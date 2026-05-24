@@ -13,169 +13,21 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from agentalloy.install.output import print_rich
-
-if TYPE_CHECKING:
-    from agentalloy.signals.predicates import PredicateContext
+from agentalloy.signals.skill_loader import (
+    _build_predicate_context,
+    _load_workflow_skill_for_phase,
+    _read_phase,
+    _write_phase_atomic,
+    _write_telemetry,
+)
 
 try:
     from agentalloy.lm_client import OpenAICompatClient
 except Exception:  # pragma: no cover
     OpenAICompatClient = None  # type: ignore[assignment,misc]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _read_phase(project_root: Path) -> str | None:
-    phase_file = project_root / ".agentalloy" / "phase"
-    if not phase_file.exists():
-        return None
-    try:
-        from typing import cast as _cast
-
-        import yaml as _yaml
-
-        raw = _yaml.safe_load(phase_file.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            data: dict[str, Any] = _cast(dict[str, Any], raw)
-            val = data.get("phase")
-            return str(val).strip() if val else None
-        return str(raw).strip() or None
-    except Exception:
-        return None
-
-
-def _write_phase_atomic(project_root: Path, phase: str) -> None:
-    import os as _os
-
-    phase_file = project_root / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = phase_file.with_suffix(".tmp")
-    tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
-    # os.replace is atomic and overwrites cross-platform; Path.rename fails
-    # on Windows when the destination exists.
-    _os.replace(tmp, phase_file)
-
-
-def _load_workflow_skill_for_phase(phase: str) -> dict[str, Any] | None:
-    """Load the active workflow skill for the given phase from the profile datastore."""
-    try:
-        import duckdb
-
-        from agentalloy.profiles import detect_profile, profile_datastore_path
-
-        profile = detect_profile(cwd=Path.cwd())
-        db_path = profile_datastore_path(profile.name if profile else "default")
-        if not db_path.exists():
-            return None
-        with duckdb.connect(str(db_path), read_only=True) as con:
-            row = con.execute(
-                """
-                SELECT skill_id, raw_prose, applies_to_phases, exit_gates, signal_keywords
-                FROM profile_skills
-                WHERE skill_class = 'workflow'
-                """,
-            ).fetchall()
-        import json as _json
-
-        for r in row:
-            skill_id, raw_prose, applies_to_phases, exit_gates_raw, signal_keywords_raw = r
-            applies: list[str] = list(applies_to_phases or [])
-            if phase in applies:
-                exit_gates: dict[str, Any] = {}
-                if exit_gates_raw:
-                    import contextlib
-
-                    with contextlib.suppress(Exception):
-                        exit_gates = _json.loads(exit_gates_raw)
-                signal_keywords: list[str] = list(signal_keywords_raw or [])
-                return {
-                    "skill_id": skill_id,
-                    "raw_prose": raw_prose,
-                    "applies_to_phases": applies,
-                    "exit_gates": exit_gates,
-                    "signal_keywords": signal_keywords,
-                }
-    except Exception:
-        pass
-    # Fallback: load from _packs
-    return _load_workflow_skill_from_packs(phase)
-
-
-def _load_workflow_skill_from_packs(phase: str) -> dict[str, Any] | None:
-    try:
-        import yaml as _yaml
-
-        import agentalloy
-
-        packs_root = Path(agentalloy.__file__).resolve().parent / "_packs" / "sdd"
-        for f in packs_root.glob("sdd-*.yaml"):
-            data: dict[str, Any] = _yaml.safe_load(f.read_text(encoding="utf-8")) or {}
-            if data.get("skill_class") == "workflow" and phase in (
-                data.get("applies_to_phases") or []
-            ):
-                return data
-    except Exception:
-        pass
-    return None
-
-
-def _build_predicate_context(
-    project_root: Path,
-    phase: str | None,
-    prompt_text: str | None = None,
-    tool_name: str | None = None,
-    tool_path: str | None = None,
-    file_events: list[Path] | None = None,
-) -> PredicateContext:
-    from agentalloy.signals.predicates import PredicateContext
-
-    recent_tool_use: dict[str, Any] | None = None
-    if tool_name:
-        recent_tool_use = {"tool": tool_name, "path": tool_path or "", "args": {}}
-
-    return PredicateContext(
-        project_root=project_root,
-        current_phase=phase,
-        recent_prompt_text=prompt_text,
-        recent_tool_use=recent_tool_use,
-        file_events_since=file_events or [],
-        contracts_root=project_root / ".agentalloy" / "contracts",
-    )
-
-
-def _write_telemetry(record: dict[str, Any]) -> None:
-    """Write a telemetry record to the vector store (soft-fail)."""
-    try:
-        import time
-        import uuid
-
-        from agentalloy.profiles import domain_datastore_path
-        from agentalloy.storage.vector_store import CompositionTrace, append_trace
-
-        db_path = domain_datastore_path()
-        if not db_path.exists():
-            return
-        trace = CompositionTrace(
-            trace_id=str(uuid.uuid4()),
-            request_ts=int(time.time() * 1000),
-            phase=record.get("phase", ""),
-            task_prompt=record.get("task", "")[:500],
-            status="signal",
-            event_type=record.get("event_type", "phase_eval"),
-            pre_filter_matched=record.get("pre_filter_matched"),
-            gates_met=record.get("gates_met", []),
-            gates_unmet=record.get("gates_unmet", []),
-            qwen_calls=record.get("qwen_calls", 0),
-        )
-        append_trace(db_path, trace)
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------

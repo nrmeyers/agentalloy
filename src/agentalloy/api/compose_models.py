@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Phase = Literal["spec", "design", "qa", "build", "ops", "meta", "governance"]
+Phase = Literal["spec", "design", "qa", "build", "ops", "meta", "governance", "ship"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
 # Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction
@@ -20,6 +20,7 @@ Phase = Literal["spec", "design", "qa", "build", "ops", "meta", "governance"]
 DEFAULT_K_BY_PHASE: dict[str, int] = {
     "build": 2,
     "ops": 2,
+    "ship": 2,
     "qa": 4,  # safer default; long-form qa (postmortem) needs anchor context
     "spec": 4,
     "design": 4,
@@ -34,6 +35,7 @@ DEFAULT_K_BY_PHASE: dict[str, int] = {
 DEFAULT_MAX_TOKENS_BY_PHASE: dict[str, int] = {
     "build": 2048,
     "ops": 2048,
+    "ship": 2048,
     "qa": 4096,
     "spec": 4096,
     "design": 4096,
