@@ -263,13 +263,13 @@ Tier classification depends entirely on whether the harness exposes a hook mecha
 | Capability | Tier 1 (per-turn hooks) | Tier 3 (no hooks; sidecar) |
 |---|---|---|
 | Initial workflow skill context | ✅ | ✅ |
-| Phase transition detection (automatic) | ✅ Per-turn hook | ⚠️ Manual via `agentalloy phase set <name>` |
+| Phase transition detection (automatic) | ✅ Per-turn hook | ✅ Sidecar auto-detects via file watcher (when running); manual fallback via `agentalloy phase set <name>` |
 | System skill enforcement (gates) | ✅ PreToolUse hook blocks tool call | ⚠️ Advisory text only — no enforcement |
 | Mid-session context updates | ✅ Injected into next turn | ⚠️ Requires file reload (harness-dependent) |
 | Contract → skill injection | ✅ PostToolUse hook | ✅ Sidecar (`agentalloy watch start`) |
 | Semantic gate evaluation | ✅ Runs per-turn | ⚠️ Falls back to `UNKNOWN` without hook |
 
-**Tier 3 is a real reduction in capability.** Without a per-turn hook, system skills become suggestions rather than gates, and phase transitions require a manual command. If you need enforcement, use a Tier 1 harness. See [`docs/tier3-experience.md`](docs/tier3-experience.md) for sidecar setup details.
+**Tier 3 is a real reduction in capability.** Without a per-turn hook, system skills become suggestions rather than gates, and phase transitions are automatic when the sidecar watcher is running; otherwise manual via `agentalloy phase set <name>`. If you need enforcement, use a Tier 1 harness. See [`docs/tier3-experience.md`](docs/tier3-experience.md) for sidecar setup details.
 
 Examples of each tier today (lists evolve as harness vendors add or remove hook APIs — check `agentalloy wire --harness <name>` for current support):
 
@@ -319,7 +319,7 @@ The `agentalloy.install` module exposes a single CLI with subcommands. All write
 
 | Command | Description |
 |---|---|
-| `phase {get,set,clear}` | Read / write `.agentalloy/phase`. `set` advances or resets the SDD phase manually (Tier 3 fallback when no per-turn hook is available). |
+| `phase {get,set,clear}` | Read / write `.agentalloy/phase`. `set` is a manual override / Tier 3 fallback when the sidecar watcher is not running. |
 | `contract {write,validate,list}` | Create or validate task contracts under `.agentalloy/contracts/<phase>/`. |
 | `signal evaluate-phase` | Fire the pre-filter + gate evaluator; emits the next workflow skill's prose if a transition occurs. Wired by Tier 1 harnesses as a hook. |
 | `signal evaluate-system --tool <name>` | Find system skills whose `applies_when` matches a tool that's about to fire. |
@@ -331,8 +331,8 @@ The `agentalloy.install` module exposes a single CLI with subcommands. All write
 
 | Command | Description |
 |---|---|
-| `profile {list,active,create,use}` | Per-profile datastores (e.g., `work` vs `personal`). Auto-detected from cwd via git remote or path. |
-| `customize {list,edit,validate,update,diff,reset}` | Three-layer skill overrides (project → profile → shipped default). Edit a skill's prose, gates, or applicability for your project or profile without forking. |
+| `profile {list,active,create,use}` | Per-profile datastores and skill overrides (e.g., `work` vs `personal`). Auto-detected from cwd via git remote, path prefix, or explicit project marker. See docs/profiles-and-overrides.md. |
+| `customize {list,edit,validate,update,diff,reset}` | Three-layer skill overrides (project → profile → shipped default). Edit a skill's prose, gates, or applicability for your project or profile without forking. See docs/profiles-and-overrides.md § Three-layer overrides. |
 | `reset` | Wipe profile overrides and re-ingest shipped defaults. |
 
 **Tier 3 sidecar**
