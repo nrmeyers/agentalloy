@@ -168,6 +168,7 @@ class TestWriteProxyTrace:
 
     def test_soft_fail_on_import_error(self):
         """If the import chain fails, the function swallows the exception."""
+
         # This test verifies the try/except wrapping is effective.
         # We can't easily break imports at runtime, but we can verify
         # that a completely broken vector_store doesn't propagate errors.

@@ -518,17 +518,11 @@ def _test_upstream_endpoint(cfg: SetupConfig) -> bool:
             if resp.status == 200:
                 _print(f"  [green]Upstream LLM reachable at {models_url}[/green]")
                 return True
-            _print(
-                f"  [yellow]Upstream returned HTTP {resp.status} — "
-                "continuing anyway.[/yellow]"
-            )
+            _print(f"  [yellow]Upstream returned HTTP {resp.status} — continuing anyway.[/yellow]")
             return False
     except Exception as exc:
         _print(f"  [yellow]Upstream LLM not reachable ({exc}) — continuing anyway.[/yellow]")
-        _print(
-            f"  [dim]Start the upstream LLM and verify: "
-            f"curl {models_url}[/dim]"
-        )
+        _print(f"  [dim]Start the upstream LLM and verify: curl {models_url}[/dim]")
         return False
 
 
@@ -558,7 +552,6 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
     install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
         env_fp, "\n".join(filtered_lines)
     )
-
 
 
 def _test_embed_endpoint(cfg: SetupConfig) -> None:

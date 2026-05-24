@@ -64,7 +64,9 @@ class ProxyStreamChunk(BaseModel):
     model: str
     choices: list[dict[str, Any]]
 
-    def set_delta(self, index: int, delta: ProxyStreamDelta, *, finish_reason: str | None = None) -> None:
+    def set_delta(
+        self, index: int, delta: ProxyStreamDelta, *, finish_reason: str | None = None
+    ) -> None:
         """Set or update the delta for a given choice index.
 
         Creates the entry if it does not exist.

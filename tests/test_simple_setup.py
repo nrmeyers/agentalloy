@@ -31,6 +31,10 @@ from agentalloy.install.subcommands.simple_setup import (
 )
 # ruff: noqa: I001
 
+# This module is slow (several minutes). Excluded from the fast PR job;
+# run via the dedicated slow-tests CI job on merges to main / on demand.
+pytestmark = pytest.mark.slow
+
 
 # Helper to avoid pyright lambda param type issues (ruff reformatting moves ignore comments)
 def _mock_input_accept(prompt: str) -> str:
@@ -1178,9 +1182,7 @@ class TestPromptUpstream:
     def test_prompt_upstream_updates_cfg_fields(self):
         """_prompt_upstream writes user input into cfg fields."""
         cfg = SetupConfig()
-        responses = iter(
-            ["http://llm.example.com/v1", "my-model", "sk-abc123"]
-        )
+        responses = iter(["http://llm.example.com/v1", "my-model", "sk-abc123"])
         with (
             patch.object(sys.stdin, "isatty", return_value=True),
             patch("builtins.input", side_effect=lambda _: next(responses)),
@@ -1369,4 +1371,3 @@ class TestSetupConfigUpstreamDefaults:
         """SetupConfig defaults upstream_api_key to empty string."""
         cfg = SetupConfig()
         assert cfg.upstream_api_key == ""
-

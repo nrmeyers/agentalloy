@@ -6,6 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
@@ -16,6 +17,7 @@ from agentalloy.api.diagnostics_router import DiagnosticsChecker
 from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker
 from agentalloy.api.health_router import router as health_router
+from agentalloy.api.proxy_router import router as proxy_router
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
 from agentalloy.api.skill_router import get_skill_store
@@ -101,12 +103,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.health_checker = health_checker
     app.state.diagnostics_checker = DiagnosticsChecker(store, runtime, health_checker)
     app.state.telemetry_querier = TelemetryQuerier(vector_store)
+
+    # Upstream LLM client (for proxy passthrough)
+    upstream_client: httpx.Client | None = None
+    if settings.upstream_configured():
+        upstream_client = httpx.Client(
+            base_url=settings.upstream_url.rstrip("/"),
+            headers={
+                "Authorization": f"Bearer {settings.upstream_api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0),
+        )
+    app.state.upstream_client = upstream_client
+
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
+        if upstream_client is not None:
+            upstream_client.close()
         telemetry.close()
         embed_client.close()
         vector_store.close()
@@ -169,6 +187,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app.include_router(skill_router)
     app.include_router(diagnostics_router)
     app.include_router(telemetry_router)
+    app.include_router(proxy_router)
 
     return app
 
