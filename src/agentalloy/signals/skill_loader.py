@@ -1,0 +1,201 @@
+"""Pure domain helpers for phase management and workflow skill loading.
+
+Extracted from ``install/subcommands/signal.py`` so that the proxy path
+(see plan Pass 1) can reuse the same logic without pulling in CLI
+dependencies (argparse, Rich, etc.).
+
+Public API
+----------
+_read_phase, _write_phase_atomic, _load_workflow_skill_for_phase,
+_load_workflow_skill_from_packs, _build_predicate_context, _write_telemetry
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agentalloy.signals.predicates import PredicateContext
+
+__all__ = [
+    "_build_predicate_context",
+    "_load_workflow_skill_for_phase",
+    "_load_workflow_skill_from_packs",
+    "_read_phase",
+    "_write_phase_atomic",
+    "_write_telemetry",
+]
+
+
+# ---------------------------------------------------------------------------
+# Phase file helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_phase(project_root: Path) -> str | None:
+    """Read the active phase from ``.agentalloy/phase``.
+
+    Returns ``None`` when the file is absent, unreadable, or malformed.
+    """
+    phase_file = project_root / ".agentalloy" / "phase"
+    if not phase_file.exists():
+        return None
+    try:
+        import yaml
+
+        raw = yaml.safe_load(phase_file.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            val = raw.get("phase")
+            return str(val).strip() if val else None
+        return str(raw).strip() or None
+    except Exception:
+        return None
+
+
+def _write_phase_atomic(project_root: Path, phase: str) -> None:
+    """Atomically write *phase* to ``.agentalloy/phase``.
+
+    Uses a temp file + ``os.replace`` so concurrent writers never leave
+    a partially-written file.
+    """
+    phase_file = project_root / ".agentalloy" / "phase"
+    phase_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = phase_file.with_suffix(".tmp")
+    tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
+    os.replace(tmp, phase_file)
+
+
+# ---------------------------------------------------------------------------
+# Workflow skill loading
+# ---------------------------------------------------------------------------
+
+
+def _load_workflow_skill_for_phase(phase: str) -> dict[str, Any] | None:
+    """Load the active workflow skill for the given phase from the profile datastore.
+
+    Tries the DuckDB-backed profile store first; falls back to ``_packs``.
+    """
+    try:
+        import duckdb
+
+        from agentalloy.profiles import detect_profile, profile_datastore_path
+
+        profile = detect_profile(cwd=Path.cwd())
+        db_path = profile_datastore_path(profile.name if profile else "default")
+        if not db_path.exists():
+            return None
+        with duckdb.connect(str(db_path), read_only=True) as con:
+            row = con.execute(
+                """
+                SELECT skill_id, raw_prose, applies_to_phases, exit_gates, signal_keywords
+                FROM profile_skills
+                WHERE skill_class = 'workflow'
+                """,
+            ).fetchall()
+        for r in row:
+            skill_id, raw_prose, applies_to_phases, exit_gates_raw, signal_keywords_raw = r
+            applies: list[str] = list(applies_to_phases or [])
+            if phase in applies:
+                exit_gates: dict[str, Any] = {}
+                if exit_gates_raw:
+                    import contextlib
+
+                    with contextlib.suppress(Exception):
+                        exit_gates = json.loads(exit_gates_raw)
+                signal_keywords: list[str] = list(signal_keywords_raw or [])
+                return {
+                    "skill_id": skill_id,
+                    "raw_prose": raw_prose,
+                    "applies_to_phases": applies,
+                    "exit_gates": exit_gates,
+                    "signal_keywords": signal_keywords,
+                }
+    except Exception:
+        pass
+    # Fallback: load from _packs
+    return _load_workflow_skill_from_packs(phase)
+
+
+def _load_workflow_skill_from_packs(phase: str) -> dict[str, Any] | None:
+    """Fallback: load a workflow skill from the shipped ``_packs/sdd`` directory."""
+    try:
+        import yaml
+
+        import agentalloy
+
+        packs_root = Path(agentalloy.__file__).resolve().parent / "_packs" / "sdd"
+        for f in packs_root.glob("sdd-*.yaml"):
+            data: dict[str, Any] = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+            if data.get("skill_class") == "workflow" and phase in (
+                data.get("applies_to_phases") or []
+            ):
+                return data
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Predicate context builder
+# ---------------------------------------------------------------------------
+
+
+def _build_predicate_context(
+    project_root: Path,
+    phase: str | None,
+    prompt_text: str | None = None,
+    tool_name: str | None = None,
+    tool_path: str | None = None,
+    file_events: list[Path] | None = None,
+) -> "PredicateContext":
+    """Build a ``PredicateContext`` for gate evaluation."""
+    from agentalloy.signals.predicates import PredicateContext
+
+    recent_tool_use: dict[str, Any] | None = None
+    if tool_name:
+        recent_tool_use = {"tool": tool_name, "path": tool_path or "", "args": {}}
+
+    return PredicateContext(
+        project_root=project_root,
+        current_phase=phase,
+        recent_prompt_text=prompt_text,
+        recent_tool_use=recent_tool_use,
+        file_events_since=file_events or [],
+        contracts_root=project_root / ".agentalloy" / "contracts",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------------
+
+
+def _write_telemetry(record: dict[str, Any]) -> None:
+    """Write a telemetry record to the vector store (soft-fail)."""
+    try:
+        from agentalloy.profiles import domain_datastore_path
+        from agentalloy.storage.vector_store import CompositionTrace, append_trace
+
+        db_path = domain_datastore_path()
+        if not db_path.exists():
+            return
+        trace = CompositionTrace(
+            trace_id=str(uuid.uuid4()),
+            request_ts=int(time.time() * 1000),
+            phase=record.get("phase", ""),
+            task_prompt=record.get("task", "")[:500],
+            status="signal",
+            event_type=record.get("event_type", "phase_eval"),
+            pre_filter_matched=record.get("pre_filter_matched"),
+            gates_met=record.get("gates_met", []),
+            gates_unmet=record.get("gates_unmet", []),
+            qwen_calls=record.get("qwen_calls", 0),
+        )
+        append_trace(db_path, trace)
+    except Exception:
+        pass
