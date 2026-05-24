@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     dedup_soft_threshold: float = 0.80
     bounce_budget: int = 3
 
+    # Upstream LLM — the generative model the proxy forwards chat completions to.
+    # Env vars: UPSTREAM_URL, UPSTREAM_MODEL, UPSTREAM_API_KEY (bare names, no prefix).
+    upstream_url: str = ""
+    upstream_model: str = ""
+    upstream_api_key: str = ""
+
     # Profile root. Resolves to ~/.agentalloy by default.
     profile_root: str = Field(default_factory=lambda: str(Path.home() / ".agentalloy"))
 
@@ -82,6 +88,10 @@ class Settings(BaseSettings):
     forced_profile: str | None = None
 
     code_indexer_url: str = "http://127.0.0.1:8003"
+
+    def upstream_configured(self) -> bool:
+        """Return True when all three upstream LLM fields are set."""
+        return bool(self.upstream_url and self.upstream_model and self.upstream_api_key)
 
     def active_datastore_path(self, cwd: Path | None = None) -> Path:
         """Return the skills.duck for the active profile.

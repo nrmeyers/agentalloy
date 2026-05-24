@@ -13,6 +13,9 @@ _ENV_KEYS = (
     "LADYBUG_DB_PATH",
     "DUCKDB_PATH",
     "RUNTIME_EMBEDDING_MODEL",
+    "UPSTREAM_URL",
+    "UPSTREAM_MODEL",
+    "UPSTREAM_API_KEY",
 )
 
 
@@ -38,3 +41,104 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     s = Settings()
     assert s.runtime_embed_base_url == "http://embed.internal:52625"
     assert s.ladybug_db_path == "/var/lib/ladybug"
+
+
+# ---------------------------------------------------------------------------
+# Upstream LLM configuration tests
+# ---------------------------------------------------------------------------
+
+
+def test_upstream_defaults_empty(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Upstream fields default to empty strings when env vars are unset."""
+    for key in ("UPSTREAM_URL", "UPSTREAM_MODEL", "UPSTREAM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(tmp_path)
+    s = Settings()
+    assert s.upstream_url == ""
+    assert s.upstream_model == ""
+    assert s.upstream_api_key == ""
+
+
+def test_upstream_configured_false_when_all_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns False when all three vars are unset."""
+    for key in ("UPSTREAM_URL", "UPSTREAM_MODEL", "UPSTREAM_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.chdir(tmp_path)
+    s = Settings()
+    assert s.upstream_configured() is False
+
+
+def test_upstream_configured_false_when_partial(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns False when only some vars are set."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
+    monkeypatch.delenv("UPSTREAM_API_KEY", raising=False)
+    s = Settings()
+    assert s.upstream_configured() is False
+
+
+def test_upstream_configured_false_when_url_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns False when URL is missing."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UPSTREAM_URL", raising=False)
+    monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "sk-test")
+    s = Settings()
+    assert s.upstream_configured() is False
+
+
+def test_upstream_configured_false_when_model_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns False when model is missing."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.delenv("UPSTREAM_MODEL", raising=False)
+    monkeypatch.setenv("UPSTREAM_API_KEY", "sk-test")
+    s = Settings()
+    assert s.upstream_configured() is False
+
+
+def test_upstream_configured_true_when_all_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns True when all three vars are set."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_MODEL", "qwen3-14b")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "sk-test")
+    s = Settings()
+    assert s.upstream_configured() is True
+
+
+def test_upstream_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Upstream fields are read correctly from env vars."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", "http://llm.internal:8080/v1")
+    monkeypatch.setenv("UPSTREAM_MODEL", "llama3")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "bearer-token-abc")
+    s = Settings()
+    assert s.upstream_url == "http://llm.internal:8080/v1"
+    assert s.upstream_model == "llama3"
+    assert s.upstream_api_key == "bearer-token-abc"
+    assert s.upstream_configured() is True
+
+
+def test_upstream_configured_false_when_api_key_empty_string(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """upstream_configured() returns False when api key is set to empty string."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "")
+    s = Settings()
+    # Empty string is falsy — upstream not configured
+    assert s.upstream_configured() is False
