@@ -372,7 +372,7 @@ class TestState:
     def test_records_files_written(self, repo_root: Path) -> None:
         wire_harness("claude-code", port=8000, root=repo_root)
         st = install_state.load_state(repo_root)
-        assert len(st["harness_files_written"]) == 1  # CLAUDE.md only
+        assert len(st["harness_files_written"]) == 1  # env file only
 
 
 # ---------------------------------------------------------------------------
@@ -656,17 +656,21 @@ class TestProxyWiring:
         assert len(proxy_models) == 1
         assert proxy_models[0]["apiBase"] == "http://localhost:7777/v1"
 
-    def test_claude_code_proxy_instruction(self, repo_root: Path) -> None:
-        """claude-code default wiring writes proxy instruction block to CLAUDE.md."""
+    def test_claude_code_proxy_writes_env_file(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """claude-code default wiring writes ~/.agentalloy/claude-code-env.sh."""
+        fake_home = repo_root / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
         result = wire_harness("claude-code", port=5555, root=repo_root)
         assert result["integration_vector"] == "proxy"
 
-        claude_md = repo_root / "CLAUDE.md"
-        assert claude_md.exists()
-        content = claude_md.read_text()
+        env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
+        assert env_path.exists()
+        content = env_path.read_text()
         assert SENTINEL_BEGIN in content
-        assert "localhost:5555" in content
-        assert "proxy" in content.lower()
+        assert "ANTHROPIC_BASE_URL=http://localhost:5555/v1" in content
+        assert "ANTHROPIC_API_KEY=agentalloy" in content
 
     def test_manual_proxy_prints_to_stderr(
         self, repo_root: Path, capsys: pytest.CaptureFixture[str]

@@ -572,6 +572,7 @@ def uninstall(
         home / ".claude",
         home / ".cursor",
         home / ".continue",
+        home / ".agentalloy",
     )
     # Set of harness target basenames / suffix-paths we ever write. Any
     # `path` in state that doesn't end in one of these is rejected even
@@ -588,6 +589,7 @@ def uninstall(
         ".agentalloy-aider-instructions.md",
         ".opencode/system-prompt.md",
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
+        "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
     )
     root_resolved = root.resolve()
     # Iterate over harness entries only when wiring removal is enabled.

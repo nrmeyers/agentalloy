@@ -778,7 +778,9 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # Proxy wiring
 # ---------------------------------------------------------------------------
 
-_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider", "hermes-agent", "opencode"})
+_PROXY_SUPPORTED_API = frozenset(
+    {"continue-closed", "continue-local", "aider", "hermes-agent", "opencode", "claude-code"}
+)
 
 
 def _wire_proxy(
@@ -814,6 +816,9 @@ def _wire_proxy(
 
     if harness == "opencode":
         return _wire_proxy_opencode(port, root)
+
+    if harness == "claude-code":
+        return _wire_proxy_claude_code(port, root)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -1045,6 +1050,57 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
             "action": "injected_block",
             "content_sha256": _sha256(instruction.strip()),
         },
+    ]
+
+
+def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire Claude Code to use the AgentAlloy proxy.
+
+    Writes ``~/.agentalloy/claude-code-env.sh`` with sentinel-bounded
+    ``ANTHROPIC_BASE_URL`` and ``ANTHROPIC_API_KEY`` exports. Claude Code
+    reads these environment variables at startup to route requests through
+    the proxy.
+    """
+    agentalloy_dir = Path.home() / ".agentalloy"
+    agentalloy_dir.mkdir(parents=True, exist_ok=True)
+
+    env_path = agentalloy_dir / "claude-code-env.sh"
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    proxy_url = f"http://localhost:{port}/v1"
+    block_lines = [
+        sentinel_begin,
+        f"export ANTHROPIC_BASE_URL={proxy_url}",
+        "export ANTHROPIC_API_KEY=agentalloy",
+        sentinel_end,
+    ]
+    block = "\n".join(block_lines)
+
+    if env_path.exists():
+        content = env_path.read_text()
+        if sentinel_begin in content and sentinel_end in content:
+            # Replace existing block
+            begin_idx = content.index(sentinel_begin)
+            end_idx = content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(content) and content[end_idx] == "\n":
+                end_idx += 1
+            content = content[:begin_idx] + block + "\n" + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += block + "\n"
+    else:
+        content = block + "\n"
+
+    install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(env_path),
+            "action": "wrote_new_file",
+            "content_sha256": _sha256(block),
+        }
     ]
 
 
