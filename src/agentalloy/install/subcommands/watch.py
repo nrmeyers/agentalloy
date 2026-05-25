@@ -61,7 +61,7 @@ def _detect_harness() -> str | None:
         files = st.get("harness_files_written", [])
         for entry in files:
             h = entry.get("harness", "")
-            if h in ("cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"):
+            if h in ("cursor", "windsurf", "github-copilot", "gemini-cli", "aider"):
                 return h
     except Exception:
         pass
@@ -85,7 +85,7 @@ def _start(args: argparse.Namespace) -> int:
     if harness is None:
         print(
             "ERROR: --harness required (could not detect from state.json).\n"
-            "Use: agentalloy watch start --harness <cursor|windsurf|github-copilot|cline|gemini-cli|aider>",
+            "Use: agentalloy watch start --harness <cursor|windsurf|github-copilot|gemini-cli|aider>",
             file=sys.stderr,
         )
         return 1

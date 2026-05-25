@@ -993,7 +993,7 @@ def run_setup(cfg: SetupConfig) -> int:
     # explicitly acknowledge that with --acknowledge-tier3; interactive
     # installs get a y/n prompt with a 'no' default.
     _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"}
+        {"cursor", "windsurf", "github-copilot", "gemini-cli"}
     )
     if cfg.harness in _tier3_harnesses:
         tier3_msg = (
