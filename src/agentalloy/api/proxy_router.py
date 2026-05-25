@@ -402,3 +402,30 @@ async def proxy_chat_completions(
         status_code=resp.status_code,
         content=body,
     )
+
+
+@router.post("/v1/embeddings", response_model=None)
+async def proxy_embeddings(
+    request: Request,
+    embed_client: httpx.AsyncClient | None = Depends(get_embed_client),
+):
+    """Forward /v1/embeddings to the embed server."""
+    if embed_client is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": "Embed server not configured",
+                    "type": "api_error",
+                    "code": "embed_not_configured",
+                }
+            },
+        )
+
+    body = await request.json()
+    resp = await embed_client.post("/v1/embeddings", json=body)
+
+    return JSONResponse(
+        status_code=resp.status_code,
+        content=resp.json(),
+    )

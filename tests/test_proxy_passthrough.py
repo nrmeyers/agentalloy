@@ -361,3 +361,73 @@ class TestProxyStreaming:
             body = resp.read().decode()
             assert "error" in body.lower()
             assert "500" in body
+
+
+class TestEmbeddingsPassthrough:
+    """Tests for /v1/embeddings passthrough."""
+
+    def test_embeddings_passthrough(self) -> None:
+        """Embeddings request is forwarded to embed server."""
+        from agentalloy.app import create_app
+
+        captured_request = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_request["body"] = json.loads(request.content.decode())
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": 0,
+                            "embedding": [0.1, 0.2, 0.3],
+                        }
+                    ],
+                    "model": "text-embedding-ada-002",
+                    "usage": {"prompt_tokens": 8, "total_tokens": 8},
+                },
+                request=request,
+            )
+
+        app = create_app(use_default_lifespan=False)
+        app.state.embed_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://mock-embed/v1",
+        )
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/v1/embeddings",
+                json={
+                    "model": "text-embedding-ada-002",
+                    "input": "Hello world",
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["object"] == "list"
+        assert len(body["data"]) == 1
+        assert body["data"][0]["embedding"] == [0.1, 0.2, 0.3]
+
+    def test_embeddings_no_embed_client(self) -> None:
+        """When embed client is not configured, return 503."""
+        from agentalloy.app import create_app
+
+        app = create_app(use_default_lifespan=False)
+        app.state.embed_client = None
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/v1/embeddings",
+                json={
+                    "model": "text-embedding-ada-002",
+                    "input": "Hello world",
+                },
+            )
+
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["error"]["code"] == "embed_not_configured"
