@@ -778,7 +778,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # Proxy wiring
 # ---------------------------------------------------------------------------
 
-_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider", "hermes-agent"})
+_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider", "hermes-agent", "opencode"})
 
 
 def _wire_proxy(
@@ -811,6 +811,9 @@ def _wire_proxy(
 
     if harness == "hermes-agent":
         return _wire_proxy_hermes_agent(port, root, scope)
+
+    if harness == "opencode":
+        return _wire_proxy_opencode(port, root)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -990,6 +993,58 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
             "action": "injected_block",
             "content_sha256": _sha256(instruction.strip()),
         }
+    ]
+
+
+def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire OpenCode to use the AgentAlloy proxy.
+
+    Writes two files:
+    - ``.opencode/.agentalloy-env``: shell script exporting OPENAI_API_BASE and
+      OPENAI_API_KEY, which the user sources before launching OpenCode.
+    - ``.opencode/system-prompt.md``: brief proxy-mode instruction appended with
+      sentinel markers.
+
+    Prints a one-line activation reminder to stderr.
+    """
+    opencode_dir = root / ".opencode"
+    opencode_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write env file (always overwrites — it's a generated file we own fully)
+    env_path = opencode_dir / ".agentalloy-env"
+    env_content = (
+        f"export OPENAI_API_BASE=http://localhost:{port}/v1\n"
+        "export OPENAI_API_KEY=agentalloy\n"
+    )
+    install_state._atomic_write(env_path, env_content)  # pyright: ignore[reportPrivateUsage]
+
+    # Write / update system-prompt.md with sentinel block
+    prompt_path = opencode_dir / "system-prompt.md"
+    instruction = (
+        "## AgentAlloy proxy\n\n"
+        f"An AgentAlloy proxy is active at `http://localhost:{port}/v1`.\n"
+        "It intercepts requests to inject skill context before forwarding to your LLM.\n"
+    )
+    existing = prompt_path.read_text() if prompt_path.exists() else ""
+    result_content = _inject_sentinel_block(existing, instruction)
+    install_state._atomic_write(prompt_path, result_content)  # pyright: ignore[reportPrivateUsage]
+
+    print(
+        f"[AgentAlloy] Activate proxy: source .opencode/.agentalloy-env",
+        file=sys.stderr,
+    )
+
+    return [
+        {
+            "path": str(env_path),
+            "action": "wrote_new_file",
+            "content_sha256": _sha256(env_content),
+        },
+        {
+            "path": str(prompt_path),
+            "action": "injected_block",
+            "content_sha256": _sha256(instruction.strip()),
+        },
     ]
 
 

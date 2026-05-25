@@ -690,15 +690,21 @@ class TestProxyWiring:
         assert "localhost:6666" in content
         assert "proxy" in content.lower()
 
-    def test_hermes_agent_proxy_user_scope(self, tmp_path: Path) -> None:
-        """hermes-agent default wiring with user scope writes to SOUL.md."""
+    def test_hermes_agent_proxy_user_scope(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """hermes-agent default proxy wiring with user scope writes to ~/.hermes/config.yaml."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
         result = wire_harness("hermes-agent", port=3333, root=tmp_path, scope="user")
         assert result["integration_vector"] == "proxy"
-        soul = tmp_path / ".hermes" / "SOUL.md"
-        assert soul.exists()
-        content = soul.read_text()
-        assert SENTINEL_BEGIN in content
+        config = fake_home / ".hermes" / "config.yaml"
+        assert config.exists()
+        content = config.read_text()
         assert "localhost:3333" in content
+        assert "custom_providers" in content
 
     def test_mcp_only_with_proxy_rejected(self, repo_root: Path) -> None:
         """mcp-only harness is rejected (blocked by top-level check)."""
