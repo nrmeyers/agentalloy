@@ -778,7 +778,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # Proxy wiring
 # ---------------------------------------------------------------------------
 
-_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider"})
+_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider", "hermes-agent"})
 
 
 def _wire_proxy(
@@ -808,6 +808,9 @@ def _wire_proxy(
 
     if harness == "aider":
         return _wire_proxy_aider(port, root)
+
+    if harness == "hermes-agent":
+        return _wire_proxy_hermes_agent(port, root, scope)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -915,6 +918,77 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
             "sentinel_begin": sentinel_begin,
             "sentinel_end": sentinel_end,
             "content_sha256": _sha256(block),
+        }
+    ]
+
+
+def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
+    """Wire Hermes Agent to use the AgentAlloy proxy.
+
+    User scope: writes a ``custom_providers`` entry to ~/.hermes/config.yaml
+    so the Hermes agent can pick up the proxy as a named provider.
+
+    Repo scope: writes a compact sentinel-bounded proxy-mode instruction to
+    AGENTS.md so agents reading that file know to use the proxy.
+    """
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    if scope == "user":
+        config_path = Path.home() / ".hermes" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        proxy_block_lines = [
+            sentinel_begin,
+            "custom_providers:",
+            "  agentalloy:",
+            f"    base_url: http://localhost:{port}/v1",
+            "    api_key: agentalloy",
+            sentinel_end,
+        ]
+        block = "\n".join(proxy_block_lines)
+
+        if config_path.exists():
+            content = config_path.read_text()
+            if sentinel_begin in content and sentinel_end in content:
+                begin_idx = content.index(sentinel_begin)
+                end_idx = content.index(sentinel_end) + len(sentinel_end)
+                if end_idx < len(content) and content[end_idx] == "\n":
+                    end_idx += 1
+                content = content[:begin_idx] + block + "\n" + content[end_idx:]
+            else:
+                if content and not content.endswith("\n"):
+                    content += "\n"
+                content += block + "\n"
+        else:
+            content = block + "\n"
+
+        install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
+        return [
+            {
+                "path": str(config_path),
+                "action": "injected_block",
+                "sentinel_begin": sentinel_begin,
+                "sentinel_end": sentinel_end,
+                "content_sha256": _sha256(block),
+            }
+        ]
+
+    # Repo scope: write a proxy instruction block to AGENTS.md
+    agents_md = root / "AGENTS.md"
+    instruction = (
+        f"## AgentAlloy proxy\n\n"
+        f"An AgentAlloy proxy is running at `http://localhost:{port}/v1`.\n"
+        "Configure your agent to use it as its API base.\n"
+    )
+    existing = agents_md.read_text() if agents_md.exists() else ""
+    result_content = _inject_sentinel_block(existing, instruction)
+    install_state._atomic_write(agents_md, result_content)  # pyright: ignore[reportPrivateUsage]
+    return [
+        {
+            "path": str(agents_md),
+            "action": "injected_block",
+            "content_sha256": _sha256(instruction.strip()),
         }
     ]
 
