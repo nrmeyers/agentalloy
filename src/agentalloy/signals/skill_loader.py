@@ -76,46 +76,51 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_workflow_skill_for_phase(phase: str) -> dict[str, Any] | None:
+def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[str, Any] | None:
     """Load the active workflow skill for the given phase from the profile datastore.
 
     Tries the DuckDB-backed profile store first; falls back to ``_packs``.
+
+    Args:
+        phase: The current phase (e.g. "build").
+        cwd: The working directory for profile detection. Defaults to ``Path.cwd()``.
     """
+    if cwd is None:
+        cwd = Path.cwd()
     try:
         import duckdb
 
         from agentalloy.profiles import detect_profile, profile_datastore_path
 
-        profile = detect_profile(cwd=Path.cwd())
+        profile = detect_profile(cwd=cwd)
         db_path = profile_datastore_path(profile.name if profile else "default")
-        if not db_path.exists():
-            return None
-        with duckdb.connect(str(db_path), read_only=True) as con:
-            row = con.execute(
-                """
-                SELECT skill_id, raw_prose, applies_to_phases, exit_gates, signal_keywords
-                FROM profile_skills
-                WHERE skill_class = 'workflow'
-                """,
-            ).fetchall()
-        for r in row:
-            skill_id, raw_prose, applies_to_phases, exit_gates_raw, signal_keywords_raw = r
-            applies: list[str] = list(applies_to_phases or [])
-            if phase in applies:
-                exit_gates: dict[str, Any] = {}
-                if exit_gates_raw:
-                    import contextlib
+        if db_path.exists():
+            with duckdb.connect(str(db_path), read_only=True) as con:
+                row = con.execute(
+                    """
+                    SELECT skill_id, raw_prose, applies_to_phases, exit_gates, signal_keywords
+                    FROM profile_skills
+                    WHERE skill_class = 'workflow'
+                    """,
+                ).fetchall()
+            for r in row:
+                skill_id, raw_prose, applies_to_phases, exit_gates_raw, signal_keywords_raw = r
+                applies: list[str] = list(applies_to_phases or [])
+                if phase in applies:
+                    exit_gates: dict[str, Any] = {}
+                    if exit_gates_raw:
+                        import contextlib
 
-                    with contextlib.suppress(Exception):
-                        exit_gates = json.loads(exit_gates_raw)
-                signal_keywords: list[str] = list(signal_keywords_raw or [])
-                return {
-                    "skill_id": skill_id,
-                    "raw_prose": raw_prose,
-                    "applies_to_phases": applies,
-                    "exit_gates": exit_gates,
-                    "signal_keywords": signal_keywords,
-                }
+                        with contextlib.suppress(Exception):
+                            exit_gates = json.loads(exit_gates_raw)
+                    signal_keywords: list[str] = list(signal_keywords_raw or [])
+                    return {
+                        "skill_id": skill_id,
+                        "raw_prose": raw_prose,
+                        "applies_to_phases": applies,
+                        "exit_gates": exit_gates,
+                        "signal_keywords": signal_keywords,
+                    }
     except Exception:
         pass
     # Fallback: load from _packs

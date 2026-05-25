@@ -64,7 +64,7 @@ def _load_workflow_skill_prose(phase: str, profile_name: str) -> str:
             _load_workflow_skill_for_phase,  # pyright: ignore[reportPrivateUsage]
         )
 
-        skill = _load_workflow_skill_for_phase(phase)
+        skill = _load_workflow_skill_for_phase(phase, Path.cwd())
         if skill:
             return skill.get("raw_prose", "")
     except Exception as exc:

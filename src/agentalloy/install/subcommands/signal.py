@@ -52,7 +52,7 @@ def _evaluate_phase(args: argparse.Namespace) -> int:
         print(json.dumps({"matched": False, "reason": "no phase file"}))
         return 0
 
-    skill = _load_workflow_skill_for_phase(current_phase)
+    skill = _load_workflow_skill_for_phase(current_phase, project_root)
     if skill is None:
         print(
             json.dumps({"matched": False, "reason": f"no workflow skill for phase={current_phase}"})
@@ -120,7 +120,7 @@ def _evaluate_phase(args: argparse.Namespace) -> int:
 
     if decision.should_transition and decision.to_phase:
         _write_phase_atomic(project_root, decision.to_phase)
-        next_skill = _load_workflow_skill_for_phase(decision.to_phase)
+        next_skill = _load_workflow_skill_for_phase(decision.to_phase, project_root)
         prose = (next_skill or {}).get("raw_prose", "")
         if prose:
             print(f"[agentalloy-workflow]\n{prose}\n[/agentalloy-workflow]")
@@ -281,7 +281,9 @@ def _watch_contract(args: argparse.Namespace) -> int:
 def _check(args: argparse.Namespace) -> int:
     project_root = Path.cwd()
     current_phase = _read_phase(project_root)
-    skill = _load_workflow_skill_for_phase(current_phase or "") if current_phase else None
+    skill = (
+        _load_workflow_skill_for_phase(current_phase or "", project_root) if current_phase else None
+    )
 
     report: dict[str, Any] = {
         "current_phase": current_phase,

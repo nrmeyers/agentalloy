@@ -90,8 +90,11 @@ class Settings(BaseSettings):
     code_indexer_url: str = "http://127.0.0.1:8003"
 
     def upstream_configured(self) -> bool:
-        """Return True when all three upstream LLM fields are set."""
-        return bool(self.upstream_url and self.upstream_model and self.upstream_api_key)
+        """Return True when upstream URL and model are set.
+
+        API key is optional — local runners don't need one.
+        """
+        return bool(self.upstream_url and self.upstream_model)
 
     def active_datastore_path(self, cwd: Path | None = None) -> Path:
         """Return the skills.duck for the active profile.

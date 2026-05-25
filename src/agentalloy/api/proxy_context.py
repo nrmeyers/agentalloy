@@ -43,17 +43,13 @@ def resolve_working_dir(request: ProxyRequest) -> Path:
 def read_phase(cwd: Path) -> str | None:
     """Read the current phase from *cwd*/.agentalloy/phase.
 
+    Handles both YAML format ("phase: build") and plain text ("build").
+
     Returns the stripped phase string (e.g. "build") or ``None`` if the file
     does not exist, is empty, or cannot be read.
     """
-    phase_path = cwd / PHASE_FILE
-    try:
-        content = phase_path.read_text().strip()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        logger.debug("Failed to read phase file %s: %s", phase_path, exc)
-        return None
-    if not content:
-        return None
-    return content
+    from agentalloy.signals.skill_loader import (
+        _read_phase,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    return _read_phase(cwd)

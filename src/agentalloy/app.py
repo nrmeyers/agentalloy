@@ -107,15 +107,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.embed_client = embed_client
     app.state.vector_store = vector_store
 
+    # Async client for embed proxy passthrough (OpenAICompatClient is sync)
+    import contextlib as _ctx
+
+    embed_async_client: httpx.AsyncClient | None = None
+    with _ctx.suppress(Exception):
+        embed_async_client = httpx.AsyncClient(
+            base_url=settings.runtime_embed_base_url.rstrip("/"),
+            headers={"Content-Type": "application/json"},
+            timeout=httpx.Timeout(connect=5.0, read=30.0),
+        )
+    app.state.embed_async_client = embed_async_client
+
     # Upstream LLM client (for proxy passthrough)
     upstream_client: httpx.AsyncClient | None = None
     if settings.upstream_configured():
+        upstream_headers: dict[str, str] = {
+            "Content-Type": "application/json",
+        }
+        if settings.upstream_api_key:
+            upstream_headers["Authorization"] = f"Bearer {settings.upstream_api_key}"
         upstream_client = httpx.AsyncClient(
             base_url=settings.upstream_url.rstrip("/"),
-            headers={
-                "Authorization": f"Bearer {settings.upstream_api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=upstream_headers,
             timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0),
         )
     app.state.upstream_client = upstream_client
@@ -126,6 +140,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
+        if embed_async_client is not None:
+            await embed_async_client.aclose()
         if upstream_client is not None:
             await upstream_client.aclose()
         telemetry.close()

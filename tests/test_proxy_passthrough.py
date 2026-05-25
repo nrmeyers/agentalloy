@@ -392,7 +392,7 @@ class TestEmbeddingsPassthrough:
             )
 
         app = create_app(use_default_lifespan=False)
-        app.state.embed_client = httpx.AsyncClient(
+        app.state.embed_async_client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="http://mock-embed/v1",
         )

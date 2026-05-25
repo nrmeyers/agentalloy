@@ -91,7 +91,7 @@ async def evaluate_signal(
     task = _extract_task_from_messages(request)
 
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
-    skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase)
+    skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
     if skill is None:
         return SignalResult(should_compose=False, phase=phase, task=task)
 

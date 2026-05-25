@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -23,9 +23,12 @@ from agentalloy.api.proxy_injection import compose_and_inject
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
-from agentalloy.lm_client import OpenAICompatClient
-from agentalloy.orchestration.compose import ComposeOrchestrator
-from agentalloy.storage.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from agentalloy.config import Settings as AppSettings
+    from agentalloy.lm_client import OpenAICompatClient
+    from agentalloy.orchestration.compose import ComposeOrchestrator
+    from agentalloy.storage.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,11 @@ def get_embed_client(request: Request) -> OpenAICompatClient | None:
     return getattr(request.app.state, "embed_client", None)
 
 
+def get_embed_async_client(request: Request) -> httpx.AsyncClient | None:
+    """Return the async embed client from app.state for proxy passthrough."""
+    return getattr(request.app.state, "embed_async_client", None)
+
+
 def get_vector_store(request: Request) -> VectorStore | None:
     """Return the VectorStore from app.state."""
     return getattr(request.app.state, "vector_store", None)
@@ -70,6 +78,13 @@ def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
     return None
 
 
+def get_settings_for_proxy(request: Request) -> AppSettings:
+    """Return Settings instance for proxy (used for upstream_model override)."""
+    from agentalloy.config import Settings as AppSettings
+
+    return AppSettings()
+
+
 # ---------------------------------------------------------------------------
 # Error responses
 # ---------------------------------------------------------------------------
@@ -81,7 +96,7 @@ def _upstream_not_configured_error() -> JSONResponse:
         content={
             "error": {
                 "code": "upstream_not_configured",
-                "message": "Upstream LLM is not configured. Set UPSTREAM_URL, UPSTREAM_MODEL, and UPSTREAM_API_KEY.",
+                "message": "Upstream LLM is not configured. Set UPSTREAM_URL and UPSTREAM_MODEL.",
             }
         },
     )
@@ -134,10 +149,15 @@ def _stream_upstream_response(
 # ---------------------------------------------------------------------------
 
 
-def _build_payload(request: ProxyRequest) -> dict[str, Any]:
-    """Build the JSON payload to forward to the upstream LLM."""
+def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> dict[str, Any]:
+    """Build the JSON payload to forward to the upstream LLM.
+
+    If *upstream_model* is set, overrides ``request.model`` so that synthetic
+    model names (e.g. "agentalloy-proxy" from Continue) are mapped to the
+    actual upstream model.
+    """
     payload: dict[str, Any] = {
-        "model": request.model,
+        "model": upstream_model if upstream_model else request.model,
         "messages": [m.model_dump() for m in request.messages],
         "stream": request.stream,
     }
@@ -219,6 +239,7 @@ async def proxy_chat_completions(
     embed_client: OpenAICompatClient | None = Depends(get_embed_client),
     vector_store: VectorStore | None = Depends(get_vector_store),
     orchestrator: ComposeOrchestrator | None = Depends(get_orchestrator_for_proxy),
+    settings: AppSettings = Depends(get_settings_for_proxy),  # pyright: ignore[reportUnknownArgumentType]
 ):
     """Integrated proxy handler: signal -> compose -> inject -> forward -> telemetry.
 
@@ -266,7 +287,7 @@ async def proxy_chat_completions(
             modified_request = request
 
     # --- Step 5: Forward to upstream ---
-    payload = _build_payload(modified_request)
+    payload = _build_payload(modified_request, settings.upstream_model)
     error_code: str | None = None
 
     if modified_request.stream:
@@ -407,10 +428,10 @@ async def proxy_chat_completions(
 @router.post("/v1/embeddings", response_model=None)
 async def proxy_embeddings(
     request: Request,
-    embed_client: httpx.AsyncClient | None = Depends(get_embed_client),
+    embed_async_client: httpx.AsyncClient | None = Depends(get_embed_async_client),
 ):
     """Forward /v1/embeddings to the embed server."""
-    if embed_client is None:
+    if embed_async_client is None:
         return JSONResponse(
             status_code=503,
             content={
@@ -423,7 +444,7 @@ async def proxy_embeddings(
         )
 
     body = await request.json()
-    resp = await embed_client.post("/v1/embeddings", json=body)
+    resp = await embed_async_client.post("/v1/embeddings", json=body)
 
     return JSONResponse(
         status_code=resp.status_code,

@@ -73,13 +73,14 @@ def test_upstream_configured_false_when_all_empty(
 def test_upstream_configured_false_when_partial(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """upstream_configured() returns False when only some vars are set."""
+    """API key is optional — URL + model is enough for upstream_configured()."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
     monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
     monkeypatch.delenv("UPSTREAM_API_KEY", raising=False)
     s = Settings()
-    assert s.upstream_configured() is False
+    # API key is optional — URL + model is sufficient
+    assert s.upstream_configured() is True
 
 
 def test_upstream_configured_false_when_url_missing(
@@ -134,11 +135,11 @@ def test_upstream_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 def test_upstream_configured_false_when_api_key_empty_string(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """upstream_configured() returns False when api key is set to empty string."""
+    """API key is optional — upstream_configured() returns True with just URL + model."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
     monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
     monkeypatch.setenv("UPSTREAM_API_KEY", "")
     s = Settings()
-    # Empty string is falsy — upstream not configured
-    assert s.upstream_configured() is False
+    # API key is optional — URL + model is enough
+    assert s.upstream_configured() is True
