@@ -149,6 +149,20 @@ def _stream_upstream_response(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_model(model: str, upstream_model: str | None) -> str:
+    """Resolve a model name to the upstream model to forward.
+
+    The synthetic name ``"agentalloy-proxy"`` (used by Continue and other
+    harnesses that point their API base at the proxy) maps to
+    ``upstream_model`` from settings.  Any other name is passed through
+    unchanged, which allows callers that already specify a concrete model
+    (e.g. ``"gpt-4o"``) to work without re-configuration.
+    """
+    if model == "agentalloy-proxy":
+        return upstream_model or model
+    return model
+
+
 def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> dict[str, Any]:
     """Build the JSON payload to forward to the upstream LLM.
 
@@ -157,7 +171,7 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
     actual upstream model.
     """
     payload: dict[str, Any] = {
-        "model": upstream_model if upstream_model else request.model,
+        "model": _resolve_model(request.model, upstream_model),
         "messages": [m.model_dump() for m in request.messages],
         "stream": request.stream,
     }
