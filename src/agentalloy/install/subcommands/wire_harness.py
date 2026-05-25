@@ -528,7 +528,7 @@ def _wire_legacy(
 
     # For Tier 3 harnesses, write watcher config and print guidance
     _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"}
+        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli"}
     )
     if harness in _tier3_harnesses:
         _wire_tier3_watcher_config(harness, root)
@@ -778,7 +778,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # Proxy wiring
 # ---------------------------------------------------------------------------
 
-_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local"})
+_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local", "aider"})
 
 
 def _wire_proxy(
@@ -803,8 +803,11 @@ def _wire_proxy(
         return []
 
     # Harnesses that support custom API endpoints
-    if harness in _PROXY_SUPPORTED_API:
+    if harness in ("continue-closed", "continue-local"):
         return _wire_proxy_continue(harness, port, root)
+
+    if harness == "aider":
+        return _wire_proxy_aider(port, root)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -861,6 +864,57 @@ def _wire_proxy_continue(
             "action": "injected_block",
             "marker_key": "models.agentalloy-proxy",
             "content_sha256": _sha256(serialized),
+        }
+    ]
+
+
+def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire aider to use the AgentAlloy proxy via .aider.conf.yml.
+
+    Writes a sentinel-bounded YAML block that configures aider's
+    ``openai-api-base``, ``openai-api-key``, and ``model`` fields to point
+    at the proxy, and adds a ``read`` entry for the instructions file.
+    """
+    conf_path = root / ".aider.conf.yml"
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    proxy_url = f"http://localhost:{port}/v1"
+    block_lines = [
+        sentinel_begin,
+        f"openai-api-base: {proxy_url}",
+        "openai-api-key: agentalloy",
+        "model: agentalloy-proxy",
+        "read:",
+        "  - .agentalloy-aider-instructions.md",
+        sentinel_end,
+    ]
+    block = "\n".join(block_lines)
+
+    if conf_path.exists():
+        content = conf_path.read_text()
+        if sentinel_begin in content and sentinel_end in content:
+            # Replace existing block
+            begin_idx = content.index(sentinel_begin)
+            end_idx = content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(content) and content[end_idx] == "\n":
+                end_idx += 1
+            content = content[:begin_idx] + block + "\n" + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += block + "\n"
+    else:
+        content = block + "\n"
+
+    install_state._atomic_write(conf_path, content)  # pyright: ignore[reportPrivateUsage]
+    return [
+        {
+            "path": str(conf_path),
+            "action": "injected_block",
+            "sentinel_begin": sentinel_begin,
+            "sentinel_end": sentinel_end,
+            "content_sha256": _sha256(block),
         }
     ]
 
