@@ -1,0 +1,165 @@
+"""Signal layer integration for proxy requests.
+
+Ties together the existing signal-layer components (pre-filter, gate
+evaluation, phase transitions) so the proxy path can evaluate whether
+a request should trigger skill composition.
+
+Public API
+----------
+SignalResult
+    evaluate_signal
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from agentalloy.api.proxy_models import ProxyRequest
+from agentalloy.signals.gates import decide_transition
+from agentalloy.signals.prefilter import check_prefilter
+from agentalloy.signals.skill_loader import (
+    _build_predicate_context,
+    _load_workflow_skill_for_phase,
+    _read_phase,
+    _write_phase_atomic,
+)
+
+if TYPE_CHECKING:
+    from agentalloy.lm_client import OpenAICompatClient
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SignalResult:
+    """Outcome of evaluating the signal layer for a proxy request."""
+
+    should_compose: bool
+    phase: str | None = None
+    task: str | None = None
+    domain_tags: list[str] | None = field(default_factory=lambda: list[str]())
+
+    # Optional signal-layer metadata (for telemetry)
+    pre_filter_matched: str | None = None
+    gates_met: list[str] = field(default_factory=lambda: list[str]())
+    gates_unmet: list[str] = field(default_factory=lambda: list[str]())
+    qwen_calls: int = 0
+
+
+def _extract_task_from_messages(request: ProxyRequest) -> str | None:
+    """Extract the first user message text as the task prompt."""
+    for msg in request.messages:
+        if msg.role == "user" and msg.content:
+            return msg.content
+    return None
+
+
+async def evaluate_signal(
+    request: ProxyRequest,
+    cwd: Path,
+    embed_client: OpenAICompatClient | None = None,
+) -> SignalResult:
+    """Evaluate the signal layer for an incoming proxy request.
+
+    Flow:
+    1. Read phase file (``.agentalloy/phase``)
+    2. If no phase: return ``should_compose=False``
+    3. Load workflow skill for the current phase
+    4. Build PredicateContext from request data
+    5. Run pre-filter (cheap keyword match)
+    6. If pre-filter matched: run gate evaluation (may include semantic)
+    7. If gates met: write phase transition atomically
+    8. Return SignalResult indicating whether to compose
+
+    Args:
+        request: the incoming proxy request
+        cwd: resolved working directory (project root)
+        embed_client: optional client for semantic gate predicates
+
+    Returns:
+        SignalResult with composition decision and metadata
+    """
+    # 1. Read phase file (sync, instant)
+    phase = _read_phase(cwd)
+    if not phase:
+        return SignalResult(should_compose=False)
+
+    task = _extract_task_from_messages(request)
+
+    # 2. Load workflow skill for the phase (sync DB query — run in thread)
+    skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase)
+    if skill is None:
+        return SignalResult(should_compose=False, phase=phase, task=task)
+
+    signal_keywords: list[str] = skill.get("signal_keywords") or []
+    exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
+
+    # 3. Build predicate context
+    ctx = _build_predicate_context(
+        project_root=cwd,
+        phase=phase,
+        prompt_text=task,
+        # Proxy has no file/tool events — only prompt text
+    )
+
+    # 4. Pre-filter (cheap, deterministic)
+    match = check_prefilter(signal_keywords, exit_gates, ctx)
+    if match is None:
+        return SignalResult(
+            should_compose=False,
+            phase=phase,
+            task=task,
+        )
+
+    # 5. Pre-filter matched — compose is warranted.
+    # Run gate evaluation in a thread to avoid blocking the event loop.
+    gates_result: SignalResult | None = None
+
+    def _run_gates() -> None:
+        nonlocal gates_result
+        decision = decide_transition(
+            current_phase=phase,
+            gate_spec=exit_gates,
+            ctx=ctx,
+            lm_client=embed_client,
+        )
+        # 6. Phase transition: write atomically if gates are met
+        if decision.should_transition and decision.to_phase:
+            try:
+                _write_phase_atomic(cwd, decision.to_phase)
+                logger.info(
+                    "Phase transition: %s -> %s", phase, decision.to_phase
+                )
+            except OSError as e:
+                logger.warning("Failed to write phase file: %s", e)
+
+        gates_met = [g.gate_name for g in decision.gates_met]
+        gates_unmet = [g.gate_name for g in decision.gates_unmet]
+
+        gates_result = SignalResult(
+            should_compose=True,
+            phase=phase,
+            task=task,
+            domain_tags=skill.get("applies_to_phases"),
+            pre_filter_matched=match.detail,
+            gates_met=gates_met,
+            gates_unmet=gates_unmet,
+            qwen_calls=decision.qwen_calls,
+        )
+
+    await asyncio.to_thread(_run_gates)
+
+    if gates_result is not None:
+        return gates_result
+
+    # Fallback: pre-filter matched but gates didn't populate
+    return SignalResult(
+        should_compose=True,
+        phase=phase,
+        task=task,
+        pre_filter_matched=match.detail,
+    )
