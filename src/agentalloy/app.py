@@ -18,6 +18,7 @@ from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker
 from agentalloy.api.health_router import router as health_router
 from agentalloy.api.proxy_router import router as proxy_router
+from agentalloy.api.proxy_anthropic_router import router as anthropic_router
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
 from agentalloy.api.skill_router import get_skill_store
@@ -207,6 +208,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app.include_router(diagnostics_router)
     app.include_router(telemetry_router)
     app.include_router(proxy_router)
+    app.include_router(anthropic_router)
 
     return app
 
