@@ -590,6 +590,7 @@ def uninstall(
         ".opencode/system-prompt.md",
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
         "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
+        ".cline/settings.json",  # Cline proxy config
     )
     root_resolved = root.resolve()
     # Iterate over harness entries only when wiring removal is enabled.

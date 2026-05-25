@@ -48,7 +48,7 @@ def test_tier3_interactive_code_path(tmp_path: Path):
 
     # Directly test the code block that would fire for Tier 3 interactive
     # by simulating the harness check inline
-    _tier3 = frozenset({"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"})
+    _tier3 = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
     harness = "cursor"
     assert harness in _tier3  # sanity check
 

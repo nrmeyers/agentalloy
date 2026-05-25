@@ -266,6 +266,45 @@ class TestOpenHarnesses:
         content = path.read_text()
         assert SENTINEL_BEGIN in content
 
+    def test_cline_proxy(self, tmp_path: Path) -> None:
+        """Proxy path writes .cline/settings.json with proxy API fields."""
+        result = wire_harness("cline", port=8000, root=tmp_path)
+        assert result["harness"] == "cline"
+        assert result["integration_vector"] == "proxy"
+        settings = tmp_path / ".cline" / "settings.json"
+        assert settings.exists()
+        config = json.loads(settings.read_text())
+        assert config["apiProvider"] == "openai"
+        assert config["apiBaseUrl"] == "http://localhost:8000/v1"
+        assert config["apiKey"] == "agentalloy"
+        assert config["model"] == "agentalloy-proxy"
+
+    def test_merges_existing_settings(self, tmp_path: Path) -> None:
+        """Cline proxy settings merge with existing settings without overwriting."""
+        # Create a pre-existing settings file with user-defined settings
+        existing_settings = {
+            "apiProvider": "anthropic",
+            "modelId": "claude-3-sonnet",
+            "someOtherSetting": "keep this",
+        }
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        (settings_dir / "settings.json").write_text(json.dumps(existing_settings, indent=2))
+
+        wire_harness("cline", port=9999, root=tmp_path)
+
+        config = json.loads((settings_dir / "settings.json").read_text())
+
+        # Verify proxy fields are present
+        assert config["apiProvider"] == "openai"
+        assert config["apiBaseUrl"] == "http://localhost:9999/v1"
+        assert config["apiKey"] == "agentalloy"
+        assert config["model"] == "agentalloy-proxy"
+
+        # Verify existing settings are preserved
+        assert config["modelId"] == "claude-3-sonnet"
+        assert config["someOtherSetting"] == "keep this"
+
     def test_aider(self, repo_root: Path) -> None:
         result = wire_harness("aider", port=8000, root=repo_root, legacy=True)
         # Instructions file (dedicated)

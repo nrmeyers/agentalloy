@@ -528,7 +528,7 @@ def _wire_legacy(
 
     # For Tier 3 harnesses, write watcher config and print guidance
     _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli"}
+        {"cursor", "windsurf", "github-copilot", "gemini-cli"}
     )
     if harness in _tier3_harnesses:
         _wire_tier3_watcher_config(harness, root)
@@ -779,7 +779,7 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # ---------------------------------------------------------------------------
 
 _PROXY_SUPPORTED_API = frozenset(
-    {"continue-closed", "continue-local", "aider", "hermes-agent", "opencode", "claude-code"}
+    {"continue-closed", "continue-local", "aider", "hermes-agent", "opencode", "claude-code", "cline"}
 )
 
 
@@ -819,6 +819,9 @@ def _wire_proxy(
 
     if harness == "claude-code":
         return _wire_proxy_claude_code(port, root)
+
+    if harness == "cline":
+        return _wire_proxy_cline(port, root)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -1100,6 +1103,45 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
             "path": str(env_path),
             "action": "wrote_new_file",
             "content_sha256": _sha256(block),
+        }
+    ]
+
+
+def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire Cline to use the AgentAlloy proxy.
+
+    Writes ``.cline/settings.json`` with proxy fields (``apiProvider``,
+    ``apiBaseUrl``, ``apiKey``, ``model``).  If the file already exists,
+    merges the proxy fields into it without overwriting other settings.
+    """
+    settings_path = root / ".cline" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    proxy_url = f"http://localhost:{port}/v1"
+    proxy_fields = {
+        "apiProvider": "openai",
+        "apiBaseUrl": proxy_url,
+        "apiKey": "agentalloy",
+        "model": "agentalloy-proxy",
+    }
+
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+    else:
+        settings = {}
+
+    settings.update(proxy_fields)
+    serialized = json.dumps(settings, indent=2) + "\n"
+    install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(settings_path),
+            "action": "wrote_new_file",
+            "content_sha256": _sha256(serialized),
         }
     ]
 
