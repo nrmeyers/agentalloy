@@ -49,6 +49,8 @@ def _read_phase(project_root: Path) -> str | None:
         import yaml
 
         raw = yaml.safe_load(phase_file.read_text(encoding="utf-8"))
+        if raw is None:
+            return None
         if isinstance(raw, dict):
             raw_dict = cast("dict[str, Any]", raw)
             phase_val = raw_dict.get("phase")
