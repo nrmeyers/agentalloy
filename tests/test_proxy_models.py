@@ -6,8 +6,6 @@ field defaults, and ProxyStreamChunk.set_delta behaviour.
 
 from __future__ import annotations
 
-import pytest
-
 from agentalloy.api.proxy_models import (
     ProxyChoice,
     ProxyMessage,
@@ -17,7 +15,6 @@ from agentalloy.api.proxy_models import (
     ProxyStreamChunk,
     ProxyStreamDelta,
 )
-
 
 # ── ProxyMessage ──────────────────────────────────────────────────────
 

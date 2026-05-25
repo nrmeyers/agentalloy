@@ -44,9 +44,11 @@ class TestResolveWorkingDir:
         # Unset AGENTALLOY_PROJECT_DIR
         env = os.environ.copy()
         env.pop("AGENTALLOY_PROJECT_DIR", None)
-        with mock.patch.dict(os.environ, env, clear=True):
-            with mock.patch("pathlib.Path.cwd", return_value=Path("/proc/cwd")):
-                result = resolve_working_dir(req)
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch("pathlib.Path.cwd", return_value=Path("/proc/cwd")),
+        ):
+            result = resolve_working_dir(req)
         assert result == Path("/proc/cwd")
 
     def test_metadata_cwd_beats_env_var(self, tmp_path: Path) -> None:

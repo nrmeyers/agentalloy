@@ -21,12 +21,11 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
-from agentalloy.app import create_app
 from agentalloy.api.compose_models import ComposedResult, EmptyResult, LatencyBreakdown
 from agentalloy.api.proxy_signal import SignalResult
+from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
 
 
@@ -155,16 +154,15 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=SignalResult(should_compose=False),
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Hello"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -192,19 +190,18 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=signal_result,
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [
-                            {"role": "system", "content": "You are an assistant."},
-                            {"role": "user", "content": "Implement feature X"},
-                        ],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "system", "content": "You are an assistant."},
+                        {"role": "user", "content": "Implement feature X"},
+                    ],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -229,16 +226,15 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=signal_result,
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Implement feature X"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Implement feature X"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         # Should still succeed (soft-fail)
         assert resp.status_code == 200
@@ -258,16 +254,15 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             side_effect=RuntimeError("signal error"),
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Hello"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -287,16 +282,15 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=signal_result,
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Implement feature X"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Implement feature X"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
 
@@ -326,17 +320,16 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=signal_result,
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "stream": True,
-                        "messages": [{"role": "user", "content": "Implement X"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "Implement X"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
         assert "text/event-stream" in resp.headers.get("content-type", "")
@@ -361,16 +354,15 @@ class TestFullProxyFlow:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=signal_result,
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Implement X"}],
-                        "metadata": {"cwd": str(tmp_path)},
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Implement X"}],
+                    "metadata": {"cwd": str(tmp_path)},
+                },
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -392,15 +384,14 @@ class TestUpstreamErrorHandling:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=SignalResult(should_compose=False),
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [{"role": "user", "content": "Hello"}],
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                },
+            )
 
         assert resp.status_code == 503
         body = resp.json()
@@ -460,21 +451,20 @@ class TestUpstreamErrorHandling:
         with patch(
             "agentalloy.api.proxy_router.evaluate_signal",
             return_value=SignalResult(should_compose=False),
-        ):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/v1/chat/completions",
-                    json={
-                        "model": "gpt-4",
-                        "messages": [
-                            {"role": "system", "content": "Be helpful"},
-                            {"role": "user", "content": "Hello"},
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 100,
-                        "top_p": 0.9,
-                    },
-                )
+        ), TestClient(app) as client:
+            resp = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "system", "content": "Be helpful"},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 100,
+                    "top_p": 0.9,
+                },
+            )
 
         assert resp.status_code == 200
         assert captured_payload["model"] == "gpt-4"

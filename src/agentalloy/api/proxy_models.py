@@ -7,7 +7,7 @@ SDK.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -101,4 +101,4 @@ class ProxyResponse(BaseModel):
 
     @staticmethod
     def _now_ts() -> int:
-        return int(datetime.now(timezone.utc).timestamp())
+        return int(datetime.now(UTC).timestamp())

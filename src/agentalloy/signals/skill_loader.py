@@ -152,7 +152,7 @@ def _build_predicate_context(
     tool_name: str | None = None,
     tool_path: str | None = None,
     file_events: list[Path] | None = None,
-) -> "PredicateContext":
+) -> PredicateContext:
     """Build a ``PredicateContext`` for gate evaluation."""
     from agentalloy.signals.predicates import PredicateContext
 

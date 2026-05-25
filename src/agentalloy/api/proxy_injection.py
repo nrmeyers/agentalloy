@@ -120,7 +120,7 @@ def _extract_marker_block(content: str) -> str:
 async def compose_and_inject(
     request: ProxyRequest,
     signal: SignalResult,
-    orchestrator: "ComposeOrchestrator",
+    orchestrator: ComposeOrchestrator,
 ) -> ProxyRequest:
     """Run composition and inject result into the system message.
 
