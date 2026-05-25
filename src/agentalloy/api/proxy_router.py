@@ -1,18 +1,19 @@
 """Proxy router — forwards chat completions to the upstream LLM.
 
-Basic passthrough: receives an OpenAI-compatible request, forwards it to
-the upstream LLM, and returns the response unchanged. Signal evaluation,
-composition injection, and streaming are added in later tasks.
+Handles both non-streaming (JSON) and streaming (SSE) responses.
+Signal evaluation, composition injection, and telemetry are added in
+later tasks.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from agentalloy.api.proxy_models import ProxyRequest
 
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_upstream_client(request: Request) -> httpx.Client | None:
-    """Return the upstream LLM httpx client (lifespan-scoped, via app.state).
+def get_upstream_client(request: Request) -> httpx.AsyncClient | None:
+    """Return the upstream LLM httpx.AsyncClient (lifespan-scoped, via app.state).
 
     Returns None if the upstream is not configured.
     """
@@ -53,16 +54,41 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
     )
 
 
-@router.post("/v1/chat/completions")
-def proxy_chat_completions(
+def _stream_upstream_response(
+    upstream: httpx.AsyncClient, payload: dict[str, Any]
+) -> StreamingResponse:
+    """Forward a streaming (SSE) response from the upstream LLM."""
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+            if resp.status_code >= 500:
+                logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
+                yield f'data: {{"error": "Upstream returned HTTP {resp.status_code}"}}\n\n'
+                return
+            async for chunk in resp.aiter_text():
+                yield chunk
+
+    return StreamingResponse(
+        content=event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/v1/chat/completions", response_model=None)
+async def proxy_chat_completions(
     request: ProxyRequest,
-    upstream: httpx.Client | None = Depends(get_upstream_client),
-) -> JSONResponse:
+    upstream: httpx.AsyncClient | None = Depends(get_upstream_client),
+):
     """Forward a chat completion request to the upstream LLM.
 
     Receives an OpenAI-compatible request body, forwards it to the
     upstream LLM's /v1/chat/completions endpoint, and returns the
-    response unchanged.
+    response unchanged. Supports both streaming and non-streaming modes.
     """
     if upstream is None:
         return _upstream_not_configured_error()
@@ -91,8 +117,13 @@ def proxy_chat_completions(
     if request.metadata is not None:
         payload["metadata"] = request.metadata
 
+    # Streaming mode: forward SSE chunks
+    if request.stream:
+        return _stream_upstream_response(upstream, payload)
+
+    # Non-streaming mode: forward and return JSON
     try:
-        resp = upstream.post("/v1/chat/completions", json=payload)
+        resp = await upstream.post("/v1/chat/completions", json=payload)
     except httpx.ConnectError as e:
         logger.warning("Upstream connection failed: %s", e)
         return _upstream_unavailable_error(str(e))

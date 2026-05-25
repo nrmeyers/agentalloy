@@ -105,9 +105,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.telemetry_querier = TelemetryQuerier(vector_store)
 
     # Upstream LLM client (for proxy passthrough)
-    upstream_client: httpx.Client | None = None
+    upstream_client: httpx.AsyncClient | None = None
     if settings.upstream_configured():
-        upstream_client = httpx.Client(
+        upstream_client = httpx.AsyncClient(
             base_url=settings.upstream_url.rstrip("/"),
             headers={
                 "Authorization": f"Bearer {settings.upstream_api_key}",
@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
         if upstream_client is not None:
-            upstream_client.close()
+            await upstream_client.aclose()
         telemetry.close()
         embed_client.close()
         vector_store.close()

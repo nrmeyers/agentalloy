@@ -1,7 +1,7 @@
-"""Proxy router — basic passthrough tests.
+"""Proxy router — basic passthrough and streaming tests.
 
 Tests the /v1/chat/completions endpoint with mock upstream responses
-using httpx.MockTransport.
+using httpx.MockTransport / httpx.MockTransport for async clients.
 """
 
 from __future__ import annotations
@@ -16,8 +16,11 @@ from fastapi.testclient import TestClient
 from agentalloy.app import create_app
 
 
-def _make_mock_upstream(response_body: dict[str, Any], status_code: int = 200) -> httpx.Client:
-    """Create an httpx.Client with MockTransport for the upstream LLM."""
+def _make_mock_async_upstream(
+    response_body: dict[str, Any],
+    status_code: int = 200,
+) -> httpx.AsyncClient:
+    """Create an httpx.AsyncClient with MockTransport for the upstream LLM."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -27,7 +30,7 @@ def _make_mock_upstream(response_body: dict[str, Any], status_code: int = 200) -
         )
 
     transport = httpx.MockTransport(handler)
-    return httpx.Client(transport=transport, base_url="http://mock-upstream/v1")
+    return httpx.AsyncClient(transport=transport, base_url="http://mock-upstream/v1")
 
 
 class TestProxyPassthrough:
@@ -37,7 +40,7 @@ class TestProxyPassthrough:
     def app_with_upstream(self):
         """Create an app with a mock upstream client."""
         app = create_app(use_default_lifespan=False)
-        mock_client = _make_mock_upstream({})
+        mock_client = _make_mock_async_upstream({})
         app.state.upstream_client = mock_client
         return app
 
@@ -69,11 +72,10 @@ class TestProxyPassthrough:
             },
         }
 
-        # Recreate the mock client with the actual response body
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=response_body, request=request)
 
-        app_with_upstream.state.upstream_client = httpx.Client(
+        app_with_upstream.state.upstream_client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="http://mock-upstream/v1",
         )
@@ -136,7 +138,7 @@ class TestProxyPassthrough:
                 request=request,
             )
 
-        app_with_upstream.state.upstream_client = httpx.Client(
+        app_with_upstream.state.upstream_client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="http://mock-upstream/v1",
         )
@@ -180,7 +182,7 @@ class TestProxyPassthrough:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(500, text="Internal Server Error", request=request)
 
-        app_with_upstream.state.upstream_client = httpx.Client(
+        app_with_upstream.state.upstream_client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="http://mock-upstream/v1",
         )
@@ -226,7 +228,7 @@ class TestProxyPassthrough:
                 request=request,
             )
 
-        app_with_upstream.state.upstream_client = httpx.Client(
+        app_with_upstream.state.upstream_client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             base_url="http://mock-upstream/v1",
         )
@@ -244,3 +246,118 @@ class TestProxyPassthrough:
             )
 
         assert received_stream is True
+
+
+class TestProxyStreaming:
+    """Test SSE streaming passthrough."""
+
+    def test_stream_passthrough(self) -> None:
+        """Streaming request returns SSE chunks forwarded from upstream."""
+        chunks = [
+            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}\n\n',
+            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"}}]}\n\n',
+            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{"content":" world"}}]}\n\n',
+            'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":123,"model":"gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+            "data: [DONE]\n\n",
+        ]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content="".join(chunks),
+                headers={"content-type": "text/event-stream"},
+                request=request,
+            )
+
+        app = create_app(use_default_lifespan=False)
+        app.state.upstream_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://mock-upstream/v1",
+        )
+
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "user", "content": "Say hello"},
+                    ],
+                    "stream": True,
+                },
+            ) as resp,
+        ):
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("text/event-stream")
+            body = resp.read().decode()
+            assert "Hello" in body
+            assert "world" in body
+            assert "[DONE]" in body
+
+    def test_stream_format_preserved(self) -> None:
+        """SSE format is preserved — data: prefix and double newlines."""
+        sse_data = 'data: {"id":"test","object":"chat.completion.chunk"}\n\n'
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=sse_data,
+                headers={"content-type": "text/event-stream"},
+                request=request,
+            )
+
+        app = create_app(use_default_lifespan=False)
+        app.state.upstream_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://mock-upstream/v1",
+        )
+
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    "stream": True,
+                },
+            ) as resp,
+        ):
+            assert resp.status_code == 200
+            assert resp.read().decode() == sse_data
+
+    def test_stream_upstream_error_500(self) -> None:
+        """Upstream 5xx during streaming returns error SSE chunk."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, text="Internal Server Error", request=request)
+
+        app = create_app(use_default_lifespan=False)
+        app.state.upstream_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://mock-upstream/v1",
+        )
+
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    "stream": True,
+                },
+            ) as resp,
+        ):
+            assert resp.status_code == 200  # Streaming response always 200
+            body = resp.read().decode()
+            assert "error" in body.lower()
+            assert "500" in body
