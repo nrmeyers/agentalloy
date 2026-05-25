@@ -165,6 +165,7 @@ def _build_namespace(cfg: SetupConfig, **overrides: Any) -> argparse.Namespace: 
         "overrides": None,  # write_env overrides
         "scope": "user",  # wire_harness scope
         "mcp_fallback": False,  # wire_harness mcp_fallback
+        "legacy": False,  # wire_harness legacy mode
         "quiet": True,  # suppress JSON stdout when called from wizard
         "json": False,  # human-readable output (not raw JSON)
     }

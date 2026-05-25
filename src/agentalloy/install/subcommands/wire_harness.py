@@ -46,9 +46,6 @@ from agentalloy.install import state as install_state
 SCHEMA_VERSION = 1
 STEP_NAME = "wire-harness"
 
-# Track whether we've emitted the deprecation warning this session.
-_deprecation_warned = False
-
 SENTINEL_BEGIN = "<!-- BEGIN agentalloy install -->"
 SENTINEL_END = "<!-- END agentalloy install -->"
 
@@ -356,7 +353,7 @@ def wire_harness(
     root: Path | None = None,
     force: bool = False,
     mcp_fallback: bool = False,
-    proxy: bool = False,
+    legacy: bool = False,
     scope: str = "user",
 ) -> dict[str, Any]:
     """Wire the specified harness. Returns contract-shaped result.
@@ -366,14 +363,12 @@ def wire_harness(
     edited inside the sentinels), refuse to clobber unless ``force=True``.
 
     If ``mcp_fallback=True``, writes the strict-tools MCP server config for
-    the chosen harness instead of the markdown-injection variant. Supported
+    the chosen harness instead of the default proxy wiring. Supported
     harnesses for MCP fallback: claude-code, cursor, continue-closed,
     continue-local. Other harnesses raise SystemExit(1).
 
-    If ``proxy=True``, wires the harness to use the AgentAlloy proxy at
-    ``http://localhost:{port}/v1`` as its API base URL. For harnesses that
-    don't support custom API endpoints, writes a proxy instruction block
-    instead.
+    If ``legacy=True``, uses the old markdown-injection wiring path instead
+    of the default proxy model. Orthogonal to ``--mcp-fallback``.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
@@ -388,8 +383,6 @@ def wire_harness(
         print(f"ERROR: Unknown harness: '{harness}'", file=sys.stderr)
         print(f"FIX:   Use one of: {', '.join(sorted(VALID_HARNESSES))}", file=sys.stderr)
         raise SystemExit(1)
-
-    reg = _HARNESS_REGISTRY[harness]
 
     # Handle the legacy `mcp-only` harness name: it pre-dates the
     # `--mcp-fallback` flag. Surface a clear migration message.
@@ -408,30 +401,18 @@ def wire_harness(
         )
         raise SystemExit(1)
 
-    # MCP fallback path: write the harness-specific MCP server config
-    # instead of the default markdown-injection content.
+    # MCP fallback path: write the harness-specific MCP server config.
     if mcp_fallback:
         files_written = _wire_mcp_fallback(harness, port, root, force)
         return _build_result(harness, "mcp_server_config", files_written, root)
 
-    # Proxy path: wire the harness to use the AgentAlloy proxy URL.
-    if proxy:
-        files_written = _wire_proxy(harness, port, root, force, scope)
-        return _build_result(harness, "proxy", files_written, root)
+    # Legacy path: old markdown-injection wiring (--legacy flag).
+    if legacy:
+        return _wire_legacy(harness, port, root, force, scope)
 
-    # Markdown-injection / system-prompt-snippet wiring is deprecated in
-    # favor of the proxy model. Warn once per session.
-    global _deprecation_warned
-    if not _deprecation_warned:
-        _deprecation_warned = True
-        print(
-            "DEPRECATION: markdown-injection wiring is deprecated. "
-            "The proxy model (agentalloy wire --proxy) is the recommended "
-            "approach. See docs for migration.",
-            file=sys.stderr,
-        )
-
-    return _wire_legacy(harness, port, root, force, scope)
+    # Default: proxy wiring.
+    files_written = _wire_proxy(harness, port, root, force, scope)
+    return _build_result(harness, "proxy", files_written, root)
 
 
 def _wire_legacy(
@@ -1053,19 +1034,18 @@ def add_parser(
         action="store_true",
         help=(
             "Write the strict-tools MCP server config for the chosen harness instead "
-            "of the default markdown-injection variant. Supported on: claude-code, "
-            "cursor, continue-closed, continue-local. The MCP server module lives at "
-            "agentalloy.install.mcp_server."
+            "of the default proxy wiring. Supported on: claude-code, cursor, "
+            "continue-closed, continue-local. Orthogonal to --legacy. The MCP server "
+            "module lives at agentalloy.install.mcp_server."
         ),
     )
     p.add_argument(
-        "--proxy",
+        "--legacy",
         action="store_true",
         help=(
-            "Wire the harness to use the AgentAlloy proxy (recommended). "
-            "For harnesses that support custom API endpoints (Continue), "
-            "configures the API base URL. For others, writes a proxy "
-            "instruction block."
+            "Use the legacy markdown-injection wiring method instead of the proxy model. "
+            "Writes harness-specific instruction blocks into config files. "
+            "Orthogonal to --mcp-fallback."
         ),
     )
     p.set_defaults(func=_run)
@@ -1081,7 +1061,7 @@ def _run(args: argparse.Namespace) -> int:
         port=port,
         force=args.force,
         mcp_fallback=args.mcp_fallback,
-        proxy=getattr(args, "proxy", False),
+        legacy=getattr(args, "legacy", False),
         scope=args.scope,
     )
     if not getattr(args, "quiet", False):
