@@ -446,7 +446,7 @@ class TestUpstreamErrorHandling:
 
     def test_request_body_preserved(self) -> None:
         """All request fields are forwarded to upstream."""
-        captured_payload = {}
+        captured_payload: dict[str, Any] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured_payload.update(json.loads(request.content.decode()))

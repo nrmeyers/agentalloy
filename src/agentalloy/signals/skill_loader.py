@@ -17,7 +17,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from agentalloy.signals.predicates import PredicateContext
@@ -50,8 +50,9 @@ def _read_phase(project_root: Path) -> str | None:
 
         raw = yaml.safe_load(phase_file.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
-            val = raw.get("phase")
-            return str(val).strip() if val else None
+            raw_dict = cast("dict[str, Any]", raw)
+            phase_val = raw_dict.get("phase")
+            return str(phase_val).strip() if phase_val else None
         return str(raw).strip() or None
     except Exception:
         return None

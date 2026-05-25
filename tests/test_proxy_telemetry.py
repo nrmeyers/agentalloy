@@ -7,6 +7,7 @@ and soft-fail behaviour when the vector store raises.
 from __future__ import annotations
 
 import time
+from typing import Any
 from unittest.mock import MagicMock
 
 from agentalloy.api.proxy_telemetry import write_proxy_trace
@@ -166,19 +167,19 @@ class TestWriteProxyTrace:
         # Still attempted to write
         mock_store.record_composition_trace.assert_called_once()
 
-    def test_soft_fail_on_import_error(self):
+    def test_soft_fail_on_import_error(self) -> None:
         """If the import chain fails, the function swallows the exception."""
 
         # This test verifies the try/except wrapping is effective.
         # We can't easily break imports at runtime, but we can verify
         # that a completely broken vector_store doesn't propagate errors.
         class BrokenStore:
-            def record_composition_trace(self, trace):
+            def record_composition_trace(self, trace: Any) -> None:
                 raise ImportError("module not found")
 
         # Should not raise
         write_proxy_trace(
-            BrokenStore(),
+            BrokenStore(),  # type: ignore[arg-type]
             phase="build",
             task_prompt="test",
             status="proxy_composed",

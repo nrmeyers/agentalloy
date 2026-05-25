@@ -83,6 +83,8 @@ pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 reportUnusedFunction = false
+reportPrivateUsage = "warning"
+reportUnknownLambdaType = "warning"
 venvPath = "."
 venv = ".venv"
 

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.signals.gates import decide_transition
 from agentalloy.signals.prefilter import check_prefilter
-from agentalloy.signals.skill_loader import (
+from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _build_predicate_context,
     _load_workflow_skill_for_phase,
     _read_phase,

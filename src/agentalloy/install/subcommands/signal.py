@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install.output import print_rich
-from agentalloy.signals.skill_loader import (
+from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _build_predicate_context,
     _load_workflow_skill_for_phase,
     _read_phase,
