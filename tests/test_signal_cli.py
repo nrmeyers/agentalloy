@@ -116,7 +116,7 @@ def test_evaluate_phase_transition_writes_workflow_skill_to_stdout(
     prompt_file = tmp_path / "prompt.txt"
     prompt_file.write_text("done, ready to move on")
 
-    def mock_load(phase: str) -> dict[str, Any]:
+    def mock_load(phase: str, *args: Any) -> dict[str, Any]:
         return skill if phase == "spec" else next_skill
 
     import io
@@ -292,7 +292,7 @@ def test_evaluate_phase_emits_advisory_to_stdout(tmp_path: Path, monkeypatch: py
     prompt_file = tmp_path / "prompt.txt"
     prompt_file.write_text("done")
 
-    def mock_load(phase: str) -> dict[str, Any]:
+    def mock_load(phase: str, *args: Any) -> dict[str, Any]:
         return skill if phase == "spec" else next_skill
 
     import io
