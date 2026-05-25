@@ -21,6 +21,7 @@ from agentalloy.install.subcommands.wire_harness import (
     _inject_sentinel_block,  # pyright: ignore[reportPrivateUsage]
     wire_harness,
 )
+from agentalloy.install.subcommands import uninstall_proxy
 
 
 @pytest.fixture()
@@ -784,3 +785,173 @@ class TestLegacyFlag:
             "claude-code", port=8000, root=repo_root, mcp_fallback=True, legacy=True
         )
         assert result["integration_vector"] == "mcp_server_config"
+
+
+# ---------------------------------------------------------------------------
+# Uninstall proxy
+# ---------------------------------------------------------------------------
+
+
+class TestUninstallProxy:
+    """Tests for uninstall_proxy module functions."""
+
+    def test_unwire_proxy_aider_removes_block(self, repo_root: Path) -> None:
+        """Unwire removes sentinel block from .aider.conf.yml."""
+        # Create a .aider.conf.yml with proxy block
+        conf = repo_root / ".aider.conf.yml"
+        conf.write_text(
+            f"# Before\n{SENTINEL_BEGIN}\nproxy config here\n{SENTINEL_END}\n# After\n"
+        )
+        # Also create the instructions file (so it gets removed)
+        instr = repo_root / ".agentalloy-aider-instructions.md"
+        instr.write_text("# Instructions\n")
+        
+        removed = uninstall_proxy._unwire_proxy_aider(repo_root)
+        assert conf.exists()
+        content = conf.read_text()
+        assert SENTINEL_BEGIN not in content
+        assert "proxy config here" not in content
+        assert "# Before" in content
+        assert "# After" in content
+        # Both files should be removed
+        assert not instr.exists()
+        assert len(removed) == 2
+
+    def test_unwire_proxy_aider_no_file(self, repo_root: Path) -> None:
+        """Unwire no-ops if .aider.conf.yml doesn't exist."""
+        removed = uninstall_proxy._unwire_proxy_aider(repo_root)
+        assert removed == []
+
+    def test_unwire_proxy_hermes_agent_user_scope(self, tmp_path: Path) -> None:
+        """Unwire user-scope hermes-agent from ~/.hermes/config.yaml."""
+        import os as _os
+        
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _os.environ["HOME"] = str(fake_home)
+        
+        # Mock Path.home by replacing the function on the Path class
+        from pathlib import Path as _Path
+        original_home = _Path.home
+        _Path.home = lambda: fake_home
+        
+        try:
+            config = fake_home / ".hermes" / "config.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text(
+                f"# Before\n{SENTINEL_BEGIN}\nhermes proxy config\n{SENTINEL_END}\n# After\n"
+            )
+            removed = uninstall_proxy._unwire_proxy_hermes_agent("user", fake_home)
+            assert config.exists()
+            content = config.read_text()
+            assert SENTINEL_BEGIN not in content
+            assert len(removed) == 1
+        finally:
+            _Path.home = original_home
+
+    def test_unwire_proxy_hermes_agent_repo_scope(self, repo_root: Path) -> None:
+        """Unwire repo-scope hermes-agent from AGENTS.md."""
+        agents = repo_root / "AGENTS.md"
+        agents.write_text(
+            f"# Before\n{SENTINEL_BEGIN}\nhermes proxy config\n{SENTINEL_END}\n# After\n"
+        )
+        removed = uninstall_proxy._unwire_proxy_hermes_agent("repo", repo_root)
+        assert agents.exists()
+        content = agents.read_text()
+        assert SENTINEL_BEGIN not in content
+        assert len(removed) == 1
+
+    def test_unwire_proxy_opencode_removes_files(self, repo_root: Path) -> None:
+        """Unwire removes opencode env file and system prompt."""
+        opencode_dir = repo_root / ".opencode"
+        opencode_dir.mkdir()
+        env_file = opencode_dir / ".agentalloy-env"
+        prompt_file = repo_root / ".opencode" / "system-prompt.md"
+        env_file.write_text("ENV_VAR=value\n")
+        prompt_file.write_text("SYSTEM PROMPT\n")
+
+        removed = uninstall_proxy._unwire_proxy_opencode(repo_root)
+        assert not env_file.exists()
+        assert not prompt_file.exists()
+        assert len(removed) == 2
+
+    def test_unwire_proxy_claude_code_removes_env(self, tmp_path: Path) -> None:
+        """Unwire removes claude-code env file."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        from pathlib import Path as _Path
+        original_home = _Path.home
+        _Path.home = lambda: fake_home
+
+        try:
+            import os as _os
+            _os.environ["HOME"] = str(fake_home)
+            env_file = fake_home / ".agentalloy" / "claude-code-env.sh"
+            env_file.parent.mkdir(parents=True)
+            env_file.write_text("# AgentAlloy: claude-code proxy env\nexport AGENTALLOY_PROXY=on\n")
+
+            removed = uninstall_proxy._unwire_proxy_claude_code(fake_home)
+            assert not env_file.exists()
+            assert len(removed) == 1
+        finally:
+            _Path.home = original_home
+
+    def test_unwire_proxy_cline_removes_settings(self, tmp_path: Path) -> None:
+        """Unwire removes .cline/settings.json if only proxy fields exist."""
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        # Write only proxy fields
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "apiProvider": "openai",
+                    "apiBaseUrl": "http://localhost:8000/v1",
+                    "apiKey": "agentalloy",
+                    "model": "agentalloy-proxy",
+                },
+                indent=2,
+            )
+        )
+
+        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        assert not settings_file.exists()
+        assert len(removed) == 1
+
+    def test_unwire_proxy_cline_preserves_other_settings(self, tmp_path: Path) -> None:
+        """Unwire removes only proxy fields, keeps other settings."""
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        # Write with both proxy and user settings
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "apiProvider": "openai",
+                    "apiBaseUrl": "http://localhost:8000/v1",
+                    "apiKey": "agentalloy",
+                    "model": "agentalloy-proxy",
+                    "modelId": "claude-3-sonnet",
+                    "someUserSetting": "keep this",
+                },
+                indent=2,
+            )
+        )
+
+        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        assert settings_file.exists()
+        config = json.loads(settings_file.read_text())
+        # Proxy fields removed
+        assert "apiProvider" not in config
+        assert "apiBaseUrl" not in config
+        assert "apiKey" not in config
+        assert "model" not in config
+        # User fields preserved
+        assert config["modelId"] == "claude-3-sonnet"
+        assert config["someUserSetting"] == "keep this"
+
+    def test_unwire_proxy_cline_no_file(self, tmp_path: Path) -> None:
+        """Unwire no-ops if .cline/settings.json doesn't exist."""
+        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        assert removed == []
+
