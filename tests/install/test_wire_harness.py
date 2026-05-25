@@ -513,6 +513,94 @@ class TestScopeFlag:
 
 
 # ---------------------------------------------------------------------------
+# Proxy wiring - aider
+# ---------------------------------------------------------------------------
+
+
+class TestAiderProxyWiring:
+    """Proxy-mode wiring for aider writes .aider.conf.yml with proxy fields."""
+
+    def test_writes_aider_conf_yml(self, repo_root: Path) -> None:
+        result = wire_harness("aider", port=8000, root=repo_root)
+        assert result["integration_vector"] == "proxy"
+        conf = repo_root / ".aider.conf.yml"
+        assert conf.exists()
+        content = conf.read_text()
+        assert "openai-api-base: http://localhost:8000/v1" in content
+        assert "openai-api-key: agentalloy" in content
+        assert "model: agentalloy-proxy" in content
+        assert "  - .agentalloy-aider-instructions.md" in content
+
+    def test_merges_existing_aider_conf(self, repo_root: Path) -> None:
+        (repo_root / ".aider.conf.yml").write_text("model: gpt-4\nread:\n  - my-docs.md\n")
+        wire_harness("aider", port=7777, root=repo_root)
+        content = (repo_root / ".aider.conf.yml").read_text()
+        # User settings preserved above sentinel
+        assert "model: gpt-4" in content
+        assert "my-docs.md" in content
+        # Proxy block appended
+        assert "localhost:7777" in content
+        assert "# <!-- BEGIN agentalloy install -->" in content
+
+    def test_idempotent_rewire(self, repo_root: Path) -> None:
+        wire_harness("aider", port=8000, root=repo_root)
+        wire_harness("aider", port=9000, root=repo_root)
+        content = (repo_root / ".aider.conf.yml").read_text()
+        assert "localhost:9000" in content
+        assert "localhost:8000" not in content
+        assert content.count("# <!-- BEGIN agentalloy install -->") == 1
+
+    def test_proxy_does_not_create_instructions_file(self, repo_root: Path) -> None:
+        """Proxy mode writes .aider.conf.yml only, not the instructions file."""
+        wire_harness("aider", port=8000, root=repo_root)
+        assert not (repo_root / ".agentalloy-aider-instructions.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Proxy wiring - opencode
+# ---------------------------------------------------------------------------
+
+
+class TestOpenCodeProxyWiring:
+    """Proxy-mode wiring for opencode writes env file + system prompt."""
+
+    def test_writes_env_file(self, repo_root: Path) -> None:
+        result = wire_harness("opencode", port=8000, root=repo_root)
+        assert result["integration_vector"] == "proxy"
+        env_path = repo_root / ".opencode" / ".agentalloy-env"
+        assert env_path.exists()
+        content = env_path.read_text()
+        assert "OPENAI_API_BASE=http://localhost:8000/v1" in content
+        assert "OPENAI_API_KEY" in content
+
+    def test_writes_system_prompt(self, repo_root: Path) -> None:
+        wire_harness("opencode", port=8000, root=repo_root)
+        prompt = repo_root / ".opencode" / "system-prompt.md"
+        assert prompt.exists()
+        content = prompt.read_text()
+        assert SENTINEL_BEGIN in content
+        assert "localhost:8000" in content
+
+    def test_idempotent_rewire(self, repo_root: Path) -> None:
+        wire_harness("opencode", port=8000, root=repo_root)
+        wire_harness("opencode", port=9000, root=repo_root)
+        prompt = (repo_root / ".opencode" / "system-prompt.md").read_text()
+        env = (repo_root / ".opencode" / ".agentalloy-env").read_text()
+        assert "localhost:9000" in prompt
+        assert "localhost:8000" not in prompt
+        assert prompt.count(SENTINEL_BEGIN) == 1
+        assert "localhost:9000" in env
+
+    def test_prints_activation_guidance(
+        self, repo_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        wire_harness("opencode", port=8000, root=repo_root)
+        captured = capsys.readouterr()
+        assert "source" in captured.err
+        assert ".agentalloy-env" in captured.err
+
+
+# ---------------------------------------------------------------------------
 # Intake activation markers
 # ---------------------------------------------------------------------------
 
