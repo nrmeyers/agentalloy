@@ -431,14 +431,31 @@ def wire_harness(
             file=sys.stderr,
         )
 
-    # Handle Continue.dev specially
+    return _wire_legacy(harness, port, root, force, scope)
+
+
+def _wire_legacy(
+    harness: str,
+    port: int,
+    root: Path,
+    force: bool = False,
+    scope: str = "user",
+) -> dict[str, Any]:
+    """Legacy markdown-injection wiring path.
+
+    This is the OLD behavior — used only when ``--legacy`` is passed.
+    Extracted from the inline legacy path in ``wire_harness()``.
+    """
+    reg = _HARNESS_REGISTRY[harness]
+    files_written: list[dict[str, Any]] = []
+
+    # continue special case (already has proxy, skip)
     if harness in ("continue-closed", "continue-local"):
         variant = "closed" if harness == "continue-closed" else "local"
         files_written = _wire_continue(root, port, variant)
         return _build_result(harness, reg["vector"], files_written, root)
 
-    # Handle manual: emit the sentinel block on stderr (so stdout stays
-    # parseable as the JSON result the runbook reads).
+    # Handle manual: emit the sentinel block on stderr
     if harness == "manual":
         template = _load_template(reg["template"])
         rendered = _render_template(template, port)
@@ -470,9 +487,7 @@ def wire_harness(
     # Ensure parent directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Tamper detection: if a prior wire-harness run recorded this path and
-    # the current inner content's sha256 differs, the user edited inside
-    # the sentinels. Refuse to clobber without --force.
+    # Tamper detection
     if not force and not dedicated and target_path.exists():
         st = install_state.load_state(root)
         prior = next(
@@ -506,36 +521,33 @@ def wire_harness(
                         file=sys.stderr,
                     )
                     raise SystemExit(1)
-
+    
     if dedicated:
-        # We own the entire file
-        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, rendered)
         action = "wrote_new_file"
-        # sha256 of the rendered file content for drift detection
         content_sha256 = _sha256(rendered.strip())
     else:
-        # Sentinel-bounded injection
         existing = target_path.read_text() if target_path.exists() else ""
         result_content = _inject_sentinel_block(existing, rendered)
-        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, result_content)
         action = "injected_block"
-        # sha256 of the inner content (matches what uninstall extracts via
-        # _extract_sentinel_content, which strips surrounding whitespace).
         content_sha256 = _sha256(rendered.strip())
-
-    files_written = [
-        {
-            "path": str(target_path),
-            "action": action,
-            "sentinel_begin": SENTINEL_BEGIN if not dedicated else None,
-            "sentinel_end": SENTINEL_END if not dedicated else None,
-            "content_sha256": content_sha256,
-        }
-    ]
+    
+    files_written.append({
+        "path": str(target_path),
+        "action": action,
+        "sentinel_begin": SENTINEL_BEGIN if not dedicated else None,
+        "sentinel_end": SENTINEL_END if not dedicated else None,
+        "content_sha256": content_sha256,
+    })
 
     # For aider, also wire .aider.conf.yml
     if harness == "aider":
         files_written.extend(_wire_aider_conf(root))
+
+    # For claude-code, additionally wire signal-layer hooks
+    if harness == "claude-code":
+        files_written.extend(_wire_claude_code_hooks(root))
 
     # For Tier 3 harnesses, write watcher config and print guidance
     _tier3_harnesses = frozenset(
@@ -543,10 +555,6 @@ def wire_harness(
     )
     if harness in _tier3_harnesses:
         _wire_tier3_watcher_config(harness, root)
-
-    # For claude-code, additionally wire signal-layer hooks
-    if harness == "claude-code":
-        files_written.extend(_wire_claude_code_hooks(root))
 
     # Probe for code-indexer and persist result to state.json
     _probe_code_indexer(root)
@@ -593,6 +601,67 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # MCP fallback wiring
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Tier 3 watcher wiring
+# ---------------------------------------------------------------------------
+
+
+def _wire_tier3_watcher_config(harness: str, root: Path) -> None:
+    """Write watcher config and print Tier 3 guidance. Soft-fail."""
+    try:
+        import yaml as _yaml
+
+        watch_dir = Path.home() / ".agentalloy" / "watch"
+        watch_dir.mkdir(parents=True, exist_ok=True)
+        config = {
+            "project_root": str(root),
+            "profile_name": "default",
+            "harness": harness,
+            "poll_interval_s": 1.0,
+            "debounce_ms": 500,
+        }
+        (watch_dir / "default.yaml").write_text(_yaml.dump(config))
+    except Exception:
+        pass
+
+    print(
+        f"\n[AgentAlloy — Tier 3 wiring]\n"
+        f"You selected: {harness}\n\n"
+        "Tier 3 harnesses do not support per-turn hooks. To get phase- and\n"
+        "contract-driven context updates, run the watcher sidecar:\n\n"
+        f"    agentalloy watch start --harness {harness}\n\n"
+        "Run under tmux, systemd, or launchd for persistence. Without the\n"
+        "watcher, you'll only get the initial workflow skill context. System\n"
+        "skills (commit-safety, etc.) are advisory-only on Tier 3.\n\n"
+        "See docs/tier3-experience.md for the full picture.\n",
+        file=sys.stderr,
+    )
+
+
+def _probe_code_indexer(root: Path) -> None:
+    """Probe code-indexer health and persist reachability to state.json. Soft-fail."""
+    import time
+    import urllib.request
+
+    from agentalloy.config import get_settings
+
+    ci_url = get_settings().code_indexer_url
+    reachable = False
+    try:
+        req = urllib.request.urlopen(f"{ci_url}/health", timeout=2)
+        reachable = req.status == 200
+    except Exception:
+        pass
+
+    st = install_state.load_state(root)
+    st["code_indexer"] = {
+        "reachable": reachable,
+        "url": ci_url,
+        "last_health_at": int(time.time()),
+    }
+    install_state.save_state(st, root)
+
 
 _AGENTALLOY_HOOKS_MARKER = "agentalloy-signal"
 
@@ -707,62 +776,6 @@ def _wire_claude_code_hooks(root: Path) -> list[dict[str, Any]]:
             "content_sha256": _sha256(serialized),
         }
     ]
-
-
-def _wire_tier3_watcher_config(harness: str, root: Path) -> None:
-    """Write watcher config and print Tier 3 guidance. Soft-fail."""
-    try:
-        import yaml as _yaml
-
-        watch_dir = Path.home() / ".agentalloy" / "watch"
-        watch_dir.mkdir(parents=True, exist_ok=True)
-        config = {
-            "project_root": str(root),
-            "profile_name": "default",
-            "harness": harness,
-            "poll_interval_s": 1.0,
-            "debounce_ms": 500,
-        }
-        (watch_dir / "default.yaml").write_text(_yaml.dump(config))
-    except Exception:
-        pass
-
-    print(
-        f"\n[AgentAlloy — Tier 3 wiring]\n"
-        f"You selected: {harness}\n\n"
-        "Tier 3 harnesses do not support per-turn hooks. To get phase- and\n"
-        "contract-driven context updates, run the watcher sidecar:\n\n"
-        f"    agentalloy watch start --harness {harness}\n\n"
-        "Run under tmux, systemd, or launchd for persistence. Without the\n"
-        "watcher, you'll only get the initial workflow skill context. System\n"
-        "skills (commit-safety, etc.) are advisory-only on Tier 3.\n\n"
-        "See docs/tier3-experience.md for the full picture.\n",
-        file=sys.stderr,
-    )
-
-
-def _probe_code_indexer(root: Path) -> None:
-    """Probe code-indexer health and persist reachability to state.json. Soft-fail."""
-    import time
-    import urllib.request
-
-    from agentalloy.config import get_settings
-
-    ci_url = get_settings().code_indexer_url
-    reachable = False
-    try:
-        req = urllib.request.urlopen(f"{ci_url}/health", timeout=2)
-        reachable = req.status == 200
-    except Exception:
-        pass
-
-    st = install_state.load_state(root)
-    st["code_indexer"] = {
-        "reachable": reachable,
-        "url": ci_url,
-        "last_health_at": int(time.time()),
-    }
-    install_state.save_state(st, root)
 
 
 def _unwire_claude_code_hooks(root: Path) -> list[dict[str, Any]]:
