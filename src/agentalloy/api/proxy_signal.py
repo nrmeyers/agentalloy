@@ -131,9 +131,7 @@ async def evaluate_signal(
         if decision.should_transition and decision.to_phase:
             try:
                 _write_phase_atomic(cwd, decision.to_phase)
-                logger.info(
-                    "Phase transition: %s -> %s", phase, decision.to_phase
-                )
+                logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
             except OSError as e:
                 logger.warning("Failed to write phase file: %s", e)
 

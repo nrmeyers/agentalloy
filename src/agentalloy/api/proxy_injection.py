@@ -49,9 +49,7 @@ def extract_system_message(messages: list[ProxyMessage]) -> ProxyMessage | None:
     return None
 
 
-def replace_system_message(
-    messages: list[ProxyMessage], new_msg: ProxyMessage
-) -> None:
+def replace_system_message(messages: list[ProxyMessage], new_msg: ProxyMessage) -> None:
     """Replace the first system message in-place."""
     for i, msg in enumerate(messages):
         if msg.role == "system":
@@ -59,9 +57,7 @@ def replace_system_message(
             return
 
 
-def inject_composed_output(
-    request: ProxyRequest, output: str
-) -> ProxyRequest:
+def inject_composed_output(request: ProxyRequest, output: str) -> ProxyRequest:
     """Inject *output* into the system message of *request*.
 
     Injection logic:
@@ -146,9 +142,11 @@ async def compose_and_inject(
     # Build ComposeRequest
     # signal.phase may not be a valid Phase literal if it's something
     # unexpected; fall back to "build" as a safe default.
-    compose_phase: Phase = phase if phase in (
-        "spec", "design", "qa", "build", "ops", "meta", "governance", "ship"
-    ) else "build"
+    compose_phase: Phase = (
+        phase
+        if phase in ("spec", "design", "qa", "build", "ops", "meta", "governance", "ship")
+        else "build"
+    )
 
     compose_req = ComposeRequest(
         task=task,

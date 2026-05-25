@@ -36,6 +36,7 @@ router = APIRouter()
 # Dependency providers — overridden in tests via app.dependency_overrides[]
 # ---------------------------------------------------------------------------
 
+
 def get_upstream_client(request: Request) -> httpx.AsyncClient | None:
     """Return the upstream LLM httpx.AsyncClient (lifespan-scoped, via app.state).
 
@@ -73,6 +74,7 @@ def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
 # Error responses
 # ---------------------------------------------------------------------------
 
+
 def _upstream_not_configured_error() -> JSONResponse:
     return JSONResponse(
         status_code=503,
@@ -100,6 +102,7 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # Streaming helper
 # ---------------------------------------------------------------------------
+
 
 def _stream_upstream_response(
     upstream: httpx.AsyncClient, payload: dict[str, Any]
@@ -130,6 +133,7 @@ def _stream_upstream_response(
 # Request payload builder
 # ---------------------------------------------------------------------------
 
+
 def _build_payload(request: ProxyRequest) -> dict[str, Any]:
     """Build the JSON payload to forward to the upstream LLM."""
     payload: dict[str, Any] = {
@@ -159,6 +163,7 @@ def _build_payload(request: ProxyRequest) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Telemetry helper for the full flow
 # ---------------------------------------------------------------------------
+
 
 def _extract_task_prompt(request: ProxyRequest) -> str:
     """Extract the first user message as the task prompt for telemetry."""
@@ -204,6 +209,7 @@ async def _write_flow_telemetry(
 # ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
+
 
 @router.post("/v1/chat/completions", response_model=None)
 async def proxy_chat_completions(
@@ -254,7 +260,9 @@ async def proxy_chat_completions(
             if modified_request is not request:
                 composed = True
         except Exception:
-            logger.warning("Composition/injection failed -- passing through unchanged", exc_info=True)
+            logger.warning(
+                "Composition/injection failed -- passing through unchanged", exc_info=True
+            )
             modified_request = request
 
     # --- Step 5: Forward to upstream ---

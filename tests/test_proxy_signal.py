@@ -49,7 +49,6 @@ def _no_transition(qwen: int = 0) -> MagicMock:
 
 
 class TestEvaluateSignal:
-
     def test_no_phase_file_returns_passthrough(self, tmp_path: Path) -> None:
         result = asyncio.run(evaluate_signal(_req("hello"), tmp_path))
         assert result.should_compose is False
@@ -130,9 +129,7 @@ class TestEvaluateSignal:
                 "agentalloy.api.proxy_signal.decide_transition",
                 return_value=decision,
             ),
-            mock.patch(
-                "agentalloy.api.proxy_signal._write_phase_atomic"
-            ) as mock_write,
+            mock.patch("agentalloy.api.proxy_signal._write_phase_atomic") as mock_write,
         ):
             result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path))
         assert result.should_compose is True

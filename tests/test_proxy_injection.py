@@ -52,7 +52,6 @@ def _signal(
 
 
 class TestExtractSystemMessage:
-
     def test_returns_first_system(self) -> None:
         msgs = [
             ProxyMessage(role="system", content="sys1"),
@@ -73,7 +72,6 @@ class TestExtractSystemMessage:
 
 
 class TestInjectComposedOutput:
-
     def test_no_system_message_prepends_one(self) -> None:
         req = _req(messages=[ProxyMessage(role="user", content="hello")])
         result = inject_composed_output(req, OUTPUT)
@@ -87,10 +85,12 @@ class TestInjectComposedOutput:
         assert result.messages[1].content == "hello"
 
     def test_existing_system_without_markers_appends(self) -> None:
-        req = _req(messages=[
-            ProxyMessage(role="system", content="You are helpful"),
-            ProxyMessage(role="user", content="hello"),
-        ])
+        req = _req(
+            messages=[
+                ProxyMessage(role="system", content="You are helpful"),
+                ProxyMessage(role="user", content="hello"),
+            ]
+        )
         result = inject_composed_output(req, OUTPUT)
 
         assert len(result.messages) == 2
@@ -101,10 +101,12 @@ class TestInjectComposedOutput:
 
     def test_existing_marker_block_replaced_idempotent(self) -> None:
         old_block = f"{MARKER_BEGIN}\nOld content\n{MARKER_END}"
-        req = _req(messages=[
-            ProxyMessage(role="system", content=f"You are helpful\n\n{old_block}"),
-            ProxyMessage(role="user", content="hello"),
-        ])
+        req = _req(
+            messages=[
+                ProxyMessage(role="system", content=f"You are helpful\n\n{old_block}"),
+                ProxyMessage(role="user", content="hello"),
+            ]
+        )
         result = inject_composed_output(req, OUTPUT)
 
         sys_content = result.messages[0].content
@@ -127,10 +129,12 @@ class TestInjectComposedOutput:
         assert result.metadata == {"cwd": "/tmp/project"}
 
     def test_returns_new_request_not_mutated(self) -> None:
-        req = _req(messages=[
-            ProxyMessage(role="system", content="original"),
-            ProxyMessage(role="user", content="hello"),
-        ])
+        req = _req(
+            messages=[
+                ProxyMessage(role="system", content="original"),
+                ProxyMessage(role="user", content="hello"),
+            ]
+        )
         original_content = req.messages[0].content
         result = inject_composed_output(req, OUTPUT)
 
@@ -141,13 +145,13 @@ class TestInjectComposedOutput:
 
 
 class TestComposeAndInject:
-
     def test_no_compose_signal_returns_unchanged(self) -> None:
         req = _req()
         signal = _signal(compose=False)
         orchestrator = MagicMock()
 
         import asyncio
+
         result = asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         assert result.messages[0].content == "hello"
@@ -162,6 +166,7 @@ class TestComposeAndInject:
         orchestrator.compose = AsyncMock(return_value=mock_result)
 
         import asyncio
+
         result = asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         assert MARKER_BEGIN in result.messages[0].content
@@ -171,14 +176,17 @@ class TestComposeAndInject:
         req = _req()
         signal = _signal()
         orchestrator = MagicMock()
-        orchestrator.compose = AsyncMock(return_value=EmptyResult(
-            task="do stuff",
-            phase="build",
-            system_fragments=[],
-            system_skills_applied=False,
-        ))
+        orchestrator.compose = AsyncMock(
+            return_value=EmptyResult(
+                task="do stuff",
+                phase="build",
+                system_fragments=[],
+                system_skills_applied=False,
+            )
+        )
 
         import asyncio
+
         result = asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         # Original request -- no system message added
@@ -191,6 +199,7 @@ class TestComposeAndInject:
         orchestrator.compose = AsyncMock(side_effect=RuntimeError("db error"))
 
         import asyncio
+
         result = asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         # Original request unchanged
@@ -206,6 +215,7 @@ class TestComposeAndInject:
         orchestrator.compose = AsyncMock(return_value=mock_result)
 
         import asyncio
+
         asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         # Verify compose was called with phase="build"
@@ -226,6 +236,7 @@ class TestComposeAndInject:
         orchestrator.compose = AsyncMock(return_value=mock_result)
 
         import asyncio
+
         asyncio.run(compose_and_inject(req, signal, orchestrator))
 
         call_args = orchestrator.compose.call_args[0][0]

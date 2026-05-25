@@ -151,10 +151,13 @@ class TestFullProxyFlow:
         app = _make_app()
 
         # Override signal evaluation to simulate no phase
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=SignalResult(should_compose=False),
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False),
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -187,10 +190,13 @@ class TestFullProxyFlow:
             pre_filter_matched="prompt_keyword",
             gates_met=["test_passed"],
         )
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=signal_result,
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -223,10 +229,13 @@ class TestFullProxyFlow:
             task="implement feature",
             pre_filter_matched="prompt_keyword",
         )
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=signal_result,
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -251,10 +260,13 @@ class TestFullProxyFlow:
         orchestrator = _make_mock_orchestrator()
         app = _make_app(mock_orchestrator=orchestrator)
 
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            side_effect=RuntimeError("signal error"),
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                side_effect=RuntimeError("signal error"),
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -279,10 +291,13 @@ class TestFullProxyFlow:
             task="implement feature",
             pre_filter_matched="prompt_keyword",
         )
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=signal_result,
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -307,7 +322,7 @@ class TestFullProxyFlow:
         stream_chunks = [
             'data: {"id":"1","choices":[{"delta":{"content":"Hello"}}]}\n\n',
             'data: {"id":"1","choices":[{"delta":{"content":" world"}}]}\n\n',
-            'data: [DONE]\n\n',
+            "data: [DONE]\n\n",
         ]
         app = _make_app(mock_orchestrator=orchestrator, stream_chunks=stream_chunks)
 
@@ -317,10 +332,13 @@ class TestFullProxyFlow:
             task="implement feature",
             pre_filter_matched="prompt_keyword",
         )
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=signal_result,
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -351,10 +369,13 @@ class TestFullProxyFlow:
             task="implement feature",
             pre_filter_matched="prompt_keyword",
         )
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=signal_result,
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=signal_result,
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -381,10 +402,13 @@ class TestUpstreamErrorHandling:
         """Upstream returns 500 -> proxy returns 503 with error code."""
         app = _make_app(upstream_status=500)
 
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=SignalResult(should_compose=False),
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False),
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -433,7 +457,13 @@ class TestUpstreamErrorHandling:
                     "object": "chat.completion",
                     "created": int(time.time()),
                     "model": "gpt-4",
-                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "OK"},
+                            "finish_reason": "stop",
+                        }
+                    ],
                     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
                 },
                 request=request,
@@ -448,10 +478,13 @@ class TestUpstreamErrorHandling:
         app.state.upstream_client = mock_client
         app.state.vector_store = MagicMock()
 
-        with patch(
-            "agentalloy.api.proxy_router.evaluate_signal",
-            return_value=SignalResult(should_compose=False),
-        ), TestClient(app) as client:
+        with (
+            patch(
+                "agentalloy.api.proxy_router.evaluate_signal",
+                return_value=SignalResult(should_compose=False),
+            ),
+            TestClient(app) as client,
+        ):
             resp = client.post(
                 "/v1/chat/completions",
                 json={
@@ -481,7 +514,13 @@ class TestUpstreamErrorHandling:
             "object": "chat.completion",
             "created": int(time.time()),
             "model": "gpt-4",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "OK"},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         app.state.upstream_client = _make_mock_upstream(response_body)
