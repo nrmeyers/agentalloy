@@ -71,6 +71,14 @@ def _detect_harness() -> str | None:
 def _start(args: argparse.Namespace) -> int:
     import yaml
 
+    # Deprecation warning for the hooks/sidecar model
+    print(
+        "DEPRECATION: the hooks/sidecar watch model is deprecated. "
+        "The proxy model is the recommended approach. "
+        "See docs for migration.",
+        file=sys.stderr,
+    )
+
     profile = getattr(args, "profile", None) or "default"
     harness = getattr(args, "harness", None) or _detect_harness()
 

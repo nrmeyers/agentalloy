@@ -613,3 +613,41 @@ class TestMCPFallback:
         config = json.loads((repo_root / ".cursor" / "mcp.json").read_text())
         entry = config["mcpServers"]["agentalloy"]
         assert entry["command"] == sys.executable
+
+
+class TestDeprecationWarning:
+    """Verify deprecation warnings for markdown-injection wiring. Maps to T12."""
+
+    def test_default_wiring_emits_deprecation(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        """Default (non-MCP) wiring emits a deprecation warning to stderr."""
+        # Reset the warning flag so it fires for this test
+        from agentalloy.install.subcommands import wire_harness as wh_module  # pyright: ignore[reportPrivateUsage]
+
+        wh_module._deprecation_warned = False
+        wire_harness("claude-code", port=8000, root=repo_root)
+        captured = capsys.readouterr()
+        assert "DEPRECATION" in captured.err
+        assert "markdown-injection" in captured.err
+        assert "proxy" in captured.err
+
+    def test_mcp_fallback_no_deprecation(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        """MCP fallback wiring does NOT emit a deprecation warning."""
+        (repo_root / ".cursor").mkdir()
+        wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
+        captured = capsys.readouterr()
+        assert "DEPRECATION" not in captured.err
+
+    def test_warns_once_per_session(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        """Deprecation warning fires once, not on every call."""
+        from agentalloy.install.subcommands import wire_harness as wh_module  # pyright: ignore[reportPrivateUsage]
+
+        wh_module._deprecation_warned = False
+        # Wire twice
+        wire_harness("claude-code", port=8000, root=repo_root)
+        captured1 = capsys.readouterr()
+        wire_harness("cursor", port=8000, root=repo_root)
+        captured2 = capsys.readouterr()
+        # First call has the warning, second doesn't
+        assert "DEPRECATION" in captured1.err
+        assert "DEPRECATION" not in captured2.err
+

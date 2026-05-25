@@ -38,6 +38,7 @@ import argparse
 import hashlib
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,9 @@ from agentalloy.install import state as install_state
 
 SCHEMA_VERSION = 1
 STEP_NAME = "wire-harness"
+
+# Track whether we've emitted the deprecation warning this session.
+_deprecation_warned = False
 
 SENTINEL_BEGIN = "<!-- BEGIN agentalloy install -->"
 SENTINEL_END = "<!-- END agentalloy install -->"
@@ -404,6 +408,18 @@ def wire_harness(
     if mcp_fallback:
         files_written = _wire_mcp_fallback(harness, port, root, force)
         return _build_result(harness, "mcp_server_config", files_written, root)
+
+    # Markdown-injection / system-prompt-snippet wiring is deprecated in
+    # favor of the proxy model. Warn once per session.
+    global _deprecation_warned
+    if not _deprecation_warned:
+        _deprecation_warned = True
+        print(
+            "DEPRECATION: markdown-injection wiring is deprecated. "
+            "The proxy model (agentalloy wire --proxy) is the recommended "
+            "approach. See docs for migration.",
+            file=sys.stderr,
+        )
 
     # Handle Continue.dev specially
     if harness in ("continue-closed", "continue-local"):

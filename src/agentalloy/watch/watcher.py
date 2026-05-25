@@ -11,6 +11,7 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -191,6 +192,14 @@ def run_watcher(config: WatchConfig) -> None:
     if regen is None:
         _log.error("No regenerator for harness '%s'. Known: %s", config.harness, list(REGENERATORS))
         return
+
+    # Deprecation warning for the hooks/sidecar model
+    print(
+        "DEPRECATION: the hooks/sidecar watch model is deprecated. "
+        "The proxy model is the recommended approach. "
+        "See docs for migration.",
+        file=sys.stderr,
+    )
 
     # Set up log file
     log_dir = Path.home() / ".agentalloy" / "watch"
