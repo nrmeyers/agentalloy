@@ -35,6 +35,7 @@ from typing import Any, cast
 
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
+from agentalloy.install.subcommands import uninstall_proxy
 
 SCHEMA_VERSION = 1
 
@@ -714,6 +715,38 @@ def uninstall(
                 warnings.append(
                     f"Sentinel block not found in {path} — skipped. Use --force to delete anyway."
                 )
+
+    # 2a. Handle proxy config cleanup (new sentinel-bounded blocks)
+    # Each proxy-wired harness has its own uninstall function in uninstall_proxy
+    proxy_removed = []
+    proxy_modified = []
+    
+    # aider proxy
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
+    
+    # hermes-agent proxy (user-scope only)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
+    
+    # opencode proxy
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
+    
+    # claude-code proxy (user-scope only)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
+    
+    # cline proxy (per-repo .cline/settings.json)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
+    
+    if proxy_removed:
+        files_removed.extend(proxy_removed)
+        print("  Proxy config removed:", file=sys.stderr)
+        for path in proxy_removed:
+            print(f"    - {path}", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # 2. Handle Continue.dev marker cleanup (markdown injection variant)
     continuerc = root / ".continuerc.json"
