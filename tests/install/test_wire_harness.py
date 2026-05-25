@@ -523,3 +523,93 @@ class TestIntakeActivationMarkers:
                     assert ".agentalloy/phase" in content, (
                         f"Harness {harness} at {path} missing phase reference"
                     )
+
+
+# ---------------------------------------------------------------------------
+# MCP fallback
+# ---------------------------------------------------------------------------
+
+
+class TestMCPFallback:
+    """Tests for ``--mcp-fallback`` wiring path. Maps to T13."""
+
+    def test_claude_code_mcp_writes_user_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """claude-code --mcp-fallback writes ~/.claude/mcp_servers.json."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setenv("AGENTALLOY_STATE_DIR", str(fake_home / ".agentalloy"))
+
+        result = wire_harness("claude-code", port=9999, mcp_fallback=True)
+        assert result["integration_vector"] == "mcp_server_config"
+        assert result["harness"] == "claude-code"
+
+        mcp_config = fake_home / ".claude" / "mcp_servers.json"
+        assert mcp_config.exists()
+        config = json.loads(mcp_config.read_text())
+        assert "agentalloy" in config["mcpServers"]
+        entry = config["mcpServers"]["agentalloy"]
+        assert entry["args"] == ["-m", "agentalloy.install.mcp_server", "--port", "9999"]
+
+    def test_cursor_mcp_writes_repo_config(self, repo_root: Path) -> None:
+        """cursor --mcp-fallback writes .cursor/mcp.json."""
+        result = wire_harness("cursor", port=8888, root=repo_root, mcp_fallback=True)
+        assert result["integration_vector"] == "mcp_server_config"
+
+        mcp_config = repo_root / ".cursor" / "mcp.json"
+        assert mcp_config.exists()
+        config = json.loads(mcp_config.read_text())
+        assert "agentalloy" in config["mcpServers"]
+        entry = config["mcpServers"]["agentalloy"]
+        assert entry["args"] == ["-m", "agentalloy.install.mcp_server", "--port", "8888"]
+
+    def test_continue_closed_mcp_writes_continuerc(self, repo_root: Path) -> None:
+        """continue-closed --mcp-fallback writes MCP entry to .continuerc.json."""
+        result = wire_harness("continue-closed", port=7777, root=repo_root, mcp_fallback=True)
+        assert result["integration_vector"] == "mcp_server_config"
+
+        config_path = repo_root / ".continuerc.json"
+        assert config_path.exists()
+        config = json.loads(config_path.read_text())
+        assert "agentalloy" in config["mcpServers"]
+        entry = config["mcpServers"]["agentalloy"]
+        assert entry["args"] == ["-m", "agentalloy.install.mcp_server", "--port", "7777"]
+        # Marker for uninstall
+        assert config["_agentalloy_install_marker"]["variant"] == "mcp-closed"
+
+    def test_continue_local_mcp_variant(self, repo_root: Path) -> None:
+        """continue-local --mcp-fallback uses mcp-local variant marker."""
+        wire_harness("continue-local", port=7777, root=repo_root, mcp_fallback=True)
+        config = json.loads((repo_root / ".continuerc.json").read_text())
+        assert config["_agentalloy_install_marker"]["variant"] == "mcp-local"
+
+    def test_unsupported_harness_raises(self, repo_root: Path) -> None:
+        """--mcp-fallback on unsupported harness raises SystemExit(1)."""
+        with pytest.raises(SystemExit, match=".*"):
+            wire_harness("hermes-agent", root=repo_root, mcp_fallback=True)
+
+    def test_preserves_existing_mcp_servers(self, repo_root: Path) -> None:
+        """Existing MCP server entries survive re-wiring."""
+        (repo_root / ".cursor").mkdir()
+        existing = {
+            "mcpServers": {
+                "other-server": {"command": "other", "args": []}
+            }
+        }
+        (repo_root / ".cursor" / "mcp.json").write_text(json.dumps(existing))
+        wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
+        config = json.loads((repo_root / ".cursor" / "mcp.json").read_text())
+        assert "other-server" in config["mcpServers"]
+        assert "agentalloy" in config["mcpServers"]
+
+    def test_uses_sys_executable(self, repo_root: Path) -> None:
+        """MCP server entry uses sys.executable, not bare 'python'."""
+        import sys
+
+        wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
+        config = json.loads((repo_root / ".cursor" / "mcp.json").read_text())
+        entry = config["mcpServers"]["agentalloy"]
+        assert entry["command"] == sys.executable
