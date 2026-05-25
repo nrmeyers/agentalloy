@@ -103,6 +103,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.health_checker = health_checker
     app.state.diagnostics_checker = DiagnosticsChecker(store, runtime, health_checker)
     app.state.telemetry_querier = TelemetryQuerier(vector_store)
+    # Expose for proxy router dependencies
+    app.state.embed_client = embed_client
+    app.state.vector_store = vector_store
 
     # Upstream LLM client (for proxy passthrough)
     upstream_client: httpx.AsyncClient | None = None
