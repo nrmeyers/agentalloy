@@ -77,6 +77,11 @@ class SetupConfig:
     compose_binary: str = ""  # "podman compose" | "docker compose"
     compose_file: str = ""  # abs path to compose yaml used
 
+    # Upstream LLM (proxy target)
+    upstream_url: str = "http://localhost:2099/v1"
+    upstream_model: str = ""
+    upstream_api_key: str = ""
+
     # Resolved during execution -- not user-facing.
     detected_runner: str | None = None  # from detect.json (e.g. "ollama", "llama-server")
     recommended_host: str | None = None  # from recommend-host-targets.json
@@ -465,6 +470,88 @@ def _derive_host_target(detect_data: dict[str, Any]) -> str:
         if str(card.get("vendor") or "").lower() == "apple":
             return "apple-silicon"
     return "cpu"
+
+
+def _prompt_upstream(cfg: SetupConfig) -> None:
+    """Interactive prompts to capture upstream LLM configuration."""
+    _print("\n  [bold]Upstream LLM (proxy target)[/bold]")
+    _print("  [dim]The AgentAlloy proxy forwards requests to this LLM.[/dim]")
+
+    cfg.upstream_url = _prompt_context(
+        "  Upstream URL",
+        "  Base URL of the upstream LLM (e.g. http://localhost:2099/v1)",
+        default=cfg.upstream_url or "http://localhost:2099/v1",
+    )
+    cfg.upstream_model = _prompt_context(
+        "  Upstream model",
+        "  Model name to pass to the upstream LLM (e.g. qwen3-14b)",
+        default=cfg.upstream_model or "",
+    )
+    cfg.upstream_api_key = _prompt_context(
+        "  Upstream API key",
+        "  API key for the upstream LLM (leave blank for local runners)",
+        default=cfg.upstream_api_key or "",
+    )
+
+
+def _test_upstream_endpoint(cfg: SetupConfig) -> bool:
+    """Validate the upstream LLM connection by hitting /v1/models.
+
+    Returns True if the endpoint responds successfully, False otherwise.
+    A missing or empty api key is accepted (local runners may not require one).
+    """
+    import urllib.request as _urllib_request
+
+    url = (cfg.upstream_url or "").rstrip("/")
+    if not url:
+        _print("  [yellow]No upstream URL set — skipping validation.[/yellow]")
+        return False
+
+    models_url = f"{url}/models"
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if cfg.upstream_api_key:
+        headers["Authorization"] = f"Bearer {cfg.upstream_api_key}"
+
+    req = _urllib_request.Request(models_url, headers=headers, method="GET")
+    try:
+        with _urllib_request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            if resp.status == 200:
+                _print(f"  [green]Upstream LLM reachable at {models_url}[/green]")
+                return True
+            _print(f"  [yellow]Upstream returned HTTP {resp.status} — continuing anyway.[/yellow]")
+            return False
+    except Exception as exc:
+        _print(f"  [yellow]Upstream LLM not reachable ({exc}) — continuing anyway.[/yellow]")
+        _print(f"  [dim]Start the upstream LLM and verify: curl {models_url}[/dim]")
+        return False
+
+
+def _write_upstream_env(cfg: SetupConfig) -> None:
+    """Append/update upstream LLM vars in the existing .env file.
+
+    Reads the current .env, removes any existing UPSTREAM_* lines, then
+    appends the three upstream vars. This is idempotent and safe to call
+    multiple times.
+    """
+    env_fp = install_state.env_path()
+    existing = env_fp.read_text(encoding="utf-8") if env_fp.exists() else ""
+
+    # Remove any existing upstream lines
+    filtered_lines = [
+        line
+        for line in existing.splitlines()
+        if not line.startswith(("UPSTREAM_URL=", "UPSTREAM_MODEL=", "UPSTREAM_API_KEY="))
+    ]
+
+    # Append the three upstream vars
+    filtered_lines.append(f"UPSTREAM_URL={cfg.upstream_url}")
+    filtered_lines.append(f"UPSTREAM_MODEL={cfg.upstream_model}")
+    filtered_lines.append(f"UPSTREAM_API_KEY={cfg.upstream_api_key}")
+    filtered_lines.append("")  # trailing newline
+
+    install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
+        env_fp, "\n".join(filtered_lines)
+    )
 
 
 def _test_embed_endpoint(cfg: SetupConfig) -> None:
@@ -932,6 +1019,15 @@ def run_setup(cfg: SetupConfig) -> int:
     preset = _resolve_preset(cfg)
     # Preset is an internal write-env detail; not shown to the user.
 
+    # 8. Upstream LLM
+    if not cfg.non_interactive:
+        _prompt_upstream(cfg)
+    # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
+    # (which may be pre-set by the caller). We don't require them to be set — the proxy
+    # can be configured later via env vars.
+    _print(f"  Upstream URL:   {cfg.upstream_url or '(not set)'}")
+    _print(f"  Upstream model: {cfg.upstream_model or '(not set)'}")
+
     # -- Phase 2: Summary confirmation --
 
     _print("\n[dim]" + "─" * 40)
@@ -1005,6 +1101,11 @@ def run_setup(cfg: SetupConfig) -> int:
     if rc not in (0, 4):
         _print(f"  [red]  write-env failed (exit {rc}).[/red]")
         return rc
+    _print("  [green]  Done.[/green]")
+
+    # Step c2: Write upstream LLM vars to .env
+    _print("  [dim]-> Writing upstream LLM config[/dim]")
+    _write_upstream_env(cfg)
     _print("  [green]  Done.[/green]")
 
     # Step d: Pull model
@@ -1096,6 +1197,11 @@ def run_setup(cfg: SetupConfig) -> int:
     # Embedding endpoint smoke test
     _print("\n[dim]Testing embed endpoint...[/dim]")
     _test_embed_endpoint(cfg)
+
+    # Upstream LLM connectivity check (non-blocking)
+    if cfg.upstream_url:
+        _print("\n[dim]Testing upstream LLM endpoint...[/dim]")
+        _test_upstream_endpoint(cfg)
 
     # -- Done --
 

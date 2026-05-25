@@ -24,9 +24,16 @@ from agentalloy.install.subcommands.simple_setup import (
     _run_from_args as _run_from_args,  # type: ignore[attr-defined]
     _build_namespace as _build_namespace,  # type: ignore[attr-defined]
     _test_embed_endpoint as _test_embed_endpoint,  # type: ignore[attr-defined]
+    _prompt_upstream as _prompt_upstream,  # type: ignore[attr-defined]
+    _test_upstream_endpoint as _test_upstream_endpoint,  # type: ignore[attr-defined]
+    _write_upstream_env as _write_upstream_env,  # type: ignore[attr-defined]
     SetupConfig,
 )
 # ruff: noqa: I001
+
+# This module is slow (several minutes). Excluded from the fast PR job;
+# run via the dedicated slow-tests CI job on merges to main / on demand.
+pytestmark = pytest.mark.slow
 
 
 # Helper to avoid pyright lambda param type issues (ruff reformatting moves ignore comments)
@@ -1151,3 +1158,216 @@ class TestDeploymentCliFlag:
 
         args = parser.parse_args(["setup", "--deployment", "container", "--non-interactive"])
         assert args.deployment == "container"
+
+
+# ---------------------------------------------------------------------------
+# Upstream LLM capture tests
+# ---------------------------------------------------------------------------
+
+
+class TestPromptUpstream:
+    """Test _prompt_upstream captures the three upstream fields."""
+
+    def test_prompt_upstream_uses_defaults_non_tty(self):
+        """_prompt_upstream returns defaults in non-TTY mode."""
+        cfg = SetupConfig(
+            upstream_url="http://localhost:2099/v1",
+            upstream_model="",
+            upstream_api_key="",
+        )
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            _prompt_upstream(cfg)
+        assert cfg.upstream_url == "http://localhost:2099/v1"
+
+    def test_prompt_upstream_updates_cfg_fields(self):
+        """_prompt_upstream writes user input into cfg fields."""
+        cfg = SetupConfig()
+        responses = iter(["http://llm.example.com/v1", "my-model", "sk-abc123"])
+        with (
+            patch.object(sys.stdin, "isatty", return_value=True),
+            patch("builtins.input", side_effect=lambda _: next(responses)),
+        ):
+            _prompt_upstream(cfg)
+        assert cfg.upstream_url == "http://llm.example.com/v1"
+        assert cfg.upstream_model == "my-model"
+        assert cfg.upstream_api_key == "sk-abc123"
+
+    def test_prompt_upstream_accepts_empty_api_key(self):
+        """_prompt_upstream accepts an empty API key (for local runners)."""
+        cfg = SetupConfig(upstream_url="http://localhost:2099/v1", upstream_model="qwen3")
+        # Empty response = accept default (which is empty)
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            _prompt_upstream(cfg)
+        assert cfg.upstream_api_key == ""
+
+
+class TestWriteUpstreamEnv:
+    """Test _write_upstream_env writes/updates upstream vars in .env."""
+
+    def test_writes_upstream_vars_to_new_env(self, tmp_path: Path):
+        """Writes UPSTREAM_* vars when .env doesn't exist."""
+        with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
+            cfg = SetupConfig(
+                upstream_url="http://localhost:2099/v1",
+                upstream_model="qwen3-14b",
+                upstream_api_key="sk-test",
+            )
+            _write_upstream_env(cfg)
+
+        env_fp = tmp_path / ".env"
+        content = env_fp.read_text()
+        assert "UPSTREAM_URL=http://localhost:2099/v1" in content
+        assert "UPSTREAM_MODEL=qwen3-14b" in content
+        assert "UPSTREAM_API_KEY=sk-test" in content
+
+    def test_appends_to_existing_env(self, tmp_path: Path):
+        """Appends upstream vars without disturbing existing content."""
+        env_fp = tmp_path / ".env"
+        env_fp.write_text("RUNTIME_EMBED_BASE_URL=http://localhost:11434\n")
+
+        with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
+            cfg = SetupConfig(
+                upstream_url="http://localhost:2099/v1",
+                upstream_model="qwen3",
+                upstream_api_key="",
+            )
+            _write_upstream_env(cfg)
+
+        content = env_fp.read_text()
+        assert "RUNTIME_EMBED_BASE_URL=http://localhost:11434" in content
+        assert "UPSTREAM_URL=http://localhost:2099/v1" in content
+        assert "UPSTREAM_MODEL=qwen3" in content
+
+    def test_replaces_existing_upstream_vars(self, tmp_path: Path):
+        """Re-running _write_upstream_env replaces old values (idempotent)."""
+        env_fp = tmp_path / ".env"
+        env_fp.write_text(
+            "RUNTIME_EMBED_BASE_URL=http://localhost:11434\n"
+            "UPSTREAM_URL=http://old-server/v1\n"
+            "UPSTREAM_MODEL=old-model\n"
+            "UPSTREAM_API_KEY=old-key\n"
+        )
+
+        with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
+            cfg = SetupConfig(
+                upstream_url="http://new-server/v1",
+                upstream_model="new-model",
+                upstream_api_key="new-key",
+            )
+            _write_upstream_env(cfg)
+
+        content = env_fp.read_text()
+        assert "UPSTREAM_URL=http://new-server/v1" in content
+        assert "UPSTREAM_MODEL=new-model" in content
+        assert "UPSTREAM_API_KEY=new-key" in content
+        # Old values must not appear
+        assert "old-server" not in content
+        assert "old-model" not in content
+        assert "old-key" not in content
+        # Other vars preserved
+        assert "RUNTIME_EMBED_BASE_URL=http://localhost:11434" in content
+
+    def test_handles_empty_api_key(self, tmp_path: Path):
+        """Writes UPSTREAM_API_KEY= with empty value when no key is set."""
+        with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
+            cfg = SetupConfig(
+                upstream_url="http://localhost:2099/v1",
+                upstream_model="qwen3",
+                upstream_api_key="",
+            )
+            _write_upstream_env(cfg)
+
+        content = (tmp_path / ".env").read_text()
+        assert "UPSTREAM_API_KEY=" in content
+
+
+class TestTestUpstreamEndpoint:
+    """Test _test_upstream_endpoint validates the upstream LLM connection."""
+
+    def test_returns_true_on_200(self, tmp_path: Path):
+        """Returns True when upstream /v1/models responds with 200."""
+        cfg = SetupConfig(
+            upstream_url="http://localhost:2099/v1",
+            upstream_model="qwen3",
+            upstream_api_key="sk-test",
+        )
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 200
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = _test_upstream_endpoint(cfg)
+        assert result is True
+
+    def test_returns_false_on_connection_error(self):
+        """Returns False (non-blocking) when upstream is unreachable."""
+        cfg = SetupConfig(
+            upstream_url="http://unreachable-host:9999/v1",
+            upstream_model="qwen3",
+            upstream_api_key="",
+        )
+        with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
+            result = _test_upstream_endpoint(cfg)
+        assert result is False
+
+    def test_returns_false_when_url_empty(self):
+        """Returns False when upstream URL is not set."""
+        cfg = SetupConfig(upstream_url="", upstream_model="qwen3", upstream_api_key="")
+        result = _test_upstream_endpoint(cfg)
+        assert result is False
+
+    def test_returns_false_on_non_200(self):
+        """Returns False when upstream returns non-200 HTTP status."""
+        cfg = SetupConfig(
+            upstream_url="http://localhost:2099/v1",
+            upstream_model="qwen3",
+            upstream_api_key="",
+        )
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 503
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = _test_upstream_endpoint(cfg)
+        assert result is False
+
+    def test_includes_auth_header_when_api_key_set(self):
+        """Sends Authorization: Bearer header when api key is configured."""
+        cfg = SetupConfig(
+            upstream_url="http://localhost:2099/v1",
+            upstream_model="qwen3",
+            upstream_api_key="sk-mysecret",
+        )
+        captured_requests: list[Any] = []
+
+        def fake_urlopen(req: Any, timeout: int = 10) -> Any:
+            captured_requests.append(req)
+            raise OSError("not really connecting")
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            _test_upstream_endpoint(cfg)
+
+        assert len(captured_requests) == 1
+        auth = captured_requests[0].get_header("Authorization")
+        assert auth == "Bearer sk-mysecret"
+
+
+class TestSetupConfigUpstreamDefaults:
+    """Test that SetupConfig has correct upstream defaults."""
+
+    def test_default_upstream_url(self):
+        """SetupConfig defaults upstream_url to http://localhost:2099/v1."""
+        cfg = SetupConfig()
+        assert cfg.upstream_url == "http://localhost:2099/v1"
+
+    def test_default_upstream_model_empty(self):
+        """SetupConfig defaults upstream_model to empty string."""
+        cfg = SetupConfig()
+        assert cfg.upstream_model == ""
+
+    def test_default_upstream_api_key_empty(self):
+        """SetupConfig defaults upstream_api_key to empty string."""
+        cfg = SetupConfig()
+        assert cfg.upstream_api_key == ""
