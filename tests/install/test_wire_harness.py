@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -594,10 +595,8 @@ class TestMCPFallback:
     def test_preserves_existing_mcp_servers(self, repo_root: Path) -> None:
         """Existing MCP server entries survive re-wiring."""
         (repo_root / ".cursor").mkdir()
-        existing = {
-            "mcpServers": {
-                "other-server": {"command": "other", "args": []}
-            }
+        existing: dict[str, Any] = {
+            "mcpServers": {"other-server": {"command": "other", "args": []}}
         }
         (repo_root / ".cursor" / "mcp.json").write_text(json.dumps(existing))
         wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
@@ -615,39 +614,140 @@ class TestMCPFallback:
         assert entry["command"] == sys.executable
 
 
+# ---------------------------------------------------------------------------
+# Proxy wiring
+# ---------------------------------------------------------------------------
+
+
+class TestProxyWiring:
+    """Tests for ``--proxy`` wiring path. Maps to T11."""
+
+    def test_continue_closed_proxy_writes_models(self, repo_root: Path) -> None:
+        """continue-closed --proxy adds a proxy model to .continuerc.json."""
+        result = wire_harness("continue-closed", port=9999, root=repo_root, proxy=True)
+        assert result["integration_vector"] == "proxy"
+        assert result["harness"] == "continue-closed"
+
+        config_path = repo_root / ".continuerc.json"
+        assert config_path.exists()
+        config = json.loads(config_path.read_text())
+        # Proxy model added
+        models = config.get("models", [])
+        proxy_model = [m for m in models if m.get("agentalloy_proxy")]
+        assert len(proxy_model) == 1
+        assert proxy_model[0]["apiBase"] == "http://localhost:9999/v1"
+        assert proxy_model[0]["provider"] == "openai"
+        # Marker for uninstall
+        assert config["_agentalloy_install_marker"]["variant"] == "proxy-closed"
+
+    def test_continue_local_proxy_variant(self, repo_root: Path) -> None:
+        """continue-local --proxy uses proxy-local variant marker."""
+        wire_harness("continue-local", port=8888, root=repo_root, proxy=True)
+        config = json.loads((repo_root / ".continuerc.json").read_text())
+        assert config["_agentalloy_install_marker"]["variant"] == "proxy-local"
+
+    def test_proxy_idempotent(self, repo_root: Path) -> None:
+        """Re-wiring proxy removes old entry and adds new one."""
+        wire_harness("continue-closed", port=9999, root=repo_root, proxy=True)
+        wire_harness("continue-closed", port=7777, root=repo_root, proxy=True)
+        config = json.loads((repo_root / ".continuerc.json").read_text())
+        models = config.get("models", [])
+        proxy_models = [m for m in models if m.get("agentalloy_proxy")]
+        assert len(proxy_models) == 1
+        assert proxy_models[0]["apiBase"] == "http://localhost:7777/v1"
+
+    def test_claude_code_proxy_instruction(self, repo_root: Path) -> None:
+        """claude-code --proxy writes proxy instruction block to CLAUDE.md."""
+        result = wire_harness("claude-code", port=5555, root=repo_root, proxy=True)
+        assert result["integration_vector"] == "proxy"
+
+        claude_md = repo_root / "CLAUDE.md"
+        assert claude_md.exists()
+        content = claude_md.read_text()
+        assert SENTINEL_BEGIN in content
+        assert "localhost:5555" in content
+        assert "proxy" in content.lower()
+
+    def test_manual_proxy_prints_to_stderr(
+        self, repo_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """manual --proxy emits proxy instruction to stderr."""
+        result = wire_harness("manual", port=4444, root=repo_root, proxy=True)
+        assert result["integration_vector"] == "proxy"
+        assert result["files_written"] == []
+        captured = capsys.readouterr()
+        assert SENTINEL_BEGIN in captured.err
+        assert "localhost:4444" in captured.err
+
+    def test_cursor_proxy_instruction(self, repo_root: Path) -> None:
+        """cursor --proxy writes proxy instruction block."""
+        (repo_root / ".cursor").mkdir()
+        result = wire_harness("cursor", port=6666, root=repo_root, proxy=True)
+        assert result["integration_vector"] == "proxy"
+        mdc = repo_root / ".cursor" / "rules" / "agentalloy.mdc"
+        assert mdc.exists()
+        content = mdc.read_text()
+        assert "localhost:6666" in content
+        assert "proxy" in content.lower()
+
+    def test_hermes_agent_proxy_user_scope(self, tmp_path: Path) -> None:
+        """hermes-agent --proxy user scope writes to SOUL.md."""
+        result = wire_harness("hermes-agent", port=3333, root=tmp_path, proxy=True, scope="user")
+        assert result["integration_vector"] == "proxy"
+        soul = tmp_path / ".hermes" / "SOUL.md"
+        assert soul.exists()
+        content = soul.read_text()
+        assert SENTINEL_BEGIN in content
+        assert "localhost:3333" in content
+
+    def test_mcp_only_with_proxy_rejected(self, repo_root: Path) -> None:
+        """mcp-only harness with --proxy is rejected (blocked by top-level check)."""
+        with pytest.raises(SystemExit):
+            wire_harness("mcp-only", port=8000, root=repo_root, proxy=True)
+
+
 class TestDeprecationWarning:
     """Verify deprecation warnings for markdown-injection wiring. Maps to T12."""
 
     def test_default_wiring_emits_deprecation(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """Default (non-MCP) wiring emits a deprecation warning to stderr."""
         # Reset the warning flag so it fires for this test
-        from agentalloy.install.subcommands import wire_harness as wh_module  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.install.subcommands import (
+            wire_harness as wh_module,  # pyright: ignore[reportPrivateUsage]
+        )
 
         wh_module._deprecation_warned = False
         wire_harness("claude-code", port=8000, root=repo_root)
-        captured = capsys.readouterr()
-        assert "DEPRECATION" in captured.err
-        assert "markdown-injection" in captured.err
-        assert "proxy" in captured.err
+        captured = capsys.readouterr()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        assert "DEPRECATION" in captured.err  # pyright: ignore[reportUnknownMemberType]
+        assert "markdown-injection" in captured.err  # pyright: ignore[reportUnknownMemberType]
+        assert "proxy" in captured.err  # pyright: ignore[reportUnknownMemberType]
 
     def test_mcp_fallback_no_deprecation(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """MCP fallback wiring does NOT emit a deprecation warning."""
         (repo_root / ".cursor").mkdir()
         wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
-        captured = capsys.readouterr()
-        assert "DEPRECATION" not in captured.err
+        captured = capsys.readouterr()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        assert "DEPRECATION" not in captured.err  # pyright: ignore[reportUnknownMemberType]
+
+    def test_proxy_no_deprecation(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
+        """Proxy wiring does NOT emit a deprecation warning."""
+        wire_harness("claude-code", port=8000, root=repo_root, proxy=True)
+        captured = capsys.readouterr()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        assert "DEPRECATION" not in captured.err  # pyright: ignore[reportUnknownMemberType]
 
     def test_warns_once_per_session(self, repo_root: Path, capsys) -> None:  # pyright: ignore[reportMissingParameterType, reportUnknownParameterType]
         """Deprecation warning fires once, not on every call."""
-        from agentalloy.install.subcommands import wire_harness as wh_module  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.install.subcommands import (
+            wire_harness as wh_module,  # pyright: ignore[reportPrivateUsage]
+        )
 
         wh_module._deprecation_warned = False
         # Wire twice
         wire_harness("claude-code", port=8000, root=repo_root)
-        captured1 = capsys.readouterr()
+        captured1 = capsys.readouterr()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         wire_harness("cursor", port=8000, root=repo_root)
-        captured2 = capsys.readouterr()
+        captured2 = capsys.readouterr()  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         # First call has the warning, second doesn't
-        assert "DEPRECATION" in captured1.err
-        assert "DEPRECATION" not in captured2.err
-
+        assert "DEPRECATION" in captured1.err  # pyright: ignore[reportUnknownMemberType]
+        assert "DEPRECATION" not in captured2.err  # pyright: ignore[reportUnknownMemberType]

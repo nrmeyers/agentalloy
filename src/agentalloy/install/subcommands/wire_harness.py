@@ -38,7 +38,6 @@ import argparse
 import hashlib
 import json
 import sys
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -357,6 +356,7 @@ def wire_harness(
     root: Path | None = None,
     force: bool = False,
     mcp_fallback: bool = False,
+    proxy: bool = False,
     scope: str = "user",
 ) -> dict[str, Any]:
     """Wire the specified harness. Returns contract-shaped result.
@@ -369,6 +369,11 @@ def wire_harness(
     the chosen harness instead of the markdown-injection variant. Supported
     harnesses for MCP fallback: claude-code, cursor, continue-closed,
     continue-local. Other harnesses raise SystemExit(1).
+
+    If ``proxy=True``, wires the harness to use the AgentAlloy proxy at
+    ``http://localhost:{port}/v1`` as its API base URL. For harnesses that
+    don't support custom API endpoints, writes a proxy instruction block
+    instead.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
@@ -408,6 +413,11 @@ def wire_harness(
     if mcp_fallback:
         files_written = _wire_mcp_fallback(harness, port, root, force)
         return _build_result(harness, "mcp_server_config", files_written, root)
+
+    # Proxy path: wire the harness to use the AgentAlloy proxy URL.
+    if proxy:
+        files_written = _wire_proxy(harness, port, root, force, scope)
+        return _build_result(harness, "proxy", files_written, root)
 
     # Markdown-injection / system-prompt-snippet wiring is deprecated in
     # favor of the proxy model. Warn once per session.
@@ -916,6 +926,147 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
     ]
 
 
+# ---------------------------------------------------------------------------
+# Proxy wiring
+# ---------------------------------------------------------------------------
+
+_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local"})
+
+
+def _wire_proxy(
+    harness: str,
+    port: int,
+    root: Path,
+    _force: bool,
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Wire the harness to use the AgentAlloy proxy.
+
+    For harnesses that support custom API endpoints (Continue), configures
+    the API base URL. For all others, writes a proxy instruction block using
+    sentinel markers.
+    """
+    # Handle manual: emit the proxy instruction on stderr
+    if harness == "manual":
+        template = _load_template("proxy-instruction.md")
+        rendered = _render_template(template, port)
+        block = f"{SENTINEL_BEGIN}\n{rendered}\n{SENTINEL_END}"
+        print(block, file=sys.stderr)
+        return []
+
+    # Harnesses that support custom API endpoints
+    if harness in _PROXY_SUPPORTED_API:
+        return _wire_proxy_continue(harness, port, root)
+
+    # All other harnesses: write a proxy instruction block
+    return _wire_proxy_instruction(harness, port, root, scope)
+
+
+def _wire_proxy_continue(
+    harness: str,
+    port: int,
+    root: Path,
+) -> list[dict[str, Any]]:
+    """Wire Continue.dev to use the proxy as its API base."""
+    variant = "closed" if harness == "continue-closed" else "local"
+    config_path = root / ".continuerc.json"
+    config: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError as err:
+            print(f"ERROR: {config_path} is not valid JSON", file=sys.stderr)
+            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
+            raise SystemExit(1) from err
+
+    proxy_url = f"http://localhost:{port}/v1"
+
+    # Add custom model pointing to the proxy
+    models = config.get("models", [])
+    # Remove any existing agentalloy proxy model
+    models = [m for m in models if m.get("agentalloy_proxy") is not True]
+    models.append(
+        {
+            "name": "agentalloy-proxy",
+            "apiBase": proxy_url,
+            "agentalloy_proxy": True,
+            "provider": "openai",
+        }
+    )
+    config["models"] = models
+
+    # Marker for clean removal
+    marker = config.get("_agentalloy_install_marker") or {}
+    marker["managed_by"] = "agentalloy install"
+    added = set(marker.get("added_paths") or [])
+    added.add("models.agentalloy-proxy")
+    marker["added_paths"] = sorted(added)
+    marker["variant"] = f"proxy-{variant}"
+    config["_agentalloy_install_marker"] = marker
+
+    serialized = json.dumps(config, indent=2) + "\n"
+    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(config_path),
+            "action": "injected_block",
+            "marker_key": "models.agentalloy-proxy",
+            "content_sha256": _sha256(serialized),
+        }
+    ]
+
+
+def _wire_proxy_instruction(
+    harness: str,
+    port: int,
+    root: Path,
+    scope: str,
+) -> list[dict[str, Any]]:
+    """Write a proxy instruction block for the harness.
+
+    For harnesses that don't support custom API endpoints, this writes a
+    sentinel-bounded instruction block explaining that the proxy is active.
+    """
+    # Resolve target path
+    if harness == "cursor":
+        rel_path, dedicated = _resolve_cursor_path(root)
+    elif harness == "windsurf":
+        rel_path, dedicated = _resolve_windsurf_path(root)
+    elif harness == "hermes-agent":
+        rel_path, dedicated = _resolve_hermes_path(scope)
+    else:
+        reg = _HARNESS_REGISTRY[harness]
+        rel_path = reg["target"]
+        dedicated = reg["dedicated"]
+
+    target_path = root / rel_path
+    template = _load_template("proxy-instruction.md")
+    rendered = _render_template(template, port)
+
+    # Ensure parent directory exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if dedicated:
+        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
+        action = "wrote_new_file"
+        content_sha256 = _sha256(rendered.strip())
+    else:
+        existing = target_path.read_text() if target_path.exists() else ""
+        result_content = _inject_sentinel_block(existing, rendered)
+        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
+        action = "injected_block"
+        content_sha256 = _sha256(rendered.strip())
+
+    return [
+        {
+            "path": str(target_path),
+            "action": action,
+            "content_sha256": content_sha256,
+        }
+    ]
+
+
 def _wire_mcp_fallback(
     harness: str,
     port: int,
@@ -1040,6 +1191,16 @@ def add_parser(
             "agentalloy.install.mcp_server."
         ),
     )
+    p.add_argument(
+        "--proxy",
+        action="store_true",
+        help=(
+            "Wire the harness to use the AgentAlloy proxy (recommended). "
+            "For harnesses that support custom API endpoints (Continue), "
+            "configures the API base URL. For others, writes a proxy "
+            "instruction block."
+        ),
+    )
     p.set_defaults(func=_run)
 
 
@@ -1053,6 +1214,7 @@ def _run(args: argparse.Namespace) -> int:
         port=port,
         force=args.force,
         mcp_fallback=args.mcp_fallback,
+        proxy=getattr(args, "proxy", False),
         scope=args.scope,
     )
     if not getattr(args, "quiet", False):
