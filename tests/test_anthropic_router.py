@@ -14,6 +14,7 @@ from agentalloy.api.proxy_anthropic_router import (
     _anthropic_to_openai,
     _openai_stream_to_anthropic,
     _openai_to_anthropic,
+    _stream_anthropic_response,
 )
 
 # ---------------------------------------------------------------------------
@@ -208,3 +209,58 @@ class TestAnthropicProxyIntegration:
         assert anthropic_response["stop_reason"] == "end_turn"
         assert anthropic_response["usage"]["input_tokens"] == 15
         assert anthropic_response["usage"]["output_tokens"] == 6
+
+
+class TestStreamAnthropicResponse:
+    """Tests for _stream_anthropic_response streaming translation."""
+
+    def test_stream_anthropic_response_produces_events(self) -> None:
+        """Streaming response produces Anthropic SSE events."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+
+        # Mock upstream response with OpenAI SSE chunks
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        # aiter_lines must be an async iterator
+        async def async_lines():
+            for line in [
+                'data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}',
+                'data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":"stop"}]}',
+                'data: {"usage":{"prompt_tokens":5,"completion_tokens":2}}',
+                "data: [DONE]",
+            ]:
+                yield line
+
+        mock_response.aiter_lines = MagicMock(return_value=async_lines())
+
+        mock_client = MagicMock()
+        mock_client.stream = MagicMock()
+        mock_client.stream.return_value.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_client.stream.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        response = _stream_anthropic_response(
+            mock_client,  # type: ignore[arg-type]
+            {"model": "claude-3-opus", "messages": []},
+            "claude-3-opus",
+        )
+
+        # Collect all yielded lines
+        collected: list[str] = []
+
+        async def collect() -> None:
+            async for item in response.body_iterator:
+                collected.append(str(item))
+
+        asyncio.get_event_loop().run_until_complete(collect())
+
+        # Check that Anthropic SSE events are produced
+        joined = "".join(collected)
+        assert "event: message_start" in joined
+        assert "event: content_block_delta" in joined
+        assert "event: message_delta" in joined
+        assert "event: message_stop" in joined
+        # Check that text is in the output
+        assert "Hello" in joined
+        assert "world" in joined

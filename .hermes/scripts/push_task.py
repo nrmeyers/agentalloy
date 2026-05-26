@@ -54,12 +54,17 @@ def main():
     branch_name = "task-0-prereq-refactors" if task_num == 0 else f"task-{task_num}-{task_num:02d}"
 
     # Check if branch already exists
-    try:
-        run_cmd(["git", "checkout", branch_name], cwd=repo_root)
-        print(f"Checked out existing branch: {branch_name}")
+    branch_exists = subprocess.run(
+        ["git", "branch", "--list", branch_name],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    if branch_exists:
         checkout = f"git checkout {branch_name}"
-    except subprocess.CalledProcessError:
-        # Create and checkout new branch
+        print(f"Checked out existing branch: {branch_name}")
+    else:
         checkout = f"git checkout -b {branch_name}"
         print(f"Created new branch: {branch_name}")
 
@@ -74,7 +79,7 @@ def main():
     run_cmd(add_cmd.split(), cwd=repo_root)
 
     print(f"Step 3: git commit -m '{commit_msg}'")
-    run_cmd([f"git commit -m '{commit_msg}'"], cwd=repo_root)
+    run_cmd(["git", "commit", "-m", commit_msg], cwd=repo_root)
 
     # Push branch
     print(f"Step 4: git push -u origin {branch_name}")

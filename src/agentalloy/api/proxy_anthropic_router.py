@@ -9,8 +9,10 @@ calling is out of scope — tool_calls deltas are silently stripped.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -25,7 +27,6 @@ from agentalloy.api.proxy_anthropic_models import (
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import (  # pyright: ignore[reportPrivateUsage]
     _build_payload,
-    _stream_upstream_response,
     _upstream_not_configured_error,
     get_settings_for_proxy,
     get_upstream_client,
@@ -225,6 +226,62 @@ def _openai_stream_to_anthropic(
 
 
 # ---------------------------------------------------------------------------
+# Streaming translation
+# ---------------------------------------------------------------------------
+
+
+def _stream_anthropic_response(
+    upstream: httpx.AsyncClient,
+    payload: dict[str, Any],
+    model: str,
+) -> StreamingResponse:
+    """Stream an Anthropic-formatted SSE response from an upstream OpenAI endpoint.
+
+    1. Opens a streaming POST to /v1/chat/completions
+    2. Collects OpenAI SSE chunks (data: {...} lines)
+    3. Converts them to Anthropic SSE events via _openai_stream_to_anthropic()
+    4. Yields the Anthropic events as event: <type>\ndata: {...} pairs
+    """
+    openai_chunks: list[dict[str, Any]] = []
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        nonlocal openai_chunks
+        async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+            if resp.status_code >= 500:
+                logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
+                yield 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_error","type":"message","role":"assistant","content":[],"model":"%s","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\n' % model
+                yield 'event: error\ndata: {"type":"error","error":{"type":"api_error","message":"Upstream returned HTTP %d"}}\n\n' % resp.status_code
+                return
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                        openai_chunks.append(chunk)
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse SSE chunk: %s", data[:100])
+
+        # Convert collected chunks to Anthropic events
+        events = _openai_stream_to_anthropic(openai_chunks, model)
+        for event in events:
+            yield f"event: {event['type']}\n"
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        content=event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
 
@@ -249,7 +306,7 @@ async def proxy_anthropic_messages(
     payload = _build_payload(openai_request, settings.upstream_model)
 
     if request.stream:
-        return _stream_upstream_response(upstream, payload)
+        return _stream_anthropic_response(upstream, payload, request.model)
 
     # Non-streaming
     try:

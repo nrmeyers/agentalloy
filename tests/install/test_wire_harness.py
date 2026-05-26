@@ -1045,3 +1045,35 @@ class TestUninstallProxy:
         """Unwire no-ops if .cline/settings.json doesn't exist."""
         removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
         assert removed == []
+
+    def test_unwire_proxy_cline_invalid_json(self, tmp_path: Path) -> None:
+        """Unwire handles invalid JSON gracefully without crashing."""
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        # Write invalid JSON
+        settings_file.write_text("{ invalid json }")
+
+        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        # Should return empty list (no crash)
+        assert removed == []
+        # File should still exist (not deleted)
+        assert settings_file.exists()
+
+    def test_remove_sentinel_block_commented_variants(self, tmp_path: Path) -> None:
+        """_remove_sentinel_block handles both raw and commented sentinels."""
+        # Test with commented sentinels (YAML/shell style)
+        content = (
+            "# Before\n"
+            "# <!-- BEGIN agentalloy install -->\n"
+            "# proxy config\n"
+            "# <!-- END agentalloy install -->\n"
+            "# After\n"
+        )
+        result = uninstall_proxy._remove_sentinel_block(content)
+        # Commented sentinel block should be removed
+        assert "proxy config" not in result
+        assert "# Before" in result
+        assert "# After" in result
+        # No dangling '#' fragments
+        assert result.count("# ") <= 2  # Only "Before" and "After"

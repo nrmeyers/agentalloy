@@ -7,34 +7,58 @@ as the corresponding wire function for bounded removal.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 
 def _remove_sentinel_block(content: str) -> str:
     """Remove content between agentalloy sentinels.
 
-    Uses the same sentinels as wire_harness.py for all blocks.
+    Handles both raw HTML-style sentinels (<!-- BEGIN ... -->) and
+    commented-out variants (# <!-- BEGIN ... -->) used by YAML/shell files.
+    Operates on whole lines so leading '#' fragments are not left behind.
     """
-    begin = "<!-- BEGIN agentalloy install -->"
-    end = "<!-- END agentalloy install -->"
+    lines = content.split("\n")
+    result: list[str] = []
+    skip = False
+    sentinel_begin_raw = "<!-- BEGIN agentalloy install -->"
+    sentinel_end_raw = "<!-- END agentalloy install -->"
+    sentinel_begin_commented = "# " + sentinel_begin_raw
+    sentinel_end_commented = "# " + sentinel_end_raw
 
-    if begin not in content or end not in content:
-        return content
-    b = content.index(begin)
-    e = content.index(end) + len(end)
-    # Consume trailing newline
-    if e < len(content) and content[e] == "\n":
-        e += 1
-    # Consume blank line before block if present
-    if b > 0 and content[b - 1] == "\n":
-        b -= 1
-        if b > 0 and content[b - 1] == "\n":
-            b -= 1
-    result = content[:b] + content[e:]
-    # Clean up double blank lines
-    while "\n\n\n" in result:
-        result = result.replace("\n\n\n", "\n\n")
-    return result
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        # Check for begin sentinel (raw or commented)
+        if (sentinel_begin_raw in line or sentinel_begin_commented in line):
+            skip = True
+            i += 1
+            continue
+        # Check for end sentinel (raw or commented)
+        if skip and (sentinel_end_raw in line or sentinel_end_commented in line):
+            skip = False
+            i += 1
+            # Skip trailing blank line after end sentinel
+            if i < len(lines) and lines[i].strip() == "":
+                i += 1
+            continue
+        if not skip:
+            result.append(line)
+        i += 1
+
+    # Clean up: remove consecutive blank lines (max 2)
+    cleaned: list[str] = []
+    blank_count = 0
+    for line in result:
+        if line.strip() == "":
+            blank_count += 1
+            if blank_count < 3:
+                cleaned.append(line)
+        else:
+            blank_count = 0
+            cleaned.append(line)
+
+    return "\n".join(cleaned)
 
 
 def _unwire_proxy_aider(root: Path) -> list[Path]:
@@ -85,8 +109,8 @@ def _unwire_proxy_claude_code(root: Path) -> list[Path]:
     if env_path.exists():
         env_path.unlink()
         # Print instructions for shell profile cleanup
-        print("Remove the source line from .bashrc/.zshrc manually:")
-        print("  # AgentAlloy: claude-code proxy env")
+        print("Remove the source line from .bashrc/.zshrc manually:", file=sys.stderr)
+        print("  # AgentAlloy: claude-code proxy env", file=sys.stderr)
         return [env_path]
     return []
 
@@ -98,7 +122,14 @@ def _unwire_proxy_cline(root: Path) -> list[Path]:
         return []
     # If proxy fields were the only content, remove the file
     # Otherwise, merge out proxy fields
-    content = json.loads(settings_path.read_text())
+    try:
+        content = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(
+            f"WARNING: {settings_path} could not be parsed ({e}) — skipping cline cleanup.",
+            file=sys.stderr,
+        )
+        return []
     # Remove proxy-specific keys
     for key in ("apiProvider", "apiBaseUrl", "apiKey", "model"):
         content.pop(key, None)
