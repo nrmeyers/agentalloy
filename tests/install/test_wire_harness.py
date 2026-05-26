@@ -1060,6 +1060,34 @@ class TestUninstallProxy:
         # File should still exist (not deleted)
         assert settings_file.exists()
 
+    def test_unwire_proxy_cline_preserves_non_proxy_settings(self, tmp_path: Path) -> None:
+        """Unwire only removes keys with AgentAlloy proxy values."""
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        # Write with user's own settings that happen to use same keys
+        # but different values
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "apiProvider": "anthropic",  # Not "openai"
+                    "apiBaseUrl": "https://api.anthropic.com",  # Not localhost
+                    "apiKey": "sk-ant-***",  # Not "***" or "agentalloy"
+                    "model": "claude-3-sonnet",  # Not "agentalloy-proxy"
+                },
+                indent=2,
+            )
+        )
+
+        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        # Should not remove anything — values don't match AgentAlloy proxy
+        assert removed == []
+        # File should still exist with original content
+        assert settings_file.exists()
+        config = json.loads(settings_file.read_text())
+        assert config["apiProvider"] == "anthropic"
+        assert config["model"] == "claude-3-sonnet"
+
     def test_remove_sentinel_block_commented_variants(self, tmp_path: Path) -> None:
         """_remove_sentinel_block handles both raw and commented sentinels."""
         # Test with commented sentinels (YAML/shell style)
@@ -1077,3 +1105,10 @@ class TestUninstallProxy:
         assert "# After" in result
         # No dangling '#' fragments
         assert result.count("# ") <= 2  # Only "Before" and "After"
+
+    def test_remove_sentinel_block_no_op_without_sentinels(self, tmp_path: Path) -> None:
+        """_remove_sentinel_block returns content unchanged when no sentinels found."""
+        content = "# Normal content\n\n# More content\n\n\n# Final line\n"
+        result = uninstall_proxy._remove_sentinel_block(content)
+        # Should be identical — no reformatting
+        assert result == content

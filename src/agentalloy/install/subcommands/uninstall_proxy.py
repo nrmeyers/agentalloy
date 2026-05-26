@@ -17,10 +17,13 @@ def _remove_sentinel_block(content: str) -> str:
     Handles both raw HTML-style sentinels (<!-- BEGIN ... -->) and
     commented-out variants (# <!-- BEGIN ... -->) used by YAML/shell files.
     Operates on whole lines so leading '#' fragments are not left behind.
+
+    Returns the original content unchanged if no sentinels are found.
     """
     lines = content.split("\n")
     result: list[str] = []
     skip = False
+    found_sentinel = False
     sentinel_begin_raw = "<!-- BEGIN agentalloy install -->"
     sentinel_end_raw = "<!-- END agentalloy install -->"
     sentinel_begin_commented = "# " + sentinel_begin_raw
@@ -32,6 +35,7 @@ def _remove_sentinel_block(content: str) -> str:
         # Check for begin sentinel (raw or commented)
         if sentinel_begin_raw in line or sentinel_begin_commented in line:
             skip = True
+            found_sentinel = True
             i += 1
             continue
         # Check for end sentinel (raw or commented)
@@ -46,7 +50,10 @@ def _remove_sentinel_block(content: str) -> str:
             result.append(line)
         i += 1
 
-    # Clean up: remove consecutive blank lines (max 2)
+    # Only clean up blank lines if we actually removed a sentinel block
+    if not found_sentinel:
+        return content
+
     cleaned: list[str] = []
     blank_count = 0
     for line in result:
@@ -130,9 +137,32 @@ def _unwire_proxy_cline(root: Path) -> list[Path]:
             file=sys.stderr,
         )
         return []
-    # Remove proxy-specific keys
-    for key in ("apiProvider", "apiBaseUrl", "apiKey", "model"):
-        content.pop(key, None)
+
+    # Only remove keys if they match AgentAlloy proxy values to avoid
+    # removing user's own settings that happen to use the same keys.
+    proxy_keys = {
+        "apiProvider": "openai",
+        "apiBaseUrl": lambda v: (
+            "localhost" in str(v) and "agentalloy" in str(v).lower() or "localhost" in str(v)
+        ),
+        "apiKey": lambda v: v == "***" or v == "agentalloy",
+        "model": lambda v: v == "agentalloy-proxy",
+    }
+    removed_any = False
+    for key, expected in proxy_keys.items():
+        if key in content:
+            if callable(expected):
+                if expected(content[key]):
+                    content.pop(key)
+                    removed_any = True
+            elif content[key] == expected:
+                content.pop(key)
+                removed_any = True
+
+    if not removed_any:
+        # No proxy keys found — nothing to do
+        return []
+
     if not content:
         settings_path.unlink()
         return [settings_path]

@@ -237,15 +237,19 @@ def _stream_anthropic_response(
 ) -> StreamingResponse:
     """Stream an Anthropic-formatted SSE response from an upstream OpenAI endpoint.
 
-    1. Opens a streaming POST to /v1/chat/completions
-    2. Collects OpenAI SSE chunks (data: {...} lines)
-    3. Converts them to Anthropic SSE events via _openai_stream_to_anthropic()
-    4. Yields the Anthropic events as event: <type>\ndata: {...} pairs
+    Converts OpenAI SSE chunks to Anthropic SSE events incrementally as they arrive,
+    yielding each event immediately instead of buffering the entire response.
     """
-    openai_chunks: list[dict[str, Any]] = []
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        nonlocal openai_chunks
+        state = {
+            "first_chunk": True,
+            "output_tokens": 0,
+            "input_tokens": 0,
+            "msg_id": f"msg_{uuid.uuid4().hex[:24]}",
+            "stop_reason": "end_turn",
+        }
+
         async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code >= 500:
                 logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
@@ -258,23 +262,68 @@ def _stream_anthropic_response(
                     f'data: {{"type":"error","error":{{"type":"api_error","message":"Upstream returned HTTP {resp.status_code}"}}}}\n\n'
                 )
                 return
+
             async for line in resp.aiter_lines():
                 line = line.strip()
-                if line.startswith("data: "):
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        openai_chunks.append(chunk)
-                    except json.JSONDecodeError:
-                        logger.warning("Failed to parse SSE chunk: %s", data[:100])
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    # Emit closing events
+                    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+                    yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': state['stop_reason'], 'stop_sequence': None}, 'usage': {'output_tokens': state['output_tokens']}})}\n\n"
+                    yield "event: message_stop\ndata: {}\n\n"
+                    return
 
-        # Convert collected chunks to Anthropic events
-        events = _openai_stream_to_anthropic(openai_chunks, model)
-        for event in events:
-            yield f"event: {event['type']}\n"
-            yield f"data: {json.dumps(event)}\n\n"
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse SSE chunk: %s", data[:100])
+                    continue
+
+                choices = chunk.get("choices") or []
+                if not choices:
+                    usage = chunk.get("usage") or {}
+                    if usage:
+                        state["input_tokens"] = int(
+                            usage.get("prompt_tokens") or state["input_tokens"]
+                        )
+                        state["output_tokens"] = int(
+                            usage.get("completion_tokens") or state["output_tokens"]
+                        )
+                    continue
+
+                choice = choices[0]
+                delta = choice.get("delta") or {}
+                finish = choice.get("finish_reason")
+
+                # Strip tool_calls — text-only mode
+                if delta.get("tool_calls"):
+                    logger.warning(
+                        "Anthropic router received tool_calls; stripping (text-only mode)"
+                    )
+
+                text = delta.get("content") or ""
+
+                if state["first_chunk"]:
+                    # Emit message_start
+                    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': state['msg_id'], 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}})}\n\n"
+                    # Emit content_block_start
+                    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+                    state["first_chunk"] = False
+
+                if text:
+                    yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}\n\n"
+
+                if finish:
+                    state["stop_reason"] = "end_turn" if finish == "stop" else "max_tokens"
+
+                usage = chunk.get("usage") or {}
+                if usage:
+                    state["input_tokens"] = int(usage.get("prompt_tokens") or state["input_tokens"])
+                    state["output_tokens"] = int(
+                        usage.get("completion_tokens") or state["output_tokens"]
+                    )
 
     return StreamingResponse(
         content=event_generator(),
