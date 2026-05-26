@@ -249,8 +249,14 @@ def _stream_anthropic_response(
         async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code >= 500:
                 logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                yield 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_error","type":"message","role":"assistant","content":[],"model":"%s","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}\n\n' % model
-                yield 'event: error\ndata: {"type":"error","error":{"type":"api_error","message":"Upstream returned HTTP %d"}}\n\n' % resp.status_code
+                yield (
+                    'event: message_start\n'
+                    f'data: {{"type":"message_start","message":{{"id":"msg_error","type":"message","role":"assistant","content":[],"model":"{model}","stop_reason":null,"stop_sequence":null,"usage":{{"input_tokens":0,"output_tokens":0}}}}}}\n\n'
+                )
+                yield (
+                    'event: error\n'
+                    f'data: {{"type":"error","error":{{"type":"api_error","message":"Upstream returned HTTP {resp.status_code}"}}}}\n\n'
+                )
                 return
             async for line in resp.aiter_lines():
                 line = line.strip()
