@@ -107,12 +107,17 @@ class TestWire:
         from agentalloy.install.subcommands import wire
 
         (repo_root / "CLAUDE.md").write_text("# Project\n")
+        fake_home = repo_root / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
         monkeypatch.chdir(repo_root)
         args = argparse.Namespace(harness=None, port=None, force=False)
         rc = wire._run(args)
         assert rc == 0
-        # Sentinels written to CLAUDE.md
-        content = (repo_root / "CLAUDE.md").read_text()
+        # Sentinels written to ~/.agentalloy/claude-code-env.sh
+        env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
+        assert env_path.exists()
+        content = env_path.read_text()
         assert "agentalloy" in content.lower()
 
     def test_auto_detects_cursor_when_dir_present(
@@ -182,9 +187,10 @@ class TestUnwire:
         rc = unwire._run(argparse.Namespace(force=False))
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
-        # cwd CLAUDE.md was either modified or removed
+        # cwd ~/.agentalloy/claude-code-env.sh was either modified or removed
         cwd_touched = any(
-            "CLAUDE.md" in f.get("path", "") for f in out["files_modified"] + out["files_removed"]
+            "claude-code-env.sh" in f.get("path", "")
+            for f in out["files_modified"] + out["files_removed"]
         )
         assert cwd_touched
         # The other-repo entry should have produced a "different repo" warning, not deletion

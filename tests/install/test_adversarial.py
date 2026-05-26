@@ -276,7 +276,7 @@ class TestDuplicateSentinels:
             f"More content\n\n{SENTINEL_BEGIN}\nsecond\n{SENTINEL_END}\n"
         )
         with pytest.raises(SystemExit):
-            wire_harness("claude-code", port=8000, root=repo_root)
+            wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
 
 
 # ---------------------------------------------------------------------------

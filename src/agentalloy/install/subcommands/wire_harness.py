@@ -46,9 +46,6 @@ from agentalloy.install import state as install_state
 SCHEMA_VERSION = 1
 STEP_NAME = "wire-harness"
 
-# Track whether we've emitted the deprecation warning this session.
-_deprecation_warned = False
-
 SENTINEL_BEGIN = "<!-- BEGIN agentalloy install -->"
 SENTINEL_END = "<!-- END agentalloy install -->"
 
@@ -356,7 +353,7 @@ def wire_harness(
     root: Path | None = None,
     force: bool = False,
     mcp_fallback: bool = False,
-    proxy: bool = False,
+    legacy: bool = False,
     scope: str = "user",
 ) -> dict[str, Any]:
     """Wire the specified harness. Returns contract-shaped result.
@@ -366,14 +363,12 @@ def wire_harness(
     edited inside the sentinels), refuse to clobber unless ``force=True``.
 
     If ``mcp_fallback=True``, writes the strict-tools MCP server config for
-    the chosen harness instead of the markdown-injection variant. Supported
+    the chosen harness instead of the default proxy wiring. Supported
     harnesses for MCP fallback: claude-code, cursor, continue-closed,
     continue-local. Other harnesses raise SystemExit(1).
 
-    If ``proxy=True``, wires the harness to use the AgentAlloy proxy at
-    ``http://localhost:{port}/v1`` as its API base URL. For harnesses that
-    don't support custom API endpoints, writes a proxy instruction block
-    instead.
+    If ``legacy=True``, uses the old markdown-injection wiring path instead
+    of the default proxy model. Orthogonal to ``--mcp-fallback``.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
@@ -388,8 +383,6 @@ def wire_harness(
         print(f"ERROR: Unknown harness: '{harness}'", file=sys.stderr)
         print(f"FIX:   Use one of: {', '.join(sorted(VALID_HARNESSES))}", file=sys.stderr)
         raise SystemExit(1)
-
-    reg = _HARNESS_REGISTRY[harness]
 
     # Handle the legacy `mcp-only` harness name: it pre-dates the
     # `--mcp-fallback` flag. Surface a clear migration message.
@@ -408,37 +401,42 @@ def wire_harness(
         )
         raise SystemExit(1)
 
-    # MCP fallback path: write the harness-specific MCP server config
-    # instead of the default markdown-injection content.
+    # MCP fallback path: write the harness-specific MCP server config.
     if mcp_fallback:
         files_written = _wire_mcp_fallback(harness, port, root, force)
         return _build_result(harness, "mcp_server_config", files_written, root)
 
-    # Proxy path: wire the harness to use the AgentAlloy proxy URL.
-    if proxy:
-        files_written = _wire_proxy(harness, port, root, force, scope)
-        return _build_result(harness, "proxy", files_written, root)
+    # Legacy path: old markdown-injection wiring (--legacy flag).
+    if legacy:
+        return _wire_legacy(harness, port, root, force, scope)
 
-    # Markdown-injection / system-prompt-snippet wiring is deprecated in
-    # favor of the proxy model. Warn once per session.
-    global _deprecation_warned
-    if not _deprecation_warned:
-        _deprecation_warned = True
-        print(
-            "DEPRECATION: markdown-injection wiring is deprecated. "
-            "The proxy model (agentalloy wire --proxy) is the recommended "
-            "approach. See docs for migration.",
-            file=sys.stderr,
-        )
+    # Default: proxy wiring.
+    files_written = _wire_proxy(harness, port, root, force, scope)
+    return _build_result(harness, "proxy", files_written, root)
 
-    # Handle Continue.dev specially
+
+def _wire_legacy(
+    harness: str,
+    port: int,
+    root: Path,
+    force: bool = False,
+    scope: str = "user",
+) -> dict[str, Any]:
+    """Legacy markdown-injection wiring path.
+
+    This is the OLD behavior — used only when ``--legacy`` is passed.
+    Extracted from the inline legacy path in ``wire_harness()``.
+    """
+    reg = _HARNESS_REGISTRY[harness]
+    files_written: list[dict[str, Any]] = []
+
+    # continue special case (already has proxy, skip)
     if harness in ("continue-closed", "continue-local"):
         variant = "closed" if harness == "continue-closed" else "local"
         files_written = _wire_continue(root, port, variant)
         return _build_result(harness, reg["vector"], files_written, root)
 
-    # Handle manual: emit the sentinel block on stderr (so stdout stays
-    # parseable as the JSON result the runbook reads).
+    # Handle manual: emit the sentinel block on stderr
     if harness == "manual":
         template = _load_template(reg["template"])
         rendered = _render_template(template, port)
@@ -470,9 +468,7 @@ def wire_harness(
     # Ensure parent directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Tamper detection: if a prior wire-harness run recorded this path and
-    # the current inner content's sha256 differs, the user edited inside
-    # the sentinels. Refuse to clobber without --force.
+    # Tamper detection
     if not force and not dedicated and target_path.exists():
         st = install_state.load_state(root)
         prior = next(
@@ -508,22 +504,17 @@ def wire_harness(
                     raise SystemExit(1)
 
     if dedicated:
-        # We own the entire file
-        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, rendered)
         action = "wrote_new_file"
-        # sha256 of the rendered file content for drift detection
         content_sha256 = _sha256(rendered.strip())
     else:
-        # Sentinel-bounded injection
         existing = target_path.read_text() if target_path.exists() else ""
         result_content = _inject_sentinel_block(existing, rendered)
-        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
+        install_state._atomic_write(target_path, result_content)
         action = "injected_block"
-        # sha256 of the inner content (matches what uninstall extracts via
-        # _extract_sentinel_content, which strips surrounding whitespace).
         content_sha256 = _sha256(rendered.strip())
 
-    files_written = [
+    files_written.append(
         {
             "path": str(target_path),
             "action": action,
@@ -531,22 +522,16 @@ def wire_harness(
             "sentinel_end": SENTINEL_END if not dedicated else None,
             "content_sha256": content_sha256,
         }
-    ]
+    )
 
     # For aider, also wire .aider.conf.yml
     if harness == "aider":
         files_written.extend(_wire_aider_conf(root))
 
     # For Tier 3 harnesses, write watcher config and print guidance
-    _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"}
-    )
+    _tier3_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
     if harness in _tier3_harnesses:
         _wire_tier3_watcher_config(harness, root)
-
-    # For claude-code, additionally wire signal-layer hooks
-    if harness == "claude-code":
-        files_written.extend(_wire_claude_code_hooks(root))
 
     # Probe for code-indexer and persist result to state.json
     _probe_code_indexer(root)
@@ -594,119 +579,9 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
 # MCP fallback wiring
 # ---------------------------------------------------------------------------
 
-_AGENTALLOY_HOOKS_MARKER = "agentalloy-signal"
-
-# Hook command template — AGENTALLOY_HOOK_PATH is replaced at wire time.
-_HOOK_COMMAND_TEMPLATE = (
-    "AGENTALLOY_HOOK_EVENT={event} AGENTALLOY_TOOL_NAME=$CLAUDE_TOOL_NAME "
-    "AGENTALLOY_TOOL_PATH=$CLAUDE_TOOL_PATH bash {hook_path}"
-)
-_HOOK_COMMAND_UPS = "AGENTALLOY_HOOK_EVENT=UserPromptSubmit bash {hook_path}"
-
-
-def _resolve_hook_path() -> str:
-    """Return the installed path to agentalloy-signal.sh, copying it to ~/.agentalloy/hooks/ first."""
-    import shutil
-
-    hooks_dir = Path.home() / ".agentalloy" / "hooks"
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    dest = hooks_dir / "agentalloy-signal.sh"
-
-    # Try to find the script relative to this package
-    import agentalloy
-
-    candidates = [
-        Path(agentalloy.__file__).resolve().parent.parent.parent.parent
-        / "tools"
-        / "agentalloy-signal.sh",
-        Path(__file__).resolve().parent.parent.parent.parent.parent
-        / "tools"
-        / "agentalloy-signal.sh",
-    ]
-    for src in candidates:
-        if src.exists():
-            shutil.copy2(str(src), str(dest))
-            dest.chmod(0o755)
-            return str(dest)
-
-    # Fallback: write a minimal stub if not found
-    if not dest.exists():
-        dest.write_text(
-            "#!/usr/bin/env bash\nagentalloy signal evaluate-phase 2>/dev/null || true\nexit 0\n"
-        )
-        dest.chmod(0o755)
-    return str(dest)
-
-
-def _wire_claude_code_hooks(root: Path) -> list[dict[str, Any]]:
-    """Write AgentAlloy signal-layer hooks to .claude/settings.json (merging with existing)."""
-    settings_path = root / ".claude" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-    config: dict[str, Any] = {}
-    if settings_path.exists():
-        try:
-            config = json.loads(settings_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            config = {}
-
-    hook_path = _resolve_hook_path()
-    hooks = config.setdefault("hooks", {})
-
-    # UserPromptSubmit
-    ups_cmd = f"AGENTALLOY_HOOK_EVENT=UserPromptSubmit bash {hook_path}"
-    ups_hooks = hooks.setdefault("UserPromptSubmit", [])
-    # Remove any existing agentalloy entry before re-adding
-    ups_hooks[:] = [h for h in ups_hooks if _AGENTALLOY_HOOKS_MARKER not in str(h)]
-    ups_hooks.append(
-        {
-            "matcher": "",
-            "_agentalloy": _AGENTALLOY_HOOKS_MARKER,
-            "hooks": [{"type": "command", "command": ups_cmd}],
-        }
-    )
-
-    # PostToolUse
-    ptu_cmd = (
-        f"AGENTALLOY_HOOK_EVENT=PostToolUse "
-        f"AGENTALLOY_TOOL_NAME=$TOOL_NAME "
-        f"AGENTALLOY_TOOL_PATH=$TOOL_INPUT_PATH bash {hook_path}"
-    )
-    ptu_hooks = hooks.setdefault("PostToolUse", [])
-    ptu_hooks[:] = [h for h in ptu_hooks if _AGENTALLOY_HOOKS_MARKER not in str(h)]
-    ptu_hooks.append(
-        {
-            "matcher": "Edit|Write|MultiEdit",
-            "_agentalloy": _AGENTALLOY_HOOKS_MARKER,
-            "hooks": [{"type": "command", "command": ptu_cmd}],
-        }
-    )
-
-    # PreToolUse
-    pretool_cmd = (
-        f"AGENTALLOY_HOOK_EVENT=PreToolUse AGENTALLOY_TOOL_NAME=$TOOL_NAME bash {hook_path}"
-    )
-    pretool_hooks = hooks.setdefault("PreToolUse", [])
-    pretool_hooks[:] = [h for h in pretool_hooks if _AGENTALLOY_HOOKS_MARKER not in str(h)]
-    pretool_hooks.append(
-        {
-            "matcher": ".*",
-            "_agentalloy": _AGENTALLOY_HOOKS_MARKER,
-            "hooks": [{"type": "command", "command": pretool_cmd}],
-        }
-    )
-
-    serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
-
-    return [
-        {
-            "path": str(settings_path),
-            "action": "merged_hooks",
-            "marker_key": _AGENTALLOY_HOOKS_MARKER,
-            "content_sha256": _sha256(serialized),
-        }
-    ]
+# ---------------------------------------------------------------------------
+# Tier 3 watcher wiring
+# ---------------------------------------------------------------------------
 
 
 def _wire_tier3_watcher_config(harness: str, root: Path) -> None:
@@ -763,33 +638,6 @@ def _probe_code_indexer(root: Path) -> None:
         "last_health_at": int(time.time()),
     }
     install_state.save_state(st, root)
-
-
-def _unwire_claude_code_hooks(root: Path) -> list[dict[str, Any]]:
-    """Remove AgentAlloy signal-layer hooks from .claude/settings.json."""
-    settings_path = root / ".claude" / "settings.json"
-    if not settings_path.exists():
-        return []
-    try:
-        config = json.loads(settings_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-
-    hooks = config.get("hooks", {})
-    changed = False
-    for event in ("UserPromptSubmit", "PostToolUse", "PreToolUse"):
-        original = hooks.get(event, [])
-        filtered = [h for h in original if _AGENTALLOY_HOOKS_MARKER not in str(h)]
-        if len(filtered) != len(original):
-            hooks[event] = filtered
-            changed = True
-
-    if not changed:
-        return []
-
-    serialized = json.dumps(config, indent=2) + "\n"
-    install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
-    return [{"path": str(settings_path), "action": "removed_hooks"}]
 
 
 # Harnesses we know how to wire MCP for. Others (gemini-cli, opencode,
@@ -930,7 +778,17 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # Proxy wiring
 # ---------------------------------------------------------------------------
 
-_PROXY_SUPPORTED_API = frozenset({"continue-closed", "continue-local"})
+_PROXY_SUPPORTED_API = frozenset(
+    {
+        "continue-closed",
+        "continue-local",
+        "aider",
+        "hermes-agent",
+        "opencode",
+        "claude-code",
+        "cline",
+    }
+)
 
 
 def _wire_proxy(
@@ -955,8 +813,23 @@ def _wire_proxy(
         return []
 
     # Harnesses that support custom API endpoints
-    if harness in _PROXY_SUPPORTED_API:
+    if harness in ("continue-closed", "continue-local"):
         return _wire_proxy_continue(harness, port, root)
+
+    if harness == "aider":
+        return _wire_proxy_aider(port, root)
+
+    if harness == "hermes-agent":
+        return _wire_proxy_hermes_agent(port, root, scope)
+
+    if harness == "opencode":
+        return _wire_proxy_opencode(port, root)
+
+    if harness == "claude-code":
+        return _wire_proxy_claude_code(port, root)
+
+    if harness == "cline":
+        return _wire_proxy_cline(port, root)
 
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
@@ -1012,6 +885,269 @@ def _wire_proxy_continue(
             "path": str(config_path),
             "action": "injected_block",
             "marker_key": "models.agentalloy-proxy",
+            "content_sha256": _sha256(serialized),
+        }
+    ]
+
+
+def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire aider to use the AgentAlloy proxy via .aider.conf.yml.
+
+    Writes a sentinel-bounded YAML block that configures aider's
+    ``openai-api-base``, ``openai-api-key``, and ``model`` fields to point
+    at the proxy, and adds a ``read`` entry for the instructions file.
+    """
+    conf_path = root / ".aider.conf.yml"
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    proxy_url = f"http://localhost:{port}/v1"
+    block_lines = [
+        sentinel_begin,
+        f"openai-api-base: {proxy_url}",
+        "openai-api-key: agentalloy",
+        "model: agentalloy-proxy",
+        "read:",
+        "  - .agentalloy-aider-instructions.md",
+        sentinel_end,
+    ]
+    block = "\n".join(block_lines)
+
+    if conf_path.exists():
+        content = conf_path.read_text()
+        if sentinel_begin in content and sentinel_end in content:
+            # Replace existing block
+            begin_idx = content.index(sentinel_begin)
+            end_idx = content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(content) and content[end_idx] == "\n":
+                end_idx += 1
+            content = content[:begin_idx] + block + "\n" + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += block + "\n"
+    else:
+        content = block + "\n"
+
+    install_state._atomic_write(conf_path, content)  # pyright: ignore[reportPrivateUsage]
+    return [
+        {
+            "path": str(conf_path),
+            "action": "injected_block",
+            "sentinel_begin": sentinel_begin,
+            "sentinel_end": sentinel_end,
+            "content_sha256": _sha256(block),
+        }
+    ]
+
+
+def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
+    """Wire Hermes Agent to use the AgentAlloy proxy.
+
+    User scope: writes a ``custom_providers`` entry to ~/.hermes/config.yaml
+    so the Hermes agent can pick up the proxy as a named provider.
+
+    Repo scope: writes a compact sentinel-bounded proxy-mode instruction to
+    AGENTS.md so agents reading that file know to use the proxy.
+    """
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    if scope == "user":
+        config_path = Path.home() / ".hermes" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        proxy_block_lines = [
+            sentinel_begin,
+            "custom_providers:",
+            "  agentalloy:",
+            f"    base_url: http://localhost:{port}/v1",
+            "    api_key: agentalloy",
+            sentinel_end,
+        ]
+        block = "\n".join(proxy_block_lines)
+
+        if config_path.exists():
+            content = config_path.read_text()
+            if sentinel_begin in content and sentinel_end in content:
+                begin_idx = content.index(sentinel_begin)
+                end_idx = content.index(sentinel_end) + len(sentinel_end)
+                if end_idx < len(content) and content[end_idx] == "\n":
+                    end_idx += 1
+                content = content[:begin_idx] + block + "\n" + content[end_idx:]
+            else:
+                if content and not content.endswith("\n"):
+                    content += "\n"
+                content += block + "\n"
+        else:
+            content = block + "\n"
+
+        install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
+        return [
+            {
+                "path": str(config_path),
+                "action": "injected_block",
+                "sentinel_begin": sentinel_begin,
+                "sentinel_end": sentinel_end,
+                "content_sha256": _sha256(block),
+            }
+        ]
+
+    # Repo scope: write a proxy instruction block to AGENTS.md
+    agents_md = root / "AGENTS.md"
+    instruction = (
+        f"## AgentAlloy proxy\n\n"
+        f"An AgentAlloy proxy is running at `http://localhost:{port}/v1`.\n"
+        "Configure your agent to use it as its API base.\n"
+    )
+    existing = agents_md.read_text() if agents_md.exists() else ""
+    result_content = _inject_sentinel_block(existing, instruction)
+    install_state._atomic_write(agents_md, result_content)  # pyright: ignore[reportPrivateUsage]
+    return [
+        {
+            "path": str(agents_md),
+            "action": "injected_block",
+            "content_sha256": _sha256(instruction.strip()),
+        }
+    ]
+
+
+def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire OpenCode to use the AgentAlloy proxy.
+
+    Writes two files:
+    - ``.opencode/.agentalloy-env``: shell script exporting OPENAI_API_BASE and
+      OPENAI_API_KEY, which the user sources before launching OpenCode.
+    - ``.opencode/system-prompt.md``: brief proxy-mode instruction appended with
+      sentinel markers.
+
+    Prints a one-line activation reminder to stderr.
+    """
+    opencode_dir = root / ".opencode"
+    opencode_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write env file (always overwrites — it's a generated file we own fully)
+    env_path = opencode_dir / ".agentalloy-env"
+    env_content = (
+        f"export OPENAI_API_BASE=http://localhost:{port}/v1\nexport OPENAI_API_KEY=agentalloy\n"
+    )
+    install_state._atomic_write(env_path, env_content)  # pyright: ignore[reportPrivateUsage]
+
+    # Write / update system-prompt.md with sentinel block
+    prompt_path = opencode_dir / "system-prompt.md"
+    instruction = (
+        "## AgentAlloy proxy\n\n"
+        f"An AgentAlloy proxy is active at `http://localhost:{port}/v1`.\n"
+        "It intercepts requests to inject skill context before forwarding to your LLM.\n"
+    )
+    existing = prompt_path.read_text() if prompt_path.exists() else ""
+    result_content = _inject_sentinel_block(existing, instruction)
+    install_state._atomic_write(prompt_path, result_content)  # pyright: ignore[reportPrivateUsage]
+
+    print(
+        "[AgentAlloy] Activate proxy: source .opencode/.agentalloy-env",
+        file=sys.stderr,
+    )
+
+    return [
+        {
+            "path": str(env_path),
+            "action": "wrote_new_file",
+            "content_sha256": _sha256(env_content),
+        },
+        {
+            "path": str(prompt_path),
+            "action": "injected_block",
+            "content_sha256": _sha256(instruction.strip()),
+        },
+    ]
+
+
+def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire Claude Code to use the AgentAlloy proxy.
+
+    Writes ``~/.agentalloy/claude-code-env.sh`` with sentinel-bounded
+    ``ANTHROPIC_BASE_URL`` and ``ANTHROPIC_API_KEY`` exports. Claude Code
+    reads these environment variables at startup to route requests through
+    the proxy.
+    """
+    agentalloy_dir = Path.home() / ".agentalloy"
+    agentalloy_dir.mkdir(parents=True, exist_ok=True)
+
+    env_path = agentalloy_dir / "claude-code-env.sh"
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    proxy_url = f"http://localhost:{port}/v1"
+    block_lines = [
+        sentinel_begin,
+        f"export ANTHROPIC_BASE_URL={proxy_url}",
+        "export ANTHROPIC_API_KEY=agentalloy",
+        sentinel_end,
+    ]
+    block = "\n".join(block_lines)
+
+    if env_path.exists():
+        content = env_path.read_text()
+        if sentinel_begin in content and sentinel_end in content:
+            # Replace existing block
+            begin_idx = content.index(sentinel_begin)
+            end_idx = content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(content) and content[end_idx] == "\n":
+                end_idx += 1
+            content = content[:begin_idx] + block + "\n" + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += block + "\n"
+    else:
+        content = block + "\n"
+
+    install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(env_path),
+            "action": "wrote_new_file",
+            "content_sha256": _sha256(block),
+        }
+    ]
+
+
+def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire Cline to use the AgentAlloy proxy.
+
+    Writes ``.cline/settings.json`` with proxy fields (``apiProvider``,
+    ``apiBaseUrl``, ``apiKey``, ``model``).  If the file already exists,
+    merges the proxy fields into it without overwriting other settings.
+    """
+    settings_path = root / ".cline" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    proxy_url = f"http://localhost:{port}/v1"
+    proxy_fields = {
+        "apiProvider": "openai",
+        "apiBaseUrl": proxy_url,
+        "apiKey": "agentalloy",
+        "model": "agentalloy-proxy",
+    }
+
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+    else:
+        settings = {}
+
+    settings.update(proxy_fields)
+    serialized = json.dumps(settings, indent=2) + "\n"
+    install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(settings_path),
+            "action": "wrote_new_file",
             "content_sha256": _sha256(serialized),
         }
     ]
@@ -1186,19 +1322,18 @@ def add_parser(
         action="store_true",
         help=(
             "Write the strict-tools MCP server config for the chosen harness instead "
-            "of the default markdown-injection variant. Supported on: claude-code, "
-            "cursor, continue-closed, continue-local. The MCP server module lives at "
-            "agentalloy.install.mcp_server."
+            "of the default proxy wiring. Supported on: claude-code, cursor, "
+            "continue-closed, continue-local. Orthogonal to --legacy. The MCP server "
+            "module lives at agentalloy.install.mcp_server."
         ),
     )
     p.add_argument(
-        "--proxy",
+        "--legacy",
         action="store_true",
         help=(
-            "Wire the harness to use the AgentAlloy proxy (recommended). "
-            "For harnesses that support custom API endpoints (Continue), "
-            "configures the API base URL. For others, writes a proxy "
-            "instruction block."
+            "Use the legacy markdown-injection wiring method instead of the proxy model. "
+            "Writes harness-specific instruction blocks into config files. "
+            "Orthogonal to --mcp-fallback."
         ),
     )
     p.set_defaults(func=_run)
@@ -1214,7 +1349,7 @@ def _run(args: argparse.Namespace) -> int:
         port=port,
         force=args.force,
         mcp_fallback=args.mcp_fallback,
-        proxy=getattr(args, "proxy", False),
+        legacy=getattr(args, "legacy", False),
         scope=args.scope,
     )
     if not getattr(args, "quiet", False):

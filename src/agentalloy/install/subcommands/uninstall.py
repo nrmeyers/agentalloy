@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from agentalloy.install import state as install_state
+from agentalloy.install.subcommands import uninstall_proxy
 from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
 
 SCHEMA_VERSION = 1
@@ -572,6 +573,7 @@ def uninstall(
         home / ".claude",
         home / ".cursor",
         home / ".continue",
+        home / ".agentalloy",
     )
     # Set of harness target basenames / suffix-paths we ever write. Any
     # `path` in state that doesn't end in one of these is rejected even
@@ -588,6 +590,8 @@ def uninstall(
         ".agentalloy-aider-instructions.md",
         ".opencode/system-prompt.md",
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
+        "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
+        ".cline/settings.json",  # Cline proxy config
     )
     root_resolved = root.resolve()
     # Iterate over harness entries only when wiring removal is enabled.
@@ -711,6 +715,38 @@ def uninstall(
                 warnings.append(
                     f"Sentinel block not found in {path} — skipped. Use --force to delete anyway."
                 )
+
+    # 2a. Handle proxy config cleanup (new sentinel-bounded blocks)
+    # Each proxy-wired harness has its own uninstall function in uninstall_proxy
+    proxy_removed: list[Path] = []
+
+    # aider proxy
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
+
+    # hermes-agent proxy (user-scope only)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
+
+    # opencode proxy
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
+
+    # claude-code proxy (user-scope only)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
+
+    # cline proxy (per-repo .cline/settings.json)
+    if remove_wiring:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
+
+    if proxy_removed:
+        for p in proxy_removed:
+            files_removed.append({"path": str(p), "action": "unwired_proxy"})
+        print("  Proxy config removed:", file=sys.stderr)
+        for path in proxy_removed:
+            print(f"    - {path}", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # 2. Handle Continue.dev marker cleanup (markdown injection variant)
     continuerc = root / ".continuerc.json"

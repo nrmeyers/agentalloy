@@ -165,6 +165,7 @@ def _build_namespace(cfg: SetupConfig, **overrides: Any) -> argparse.Namespace: 
         "overrides": None,  # write_env overrides
         "scope": "user",  # wire_harness scope
         "mcp_fallback": False,  # wire_harness mcp_fallback
+        "legacy": False,  # wire_harness legacy mode
         "quiet": True,  # suppress JSON stdout when called from wizard
         "json": False,  # human-readable output (not raw JSON)
     }
@@ -991,9 +992,7 @@ def run_setup(cfg: SetupConfig) -> int:
     # system-skill gating degrades to advisory. Non-interactive installs must
     # explicitly acknowledge that with --acknowledge-tier3; interactive
     # installs get a y/n prompt with a 'no' default.
-    _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"}
-    )
+    _tier3_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
     if cfg.harness in _tier3_harnesses:
         tier3_msg = (
             f"\n  [yellow]Tier 3 harness selected: {cfg.harness}[/yellow]\n"

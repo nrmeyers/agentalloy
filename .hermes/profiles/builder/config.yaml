@@ -1,0 +1,4 @@
+model: a3b
+role: builder
+delegate: true
+description: Implementation delegate - reads plans and executes them precisely
