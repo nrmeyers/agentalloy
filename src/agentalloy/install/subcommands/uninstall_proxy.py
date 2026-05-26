@@ -143,16 +143,17 @@ def _unwire_proxy_cline(root: Path) -> list[Path]:
     removed_any = False
 
     for key, val in list(content.items()):
-        if key == "apiProvider" and val == "openai":
-            content.pop(key)
-            removed_any = True
-        elif key == "apiBaseUrl" and isinstance(val, str) and "localhost" in val:
-            content.pop(key)
-            removed_any = True
-        elif key == "apiKey" and val in ("***", "agentalloy"):
-            content.pop(key)
-            removed_any = True
-        elif key == "model" and val == "agentalloy-proxy":
+        if (
+            key == "apiProvider"
+            and val == "openai"
+            or key == "apiBaseUrl"
+            and isinstance(val, str)
+            and "localhost" in val
+            or key == "apiKey"
+            and val in ("***", "agentalloy")
+            or key == "model"
+            and val == "agentalloy-proxy"
+        ):
             content.pop(key)
             removed_any = True
 
