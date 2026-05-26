@@ -302,6 +302,7 @@ def _empty_state() -> dict[str, Any]:
         "completed_steps": [],
         "harness_files_written": [],
         "models_pulled": [],
+        "env_original_content": None,  # Backup of original .env content for restore
         "env_path": None,
         "port": 47950,
         "last_verify_passed_at": None,
@@ -469,6 +470,100 @@ def clear_pending_pack_selection(data: dict[str, Any]) -> dict[str, Any]:
     data["pending_pack_selection"] = None
     return data
 
+
+def capture_original_content(
+    data: dict[str, Any],
+    file_path: Path,
+    content: str,
+) -> dict[str, Any]:
+    """Capture the original content of a file before it is written.
+
+    Only captures if the file already existed and had different content.
+    New files (doesn't exist) don't get original_content recorded.
+
+    Args:
+        data: The state dict to modify
+        file_path: Path to the file being written
+        content: The content that will be written
+
+    Returns:
+        Modified state dict with original_content stored (if captured)
+    """
+    # Only capture if file existed and content is different
+    if not file_path.exists():
+        return data
+
+    existing = file_path.read_text()
+    if existing == content:
+        # Content is the same - no need to record
+        return data
+
+    # Store the original content (stripped of newlines for storage efficiency)
+    data["harness_files_written"] = [
+        (
+            entry
+            | {
+                "original_content": existing.rstrip("\n"),
+                "original_content_sha256": hashlib.sha256(existing.encode()).hexdigest(),
+            }
+        )
+        for entry in data.get("harness_files_written", [])
+        if entry.get("path") == str(file_path)
+    ]
+
+    return data
+
+
+def restore_original_content(
+    data: dict[str, Any],
+    file_path: Path,
+    entry: dict[str, Any],
+) -> bool:
+    """Restore original content if it was captured during write.
+
+    Args:
+        data: The state dict (for reference)
+        file_path: Path to the file to restore
+        entry: The harness entry to check for original_content
+
+    Returns:
+        True if original content was restored, False otherwise
+    """
+    original = entry.get("original_content")
+    if not original:
+        return False
+
+    if file_path.exists():
+        file_path.write_text(original)
+        return True
+    return False
+
+
+def restore_original_env_content(data: dict[str, Any]) -> bool | None:
+    """Restore the original .env content if it was backed up.
+
+    Args:
+        data: The state dict with env_original_content
+
+    Returns:
+        True if content was restored, None if not backed up
+    """
+    original = data.get("env_original_content")
+    if original is None:
+        return None
+
+    env_path = data.get("env_path")
+    if not env_path:
+        return False
+
+    env_file = Path(env_path)
+    if env_file.exists():
+        env_file.write_text(original)
+        return True
+    return False
+
+
+def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
 
 def save_output_file(
     content: dict[str, Any],

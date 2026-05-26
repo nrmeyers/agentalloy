@@ -165,6 +165,13 @@ def _sha256(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+def _capture_original(path: Path) -> str | None:
+    """Read and return the file's content if it exists, else None."""
+    if path.exists():
+        return path.read_text()
+    return None
+
+
 def _detect_line_ending(content: str) -> str:
     """Detect whether file uses CRLF or LF."""
     if "\r\n" in content:
@@ -1267,6 +1274,13 @@ def _build_result(
     st = install_state.load_state(root)
     prior = st.get("harness_files_written") or []
     new_paths = {f.get("path") for f in files_written}
+    # Preserve original_content from prior entries on re-wire: the new entry
+    # captures the post-first-write state, but we need the true original.
+    prior_by_path = {e.get("path"): e for e in prior}
+    for new_entry in files_written:
+        prior_entry = prior_by_path.get(new_entry.get("path"))
+        if prior_entry and prior_entry.get("original_content"):
+            new_entry.setdefault("original_content", prior_entry["original_content"])
     merged = [e for e in prior if e.get("path") not in new_paths] + files_written
     st["harness_files_written"] = merged
     st = install_state.record_step(st, STEP_NAME, extra={"output": output})
