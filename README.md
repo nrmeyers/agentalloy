@@ -232,17 +232,17 @@ python -m agentalloy                  # default :47950
 curl -s http://localhost:47950/health # {"status":"ok"}
 ```
 
-### Wired into a Tier 1 harness (full integration)
+### Wired into a proxy-wired harness (full integration)
 
-If your harness exposes per-turn hooks, AgentAlloy installs hook scripts that fire on `UserPromptSubmit`, `PreToolUse`, and `PostToolUse`. Phase transitions, contract retrieval, and system skill enforcement all happen automatically.
+If your harness honors a custom API base URL (OpenAI / Anthropic / a config-file `apiBase`), AgentAlloy points it at the local proxy. Every LLM request flows through the proxy, which injects skill context, evaluates gates, and forwards to the real upstream. Phase transitions, contract retrieval, and system skill enforcement all happen automatically.
 
 ```bash
 agentalloy wire --harness <name>
 ```
 
-### Wired into a Tier 3 harness (sidecar)
+### Wired into a sidecar harness
 
-If your harness only reads static rules files, AgentAlloy installs a file-watching sidecar that regenerates the rules file within ~1s of a phase or contract change. You start the sidecar once per session:
+A few harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI) route through their own backends and can't be intercepted. For those, AgentAlloy writes a static rules file and a file-watching sidecar regenerates that file within ~1s of a phase or contract change. You start the sidecar once per session:
 
 ```bash
 agentalloy wire --harness <name>
@@ -269,23 +269,23 @@ See [profiles-and-overrides.md](docs/profiles-and-overrides.md) for full details
 
 ## Harness support
 
-Tier classification depends entirely on whether the harness exposes a hook mechanism that fires on every turn.
+Classification depends on a single question: can the harness's LLM traffic be intercepted by the AgentAlloy proxy? Harnesses that honor a custom API base URL get full per-turn integration. Harnesses that route through their own backend fall back to a static rules file kept current by a watcher.
 
-| Capability | Tier 1 (per-turn hooks) | Tier 3 (no hooks; sidecar) |
+| Capability | Proxy-wired | Sidecar (no proxy support) |
 |---|---|---|
 | Initial workflow skill context | ✅ | ✅ |
-| Phase transition detection (automatic) | ✅ Per-turn hook | ✅ Sidecar auto-detects via file watcher (when running); manual fallback via `agentalloy phase set <name>` |
-| System skill enforcement (gates) | ✅ PreToolUse hook blocks tool call | ⚠️ Advisory text only — no enforcement |
-| Mid-session context updates | ✅ Injected into next turn | ⚠️ Requires file reload (harness-dependent) |
-| Contract → skill injection | ✅ PostToolUse hook | ✅ Sidecar (`agentalloy watch start`) |
-| Semantic gate evaluation | ✅ Runs per-turn | ⚠️ Falls back to `UNKNOWN` without hook |
+| Phase transition detection (automatic) | ✅ Per-turn via proxy | ✅ Sidecar auto-detects via file watcher (when running); manual fallback via `agentalloy phase set <name>` |
+| System skill enforcement (gates) | ✅ Proxy can block/modify request | ⚠️ Advisory text only — no enforcement |
+| Mid-session context updates | ✅ Injected into next request | ⚠️ Requires file reload (harness-dependent) |
+| Contract → skill injection | ✅ Per-turn via proxy | ✅ Sidecar (`agentalloy watch start`) |
+| Semantic gate evaluation | ✅ Runs per-turn | ⚠️ Falls back to `UNKNOWN` without proxy |
 
-**Tier 3 is a real reduction in capability.** Without a per-turn hook, system skills become suggestions rather than gates, and phase transitions are automatic when the sidecar watcher is running; otherwise manual via `agentalloy phase set <name>`. If you need enforcement, use a Tier 1 harness. See [`docs/tier3-experience.md`](docs/tier3-experience.md) for sidecar setup details.
+**Sidecar mode is a real reduction in capability.** Without proxy interception, system skills become suggestions rather than gates, and phase transitions are automatic only when the sidecar watcher is running; otherwise manual via `agentalloy phase set <name>`. If you need enforcement, prefer a proxy-wired harness. See [`docs/sidecar-experience.md`](docs/sidecar-experience.md) for sidecar setup details and [`docs/harness-classification.md`](docs/harness-classification.md) for the full classification spec.
 
-Examples of each tier today (lists evolve as harness vendors add or remove hook APIs — check `agentalloy wire --harness <name>` for current support):
+Current membership (lists evolve as harness vendors expose base-URL overrides — check `agentalloy wire --harness <name>` for current support):
 
-- **Tier 1**: Claude Code, Continue.dev
-- **Tier 3**: Cursor, Windsurf, GitHub Copilot, Cline, Gemini CLI, Aider
+- **Proxy-wired**: Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent
+- **Sidecar**: Cursor, Windsurf, GitHub Copilot, Gemini CLI
 
 Full per-harness catalog: [`docs/install/harness-catalog.md`](docs/install/harness-catalog.md).
 
@@ -330,9 +330,9 @@ The `agentalloy.install` module exposes a single CLI with subcommands. All write
 
 | Command | Description |
 |---|---|
-| `phase {get,set,clear}` | Read / write `.agentalloy/phase`. `set` is a manual override / Tier 3 fallback when the sidecar watcher is not running. |
+| `phase {get,set,clear}` | Read / write `.agentalloy/phase`. `set` is a manual override / sidecar fallback when the watcher is not running. |
 | `contract {write,validate,list}` | Create or validate task contracts under `.agentalloy/contracts/<phase>/`. |
-| `signal evaluate-phase` | Fire the pre-filter + gate evaluator; emits the next workflow skill's prose if a transition occurs. Wired by Tier 1 harnesses as a hook. |
+| `signal evaluate-phase` | Fire the pre-filter + gate evaluator; emits the next workflow skill's prose if a transition occurs. Invoked by the proxy per request (proxy-wired harnesses). |
 | `signal evaluate-system --tool <name>` | Find system skills whose `applies_when` matches a tool that's about to fire. |
 | `signal watch-contract --path <p>` | Validate a contract and trigger composition. |
 | `signal check` | Diagnostics: dump current phase + active workflow skill + pre-filter state. |
@@ -346,11 +346,11 @@ The `agentalloy.install` module exposes a single CLI with subcommands. All write
 | `customize {list,edit,validate,update,diff,reset}` | Three-layer skill overrides (project → profile → shipped default). Edit a skill's prose, gates, or applicability for your project or profile without forking. See docs/profiles-and-overrides.md § Three-layer overrides. |
 | `reset` | Wipe profile overrides and re-ingest shipped defaults. |
 
-**Tier 3 sidecar**
+**Sidecar (for harnesses that can't be proxy-wired)**
 
 | Command | Description |
 |---|---|
-| `watch start --harness <name>` | Start the file-watching sidecar for harnesses without per-turn hooks. |
+| `watch start --harness <name>` | Start the file-watching sidecar for sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI). |
 | `watch stop` | Stop the sidecar. |
 | `watch status` | Report whether the sidecar is running and where its log lives. |
 
@@ -470,8 +470,8 @@ Pack authoring lives in a separate repo and tooling — see [agentalloy-authorin
                        composed prose ◄────────────────┘
                              │
                              ▼
-                  Tier 1: hook stdout → agent next turn
-                  Tier 3: file watcher rewrites rules file
+                  Proxy-wired: injected into next LLM request
+                  Sidecar: file watcher rewrites rules file
 ```
 
 **Data plane** (the two embedded stores):

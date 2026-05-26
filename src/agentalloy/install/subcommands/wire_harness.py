@@ -528,10 +528,10 @@ def _wire_legacy(
     if harness == "aider":
         files_written.extend(_wire_aider_conf(root))
 
-    # For Tier 3 harnesses, write watcher config and print guidance
-    _tier3_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
-    if harness in _tier3_harnesses:
-        _wire_tier3_watcher_config(harness, root)
+    # For sidecar harnesses (can't be proxy-wired), write watcher config and print guidance
+    _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+    if harness in _sidecar_harnesses:
+        _wire_sidecar_watcher_config(harness, root)
 
     # Probe for code-indexer and persist result to state.json
     _probe_code_indexer(root)
@@ -580,12 +580,12 @@ def _wire_aider_conf(root: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Tier 3 watcher wiring
+# Sidecar watcher wiring (harnesses that can't be proxy-wired)
 # ---------------------------------------------------------------------------
 
 
-def _wire_tier3_watcher_config(harness: str, root: Path) -> None:
-    """Write watcher config and print Tier 3 guidance. Soft-fail."""
+def _wire_sidecar_watcher_config(harness: str, root: Path) -> None:
+    """Write watcher config and print sidecar guidance. Soft-fail."""
     try:
         import yaml as _yaml
 
@@ -603,15 +603,16 @@ def _wire_tier3_watcher_config(harness: str, root: Path) -> None:
         pass
 
     print(
-        f"\n[AgentAlloy — Tier 3 wiring]\n"
+        f"\n[AgentAlloy — sidecar wiring]\n"
         f"You selected: {harness}\n\n"
-        "Tier 3 harnesses do not support per-turn hooks. To get phase- and\n"
-        "contract-driven context updates, run the watcher sidecar:\n\n"
+        f"{harness} cannot be proxy-wired (it does not honor base-URL overrides\n"
+        "for the AgentAlloy proxy). To get phase- and contract-driven context\n"
+        "updates, run the watcher sidecar:\n\n"
         f"    agentalloy watch start --harness {harness}\n\n"
         "Run under tmux, systemd, or launchd for persistence. Without the\n"
         "watcher, you'll only get the initial workflow skill context. System\n"
-        "skills (commit-safety, etc.) are advisory-only on Tier 3.\n\n"
-        "See docs/tier3-experience.md for the full picture.\n",
+        "skills (commit-safety, etc.) are advisory-only for sidecar harnesses.\n\n"
+        "See docs/sidecar-experience.md for the full picture.\n",
         file=sys.stderr,
     )
 

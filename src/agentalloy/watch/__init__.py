@@ -1,1 +1,1 @@
-"""AgentAlloy file-watching sidecar for Tier 3 harnesses."""
+"""AgentAlloy file-watching sidecar for harnesses that can't be proxy-wired."""

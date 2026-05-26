@@ -1,4 +1,4 @@
-"""Per-harness rules-file regenerators for Tier 3 harnesses.
+"""Per-harness rules-file regenerators for sidecar harnesses.
 
 Each regenerator takes a content string and a project_root and writes (or
 updates) the harness-specific rules file. Uses marker blocks so non-AgentAlloy

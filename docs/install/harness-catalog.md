@@ -55,48 +55,33 @@ files and (for some harnesses) installs hook scripts.
 
 ## Full Harness List
 
-AgentAlloy knows 13 harness entries in its registry: 12 active plus 1 legacy (`mcp-only`). They are grouped by tier below.
+AgentAlloy knows 13 harness entries in its registry: 12 active plus 1 legacy (`mcp-only`). They are grouped below by how AgentAlloy integrates with them under the proxy redesign. See [harness-classification.md](../harness-classification.md) for the classification rule.
 
-### Tier 1: Per-Turn Hooks (Legacy)
+### Proxy-wired (default)
 
-> **DEPRECATED:** Claude Code hooks were removed in the proxy wiring pass.
-> Proxy wiring replaces hooks entirely — the proxy handles phase detection,
-> skill composition, and system message injection transparently.
-> The `--legacy` flag still installs hooks for backward compatibility.
+These harnesses honor a custom API base URL. AgentAlloy points them at the local proxy, which intercepts every LLM request to inject skill context, evaluate gates, and forward to the real upstream.
 
-Tier 1 harnesses previously exposed per-turn hooks that fired on every agent turn. AgentAlloy installed hook scripts into the harness's settings, enabling phase transition detection, semantic gate evaluation, system skill enforcement, and per-turn context injection.
+| Harness | Proxy Config File | Notes |
+|---------|------------------|-------|
+| `claude-code` | `~/.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`) | Anthropic Messages API via proxy. Sourced by the user's shell or claude-code launcher. |
+| `continue-closed`, `continue-local` | `~/.continue/config.yaml` (`models[].apiBase`) | YAML mutation per model entry; legacy `config.json` also supported. |
+| `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
+| `hermes-agent` | `~/.hermes/config.yaml` (`custom_providers.agentalloy`) user scope, or sentinel block in `AGENTS.md` repo scope | Scope resolved at runtime via `--scope user|repo`. |
+| `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `.opencode/system-prompt.md` | Env file must be sourced before launching OpenCode. |
+| `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
 
-| Harness | Target File(s) | Integration Vector | Hooks |
-|---------|---------------|-------------------|-------|
-| `claude-code` | `CLAUDE.md` + `.claude/settings.json` | `markdown_injection` + hooks | `UserPromptSubmit`, `PreToolUse`, `PreToolUse` |
-| `continue-closed` | `.continuerc.json` | `markdown_injection` | Custom command (`/skill`) + system message |
+> **Legacy hook mode:** Before the proxy redesign, `claude-code` used `UserPromptSubmit` / `PreToolUse` / `PostToolUse` hooks installed via `.claude/settings.json`. Proxy wiring supersedes that path — the proxy handles phase detection, skill composition, and system-message injection. The `--legacy` flag still installs hooks for backward compatibility.
 
-**Claude Code hooks** (`.claude/settings.json`):
+### Sidecar (no proxy interception)
 
-- `UserPromptSubmit` — fires on every user prompt. Runs `agentalloy signal evaluate-phase` which checks pre-filter keywords and evaluates exit gates. On phase transition, writes `.agentalloy/phase` atomically and emits the next workflow skill's prose.
-- `PreToolUse` — fires before every tool call (matcher: `.*`). Used for system skill enforcement — checks `applies_when` predicates on system skills.
-- `PostToolUse` — fires after file-writing tools (matcher: `Edit|Write|MultiEdit`). Used for contract detection and phase gate re-evaluation after file changes.
+These harnesses route through their own backends and cannot be intercepted by the proxy. AgentAlloy writes a static rules file that the harness reads ambiently; a file-watching sidecar regenerates that file when the project phase or contracts change.
 
-Hook scripts are installed to `~/.agentalloy/hooks/agentalloy-signal.sh` and invoked via environment variables (`AGENTALLOY_HOOK_EVENT`, `AGENTALLOY_TOOL_NAME`, `AGENTALLOY_TOOL_PATH`).
-
-**Continue.dev hooks** (`.continuerc.json`):
-
-- Custom command named `skill` — sends a `curl` POST to the local `/compose/text` endpoint with the user's task description. The agent is instructed to invoke `/skill` before starting any task.
-- System message (closed variant only) — instructs the agent to invoke the `/skill` custom command before generating code or a plan.
-
-### Tier 3: Sidecar (No Hooks)
-
-Tier 3 harnesses do not expose any hook API and cannot be proxy-wired. AgentAlloy writes static rules files that the harness reads, and a file-watching sidecar regenerates those files when the project phase or contracts change.
-
-> **NOTE:** `aider` and `cline` were removed from Tier 3 when proxy wiring was added.
-> They now use native API endpoint configuration (`_wire_proxy_aider`, `_wire_proxy_cline`).
-
-| Harness | Target File | Integration Vector | File Strategy |
-|---------|------------|-------------------|---------------|
-| `cursor` | `.cursor/rules/agentalloy-context.mdc` (or `.cursorrules` fallback) | `markdown_injection` | Dedicated (modern) / Shared (legacy) |
-| `windsurf` | `.windsurf/rules/agentalloy.md` (or `.windsurfrules` fallback) | `markdown_injection` | Dedicated (modern) / Shared (legacy) |
-| `github-copilot` | `.github/copilot-instructions.md` | `markdown_injection` | Shared (marker block) |
-| `gemini-cli` | `GEMINI.md` | `markdown_injection` | Shared (marker block) |
+| Harness | Target File | Reason proxy is not available |
+|---------|------------|-------------------------------|
+| `cursor` | `.cursor/rules/agentalloy-context.mdc` (or `.cursorrules` fallback) | Cursor routes through its own service; no first-party base-URL override |
+| `windsurf` | `.windsurf/rules/agentalloy.md` (or `.windsurfrules` fallback) | No first-party base-URL override |
+| `github-copilot` | `.github/copilot-instructions.md` (shared, marker-bounded) | Closed routing through GitHub backend |
+| `gemini-cli` | `GEMINI.md` (shared, marker-bounded) | Ignores `OPENAI_*` / `ANTHROPIC_*` env vars; talks to Google's Gemini API |
 
 **Per-harness regeneration details** (from `regenerators.py`):
 
@@ -105,23 +90,14 @@ Tier 3 harnesses do not expose any hook API and cannot be proxy-wired. AgentAllo
 - **GitHub Copilot** — marker-block replacement in `.github/copilot-instructions.md` using `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` markers.
 - **Gemini CLI** — marker-block replacement in `GEMINI.md` using the same `AGENTALLOY-CONTEXT` markers.
 
-> **NOTE:** Cline and aider regeneration details are now legacy-only. With proxy wiring (default), these harnesses use native API config instead of regenerated rules files.
+> **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire --legacy`. Both are proxy-wired by default and should not need the sidecar.
 
-### Non-Tiered
+### Other
 
-These harnesses integrate with AgentAlloy but are not classified as Tier 1 or Tier 3. With proxy wiring (default), most receive native API endpoint configuration instead of markdown injection.
-
-| Harness | Proxy Config File | Legacy Config File | Notes |
-|---------|-----------------|-------------------|-------|
-| `hermes-agent` | `~/.hermes/config.yaml` (`custom_providers.agentalloy`) | `.hermes/SOUL.md` / `AGENTS.md` | Scope resolved at runtime via `--scope user\|repo` |
-| `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) | `.opencode/system-prompt.md` | Open-source coding agent. Env file requires sourcing. |
-| `claude-code` | `~/.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL`) | `CLAUDE.md` + `.claude/settings.json` | Anthropic Messages API via proxy. Hooks removed. |
-| `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`) | `.clinerules` | Removed from Tier 3; proxy-wired. |
-| `aider` | `.aider.conf.yml` (`openai-api-base`, `model`) | `.aider/agentalloy-context.txt` | Removed from Tier 3; proxy-wired. |
-| `continue-local` | `.continuerc.json` (`models[].apiBase`) | `.continuerc.json` | Local LLM variant of Continue.dev. |
-| `continue-closed` | `.continuerc.json` (`models[].apiBase`) | `.continuerc.json` | Custom command (`/skill`) + system message. |
-| `manual` | stdout (proxy instruction block) | stdout (sentinel-bounded markdown) | Emits instructions to stdout for manual copy-paste. |
-| `mcp-only` | None | None | Legacy entry — no longer accepted. Use `--mcp-fallback` instead. |
+| Harness | Notes |
+|---------|-------|
+| `manual` | Emits the proxy instruction block to stdout for manual copy-paste. |
+| `mcp-only` | Legacy entry — no longer accepted standalone. Use `--mcp-fallback` with a real harness. |
 
 ## Auto-Detection
 
@@ -176,7 +152,7 @@ Same concept as sentinel-bounded injection, but uses the `AGENTALLOY-CONTEXT` ma
 <!-- END AGENTALLOY-CONTEXT -->
 ```
 
-Used by Tier 3 regenerator functions (`regenerators.py`) for: Windsurf, GitHub Copilot, Gemini CLI.
+Used by sidecar regenerator functions (`regenerators.py`) for: Windsurf, GitHub Copilot, Gemini CLI.
 
 ## MCP Fallback
 

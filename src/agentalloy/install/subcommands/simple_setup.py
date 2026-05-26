@@ -69,7 +69,7 @@ class SetupConfig:
     preset: str = ""  # filled by auto-detect: "cpu", "nvidia", etc.
     non_interactive: bool = False
     force: bool = False
-    acknowledge_tier3: bool = False
+    acknowledge_sidecar: bool = False
     hardware_target: str = ""  # explicit user choice: "nvidia", "radeon", "apple-silicon", "cpu"
 
     # Deployment type: "native" (default) or "container"
@@ -988,28 +988,29 @@ def run_setup(cfg: SetupConfig) -> int:
         return 1
     _print(f"  Harness: {cfg.harness}")
 
-    # Tier 3 harness guardrail: these harnesses lack per-turn hooks so
-    # system-skill gating degrades to advisory. Non-interactive installs must
-    # explicitly acknowledge that with --acknowledge-tier3; interactive
-    # installs get a y/n prompt with a 'no' default.
-    _tier3_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
-    if cfg.harness in _tier3_harnesses:
-        tier3_msg = (
-            f"\n  [yellow]Tier 3 harness selected: {cfg.harness}[/yellow]\n"
-            "  AgentAlloy routes context best on harnesses with per-turn hooks.\n"
-            "  This harness has no hook API, so a file-watching sidecar is used\n"
-            "  instead. System skill enforcement is advisory-only; phase transitions\n"
-            "  require a manual command.\n"
-            "  See docs/tier3-experience.md for the full picture."
+    # Sidecar harness guardrail: these harnesses can't be proxy-wired (they
+    # don't honor base-URL overrides), so AgentAlloy falls back to a static
+    # rules file kept current by a watcher. System-skill gating degrades to
+    # advisory. Non-interactive installs must explicitly acknowledge that with
+    # --acknowledge-sidecar; interactive installs get a y/n prompt.
+    _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+    if cfg.harness in _sidecar_harnesses:
+        sidecar_msg = (
+            f"\n  [yellow]Sidecar harness selected: {cfg.harness}[/yellow]\n"
+            "  This harness cannot be proxy-wired (it does not honor OpenAI/Anthropic\n"
+            "  base-URL overrides). AgentAlloy falls back to a static rules file kept\n"
+            "  current by a file-watching sidecar. System skill enforcement is\n"
+            "  advisory-only; phase transitions require the watcher to be running.\n"
+            "  See docs/sidecar-experience.md for the full picture."
         )
         if cfg.non_interactive:
-            if not cfg.acknowledge_tier3:
-                _print(tier3_msg)
-                _print("  [red]Non-interactive Tier 3 setup requires --acknowledge-tier3.[/red]")
+            if not cfg.acknowledge_sidecar:
+                _print(sidecar_msg)
+                _print("  [red]Non-interactive sidecar setup requires --acknowledge-sidecar.[/red]")
                 return 1
         else:
-            _print(tier3_msg)
-            ans = _prompt_context("  Continue with Tier 3?", "y/n", default="n")
+            _print(sidecar_msg)
+            ans = _prompt_context("  Continue with sidecar harness?", "y/n", default="n")
             if (ans or "n").strip().lower() != "y":
                 _print("  [yellow]Setup cancelled.[/yellow]")
                 return 0
@@ -1292,11 +1293,19 @@ def add_parser(
         help="Hardware target for embedding (default: auto-detected).",
     )
     p.add_argument(
+        "--acknowledge-sidecar",
+        action="store_true",
+        default=False,
+        dest="acknowledge_sidecar",
+        help="Acknowledge sidecar harness limitations (required for non-interactive setup of cursor/windsurf/github-copilot/gemini-cli).",
+    )
+    # Deprecated alias; preserved for backward compatibility. Sets the same dest.
+    p.add_argument(
         "--acknowledge-tier3",
         action="store_true",
         default=False,
-        dest="acknowledge_tier3",
-        help="Acknowledge Tier 3 harness limitations (required for non-interactive Tier 3 setup).",
+        dest="acknowledge_sidecar",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--deployment",
@@ -1320,7 +1329,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         deployment=getattr(args, "deployment", None) or "",
         non_interactive=args.non_interactive,
         force=getattr(args, "force", False),
-        acknowledge_tier3=getattr(args, "acknowledge_tier3", False),
+        acknowledge_sidecar=getattr(args, "acknowledge_sidecar", False),
     )
     # Model default is resolved inside run_setup() after cfg.runner is finalized.
     return run_setup(cfg)

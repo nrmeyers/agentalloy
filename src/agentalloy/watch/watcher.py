@@ -1,4 +1,9 @@
-"""File-system watcher loop for Tier 3 harnesses.
+"""File-system watcher loop for sidecar harnesses.
+
+Sidecar harnesses are those whose LLM traffic cannot be intercepted by the
+AgentAlloy proxy (they ignore base-URL overrides or route to their own
+backends). The watcher keeps their static rules files in sync with the
+current project phase and contract state.
 
 Watches:
   - .agentalloy/phase        → regenerate on change
@@ -26,8 +31,8 @@ from watchdog.observers import Observer
 
 _log = logging.getLogger(__name__)
 
-TIER3_HARNESSES = frozenset(
-    {"cursor", "windsurf", "github-copilot", "cline", "gemini-cli", "aider"}
+SIDECAR_HARNESSES = frozenset(
+    {"cursor", "windsurf", "github-copilot", "gemini-cli"}
 )
 
 
