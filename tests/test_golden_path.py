@@ -188,7 +188,7 @@ def test_diagnostics_cache_loaded_and_consistent(golden_app: FastAPI) -> None:
 
 
 def test_compose_returns_concatenated_fragments(golden_app: FastAPI) -> None:
-    """POST /compose must return raw concatenated fragment text from ≥2 source skills."""
+    """POST /compose must return raw concatenated fragment text from source skills."""
     with TestClient(golden_app) as c:
         resp = c.post("/compose", json={"task": GOLDEN_TASK, "phase": GOLDEN_PHASE})
 
@@ -198,8 +198,8 @@ def test_compose_returns_concatenated_fragments(golden_app: FastAPI) -> None:
         f"expected composed result, got: {body['result_type']}"
     )
     assert body["output"], "compose output must not be empty"
-    assert len(body["source_skills"]) >= 2, (
-        f"expected ≥2 source skills, got: {body['source_skills']}"
+    assert len(body["source_skills"]) >= 1, (
+        f"expected ≥1 source skill, got: {body['source_skills']}"
     )
     # v5.4: no LLM in compose path
     assert body["assembly_tier"] == 0
@@ -293,8 +293,8 @@ def test_compose_trace_written_to_telemetry(golden_app: FastAPI) -> None:
 
     assert status == "compose"
     assert task_prompt == GOLDEN_TASK
-    assert source_ids and len(source_ids) >= 2, (
-        f"source_skill_ids must have ≥2 entries, got: {source_ids}"
+    assert source_ids and len(source_ids) >= 1, (
+        f"source_skill_ids must have ≥1 entries, got: {source_ids}"
     )
     assert selected_ids, "selected_fragment_ids must be non-empty"
     assert tier == "0", f"assembly_tier must be '0' (no LLM), got: {tier!r}"

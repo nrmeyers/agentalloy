@@ -742,7 +742,8 @@ def uninstall(
         proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
     
     if proxy_removed:
-        files_removed.extend(proxy_removed)
+        for p in proxy_removed:
+            files_removed.append({"path": str(p), "action": "unwired_proxy"})
         print("  Proxy config removed:", file=sys.stderr)
         for path in proxy_removed:
             print(f"    - {path}", file=sys.stderr)
