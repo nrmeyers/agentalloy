@@ -69,7 +69,7 @@ def _unwire_proxy_opencode(root: Path) -> list[Path]:
     """Remove opencode proxy env file."""
     env_path = root / ".opencode" / ".agentalloy-env"
     prompt_path = root / ".opencode" / "system-prompt.md"
-    removed = []
+    removed: list[Path] = []  # type: ignore[reportUnknownVariableType]
     if env_path.exists():
         env_path.unlink()
         removed.append(env_path)
