@@ -549,14 +549,18 @@ class TestModelResolution:
 
     def test_agentalloy_proxy_resolves_to_upstream(self) -> None:
         """The synthetic 'agentalloy-proxy' name maps to the configured upstream model."""
-        from agentalloy.api.proxy_router import _resolve_model  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.api.proxy_router import (
+            _resolve_model,  # pyright: ignore[reportPrivateUsage]
+        )
 
         result = _resolve_model("agentalloy-proxy", "gpt-4o")
         assert result == "gpt-4o"
 
     def test_unknown_model_passes_through(self) -> None:
         """Any other model name is forwarded unchanged."""
-        from agentalloy.api.proxy_router import _resolve_model  # pyright: ignore[reportPrivateUsage]
+        from agentalloy.api.proxy_router import (
+            _resolve_model,  # pyright: ignore[reportPrivateUsage]
+        )
 
         result = _resolve_model("claude-3-opus", "gpt-4o")
         assert result == "claude-3-opus"

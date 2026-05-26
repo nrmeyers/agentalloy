@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from agentalloy.install import state as install_state
-from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
 from agentalloy.install.subcommands import uninstall_proxy
+from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
 
 SCHEMA_VERSION = 1
 
@@ -719,28 +719,27 @@ def uninstall(
     # 2a. Handle proxy config cleanup (new sentinel-bounded blocks)
     # Each proxy-wired harness has its own uninstall function in uninstall_proxy
     proxy_removed = []
-    proxy_modified = []
-    
+
     # aider proxy
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
-    
+
     # hermes-agent proxy (user-scope only)
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
-    
+
     # opencode proxy
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
-    
+
     # claude-code proxy (user-scope only)
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
-    
+
     # cline proxy (per-repo .cline/settings.json)
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
-    
+
     if proxy_removed:
         for p in proxy_removed:
             files_removed.append({"path": str(p), "action": "unwired_proxy"})

@@ -1,4 +1,5 @@
 """Tests for aider proxy wiring via .aider.conf.yml. Maps to Step 3."""
+
 from __future__ import annotations
 
 from pathlib import Path

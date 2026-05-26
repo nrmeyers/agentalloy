@@ -15,16 +15,14 @@ The PR title follows the pattern: "Task N: <title>"
 The PR description includes the task file content.
 """
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 
 def run_cmd(cmd: list[str], cwd: Path | None = None) -> str:
     """Run a shell command and return output."""
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True
-    )
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f"Command failed: {' '.join(cmd)}")
         print(f"stderr: {result.stderr}")
@@ -50,16 +48,10 @@ def main():
 
     # Parse task number from filename
     parts = task_name.split("-")
-    if len(parts) >= 2 and parts[1] == "0":
-        task_num = 0
-    else:
-        task_num = int(parts[1])
+    task_num = 0 if len(parts) >= 2 and parts[1] == "0" else int(parts[1])
 
     # Create branch from task-0-N pattern
-    if task_num == 0:
-        branch_name = "task-0-prereq-refactors"
-    else:
-        branch_name = f"task-{task_num}-{task_num:02d}"
+    branch_name = "task-0-prereq-refactors" if task_num == 0 else f"task-{task_num}-{task_num:02d}"
 
     # Check if branch already exists
     try:
@@ -90,18 +82,26 @@ def main():
 
     # Create PR
     pr_title = f"Task {task_num}: {task_file.stem.replace('task-', '')}"
-    pr_body = f"This PR implements {task_file.stem.replace('task-', '')} as defined in the task file.\n\n"
-    pr_body += f"<details><summary>Task Details</summary>\n\n```md\n"
+    pr_body = (
+        f"This PR implements {task_file.stem.replace('task-', '')} as defined in the task file.\n\n"
+    )
+    pr_body += "<details><summary>Task Details</summary>\n\n```md\n"
     pr_body += task_file.read_text()
     pr_body += "```\n\n</details>"
 
     print(f"Step 5: Creating PR '{pr_title}' to main")
     pr_cmd = [
-        "gh", "pr", "create",
-        "--title", pr_title,
-        "--body", pr_body,
-        "--base", "main",
-        "--head", branch_name,
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        pr_title,
+        "--body",
+        pr_body,
+        "--base",
+        "main",
+        "--head",
+        branch_name,
         "--draft",  # Start as draft for review
     ]
     run_cmd(pr_cmd)

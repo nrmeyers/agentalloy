@@ -502,7 +502,7 @@ def _wire_legacy(
                         file=sys.stderr,
                     )
                     raise SystemExit(1)
-    
+
     if dedicated:
         install_state._atomic_write(target_path, rendered)
         action = "wrote_new_file"
@@ -513,23 +513,23 @@ def _wire_legacy(
         install_state._atomic_write(target_path, result_content)
         action = "injected_block"
         content_sha256 = _sha256(rendered.strip())
-    
-    files_written.append({
-        "path": str(target_path),
-        "action": action,
-        "sentinel_begin": SENTINEL_BEGIN if not dedicated else None,
-        "sentinel_end": SENTINEL_END if not dedicated else None,
-        "content_sha256": content_sha256,
-    })
+
+    files_written.append(
+        {
+            "path": str(target_path),
+            "action": action,
+            "sentinel_begin": SENTINEL_BEGIN if not dedicated else None,
+            "sentinel_end": SENTINEL_END if not dedicated else None,
+            "content_sha256": content_sha256,
+        }
+    )
 
     # For aider, also wire .aider.conf.yml
     if harness == "aider":
         files_written.extend(_wire_aider_conf(root))
 
     # For Tier 3 harnesses, write watcher config and print guidance
-    _tier3_harnesses = frozenset(
-        {"cursor", "windsurf", "github-copilot", "gemini-cli"}
-    )
+    _tier3_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
     if harness in _tier3_harnesses:
         _wire_tier3_watcher_config(harness, root)
 
@@ -779,7 +779,15 @@ def _wire_mcp_continue(port: int, root: Path, variant: str) -> list[dict[str, An
 # ---------------------------------------------------------------------------
 
 _PROXY_SUPPORTED_API = frozenset(
-    {"continue-closed", "continue-local", "aider", "hermes-agent", "opencode", "claude-code", "cline"}
+    {
+        "continue-closed",
+        "continue-local",
+        "aider",
+        "hermes-agent",
+        "opencode",
+        "claude-code",
+        "cline",
+    }
 )
 
 
@@ -1021,8 +1029,7 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
     # Write env file (always overwrites — it's a generated file we own fully)
     env_path = opencode_dir / ".agentalloy-env"
     env_content = (
-        f"export OPENAI_API_BASE=http://localhost:{port}/v1\n"
-        "export OPENAI_API_KEY=agentalloy\n"
+        f"export OPENAI_API_BASE=http://localhost:{port}/v1\nexport OPENAI_API_KEY=agentalloy\n"
     )
     install_state._atomic_write(env_path, env_content)  # pyright: ignore[reportPrivateUsage]
 
@@ -1038,7 +1045,7 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
     install_state._atomic_write(prompt_path, result_content)  # pyright: ignore[reportPrivateUsage]
 
     print(
-        f"[AgentAlloy] Activate proxy: source .opencode/.agentalloy-env",
+        "[AgentAlloy] Activate proxy: source .opencode/.agentalloy-env",
         file=sys.stderr,
     )
 

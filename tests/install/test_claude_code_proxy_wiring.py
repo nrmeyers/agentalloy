@@ -1,4 +1,5 @@
 """Tests for Claude Code proxy wiring. Maps to Step 8."""
+
 from __future__ import annotations
 
 from pathlib import Path
