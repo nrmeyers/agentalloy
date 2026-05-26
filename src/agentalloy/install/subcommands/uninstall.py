@@ -601,6 +601,10 @@ def uninstall(
     harness_entries: list[dict[str, Any]] = (
         st.get("harness_files_written", []) if remove_wiring else []
     )
+    # Track paths already handled by the harness loop so downstream
+    # special-case sections (Continue, Cursor MCP, Claude MCP, etc.)
+    # can skip them to avoid double-processing.
+    handled_paths: set[str] = set()
     for entry in harness_entries:
         raw_path = entry.get("path")
         if not isinstance(raw_path, str) or not raw_path:
@@ -669,6 +673,15 @@ def uninstall(
         sentinel_begin = entry.get("sentinel_begin", SENTINEL_BEGIN)
         sentinel_end = entry.get("sentinel_end", SENTINEL_END)
 
+        # NEW: Restore original content if we backed it up
+        original = entry.get("original_content")
+        if original is not None:
+            # File existed before install — restore it to pre-install state
+            path.write_text(original)
+            files_modified.append({"path": str(path), "action": "restored_original"})
+            handled_paths.add(raw_path)
+            continue
+
         if sentinel_begin and sentinel_begin in content and sentinel_end in content:
             # Check if content was modified inside sentinels
             current_inner = _extract_sentinel_content(content, sentinel_begin, sentinel_end)
@@ -678,6 +691,7 @@ def uninstall(
             if entry.get("action") == "wrote_new_file":
                 path.unlink()
                 files_removed.append({"path": str(path), "action": "deleted_dedicated_file"})
+                handled_paths.add(raw_path)
                 continue
 
             if current_inner is not None and stored_sha:
@@ -699,18 +713,22 @@ def uninstall(
             if cleaned.strip():
                 path.write_text(cleaned)
                 files_modified.append({"path": str(path), "action": "removed_sentinel_block"})
+                handled_paths.add(raw_path)
             else:
                 # File is now empty after removing our block — delete it
                 path.unlink()
                 files_removed.append({"path": str(path), "action": "deleted_empty_file"})
+                handled_paths.add(raw_path)
         elif entry.get("action") == "wrote_new_file":
             # Dedicated file (no sentinels) — delete it
             path.unlink()
             files_removed.append({"path": str(path), "action": "deleted_dedicated_file"})
+            handled_paths.add(raw_path)
         else:
             if force:
                 path.unlink()
                 files_removed.append({"path": str(path), "action": "force_deleted"})
+                handled_paths.add(raw_path)
             else:
                 warnings.append(
                     f"Sentinel block not found in {path} — skipped. Use --force to delete anyway."
@@ -722,15 +740,23 @@ def uninstall(
 
     # Repo-scope proxies: safe to run on any per-repo unwire
     if remove_wiring:
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
+        # Skip proxy unwiring for paths already handled by harness loop's original_content restore
+        if str(root / ".aider.conf.yml") not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
+        if str(root / ".opencode") not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
+        if str(root / ".cline" / "settings.json") not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
 
     # User-scope proxies: only run during a global (all_repos) uninstall to avoid
     # removing global home-dir config when unwiring an unrelated repo.
     if remove_wiring and all_repos:
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
+        hermes_config = Path.home() / ".hermes" / "config.yaml"
+        if str(hermes_config) not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
+        claude_env = Path.home() / ".agentalloy" / "claude-code-env.sh"
+        if str(claude_env) not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
 
     if proxy_removed:
         for p in proxy_removed:
@@ -742,7 +768,7 @@ def uninstall(
 
     # 2. Handle Continue.dev marker cleanup (markdown injection variant)
     continuerc = root / ".continuerc.json"
-    if remove_wiring and continuerc.exists():
+    if remove_wiring and continuerc.exists() and str(continuerc) not in handled_paths:
         try:
             config = json.loads(continuerc.read_text())
             modified = False
@@ -792,7 +818,7 @@ def uninstall(
 
     # 2b. Handle Cursor MCP config cleanup (.cursor/mcp.json)
     cursor_mcp = root / ".cursor" / "mcp.json"
-    if remove_wiring and cursor_mcp.exists():
+    if remove_wiring and cursor_mcp.exists() and str(cursor_mcp) not in handled_paths:
         try:
             cfg = json.loads(cursor_mcp.read_text())
             servers = cfg.get("mcpServers")
@@ -813,7 +839,7 @@ def uninstall(
 
     # 2c. Handle user-scoped Claude Code MCP config (~/.claude/mcp_servers.json)
     claude_mcp = Path.home() / ".claude" / "mcp_servers.json"
-    if remove_wiring and claude_mcp.exists():
+    if remove_wiring and claude_mcp.exists() and str(claude_mcp) not in handled_paths:
         try:
             cfg = json.loads(claude_mcp.read_text())
             servers = cfg.get("mcpServers")
@@ -834,7 +860,7 @@ def uninstall(
 
     # 3. Handle aider config cleanup
     aider_conf = root / ".aider.conf.yml"
-    if remove_wiring and aider_conf.exists():
+    if remove_wiring and aider_conf.exists() and str(aider_conf) not in handled_paths:
         content = aider_conf.read_text()
         aider_begin = "# <!-- BEGIN agentalloy install -->"
         aider_end = "# <!-- END agentalloy install -->"
@@ -851,8 +877,14 @@ def uninstall(
     if remove_env:
         env_path = install_state.env_path()
         if env_path.exists():
-            env_path.unlink()
-            files_removed.append({"path": str(env_path), "action": "deleted"})
+            # Restore original .env content if we backed it up
+            original_env = st.get("env_original_content")
+            if original_env is not None:
+                env_path.write_text(original_env)
+                files_modified.append({"path": str(env_path), "action": "restored_original"})
+            else:
+                env_path.unlink()
+                files_removed.append({"path": str(env_path), "action": "deleted"})
 
     # 5. Handle user-data dir contents. Three sub-cases:
     #    - corpus_dir: kept by default (user data); removed only with --remove-data.
