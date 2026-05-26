@@ -22,9 +22,7 @@ from agentalloy.install.output import print_rich
 # Proxy-wired harnesses don't need the watcher; these are the ones
 # whose LLM traffic cannot be intercepted, plus the legacy cline/aider
 # regenerators for users running `agentalloy wire --legacy`.
-_SIDECAR_HARNESSES: frozenset[str] = frozenset(
-    PROXY_UNABLE_HARNESSES | {"cline", "aider"}
-)
+_SIDECAR_HARNESSES: frozenset[str] = frozenset(PROXY_UNABLE_HARNESSES | {"cline", "aider"})
 
 
 def _watch_dir() -> Path:
