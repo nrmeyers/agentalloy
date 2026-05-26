@@ -132,8 +132,11 @@ def _unwire_proxy_claude_code(root: Path) -> list[Path]:
             env_path.write_text(new_content)
         else:
             env_path.unlink()
-        print("Remove the source line from .bashrc/.zshrc manually:", file=sys.stderr)
-        print("  # AgentAlloy: claude-code proxy env", file=sys.stderr)
+        print(
+            "Remove any line sourcing the AgentAlloy claude-code env file from your shell profile (.bashrc/.zshrc):",
+            file=sys.stderr,
+        )
+        print(f"  source {env_path}", file=sys.stderr)
         return [env_path]
     return []
 
