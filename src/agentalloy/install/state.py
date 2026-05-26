@@ -564,6 +564,10 @@ def restore_original_env_content(data: dict[str, Any]) -> bool | None:
 
 
 def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
+    """Migrate state data from an older schema version."""
+    # No migrations needed yet — schema_version 1 is current.
+    return data
+
 
 def save_output_file(
     content: dict[str, Any],
