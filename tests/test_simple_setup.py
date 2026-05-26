@@ -241,12 +241,8 @@ class TestSimpleSetupExecution:
         self.mock.teardown()
 
     def _import_run_setup(self):
-        # Force re-import to pick up mocks
-        import importlib
-
         import agentalloy.install.subcommands.simple_setup as mod
 
-        importlib.reload(mod)
         return mod.SetupConfig, mod.run_setup
 
     def test_run_setup_preflight_early_failure(self, tmp_state_dir: tuple[Path, Path]):
@@ -698,11 +694,8 @@ class TestHarnessValidation:
         mock = MockSetup()
         mock.setup_all()
         try:
-            import importlib
-
             import agentalloy.install.subcommands.simple_setup as mod
 
-            importlib.reload(mod)
             cfg = mod.SetupConfig(harness="continue", non_interactive=True)
             # Harness normalization happens before execution
             h = cfg.harness.strip().lower()
@@ -733,11 +726,8 @@ class TestHarnessValidation:
         assert expected.issubset(VALID_HARNESSES)
 
     def _import_run_setup(self):
-        import importlib
-
         import agentalloy.install.subcommands.simple_setup as mod
 
-        importlib.reload(mod)
         return mod.SetupConfig, mod.run_setup
 
 
@@ -936,11 +926,8 @@ class TestContainerFlow:
         self.mock.teardown()
 
     def _import_run_setup(self):
-        import importlib
-
         import agentalloy.install.subcommands.simple_setup as mod
 
-        importlib.reload(mod)
         return mod.SetupConfig, mod.run_setup
 
     def test_container_flow_skips_native_prompts(self, tmp_state_dir: tuple[Path, Path]):
@@ -993,11 +980,8 @@ class TestContainerFlow:
         assert rc == 0
 
         # Check state was recorded
-        import importlib
-
         import agentalloy.install.state as state_mod
 
-        importlib.reload(state_mod)
         st = state_mod.load_state()
         assert st["deployment"] == "container"
         assert st["compose_binary"] == "podman compose"
@@ -1042,11 +1026,8 @@ class TestContainerFlow:
 
         assert rc == 0
 
-        import importlib
-
         import agentalloy.install.state as state_mod
 
-        importlib.reload(state_mod)
         st = state_mod.load_state()
         assert "compose.radeon.yaml" in st["compose_file"]
 
@@ -1092,11 +1073,8 @@ class TestContainerFlow:
 
         assert rc == 0
 
-        import importlib
-
         import agentalloy.install.state as state_mod
 
-        importlib.reload(state_mod)
         st = state_mod.load_state()
         # Should be absolute path
         assert st["compose_file"].startswith("/")
@@ -1108,11 +1086,8 @@ class TestContainerFlow:
         rc = run_setup(SetupConfig(deployment="native", non_interactive=True))
         assert rc == 0
 
-        import importlib
-
         import agentalloy.install.state as state_mod
 
-        importlib.reload(state_mod)
         st = state_mod.load_state()
         assert st["deployment"] == "native"
 
@@ -1123,11 +1098,8 @@ class TestContainerFlow:
         rc = run_setup(SetupConfig(non_interactive=True))
         assert rc == 0
 
-        import importlib
-
         import agentalloy.install.state as state_mod
 
-        importlib.reload(state_mod)
         st = state_mod.load_state()
         assert st["deployment"] == "native"
 
