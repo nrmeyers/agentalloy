@@ -253,7 +253,7 @@ def _stream_anthropic_response(
         async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code != 200:
                 logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                msg_start_data = {
+                msg_start_data = {  # pyright: ignore[reportUnknownVariableType]
                     "type": "message_start",
                     "message": {
                         "id": "msg_error",
