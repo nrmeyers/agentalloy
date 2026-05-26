@@ -123,28 +123,24 @@ def write_env(
     """Generate and write the .env file. Returns the contract-shaped result."""
     env_path = install_state.env_path()
 
-    # Capture original .env content before first write for backup/restore
-    original_content: str | None = None
-    if env_path.exists():
-        original_content = env_path.read_text()
+    # Read existing .env once — used for both backup and sentinel check.
+    original_content: str | None = env_path.read_text() if env_path.exists() else None
 
     # Refuse to overwrite hand-edited .env without --force
-    if env_path.exists():
-        existing = env_path.read_text()
-        if _SENTINEL not in existing and not force:
-            print(
-                "ERROR: Cannot write .env: file exists and was not produced by a prior install",
-                file=sys.stderr,
-            )
-            print(
-                f"CAUSE: A hand-edited or third-party .env is present at {env_path}.",
-                file=sys.stderr,
-            )
-            print(
-                "FIX:   Either move the existing file aside, or run `write-env --force` to overwrite",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+    if original_content is not None and _SENTINEL not in original_content and not force:
+        print(
+            "ERROR: Cannot write .env: file exists and was not produced by a prior install",
+            file=sys.stderr,
+        )
+        print(
+            f"CAUSE: A hand-edited or third-party .env is present at {env_path}.",
+            file=sys.stderr,
+        )
+        print(
+            "FIX:   Either move the existing file aside, or run `write-env --force` to overwrite",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     defaults = _load_preset(preset)
 
