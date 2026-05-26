@@ -529,8 +529,9 @@ def _wire_legacy(
         files_written.extend(_wire_aider_conf(root))
 
     # For sidecar harnesses (can't be proxy-wired), write watcher config and print guidance
-    _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
-    if harness in _sidecar_harnesses:
+    from agentalloy.install import PROXY_UNABLE_HARNESSES
+
+    if harness in PROXY_UNABLE_HARNESSES:
         _wire_sidecar_watcher_config(harness, root)
 
     # Probe for code-indexer and persist result to state.json

@@ -15,7 +15,17 @@ import signal
 import sys
 from pathlib import Path
 
+from agentalloy.install import PROXY_UNABLE_HARNESSES
 from agentalloy.install.output import print_rich
+
+
+# All sidecar harnesses that use the file-watching watcher.
+# Proxy-wired harnesses don't need the watcher; these are the ones
+# whose LLM traffic cannot be intercepted, plus the legacy cline/aider
+# regenerators for users running `agentalloy wire --legacy`.
+_SIDECAR_HARNESSES: frozenset[str] = frozenset(
+    PROXY_UNABLE_HARNESSES | {"cline", "aider"}
+)
 
 
 def _watch_dir() -> Path:
@@ -61,7 +71,7 @@ def _detect_harness() -> str | None:
         files = st.get("harness_files_written", [])
         for entry in files:
             h = entry.get("harness", "")
-            if h in ("cursor", "windsurf", "github-copilot", "gemini-cli"):
+            if h in _SIDECAR_HARNESSES:
                 return h
     except Exception:
         pass

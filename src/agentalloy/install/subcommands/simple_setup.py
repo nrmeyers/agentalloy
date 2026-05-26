@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import state as install_state
+from agentalloy.install import state as install_state, PROXY_UNABLE_HARNESSES
 from agentalloy.install.subcommands import (
     detect,
     enable_service,
@@ -780,13 +780,13 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
         # use legacy markdown-injection so we don't write a misleading
         # proxy-instruction.md file that claims traffic flows through the proxy.
-        _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+        # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
         rc = wire_harness.run(
             _build_namespace(
                 cfg,
                 harness=cfg.harness,
                 force=False,
-                legacy=cfg.harness in _sidecar_harnesses,
+                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
             )
         )
         if rc not in (0, 4):
@@ -1004,8 +1004,8 @@ def run_setup(cfg: SetupConfig) -> int:
     # rules file kept current by a watcher. System-skill gating degrades to
     # advisory. Non-interactive installs must explicitly acknowledge that with
     # --acknowledge-sidecar; interactive installs get a y/n prompt.
-    _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
-    if cfg.harness in _sidecar_harnesses:
+    # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
+    if cfg.harness in PROXY_UNABLE_HARNESSES:
         sidecar_msg = (
             f"\n  [yellow]Sidecar harness selected: {cfg.harness}[/yellow]\n"
             "  This harness cannot be proxy-wired (it does not honor OpenAI/Anthropic\n"
@@ -1193,13 +1193,13 @@ def run_setup(cfg: SetupConfig) -> int:
         # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
         # use legacy markdown-injection so we don't write a misleading
         # proxy-instruction.md file that claims traffic flows through the proxy.
-        _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+        # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
         rc = wire_harness.run(
             _build_namespace(
                 cfg,
                 harness=cfg.harness,
                 force=False,
-                legacy=cfg.harness in _sidecar_harnesses,
+                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
             )
         )
         if rc not in (0, 4):

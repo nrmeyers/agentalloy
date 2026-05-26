@@ -190,7 +190,7 @@ The proxy does NOT maintain:
 
 ### Universal Wiring
 
-Harnesses that support custom API endpoints wire to the proxy by changing their LLM configuration to point to `http://localhost:47950/v1/chat/completions`.
+Harnesses that support custom API endpoints wire to the proxy by changing their LLM configuration to point to `http://localhost:47950/v1`. The harness's own client appends the endpoint path (e.g., `/chat/completions`) to this base URL.
 
 ```bash
 agentalloy wire
@@ -219,10 +219,10 @@ The three-tier model (hooks, session injection, sidecar) is replaced by the prox
 
 | Component | Status |
 |-----------|--------|
-| Hook scripts (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`) | Deprecated — removed |
-| Sidecar / file watcher | Deprecated — removed |
-| Per-harness wiring (`wire_harness.py` 13 entries) | Replaced by universal proxy wiring |
-| Tier classification | Deprecated — single model |
+| Hook scripts (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`) | Deprecated — removed in proxy redesign |
+| Sidecar / file watcher | Kept — still the only option for non-interceptable harnesses (cursor, windsurf, github-copilot, gemini-cli). Marked with deprecation warning but functional. |
+| Per-harness wiring (`wire_harness.py`) | Kept — proxy wiring for interceptable harnesses; legacy wiring + sidecar for the rest |
+| Tier classification | Deprecated — replaced by binary proxy-wired vs sidecar classification |
 | `/compose` endpoint | Kept — standalone manual composition |
 | MCP fallback | Kept — for harnesses without custom API support |
 | Embedding model | Kept — still `qwen3-embedding:0.6b` |
