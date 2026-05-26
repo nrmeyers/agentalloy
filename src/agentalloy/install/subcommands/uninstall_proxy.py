@@ -121,7 +121,7 @@ def _unwire_proxy_opencode(root: Path) -> list[Path]:
 
 
 def _unwire_proxy_claude_code(root: Path) -> list[Path]:
-    """Remove claude-code env file and shell profile entries."""
+    """Remove the AgentAlloy sentinel block from the claude-code env file (delete it if empty)."""
     env_path = Path.home() / ".agentalloy" / "claude-code-env.sh"
     if not env_path.exists():
         return []
