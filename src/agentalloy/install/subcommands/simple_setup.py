@@ -777,7 +777,18 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     if cfg.harness and cfg.harness != "manual":
         _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
-        rc = wire_harness.run(_build_namespace(cfg, harness=cfg.harness, force=False))
+        # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
+        # use legacy markdown-injection so we don't write a misleading
+        # proxy-instruction.md file that claims traffic flows through the proxy.
+        _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+        rc = wire_harness.run(
+            _build_namespace(
+                cfg,
+                harness=cfg.harness,
+                force=False,
+                legacy=cfg.harness in _sidecar_harnesses,
+            )
+        )
         if rc not in (0, 4):
             _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
             return rc
@@ -1179,7 +1190,18 @@ def run_setup(cfg: SetupConfig) -> int:
     # Step i: Wire harness (if requested)
     if cfg.harness and cfg.harness != "manual":
         _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
-        rc = wire_harness.run(_build_namespace(cfg, harness=cfg.harness, force=False))
+        # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
+        # use legacy markdown-injection so we don't write a misleading
+        # proxy-instruction.md file that claims traffic flows through the proxy.
+        _sidecar_harnesses = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+        rc = wire_harness.run(
+            _build_namespace(
+                cfg,
+                harness=cfg.harness,
+                force=False,
+                legacy=cfg.harness in _sidecar_harnesses,
+            )
+        )
         if rc not in (0, 4):
             _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
             return rc

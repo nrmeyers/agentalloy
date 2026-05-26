@@ -83,7 +83,6 @@ eval/runs/
 .nanocoder/
 AGENTS.md
 CLAUDE.md
-docs/
 experiments/
 
 # Local agent/dev workspace configs

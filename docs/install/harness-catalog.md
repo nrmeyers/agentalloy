@@ -64,7 +64,7 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 | Harness | Proxy Config File | Notes |
 |---------|------------------|-------|
 | `claude-code` | `~/.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`) | Anthropic Messages API via proxy. Sourced by the user's shell or claude-code launcher. |
-| `continue-closed`, `continue-local` | `~/.continue/config.yaml` (`models[].apiBase`) | YAML mutation per model entry; legacy `config.json` also supported. |
+| `continue-closed`, `continue-local` | `.continuerc.json` (`models[].apiBase`) | JSON mutation per model entry. |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
 | `hermes-agent` | `~/.hermes/config.yaml` (`custom_providers.agentalloy`) user scope, or sentinel block in `AGENTS.md` repo scope | Scope resolved at runtime via `--scope user|repo`. |
 | `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `.opencode/system-prompt.md` | Env file must be sourced before launching OpenCode. |
