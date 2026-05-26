@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 
 from agentalloy.install.subcommands.wire_harness import (
     _build_result,
@@ -62,15 +61,17 @@ class TestBuildResultMerge:
         ]
         st = {"harness_files_written": prior}
 
-        with patch("agentalloy.install.state.load_state", return_value=st):
-            with patch("agentalloy.install.state.record_step", return_value=st):
-                with patch("agentalloy.install.state.save_state"):
-                    result = _build_result(
-                        harness="claude-code",
-                        vector="markdown",
-                        files_written=new_entries,
-                        root=tmp_path,
-                    )
+        with (
+            patch("agentalloy.install.state.load_state", return_value=st),
+            patch("agentalloy.install.state.record_step", return_value=st),
+            patch("agentalloy.install.state.save_state"),
+        ):
+            result = _build_result(
+                harness="claude-code",
+                vector="markdown",
+                files_written=new_entries,
+                root=tmp_path,
+            )
         entry = result["files_written"][0]
         assert entry["original_content"] == '{"key": "original"}\n'
 
@@ -94,15 +95,17 @@ class TestBuildResultMerge:
         ]
         st = {"harness_files_written": prior}
 
-        with patch("agentalloy.install.state.load_state", return_value=st):
-            with patch("agentalloy.install.state.record_step", return_value=st):
-                with patch("agentalloy.install.state.save_state"):
-                    result = _build_result(
-                        harness="claude-code",
-                        vector="markdown",
-                        files_written=new_entries,
-                        root=tmp_path,
-                    )
+        with (
+            patch("agentalloy.install.state.load_state", return_value=st),
+            patch("agentalloy.install.state.record_step", return_value=st),
+            patch("agentalloy.install.state.save_state"),
+        ):
+            result = _build_result(
+                harness="claude-code",
+                vector="markdown",
+                files_written=new_entries,
+                root=tmp_path,
+            )
         entry = result["files_written"][0]
         assert entry["original_content"] == "new original\n"
 
@@ -131,23 +134,25 @@ class TestUninstallRestoreLogic:
         """Call uninstall() with state and proxy mocks applied."""
         from agentalloy.install.subcommands.uninstall import uninstall
 
-        with patch(f"{_UNINSTALL}.install_state.load_state", return_value=st):
-            with patch(f"{_UNINSTALL}.install_state.save_state"):
-                with patch(f"{_UNINSTALL}.install_state.is_inside_root", return_value=True):
-                    with patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_aider", return_value=[]):
-                        with patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_opencode", return_value=[]):
-                            with patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_cline", return_value=[]):
-                                return uninstall(
-                                    remove_data=False,
-                                    force=force,
-                                    root=root,
-                                    remove_user_state=False,
-                                    remove_env=False,
-                                    all_repos=True,
-                                    remove_models=False,
-                                    remove_wiring=True,
-                                    stop_services=False,
-                                )
+        with (
+            patch(f"{_UNINSTALL}.install_state.load_state", return_value=st),
+            patch(f"{_UNINSTALL}.install_state.save_state"),
+            patch(f"{_UNINSTALL}.install_state.is_inside_root", return_value=True),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_aider", return_value=[]),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_opencode", return_value=[]),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_cline", return_value=[]),
+        ):
+            return uninstall(
+                remove_data=False,
+                force=force,
+                root=root,
+                remove_user_state=False,
+                remove_env=False,
+                all_repos=True,
+                remove_models=False,
+                remove_wiring=True,
+                stop_services=False,
+            )
 
     def test_restores_original_content(self, tmp_path: Path) -> None:
         """Uninstall restores original content when present in state."""
@@ -205,13 +210,7 @@ class TestUninstallRestoreLogic:
     def test_fallback_to_sentinel_stripping(self, tmp_path: Path) -> None:
         """Legacy state without original_content falls back to sentinel stripping."""
         config_file = tmp_path / "CLAUDE.md"
-        content = (
-            "user content\n"
-            "<!-- BEGIN -->\n"
-            "injected block\n"
-            "<!-- END -->\n"
-            "more user content\n"
-        )
+        content = "user content\n<!-- BEGIN -->\ninjected block\n<!-- END -->\nmore user content\n"
         config_file.write_text(content)
 
         st = {
@@ -252,21 +251,21 @@ class TestEnvBackup:
         original = "EXISTING_VAR=value\n"
         env_file.write_text(original)
 
-        with patch(
-            "agentalloy.install.subcommands.write_env.install_state.env_path",
-            return_value=env_file,
-        ):
-            with patch(
+        with (
+            patch(
+                "agentalloy.install.subcommands.write_env.install_state.env_path",
+                return_value=env_file,
+            ),
+            patch(
                 "agentalloy.install.subcommands.write_env.install_state.load_state",
                 return_value={},
-            ):
-                with patch(
-                    "agentalloy.install.subcommands.write_env.install_state.save_state"
-                ) as mock_save:
-                    write_env(preset="cpu", port=47950, force=True)
-                    mock_save.assert_called_once()
-                    state_arg = mock_save.call_args[0][0]
-                    assert state_arg.get("env_original_content") == original
+            ),
+            patch("agentalloy.install.subcommands.write_env.install_state.save_state") as mock_save,
+        ):
+            write_env(preset="cpu", port=47950, force=True)
+            mock_save.assert_called_once()
+            state_arg = mock_save.call_args[0][0]
+            assert state_arg.get("env_original_content") == original
 
     def test_write_env_does_not_overwrite_existing_backup(self, tmp_path: Path) -> None:
         """write_env doesn't overwrite existing env_original_content in state."""
@@ -275,17 +274,17 @@ class TestEnvBackup:
         env_file = tmp_path / ".env"
         env_file.write_text("CURRENT_VAR=value\n")
 
-        with patch(
-            "agentalloy.install.subcommands.write_env.install_state.env_path",
-            return_value=env_file,
-        ):
-            with patch(
+        with (
+            patch(
+                "agentalloy.install.subcommands.write_env.install_state.env_path",
+                return_value=env_file,
+            ),
+            patch(
                 "agentalloy.install.subcommands.write_env.install_state.load_state",
                 return_value={"env_original_content": "PRIOR_BACKUP\n"},
-            ):
-                with patch(
-                    "agentalloy.install.subcommands.write_env.install_state.save_state"
-                ) as mock_save:
-                    write_env(preset="cpu", port=47950, force=True)
-                    # save_state should NOT be called when backup already exists
-                    mock_save.assert_not_called()
+            ),
+            patch("agentalloy.install.subcommands.write_env.install_state.save_state") as mock_save,
+        ):
+            write_env(preset="cpu", port=47950, force=True)
+            # save_state should NOT be called when backup already exists
+            mock_save.assert_not_called()
