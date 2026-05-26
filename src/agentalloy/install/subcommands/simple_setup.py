@@ -634,21 +634,6 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
                 f"check {install_state.user_data_dir() / 'logs' / 'agentalloy.log'}[/dim]"
             )
 
-    # Show curl command for user reference
-    _print("")
-    if proxy_port:
-        _print("  Verify manually:")
-        _print(f"  curl -s http://localhost:{proxy_port}/v1/chat/completions \\")
-        _print("    -H 'Content-Type: application/json' \\")
-        _print(
-            '    -d \'{"model":"agentalloy-proxy","messages":[{"role":"user","content":"add a pytest for the CLI"}]}\'',
-        )
-    else:
-        _print("  Verify manually:")
-        _print(f"  curl -s {embed_url}/v1/embeddings \\")
-        _print("    -H 'Content-Type: application/json' \\")
-        _print(f'    -d \'{{"model":"{embed_model}","input":"hello"}}\'')
-
 
 def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     """Execute the container deployment flow.

@@ -817,6 +817,60 @@ class TestEmbedEndpoint:
         captured = capsys.readouterr()
         assert "fail" in captured.out.lower()
 
+    def test_embed_endpoint_with_proxy_port(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+        """Smoke test: embedding OK then proxy skill query with real completion output."""
+        import json as _json
+
+        env_content = (
+            "RUNTIME_EMBED_BASE_URL=http://localhost:11434\n"
+            "RUNTIME_EMBEDDING_MODEL=test-model\n"
+            "RUNTIME_PORT=47950\n"
+        )
+
+        # First call: embedding response
+        embed_resp = _json.dumps({"data": [{"embedding": [0.1] * 1024}]}).encode()
+        # Second call: proxy chat completion response
+        chat_resp = _json.dumps({
+            "choices": [{
+                "message": {"content": "Here is a pytest for the CLI:\n\ndef test_example():\n    pass"}
+            }]
+        }).encode()
+
+        call_count = [0]
+
+        class _MockResp:
+            def __init__(self, data: bytes):
+                self._data = data
+
+            def read(self):
+                return self._data
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a: Any) -> None:
+                pass
+
+        def _fake_urlopen(req: Any, timeout: int = 10) -> Any:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return _MockResp(embed_resp)
+            return _MockResp(chat_resp)
+
+        cfg = SetupConfig()
+        with patch("agentalloy.install.state.env_path", return_value=tmp_path / ".env"):
+            (tmp_path / ".env").write_text(env_content)
+            with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+                _test_embed_endpoint(cfg)
+
+        captured = capsys.readouterr()
+        # Strip ANSI codes for assertion
+        import re
+        clean = re.sub(r'\x1b\[[0-9;]*m', '', captured.out)
+        assert "1024-dim vector" in clean or "OK" in clean
+        assert "Skill query test: OK" in clean
+        assert "chars returned" in clean
+
 
 # ---------------------------------------------------------------------------
 # Setup Wizard UX Overhaul regression tests
