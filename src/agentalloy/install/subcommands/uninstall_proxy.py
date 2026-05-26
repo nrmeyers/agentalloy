@@ -140,24 +140,24 @@ def _unwire_proxy_cline(root: Path) -> list[Path]:
 
     # Only remove keys if they match AgentAlloy proxy values to avoid
     # removing user's own settings that happen to use the same keys.
-    proxy_keys = {
-        "apiProvider": "openai",
-        "apiBaseUrl": lambda v: (
-            "localhost" in str(v) and "agentalloy" in str(v).lower() or "localhost" in str(v)
-        ),
-        "apiKey": lambda v: v == "***" or v == "agentalloy",
-        "model": lambda v: v == "agentalloy-proxy",
-    }
     removed_any = False
-    for key, expected in proxy_keys.items():
-        if key in content:
-            if callable(expected):
-                if expected(content[key]):
-                    content.pop(key)
-                    removed_any = True
-            elif content[key] == expected:
-                content.pop(key)
-                removed_any = True
+
+    def should_remove_key(key: str, value: object) -> bool:
+        """Return True if the key/value pair looks like an AgentAlloy proxy setting."""
+        if key == "apiProvider" and value == "openai":
+            return True
+        if key == "apiBaseUrl" and isinstance(value, str) and "localhost" in value:
+            return True
+        if key == "apiKey" and value in ("***", "agentalloy"):
+            return True
+        if key == "model" and value == "agentalloy-proxy":
+            return True
+        return False
+
+    for key in ("apiProvider", "apiBaseUrl", "apiKey", "model"):
+        if key in content and should_remove_key(key, content[key]):
+            content.pop(key)
+            removed_any = True
 
     if not removed_any:
         # No proxy keys found — nothing to do
