@@ -121,11 +121,12 @@ def write_env(
     root: Path | None = None,
 ) -> dict[str, Any]:
     """Generate and write the .env file. Returns the contract-shaped result."""
-    # `.env` is now user-scoped (lives in the XDG config dir) so a single
-    # AgentAlloy service can serve every repo the user opens. The legacy
-    # per-repo location is no longer written; if one exists the user must
-    # remove it manually (it's now ignored at runtime).
     env_path = install_state.env_path()
+
+    # Capture original .env content before first write for backup/restore
+    original_content: str | None = None
+    if env_path.exists():
+        original_content = env_path.read_text()
 
     # Refuse to overwrite hand-edited .env without --force
     if env_path.exists():
@@ -156,6 +157,15 @@ def write_env(
 
     content = _render_env(values, preset, port)
     install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
+
+    # Persist original .env content to state for uninstall restore
+    # Only store on first write (if key doesn't already exist)
+    if original_content is not None:
+        st = install_state.load_state()
+        if "env_original_content" not in st:
+            st["env_original_content"] = original_content
+            install_state.save_state(st)
+
     # `.env` may carry tokens or runtime URLs; restrict to owner-only on
     # POSIX. Windows ignores chmod and falls back to NTFS ACL defaults.
     import os as _os

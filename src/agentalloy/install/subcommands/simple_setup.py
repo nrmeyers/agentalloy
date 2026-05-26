@@ -541,6 +541,19 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
     multiple times.
     """
     env_fp = install_state.env_path()
+
+    # Capture original .env content for backup/restore (only on first call)
+    original_content = None
+    if env_fp.exists():
+        original_content = env_fp.read_text()
+
+    # Persist to state if this is the first backup
+    if original_content is not None:
+        st = install_state.load_state()
+        if "env_original_content" not in st:
+            st["env_original_content"] = original_content
+            install_state.save_state(st)
+
     existing = env_fp.read_text(encoding="utf-8") if env_fp.exists() else ""
 
     # Remove any existing upstream lines
@@ -782,6 +795,13 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     env_dir = install_state.user_config_dir()
     env_dir.mkdir(parents=True, exist_ok=True)
     env_fp = install_state.env_path()
+
+    # Capture original .env content for backup/restore (only on first write)
+    original_env_content: str | None = None
+    if env_fp.exists():
+        original_env_content = env_fp.read_text()
+        st["env_original_content"] = original_env_content
+
     env_lines = [
         f"RUNTIME_EMBED_BASE_URL=http://localhost:{cfg.port}",
         'RUNTIME_EMBEDDING_MODEL=""',
