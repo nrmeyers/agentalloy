@@ -29,7 +29,8 @@ class TestAiderProxyWiring:
         assert "openai-api-base: http://localhost:7777/v1" in content
         assert "openai-api-key: agentalloy" in content
         assert "model: agentalloy-proxy" in content
-        assert ".agentalloy-aider-instructions.md" in content
+        # Proxy mode does NOT create a separate instructions file
+        assert ".agentalloy-aider-instructions.md" not in content
 
     def test_aider_proxy_uses_sentinel_markers(self, repo_root: Path) -> None:
         """Proxy block is bounded by sentinel comments for clean removal."""

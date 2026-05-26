@@ -149,17 +149,20 @@ def _stream_upstream_response(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_model(model: str, upstream_model: str | None) -> str:
+def _resolve_model(model: str, upstream_model: str | None) -> str | None:
     """Resolve a model name to the upstream model to forward.
 
     The synthetic name ``"agentalloy-proxy"`` (used by Continue and other
     harnesses that point their API base at the proxy) maps to
-    ``upstream_model`` from settings.  Any other name is passed through
-    unchanged, which allows callers that already specify a concrete model
-    (e.g. ``"gpt-4o"``) to work without re-configuration.
+    ``upstream_model`` from settings.  If upstream_model is unset, returns
+    ``None`` so the caller can return a 503 with a clear message.
+
+    Any other name is passed through unchanged, which allows callers that
+    already specify a concrete model (e.g. ``"gpt-4o"``) to work without
+    re-configuration.
     """
     if model == "agentalloy-proxy":
-        return upstream_model or model
+        return upstream_model if upstream_model else None
     return model
 
 
@@ -169,9 +172,18 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
     If *upstream_model* is set, overrides ``request.model`` so that synthetic
     model names (e.g. "agentalloy-proxy" from Continue) are mapped to the
     actual upstream model.
+
+    Raises ``ValueError`` if the resolved model is ``None`` (i.e., the
+    client sent ``"agentalloy-proxy"`` but no upstream model is configured).
     """
+    resolved = _resolve_model(request.model, upstream_model)
+    if resolved is None:
+        raise ValueError(
+            "Model 'agentalloy-proxy' requires an upstream model. "
+            "Set UPSTREAM_MODEL in your configuration."
+        )
     payload: dict[str, Any] = {
-        "model": _resolve_model(request.model, upstream_model),
+        "model": resolved,
         "messages": [m.model_dump() for m in request.messages],
         "stream": request.stream,
     }
@@ -301,7 +313,18 @@ async def proxy_chat_completions(
             modified_request = request
 
     # --- Step 5: Forward to upstream ---
-    payload = _build_payload(modified_request, settings.upstream_model)
+    try:
+        payload = _build_payload(modified_request, settings.upstream_model)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "type": "api_error",
+                    "message": str(e),
+                }
+            },
+        )
     error_code: str | None = None
 
     if modified_request.stream:

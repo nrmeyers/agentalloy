@@ -251,16 +251,30 @@ def _stream_anthropic_response(
         }
 
         async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
-            if resp.status_code >= 500:
+            if resp.status_code != 200:
                 logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                yield (
-                    "event: message_start\n"
-                    f'data: {{"type":"message_start","message":{{"id":"msg_error","type":"message","role":"assistant","content":[],"model":"{model}","stop_reason":null,"stop_sequence":null,"usage":{{"input_tokens":0,"output_tokens":0}}}}}}\n\n'
-                )
-                yield (
-                    "event: error\n"
-                    f'data: {{"type":"error","error":{{"type":"api_error","message":"Upstream returned HTTP {resp.status_code}"}}}}\n\n'
-                )
+                msg_start_data = {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_error",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                }
+                yield f"event: message_start\ndata: {json.dumps(msg_start_data)}\n\n"
+                error_data = {
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "message": f"Upstream returned HTTP {resp.status_code}",
+                    },
+                }
+                yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
                 return
 
             async for line in resp.aiter_lines():
@@ -344,7 +358,7 @@ def _stream_anthropic_response(
 @router.post("/v1/messages", response_model=None)
 async def proxy_anthropic_messages(
     request: AnthropicRequest,
-    http_request: Request,
+    _http_request: Request,
     upstream: httpx.AsyncClient | None = Depends(get_upstream_client),
     settings: Any = Depends(get_settings_for_proxy),
 ) -> JSONResponse | StreamingResponse:
@@ -358,7 +372,19 @@ async def proxy_anthropic_messages(
         return _upstream_not_configured_error()
 
     openai_request = _anthropic_to_openai(request)
-    payload = _build_payload(openai_request, settings.upstream_model)
+    try:
+        payload = _build_payload(openai_request, settings.upstream_model)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": str(e),
+                },
+            },
+        )
 
     if request.stream:
         return _stream_anthropic_response(upstream, payload, request.model)

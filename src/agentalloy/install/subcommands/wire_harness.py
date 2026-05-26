@@ -504,13 +504,13 @@ def _wire_legacy(
                     raise SystemExit(1)
 
     if dedicated:
-        install_state._atomic_write(target_path, rendered)
+        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
         action = "wrote_new_file"
         content_sha256 = _sha256(rendered.strip())
     else:
         existing = target_path.read_text() if target_path.exists() else ""
         result_content = _inject_sentinel_block(existing, rendered)
-        install_state._atomic_write(target_path, result_content)
+        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
         action = "injected_block"
         content_sha256 = _sha256(rendered.strip())
 
@@ -895,7 +895,7 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
 
     Writes a sentinel-bounded YAML block that configures aider's
     ``openai-api-base``, ``openai-api-key``, and ``model`` fields to point
-    at the proxy, and adds a ``read`` entry for the instructions file.
+    at the proxy.
     """
     conf_path = root / ".aider.conf.yml"
     sentinel_begin = "# <!-- BEGIN agentalloy install -->"
@@ -907,8 +907,6 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
         f"openai-api-base: {proxy_url}",
         "openai-api-key: agentalloy",
         "model: agentalloy-proxy",
-        "read:",
-        "  - .agentalloy-aider-instructions.md",
         sentinel_end,
     ]
     block = "\n".join(block_lines)
@@ -1118,8 +1116,8 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
     """Wire Cline to use the AgentAlloy proxy.
 
     Writes ``.cline/settings.json`` with proxy fields (``apiProvider``,
-    ``apiBaseUrl``, ``apiKey``, ``model``).  If the file already exists,
-    merges the proxy fields into it without overwriting other settings.
+    ``apiBaseUrl``, ``apiKey``, ``model``).  Overwrites those four keys;
+    preserves all other keys in the file.
     """
     settings_path = root / ".cline" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)

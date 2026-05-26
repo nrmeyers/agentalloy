@@ -30,6 +30,15 @@ def repo_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture()
+def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Patch Path.home() to return a tmp_path subdir for hermetic tests."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home, raising=False)
+    return home
+
+
 # ---------------------------------------------------------------------------
 # Sentinel injection
 # ---------------------------------------------------------------------------
@@ -398,7 +407,9 @@ class TestOutputSchema:
 
 
 class TestState:
-    def test_records_harness_in_state(self, repo_root: Path) -> None:
+    def test_records_harness_in_state(
+        self, repo_root: Path, mock_home: Path  # noqa: ARG001
+    ) -> None:
         # Schema v2: each harness_files_written entry carries its own
         # `harness` field (state may span multiple repos with different
         # harnesses wired). No top-level `harness` field exists.
@@ -409,10 +420,12 @@ class TestState:
         assert st["harness_files_written"][0]["repo_root"] == str(repo_root)
         assert install_state.is_step_completed(st, STEP_NAME)
 
-    def test_records_files_written(self, repo_root: Path) -> None:
+    def test_records_files_written(self, repo_root: Path, mock_home: Path) -> None:
         wire_harness("claude-code", port=8000, root=repo_root)
         st = install_state.load_state(repo_root)
         assert len(st["harness_files_written"]) == 1  # env file only
+        # Verify it wrote to the mocked home, not the real one
+        assert (mock_home / ".agentalloy" / "claude-code-env.sh").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +542,9 @@ class TestAiderProxyWiring:
         assert "openai-api-base: http://localhost:8000/v1" in content
         assert "openai-api-key: agentalloy" in content
         assert "model: agentalloy-proxy" in content
-        assert "  - .agentalloy-aider-instructions.md" in content
+        # Proxy mode does NOT create a separate instructions file — context
+        # injection is handled server-side by the proxy
+        assert ".agentalloy-aider-instructions.md" not in content
 
     def test_merges_existing_aider_conf(self, repo_root: Path) -> None:
         (repo_root / ".aider.conf.yml").write_text("model: gpt-4\nread:\n  - my-docs.md\n")
@@ -951,13 +966,42 @@ class TestUninstallProxy:
         assert len(removed) == 1
 
     def test_unwire_proxy_opencode_removes_files(self, repo_root: Path) -> None:
-        """Unwire removes opencode env file and system prompt."""
+        """Unwire removes opencode env file and sentinel block from prompt."""
         opencode_dir = repo_root / ".opencode"
         opencode_dir.mkdir()
         env_file = opencode_dir / ".agentalloy-env"
         prompt_file = repo_root / ".opencode" / "system-prompt.md"
         env_file.write_text("ENV_VAR=value\n")
-        prompt_file.write_text("SYSTEM PROMPT\n")
+        # Prompt file has user content + sentinel block
+        prompt_file.write_text(
+            "My custom prompt\n\n"
+            f"{SENTINEL_BEGIN}\nproxy block\n{SENTINEL_END}\n"
+            "More user content\n"
+        )
+
+        removed = uninstall_proxy._unwire_proxy_opencode(repo_root)
+        assert not env_file.exists()
+        # Prompt file preserved, sentinel block removed
+        assert prompt_file.exists()
+        content = prompt_file.read_text()
+        assert "My custom prompt" in content
+        assert "More user content" in content
+        assert SENTINEL_BEGIN not in content
+        assert len(removed) == 2
+
+    def test_unwire_proxy_opencode_deletes_prompt_if_only_sentinel(
+        self, repo_root: Path
+    ) -> None:
+        """Unwire deletes prompt file if it contains only the sentinel block."""
+        opencode_dir = repo_root / ".opencode"
+        opencode_dir.mkdir()
+        env_file = opencode_dir / ".agentalloy-env"
+        prompt_file = repo_root / ".opencode" / "system-prompt.md"
+        env_file.write_text("ENV_VAR=value\n")
+        # Prompt file has only the sentinel block
+        prompt_file.write_text(
+            f"{SENTINEL_BEGIN}\nproxy block\n{SENTINEL_END}\n"
+        )
 
         removed = uninstall_proxy._unwire_proxy_opencode(repo_root)
         assert not env_file.exists()
@@ -965,7 +1009,7 @@ class TestUninstallProxy:
         assert len(removed) == 2
 
     def test_unwire_proxy_claude_code_removes_env(self, tmp_path: Path) -> None:
-        """Unwire removes claude-code env file."""
+        """Unwire removes claude-code env file sentinel block."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         from pathlib import Path as _Path
@@ -979,10 +1023,20 @@ class TestUninstallProxy:
             _os.environ["HOME"] = str(fake_home)
             env_file = fake_home / ".agentalloy" / "claude-code-env.sh"
             env_file.parent.mkdir(parents=True)
-            env_file.write_text("# AgentAlloy: claude-code proxy env\nexport AGENTALLOY_PROXY=on\n")
+            # Env file has user content + sentinel block
+            env_file.write_text(
+                "# Existing env\nexport FOO=bar\n"
+                f"{SENTINEL_BEGIN}\nproxy block\n{SENTINEL_END}\n"
+                "# More user content\n"
+            )
 
             removed = uninstall_proxy._unwire_proxy_claude_code(fake_home)
-            assert not env_file.exists()
+            # Env file preserved, sentinel block removed
+            assert env_file.exists()
+            content = env_file.read_text()
+            assert "Existing env" in content
+            assert "More user content" in content
+            assert SENTINEL_BEGIN not in content
             assert len(removed) == 1
         finally:
             _Path.home = original_home

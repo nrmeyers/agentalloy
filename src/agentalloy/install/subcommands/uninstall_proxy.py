@@ -74,15 +74,17 @@ def _unwire_proxy_aider(root: Path) -> list[Path]:
     if not conf_path.exists():
         return []
     content = conf_path.read_text()
-    # Remove between sentinel comments
     new_content = _remove_sentinel_block(content)
-    conf_path.write_text(new_content)
-    # Also remove instructions file
+    removed: list[Path] = []
+    if new_content != content:
+        conf_path.write_text(new_content)
+        removed.append(conf_path)
+    # Also remove instructions file if it exists (legacy installs created it)
     instr_path = root / ".agentalloy-aider-instructions.md"
     if instr_path.exists():
         instr_path.unlink()
-        return [conf_path, instr_path]
-    return [conf_path]
+        removed.append(instr_path)
+    return removed
 
 
 def _unwire_proxy_hermes_agent(scope: str, root: Path) -> list[Path]:
@@ -92,8 +94,10 @@ def _unwire_proxy_hermes_agent(scope: str, root: Path) -> list[Path]:
         return []
     content = config_path.read_text()
     new_content = _remove_sentinel_block(content)
-    config_path.write_text(new_content)
-    return [config_path]
+    if new_content != content:
+        config_path.write_text(new_content)
+        return [config_path]
+    return []
 
 
 def _unwire_proxy_opencode(root: Path) -> list[Path]:
@@ -105,17 +109,29 @@ def _unwire_proxy_opencode(root: Path) -> list[Path]:
         env_path.unlink()
         removed.append(env_path)
     if prompt_path.exists():
-        prompt_path.unlink()
-        removed.append(prompt_path)
+        content = prompt_path.read_text()
+        new_content = _remove_sentinel_block(content)
+        if new_content != content:
+            if new_content.strip():
+                prompt_path.write_text(new_content)
+            else:
+                prompt_path.unlink()
+            removed.append(prompt_path)
     return removed
 
 
 def _unwire_proxy_claude_code(root: Path) -> list[Path]:
     """Remove claude-code env file and shell profile entries."""
     env_path = Path.home() / ".agentalloy" / "claude-code-env.sh"
-    if env_path.exists():
-        env_path.unlink()
-        # Print instructions for shell profile cleanup
+    if not env_path.exists():
+        return []
+    content = env_path.read_text()
+    new_content = _remove_sentinel_block(content)
+    if new_content != content:
+        if new_content.strip():
+            env_path.write_text(new_content)
+        else:
+            env_path.unlink()
         print("Remove the source line from .bashrc/.zshrc manually:", file=sys.stderr)
         print("  # AgentAlloy: claude-code proxy env", file=sys.stderr)
         return [env_path]
