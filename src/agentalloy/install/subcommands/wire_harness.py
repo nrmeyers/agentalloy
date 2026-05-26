@@ -1144,10 +1144,12 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
     serialized = json.dumps(settings, indent=2) + "\n"
     install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
 
+    # Record as "injected_block" so uninstall knows to merge-remove proxy keys
+    # rather than delete the file outright (users may have their own settings).
     return [
         {
             "path": str(settings_path),
-            "action": "wrote_new_file",
+            "action": "injected_block",
             "content_sha256": _sha256(serialized),
         }
     ]

@@ -720,25 +720,17 @@ def uninstall(
     # Each proxy-wired harness has its own uninstall function in uninstall_proxy
     proxy_removed: list[Path] = []
 
-    # aider proxy
+    # Repo-scope proxies: safe to run on any per-repo unwire
     if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
-
-    # hermes-agent proxy (user-scope only)
-    if remove_wiring:
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
-
-    # opencode proxy
-    if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
-
-    # claude-code proxy (user-scope only)
-    if remove_wiring:
-        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
-
-    # cline proxy (per-repo .cline/settings.json)
-    if remove_wiring:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
+
+    # User-scope proxies: only run during a global (all_repos) uninstall to avoid
+    # removing global home-dir config when unwiring an unrelated repo.
+    if remove_wiring and all_repos:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
 
     if proxy_removed:
         for p in proxy_removed:
