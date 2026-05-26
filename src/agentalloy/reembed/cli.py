@@ -408,7 +408,12 @@ def reembed_fragments(
 
         stats.embedded += 1
         if progress_tty:
-            print(f"\r  embedded {stats.embedded}/{stats.discovered}", end="", file=sys.stderr, flush=True)
+            print(
+                f"\r  embedded {stats.embedded}/{stats.discovered}",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
         elif stats.embedded % 10 == 0:
             logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
 

@@ -611,10 +611,12 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
     # Second test: end-to-end skill query via the proxy
     if proxy_port and upstream_model:
         proxy_url = f"http://localhost:{proxy_port}"
-        query_payload = json.dumps({
-            "model": upstream_model,
-            "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
-        }).encode()
+        query_payload = json.dumps(
+            {
+                "model": upstream_model,
+                "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
+            }
+        ).encode()
         req2 = _urllib_request.Request(
             f"{proxy_url}/v1/chat/completions",
             data=query_payload,
@@ -639,7 +641,9 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
         _print("  Verify manually:")
         _print(f"  curl -s http://localhost:{proxy_port}/v1/chat/completions \\")
         _print("    -H 'Content-Type: application/json' \\")
-        _print(f'    -d \'{{"model":"{upstream_model}","messages":[{{"role":"user","content":"add a pytest for the CLI"}}]}}\'')
+        _print(
+            f'    -d \'{{"model":"{upstream_model}","messages":[{{"role":"user","content":"add a pytest for the CLI"}}]}}\''
+        )
     else:
         _print("  Verify manually:")
         _print(f"  curl -s {embed_url}/v1/embeddings \\")
