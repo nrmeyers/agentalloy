@@ -718,7 +718,7 @@ def uninstall(
 
     # 2a. Handle proxy config cleanup (new sentinel-bounded blocks)
     # Each proxy-wired harness has its own uninstall function in uninstall_proxy
-    proxy_removed = []
+    proxy_removed: list[Path] = []
 
     # aider proxy
     if remove_wiring:

@@ -74,18 +74,19 @@ def _openai_to_anthropic(openai_body: dict[str, Any], model: str) -> dict[str, A
     - ``finish_reason`` → ``stop_reason`` (``"stop"`` → ``"end_turn"``,
       ``"length"`` → ``"max_tokens"``)
     """
-    choice = (openai_body.get("choices") or [{}])[0]
-    message = choice.get("message") or {}
-    text = message.get("content") or ""
+    choices: list[dict[str, Any]] = openai_body.get("choices") or [{}]
+    choice: dict[str, Any] = choices[0]
+    message: dict[str, Any] = choice.get("message") or {}
+    text: str = message.get("content") or ""
 
-    finish = choice.get("finish_reason")
+    finish: str | None = choice.get("finish_reason")
     stop_reason: str | None = None
     if finish == "stop":
         stop_reason = "end_turn"
     elif finish == "length":
         stop_reason = "max_tokens"
 
-    usage_raw = openai_body.get("usage") or {}
+    usage_raw: dict[str, Any] = openai_body.get("usage") or {}
     usage: dict[str, Any] = {
         "input_tokens": usage_raw.get("prompt_tokens", 0),
         "output_tokens": usage_raw.get("completion_tokens", 0),
@@ -126,23 +127,23 @@ def _openai_stream_to_anthropic(
     stop_reason = "end_turn"
 
     for chunk in openai_chunks:
-        choices = chunk.get("choices") or []
+        choices: list[dict[str, Any]] = chunk.get("choices") or []
         if not choices:
-            usage = chunk.get("usage") or {}
+            usage: dict[str, Any] = chunk.get("usage") or {}
             if usage:
                 input_tokens = int(usage.get("prompt_tokens") or input_tokens)
                 output_tokens = int(usage.get("completion_tokens") or output_tokens)
             continue
 
-        choice = choices[0]
-        delta = choice.get("delta") or {}
-        finish = choice.get("finish_reason")
+        choice: dict[str, Any] = choices[0]
+        delta: dict[str, Any] = choice.get("delta") or {}
+        finish: str | None = choice.get("finish_reason")
 
         # Strip tool_calls — text-only mode
         if delta.get("tool_calls"):
             logger.warning("Anthropic router received tool_calls; stripping (text-only mode)")
 
-        text = delta.get("content") or ""
+        text: str = delta.get("content") or ""
 
         if first:
             events.append(
@@ -181,7 +182,7 @@ def _openai_stream_to_anthropic(
         if finish:
             stop_reason = "end_turn" if finish == "stop" else "max_tokens"
 
-        usage = chunk.get("usage") or {}
+        usage: dict[str, Any] = chunk.get("usage") or {}
         if usage:
             input_tokens = int(usage.get("prompt_tokens") or input_tokens)
             output_tokens = int(usage.get("completion_tokens") or output_tokens)

@@ -6,7 +6,10 @@ import time
 import uuid
 from typing import Any
 
-from agentalloy.api.proxy_anthropic_models import AnthropicRequest
+from agentalloy.api.proxy_anthropic_models import (
+    AnthropicMessage,
+    AnthropicRequest,
+)
 from agentalloy.api.proxy_anthropic_router import (
     _anthropic_to_openai,
     _openai_stream_to_anthropic,
@@ -27,7 +30,7 @@ class TestAnthropicToOpenAI:
             model="claude-3-opus",
             max_tokens=1024,
             system="You are a helpful assistant.",
-            messages=[{"role": "user", "content": "Hello"}],
+            messages=[AnthropicMessage(role="user", content="Hello")],
         )
         openai_req = _anthropic_to_openai(req)
         assert openai_req.messages[0].role == "system"
@@ -41,9 +44,9 @@ class TestAnthropicToOpenAI:
             model="claude-3-opus",
             max_tokens=1024,
             messages=[
-                {"role": "user", "content": "What is 2+2?"},
-                {"role": "assistant", "content": "4"},
-                {"role": "user", "content": "Thanks"},
+                AnthropicMessage(role="user", content="What is 2+2?"),
+                AnthropicMessage(role="assistant", content="4"),
+                AnthropicMessage(role="user", content="Thanks"),
             ],
         )
         openai_req = _anthropic_to_openai(req)
@@ -57,7 +60,7 @@ class TestAnthropicToOpenAI:
         req = AnthropicRequest(
             model="claude-3-opus",
             max_tokens=1024,
-            messages=[{"role": "user", "content": "Hi"}],
+            messages=[AnthropicMessage(role="user", content="Hi")],
         )
         openai_req = _anthropic_to_openai(req)
         assert len(openai_req.messages) == 1
@@ -178,7 +181,7 @@ class TestAnthropicProxyIntegration:
             model="claude-3-opus",
             max_tokens=100,
             system="Be concise.",
-            messages=[{"role": "user", "content": "What year is it?"}],
+            messages=[AnthropicMessage(role="user", content="What year is it?")],
         )
         _openai_req = _anthropic_to_openai(req)
 
