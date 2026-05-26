@@ -570,17 +570,14 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
     embed_url = None
     embed_model = None
     proxy_port = None
-    upstream_model = None
     if env_path.exists():
         for line in env_path.read_text().splitlines():
             if line.startswith("RUNTIME_EMBED_BASE_URL="):
                 embed_url = line.split("=", 1)[1].strip()
             elif line.startswith("RUNTIME_EMBEDDING_MODEL="):
                 embed_model = line.split("=", 1)[1].strip()
-            elif line.startswith("PROXY_PORT="):
+            elif line.startswith("RUNTIME_PORT="):
                 proxy_port = line.split("=", 1)[1].strip()
-            elif line.startswith("UPSTREAM_MODEL="):
-                upstream_model = line.split("=", 1)[1].strip()
 
     if not embed_url or not embed_model:
         _print("  [yellow]Could not read embed URL/model from .env -- skipping test.[/yellow]")
@@ -609,11 +606,13 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
         return
 
     # Second test: end-to-end skill query via the proxy
-    if proxy_port and upstream_model:
+    if proxy_port:
         proxy_url = f"http://localhost:{proxy_port}"
+        # Use the synthetic proxy model name (agentalloy-proxy) which the proxy
+        # resolves to UPSTREAM_MODEL — exercises the proxy's full resolution path.
         query_payload = json.dumps(
             {
-                "model": upstream_model,
+                "model": "agentalloy-proxy",
                 "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
             }
         ).encode()
@@ -637,12 +636,12 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
 
     # Show curl command for user reference
     _print("")
-    if proxy_port and upstream_model:
+    if proxy_port:
         _print("  Verify manually:")
         _print(f"  curl -s http://localhost:{proxy_port}/v1/chat/completions \\")
         _print("    -H 'Content-Type: application/json' \\")
         _print(
-            f'    -d \'{{"model":"{upstream_model}","messages":[{{"role":"user","content":"add a pytest for the CLI"}}]}}\''
+            '    -d \'{"model":"agentalloy-proxy","messages":[{"role":"user","content":"add a pytest for the CLI"}]}\'',
         )
     else:
         _print("  Verify manually:")
