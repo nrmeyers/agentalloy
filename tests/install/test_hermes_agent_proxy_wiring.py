@@ -1,4 +1,5 @@
 """Tests for Hermes Agent proxy wiring. Maps to Step 4."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -48,9 +49,7 @@ class TestHermesAgentProxyWiring:
         assert "# <!-- BEGIN agentalloy install -->" in content
         assert "# <!-- END agentalloy install -->" in content
 
-    def test_user_scope_idempotent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_user_scope_idempotent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Re-running user-scope wiring replaces the existing block."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()

@@ -9,7 +9,6 @@ calling is out of scope — tool_calls deltas are silently stripped.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from typing import Any
@@ -146,32 +145,38 @@ def _openai_stream_to_anthropic(
         text = delta.get("content") or ""
 
         if first:
-            events.append({
-                "type": "message_start",
-                "message": {
-                    "id": msg_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model,
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                },
-            })
-            events.append({
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
-            })
+            events.append(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": msg_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                }
+            )
+            events.append(
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                }
+            )
             first = False
 
         if text:
-            events.append({
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": text},
-            })
+            events.append(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": text},
+                }
+            )
 
         if finish:
             stop_reason = "end_turn" if finish == "stop" else "max_tokens"
@@ -183,26 +188,37 @@ def _openai_stream_to_anthropic(
 
     if first:
         # Empty stream
-        events.append({
-            "type": "message_start",
-            "message": {
-                "id": msg_id, "type": "message", "role": "assistant",
-                "content": [], "model": model,
-                "stop_reason": None, "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            },
-        })
-        events.append({
-            "type": "content_block_start", "index": 0,
-            "content_block": {"type": "text", "text": ""},
-        })
+        events.append(
+            {
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+        )
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            }
+        )
 
     events.append({"type": "content_block_stop", "index": 0})
-    events.append({
-        "type": "message_delta",
-        "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-        "usage": {"output_tokens": output_tokens},
-    })
+    events.append(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {"output_tokens": output_tokens},
+        }
+    )
     events.append({"type": "message_stop"})
     return events
 
@@ -241,15 +257,16 @@ async def proxy_anthropic_messages(
         logger.warning("Upstream connection failed: %s", e)
         return JSONResponse(
             status_code=503,
-            content={"type": "error", "error": {"type": "overloaded_error",
-                     "message": f"Upstream unavailable: {e}"}},
+            content={
+                "type": "error",
+                "error": {"type": "overloaded_error", "message": f"Upstream unavailable: {e}"},
+            },
         )
 
     if resp.status_code != 200:
         return JSONResponse(
             status_code=resp.status_code,
-            content={"type": "error", "error": {"type": "api_error",
-                     "message": resp.text}},
+            content={"type": "error", "error": {"type": "api_error", "message": resp.text}},
         )
 
     openai_body: dict[str, Any] = resp.json()

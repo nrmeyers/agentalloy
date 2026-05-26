@@ -1,4 +1,5 @@
 """Tests for Tier 3 watcher skipping in proxy vs legacy paths. Maps to Step 6."""
+
 from __future__ import annotations
 
 from pathlib import Path

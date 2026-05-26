@@ -189,7 +189,8 @@ class TestUnwire:
         out = json.loads(capsys.readouterr().out)
         # cwd ~/.agentalloy/claude-code-env.sh was either modified or removed
         cwd_touched = any(
-            "claude-code-env.sh" in f.get("path", "") for f in out["files_modified"] + out["files_removed"]
+            "claude-code-env.sh" in f.get("path", "")
+            for f in out["files_modified"] + out["files_removed"]
         )
         assert cwd_touched
         # The other-repo entry should have produced a "different repo" warning, not deletion

@@ -12,12 +12,12 @@ from pathlib import Path
 
 def _remove_sentinel_block(content: str) -> str:
     """Remove content between agentalloy sentinels.
-    
+
     Uses the same sentinels as wire_harness.py for all blocks.
     """
     begin = "<!-- BEGIN agentalloy install -->"
     end = "<!-- END agentalloy install -->"
-    
+
     if begin not in content or end not in content:
         return content
     b = content.index(begin)
@@ -56,10 +56,7 @@ def _unwire_proxy_aider(root: Path) -> list[Path]:
 
 def _unwire_proxy_hermes_agent(scope: str, root: Path) -> list[Path]:
     """Remove hermes-agent proxy config from config.yaml."""
-    if scope == "user":
-        config_path = Path.home() / ".hermes" / "config.yaml"
-    else:
-        config_path = root / "AGENTS.md"
+    config_path = Path.home() / ".hermes" / "config.yaml" if scope == "user" else root / "AGENTS.md"
     if not config_path.exists():
         return []
     content = config_path.read_text()

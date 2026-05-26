@@ -1,11 +1,10 @@
 """Tests for Anthropic Messages API router. Maps to Step 7."""
+
 from __future__ import annotations
 
 import time
 import uuid
 from typing import Any
-
-import pytest
 
 from agentalloy.api.proxy_anthropic_models import AnthropicRequest
 from agentalloy.api.proxy_anthropic_router import (
@@ -13,7 +12,6 @@ from agentalloy.api.proxy_anthropic_router import (
     _openai_stream_to_anthropic,
     _openai_to_anthropic,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestAnthropicToOpenAI
@@ -118,15 +116,17 @@ class TestOpenAItoAnthropic:
         chunks: list[dict[str, Any]] = [
             {
                 "id": "chatcmpl-1",
-                "choices": [{
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant",
-                        "tool_calls": [{"id": "tc1", "function": {"name": "search"}}],
-                        "content": "prefix",
-                    },
-                    "finish_reason": None,
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "tool_calls": [{"id": "tc1", "function": {"name": "search"}}],
+                            "content": "prefix",
+                        },
+                        "finish_reason": None,
+                    }
+                ],
             },
             {
                 "id": "chatcmpl-1",
@@ -135,10 +135,7 @@ class TestOpenAItoAnthropic:
         ]
         events = _openai_stream_to_anthropic(chunks, "claude-3-opus")
         # Collect text deltas
-        text_deltas = [
-            e["delta"]["text"] for e in events
-            if e.get("type") == "content_block_delta"
-        ]
+        text_deltas = [e["delta"]["text"] for e in events if e.get("type") == "content_block_delta"]
         combined = "".join(text_deltas)
         assert "prefix" in combined
         assert " text" in combined
@@ -183,7 +180,7 @@ class TestAnthropicProxyIntegration:
             system="Be concise.",
             messages=[{"role": "user", "content": "What year is it?"}],
         )
-        openai_req = _anthropic_to_openai(req)
+        _openai_req = _anthropic_to_openai(req)
 
         # Simulate upstream response
         fake_response: dict[str, Any] = {
@@ -191,11 +188,13 @@ class TestAnthropicProxyIntegration:
             "object": "chat.completion",
             "created": int(time.time()),
             "model": "gpt-4o",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "It is 2024."},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "It is 2024."},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 15, "completion_tokens": 6, "total_tokens": 21},
         }
         anthropic_response = _openai_to_anthropic(fake_response, req.model)

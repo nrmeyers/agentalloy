@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from agentalloy.install import state as install_state
+from agentalloy.install.subcommands import uninstall_proxy
 from agentalloy.install.subcommands.wire_harness import (
     SENTINEL_BEGIN,
     SENTINEL_END,
@@ -21,7 +22,6 @@ from agentalloy.install.subcommands.wire_harness import (
     _inject_sentinel_block,  # pyright: ignore[reportPrivateUsage]
     wire_harness,
 )
-from agentalloy.install.subcommands import uninstall_proxy
 
 
 @pytest.fixture()
@@ -784,7 +784,9 @@ class TestProxyWiring:
         assert len(proxy_models) == 1
         assert proxy_models[0]["apiBase"] == "http://localhost:7777/v1"
 
-    def test_claude_code_proxy_writes_env_file(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_claude_code_proxy_writes_env_file(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """claude-code default wiring writes ~/.agentalloy/claude-code-env.sh."""
         fake_home = repo_root / "home"
         fake_home.mkdir()
@@ -887,13 +889,11 @@ class TestUninstallProxy:
         """Unwire removes sentinel block from .aider.conf.yml."""
         # Create a .aider.conf.yml with proxy block
         conf = repo_root / ".aider.conf.yml"
-        conf.write_text(
-            f"# Before\n{SENTINEL_BEGIN}\nproxy config here\n{SENTINEL_END}\n# After\n"
-        )
+        conf.write_text(f"# Before\n{SENTINEL_BEGIN}\nproxy config here\n{SENTINEL_END}\n# After\n")
         # Also create the instructions file (so it gets removed)
         instr = repo_root / ".agentalloy-aider-instructions.md"
         instr.write_text("# Instructions\n")
-        
+
         removed = uninstall_proxy._unwire_proxy_aider(repo_root)
         assert conf.exists()
         content = conf.read_text()
@@ -913,16 +913,17 @@ class TestUninstallProxy:
     def test_unwire_proxy_hermes_agent_user_scope(self, tmp_path: Path) -> None:
         """Unwire user-scope hermes-agent from ~/.hermes/config.yaml."""
         import os as _os
-        
+
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         _os.environ["HOME"] = str(fake_home)
-        
+
         # Mock Path.home by replacing the function on the Path class
         from pathlib import Path as _Path
+
         original_home = _Path.home
         _Path.home = lambda: fake_home
-        
+
         try:
             config = fake_home / ".hermes" / "config.yaml"
             config.parent.mkdir(parents=True)
@@ -968,11 +969,13 @@ class TestUninstallProxy:
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         from pathlib import Path as _Path
+
         original_home = _Path.home
         _Path.home = lambda: fake_home
 
         try:
             import os as _os
+
             _os.environ["HOME"] = str(fake_home)
             env_file = fake_home / ".agentalloy" / "claude-code-env.sh"
             env_file.parent.mkdir(parents=True)
@@ -1026,7 +1029,7 @@ class TestUninstallProxy:
             )
         )
 
-        removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
+        _removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
         assert settings_file.exists()
         config = json.loads(settings_file.read_text())
         # Proxy fields removed
@@ -1042,4 +1045,3 @@ class TestUninstallProxy:
         """Unwire no-ops if .cline/settings.json doesn't exist."""
         removed = uninstall_proxy._unwire_proxy_cline(tmp_path)
         assert removed == []
-
