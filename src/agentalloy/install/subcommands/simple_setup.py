@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import state as install_state, PROXY_UNABLE_HARNESSES
+from agentalloy.install import PROXY_UNABLE_HARNESSES
+from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import (
     detect,
     enable_service,

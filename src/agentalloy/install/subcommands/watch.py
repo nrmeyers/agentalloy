@@ -18,7 +18,6 @@ from pathlib import Path
 from agentalloy.install import PROXY_UNABLE_HARNESSES
 from agentalloy.install.output import print_rich
 
-
 # All sidecar harnesses that use the file-watching watcher.
 # Proxy-wired harnesses don't need the watcher; these are the ones
 # whose LLM traffic cannot be intercepted, plus the legacy cline/aider
