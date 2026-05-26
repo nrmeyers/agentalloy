@@ -30,7 +30,7 @@ def _remove_sentinel_block(content: str) -> str:
     while i < len(lines):
         line = lines[i]
         # Check for begin sentinel (raw or commented)
-        if (sentinel_begin_raw in line or sentinel_begin_commented in line):
+        if sentinel_begin_raw in line or sentinel_begin_commented in line:
             skip = True
             i += 1
             continue
