@@ -320,8 +320,9 @@ async def proxy_chat_completions(
             status_code=503,
             content={
                 "error": {
-                    "type": "api_error",
+                    "code": "upstream_model_not_configured",
                     "message": str(e),
+                    "type": "api_error",
                 }
             },
         )
