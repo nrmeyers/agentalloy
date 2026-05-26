@@ -155,10 +155,10 @@ def write_env(
     install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
 
     # Persist original .env content to state for uninstall restore
-    # Only store on first write (if key doesn't already exist)
+    # Only store on first write (skip if already backed up)
     if original_content is not None:
         st = install_state.load_state()
-        if "env_original_content" not in st:
+        if st.get("env_original_content") is None:
             st["env_original_content"] = original_content
             install_state.save_state(st)
 

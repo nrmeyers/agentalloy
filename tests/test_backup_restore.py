@@ -251,6 +251,9 @@ class TestEnvBackup:
         original = "EXISTING_VAR=value\n"
         env_file.write_text(original)
 
+        # Mock real load_state shape: env_original_content is None by default
+        empty_st = {"env_original_content": None}
+
         with (
             patch(
                 "agentalloy.install.subcommands.write_env.install_state.env_path",
@@ -258,7 +261,7 @@ class TestEnvBackup:
             ),
             patch(
                 "agentalloy.install.subcommands.write_env.install_state.load_state",
-                return_value={},
+                return_value=empty_st,
             ),
             patch("agentalloy.install.subcommands.write_env.install_state.save_state") as mock_save,
         ):

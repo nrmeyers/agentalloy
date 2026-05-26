@@ -471,7 +471,6 @@ def clear_pending_pack_selection(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-
 def save_output_file(
     content: dict[str, Any],
     filename: str,

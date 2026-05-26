@@ -743,7 +743,9 @@ def uninstall(
         # Skip proxy unwiring for paths already handled by harness loop's original_content restore
         if str(root / ".aider.conf.yml") not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
-        if str(root / ".opencode") not in handled_paths:
+        opencode_env = str(root / ".opencode" / ".agentalloy-env")
+        opencode_prompt = str(root / ".opencode" / "system-prompt.md")
+        if opencode_env not in handled_paths and opencode_prompt not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
         if str(root / ".cline" / "settings.json") not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))

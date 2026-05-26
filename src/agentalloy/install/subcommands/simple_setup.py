@@ -550,7 +550,7 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
     # Persist to state if this is the first backup
     if original_content is not None:
         st = install_state.load_state()
-        if "env_original_content" not in st:
+        if st.get("env_original_content") is None:
             st["env_original_content"] = original_content
             install_state.save_state(st)
 
@@ -797,10 +797,9 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     env_fp = install_state.env_path()
 
     # Capture original .env content for backup/restore (only on first write)
-    original_env_content: str | None = None
-    if env_fp.exists():
-        original_env_content = env_fp.read_text()
-        st["env_original_content"] = original_env_content
+    if env_fp.exists() and st.get("env_original_content") is None:
+        st["env_original_content"] = env_fp.read_text()
+        install_state.save_state(st)
 
     env_lines = [
         f"RUNTIME_EMBED_BASE_URL=http://localhost:{cfg.port}",

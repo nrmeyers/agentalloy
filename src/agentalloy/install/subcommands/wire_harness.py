@@ -1311,7 +1311,7 @@ def _build_result(
     prior_by_path = {e.get("path"): e for e in prior}
     for new_entry in files_written:
         prior_entry = prior_by_path.get(new_entry.get("path"))
-        if prior_entry and prior_entry.get("original_content"):
+        if prior_entry and "original_content" in prior_entry:
             new_entry.setdefault("original_content", prior_entry["original_content"])
     merged = [e for e in prior if e.get("path") not in new_paths] + files_written
     st["harness_files_written"] = merged
