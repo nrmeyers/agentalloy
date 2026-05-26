@@ -34,7 +34,7 @@ def repo_root(tmp_path: Path) -> Path:
 def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Patch Path.home() to return a tmp_path subdir for hermetic tests."""
     home = tmp_path / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     monkeypatch.setattr(Path, "home", lambda: home, raising=False)
     return home
 
