@@ -451,10 +451,11 @@ def _derive_host_target(detect_data: dict[str, Any]) -> str:
     """Derive a hardware target string from detect.json output.
 
     Priority (regardless of list order):
-      1. NVIDIA discrete GPU  →  "nvidia"
-      2. AMD discrete GPU     →  "radeon"
-      3. Apple integrated GPU →  "apple-silicon"
-      4. Fallback             →  "cpu"
+      1. NVIDIA discrete GPU       →  "nvidia"
+      2. AMD discrete GPU          →  "radeon"
+      3. AMD integrated (APU)      →  "radeon"
+      4. Apple integrated GPU      →  "apple-silicon"
+      5. Fallback                  →  "cpu"
     """
     gpu = detect_data.get("gpu", {})
     discrete = gpu.get("discrete", [])
@@ -465,6 +466,10 @@ def _derive_host_target(detect_data: dict[str, Any]) -> str:
         if str(card.get("vendor") or "").lower() == "nvidia":
             return "nvidia"
     for card in discrete:
+        if str(card.get("vendor") or "").lower() == "amd":
+            return "radeon"
+    # AMD integrated (APU: Strix Point, Phoenix, Hawk Point, etc.)
+    for card in integrated:
         if str(card.get("vendor") or "").lower() == "amd":
             return "radeon"
     # Apple Silicon (integrated on Mac)
@@ -564,12 +569,18 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
     env_path = install_state.env_path()
     embed_url = None
     embed_model = None
+    proxy_port = None
+    upstream_model = None
     if env_path.exists():
         for line in env_path.read_text().splitlines():
             if line.startswith("RUNTIME_EMBED_BASE_URL="):
                 embed_url = line.split("=", 1)[1].strip()
             elif line.startswith("RUNTIME_EMBEDDING_MODEL="):
                 embed_model = line.split("=", 1)[1].strip()
+            elif line.startswith("PROXY_PORT="):
+                proxy_port = line.split("=", 1)[1].strip()
+            elif line.startswith("UPSTREAM_MODEL="):
+                upstream_model = line.split("=", 1)[1].strip()
 
     if not embed_url or not embed_model:
         _print("  [yellow]Could not read embed URL/model from .env -- skipping test.[/yellow]")
@@ -589,18 +600,51 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
             data = json.loads(resp.read())
             dim = len(data["data"][0]["embedding"])
             _print(f"  Embedding test: [green]OK[/green] -- {dim}-dim vector returned")
-            # Show curl command for user reference
-            _print("")
-            _print("  Verify manually:")
-            _print(f"  curl -s {embed_url}/v1/embeddings \\")
-            _print("    -H 'Content-Type: application/json' \\")
-            _print(f'    -d \'{{"model":"{embed_model}","input":"hello"}}\'')
     except Exception as exc:
         _print(f"  [yellow]Embedding test failed: {exc}[/yellow]")
         _print(
             f"  [dim]The embed server may still start up; "
             f"check {install_state.user_data_dir() / 'logs' / 'embed-server.log'}[/dim]"
         )
+        return
+
+    # Second test: end-to-end skill query via the proxy
+    if proxy_port and upstream_model:
+        proxy_url = f"http://localhost:{proxy_port}"
+        query_payload = json.dumps({
+            "model": upstream_model,
+            "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
+        }).encode()
+        req2 = _urllib_request.Request(
+            f"{proxy_url}/v1/chat/completions",
+            data=query_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _urllib_request.urlopen(req2, timeout=30) as resp2:
+                result = json.loads(resp2.read())
+                completion = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                _print(f"  Skill query test: [green]OK[/green] -- {len(completion)} chars returned")
+        except Exception as exc:
+            _print(f"  [yellow]Skill query test: {exc}[/yellow]")
+            _print(
+                f"  [dim]The proxy may not be running yet; "
+                f"check {install_state.user_data_dir() / 'logs' / 'agentalloy.log'}[/dim]"
+            )
+
+    # Show curl command for user reference
+    _print("")
+    if proxy_port and upstream_model:
+        _print("  Verify manually:")
+        _print(f"  curl -s http://localhost:{proxy_port}/v1/chat/completions \\")
+        _print("    -H 'Content-Type: application/json' \\")
+        _print(f'    -d \'{{"model":"{upstream_model}","messages":[{{"role":"user","content":"add a pytest for the CLI"}}]}}\'')
+    else:
+        _print("  Verify manually:")
+        _print(f"  curl -s {embed_url}/v1/embeddings \\")
+        _print("    -H 'Content-Type: application/json' \\")
+        _print(f'    -d \'{{"model":"{embed_model}","input":"hello"}}\'')
 
 
 def _run_container_flow(cfg: SetupConfig, t0: float) -> int:

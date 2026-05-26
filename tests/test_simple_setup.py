@@ -205,15 +205,25 @@ class TestDeriveHostTarget:
         data: dict[str, Any] = {}
         assert _derive_host_target(data) == "cpu"
 
-    def test_integrated_amd_not_discrete(self):
-        """AMD integrated (APU) stays as CPU, not radeon."""
+    def test_integrated_amd_returns_radeon(self):
+        """AMD integrated (APU: Strix Point, Phoenix, etc.) → radeon."""
         data = {
             "gpu": {
                 "discrete": [],
                 "integrated": [{"vendor": "amd", "model": "Radeon Graphics"}],
             }
         }
-        assert _derive_host_target(data) == "cpu"
+        assert _derive_host_target(data) == "radeon"
+
+    def test_amd_apu_strix_point(self):
+        """Strix Point APU (Radeon 890M) → radeon."""
+        data = {
+            "gpu": {
+                "discrete": [],
+                "integrated": [{"vendor": "amd", "model": "Radeon 890M"}],
+            }
+        }
+        assert _derive_host_target(data) == "radeon"
 
 
 # ---------------------------------------------------------------------------

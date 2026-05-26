@@ -360,6 +360,7 @@ def reembed_fragments(
     embed_fn: Callable[[str], list[float]],
     vector_store: VectorStore,
     embedding_model: str,
+    progress_tty: bool = False,
 ) -> ReembedStats:
     """Embed each fragment and insert to DuckDB. Returns run stats.
 
@@ -406,9 +407,13 @@ def reembed_fragments(
             continue
 
         stats.embedded += 1
-        if stats.embedded % 10 == 0:
+        if progress_tty:
+            print(f"\r  embedded {stats.embedded}/{stats.discovered}", end="", file=sys.stderr, flush=True)
+        elif stats.embedded % 10 == 0:
             logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
 
+    if progress_tty:
+        print(file=sys.stderr)  # newline after progress
     return stats
 
 
@@ -425,6 +430,8 @@ def _duckdb_path(settings: Settings) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Silence httpx per-request INFO logs during the embedding phase
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.reembed",
         description=(
@@ -558,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
                         embed_fn=_embed,
                         vector_store=vs,
                         embedding_model=model_id,
+                        progress_tty=sys.stderr.isatty(),
                     )
                 stats.log_summary()
             else:
