@@ -30,7 +30,7 @@ def repo_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def mock_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Patch Path.home() to return a tmp_path subdir for hermetic tests."""
     home = tmp_path / "home"
