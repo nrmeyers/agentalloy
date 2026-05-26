@@ -183,7 +183,11 @@ def add_parser(
     sub: argparse._SubParsersAction[argparse.ArgumentParser] = p.add_subparsers(dest="watch_cmd")  # pyright: ignore[reportPrivateUsage]
 
     start: argparse.ArgumentParser = sub.add_parser("start", help="Start the watcher (foreground)")
-    start.add_argument("--harness", default=None, help="Sidecar harness name (e.g. cursor, windsurf, github-copilot, gemini-cli)")
+    start.add_argument(
+        "--harness",
+        default=None,
+        help="Sidecar harness name (e.g. cursor, windsurf, github-copilot, gemini-cli)",
+    )
     start.add_argument("--profile", default=None, help="Profile name (default: default)")
 
     stop: argparse.ArgumentParser = sub.add_parser("stop", help="Stop the running watcher")

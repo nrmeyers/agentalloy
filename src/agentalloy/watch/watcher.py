@@ -31,9 +31,7 @@ from watchdog.observers import Observer
 
 _log = logging.getLogger(__name__)
 
-SIDECAR_HARNESSES = frozenset(
-    {"cursor", "windsurf", "github-copilot", "gemini-cli"}
-)
+SIDECAR_HARNESSES = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
 
 
 @dataclass
