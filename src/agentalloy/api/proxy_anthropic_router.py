@@ -276,14 +276,14 @@ def _stream_anthropic_response(
                     return
 
                 try:
-                    chunk = json.loads(data)
+                    chunk: dict[str, Any] = json.loads(data)
                 except json.JSONDecodeError:
                     logger.warning("Failed to parse SSE chunk: %s", data[:100])
                     continue
 
-                choices = chunk.get("choices") or []
+                choices: list[dict[str, Any]] = chunk.get("choices") or []
                 if not choices:
-                    usage = chunk.get("usage") or {}
+                    usage: dict[str, Any] = chunk.get("usage") or {}
                     if usage:
                         state["input_tokens"] = int(
                             usage.get("prompt_tokens") or state["input_tokens"]
@@ -293,9 +293,9 @@ def _stream_anthropic_response(
                         )
                     continue
 
-                choice = choices[0]
-                delta = choice.get("delta") or {}
-                finish = choice.get("finish_reason")
+                choice: dict[str, Any] = choices[0]
+                delta: dict[str, Any] = choice.get("delta") or {}
+                finish: str | None = choice.get("finish_reason")
 
                 # Strip tool_calls — text-only mode
                 if delta.get("tool_calls"):
@@ -303,7 +303,7 @@ def _stream_anthropic_response(
                         "Anthropic router received tool_calls; stripping (text-only mode)"
                     )
 
-                text = delta.get("content") or ""
+                text: str = delta.get("content") or ""
 
                 if state["first_chunk"]:
                     # Emit message_start
