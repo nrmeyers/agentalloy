@@ -390,7 +390,6 @@ def _check_harness_config_present(st: dict[str, Any]) -> dict[str, Any]:
                 "remediation": "Re-run `python -m agentalloy.install wire-harness`",
             }
     duration = int((time.monotonic() - t0) * 1000)
-    st.get("harness", "unknown")
     path = files_written[0]["path"]
     return {
         "name": "harness_config_present",

@@ -22,7 +22,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -769,7 +768,3 @@ def _run(args: argparse.Namespace) -> int:
         print(f"  Unknown customize command: {cmd}", file=sys.stderr)
         return 1
     return handler(args)
-
-
-# Suppress unused import
-_ = tempfile
