@@ -26,6 +26,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _empty_candidates() -> list[ActiveFragment]:
+    return []
+
+
+def _empty_scores_by_id() -> dict[str, float]:
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Error taxonomy
 # ---------------------------------------------------------------------------
@@ -101,10 +109,10 @@ class EmbeddingErrorResult:
 
     error: EmbeddingError
     bm25_only: bool = False
-    candidates: list[ActiveFragment] = field(default_factory=list)
+    candidates: list[ActiveFragment] = field(default_factory=_empty_candidates)
     eligible_count: int = 0
     retrieval_ms: int = 0
-    scores_by_id: dict[str, float] = field(default_factory=dict)
+    scores_by_id: dict[str, float] = field(default_factory=_empty_scores_by_id)
     bm25_source: str = "rule-extracted"
 
     @property
