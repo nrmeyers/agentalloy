@@ -40,7 +40,7 @@ jobs:
         run: uv run pyright
 
       - name: Test (excludes integration)
-        run: uv run pytest -m "not integration" --durations=15
+        run: uv run pytest -m "not integration"
 
   pipx-smoke:
     runs-on: ubuntu-latest
