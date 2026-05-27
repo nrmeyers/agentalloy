@@ -163,3 +163,33 @@ async def test_compose_uses_bm25_fallback_candidates() -> None:
     record = writer.records[0]
     assert record.result_type == "compose"
     assert record.error_payload == EmbeddingErrorCode.UNAVAILABLE.value
+
+
+@pytest.mark.asyncio
+async def test_compose_empty_with_embedding_error_sets_error_payload() -> None:
+    """Regression test: embedding fails AND BM25 returns no hits.
+
+    The result should be EmptyResult with error_payload set to the embedding
+    error code — distinguishable from a normal empty result where
+    error_payload is None.
+    """
+    writer = _RecordingWriter()
+    domain = EmbeddingErrorResult(
+        error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
+        bm25_only=True,
+        candidates=[],
+        eligible_count=0,
+        retrieval_ms=6,
+        scores_by_id={},
+    )
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+
+    result = await orch.compose(_req())
+
+    assert result.result_type == "empty"
+    assert len(writer.records) == 1
+    r = writer.records[0]
+    assert r.result_type == "compose_empty"
+    assert r.error_payload == EmbeddingErrorCode.UNAVAILABLE.value
+    assert r.domain_fragment_ids == []
+    assert r.source_skill_ids == []

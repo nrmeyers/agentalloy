@@ -398,3 +398,37 @@ def test_rrf_fuse_empty_dense_returns_bm25_order() -> None:
 
 def test_rrf_fuse_both_empty_returns_empty() -> None:
     assert _rrf_fuse([], []) == []
+
+
+def test_degradable_embedding_error_with_empty_bm25(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test: embedding fails with degradable code AND BM25 returns no hits.
+
+    The double-failure path must still return a structured EmbeddingErrorResult
+    (candidates=[], bm25_only=True) rather than crashing.
+    """
+    def _raise_embed(*args: object, **kwargs: object) -> list[list[float]]:
+        raise EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down")
+
+    monkeypatch.setattr(domain_module, "safe_embed", _raise_embed)
+    monkeypatch.setattr(populated_vectors, "search_bm25", lambda *args, **kwargs: [])
+
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+
+    assert isinstance(result, EmbeddingErrorResult)
+    assert result.error.code == EmbeddingErrorCode.UNAVAILABLE
+    assert result.bm25_only is True
+    assert result.candidates == []
+    assert result.retrieval_ms >= 0

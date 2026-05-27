@@ -242,3 +242,36 @@ def test_null_writer_accepts_records() -> None:
             result_type="composed",
         )
     )  # must not raise
+
+
+def test_retrieve_query_empty_with_embedding_error_sets_error_payload(
+    app: FastAPI,
+    client: TestClient,
+    orch: RetrieveOrchestrator,
+    spy_telemetry: _SpyTelemetry,
+) -> None:
+    """Regression test: POST /retrieve returns 200 with results=[] when
+    embedding fails AND BM25 returns no hits. Telemetry record must have
+    error_payload set to distinguish from a normal empty result.
+    """
+    _install(app, orch)
+    fallback = EmbeddingErrorResult(
+        error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
+        bm25_only=True,
+        candidates=[],
+        eligible_count=0,
+        retrieval_ms=5,
+        scores_by_id={},
+    )
+
+    with patch(
+        "agentalloy.orchestration.retrieve.retrieve_domain_candidates", return_value=fallback
+    ):
+        resp = client.post(
+            "/retrieve", json={"task": "fastapi endpoint design", "phase": "design", "k": 5}
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["results"] == []
+    assert spy_telemetry.records[-1].error_payload == EmbeddingErrorCode.UNAVAILABLE.value
