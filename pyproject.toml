@@ -14,7 +14,6 @@ dependencies = [
     "pydantic-settings>=2.6",
     "httpx>=0.27",
     "kuzu>=0.11",
-    "sqlalchemy>=2.0",
     "pyyaml>=6.0",
     "rich>=13.0",
     "duckdb>=1.1",
