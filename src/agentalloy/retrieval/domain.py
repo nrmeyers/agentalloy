@@ -29,8 +29,8 @@ from agentalloy.reads import ActiveFragment
 from agentalloy.reads.models import SkillClass
 from agentalloy.retrieval.embedding_errors import (
     EmbeddingError,
-    EmbeddingErrorResult,
     EmbeddingErrorCode,
+    EmbeddingErrorResult,
     embedding_breaker,
     safe_embed,
 )

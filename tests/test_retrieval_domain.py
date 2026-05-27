@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import agentalloy.retrieval.domain as domain_module
 import time
 from pathlib import Path
 
 import pytest
 
+import agentalloy.retrieval.domain as domain_module
 from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.lm_client import LMModelNotLoaded
 from agentalloy.reads import get_active_fragments

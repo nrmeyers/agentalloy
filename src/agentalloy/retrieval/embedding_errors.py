@@ -17,7 +17,7 @@ import enum
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agentalloy.lm_client import OpenAICompatClient
@@ -159,9 +159,12 @@ class CircuitBreaker:
     @property
     def state(self) -> str:
         """Current circuit state, with automatic half_open transition check."""
-        if self._state == "open" and self._opened_at is not None:
-            if time.monotonic() - self._opened_at >= self._recovery_timeout:
-                self._state = "half_open"
+        if (
+            self._state == "open"
+            and self._opened_at is not None
+            and time.monotonic() - self._opened_at >= self._recovery_timeout
+        ):
+            self._state = "half_open"
         return self._state
 
     @property
@@ -220,11 +223,7 @@ class CircuitBreaker:
         Returns False if the circuit is open and recovery timeout hasn't elapsed.
         """
         current = self.state
-        if current == "closed":
-            return True
-        if current == "half_open":
-            return True  # allow one probe
-        return False  # open, recovery timeout not elapsed
+        return current in ("closed", "half_open")
 
     def reset(self) -> None:
         """Reset the circuit breaker to initial closed state."""
@@ -319,11 +318,11 @@ def _classify_exception(exc: Exception) -> EmbeddingErrorCode:
     the appropriate error code.
     """
     from agentalloy.lm_client import (
-        LMClientError,
-        LMUnavailable,
-        LMTimeout,
         LMBadResponse,
+        LMClientError,
         LMModelNotLoaded,
+        LMTimeout,
+        LMUnavailable,
     )
 
     if isinstance(exc, LMModelNotLoaded):
