@@ -30,7 +30,14 @@ from agentalloy.lm_client import (
     OpenAICompatClient,
 )
 from agentalloy.reads.models import ActiveFragment
-from agentalloy.retrieval.domain import RetrievalResult, retrieve_domain_candidates
+from agentalloy.retrieval.domain import (
+    RetrievalResult,
+    retrieve_domain_candidates,
+)
+from agentalloy.retrieval.embedding_errors import (
+    EmbeddingError,
+    EmbeddingErrorResult,
+)
 from agentalloy.retrieval.system import SystemRetrievalResult, retrieve_system_fragments
 from agentalloy.runtime_state import RuntimeCache
 from agentalloy.storage.ladybug import LadybugStore
@@ -97,6 +104,15 @@ class ComposeOrchestrator:
         )
         system_fragment_ids = [f.fragment_id for f in system.candidates]
         system_applied = bool(system.candidates)
+        retrieval_error_code: str | None = None
+
+        if isinstance(retrieval, EmbeddingErrorResult):
+            retrieval_error_code = retrieval.error.code.value
+            logger.warning(
+                "embedding failed (code=%s), using %s fallback",
+                retrieval_error_code,
+                "BM25-only" if retrieval.candidates else "empty-result",
+            )
 
         if not retrieval.candidates:
             elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
@@ -112,6 +128,7 @@ class ComposeOrchestrator:
                     source_skill_ids=[],
                     latency_retrieval_ms=retrieval.retrieval_ms,
                     latency_total_ms=elapsed_ms,
+                    error_payload=retrieval_error_code,
                 )
             )
             return EmptyResult(
@@ -143,6 +160,7 @@ class ComposeOrchestrator:
                 latency_retrieval_ms=retrieval.retrieval_ms,
                 latency_assembly_ms=0,
                 latency_total_ms=elapsed_ms,
+                error_payload=retrieval_error_code,
                 workflow_skill_ids=workflow_skill_ids,
             )
         )
@@ -163,7 +181,7 @@ class ComposeOrchestrator:
             recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
         )
 
-    async def retrieve(self, req: ComposeRequest) -> RetrievalResult:
+    async def retrieve(self, req: ComposeRequest) -> RetrievalResult | EmbeddingErrorResult:
         try:
             return await asyncio.to_thread(
                 retrieve_domain_candidates,
@@ -176,6 +194,14 @@ class ComposeOrchestrator:
                 k=req.resolved_k(),
                 embedding_model=self._embedding_model,
                 contract_tags=req.resolved_contract_tags,
+            )
+        except EmbeddingError as e:
+            # EmbeddingError is raised by safe_embed() when the circuit breaker
+            # is open or the embedding call fails. Return EmbeddingErrorResult
+            # so compose() can handle it gracefully.
+            return EmbeddingErrorResult(
+                error=e,
+                bm25_only=False,
             )
         except LMModelNotLoaded as e:
             raise RetrievalStageError("embedding_model_unavailable", str(e), available=None) from e

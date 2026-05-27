@@ -16,6 +16,7 @@ Improvements (v5.4+):
 
 from __future__ import annotations
 
+import logging
 import os as _os
 import re as _re
 import time
@@ -26,9 +27,23 @@ from agentalloy.api.compose_models import Phase
 from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.reads import ActiveFragment
 from agentalloy.reads.models import SkillClass
+from agentalloy.retrieval.embedding_errors import (
+    EmbeddingError,
+    EmbeddingErrorResult,
+    EmbeddingErrorCode,
+    embedding_breaker,
+    safe_embed,
+)
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
 
 _RRF_K_DEFAULT = 60
+logger = logging.getLogger(__name__)
+_DEGRADABLE_EMBEDDING_CODES = {
+    EmbeddingErrorCode.CIRCUIT_OPEN,
+    EmbeddingErrorCode.UNAVAILABLE,
+    EmbeddingErrorCode.TIMEOUT,
+    EmbeddingErrorCode.BAD_RESPONSE,
+}
 
 
 class _RRFConfig(TypedDict):
@@ -65,6 +80,16 @@ def _extract_bm25_keywords(task: str) -> str:
     if matches:
         return f"{task} {' '.join(matches)}"
     return task
+
+
+def _resolve_bm25_query(task: str, contract_tags: list[str] | None) -> tuple[str, str]:
+    """Resolve the BM25 query text and telemetry source label."""
+    if contract_tags:
+        bm25_query = " ".join(contract_tags)
+        if _os.environ.get("AGENTALLOY_UNION_KEYWORDS") == "1":
+            return f"{bm25_query} {_extract_bm25_keywords(task)}", "union"
+        return bm25_query, "contract"
+    return _extract_bm25_keywords(task), "rule-extracted"
 
 
 @runtime_checkable
@@ -168,6 +193,56 @@ def _rrf_fuse(
     return sorted(all_ids, key=lambda fid: scores[fid], reverse=True)
 
 
+def _bm25_fallback_result(
+    frag_src: FragmentSource,
+    vector_store: VectorStore,
+    *,
+    task: str,
+    phase: Phase,
+    domain_tags: list[str] | None,
+    k: int,
+    raw_scores: bool,
+    contract_tags: list[str] | None,
+    error: EmbeddingError,
+    start_ns: int,
+) -> EmbeddingErrorResult:
+    """Run the lexical leg only and package the degraded retrieval result."""
+    categories = phase_to_categories(phase)
+    pool_size = max(k * 2, 50)
+    bm25_query, bm25_source = _resolve_bm25_query(task, contract_tags)
+    bm25_hits = vector_store.search_bm25(bm25_query, categories=categories, k=pool_size)
+
+    metadata = frag_src.get_active_fragments(
+        skill_class=("domain", "workflow"),
+        categories=categories,
+        domain_tags=domain_tags,
+    )
+    by_id = {f.fragment_id: f for f in metadata}
+
+    ranked: list[ActiveFragment] = []
+    scores_by_id: dict[str, float] = {}
+    for hit in bm25_hits:
+        frag = by_id.get(hit.fragment_id)
+        if frag is None:
+            continue
+        ranked.append(frag)
+        scores_by_id[hit.fragment_id] = hit.score
+
+    eligible_count = len(ranked)
+    diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
+    selected = ranked[:k] if raw_scores or diversity_off else diversity_select(ranked, k)
+    elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
+    return EmbeddingErrorResult(
+        error=error,
+        bm25_only=True,
+        candidates=selected,
+        eligible_count=eligible_count,
+        retrieval_ms=elapsed_ms,
+        scores_by_id=scores_by_id,
+        bm25_source=bm25_source,
+    )
+
+
 def retrieve_domain_candidates(
     source: object,
     lm: OpenAICompatClient,
@@ -180,7 +255,7 @@ def retrieve_domain_candidates(
     embedding_model: str,
     raw_scores: bool = False,
     contract_tags: list[str] | None = None,
-) -> RetrievalResult:
+) -> RetrievalResult | EmbeddingErrorResult:
     """Execute the retrieval pipeline and return a bounded candidate set.
 
     ``source`` may be a ``RuntimeCache`` (startup-loaded snapshot) or a raw
@@ -190,15 +265,22 @@ def retrieve_domain_candidates(
 
     Stages:
 
-    1. embed the task via ``lm.embed`` (propagates LMClientError on failure)
-    2. DuckDB top-k vector search filtered by phase categories
-    3. DuckDB BM25 search on prose column filtered by phase categories (with keyword extraction)
-    4. Reciprocal Rank Fusion of both legs (with phase-specific weighting)
-    5. hydrate ActiveFragment metadata from ``source`` and apply optional
+    1. Check circuit breaker — if open, skip embedding and return BM25-only
+    2. embed the task via ``safe_embed`` (propagates EmbeddingError on failure)
+    3. DuckDB top-k vector search filtered by phase categories
+    4. DuckDB BM25 search on prose column filtered by phase categories (with keyword extraction)
+    5. Reciprocal Rank Fusion of both legs (with phase-specific weighting)
+    6. hydrate ActiveFragment metadata from ``source`` and apply optional
        domain_tags filter
-    6. greedy diversity reshuffle — prefer fragment_types from the
+    7. greedy diversity reshuffle — prefer fragment_types from the
        setup/execution/verification priority set when not already in the
        selected set (skipped when ``raw_scores=True``)
+
+    Returns:
+        RetrievalResult on success, EmbeddingErrorResult when the embedding
+        service is unavailable (circuit open or call failed). The caller
+        (compose.py) should treat this as a partial result and proceed with
+        BM25-only fragments if available.
     """
     start_ns = time.perf_counter_ns()
 
@@ -206,16 +288,65 @@ def retrieve_domain_candidates(
         source if isinstance(source, FragmentSource) else StoreFragmentSource(source)
     )
 
-    # Qwen3-Embedding canonical query template — see model card.
-    # Documents are embedded with bare content (reembed/cli.py); only queries
-    # carry the instruct prefix. Format is exact: "Instruct: ...\nQuery:..."
-    # with literal newline and no space before {task}.
-    task_description = (
-        "Given a software engineering task description, retrieve relevant "
-        "skill instruction fragments"
-    )
-    embed_input = f"Instruct: {task_description}\nQuery:{task}"
-    query_vec = lm.embed(model=embedding_model, texts=[embed_input])[0]
+    # ------------------------------------------------------------------
+    # Stage 1: Circuit breaker check — skip embedding if circuit is open
+    # ------------------------------------------------------------------
+    if not embedding_breaker.allow_request():
+        logger.warning(
+            "embedding circuit open for task=%s phase=%s; falling back to BM25-only",
+            task[:80],
+            phase,
+        )
+        return _bm25_fallback_result(
+            frag_src,
+            vector_store,
+            task=task,
+            phase=phase,
+            domain_tags=domain_tags,
+            k=k,
+            raw_scores=raw_scores,
+            contract_tags=contract_tags,
+            error=EmbeddingError(
+                EmbeddingErrorCode.CIRCUIT_OPEN,
+                message="circuit breaker open — embedding unavailable",
+            ),
+            start_ns=start_ns,
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 2: Safe embedding with circuit-breaker integration
+    # ------------------------------------------------------------------
+    try:
+        task_description = (
+            "Given a software engineering task description, retrieve relevant "
+            "skill instruction fragments"
+        )
+        embed_input = f"Instruct: {task_description}\nQuery:{task}"
+        query_vec = safe_embed(lm, embedding_model, [embed_input])[0]
+    except EmbeddingError as exc:
+        if exc.code not in _DEGRADABLE_EMBEDDING_CODES:
+            if exc.original is not None:
+                raise exc.original from exc
+            raise
+        logger.warning(
+            "embedding failed for task=%s phase=%s code=%s: %s",
+            task[:80],
+            phase,
+            exc.code.value,
+            exc.message,
+        )
+        return _bm25_fallback_result(
+            frag_src,
+            vector_store,
+            task=task,
+            phase=phase,
+            domain_tags=domain_tags,
+            k=k,
+            raw_scores=raw_scores,
+            contract_tags=contract_tags,
+            error=exc,
+            start_ns=start_ns,
+        )
 
     categories = phase_to_categories(phase)
     pool_size = max(k * 2, 50)
@@ -230,16 +361,7 @@ def retrieve_domain_candidates(
     # The paid LLM picked them deliberately; they're better keywords than
     # rule-extracted ones. Union mode enabled by AGENTALLOY_UNION_KEYWORDS=1.
 
-    if contract_tags:
-        bm25_query = " ".join(contract_tags)
-        if _os.environ.get("AGENTALLOY_UNION_KEYWORDS") == "1":
-            bm25_query += " " + _extract_bm25_keywords(task)
-            _bm25_source = "union"
-        else:
-            _bm25_source = "contract"
-    else:
-        bm25_query = _extract_bm25_keywords(task)
-        _bm25_source = "rule-extracted"
+    bm25_query, _bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(bm25_query, categories=categories, k=pool_size)
     bm25_ids = [h.fragment_id for h in bm25_hits]
 

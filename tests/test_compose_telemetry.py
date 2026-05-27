@@ -14,6 +14,11 @@ from agentalloy.orchestration.compose import (
     ComposeOrchestrator,
 )
 from agentalloy.retrieval.domain import RetrievalResult
+from agentalloy.retrieval.embedding_errors import (
+    EmbeddingError,
+    EmbeddingErrorCode,
+    EmbeddingErrorResult,
+)
 from agentalloy.retrieval.system import SystemRetrievalResult
 from agentalloy.telemetry import TelemetryRecord
 from agentalloy.telemetry.writer import NullTelemetryWriter
@@ -33,7 +38,7 @@ class _FakeOrchestrator(ComposeOrchestrator):
 
     def __init__(
         self,
-        domain: RetrievalResult,
+        domain: RetrievalResult | EmbeddingErrorResult,
         system: SystemRetrievalResult,
         writer: _RecordingWriter,
     ) -> None:
@@ -42,7 +47,7 @@ class _FakeOrchestrator(ComposeOrchestrator):
         self._embedding_model = "fake-embed"
         self._telemetry = writer
 
-    async def retrieve(self, req: ComposeRequest) -> RetrievalResult:  # noqa: ARG002
+    async def retrieve(self, req: ComposeRequest) -> RetrievalResult | EmbeddingErrorResult:  # noqa: ARG002
         return self._domain
 
     async def retrieve_system(self, req: ComposeRequest) -> SystemRetrievalResult:  # noqa: ARG002
@@ -135,3 +140,26 @@ async def test_compose_empty_writes_telemetry_record() -> None:
     assert r.task_prompt == "write a handler"
     assert r.domain_fragment_ids == []
     assert r.source_skill_ids == []
+
+
+@pytest.mark.asyncio
+async def test_compose_uses_bm25_fallback_candidates() -> None:
+    writer = _RecordingWriter()
+    frag = fake_fragment("f1", "execution", skill="sk-a")
+    domain = EmbeddingErrorResult(
+        error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
+        bm25_only=True,
+        candidates=[frag],
+        eligible_count=1,
+        retrieval_ms=6,
+        scores_by_id={frag.fragment_id: 1.0},
+    )
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+
+    result = await orch.compose(_req())
+
+    assert result.result_type == "composed"
+    assert result.domain_fragments == ["f1"]
+    record = writer.records[0]
+    assert record.result_type == "compose"
+    assert record.error_payload == EmbeddingErrorCode.UNAVAILABLE.value

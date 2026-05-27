@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
+from agentalloy.reads import get_active_fragments
+from agentalloy.retrieval.embedding_errors import (
+    EmbeddingError,
+    EmbeddingErrorCode,
+    EmbeddingErrorResult,
+)
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import VectorStore
 from agentalloy.telemetry import NullTelemetryWriter, TelemetryRecord, TelemetryWriter
@@ -147,6 +154,36 @@ def test_retrieve_query_rejects_invalid_phase(
     _install(app, orch)
     resp = client.post("/retrieve", json={"task": "t", "phase": "invalid"})
     assert resp.status_code == 422
+
+
+def test_retrieve_query_uses_bm25_fallback_results(
+    app: FastAPI,
+    client: TestClient,
+    orch: RetrieveOrchestrator,
+    populated_store: LadybugStore,
+    spy_telemetry: _SpyTelemetry,
+) -> None:
+    _install(app, orch)
+    frag = next(f for f in get_active_fragments(populated_store) if f.skill_id == "py-fastapi-endpoint-design")
+    fallback = EmbeddingErrorResult(
+        error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
+        bm25_only=True,
+        candidates=[frag],
+        eligible_count=1,
+        retrieval_ms=5,
+        scores_by_id={frag.fragment_id: 1.0},
+    )
+
+    with patch("agentalloy.orchestration.retrieve.retrieve_domain_candidates", return_value=fallback):
+        resp = client.post(
+            "/retrieve", json={"task": "fastapi endpoint design", "phase": "design", "k": 5}
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["results"]
+    assert body["results"][0]["skill_id"] == "py-fastapi-endpoint-design"
+    assert spy_telemetry.records[-1].error_payload == EmbeddingErrorCode.UNAVAILABLE.value
 
 
 # -------- AC-4: retrieval-only telemetry shape --------

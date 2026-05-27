@@ -23,6 +23,7 @@ from agentalloy.orchestration.compose import RetrievalStageError
 from agentalloy.reads import get_active_version_by_id
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.retrieval.domain import retrieve_domain_candidates
+from agentalloy.retrieval.embedding_errors import EmbeddingErrorResult
 from agentalloy.runtime_state import RuntimeCache, VersionDetail
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import VectorStore
@@ -107,6 +108,7 @@ class RetrieveOrchestrator:
             raise RetrievalStageError("embedding_failed", str(e), available=None) from e
         except Exception as e:
             raise RetrievalStageError("store_unavailable", str(e), available=None) from e
+        error_payload = result.error_code if isinstance(result, EmbeddingErrorResult) else None
 
         # Dedup fragments to best-scoring-per-skill. Scores already computed
         # during retrieval (see ``RetrievalResult.scores_by_id``).
@@ -146,6 +148,7 @@ class RetrieveOrchestrator:
                 source_skill_ids=[h.skill_id for h in hits],
                 latency_retrieval_ms=elapsed_ms,
                 latency_total_ms=elapsed_ms,
+                error_payload=error_payload,
             )
         )
         return RetrieveQueryResponse(results=hits)

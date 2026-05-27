@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import agentalloy.retrieval.domain as domain_module
 import time
 from pathlib import Path
 
 import pytest
 
 from agentalloy.fixtures.loader import load_fixtures
+from agentalloy.lm_client import LMModelNotLoaded
 from agentalloy.reads import get_active_fragments
 from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
@@ -15,6 +17,11 @@ from agentalloy.retrieval.domain import (
     diversity_select,
     phase_to_categories,
     retrieve_domain_candidates,
+)
+from agentalloy.retrieval.embedding_errors import (
+    EmbeddingError,
+    EmbeddingErrorCode,
+    EmbeddingErrorResult,
 )
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import (
@@ -60,6 +67,7 @@ def populated_vectors(tmp_path: Path, populated: LadybugStore) -> VectorStore:
         for f in fragments
     ]
     vs.insert_embeddings(items)
+    vs.rebuild_fts_index()
     return vs
 
 
@@ -254,6 +262,86 @@ def test_retrieval_records_latency(populated: LadybugStore, populated_vectors: V
         embedding_model="stub-embed",
     )
     assert result.retrieval_ms >= 0
+
+
+def test_circuit_open_falls_back_to_bm25(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(domain_module.embedding_breaker, "allow_request", lambda: False)
+
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+
+    assert isinstance(result, EmbeddingErrorResult)
+    assert result.error.code == EmbeddingErrorCode.CIRCUIT_OPEN
+    assert result.bm25_only is True
+    assert result.candidates
+    assert result.retrieval_ms >= 0
+
+
+def test_embedding_error_also_falls_back_to_bm25(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_embed(*args: object, **kwargs: object) -> list[list[float]]:
+        raise EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down")
+
+    monkeypatch.setattr(domain_module, "safe_embed", _raise_embed)
+
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+
+    assert isinstance(result, EmbeddingErrorResult)
+    assert result.error.code == EmbeddingErrorCode.UNAVAILABLE
+    assert result.bm25_only is True
+    assert result.candidates
+
+
+def test_model_not_loaded_does_not_degrade(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_embed(*args: object, **kwargs: object) -> list[list[float]]:
+        original = LMModelNotLoaded("stub-embed", ["other-model"])
+        raise EmbeddingError(
+            EmbeddingErrorCode.MODEL_NOT_LOADED,
+            str(original),
+            original=original,
+        )
+
+    monkeypatch.setattr(domain_module, "safe_embed", _raise_embed)
+
+    with pytest.raises(LMModelNotLoaded):
+        retrieve_domain_candidates(
+            populated,
+            StubLMClient(),
+            populated_vectors,
+            task="fastapi endpoint design",
+            phase="design",
+            domain_tags=None,
+            k=5,
+            embedding_model="stub-embed",
+        )
 
 
 def test_k_larger_than_eligible_returns_all(
