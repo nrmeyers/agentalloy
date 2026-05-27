@@ -5,7 +5,7 @@ Sprint 1 — embedding error handling:
 - EmbeddingError exception with code + original error
 - EmbeddingErrorResult sentinel for graceful degradation (BM25-only fallback)
 - CircuitBreaker to avoid hammering a failing embedding service
-- safe_embed() context manager for try/except embedding calls
+- safe_embed() helper function that wraps embedding calls with the breaker
 
 Per v5.4: embedding failures must NOT crash the compose pipeline.
 When the embedding service is unavailable, fall back to BM25-only retrieval.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -162,91 +163,119 @@ class CircuitBreaker:
         self._recovery_timeout = recovery_timeout
         self._success_threshold = success_threshold
 
+        self._lock = threading.Lock()
         self._state = "closed"
         self._failure_count = 0
         self._success_count = 0
         self._last_failure_ts: float | None = None
         self._opened_at: float | None = None
+        self._probe_in_flight = False
 
-    @property
-    def state(self) -> str:
-        """Current circuit state, with automatic half_open transition check."""
+    def _maybe_transition_to_half_open_locked(self) -> None:
+        # Caller must hold self._lock.
         if (
             self._state == "open"
             and self._opened_at is not None
             and time.monotonic() - self._opened_at >= self._recovery_timeout
         ):
             self._state = "half_open"
-        return self._state
+            self._probe_in_flight = False
+            self._success_count = 0
+
+    @property
+    def state(self) -> str:
+        """Current circuit state, with automatic half_open transition check."""
+        with self._lock:
+            self._maybe_transition_to_half_open_locked()
+            return self._state
 
     @property
     def is_open(self) -> bool:
         """True if the circuit is open or half_open (calls should be blocked or probed)."""
-        return self._state in ("open", "half_open")
+        with self._lock:
+            return self._state in ("open", "half_open")
 
     def get_state(self) -> CircuitState:
         """Return an immutable snapshot of the current state."""
-        _ = self.state  # trigger state transition check
-        return CircuitState(
-            state=self._state,
-            failure_count=self._failure_count,
-            last_failure_ts=self._last_failure_ts,
-            opened_at=self._opened_at,
-        )
+        with self._lock:
+            self._maybe_transition_to_half_open_locked()
+            return CircuitState(
+                state=self._state,
+                failure_count=self._failure_count,
+                last_failure_ts=self._last_failure_ts,
+                opened_at=self._opened_at,
+            )
 
     def record_success(self) -> None:
         """Record a successful embedding call."""
-        if self._state == "half_open":
-            self._success_count += 1
-            if self._success_count >= self._success_threshold:
-                self._state = "closed"
+        with self._lock:
+            if self._state == "half_open":
+                self._success_count += 1
+                self._probe_in_flight = False
+                if self._success_count >= self._success_threshold:
+                    self._state = "closed"
+                    self._failure_count = 0
+                    self._success_count = 0
+                    self._opened_at = None
+                    logger.info(
+                        "embedding circuit breaker: closed after %d successes",
+                        self._success_threshold,
+                    )
+            elif self._state == "closed":
                 self._failure_count = 0
                 self._success_count = 0
-                self._opened_at = None
-                logger.info(
-                    "embedding circuit breaker: closed after %d successes", self._success_threshold
-                )
-        elif self._state == "closed":
-            self._failure_count = 0
-            self._success_count = 0
 
     def record_failure(self) -> None:
         """Record a failed embedding call."""
-        self._last_failure_ts = time.monotonic()
-        if self._state == "half_open":
-            # Probe failed — go back to open
-            self._state = "open"
-            self._opened_at = time.monotonic()
-            self._success_count = 0
-            self._failure_count += 1
-            logger.warning("embedding circuit breaker: half_open probe failed, reopening")
-        elif self._state == "closed":
-            self._failure_count += 1
-            if self._failure_count >= self._failure_threshold:
+        with self._lock:
+            self._last_failure_ts = time.monotonic()
+            if self._state == "half_open":
+                # Probe failed — go back to open
                 self._state = "open"
                 self._opened_at = time.monotonic()
-                logger.warning(
-                    "embedding circuit breaker: opened after %d failures",
-                    self._failure_count,
-                )
+                self._success_count = 0
+                self._failure_count += 1
+                self._probe_in_flight = False
+                logger.warning("embedding circuit breaker: half_open probe failed, reopening")
+            elif self._state == "closed":
+                self._failure_count += 1
+                if self._failure_count >= self._failure_threshold:
+                    self._state = "open"
+                    self._opened_at = time.monotonic()
+                    logger.warning(
+                        "embedding circuit breaker: opened after %d failures",
+                        self._failure_count,
+                    )
 
     def allow_request(self) -> bool:
-        """Check if a call is allowed through (without recording success/failure).
+        """Check if a call is allowed through, reserving the half_open probe slot.
 
-        Returns True if the circuit is closed or if it's a half_open probe.
+        Returns True if the circuit is closed, or if it's the single allowed
+        half_open probe (subsequent concurrent callers are blocked until
+        record_success() / record_failure() releases the slot).
         Returns False if the circuit is open and recovery timeout hasn't elapsed.
         """
-        current = self.state
-        return current in ("closed", "half_open")
+        with self._lock:
+            self._maybe_transition_to_half_open_locked()
+            if self._state == "closed":
+                return True
+            if self._state == "half_open":
+                if self._probe_in_flight:
+                    return False
+                self._probe_in_flight = True
+                return True
+            return False
 
     def reset(self) -> None:
         """Reset the circuit breaker to initial closed state."""
-        self._state = "closed"
-        self._failure_count = 0
-        self._success_count = 0
-        self._last_failure_ts = None
-        self._opened_at = None
-        logger.info("embedding circuit breaker: reset")
+        with self._lock:
+            self._state = "closed"
+            self._failure_count = 0
+            self._success_count = 0
+            self._last_failure_ts = None
+            self._opened_at = None
+            self._probe_in_flight = False
+            logger.info("embedding circuit breaker: reset")
 
 
 # Global circuit breaker instance (module-level singleton)
