@@ -19,7 +19,6 @@ dependencies = [
     "duckdb>=1.1",
     "asyncpg>=0.31.0",
     "watchdog>=6.0.0",
-    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

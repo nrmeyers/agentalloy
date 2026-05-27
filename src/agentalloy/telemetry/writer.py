@@ -1,9 +1,10 @@
 """Telemetry writer protocol, no-op stub, and DuckDB-backed writer.
 
 Per v5.3, composition telemetry lives in DuckDB ``composition_traces``
-(same ``skills.duck`` file as fragment_embeddings). Writes are inline
-before the response — no queue, no background thread. Trace-write
-failures are logged but never propagate to the caller of /compose.
+(same ``skills.duck`` file as fragment_embeddings). Writes are
+synchronous on the request path. Trace-write failures are caught and
+logged but never propagate to the caller of /compose — the response
+always succeeds regardless of telemetry state.
 """
 
 from __future__ import annotations
@@ -69,12 +70,13 @@ class NullTelemetryWriter:
 
 
 class DuckDBTelemetryWriter:
-    """Inline-before-response DuckDB writer.
+    """Best-effort DuckDB telemetry writer.
 
-    Writes happen synchronously on the request path. Per v5.3 directive
-    §2.6, composition telemetry must be durable before the response
-    returns. Trace-write failures are logged but never propagate — the
-    response always succeeds regardless of telemetry state.
+    Writes happen synchronously on the request path. Telemetry is
+    best-effort — failures are caught, logged, and never propagate to
+    the caller. The response always succeeds regardless of telemetry
+    state. The broad ``except Exception`` on :meth:`write` is intentional
+    by design.
 
     ``TelemetryRecord`` (legacy v1.0 shape) maps to
     ``CompositionTrace`` (v5.3 schema) via :meth:`_to_duck_trace`.
@@ -86,7 +88,7 @@ class DuckDBTelemetryWriter:
     def write(self, record: TelemetryRecord) -> None:
         try:
             self._vs.record_composition_trace(self._to_duck_trace(record))
-        except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+        except Exception as exc:
             logger.error("telemetry write failed: %s", exc)
 
     def close(self) -> None:  # noqa: B027 — empty by design; the vector_store owns the connection
