@@ -164,7 +164,11 @@ def test_retrieve_query_uses_bm25_fallback_results(
     spy_telemetry: _SpyTelemetry,
 ) -> None:
     _install(app, orch)
-    frag = next(f for f in get_active_fragments(populated_store) if f.skill_id == "py-fastapi-endpoint-design")
+    frag = next(
+        f
+        for f in get_active_fragments(populated_store)
+        if f.skill_id == "py-fastapi-endpoint-design"
+    )
     fallback = EmbeddingErrorResult(
         error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
         bm25_only=True,
@@ -174,7 +178,9 @@ def test_retrieve_query_uses_bm25_fallback_results(
         scores_by_id={frag.fragment_id: 1.0},
     )
 
-    with patch("agentalloy.orchestration.retrieve.retrieve_domain_candidates", return_value=fallback):
+    with patch(
+        "agentalloy.orchestration.retrieve.retrieve_domain_candidates", return_value=fallback
+    ):
         resp = client.post(
             "/retrieve", json={"task": "fastapi endpoint design", "phase": "design", "k": 5}
         )

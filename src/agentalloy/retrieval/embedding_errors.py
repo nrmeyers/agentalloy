@@ -37,6 +37,7 @@ class EmbeddingErrorCode(enum.Enum):
     Each code maps to a specific error_code string used in telemetry traces
     and the compose API error response.
     """
+
     # Client-side errors — the embedding call was never made or was invalid
     INVALID_MODEL = "embedding_model_invalid"
     EMPTY_INPUT = "embedding_empty_input"
@@ -64,6 +65,7 @@ class EmbeddingError(Exception):
     Wraps the original exception (if any) so callers can inspect it,
     while the code field drives structured handling (fallback, telemetry, etc.).
     """
+
     def __init__(
         self,
         code: EmbeddingErrorCode,
@@ -96,6 +98,7 @@ class EmbeddingErrorResult:
         bm25_only: True when the retrieval path fell back to lexical-only search.
         candidates: Hydrated fallback candidates, if any.
     """
+
     error: EmbeddingError
     bm25_only: bool = False
     candidates: list[ActiveFragment] = field(default_factory=list)
@@ -117,6 +120,7 @@ class EmbeddingErrorResult:
 @dataclass(frozen=True)
 class CircuitState:
     """Immutable snapshot of the circuit-breaker state."""
+
     state: str  # "closed" | "open" | "half_open"
     failure_count: int
     last_failure_ts: float | None = None
@@ -191,7 +195,9 @@ class CircuitBreaker:
                 self._failure_count = 0
                 self._success_count = 0
                 self._opened_at = None
-                logger.info("embedding circuit breaker: closed after %d successes", self._success_threshold)
+                logger.info(
+                    "embedding circuit breaker: closed after %d successes", self._success_threshold
+                )
         elif self._state == "closed":
             self._failure_count = 0
             self._success_count = 0
@@ -251,6 +257,7 @@ embedding_breaker = CircuitBreaker(
 @dataclass
 class _EmbedContext:
     """Internal context for safe_embed()."""
+
     model: str
     client: OpenAICompatClient
     texts: list[str]
