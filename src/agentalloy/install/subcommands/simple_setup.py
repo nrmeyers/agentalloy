@@ -310,8 +310,6 @@ def _prompt_deployment() -> str:
 def _discover_packs() -> dict[str, dict[str, Any]]:
     """Discover available packs from the _packs directory."""
     try:
-        from pathlib import Path
-
         import yaml as _yaml
 
         import agentalloy
@@ -507,8 +505,6 @@ def _test_upstream_endpoint(cfg: SetupConfig) -> bool:
     Returns True if the endpoint responds successfully, False otherwise.
     A missing or empty api key is accepted (local runners may not require one).
     """
-    import urllib.request as _urllib_request
-
     url = (cfg.upstream_url or "").rstrip("/")
     if not url:
         _print("  [yellow]No upstream URL set — skipping validation.[/yellow]")
@@ -519,9 +515,9 @@ def _test_upstream_endpoint(cfg: SetupConfig) -> bool:
     if cfg.upstream_api_key:
         headers["Authorization"] = f"Bearer {cfg.upstream_api_key}"
 
-    req = _urllib_request.Request(models_url, headers=headers, method="GET")
+    req = urllib.request.Request(models_url, headers=headers, method="GET")
     try:
-        with _urllib_request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
             if resp.status == 200:
                 _print(f"  [green]Upstream LLM reachable at {models_url}[/green]")
                 return True
@@ -563,8 +559,6 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
 
 def _test_embed_endpoint(cfg: SetupConfig) -> None:
     """Smoke test: send a real embedding request and show the curl equivalent."""
-    import urllib.request as _urllib_request
-
     # Read .env values for the embed endpoint
     env_path = install_state.env_path()
     embed_url = None
@@ -585,7 +579,7 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
 
     test_text = "test embedding for setup verification"
     payload = json.dumps({"model": embed_model, "input": test_text}).encode()
-    req = _urllib_request.Request(
+    req = urllib.request.Request(
         f"{embed_url}/v1/embeddings",
         data=payload,
         headers={"Content-Type": "application/json"},
@@ -593,7 +587,7 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
     )
 
     try:
-        with _urllib_request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
             dim = len(data["data"][0]["embedding"])
             _print(f"  Embedding test: [green]OK[/green] -- {dim}-dim vector returned")
@@ -616,14 +610,14 @@ def _test_embed_endpoint(cfg: SetupConfig) -> None:
                 "messages": [{"role": "user", "content": "add a pytest for the CLI"}],
             }
         ).encode()
-        req2 = _urllib_request.Request(
+        req2 = urllib.request.Request(
             f"{proxy_url}/v1/chat/completions",
             data=query_payload,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
-            with _urllib_request.urlopen(req2, timeout=30) as resp2:
+            with urllib.request.urlopen(req2, timeout=30) as resp2:
                 result = json.loads(resp2.read())
                 completion = result.get("choices", [{}])[0].get("message", {}).get("content", "")
                 _print(f"  Skill query test: [green]OK[/green] -- {len(completion)} chars returned")

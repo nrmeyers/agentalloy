@@ -16,6 +16,7 @@ pull.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -447,7 +448,7 @@ def _download_gguf(model_name: str) -> dict[str, Any]:
 
     except Exception as exc:  # noqa: BLE001
         # Remove a partial download so a retry starts clean.
-        with __import__("contextlib").suppress(OSError):
+        with contextlib.suppress(OSError):
             dest_path.unlink()
         return {"success": False, "error": str(exc)}
 
@@ -546,16 +547,12 @@ def _handle_llama_server(
 
 
 def _collect_model_runner_pairs(option: dict[str, Any]) -> list[tuple[str, str]]:
-    """Extract unique (model, runner) pairs from a recommend-models option."""
-    pairs: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for model_key, runner_key in (("embed_model", "embed_runner"),):
-        model = option.get(model_key, "")
-        runner = option.get(runner_key, "")
-        if model and runner and (model, runner) not in seen:
-            pairs.append((model, runner))
-            seen.add((model, runner))
-    return pairs
+    """Extract the (model, runner) pair from a recommend-models option."""
+    model = option.get("embed_model", "")
+    runner = option.get("embed_runner", "")
+    if model and runner:
+        return [(model, runner)]
+    return []
 
 
 # Strict model-name pattern. Allowed characters cover the canonical

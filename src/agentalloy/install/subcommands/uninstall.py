@@ -966,30 +966,28 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
 
     Replaces the raw JSON output with a clean, user-friendly summary.
     """
-    import sys as _sys
-
-    print("", file=_sys.stderr)
-    print("  Uninstall complete.", file=_sys.stderr)
-    print("", file=_sys.stderr)
+    print("", file=sys.stderr)
+    print("  Uninstall complete.", file=sys.stderr)
+    print("", file=sys.stderr)
 
     # Files modified
     modified = result.get("files_modified", [])
     if modified:
-        print("  Files modified:", file=_sys.stderr)
+        print("  Files modified:", file=sys.stderr)
         for entry in modified:
             path = entry.get("path", "?")
             action = entry.get("action", "?")
-            print(f"    - {path} ({action})", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    - {path} ({action})", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # Files/dirs removed
     removed = result.get("files_removed", [])
     if removed:
-        print("  Removed:", file=_sys.stderr)
+        print("  Removed:", file=sys.stderr)
         for entry in removed:
             path = entry.get("path", "?")
-            print(f"    - {path}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    - {path}", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # Models removed
     models = result.get("models_removed", [])
@@ -999,14 +997,14 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
         entry for entry in models if entry.get("action") not in removed_model_actions
     ]
     if removed_models:
-        print("  Models removed:", file=_sys.stderr)
+        print("  Models removed:", file=sys.stderr)
         for entry in removed_models:
             runner = entry.get("runner", "?")
             model = entry.get("model", "?")
-            print(f"    - {runner}: {model}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    - {runner}: {model}", file=sys.stderr)
+        print("", file=sys.stderr)
     if other_model_actions:
-        print("  Model cleanup:", file=_sys.stderr)
+        print("  Model cleanup:", file=sys.stderr)
         for entry in other_model_actions:
             action = entry.get("action", "?")
             runner = entry.get("runner")
@@ -1018,13 +1016,13 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
             hint = entry.get("hint") or entry.get("error")
             if hint:
                 detail += f" - {hint}"
-            print(f"    - {detail}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    - {detail}", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # Data preserved
     kept = result.get("data_kept", [])
     if kept:
-        print("  Data preserved:", file=_sys.stderr)
+        print("  Data preserved:", file=sys.stderr)
         for entry in kept:
             if isinstance(entry, dict):
                 entry_dict = cast(dict[str, Any], entry)
@@ -1032,23 +1030,23 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
                 path = raw_path if isinstance(raw_path, str) else "?"
             else:
                 path = str(entry)
-            print(f"    - {path}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    - {path}", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # uv tool
     uv = result.get("uv_tool", {})
     if uv.get("action") == "uv_tool_uninstalled":
-        print("  uv tool: uninstalled", file=_sys.stderr)
-        print("", file=_sys.stderr)
+        print("  uv tool: uninstalled", file=sys.stderr)
+        print("", file=sys.stderr)
     elif uv.get("action") == "uv_tool_skipped":
         reason = uv.get("reason", "")
-        print(f"  uv tool: skipped ({reason})", file=_sys.stderr)
-        print("", file=_sys.stderr)
+        print(f"  uv tool: skipped ({reason})", file=sys.stderr)
+        print("", file=sys.stderr)
 
     # Container actions
     container_actions = result.get("container_actions", [])
     if container_actions:
-        print("  Container actions:", file=_sys.stderr)
+        print("  Container actions:", file=sys.stderr)
         for entry in container_actions:
             path = entry.get("path", "?")
             action = entry.get("action", "?")
@@ -1056,16 +1054,16 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
             detail = f"    - {path} ({action})"
             if error:
                 detail += f" - {error}"
-            print(detail, file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(detail, file=sys.stderr)
+        print("", file=sys.stderr)
 
     # Warnings
     warnings = result.get("warnings", [])
     if warnings:
-        print("  Warnings:", file=_sys.stderr)
+        print("  Warnings:", file=sys.stderr)
         for w in warnings:
-            print(f"    ! {w}", file=_sys.stderr)
-        print("", file=_sys.stderr)
+            print(f"    ! {w}", file=sys.stderr)
+        print("", file=sys.stderr)
 
 
 def _print_uninstall_json(result: dict[str, Any]) -> None:
