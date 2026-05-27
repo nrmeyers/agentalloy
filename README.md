@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, and zero paid-LLM tokens spent on routing. No generative LLM in the hot path. No remote calls. No containers (unless you want them). The whole loop runs locally on one 0.6B embed model plus embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB. In our proof-of-concept: **60% smaller prompts, 25% faster runs, same model — and answers improve, not degrade** (see [Empirical results](#empirical-results)).
+Phase-aware, intent-aware, and zero paid-LLM tokens spent on routing. No generative LLM in the hot path. No remote calls. No containers (unless you want them). The whole loop runs locally on one 0.6B embed model plus embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -54,13 +54,14 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - [Harness support](#harness-support)
 - [Standalone CLI](#standalone-cli)
 - [REST API](#rest-api)
+- [MCP Server](#mcp-server)
 - [Hardware presets](#hardware-presets)
 - [Packs shipping in-tree](#packs-shipping-in-tree)
 - [Architecture](#architecture)
 - [Telemetry](#telemetry)
 - [Configuration](#configuration)
 - [Development](#development)
-- [Empirical results](#empirical-results)
+- [Benchmarks](#benchmarks)
 - [License](#license)
 
 ---
@@ -138,7 +139,7 @@ Your agent calls `/compose`, gets back the relevant raw skill prose, and assembl
 
 ## What makes the composition different
 
-- **Composed per task, not loaded every turn.** A skill that's irrelevant to the current task isn't in the prompt at all — RRF + applicability filtering picks the right subset for each request. 60% smaller prompts on average vs. flat injection (see [Empirical results](#empirical-results)).
+- **Composed per task, not loaded every turn.** A skill that's irrelevant to the current task isn't in the prompt at all — RRF + applicability filtering picks the right subset for each request.
 - **Three instruction sets, fused.** Governance, workflow, and domain skills are composed together into one persona — not three files the agent has to reconcile on its own.
 - **Phase-aware.** Build-phase skills weight differently than QA-phase or review-phase skills. The same task gets a different composition at different points in the lifecycle.
 - **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 1024-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
@@ -269,96 +270,29 @@ See [profiles-and-overrides.md](docs/profiles-and-overrides.md) for full details
 
 ## Harness support
 
-Classification depends on a single question: can the harness's LLM traffic be intercepted by the AgentAlloy proxy? Harnesses that honor a custom API base URL get full per-turn integration. Harnesses that route through their own backend fall back to a static rules file kept current by a watcher.
+Harnesses fall into two categories:
 
-| Capability | Proxy-wired | Sidecar (no proxy support) |
-|---|---|---|
-| Initial workflow skill context | ✅ | ✅ |
-| Phase transition detection (automatic) | ✅ Per-turn via proxy | ✅ Sidecar auto-detects via file watcher (when running); manual fallback via `agentalloy phase set <name>` |
-| System skill enforcement (gates) | ✅ Proxy can block/modify request | ⚠️ Advisory text only — no enforcement |
-| Mid-session context updates | ✅ Injected into next request | ⚠️ Requires file reload (harness-dependent) |
-| Contract → skill injection | ✅ Per-turn via proxy | ✅ Sidecar (`agentalloy watch start`) |
-| Semantic gate evaluation | ✅ Runs per-turn | ⚠️ Falls back to `UNKNOWN` without proxy |
+- **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
+- **Sidecar** (Cursor, Windsurf, GitHub Copilot, Gemini CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
 
-**Sidecar mode is a real reduction in capability.** Without proxy interception, system skills become suggestions rather than gates, and phase transitions are automatic only when the sidecar watcher is running; otherwise manual via `agentalloy phase set <name>`. If you need enforcement, prefer a proxy-wired harness. See [`docs/sidecar-experience.md`](docs/sidecar-experience.md) for sidecar setup details and [`docs/harness-classification.md`](docs/harness-classification.md) for the full classification spec.
-
-Current membership (lists evolve as harness vendors expose base-URL overrides — check `agentalloy wire --harness <name>` for current support):
-
-- **Proxy-wired**: Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent
-- **Sidecar**: Cursor, Windsurf, GitHub Copilot, Gemini CLI
-
-Full per-harness catalog: [`docs/install/harness-catalog.md`](docs/install/harness-catalog.md).
+Proxy-wired is the preferred mode. Full per-harness catalog: [docs/install/harness-catalog.md](docs/install/harness-catalog.md).
 
 ---
 
 ## Standalone CLI
 
-The `agentalloy.install` module exposes a single CLI with subcommands. All write paths are user-scoped (LadybugDB and pack drafts live under `user_config_dir()`).
+The `agentalloy` CLI handles install, service management, phase control, and composition. Key commands:
 
-**Install & lifecycle**
+```bash
+agentalloy setup                          # Interactive install wizard
+agentalloy wire --harness <name>          # Wire a harness (or --mcp-fallback)
+agentalloy serve                          # Run the service
+agentalloy phase get|set|clear            # Manage project phase
+agentalloy compose --contract <path>      # One-shot composition
+agentalloy doctor                         # Diagnose install issues
+```
 
-| Command | Description |
-|---|---|
-| `setup` | End-to-end interactive install (calls every step below in order). |
-| `preflight` | Gate prereqs (Python, runtimes, ports) before any state changes. |
-| `pull-models` | Pull / verify the embedding model is loaded into your backend. |
-| `start-embed-server` | Start the embedding backend (llama-server or Ollama) before pack install. |
-| `seed-corpus` | One-shot pack ingestion into LadybugDB + DuckDB. |
-| `install-packs [--packs <names>] [--list]` | Install/refresh specific pack(s), or `--list` to see what's available. |
-| `install-pack [--pack <name>]` | Install a single pack by name. |
-| `reembed` | Recompute embeddings for unembedded or updated LadybugDB fragments. |
-| `wire [--harness <name>]` | Auto-detect the harness in the current repo and inject sentinels (or pass `--harness` to force). |
-| `wire-harness --harness <name>` | Lower-level: explicit harness wiring with full flag control. |
-| `unwire` | Remove AgentAlloy sentinels from the current repo (keeps user state). |
-| `write-env` | Write `.env` with the resolved backend / model / paths. |
-| `update` | Pull the latest packs and re-seed. |
-| `uninstall` | Cross-repo sentinel cleanup, optional data-dir wipe. |
-| `reset-step <step>` | Roll back one step of an in-progress install. |
-
-**Service**
-
-| Command | Description |
-|---|---|
-| `serve` | Run the service in the foreground (uvicorn). |
-| `server-start` / `server-stop` / `server-restart` / `server-status` | Manage the background FastAPI daemon on :47950. |
-| `enable-service` | Register AgentAlloy as a persistent background service (systemd-user / launchd). |
-| `status` | Show user-scope install state, wired repos, and service reachability. |
-| `verify` | Run post-install integrity checks (corpus count, harness sentinels, port). |
-| `doctor` | Diagnose a partial / broken install. |
-
-**Phases, contracts, signal layer**
-
-| Command | Description |
-|---|---|
-| `phase {get,set,clear}` | Read / write `.agentalloy/phase`. `set` is a manual override / sidecar fallback when the watcher is not running. |
-| `contract {write,validate,list}` | Create or validate task contracts under `.agentalloy/contracts/<phase>/`. |
-| `signal evaluate-phase` | Fire the pre-filter + gate evaluator; emits the next workflow skill's prose if a transition occurs. Invoked by the proxy per request (proxy-wired harnesses). |
-| `signal evaluate-system --tool <name>` | Find system skills whose `applies_when` matches a tool that's about to fire. |
-| `signal watch-contract --path <p>` | Validate a contract and trigger composition. |
-| `signal check` | Diagnostics: dump current phase + active workflow skill + pre-filter state. |
-| `compose --contract <path> [--inject]` | One-shot composition from a contract file. Used by hook scripts; can also be called directly. |
-
-**Profiles & customization**
-
-| Command | Description |
-|---|---|
-| `profile {list,active,create,use}` | Per-profile datastores and skill overrides (e.g., `work` vs `personal`). Auto-detected from cwd via git remote, path prefix, or explicit project marker. See docs/profiles-and-overrides.md. |
-| `customize {list,edit,validate,update,diff,reset}` | Three-layer skill overrides (project → profile → shipped default). Edit a skill's prose, gates, or applicability for your project or profile without forking. See docs/profiles-and-overrides.md § Three-layer overrides. |
-| `reset` | Wipe profile overrides and re-ingest shipped defaults. |
-
-**Sidecar (for harnesses that can't be proxy-wired)**
-
-| Command | Description |
-|---|---|
-| `watch start --harness <name>` | Start the file-watching sidecar for sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI). |
-| `watch stop` | Stop the sidecar. |
-| `watch status` | Report whether the sidecar is running and where its log lives. |
-
-**Telemetry**
-
-| Command | Description |
-|---|---|
-| `telemetry` | Query / inspect composition traces from the CLI. |
+Full command reference: [docs/operator.md](docs/operator.md).
 
 Each subcommand emits structured JSON on stdout; pair with `jq` for scripting.
 
@@ -366,30 +300,31 @@ Each subcommand emits structured JSON on stdout; pair with `jq` for scripting.
 
 ## REST API
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/compose` | Hybrid retrieve + assemble. Returns JSON: `{output, source_skills, tokens_returned, compose_ms}`. |
-| `POST` | `/compose/text` | Same as `/compose` but returns `text/plain` — paste-ready for harnesses that take freeform context. |
-| `POST` | `/retrieve` | Retrieve only (no assembly). Returns ranked fragment IDs + scores + provenance. |
-| `GET` | `/retrieve/{skill_id}` | Look up a single skill's retrievable fragments by id. |
-| `GET` | `/skills/{skill_id}` | Inspect a skill — versions, fragments, applicability rules. |
-| `GET` | `/telemetry/traces` | Composition trace history. See [Telemetry](#telemetry). |
-| `GET` | `/health` | `{"status":"ok"}` liveness probe. |
-| `GET` | `/diagnostics/runtime` | Backend / model / DB state for debugging. |
+AgentAlloy serves both OpenAI-compatible and Anthropic Messages API endpoints through the proxy:
 
-Request body for `/compose`:
+- `POST /v1/chat/completions` — OpenAI-compatible proxy
+- `POST /v1/messages` — Anthropic Messages API proxy (Claude Code, Cline)
+- `POST /compose` — Manual skill composition
+- `GET /health` — Liveness probe
 
-```json
-{
-  "task": "<one-sentence task description>",
-  "phase": "spec" | "design" | "build" | "qa" | "ship",
-  "domain_tags": ["postgres", "fastapi"],     // optional hard filter
-  "contract_path": ".agentalloy/contracts/build/<slug>.md",  // optional — overrides task + tags
-  "contract_tags": ["NestJS", "JWT"]          // optional — explicit tags without a contract file
-}
+See [proxy-architecture.md](docs/proxy-architecture.md) for the full endpoint list and request/response schemas.
+
+---
+
+## MCP Server
+
+AgentAlloy ships a built-in MCP server for harnesses that support the Model Context Protocol. Instead of proxying LLM traffic, the MCP server exposes a single tool the harness calls on demand:
+
+- **`get_skill_for(task, phase)`** — forwards to the local `/compose` endpoint and returns composed skill fragments.
+
+The server is dependency-free (no MCP SDK) and runs via stdio JSON-RPC (MCP 2024-11-05 spec).
+
+```bash
+# Wire with MCP fallback instead of proxy:
+agentalloy wire --harness cursor --mcp-fallback
 ```
 
-When `contract_path` is provided, AgentAlloy parses the contract's frontmatter and uses `domain_tags` as the BM25 input — the surgical, intent-aware path. When neither contract field is present, AgentAlloy rule-extracts keywords from `task` as a fallback.
+Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md) for per-harness configuration details.
 
 ---
 
@@ -440,97 +375,35 @@ Pack authoring lives in a separate repo and tooling — see [agentalloy-authorin
 
 ## Architecture
 
-```
-                    ┌──────────────────────────────────────────────┐
-                    │   paid LLM (your coding agent)               │
-                    └────────┬──────────────────────────┬──────────┘
-                             │                          │
-                  writes contract                executes workflow
-                  per phase task                 skill instructions
-                             │                          │
-                             ▼                          ▼
-                  ┌──────────────────────┐    ┌──────────────────────┐
-                  │ .agentalloy/         │    │ .agentalloy/phase    │
-                  │  contracts/<phase>/  │    │ (sticky)             │
-                  └──────────┬───────────┘    └─────────┬────────────┘
-                             │                          │
-                file-write event              prompt / file pre-filter
-                             │                          │
-                             ▼                          ▼
-                  ┌──────────────────────┐    ┌──────────────────────┐
-                  │ /compose             │    │ signal layer         │
-                  │ (deterministic)      │    │ deterministic + cosine
-                  │                      │    │ similarity            │
-                  └──────────┬───────────┘    └─────────┬────────────┘
-                             │                          │
-              hybrid BM25 + dense over            transition? → write
-              LadybugDB + DuckDB                  phase, emit next
-                             │                    workflow skill
-                             ▼                          │
-                       composed prose ◄────────────────┘
-                             │
-                             ▼
-                  Proxy-wired: injected into next LLM request
-                  Sidecar: file watcher rewrites rules file
-```
+AgentAlloy is a three-layer system:
 
-**Data plane** (the two embedded stores):
+1. **Signal layer** — deterministic Python that wakes on phase transitions, contract writes, or tool fires. Pre-filters cheaply, evaluates exit gates, and composes skills only when needed.
+2. **Composition engine** — hybrid BM25 + dense retrieval over LadybugDB (skill graph) and DuckDB (vector index), fused via phase-tuned Reciprocal Rank Fusion.
+3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 
-| Store | Role |
-|---|---|
-| **DuckDB** | 1024-dim vector index • BM25 FTS index • composition traces |
-| **LadybugDB** (embedded [kuzu](https://kuzudb.com/)) | Skill / Version / Fragment / Pack graph — "what skill means and how its pieces relate" |
-
-**Components**
-
-- **Embedding** — `qwen3-embedding:0.6b` (1024-dim). Backend-agnostic via OpenAI-compatible `/v1/embeddings`.
-- **Retrieval** — hybrid BM25 + dense cosine fused via Reciprocal Rank Fusion with phase-specific leg weighting. Contract `domain_tags` drive BM25 when present.
-- **Applicability filter** — deterministic rule predicates on `ActiveSkill` records (always_apply, phase_scope, category_scope). No LLM parsing.
-- **Signal layer** — pre-filter (keywords + file-event scope) → exit-gate evaluation (deterministic predicates + cosine-similarity gates) → atomic phase write + workflow-skill prose emission. Soft-fails everywhere; failure never blocks the agent.
-- **Telemetry** — every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB inline-before-response. See [Telemetry](#telemetry).
-- **Single-model runtime** — `qwen3-embedding:0.6b` does both retrieval embeddings *and* semantic gate scoring (cosine similarity against reference phrase sets). No second model, no chat classifier, no Docker.
-- **No generative LLM in the runtime path.** The agent owns generation; AgentAlloy owns retrieval and routing.
+Zero generative LLM in the runtime path. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
 
 ---
 
 ## Telemetry
 
-Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB **before the response returns** — no async backlog, no dropped traces. Trace-write failures are logged but never propagate; the response always succeeds regardless of telemetry state.
+Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns — no async backlog, no dropped traces. Trace-write failures never propagate.
 
-Each trace captures: `trace_id`, `request_ts`, `phase`, `task_prompt`, `status`, `selected_fragment_ids`, `source_skill_ids`, `system_skill_ids`, `workflow_skill_ids`, `retrieval_latency_ms`, `assembly_latency_ms`, `total_latency_ms`, `response_size_chars`, and (on failure) `error_code`. Signal-layer evaluations additionally capture: `event_type` (`phase_eval` / `phase_transition` / `system_skill_applied` / `contract_retrieval`), `pre_filter_matched` (which signal triggered the evaluation), `gates_met`, `gates_unmet`, and `qwen_calls` (number of embed-server calls made during gate evaluation).
-
-Query via `GET /telemetry/traces` with optional filters:
-
-| Filter | Type | Purpose |
-|---|---|---|
-| `phase` | string | `spec` / `design` / `build` / `qa` / `ship` |
-| `status` | string | success / error / degraded result type |
-| `event_type` | string | `compose` / `phase_eval` / `phase_transition` / `system_skill_applied` / `contract_retrieval` |
-| `since`, `until` | epoch ms | time-range window |
-| `limit`, `offset` | int | pagination (1 ≤ limit ≤ 500, default 50) |
-
-Use it to inspect which skills got composed for a task, profile retrieval latency across phases, or audit governance-rule applicability over time. Traces live in the same DuckDB file as the vector index (`DUCKDB_PATH`).
+Query via `GET /telemetry/traces` or `agentalloy telemetry`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
 
 ---
 
 ## Configuration
 
-Runtime environment variables (written automatically by `agentalloy write-env` to `~/.config/agentalloy/.env`):
+Runtime environment variables are written automatically by `agentalloy write-env` to `~/.config/agentalloy/.env`. Key variables:
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `RUNTIME_EMBED_BASE_URL` | `http://localhost:11434` | Embedding endpoint (Ollama default; 1234 for LM Studio) |
-| `RUNTIME_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model — used for both retrieval and semantic gate scoring |
-| `LADYBUG_DB_PATH` | `~/.local/share/agentalloy/corpus/ladybug` | Legacy LadybugDB (fallback if profile datastore doesn't exist) |
-| `DUCKDB_PATH` | `~/.local/share/agentalloy/corpus/skills.duck` | Legacy DuckDB (fallback; profiles use `profiles/<name>/skills.duck`) |
-| `PROFILE_ROOT` | `~/.local/share/agentalloy/profiles` | Profile root (per-profile datastores live here) |
-| `FORCED_PROFILE` | _(unset)_ | Override profile auto-detection (useful for tests) |
-| `DEDUP_HARD_THRESHOLD` | `0.92` | Dedup hard cosine threshold |
-| `DEDUP_SOFT_THRESHOLD` | `0.80` | Dedup soft cosine threshold |
-| `BOUNCE_BUDGET` | `3` | Compose retry budget |
-| `LOG_LEVEL` | `INFO` | Log verbosity |
+- `RUNTIME_EMBED_BASE_URL` — embedding endpoint (default: Ollama at `localhost:11434`)
+- `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `qwen3-embedding:0.6b`)
+- `PROFILE_ROOT` — per-profile datastores
+- `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — cosine dedup thresholds
+- `BOUNCE_BUDGET` — compose retry budget
 
-The `.env` file is user-scoped (written to `~/.config/agentalloy/.env`), not per-repo. Re-run `agentalloy setup` or `agentalloy write-env` to regenerate it with the current config.
+See [docs/operator.md](docs/operator.md) for the full configuration reference.
 
 ---
 
@@ -549,13 +422,9 @@ Tests live under `tests/` and cover the install pipeline (`tests/install/`), ret
 
 ---
 
-## Empirical results
+## Benchmarks
 
-See `docs/experiments/poc-composed-vs-flat.md` §13. Headline:
-
-> **60% smaller prompts. 25% faster runs. Same model — and answers improve, not degrade.**
-
-Reproduce: `AGENT_MODEL=<your-agent-model> uv run python -m eval.run_poc --n 3` (requires running AgentAlloy + the agent model loaded locally).
+See [BENCHMARKS.md](BENCHMARKS.md) for the composed vs flat comparison experiment and retrieval recall harness.
 
 ---
 
