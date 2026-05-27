@@ -31,10 +31,6 @@ from agentalloy.install.subcommands.simple_setup import (
 )
 # ruff: noqa: I001
 
-# This module is slow (several minutes). Excluded from the fast PR job;
-# run via the dedicated slow-tests CI job on merges to main / on demand.
-pytestmark = pytest.mark.slow
-
 
 # Helper to avoid pyright lambda param type issues (ruff reformatting moves ignore comments)
 def _mock_input_accept(prompt: str) -> str:
