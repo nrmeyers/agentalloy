@@ -1389,8 +1389,9 @@ class TestContainerFlow:
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
             patch.object(setup_mod, "__file__", str(fake_module_file)),
-            # Prompt sequence: CPU-only continue → clone path → final confirm.
-            patch("builtins.input", side_effect=["y", str(clone), "y"]),
+            # Prompt sequence: CPU-only continue → clone path → packs (blank
+            # = always-on) → final confirm.
+            patch("builtins.input", side_effect=["y", str(clone), "", "y"]),
         ):
             mock_result = MagicMock()
             mock_result.returncode = 0
@@ -1436,8 +1437,9 @@ class TestContainerFlow:
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
             patch.object(setup_mod, "__file__", str(fake_module_file)),
-            # Prompt sequence: CPU-only continue → compose path → final confirm.
-            patch("builtins.input", side_effect=["y", str(compose_file), "y"]),
+            # Prompt sequence: CPU-only continue → compose path → packs
+            # (blank = always-on) → final confirm.
+            patch("builtins.input", side_effect=["y", str(compose_file), "", "y"]),
         ):
             mock_result = MagicMock()
             mock_result.returncode = 0
@@ -1675,6 +1677,148 @@ class TestContainerFlow:
 
         out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
         assert "Could not confirm agentalloy-init" in out
+
+    # ------------------------------------------------------------------
+    # Skill-pack selection (spec: agentalloy-container-skillpack-selection)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _install_packs_argv(mock_run: MagicMock) -> list[str]:
+        """Find the direct `podman run … install-packs` argv from a mock_run."""
+        for c in mock_run.call_args_list:
+            if not c.args or not isinstance(c.args[0], list):
+                continue
+            argv = [str(x) for x in c.args[0]]  # type: ignore[arg-type]
+            if (
+                len(argv) >= 2
+                and argv[1] == "run"
+                and "agentalloy:local" in argv
+                and "install-packs" in argv
+            ):
+                return argv
+        raise AssertionError(
+            f"install-packs one-shot not found in: {[c.args for c in mock_run.call_args_list]}"
+        )
+
+    def test_container_flow_prompts_for_packs_when_interactive(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """Interactive container setup with no --packs flag must call
+        _prompt_for_packs and thread the result into the install-packs argv."""
+        SetupConfig, run_setup = self._import_run_setup()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight._probe_compose_runtime",
+                return_value=("podman compose", "/usr/bin/podman", []),
+            ),
+            patch(
+                "agentalloy.install.subcommands.simple_setup._prompt_for_packs",
+                return_value="engineering",
+            ) as mock_prompt,
+            patch(
+                "agentalloy.install.subcommands.simple_setup._discover_packs",
+                return_value={"engineering": {"skills": []}},
+            ),
+            patch("subprocess.run") as mock_run,
+            # Interactive prompts in order: CPU-only continue (Y),
+            # compose-file confirm (1 = first option), review-summary confirm (Y).
+            patch("builtins.input", side_effect=["y", "1", "y"]),
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
+            rc = run_setup(SetupConfig(deployment="container", non_interactive=False))
+
+        assert rc == 0
+        assert mock_prompt.called, "_prompt_for_packs must be called in interactive container flow"
+        argv = self._install_packs_argv(mock_run)
+        assert "--packs" in argv and argv[argv.index("--packs") + 1] == "engineering"
+        assert "--ignore-unknown" in argv
+
+    def test_container_flow_skips_prompt_when_packs_preset(self, tmp_state_dir: tuple[Path, Path]):
+        """A preset --packs value must bypass the interactive prompt and
+        flow straight through to the install-packs one-shot."""
+        SetupConfig, run_setup = self._import_run_setup()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight._probe_compose_runtime",
+                return_value=("podman compose", "/usr/bin/podman", []),
+            ),
+            patch(
+                "agentalloy.install.subcommands.simple_setup._prompt_for_packs",
+            ) as mock_prompt,
+            patch(
+                "agentalloy.install.subcommands.simple_setup._discover_packs",
+                return_value={"go": {"skills": []}},
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
+            rc = run_setup(SetupConfig(deployment="container", non_interactive=True, packs="go"))
+
+        assert rc == 0
+        mock_prompt.assert_not_called()
+        argv = self._install_packs_argv(mock_run)
+        assert "--packs" in argv and argv[argv.index("--packs") + 1] == "go"
+        assert "--ignore-unknown" in argv
+
+    def test_container_flow_non_interactive_no_packs_uses_defaults(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """Non-interactive container setup without --packs must NOT add
+        --packs to the install-packs argv — preserves today's always-on default."""
+        SetupConfig, run_setup = self._import_run_setup()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight._probe_compose_runtime",
+                return_value=("podman compose", "/usr/bin/podman", []),
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
+            rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
+
+        assert rc == 0
+        argv = self._install_packs_argv(mock_run)
+        assert "--packs" not in argv
+        assert "--ignore-unknown" not in argv
+
+    def test_container_flow_unknown_pack_stripped_and_warned(
+        self,
+        tmp_state_dir: tuple[Path, Path],
+        capsys: pytest.CaptureFixture[str],
+    ):
+        """Unknown pack names are stripped client-side with a warning so
+        the install-packs one-shot never sees them."""
+        SetupConfig, run_setup = self._import_run_setup()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight._probe_compose_runtime",
+                return_value=("podman compose", "/usr/bin/podman", []),
+            ),
+            patch(
+                "agentalloy.install.subcommands.simple_setup._discover_packs",
+                return_value={"rust": {"skills": []}, "python": {"skills": []}},
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
+            rc = run_setup(
+                SetupConfig(deployment="container", non_interactive=True, packs="rust,bogus")
+            )
+
+        assert rc == 0
+        import re
+
+        out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+        assert "bogus" in out
+        assert "Unknown pack" in out
+        argv = self._install_packs_argv(mock_run)
+        # Only the valid name survives into argv.
+        assert "--packs" in argv and argv[argv.index("--packs") + 1] == "rust"
+        assert "bogus" not in argv
 
     def test_verify_failures_surfaced_inline(
         self,

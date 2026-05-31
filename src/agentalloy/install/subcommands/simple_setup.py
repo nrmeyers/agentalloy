@@ -1160,6 +1160,26 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     cfg.port = 47950
     cfg.deployment = "container"
 
+    # 5b. Skill pack selection. Mirrors the native flow at step 6
+    # (simple_setup.py:1696). Done here — after all preflight, before
+    # any compose work — so a Ctrl-C costs nothing and the chosen packs
+    # show up in the review summary below. Selection is threaded into
+    # the one-shot install-packs container at step 8b via --packs.
+    if not cfg.non_interactive and not cfg.packs:
+        cfg.packs = _prompt_for_packs()
+    # Strip names that don't resolve against the host's seeds/packs dir.
+    # Host and image are built from the same tree, so this is a reliable
+    # pre-check that turns a typo into an immediate warning instead of a
+    # five-minute wait followed by install-packs exit 1.
+    if cfg.packs:
+        _available_packs = _discover_packs()
+        _requested = [p.strip() for p in cfg.packs.split(",") if p.strip()]
+        _unknown = [p for p in _requested if p not in _available_packs]
+        _valid = [p for p in _requested if p in _available_packs]
+        if _unknown:
+            _print(f"  [yellow]Unknown pack(s) skipped: {sorted(_unknown)}[/yellow]")
+        cfg.packs = ",".join(_valid)
+
     # 6. Show summary
     _print("\n[dim]" + "─" * 40)
     _print("\n[bold]Review your container setup:[/bold]")
@@ -1167,6 +1187,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print(f"  Compose file: {cfg.compose_file}")
     _print(f"  Compose binary: {cfg.compose_binary}")
     _print(f"  Port:         {cfg.port}")
+    _print(f"  Packs:        {cfg.packs or '(always-on only)'}")
 
     if not cfg.non_interactive:
         confirm = input("  Confirm and continue? [Y/n]: ").strip().lower()
@@ -1346,6 +1367,13 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         "agentalloy",
         "install-packs",
     ]
+    # Pass the user's pack selection through to the one-shot. --ignore-unknown
+    # is belt-and-suspenders: 5b already stripped unknowns against the host's
+    # seeds/packs, so any name reaching here is valid on the host. If the
+    # image somehow disagrees we'd rather install the rest than exit 1 and
+    # leave the corpus empty.
+    if cfg.packs:
+        packs_cmd.extend(["--packs", cfg.packs, "--ignore-unknown"])
     rc = _run_quiet(packs_cmd, label="install-packs", timeout=600, log_file=log_path)
     if rc != 0:
         # install-packs returns 0 even when reembed soft-failed; if we get
