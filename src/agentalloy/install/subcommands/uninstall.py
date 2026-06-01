@@ -1063,6 +1063,15 @@ def uninstall(
         claude_env = Path.home() / ".agentalloy" / "claude-code-env.sh"
         if str(claude_env) not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
+        # Also remove hook entries from settings.json (legacy path)
+        if all_repos:
+            settings_removed = uninstall_proxy._unwire_claude_code_hooks_settings_json()
+            for sr in settings_removed:
+                files_removed.append(sr)
+                print(
+                    f"  settings.json cleanup: {sr['action']} ({sr.get('key', sr.get('action'))})",
+                    file=sys.stderr,
+                )
 
     if proxy_removed:
         for p in proxy_removed:

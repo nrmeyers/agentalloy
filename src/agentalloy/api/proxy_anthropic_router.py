@@ -3,8 +3,7 @@
 Translates POST /v1/messages (Anthropic format) to the existing OpenAI-compatible
 proxy pipeline and converts the response back to Anthropic format.
 
-Phase 1 scope: text-only, non-streaming and streaming.  Tool use / function
-calling is out of scope — tool_calls deltas are silently stripped.
+Scope: text-only and tool-use (function calling), non-streaming and streaming.
 """
 
 from __future__ import annotations
@@ -42,20 +41,141 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+def _anthropic_tool_to_openai(tool: dict[str, Any]) -> dict[str, Any]:
+    """Convert a single Anthropic tool definition to OpenAI format.
+
+    Anthropic:  { name, description, input_schema }
+    OpenAI:     { type: "function", function: { name, description, parameters } }
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool.get("description"),
+            "parameters": tool.get("input_schema", {}),
+        },
+    }
+
+
+def _anthropic_tool_choice_to_openai(
+    tc: dict[str, Any] | None,
+) -> str | dict[str, Any] | None:
+    """Convert an Anthropic tool_choice to OpenAI format.
+
+    Anthropic:  { type: "auto" | "any" | "tool", name: str | None }
+    OpenAI:     "auto" | "none" | "required" | { type: "function", function: { name } }
+    """
+    if tc is None:
+        return None
+    t = tc.get("type")
+    if t == "auto":
+        return "auto"
+    if t == "any":
+        return "required"
+    if t == "tool":
+        return {"type": "function", "function": {"name": tc.get("name")}}
+    return None
+
+
+def _anthropic_message_to_openai(
+    msg: dict[str, Any],
+) -> ProxyMessage:
+    """Convert a single Anthropic message to an OpenAI ProxyMessage.
+
+    Handles:
+    - role mapping (Anthropic "user"/"assistant" → OpenAI "user"/"assistant")
+    - content: str → content: str
+    - content: list[blocks] → content: list[dict] (passthrough for text/tool_use blocks)
+    - tool_calls: list[{id, name, input}] → OpenAI tool_calls
+    - tool_result role → OpenAI tool role
+    """
+    role = msg.get("role", "user")
+    content = msg.get("content")
+
+    # --- tool_calls extraction ---
+    tool_calls: list[dict[str, Any]] | None = None
+    tc_list = msg.get("tool_calls")
+    if tc_list:
+        tool_calls = []
+        for tc in tc_list:
+            tool_calls.append(
+                {
+                    "id": tc.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name", ""),
+                        "arguments": json.dumps(tc.get("input", {})),
+                    },
+                }
+            )
+
+    # --- content normalisation ---
+    if isinstance(content, str):
+        # Plain text content
+        if tool_calls:
+            return ProxyMessage(role=role, content=content, tool_calls=tool_calls)
+        return ProxyMessage(role=role, content=content)
+
+    if isinstance(content, list):
+        # Content-block array
+        # Check if any block is a tool_use — if so, preserve the array
+        has_tool_use = any(
+            isinstance(block, dict) and block.get("type") == "tool_use" for block in content
+        )
+        if has_tool_use:
+            return ProxyMessage(role=role, content=content)
+        # No tool_use blocks — merge text blocks into a single string
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+        return ProxyMessage(role=role, content="".join(text_parts) or None)
+
+    # content is None or unexpected type — still include tool_calls if present
+    if tool_calls:
+        return ProxyMessage(role=role, content=content, tool_calls=tool_calls)
+    return ProxyMessage(role=role, content=content)
+
+
 def _anthropic_to_openai(request: AnthropicRequest) -> ProxyRequest:
     """Convert an Anthropic Messages request to an OpenAI ProxyRequest.
 
-    - ``system``: string → ``{"role": "system", "content": system}`` prepended
-    - ``messages``: role/content pass-through (already compatible)
+    - ``system``: string or content-block list → ``{"role": "system", "content": ...}`` prepended
+    - ``messages``: role/content/tool_calls pass-through with format conversion
     - ``stream``, ``temperature``, ``top_p``: pass-through
     - ``model``: pass-through (proxy handles model resolution)
     - ``max_tokens``: mapped to ``max_tokens`` on ProxyRequest
+    - ``tools``: Anthropic tool format → OpenAI function-calling tool format
+    - ``tool_choice``: Anthropic tool_choice → OpenAI tool_choice
     """
     messages: list[ProxyMessage] = []
-    if request.system:
-        messages.append(ProxyMessage(role="system", content=request.system))
+
+    # System message
+    if request.system is not None:
+        if isinstance(request.system, str):
+            messages.append(ProxyMessage(role="system", content=request.system))
+        elif isinstance(request.system, list):
+            # Content-block array for system — merge to string
+            text_parts: list[str] = []
+            for block in request.system:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            messages.append(ProxyMessage(role="system", content="".join(text_parts) or None))
+
+    # User / assistant / tool messages
     for m in request.messages:
-        messages.append(ProxyMessage(role=m.role, content=m.content))
+        msg_dict = m.model_dump(mode="json", exclude_none=True)
+        messages.append(_anthropic_message_to_openai(msg_dict))
+
+    # Tools
+    tools: list[dict[str, Any]] | None = None
+    if request.tools:
+        tools = [_anthropic_tool_to_openai(t.model_dump(mode="json")) for t in request.tools]
+
+    # Tool choice
+    tool_choice: str | dict[str, Any] | None = None
+    if request.tool_choice is not None:
+        tool_choice = _anthropic_tool_choice_to_openai(request.tool_choice.model_dump(mode="json"))
 
     return ProxyRequest(
         model=request.model,
@@ -64,6 +184,8 @@ def _anthropic_to_openai(request: AnthropicRequest) -> ProxyRequest:
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         top_p=request.top_p,
+        tools=tools,
+        tool_choice=tool_choice,
     )
 
 
@@ -71,14 +193,14 @@ def _openai_to_anthropic(openai_body: dict[str, Any], model: str) -> dict[str, A
     """Convert a non-streaming OpenAI chat completion response to Anthropic format.
 
     - ``choices[0].message.content`` → ``content: [{type: "text", text: ...}]``
+    - ``choices[0].message.tool_calls`` → ``content: [{type: "tool_use", ...}]``
     - ``usage.prompt_tokens`` / ``completion_tokens`` → ``usage.input_tokens`` / ``output_tokens``
     - ``finish_reason`` → ``stop_reason`` (``"stop"`` → ``"end_turn"``,
-      ``"length"`` → ``"max_tokens"``)
+      ``"length"`` → ``"max_tokens"``, ``"tool_calls"`` → ``"tool_use"``)
     """
     choices: list[dict[str, Any]] = openai_body.get("choices") or [{}]
     choice: dict[str, Any] = choices[0]
     message: dict[str, Any] = choice.get("message") or {}
-    text: str = message.get("content") or ""
 
     finish: str | None = choice.get("finish_reason")
     stop_reason: str | None = None
@@ -86,6 +208,37 @@ def _openai_to_anthropic(openai_body: dict[str, Any], model: str) -> dict[str, A
         stop_reason = "end_turn"
     elif finish == "length":
         stop_reason = "max_tokens"
+    elif finish == "tool_calls":
+        stop_reason = "tool_use"
+
+    # Build content blocks
+    content_blocks: list[dict[str, Any]] = []
+
+    # Text content
+    text: str | None = message.get("content")
+    if text:
+        content_blocks.append({"type": "text", "text": text})
+
+    # Tool calls
+    tc_list: list[dict[str, Any]] | None = message.get("tool_calls")
+    if tc_list:
+        for tc in tc_list:
+            fn = tc.get("function") or {}
+            try:
+                input_data: dict[str, Any] = json.loads(fn.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                input_data = {}
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
+                    "name": fn.get("name", ""),
+                    "input": input_data,
+                }
+            )
+
+    if not content_blocks:
+        content_blocks.append({"type": "text", "text": ""})
 
     usage_raw: dict[str, Any] = openai_body.get("usage") or {}
     usage: dict[str, Any] = {
@@ -95,7 +248,7 @@ def _openai_to_anthropic(openai_body: dict[str, Any], model: str) -> dict[str, A
 
     response = AnthropicResponse(
         id=openai_body.get("id") or f"msg_{uuid.uuid4().hex[:24]}",
-        content=[AnthropicContentBlock(text=text)],
+        content=[AnthropicContentBlock(**cb) for cb in content_blocks],
         model=openai_body.get("model") or model,
         stop_reason=stop_reason,
         stop_sequence=None,
@@ -112,10 +265,9 @@ def _openai_stream_to_anthropic(
     Mapping:
     - First chunk → ``message_start`` + ``content_block_start``
     - Text content chunks → ``content_block_delta``
+    - Tool call deltas → ``content_block_delta`` (tool_use type)
     - Last chunk (finish_reason set) → ``content_block_stop``
       + ``message_delta`` (with output_tokens) + ``message_stop``
-
-    Tool calls are stripped (text-only mode).
 
     Usage note: in Anthropic streaming, usage goes in ``message_delta``,
     NOT in ``message_stop``.
@@ -126,6 +278,8 @@ def _openai_stream_to_anthropic(
     input_tokens: int = 0
     first = True
     stop_reason = "end_turn"
+    # Accumulate tool-call deltas keyed by index
+    tool_call_deltas: dict[int, dict[str, Any]] = {}
 
     for chunk in openai_chunks:
         choices: list[dict[str, Any]] = chunk.get("choices") or []
@@ -139,12 +293,9 @@ def _openai_stream_to_anthropic(
         choice: dict[str, Any] = choices[0]
         delta: dict[str, Any] = choice.get("delta") or {}
         finish: str | None = choice.get("finish_reason")
+        tc_list: list[dict[str, Any]] | None = delta.get("tool_calls")
 
-        # Strip tool_calls — text-only mode
-        if delta.get("tool_calls"):
-            logger.warning("Anthropic router received tool_calls; stripping (text-only mode)")
-
-        text: str = delta.get("content") or ""
+        text: str | None = delta.get("content")
 
         if first:
             events.append(
@@ -162,14 +313,21 @@ def _openai_stream_to_anthropic(
                     },
                 }
             )
-            events.append(
-                {
-                    "type": "content_block_start",
-                    "index": 0,
-                    "content_block": {"type": "text", "text": ""},
-                }
-            )
             first = False
+
+        if tc_list:
+            for i, tc in enumerate(tc_list):
+                idx = tc.get("index", i)
+                base = tool_call_deltas.get(idx, {})
+                if tc.get("id"):
+                    base["id"] = tc["id"]
+                fn = tc.get("function", {})
+                if fn.get("name"):
+                    base["name"] = fn["name"]
+                if fn.get("arguments"):
+                    base.setdefault("partial_json", "")
+                    base["partial_json"] += fn["arguments"]
+                tool_call_deltas[idx] = base
 
         if text:
             events.append(
@@ -182,11 +340,38 @@ def _openai_stream_to_anthropic(
 
         if finish:
             stop_reason = "end_turn" if finish == "stop" else "max_tokens"
+            if finish == "tool_calls":
+                stop_reason = "tool_use"
 
         usage: dict[str, Any] = chunk.get("usage") or {}
         if usage:
             input_tokens = int(usage.get("prompt_tokens") or input_tokens)
             output_tokens = int(usage.get("completion_tokens") or output_tokens)
+
+    # Emit tool_use content blocks from accumulated deltas
+    for idx, tc_data in sorted(tool_call_deltas.items()):
+        partial_json = tc_data.get("partial_json", "")
+        events.append(
+            {
+                "type": "content_block_start",
+                "index": idx + 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": tc_data.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
+                    "name": tc_data.get("name", ""),
+                },
+            }
+        )
+        events.append(
+            {
+                "type": "content_block_delta",
+                "index": idx + 1,
+                "delta": {"type": "input_json_delta", "partial_json": partial_json},
+            }
+        )
+        events.append(
+            {"type": "content_block_stop", "index": idx + 1},
+        )
 
     if first:
         # Empty stream
@@ -205,15 +390,225 @@ def _openai_stream_to_anthropic(
                 },
             }
         )
+
+    # Final content_block_stop for text block (index 0)
+    events.append({"type": "content_block_stop", "index": 0})
+    events.append(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {"output_tokens": output_tokens},
+        }
+    )
+    events.append({"type": "message_stop"})
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Interleaved streaming state machine (Task 7)
+# ---------------------------------------------------------------------------
+
+
+def _openai_stream_to_anthropic_interleaved(
+    openai_chunks: list[dict[str, Any]], model: str
+) -> list[dict[str, Any]]:
+    """Convert interleaved OpenAI SSE chunks to Anthropic SSE events.
+
+    This is the Task 7 implementation: a streaming state machine that
+    properly handles text and tool_calls arriving in the same OpenAI
+    chunk (interleaved deltas).
+
+    Anthropic requires sequential content blocks:
+      content_block_start (text) → content_block_delta (text) →
+      content_block_stop (text) → content_block_start (tool_use) →
+      content_block_delta (input_json) → content_block_stop (tool_use) →
+      content_block_start (tool_use) → ...
+
+    OpenAI sends interleaved deltas:
+      delta: {content: "Hello"}  # text
+      delta: {tool_calls: [{index:0, function:{name:"search"}}]}  # tool start
+      delta: {tool_calls: [{index:0, function:{arguments:'{"q'}}]}  # tool arg
+      delta: {content: " world"}  # more text after tool
+      delta: {tool_calls: [{index:1, function:{name:"browse"}}]}  # another tool
+
+    This function serializes interleaved deltas into proper sequential
+    content blocks, emitting content_block_stop for the current block
+    before starting a new one.
+
+    Handles:
+    - Partial JSON chunks (arguments arrive in multiple deltas)
+    - Interleaved text and tool_calls
+    - Multiple tool_calls with different indices
+    - Text before, between, and after tool_calls
+    """
+    events: list[dict[str, Any]] = []
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+    output_tokens: int = 0
+    input_tokens: int = 0
+    first = True
+    stop_reason = "end_turn"
+
+    # Track tool call state keyed by OpenAI index
+    # Each entry: {id, name, partial_json, emitted_start: bool}
+    tool_states: dict[int, dict[str, Any]] = {}
+
+    # Track whether we have pending text content (not yet stopped)
+    pending_text = False
+
+    def _emit_text_stop() -> None:
+        """Emit content_block_stop for text block (index 0) if pending."""
+        nonlocal pending_text
+        if pending_text:
+            events.append({"type": "content_block_stop", "index": 0})
+            pending_text = False
+
+    def _emit_tool_stop(idx: int) -> None:
+        """Emit content_block_stop for a specific tool_use index."""
+        if idx in tool_states and tool_states[idx].get("emitted_start"):
+            events.append({"type": "content_block_stop", "index": idx + 1})
+            tool_states[idx]["emitted_start"] = False
+
+    for chunk in openai_chunks:
+        choices: list[dict[str, Any]] = chunk.get("choices") or []
+        if not choices:
+            usage: dict[str, Any] = chunk.get("usage") or {}
+            if usage:
+                input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+                output_tokens = int(usage.get("completion_tokens") or output_tokens)
+            continue
+
+        choice: dict[str, Any] = choices[0]
+        delta: dict[str, Any] = choice.get("delta") or {}
+        finish: str | None = choice.get("finish_reason")
+        tc_list: list[dict[str, Any]] | None = delta.get("tool_calls")
+        text: str | None = delta.get("content")
+
+        if first:
+            events.append(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": msg_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": model,
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                }
+            )
+            first = False
+
+        # --- Process tool calls ---
+        if tc_list:
+            # Stop any pending text before starting tool_use
+            _emit_text_stop()
+
+            for i, tc in enumerate(tc_list):
+                tc_idx = tc.get("index", i)
+                fn = tc.get("function", {})
+
+                if tc_idx not in tool_states:
+                    tool_states[tc_idx] = {
+                        "id": "",
+                        "name": "",
+                        "partial_json": "",
+                        "emitted_start": False,
+                    }
+                ts = tool_states[tc_idx]
+
+                # Emit tool_use content_block_start on first arrival
+                if not ts["emitted_start"]:
+                    if tc.get("id"):
+                        ts["id"] = tc["id"]
+                    if fn.get("name"):
+                        ts["name"] = fn["name"]
+                    events.append(
+                        {
+                            "type": "content_block_start",
+                            "index": tc_idx + 1,
+                            "content_block": {
+                                "type": "tool_use",
+                                "id": ts["id"] or f"toolu_{uuid.uuid4().hex[:24]}",
+                                "name": ts["name"],
+                            },
+                        }
+                    )
+                    ts["emitted_start"] = True
+
+                # Accumulate partial JSON arguments
+                if fn.get("arguments"):
+                    ts["partial_json"] += fn["arguments"]
+                    events.append(
+                        {
+                            "type": "content_block_delta",
+                            "index": tc_idx + 1,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": fn["arguments"],
+                            },
+                        }
+                    )
+
+        # --- Process text content ---
+        if text:
+            # If we had a pending tool_use, stop it before text
+            for tc_idx in list(tool_states.keys()):
+                if tool_states[tc_idx].get("emitted_start"):
+                    _emit_tool_stop(tc_idx)
+
+            events.append(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": text},
+                }
+            )
+            pending_text = True
+
+        # --- Handle finish_reason ---
+        if finish:
+            # Stop all pending blocks
+            _emit_text_stop()
+            for tc_idx in list(tool_states.keys()):
+                _emit_tool_stop(tc_idx)
+
+            stop_reason = "end_turn" if finish == "stop" else "max_tokens"
+            if finish == "tool_calls":
+                stop_reason = "tool_use"
+
+        # --- Handle usage chunks ---
+        usage: dict[str, Any] = chunk.get("usage") or {}
+        if usage:
+            input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+            output_tokens = int(usage.get("completion_tokens") or output_tokens)
+
+    # --- End of stream: stop any remaining blocks ---
+    _emit_text_stop()
+    for tc_idx in list(tool_states.keys()):
+        _emit_tool_stop(tc_idx)
+
+    if first:
+        # Empty stream — emit minimal structure
         events.append(
             {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "text", "text": ""},
+                "type": "message_start",
+                "message": {
+                    "id": msg_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
             }
         )
 
-    events.append({"type": "content_block_stop", "index": 0})
+    # Final message events
     events.append(
         {
             "type": "message_delta",
@@ -238,22 +633,37 @@ def _stream_anthropic_response(
     """Stream an Anthropic-formatted SSE response from an upstream OpenAI endpoint.
 
     Converts OpenAI SSE chunks to Anthropic SSE events incrementally as they arrive,
-    yielding each event immediately instead of buffering the entire response.
+    yielding each event immediately. Uses the same interleaved state machine as
+    _openai_stream_to_anthropic_interleaved but yields events in real-time.
+
+    Properly handles:
+    - Interleaved text and tool_calls arriving in the same chunk
+    - Partial JSON argument chunks (arguments arrive in multiple deltas)
+    - Multiple tool_calls with different indices
+    - Content block transitions (text -> tool_use -> text -> tool_use)
     """
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        state = {
-            "first_chunk": True,
-            "output_tokens": 0,
-            "input_tokens": 0,
-            "msg_id": f"msg_{uuid.uuid4().hex[:24]}",
-            "stop_reason": "end_turn",
-        }
+        # State machine variables
+        first_chunk = True
+        output_tokens = 0
+        input_tokens = 0
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        stop_reason = "end_turn"
+        pending_text = False
+
+        # Tool call state: keyed by OpenAI index
+        # Each: {id, name, partial_json, emitted_start}
+        tool_states: dict[int, dict[str, Any]] = {}
+
+        def _sse_event(event_type: str, data: dict[str, Any]) -> str:
+            """Format an SSE event string."""
+            return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
         async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
             if resp.status_code != 200:
                 logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                msg_start_data = {  # pyright: ignore[reportUnknownVariableType]
+                msg_start_data = {
                     "type": "message_start",
                     "message": {
                         "id": "msg_error",
@@ -266,7 +676,7 @@ def _stream_anthropic_response(
                         "usage": {"input_tokens": 0, "output_tokens": 0},
                     },
                 }
-                yield f"event: message_start\ndata: {json.dumps(msg_start_data)}\n\n"
+                yield _sse_event("message_start", msg_start_data)
                 error_data = {
                     "type": "error",
                     "error": {
@@ -274,7 +684,7 @@ def _stream_anthropic_response(
                         "message": f"Upstream returned HTTP {resp.status_code}",
                     },
                 }
-                yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
+                yield _sse_event("error", error_data)
                 return
 
             async for line in resp.aiter_lines():
@@ -283,9 +693,30 @@ def _stream_anthropic_response(
                     continue
                 data = line[6:]
                 if data == "[DONE]":
-                    # Emit closing events
-                    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-                    yield f"event: message_delta\ndata: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': state['stop_reason'], 'stop_sequence': None}, 'usage': {'output_tokens': state['output_tokens']}})}\n\n"
+                    # End of stream: stop all pending blocks
+                    if pending_text:
+                        pending_text = False
+                        yield _sse_event(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": 0},
+                        )
+                    for tc_idx in list(tool_states.keys()):
+                        if tool_states[tc_idx].get("emitted_start"):
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": tc_idx + 1},
+                            )
+                            tool_states[tc_idx]["emitted_start"] = False
+
+                    # Final message events
+                    yield _sse_event(
+                        "message_delta",
+                        {
+                            "type": "message_delta",
+                            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                            "usage": {"output_tokens": output_tokens},
+                        },
+                    )
                     yield "event: message_stop\ndata: {}\n\n"
                     return
 
@@ -299,45 +730,140 @@ def _stream_anthropic_response(
                 if not choices:
                     usage: dict[str, Any] = chunk.get("usage") or {}
                     if usage:
-                        state["input_tokens"] = int(
-                            usage.get("prompt_tokens") or state["input_tokens"]
-                        )
-                        state["output_tokens"] = int(
-                            usage.get("completion_tokens") or state["output_tokens"]
-                        )
+                        input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+                        output_tokens = int(usage.get("completion_tokens") or output_tokens)
                     continue
 
                 choice: dict[str, Any] = choices[0]
                 delta: dict[str, Any] = choice.get("delta") or {}
                 finish: str | None = choice.get("finish_reason")
+                tc_list: list[dict[str, Any]] | None = delta.get("tool_calls")
+                text: str | None = delta.get("content")
 
-                # Strip tool_calls — text-only mode
-                if delta.get("tool_calls"):
-                    logger.warning(
-                        "Anthropic router received tool_calls; stripping (text-only mode)"
+                # Emit message_start on first chunk
+                if first_chunk:
+                    yield _sse_event(
+                        "message_start",
+                        {
+                            "message": {
+                                "id": msg_id,
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                                "model": model,
+                                "stop_reason": None,
+                                "stop_sequence": None,
+                                "usage": {"input_tokens": 0, "output_tokens": 0},
+                            },
+                        },
                     )
+                    first_chunk = False
 
-                text: str = delta.get("content") or ""
+                # --- Process tool calls ---
+                if tc_list:
+                    # Stop any pending text before starting tool_use
+                    if pending_text:
+                        pending_text = False
+                        yield _sse_event(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": 0},
+                        )
 
-                if state["first_chunk"]:
-                    # Emit message_start
-                    yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': state['msg_id'], 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}})}\n\n"
-                    # Emit content_block_start
-                    yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
-                    state["first_chunk"] = False
+                    for i, tc in enumerate(tc_list):
+                        tc_idx = tc.get("index", i)
+                        fn = tc.get("function", {})
 
+                        if tc_idx not in tool_states:
+                            tool_states[tc_idx] = {
+                                "id": "",
+                                "name": "",
+                                "partial_json": "",
+                                "emitted_start": False,
+                            }
+                        ts = tool_states[tc_idx]
+
+                        # Emit tool_use content_block_start on first arrival
+                        if not ts["emitted_start"]:
+                            if tc.get("id"):
+                                ts["id"] = tc["id"]
+                            if fn.get("name"):
+                                ts["name"] = fn["name"]
+                            yield _sse_event(
+                                "content_block_start",
+                                {
+                                    "type": "content_block_start",
+                                    "index": tc_idx + 1,
+                                    "content_block": {
+                                        "type": "tool_use",
+                                        "id": ts["id"] or f"toolu_{uuid.uuid4().hex[:24]}",
+                                        "name": ts["name"],
+                                    },
+                                },
+                            )
+                            ts["emitted_start"] = True
+
+                        # Accumulate partial JSON arguments and emit delta
+                        if fn.get("arguments"):
+                            ts["partial_json"] += fn["arguments"]
+                            yield _sse_event(
+                                "content_block_delta",
+                                {
+                                    "type": "content_block_delta",
+                                    "index": tc_idx + 1,
+                                    "delta": {
+                                        "type": "input_json_delta",
+                                        "partial_json": fn["arguments"],
+                                    },
+                                },
+                            )
+
+                # --- Process text content ---
                 if text:
-                    yield f"event: content_block_delta\ndata: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}\n\n"
+                    # Stop any pending tool_use before text
+                    for tc_idx in list(tool_states.keys()):
+                        if tool_states[tc_idx].get("emitted_start"):
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": tc_idx + 1},
+                            )
+                            tool_states[tc_idx]["emitted_start"] = False
 
+                    yield _sse_event(
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": 0,
+                            "delta": {"type": "text_delta", "text": text},
+                        },
+                    )
+                    pending_text = True
+
+                # --- Handle finish_reason ---
                 if finish:
-                    state["stop_reason"] = "end_turn" if finish == "stop" else "max_tokens"
+                    # Stop all pending blocks
+                    if pending_text:
+                        pending_text = False
+                        yield _sse_event(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": 0},
+                        )
+                    for tc_idx in list(tool_states.keys()):
+                        if tool_states[tc_idx].get("emitted_start"):
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": tc_idx + 1},
+                            )
+                            tool_states[tc_idx]["emitted_start"] = False
 
+                    stop_reason = "end_turn" if finish == "stop" else "max_tokens"
+                    if finish == "tool_calls":
+                        stop_reason = "tool_use"
+
+                # --- Handle usage chunks ---
                 usage = chunk.get("usage") or {}
                 if usage:
-                    state["input_tokens"] = int(usage.get("prompt_tokens") or state["input_tokens"])
-                    state["output_tokens"] = int(
-                        usage.get("completion_tokens") or state["output_tokens"]
-                    )
+                    input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+                    output_tokens = int(usage.get("completion_tokens") or output_tokens)
 
     return StreamingResponse(
         content=event_generator(),

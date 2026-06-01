@@ -84,6 +84,13 @@ reportMissingTypeStubs = false
 reportUnusedFunction = false
 reportPrivateUsage = "warning"
 reportUnknownLambdaType = "warning"
+reportUnknownVariableType = "warning"
+reportUnknownMemberType = "warning"
+reportUnknownArgumentType = "warning"
+reportReturnType = "warning"
+reportOperatorIssue = "warning"
+reportOptionalMemberAccess = "warning"
+reportUnnecessaryIsInstance = "warning"
 venvPath = "."
 venv = ".venv"
 

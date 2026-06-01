@@ -75,19 +75,23 @@ def inject_composed_output(request: ProxyRequest, output: str) -> ProxyRequest:
         # No system message -- prepend one
         new_messages = [ProxyMessage(role="system", content=marker_block)]
         new_messages.extend(request.messages)
-    elif MARKER_BEGIN in sys_msg.content:
+    elif isinstance(sys_msg.content, str) and MARKER_BEGIN in sys_msg.content:
         # Marker block already exists -- replace it (idempotent)
         old_block = _extract_marker_block(sys_msg.content)
         new_content = sys_msg.content.replace(old_block, marker_block)
         new_sys = ProxyMessage(role="system", content=new_content)
         new_messages = list(request.messages)
         replace_system_message(new_messages, new_sys)
-    else:
+    elif isinstance(sys_msg.content, str):
         # System message exists, no markers -- append
         new_content = sys_msg.content + "\n\n" + marker_block
         new_sys = ProxyMessage(role="system", content=new_content)
         new_messages = list(request.messages)
         replace_system_message(new_messages, new_sys)
+    else:
+        # System message has list content or None -- prepend a new system message
+        new_messages = [ProxyMessage(role="system", content=marker_block)]
+        new_messages.extend(request.messages)
 
     return ProxyRequest(
         model=request.model,

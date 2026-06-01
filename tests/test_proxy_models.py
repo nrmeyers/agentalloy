@@ -26,14 +26,21 @@ class TestProxyMessage:
         assert msg.content == "hello"
 
     def test_all_roles(self):
-        for role in ("system", "user", "assistant"):
+        for role in ("system", "user", "assistant", "tool"):
             msg = ProxyMessage(role=role, content=f"role={role}")
             assert msg.role == role
 
     def test_serialization(self):
         msg = ProxyMessage(role="system", content="You are helpful.")
-        d = msg.model_dump()
+        d = msg.model_dump(exclude_none=True)
         assert d == {"role": "system", "content": "You are helpful."}
+
+    def test_serialization_excludes_none(self):
+        msg = ProxyMessage(role="user", content="hi")
+        d = msg.model_dump(exclude_none=True)
+        assert "tool_calls" not in d
+        assert "tool_call" not in d
+        assert "tool" not in d
 
     def test_json_roundtrip(self):
         msg = ProxyMessage(role="assistant", content="Done.")
@@ -41,6 +48,66 @@ class TestProxyMessage:
         restored = ProxyMessage.model_validate_json(json_str)
         assert restored.role == "assistant"
         assert restored.content == "Done."
+
+    def test_tool_role_with_content(self):
+        msg = ProxyMessage(role="tool", content="result from tool")
+        assert msg.role == "tool"
+        assert msg.content == "result from tool"
+
+    def test_tool_calls_field(self):
+        tool_call = {
+            "id": "call_123",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": '{"location": "NYC"}'},
+        }
+        msg = ProxyMessage(role="assistant", content=None, tool_calls=[tool_call])
+        assert msg.tool_calls is not None
+        assert len(msg.tool_calls) == 1
+        assert msg.tool_calls[0]["function"]["name"] == "get_weather"
+
+    def test_tool_call_field(self):
+        msg = ProxyMessage(role="assistant", content=None, tool_call={"id": "call_1"})
+        assert msg.tool_call is not None
+        assert msg.tool_call["id"] == "call_1"
+
+    def test_tool_field(self):
+        msg = ProxyMessage(role="tool", content="output", tool={"tool_call_id": "call_1"})
+        assert msg.tool is not None
+        assert msg.tool["tool_call_id"] == "call_1"
+
+    def test_content_block_list(self):
+        blocks = [
+            {"type": "text", "text": "Hello"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+        ]
+        msg = ProxyMessage(role="user", content=blocks)
+        assert isinstance(msg.content, list)
+        assert len(msg.content) == 2
+        assert msg.content[0]["type"] == "text"
+
+    def test_tool_calls_serialization(self):
+        tool_call = {
+            "id": "call_456",
+            "type": "function",
+            "function": {"name": "search", "arguments": '{"q": "test"}'},
+        }
+        msg = ProxyMessage(role="assistant", content=None, tool_calls=[tool_call])
+        d = msg.model_dump(exclude_none=True)
+        assert "tool_calls" in d
+        assert len(d["tool_calls"]) == 1
+        assert d["tool_calls"][0]["function"]["name"] == "search"
+
+    def test_tool_roundtrip(self):
+        msg = ProxyMessage(
+            role="tool",
+            content="search results here",
+            tool={"tool_call_id": "call_789", "name": "search"},
+        )
+        json_str = msg.model_dump_json()
+        restored = ProxyMessage.model_validate_json(json_str)
+        assert restored.role == "tool"
+        assert restored.content == "search results here"
+        assert restored.tool["tool_call_id"] == "call_789"
 
 
 # ── ProxyRequest ──────────────────────────────────────────────────────
@@ -86,6 +153,7 @@ class TestProxyRequest:
         assert req.max_tokens is None
         assert req.user is None
         assert req.metadata is None
+        assert req.tools is None
 
     def test_serialization(self):
         req = ProxyRequest(
@@ -106,6 +174,63 @@ class TestProxyRequest:
         restored = ProxyRequest.model_validate_json(json_str)
         assert restored.model == "test"
         assert restored.temperature == 0.5
+
+    def test_tools_field(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get the weather for a location",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"location": {"type": "string"}},
+                    },
+                },
+            }
+        ]
+        req = ProxyRequest(
+            model="gpt-4",
+            messages=[ProxyMessage(role="user", content="What's the weather?")],
+            tools=tools,
+        )
+        assert req.tools is not None
+        assert len(req.tools) == 1
+        assert req.tools[0]["function"]["name"] == "get_weather"
+
+    def test_tools_serialization(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "search", "parameters": {"type": "object"}},
+            }
+        ]
+        req = ProxyRequest(
+            model="test",
+            messages=[ProxyMessage(role="user", content="search")],
+            tools=tools,
+        )
+        d = req.model_dump(exclude_none=True)
+        assert "tools" in d
+        assert len(d["tools"]) == 1
+
+    def test_tools_roundtrip(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "calc", "parameters": {"type": "object"}},
+            }
+        ]
+        req = ProxyRequest(
+            model="test",
+            messages=[ProxyMessage(role="user", content="calculate")],
+            tools=tools,
+        )
+        json_str = req.model_dump_json()
+        restored = ProxyRequest.model_validate_json(json_str)
+        assert restored.tools is not None
+        assert len(restored.tools) == 1
+        assert restored.tools[0]["function"]["name"] == "calc"
 
 
 # ── ProxyChoice ───────────────────────────────────────────────────────
@@ -161,6 +286,7 @@ class TestProxyStreamDelta:
         delta = ProxyStreamDelta()
         assert delta.role is None
         assert delta.content is None
+        assert delta.tool_calls is None
 
     def test_full_delta(self):
         delta = ProxyStreamDelta(role="assistant", content="partial")
@@ -172,6 +298,53 @@ class TestProxyStreamDelta:
         d = delta.model_dump(exclude_none=True)
         assert d == {"content": "hello"}
         assert "role" not in d
+
+    def test_empty_tool_calls(self):
+        delta = ProxyStreamDelta()
+        assert delta.tool_calls is None
+
+    def test_tool_calls_field(self):
+        delta = ProxyStreamDelta(
+            content=None,
+            tool_calls=[
+                {
+                    "index": 0,
+                    "id": "call_123",
+                    "function": {"name": "get_weather", "arguments": '{"location": "NYC"}'},
+                }
+            ],
+        )
+        assert delta.tool_calls is not None
+        assert len(delta.tool_calls) == 1
+        assert delta.tool_calls[0]["function"]["name"] == "get_weather"
+
+    def test_tool_calls_serialization(self):
+        delta = ProxyStreamDelta(
+            tool_calls=[
+                {"index": 0, "id": "call_456", "function": {"name": "search", "arguments": ""}}
+            ]
+        )
+        d = delta.model_dump(exclude_none=True)
+        assert "tool_calls" in d
+        assert len(d["tool_calls"]) == 1
+        assert "content" not in d
+        assert "role" not in d
+
+    def test_tool_calls_roundtrip(self):
+        delta = ProxyStreamDelta(
+            tool_calls=[
+                {
+                    "index": 0,
+                    "id": "call_789",
+                    "function": {"name": "calc", "arguments": '{"expr": "1+1"}'},
+                }
+            ]
+        )
+        json_str = delta.model_dump_json()
+        restored = ProxyStreamDelta.model_validate_json(json_str)
+        assert restored.tool_calls is not None
+        assert len(restored.tool_calls) == 1
+        assert restored.tool_calls[0]["function"]["name"] == "calc"
 
 
 # ── ProxyStreamChunk ──────────────────────────────────────────────────

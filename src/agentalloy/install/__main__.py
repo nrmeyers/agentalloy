@@ -52,6 +52,7 @@ from agentalloy.install.subcommands import (
     verify,
     wire,
     wire_harness,
+    wrap,
     write_env,
 )
 from agentalloy.install.subcommands import (
@@ -99,6 +100,7 @@ _SUBCOMMANDS = [
     wire_harness,
     verify,
     doctor,
+    wrap,
     phase,
     uninstall,
     reset_step,

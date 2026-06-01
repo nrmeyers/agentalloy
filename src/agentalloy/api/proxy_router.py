@@ -203,6 +203,10 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
         payload["user"] = request.user
     if request.metadata is not None:
         payload["metadata"] = request.metadata
+    if request.tools is not None:
+        payload["tools"] = request.tools
+    if request.tool_choice is not None:
+        payload["tool_choice"] = request.tool_choice
     return payload
 
 

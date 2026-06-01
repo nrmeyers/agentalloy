@@ -1,6 +1,13 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportArgumentType=false
 """``wire-harness`` subcommand.
 
+.. deprecated::
+    This module is deprecated.  All harness wiring is now handled through
+    the provider registry in ``agentalloy.providers.REGISTRY``.  Each
+    provider package registers a ``HarnessSpec.install_writer`` callable
+    that performs the same wiring logic.  New code should import from
+    ``agentalloy.providers`` instead of this module.
+
 Emit harness-specific integration files with sentinel markers for
 clean removal by ``uninstall``.
 
@@ -21,12 +28,14 @@ Continue.dev:
   continue-closed → .continuerc.json (system message + custom command)
   continue-local  → .continuerc.json (custom command only)
 
-Manual / MCP:
+# Manual / MCP:
   manual                       → prints snippet to stdout
   --mcp-fallback (with claude-code, cursor, continue-{closed,local})
                                → writes the strict-tools MCP server config
                                  instead of the markdown-injection variant
                                  (see harness-catalog.md § "MCP fallback")
+  codex                        → ~/.codex/config.toml with apiBaseUrl sentinel
+  openclaw                     → ~/.openclaw/plugins.json with agentalloy plugin entry
 
 The legacy ``--harness mcp-only`` is no longer accepted; use the
 ``--mcp-fallback`` flag with a real harness instead.
@@ -38,10 +47,12 @@ import argparse
 import hashlib
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
+from agentalloy.providers import REGISTRY
 
 SCHEMA_VERSION = 1
 STEP_NAME = "wire-harness"
@@ -142,9 +153,24 @@ _HARNESS_REGISTRY: dict[str, dict[str, Any]] = {
         "dedicated": False,
         "vector": "mcp_server_config",
     },
+    "codex": {
+        # Codex CLI — writes ~/.codex/config.toml with apiBaseUrl sentinel.
+        "target": None,
+        "template": None,
+        "dedicated": False,
+        "vector": "proxy",
+    },
+    "openclaw": {
+        # Openclaw plugin harness — writes ~/.openclaw/plugins.json with
+        # agentalloy plugin entry pointing to the AgentAlloy proxy.
+        "target": None,
+        "template": None,
+        "dedicated": False,
+        "vector": "proxy",
+    },
 }
 
-VALID_HARNESSES = frozenset(_HARNESS_REGISTRY.keys())
+VALID_HARNESSES: frozenset[str] = frozenset(REGISTRY.keys())
 
 
 def _load_template(name: str) -> str:
@@ -369,6 +395,10 @@ def wire_harness(
 ) -> dict[str, Any]:
     """Wire the specified harness. Returns contract-shaped result.
 
+    .. deprecated::
+        This function is deprecated.  Use
+        ``agentalloy.providers.REGISTRY[harness].install_writer`` instead.
+
     If the target file already has a sentinel block and the inner content's
     sha256 differs from what install-state.json recorded (i.e., the user
     edited inside the sentinels), refuse to clobber unless ``force=True``.
@@ -381,6 +411,12 @@ def wire_harness(
     If ``legacy=True``, uses the old markdown-injection wiring path instead
     of the default proxy model. Orthogonal to ``--mcp-fallback``.
     """
+    warnings.warn(
+        "wire_harness() is deprecated; use agentalloy.providers.REGISTRY "
+        "instead. This module will be removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     if scope not in ("user", "repo"):
@@ -390,7 +426,7 @@ def wire_harness(
     if root is None:
         root = Path.home() if scope == "user" else _repo_root()
 
-    if harness not in _HARNESS_REGISTRY:
+    if harness not in REGISTRY:
         print(f"ERROR: Unknown harness: '{harness}'", file=sys.stderr)
         print(f"FIX:   Use one of: {', '.join(sorted(VALID_HARNESSES))}", file=sys.stderr)
         raise SystemExit(1)
@@ -440,6 +476,41 @@ def _wire_legacy(
     """
     reg = _HARNESS_REGISTRY[harness]
     files_written: list[dict[str, Any]] = []
+
+    # Claude Code hook wiring (legacy path): installs the hook script
+    # and writes the hooks config file.
+    # Check for duplicate sentinels in CLAUDE.md before proceeding.
+    claude_md = root / "CLAUDE.md"
+    if claude_md.exists():
+        existing_content = claude_md.read_text()
+        begin_count = existing_content.count(SENTINEL_BEGIN)
+        end_count = existing_content.count(SENTINEL_END)
+        if begin_count > 1 or end_count > 1:
+            print(
+                f"ERROR: target file contains {begin_count} BEGIN and {end_count} END "
+                f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
+                file=sys.stderr,
+            )
+            print(
+                "FIX:   Remove duplicate sentinel blocks manually, leaving at most one pair.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+    if harness == "claude-code":
+        from agentalloy.install.subcommands.claude_code import (
+            _wire_claude_code_hooks,
+        )
+
+        hook_result = _wire_claude_code_hooks(port)
+        files_written.append(
+            {
+                "path": hook_result["path"],
+                "action": hook_result["action"],
+                "script": hook_result["script"],
+                "hook_events": hook_result.get("hook_events", []),
+            }
+        )
+        return _build_result(harness, "claude_code_hooks", files_written, root)
 
     # continue special case (already has proxy, skip)
     if harness in ("continue-closed", "continue-local"):
@@ -856,6 +927,9 @@ def _wire_proxy(
     if harness == "cline":
         return _wire_proxy_cline(port, root)
 
+    if harness == "codex":
+        return _wire_proxy_codex(port, root)
+
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
 
@@ -1192,6 +1266,58 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _wire_proxy_codex(port: int, root: Path) -> list[dict[str, Any]]:
+    """Wire Codex to use the AgentAlloy proxy.
+
+    Writes ``~/.codex/config.toml`` with a sentinel-bounded TOML block
+    containing ``apiBaseUrl`` and ``apiKey`` pointing to the proxy.
+    """
+    config_path = Path.home() / ".codex" / "config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    proxy_url = f"http://localhost:{port}/v1"
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    block_lines = [
+        sentinel_begin,
+        "[codex]",
+        f'apiBaseUrl = "{proxy_url}"',
+        'apiKey = "agentalloy"',
+        sentinel_end,
+    ]
+    block = "\n".join(block_lines)
+
+    original_content = _capture_original(config_path)
+
+    if config_path.exists():
+        content = config_path.read_text()
+        if sentinel_begin in content and sentinel_end in content:
+            # Replace existing block
+            begin_idx = content.index(sentinel_begin)
+            end_idx = content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(content) and content[end_idx] == "\n":
+                end_idx += 1
+            content = content[:begin_idx] + block + "\n" + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += block + "\n"
+    else:
+        content = block + "\n"
+
+    install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
+
+    return [
+        {
+            "path": str(config_path),
+            "action": "wrote_new_file" if original_content is None else "injected_block",
+            "content_sha256": _sha256(block),
+            **({"original_content": original_content} if original_content is not None else {}),
+        }
+    ]
+
+
 def _wire_proxy_instruction(
     harness: str,
     port: int,
@@ -1329,6 +1455,19 @@ def _build_result(
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
+    """Add the wire-harness subparser to an argparse parser.
+
+    .. deprecated::
+        This function is deprecated.  The wire-harness subcommand module
+        is deprecated; use the provider registry instead.
+    """
+    warnings.warn(
+        "wire_harness.add_parser() is deprecated; use "
+        "agentalloy.providers.REGISTRY instead. This module will be "
+        "removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     p: argparse.ArgumentParser = subparsers.add_parser(
         "wire-harness",
         help="Emit harness-specific integration with sentinel markers.",
@@ -1388,6 +1527,19 @@ def add_parser(
 
 
 def _run(args: argparse.Namespace) -> int:
+    """Execute the wire-harness subcommand.
+
+    .. deprecated::
+        This function is deprecated.  The wire-harness subcommand module
+        is deprecated; use the provider registry instead.
+    """
+    warnings.warn(
+        "wire_harness._run() is deprecated; use "
+        "agentalloy.providers.REGISTRY instead. This module will be "
+        "removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     st = install_state.load_state()
     port = install_state.validate_port(
         args.port if args.port is not None else st.get("port", 47950)
@@ -1406,5 +1558,17 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Public entry point for non-argparse callers (e.g. simple_setup)."""
+    """Public entry point for non-argparse callers (e.g. simple_setup).
+
+    .. deprecated::
+        This function is deprecated.  The wire-harness subcommand module
+        is deprecated; use the provider registry instead.
+    """
+    warnings.warn(
+        "wire_harness.run() is deprecated; use "
+        "agentalloy.providers.REGISTRY instead. This module will be "
+        "removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return _run(args)

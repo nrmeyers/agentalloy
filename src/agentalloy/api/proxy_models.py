@@ -14,10 +14,15 @@ from pydantic import BaseModel
 
 
 class ProxyMessage(BaseModel):
-    """A single chat message (system / user / assistant)."""
+    """A single chat message (system / user / assistant / tool)."""
 
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | list[dict[str, Any]] | None = None
+
+    # Tool-use fields
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call: dict[str, Any] | None = None
+    tool: dict[str, Any] | None = None
 
 
 class ProxyRequest(BaseModel):
@@ -39,6 +44,10 @@ class ProxyRequest(BaseModel):
     # Harness-specific metadata (e.g. working directory)
     metadata: dict[str, Any] | None = None
 
+    # Tool-use support
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+
 
 class ProxyChoice(BaseModel):
     """A single choice in a chat completion response."""
@@ -53,6 +62,9 @@ class ProxyStreamDelta(BaseModel):
 
     role: Literal["assistant"] | None = None
     content: str | None = None
+
+    # Tool-use support
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 class ProxyStreamChunk(BaseModel):

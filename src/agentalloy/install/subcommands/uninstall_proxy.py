@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def _remove_sentinel_block(content: str) -> str:
@@ -185,3 +186,70 @@ def _unwire_proxy_cline(root: Path) -> list[Path]:
         return [settings_path]
     settings_path.write_text(json.dumps(content, indent=2))
     return [settings_path]
+
+
+def _unwire_claude_code_hooks_settings_json() -> list[dict[str, Any]]:
+    """Remove AgentAlloy hook entries from ~/.claude/settings.json.
+
+    The legacy install path may have written hook-related entries into
+    settings.json. This function removes them using sentinel markers
+    for safe, bounded cleanup.
+
+    Returns a list of dicts describing what was removed.
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+    removed: list[dict[str, Any]] = []
+
+    if not settings_path.exists():
+        return removed
+
+    try:
+        content = settings_path.read_text()
+        data = json.loads(content)
+    except (json.JSONDecodeError, OSError):
+        return removed
+
+    # Sentinel-bounded removal for settings.json
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+
+    if sentinel_begin in content and sentinel_end in content:
+        # Remove the sentinel-bounded block from the JSON string
+        begin_idx = content.index(sentinel_begin)
+        end_idx = content.index(sentinel_end) + len(sentinel_end)
+        new_content = content[:begin_idx] + content[end_idx:]
+
+        # Re-parse and write back
+        try:
+            new_data = json.loads(new_content)
+            settings_path.write_text(json.dumps(new_data, indent=2) + "\n")
+            removed.append(
+                {
+                    "path": str(settings_path),
+                    "action": "removed_sentinel_block",
+                }
+            )
+            return removed
+        except json.JSONDecodeError:
+            pass
+
+    # Key-based removal (fallback) — remove hooks-related keys
+    keys_to_remove: list[str] = []
+    for key in data:
+        if key.startswith("hooks") or key == "claude_code_hooks":
+            keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        del data[key]
+        removed.append(
+            {
+                "path": str(settings_path),
+                "action": "removed_key",
+                "key": key,
+            }
+        )
+
+    if keys_to_remove:
+        settings_path.write_text(json.dumps(data, indent=2) + "\n")
+
+    return removed
