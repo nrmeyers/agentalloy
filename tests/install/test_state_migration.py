@@ -342,6 +342,4 @@ class TestV4ToV5Migration:
         assert result["schema_version"] == 5
         assert result["bootstrap_packs_ingested"] == ["python", "nodejs"]
         assert result["bootstrap_reembed_count"] == 2949
-        assert result["bootstrap_checkpoints"] == [
-            {"step": "pack_ingested", "pack": "python"}
-        ]
+        assert result["bootstrap_checkpoints"] == [{"step": "pack_ingested", "pack": "python"}]

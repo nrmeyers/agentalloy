@@ -1854,9 +1854,7 @@ class TestContainerFlow:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            rc = run_setup(
-                SetupConfig(deployment="container", non_interactive=True, packs="all")
-            )
+            rc = run_setup(SetupConfig(deployment="container", non_interactive=True, packs="all"))
 
         assert rc == 0
         # Verify the container run call has all packs in the env var
@@ -1878,9 +1876,7 @@ class TestContainerFlow:
                         packs_found = True
                         # All three packs should be present (sorted alphabetically)
                         expected = "AGENTIALLOY_PACKS=go,python,rust"
-                        assert env_val == expected, (
-                            f"Expected expanded packs, got {env_val}"
-                        )
+                        assert env_val == expected, f"Expected expanded packs, got {env_val}"
         assert packs_found, "AGENTIALLOY_PACKS env var not found in container run"
 
     def test_verify_failures_surfaced_inline(

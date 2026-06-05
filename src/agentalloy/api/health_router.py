@@ -238,11 +238,7 @@ class ReadinessChecker:
             except ValueError:
                 parsed = None
             if parsed is not None:
-                now = (
-                    datetime.now(parsed.tzinfo)
-                    if parsed.tzinfo is not None
-                    else datetime.now()
-                )
+                now = datetime.now(parsed.tzinfo) if parsed.tzinfo is not None else datetime.now()
                 return (now - parsed).total_seconds()
         try:
             return time.time() - lock.stat().st_mtime
@@ -282,9 +278,7 @@ class ReadinessChecker:
     summary="Container bootstrap readiness (ready / warming_up / error)",
 )
 async def readiness(request: Request) -> ReadinessResponse:
-    checker: ReadinessChecker | None = getattr(
-        request.app.state, "readiness_checker", None
-    )
+    checker: ReadinessChecker | None = getattr(request.app.state, "readiness_checker", None)
     if checker is None:
         # No checker wired (e.g. native deployment) — service is ready by
         # definition; there is no bootstrap to wait on.

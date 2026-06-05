@@ -382,8 +382,8 @@ def _build_entrypoint_script(packs: str) -> str:
         "# Atomic JSON write: stage to .tmp then mv onto target. Readers either",
         "# see the prior snapshot or the new one, never a torn write.",
         "write_progress() {",
-        "    cat > \"$PROGRESS_TMP\" <<JSON",
-        "{\"current_pack\": \"$1\", \"packs_ingested\": $2, \"packs_total\": $3, \"updated_at\": \"$(date -Iseconds)\"}",
+        '    cat > "$PROGRESS_TMP" <<JSON',
+        '{"current_pack": "$1", "packs_ingested": $2, "packs_total": $3, "updated_at": "$(date -Iseconds)"}',
         "JSON",
         '    mv "$PROGRESS_TMP" "$PROGRESS"',
         "}",
@@ -429,7 +429,7 @@ def _build_entrypoint_script(packs: str) -> str:
         "fi",
         "",
         "# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------",
-        'trap \'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0\' SIGTERM',
+        "trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM",
         "",
         "# --- Fast-start uvicorn -------------------------------------------",
         "# Start uvicorn BEFORE pack ingest so /readiness is reachable while",
@@ -445,7 +445,7 @@ def _build_entrypoint_script(packs: str) -> str:
     if has_packs:
         lines.extend(
             [
-                f'    PACK_LIST=({pack_array_literal})',
+                f"    PACK_LIST=({pack_array_literal})",
                 f"    TOTAL={packs_total}",
                 "    INGESTED=0",
                 '    if [ -f "$CHECKPOINTS" ]; then',
@@ -655,12 +655,19 @@ def _wait_for_readiness(
             extra: dict[str, Any] = {}
             if runtime is not None:
                 extra = _get_bootstrap_progress(runtime, container_name)
-            try:
-                on_progress({"status": status, "progress": body.get("progress") or {}, "extra": extra, "elapsed": elapsed})
-            except Exception:
-                # Progress reporting is best-effort; never break the wait
-                # loop on a callback failure.
-                pass
+            # Progress reporting is best-effort; never break the wait loop
+            # on a callback failure.
+            import contextlib as _ctx  # noqa: PLC0415
+
+            with _ctx.suppress(Exception):
+                on_progress(
+                    {
+                        "status": status,
+                        "progress": body.get("progress") or {},
+                        "extra": extra,
+                        "elapsed": elapsed,
+                    }
+                )
 
         if status == "ready":
             return True

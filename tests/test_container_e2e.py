@@ -65,11 +65,14 @@ def _make_urlopen_mock():
     """Return a mock for urllib.request.urlopen that works as a context manager.
 
     The mock returns a context-manager mock whose __enter__ yields a response
-    mock with status=200, so `with urlopen(...) as resp: resp.status == 200`
-    evaluates correctly.
+    mock with status=200 and read() returning valid JSON, so
+    `with urlopen(...) as resp: json.loads(resp.read())` works correctly.
     """
     ctx_mock = MagicMock()
-    ctx_mock.__enter__ = MagicMock(return_value=MagicMock(status=200))
+    resp_mock = MagicMock()
+    resp_mock.status = 200
+    resp_mock.read.return_value = b'{"status": "ready"}'
+    ctx_mock.__enter__ = MagicMock(return_value=resp_mock)
     ctx_mock.__exit__ = MagicMock(return_value=False)
     return ctx_mock
 
@@ -658,7 +661,7 @@ class TestCrashRecovery:
             )
 
             assert rc == 0, f"Expected setup to continue after health check timeout, got {rc}"
-            assert any("not healthy" in m.lower() for m in printed_messages), (
+            assert any("not ready" in m.lower() for m in printed_messages), (
                 f"Expected health warning, got: {printed_messages}"
             )
 
