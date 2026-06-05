@@ -979,6 +979,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         _ensure_volume,
         _generate_entrypoint,
         _run_container,
+        _wait_for_readiness,
     )
 
     label = _detect_runtime_binary()
@@ -1189,6 +1190,13 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # the one-shot install-packs container at step 8b via --packs.
     if not cfg.non_interactive and not cfg.packs:
         cfg.packs = _prompt_for_packs()
+    # Expand 'all' keyword to the full pack list before validation.
+    # Without this, 'all' is treated as an unknown pack name and silently
+    # stripped — the user gets "always-on only" instead of all packs.
+    if cfg.packs and cfg.packs.strip().lower() == "all":
+        _all_packs = _discover_packs()
+        cfg.packs = ",".join(sorted(_all_packs.keys()))
+        _print(f"  [dim]-> Resolved packs: {len(_all_packs)} packs[/dim]")
     # Strip names that don't resolve against the host's seeds/packs dir.
     # Host and image are built from the same tree, so this is a reliable
     # pre-check that turns a typo into an immediate warning instead of a
@@ -1298,25 +1306,56 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _cleanup_temp_entrypoint(entrypoint)
     _print("  [green]  Done.[/green]")
 
-    # 10. Poll health endpoint
-    _print("  [dim]-> Waiting for service health...[/dim]")
-    healthy = False
-    deadline = time.monotonic() + 300
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(  # noqa: S310
-                f"http://localhost:{cfg.port}/health", timeout=5
-            ) as resp:
-                if resp.status == 200:
-                    healthy = True
-                    break
-        except Exception:
-            pass
-        time.sleep(5)
+    # 10. Wait for container readiness (fast-start uvicorn serves /readiness
+    # while pack ingest runs in the background). All-packs gets 1800s; any
+    # explicit pack subset gets 300s — see the design doc for rationale.
+    all_packs = (cfg.packs or "").strip() == "" or "," in (cfg.packs or "")
+    # The "all-packs" expansion happens upstream; here we approximate by
+    # counting comma-separated entries. >=8 packs triggers the long timeout.
+    pack_count = len([p for p in (cfg.packs or "").split(",") if p.strip()])
+    readiness_timeout = 1800 if (all_packs and pack_count >= 8) else 300
+    _print(
+        f"  [dim]-> Waiting for container readiness "
+        f"(timeout {readiness_timeout}s, ~30s per progress update)...[/dim]"
+    )
+
+    last_pack: str | None = None
+
+    def _on_progress(evt: dict[str, Any]) -> None:
+        nonlocal last_pack
+        progress = evt.get("progress") or {}
+        extra = evt.get("extra") or {}
+        # Prefer the in-container progress file; fall back to whatever
+        # /readiness echoed.
+        current = extra.get("current_pack") or progress.get("current_pack")
+        ingested = extra.get("packs_ingested", progress.get("packs_ingested"))
+        total = extra.get("packs_total", progress.get("packs_total"))
+        elapsed = int(evt.get("elapsed") or 0)
+        # Only print on change (pack rolled over) or every ~minute on the
+        # same pack so the user sees liveness without log spam.
+        if current and current != last_pack:
+            last_pack = current
+            suffix = f" ({ingested}/{total})" if ingested is not None and total else ""
+            _print(f"     [dim]bootstrap: {current}{suffix}  elapsed={elapsed}s[/dim]")
+        elif evt.get("status") == "warming_up" and elapsed and elapsed % 60 < 30:
+            # Heartbeat for slow packs — show every 60s window.
+            _print(f"     [dim]bootstrap: still warming up  elapsed={elapsed}s[/dim]")
+
+    healthy = _wait_for_readiness(
+        cfg.port,
+        timeout=readiness_timeout,
+        runtime=binary_path,
+        container_name=cfg.container_name or "agentalloy",
+        poll_interval=30.0,
+        on_progress=_on_progress,
+    )
     if not healthy:
-        _print("  [yellow]  Service not healthy after 300s — check container logs.[/yellow]")
+        _print(
+            f"  [yellow]  Service not ready after {readiness_timeout}s — "
+            "check container logs.[/yellow]"
+        )
     else:
-        _print("  [green]  Service healthy.[/green]")
+        _print("  [green]  Service ready.[/green]")
 
     # 10. Record state + write .env (before verify so it reads fresh values)
     st = install_state.load_state()
@@ -1326,6 +1365,18 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     st["container_name"] = cfg.container_name
     st["data_volume"] = cfg.data_volume
     st["port"] = cfg.port
+    # Persist bootstrap timing for diagnostics (only meaningful when readiness
+    # actually returned ready; otherwise leave the completed_at unset).
+    from datetime import UTC  # noqa: PLC0415
+    from datetime import datetime as _dt
+
+    if not st.get("bootstrap_started_at"):
+        st["bootstrap_started_at"] = _dt.now(UTC).isoformat()
+    if healthy:
+        st["bootstrap_completed_at"] = _dt.now(UTC).isoformat()
+        st["bootstrap_packs_ingested"] = [
+            p.strip() for p in (cfg.packs or "").split(",") if p.strip()
+        ]
     install_state.save_state(st)
 
     # Host .env for container deployments only needs the API port. The

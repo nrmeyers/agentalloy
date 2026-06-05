@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 STATE_DIR_NAME = "agentalloy"  # under XDG_CONFIG_HOME
 STATE_FILE_NAME = "install-state.json"
@@ -323,6 +323,20 @@ def _empty_state() -> dict[str, Any]:
         "container_name": None,
         # Named volume for persistent data.
         "data_volume": None,
+        # Bootstrap state (container deployment, schema v5).
+        # bootstrap_started_at / bootstrap_completed_at are ISO8601 strings.
+        # bootstrap_packs_ingested is a list of pack names finished by the
+        # container entrypoint. bootstrap_reembed_count is the number of
+        # re-embedded skills. bootstrap_lock_file is the container path to
+        # the bootstrap lock file (informational). bootstrap_checkpoints
+        # mirrors the in-container checkpoint log for host-side recovery
+        # diagnostics.
+        "bootstrap_started_at": None,
+        "bootstrap_completed_at": None,
+        "bootstrap_packs_ingested": [],
+        "bootstrap_reembed_count": 0,
+        "bootstrap_lock_file": "/app/.bootstrap-lock",
+        "bootstrap_checkpoints": [],
     }
 
 
@@ -521,6 +535,15 @@ def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
             data.pop("compose_file")
         data["image_tag"] = "agentalloy:local"
         data.pop("compose_binary_path", None)
+    if from_version < 5:
+        # v4 → v5: bootstrap state fields. Purely additive — no renames,
+        # no removals. Defaults match _empty_state().
+        data.setdefault("bootstrap_started_at", None)
+        data.setdefault("bootstrap_completed_at", None)
+        data.setdefault("bootstrap_packs_ingested", [])
+        data.setdefault("bootstrap_reembed_count", 0)
+        data.setdefault("bootstrap_lock_file", "/app/.bootstrap-lock")
+        data.setdefault("bootstrap_checkpoints", [])
     # Forward-compatibility: ensure newly added optional fields exist on
     # older state files. Not a version bump because the field is purely
     # additive and defaults to None.

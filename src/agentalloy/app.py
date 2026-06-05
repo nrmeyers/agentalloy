@@ -16,7 +16,7 @@ from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.compose_router import router as compose_router
 from agentalloy.api.diagnostics_router import DiagnosticsChecker
 from agentalloy.api.diagnostics_router import router as diagnostics_router
-from agentalloy.api.health_router import HealthChecker
+from agentalloy.api.health_router import HealthChecker, ReadinessChecker
 from agentalloy.api.health_router import router as health_router
 from agentalloy.api.hook_router import router as hook_router
 from agentalloy.api.proxy_anthropic_router import router as anthropic_router
@@ -109,6 +109,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime_load_error=runtime_load_error,
     )
     app.state.health_checker = health_checker
+    # Readiness checker reads bootstrap markers under /app. Wire it whenever
+    # the directory exists; on native installs /app won't exist and the
+    # endpoint falls back to "ready" via its None-checker default.
+    app_dir = Path("/app")
+    if app_dir.is_dir():
+        app.state.readiness_checker = ReadinessChecker(app_dir=app_dir)
     app.state.diagnostics_checker = DiagnosticsChecker(store, runtime, health_checker)
     app.state.telemetry_querier = TelemetryQuerier(vector_store)
     # Expose for proxy router dependencies

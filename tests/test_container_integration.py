@@ -64,8 +64,10 @@ def _run_with_all_patches(tmp_path: Path, tmp_compose: Path, extra_patches=None)
     Uses contextlib.ExitStack to avoid Python's AST nested block limit.
 
     The new single-container flow uses container_runtime functions:
-    _build_image, _ensure_volume, _run_container, _wait_for_health,
-    _generate_entrypoint, _cleanup_temp_entrypoint.
+    _build_image, _ensure_volume, _run_container, _wait_for_readiness,
+    _generate_entrypoint, _cleanup_temp_entrypoint. (The legacy
+    ``_wait_for_health`` was dead code and was removed alongside the
+    fast-start redesign.)
     """
     patches = [
         patch(
@@ -83,7 +85,8 @@ def _run_with_all_patches(tmp_path: Path, tmp_compose: Path, extra_patches=None)
         patch("agentalloy.install.subcommands.container_runtime._ensure_volume"),
         patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0),
         patch(
-            "agentalloy.install.subcommands.container_runtime._wait_for_health", return_value=True
+            "agentalloy.install.subcommands.container_runtime._wait_for_readiness",
+            return_value=True,
         ),
         patch(
             "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
@@ -355,9 +358,11 @@ class TestHealthCheckTimeout:
                 patch(
                     "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
                 ),
+                # Override the default True wait_for_readiness patch to simulate
+                # a readiness timeout. The setup flow must surface a warning.
                 patch(
-                    "urllib.request.urlopen",
-                    side_effect=OSError("connection refused"),
+                    "agentalloy.install.subcommands.container_runtime._wait_for_readiness",
+                    return_value=False,
                 ),
                 patch("time.sleep", return_value=None),
                 patch("time.monotonic", side_effect=fake_monotonic),
@@ -365,9 +370,11 @@ class TestHealthCheckTimeout:
 
             _run_with_all_patches(tmp_path, compose_file, extra_patches=extra)
 
+            # The new fast-start design uses "Service not ready" / "readiness".
             assert any(
-                "not healthy" in c.lower() or "health" in c.lower() for c in captured_prints
-            ), f"Expected health warning in output, got: {captured_prints}"
+                "not ready" in c.lower() or "readiness" in c.lower() or "warming" in c.lower()
+                for c in captured_prints
+            ), f"Expected readiness warning in output, got: {captured_prints}"
 
 
 # ---------------------------------------------------------------------------

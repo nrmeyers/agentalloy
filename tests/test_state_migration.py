@@ -43,8 +43,8 @@ class TestUT20MigrateV3ToV4:
         }
         result = install_state._migrate(v3_state, 3)
 
-        # Schema version bumped
-        assert result["schema_version"] == 4
+        # Schema version bumped to current (v3 → v4 → v5 hops).
+        assert result["schema_version"] == install_state.CURRENT_SCHEMA_VERSION
 
         # Compose fields removed
         assert "compose_file" not in result

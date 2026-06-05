@@ -994,13 +994,16 @@ class TestContainerFlow:
         self.mock.mocks["_outputs_dir"] = outputs_patch.start()
         (self.tmp_data / "outputs").mkdir(parents=True, exist_ok=True)
 
-        # The container flow polls http://localhost:{port}/health for up to
-        # 120s with 5s backoff. Without a real service listening on that port
-        # this burns 120s per test on CI, so short-circuit it with a 200.
+        # The container flow polls http://localhost:{port}/readiness via
+        # ``_wait_for_readiness`` (fast-start design). The wait loop calls
+        # ``json.loads(resp.read().decode())`` and short-circuits on
+        # ``status == "ready"``, so the mock must return parseable JSON
+        # with that body.
         health_resp = MagicMock()
         health_resp.__enter__ = lambda s: s
         health_resp.__exit__ = MagicMock(return_value=False)
         health_resp.status = 200
+        health_resp.read = MagicMock(return_value=b'{"status": "ready"}')
         urlopen_patch = patch("urllib.request.urlopen", return_value=health_resp)
         self.mock.patchers.append(urlopen_patch)
         self.mock.mocks["_urlopen"] = urlopen_patch.start()
@@ -1823,6 +1826,57 @@ class TestContainerFlow:
                         packs_found = True
                         assert "rust" in env_val, f"Expected 'rust' in {env_val}"
                         assert "bogus" not in env_val, f"Unexpected 'bogus' in {env_val}"
+        assert packs_found, "AGENTIALLOY_PACKS env var not found in container run"
+
+    def test_container_flow_expands_packs_all_to_full_list(
+        self,
+        tmp_state_dir: tuple[Path, Path],
+        capsys: pytest.CaptureFixture[str],
+    ):
+        """When --packs 'all' is passed in container mode, it should be
+        expanded to the full pack list instead of being silently stripped
+        as an unknown pack name."""
+        SetupConfig, run_setup = self._import_run_setup()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                return_value="podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.simple_setup._discover_packs",
+                return_value={
+                    "rust": {"skills": []},
+                    "python": {"skills": []},
+                    "go": {"skills": []},
+                },
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
+            rc = run_setup(SetupConfig(deployment="container", non_interactive=True, packs="all"))
+
+        assert rc == 0
+        # Verify the container run call has all packs in the env var
+        run_calls = [
+            c.args[0]
+            for c in mock_run.call_args_list
+            if c.args
+            and isinstance(c.args[0], list)
+            and len(c.args[0]) >= 2
+            and c.args[0][1] == "run"
+        ]
+        assert len(run_calls) >= 1
+        packs_found = False
+        for call_args in run_calls:
+            for i, arg in enumerate(call_args):
+                if str(arg) == "-e" and i + 1 < len(call_args):
+                    env_val = str(call_args[i + 1])
+                    if env_val.startswith("AGENTIALLOY_PACKS="):
+                        packs_found = True
+                        # All three packs should be present (sorted alphabetically)
+                        expected = "AGENTIALLOY_PACKS=go,python,rust"
+                        assert env_val == expected, f"Expected expanded packs, got {env_val}"
         assert packs_found, "AGENTIALLOY_PACKS env var not found in container run"
 
     def test_verify_failures_surfaced_inline(

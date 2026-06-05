@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -571,12 +570,19 @@ class TestGenerateEntrypointNoPacks:
     """Test _generate_entrypoint() when packs is empty."""
 
     def test_no_install_packs_when_packs_empty(self, tmp_path: Path):
-        """When packs='', the generated script should not contain install-packs."""
+        """When packs='', the script must not invoke ``agentalloy install-packs``.
+
+        We probe specifically for the invocation token rather than any
+        ``install-packs`` substring — the fast-start design also references
+        ``.install-packs-lock`` (the concurrent-install guard) in the env
+        block, which is unrelated to whether install-packs actually runs.
+        """
         from agentalloy.install.subcommands.container_runtime import _generate_entrypoint
 
         content = _generate_entrypoint("").read_text()
 
-        assert "install-packs" not in content
+        assert "uv run agentalloy install-packs" not in content
+        assert "No packs specified" in content
 
 
 # ---------------------------------------------------------------------------
@@ -588,13 +594,20 @@ class TestGenerateEntrypointWithPacks:
     """Test _generate_entrypoint() when packs is non-empty."""
 
     def test_install_packs_present_when_packs_set(self, tmp_path: Path):
-        """When packs='foundation,tooling', the generated script should contain install-packs."""
+        """When packs are set, the script runs install-packs per pack.
+
+        The fast-start design installs packs one at a time (so each gets its
+        own checkpoint), so we look for both pack names individually in the
+        emitted PACK_LIST literal — not the original comma-joined string.
+        """
         from agentalloy.install.subcommands.container_runtime import _generate_entrypoint
 
         content = _generate_entrypoint("foundation,tooling").read_text()
 
-        assert "install-packs" in content
-        assert "foundation,tooling" in content
+        assert "uv run agentalloy install-packs" in content
+        # Each pack appears in the PACK_LIST array.
+        assert "foundation" in content
+        assert "tooling" in content
 
 
 # ---------------------------------------------------------------------------
@@ -630,107 +643,11 @@ class TestCleanupTempEntrypoint:
 
 
 # ---------------------------------------------------------------------------
-# UT-10: _wait_for_health — polls with exponential backoff
+# UT-10: readiness polling moved to _wait_for_readiness — see
+# tests/install/test_container_runtime_readiness.py for coverage. The legacy
+# _wait_for_health helper was dead code (defined but never called) and was
+# removed alongside the fast-start redesign.
 # ---------------------------------------------------------------------------
-
-
-class TestWaitForHealth:
-    """Test _wait_for_health() polls /health endpoint with exponential backoff."""
-
-    def test_returns_true_on_immediate_success(self, tmp_path: Path):
-        """_wait_for_health() returns True when /health responds immediately."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.return_value = MagicMock(read=lambda: b'{"status":"ok"}')
-            result = _wait_for_health(47950, timeout=10)
-
-        assert result is True
-
-    def test_returns_true_after_retries(self, tmp_path: Path):
-        """_wait_for_health() returns True after a few failed attempts."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        mock_response = MagicMock(read=lambda: b'{"status":"ok"}')
-        call_count = [0]
-
-        def _side_effect(url, timeout=None):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise OSError("connection refused")
-            return mock_response
-
-        with patch("urllib.request.urlopen", side_effect=_side_effect):
-            result = _wait_for_health(47950, timeout=30)
-
-        assert result is True
-        assert call_count[0] == 3
-
-    def test_returns_false_on_timeout(self, tmp_path: Path):
-        """_wait_for_health() returns False when /health never responds within timeout."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = OSError("connection refused")
-            result = _wait_for_health(47950, timeout=1)
-
-        assert result is False
-
-    def test_uses_exponential_backoff_intervals(self, tmp_path: Path):
-        """_wait_for_health() uses exponential backoff (2s, 4s, 8s, ...) between retries."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        with patch("urllib.request.urlopen") as mock_urlopen:
-            mock_urlopen.side_effect = OSError("connection refused")
-            # Use a very short timeout so backoff steps don't actually sleep long
-            result = _wait_for_health(47950, timeout=1)
-
-        assert result is False
-        # The function should have been called at least once
-        assert mock_urlopen.call_count >= 1
-
-    def test_backoff_cap_respects_timeout(self, tmp_path: Path):
-        """_wait_for_health() caps backoff interval at the timeout value, not a fixed 30s."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        sleep_calls: list[float] = []
-
-        def _capture_sleep(seconds: float) -> None:
-            sleep_calls.append(seconds)
-            # Don't actually sleep — we're testing interval math
-            if len(sleep_calls) >= 5:
-                raise TimeoutError("stop")
-
-        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
-            with patch("time.sleep", side_effect=_capture_sleep):
-                with contextlib.suppress(TimeoutError):
-                    _wait_for_health(47950, timeout=300)
-
-        # After several doublings: 2, 4, 8, 16, 32 — interval should reach 32
-        # (not capped at 30). With timeout=300 the cap is 300 so it doubles freely.
-        assert len(sleep_calls) >= 4
-        # Verify the interval grows beyond 30 (proves cap is not 30)
-        assert max(sleep_calls) > 30
-
-    def test_backoff_cap_at_low_timeout(self, tmp_path: Path):
-        """_wait_for_health() caps backoff interval at timeout when timeout < 30."""
-        from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-        sleep_calls: list[float] = []
-
-        def _capture_sleep(seconds: float) -> None:
-            sleep_calls.append(seconds)
-            if len(sleep_calls) >= 4:
-                raise TimeoutError("stop")
-
-        with patch("urllib.request.urlopen", side_effect=OSError("refused")):
-            with patch("time.sleep", side_effect=_capture_sleep):
-                with contextlib.suppress(TimeoutError):
-                    _wait_for_health(47950, timeout=5)
-
-        # With timeout=5, intervals should be: 2, 4, capped at 5
-        # So max sleep should be <= 5
-        assert max(sleep_calls) <= 5
 
 
 # ---------------------------------------------------------------------------
@@ -916,12 +833,24 @@ def _setup_entrypoint_test(
     # Use /tmp/app as the app directory (configurable via APP_DIR env var)
     app_dir = Path("/tmp/app")
     app_dir.mkdir(exist_ok=True)
-    # Clean up any leftover bootstrap flag so tests are isolated
-    boot_flag = app_dir / ".bootstrap-complete"
-    if boot_flag.exists():
-        boot_flag.unlink()
+    # Clean up any leftover bootstrap state so tests are isolated. The
+    # fast-start entrypoint writes .bootstrap-lock / .bootstrap-progress /
+    # .bootstrap-checkpoints / .install-packs-lock; if a prior test left
+    # checkpoints behind, ``pack_already_done`` would skip the install loop
+    # and the per-pack "Installing pack" lines would never appear.
+    for name in (
+        ".bootstrap-complete",
+        ".bootstrap-lock",
+        ".bootstrap-progress",
+        ".bootstrap-progress.tmp",
+        ".bootstrap-checkpoints",
+        ".install-packs-lock",
+    ):
+        marker = app_dir / name
+        if marker.exists():
+            marker.unlink()
     if bootstrap_complete:
-        boot_flag.write_text("")
+        (app_dir / ".bootstrap-complete").write_text("")
 
     bin_dir = tmp_path / "mock_bin"
     bin_dir.mkdir()
@@ -1065,7 +994,12 @@ class TestEntrypointCrashRestart:
         assert "Starting uvicorn" in result.stdout
 
     def test_reruns_install_packs_on_crash_restart(self, tmp_path: Path):
-        """When .bootstrap-complete is missing and packs are specified, install-packs should run."""
+        """When .bootstrap-complete is missing and packs are specified, install-packs should run.
+
+        Fast-start design installs packs one at a time (per-pack checkpoints),
+        so we look for each pack name on its own ``Installing pack`` line
+        instead of a single combined banner.
+        """
         entrypoint, env, app_dir = _setup_entrypoint_test(
             tmp_path, bootstrap_complete=False, packs="foundation,tooling"
         )
@@ -1079,8 +1013,8 @@ class TestEntrypointCrashRestart:
         )
 
         assert result.returncode == 0
-        # Verify install-packs was called with the right packs
-        assert "Installing packs: foundation,tooling" in result.stdout
-        assert "foundation,tooling" in result.stdout
+        # Each pack gets its own line in the per-pack loop.
+        assert "Installing pack: foundation" in result.stdout
+        assert "Installing pack: tooling" in result.stdout
         # Verify bootstrap-complete was created
         assert (app_dir / ".bootstrap-complete").exists()

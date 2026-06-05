@@ -16,10 +16,10 @@ _empty_state = install_state._empty_state  # pyright: ignore[reportPrivateUsage]
 
 
 class TestSchemaVersion:
-    """Test CURRENT_SCHEMA_VERSION is 4."""
+    """Test CURRENT_SCHEMA_VERSION is 5."""
 
-    def test_schema_version_is_4(self):
-        assert install_state.CURRENT_SCHEMA_VERSION == 4
+    def test_schema_version_is_5(self):
+        assert install_state.CURRENT_SCHEMA_VERSION == 5
 
 
 class TestFreshStateV4:
@@ -27,8 +27,8 @@ class TestFreshStateV4:
 
     def test_fresh_state_has_runtime_fields(self):
         st = _empty_state()
-        assert st["schema_version"] == 4
-        # New runtime fields present
+        assert st["schema_version"] == 5
+        # Runtime fields present
         assert "runtime_binary" in st
         assert "image_tag" in st
         assert "container_name" in st
@@ -37,6 +37,13 @@ class TestFreshStateV4:
         assert "compose_file" not in st
         assert "compose_binary" not in st
         assert "compose_binary_path" not in st
+        # v5 bootstrap fields
+        assert st["bootstrap_started_at"] is None
+        assert st["bootstrap_completed_at"] is None
+        assert st["bootstrap_packs_ingested"] == []
+        assert st["bootstrap_reembed_count"] == 0
+        assert st["bootstrap_lock_file"] == "/app/.bootstrap-lock"
+        assert st["bootstrap_checkpoints"] == []
 
     def test_fresh_state_preserves_common_fields(self):
         st = _empty_state()
@@ -90,8 +97,8 @@ class TestV3ToV4Migration:
             importlib.reload(install_state)
             st = install_state.load_state()
 
-            # Schema version bumped
-            assert st["schema_version"] == 4
+            # Schema version bumped (v3 → v5, hops both migrations)
+            assert st["schema_version"] == 5
             # Compose fields removed
             assert "compose_file" not in st
             assert "compose_binary" not in st
@@ -101,6 +108,9 @@ class TestV3ToV4Migration:
             assert "image_tag" in st
             assert "container_name" in st
             assert "data_volume" in st
+            # v5 bootstrap fields added
+            assert st["bootstrap_started_at"] is None
+            assert st["bootstrap_packs_ingested"] == []
             # deployment preserved
             assert st["deployment"] == "container"
 
@@ -199,7 +209,7 @@ class TestV3ToV4Migration:
             "pending_pack_selection": None,
         }
         result = install_state._migrate(v3_state, 3)
-        assert result["schema_version"] == 4
+        assert result["schema_version"] == 5
         assert "compose_file" not in result
         assert "compose_binary" not in result
         assert "compose_binary_path" not in result
@@ -208,9 +218,12 @@ class TestV3ToV4Migration:
         assert "container_name" in result
         assert "data_volume" in result
         assert result["deployment"] == "container"
+        # v5 bootstrap fields
+        assert result["bootstrap_started_at"] is None
+        assert result["bootstrap_packs_ingested"] == []
 
-    def test_v4_state_no_migration_needed(self, tmp_path: Path):
-        """A v4 state file loads unchanged."""
+    def test_v4_state_migrated_to_v5(self, tmp_path: Path):
+        """A v4 state file is migrated to v5 with bootstrap fields added."""
         config_dir = tmp_path / ".config"
         data_dir = tmp_path / ".local" / "share"
         config_dir.mkdir(parents=True)
@@ -247,7 +260,7 @@ class TestV3ToV4Migration:
             importlib.reload(install_state)
             st = install_state.load_state()
 
-            assert st["schema_version"] == 4
+            assert st["schema_version"] == 5
             assert st["runtime_binary"] == "podman"
             assert st["image_tag"] == "agentalloy:latest"
             assert st["container_name"] == "agentalloy"
@@ -255,6 +268,13 @@ class TestV3ToV4Migration:
             assert "compose_file" not in st
             assert "compose_binary" not in st
             assert "compose_binary_path" not in st
+            # v5 bootstrap fields added with defaults
+            assert st["bootstrap_started_at"] is None
+            assert st["bootstrap_completed_at"] is None
+            assert st["bootstrap_packs_ingested"] == []
+            assert st["bootstrap_reembed_count"] == 0
+            assert st["bootstrap_lock_file"] == "/app/.bootstrap-lock"
+            assert st["bootstrap_checkpoints"] == []
 
         finally:
             if old_config is not None:
@@ -265,3 +285,61 @@ class TestV3ToV4Migration:
                 os.environ["XDG_DATA_HOME"] = old_data
             elif "XDG_DATA_HOME" in os.environ:
                 del os.environ["XDG_DATA_HOME"]
+
+
+class TestV4ToV5Migration:
+    """v4 → v5: add bootstrap_* fields, preserve everything else."""
+
+    def test_v4_migrate_direct_adds_bootstrap_fields(self):
+        v4_state: dict[str, Any] = {
+            "schema_version": 4,
+            "deployment": "container",
+            "runtime_binary": "podman",
+            "image_tag": "agentalloy:local",
+            "container_name": "agentalloy",
+            "data_volume": "agentalloy-data",
+            "install_started_at": "2025-01-01T00:00:00",
+            "completed_steps": [{"step": "wire-harness"}],
+            "harness_files_written": [],
+            "models_pulled": ["ollama:nomic"],
+            "env_path": None,
+            "port": 47950,
+            "last_verify_passed_at": "2025-01-01T01:00:00",
+            "pending_pack_selection": ["python"],
+        }
+        result = install_state._migrate(v4_state, 4)
+        assert result["schema_version"] == 5
+        # Preserved
+        assert result["deployment"] == "container"
+        assert result["runtime_binary"] == "podman"
+        assert result["models_pulled"] == ["ollama:nomic"]
+        assert result["completed_steps"] == [{"step": "wire-harness"}]
+        assert result["pending_pack_selection"] == ["python"]
+        assert result["last_verify_passed_at"] == "2025-01-01T01:00:00"
+        # Added with defaults
+        assert result["bootstrap_started_at"] is None
+        assert result["bootstrap_completed_at"] is None
+        assert result["bootstrap_packs_ingested"] == []
+        assert result["bootstrap_reembed_count"] == 0
+        assert result["bootstrap_lock_file"] == "/app/.bootstrap-lock"
+        assert result["bootstrap_checkpoints"] == []
+
+    def test_v5_state_passthrough(self):
+        """A state file already at v5 is returned unchanged (no migration ran)."""
+        v5_state: dict[str, Any] = {
+            "schema_version": 5,
+            "deployment": "container",
+            "bootstrap_started_at": "2025-06-01T00:00:00Z",
+            "bootstrap_completed_at": "2025-06-01T00:30:00Z",
+            "bootstrap_packs_ingested": ["python", "nodejs"],
+            "bootstrap_reembed_count": 2949,
+            "bootstrap_lock_file": "/app/.bootstrap-lock",
+            "bootstrap_checkpoints": [{"step": "pack_ingested", "pack": "python"}],
+        }
+        # _migrate is only called when from_version < current; calling with 5
+        # would short-circuit all branches and only stamp schema_version.
+        result = install_state._migrate(dict(v5_state), 5)
+        assert result["schema_version"] == 5
+        assert result["bootstrap_packs_ingested"] == ["python", "nodejs"]
+        assert result["bootstrap_reembed_count"] == 2949
+        assert result["bootstrap_checkpoints"] == [{"step": "pack_ingested", "pack": "python"}]

@@ -319,70 +319,9 @@ class TestEntrypointWriteFailure:
 # ---------------------------------------------------------------------------
 
 
-class TestHealthCheckRetries:
-    """EC-6: Health check retries with exponential backoff until success."""
-
-    def test_health_check_succeeds_after_retries(self):
-        """_wait_for_health eventually returns True after intermittent failures."""
-        call_count = [0]
-
-        def fake_urlopen(url, timeout=5):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise OSError("connection refused")
-            mock_resp = MagicMock()
-            mock_resp.status = 200
-            return mock_resp
-
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            with patch("time.sleep", return_value=None):
-                with patch("time.monotonic", side_effect=lambda: 0):
-                    from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-                    result = _wait_for_health(47950, timeout=300)
-                    assert result is True
-                    assert call_count[0] == 3
-
-    def test_health_check_times_out_after_max_retries(self):
-        """_wait_for_health returns False after timeout."""
-        call_count = [0]
-
-        def fake_urlopen_never(url, timeout=5):
-            call_count[0] += 1
-            raise OSError("connection refused")
-
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen_never):
-            with patch("time.sleep", return_value=None):
-                with patch("time.monotonic", side_effect=[0, 301]):
-                    from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-                    result = _wait_for_health(47950, timeout=300)
-                    assert result is False
-
-    def test_health_check_exponential_backoff_intervals(self):
-        """Health check uses exponential backoff: 2, 4, 8, 16, ... seconds."""
-        sleep_calls = []
-
-        def fake_sleep(seconds):
-            sleep_calls.append(seconds)
-
-        with (
-            patch(
-                "urllib.request.urlopen",
-                side_effect=lambda *a, **kw: (_ for _ in ()).throw(OSError("connection refused")),
-            ),
-            patch("time.sleep", side_effect=fake_sleep),
-        ):
-            with patch("time.monotonic", side_effect=[0, 1, 3, 7, 15, 31, 63, 127, 255, 301]):
-                from agentalloy.install.subcommands.container_runtime import _wait_for_health
-
-                _wait_for_health(47950, timeout=300)
-                assert sleep_calls[0] == 2
-                assert sleep_calls[1] == 4
-                assert sleep_calls[2] == 8
-                assert sleep_calls[3] == 16
-                for s in sleep_calls:
-                    assert s <= 256  # exponential backoff: 2, 4, 8, 16, 32, 64, 128, 256
+# Legacy _wait_for_health tests removed. The helper was dead code (never
+# wired into the setup flow); the fast-start design replaces it with
+# _wait_for_readiness, covered in tests/install/test_container_runtime_readiness.py.
 
 
 # ---------------------------------------------------------------------------
@@ -461,13 +400,19 @@ class TestEntrypointBootstrapComplete:
         assert "APP_DIR" in script
 
     def test_entrypoint_skips_bootstrap_when_flag_exists(self):
-        """The entrypoint skips all bootstrap steps when .bootstrap-complete exists."""
+        """The entrypoint skips Ollama/pack ingest when .bootstrap-complete exists.
+
+        The fast-start design starts uvicorn in the background (not via
+        ``exec``) so /readiness is reachable even before pack ingest. The
+        bootstrap branch (Ollama install + ingest) sits between the
+        ``.bootstrap-complete`` check and the uvicorn launch.
+        """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
         bootstrap_check = script.index(".bootstrap-complete")
         ollama_install = script.index("ollama.ai/install.sh")
-        uvicorn_start = script.index("exec uv run uvicorn")
+        uvicorn_start = script.index("uv run uvicorn agentalloy.app:app")
         assert bootstrap_check < ollama_install
         assert ollama_install < uvicorn_start
 
@@ -489,23 +434,35 @@ class TestEntrypointSIGTERM:
         assert "SIGTERM" in script
 
     def test_sigterm_traps_ollama_pid(self):
-        """SIGTERM trap kills the Ollama background process."""
+        """SIGTERM trap kills the Ollama background process.
+
+        The fast-start design also covers UVICORN_PID (uvicorn now runs in
+        the background, not via ``exec``), so the trap reaps both. Both
+        PIDs use the ``${VAR:-}`` form so the trap is safe to install
+        before either process has started.
+        """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
         assert "OLLAMA_PID" in script
+        assert "UVICORN_PID" in script
         assert "trap" in script
         assert "SIGTERM" in script
+        assert "kill ${OLLAMA_PID:-}" in script
 
-        # The trap command must reference OLLAMA_PID to kill the background process
-        assert 'trap "kill ${OLLAMA_PID}' in script
+    def test_sigterm_trap_set_unconditionally(self):
+        """SIGTERM trap is installed once, covering both possible bg processes.
 
-    def test_sigterm_trap_conditional_on_ollama_started(self):
-        """SIGTERM trap is only set if Ollama was actually started."""
+        The legacy design only set the trap when Ollama was started; the
+        fast-start design always runs uvicorn in the background and may also
+        run Ollama, so the trap is installed once and uses ``${VAR:-}`` to
+        no-op the kill for whichever PID is unset.
+        """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert 'if [ -n "${OLLAMA_PID:-}" ]' in script
+        # Both PIDs appear in the trap body.
+        assert "kill ${OLLAMA_PID:-} ${UVICORN_PID:-}" in script
 
 
 # ---------------------------------------------------------------------------
@@ -750,12 +707,17 @@ class TestNonInteractiveMode:
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch(
         "urllib.request.urlopen",
-        # The health check loop does:
-        #   with urllib.request.urlopen(url, timeout=5) as resp:
-        #       if resp.status == 200: healthy = True; break
-        # We need __enter__ to return a mock with status=200 so the loop
-        # breaks immediately instead of sleeping for 120s.
-        return_value=MagicMock(__enter__=MagicMock(return_value=MagicMock(status=200))),
+        # Fast-start readiness loop calls ``json.loads(resp.read().decode())``
+        # and short-circuits on ``status == "ready"``. The mock's ``__enter__``
+        # must surface a body with that status.
+        return_value=MagicMock(
+            __enter__=MagicMock(
+                return_value=MagicMock(
+                    status=200,
+                    read=MagicMock(return_value=b'{"status": "ready"}'),
+                )
+            )
+        ),
     )
     @patch(
         "builtins.input",
@@ -869,8 +831,15 @@ class TestNonInteractiveMode:
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch(
         "urllib.request.urlopen",
-        # Same health-check fix: __enter__ must return a mock with status=200
-        return_value=MagicMock(__enter__=MagicMock(return_value=MagicMock(status=200))),
+        # Fast-start readiness loop needs a parseable JSON body.
+        return_value=MagicMock(
+            __enter__=MagicMock(
+                return_value=MagicMock(
+                    status=200,
+                    read=MagicMock(return_value=b'{"status": "ready"}'),
+                )
+            )
+        ),
     )
     @patch("builtins.input", side_effect=RuntimeError("input() should not be called"))
     @patch("agentalloy.install.subcommands.simple_setup._print")

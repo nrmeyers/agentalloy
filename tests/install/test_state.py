@@ -17,18 +17,18 @@ _empty_state = install_state._empty_state  # pyright: ignore[reportPrivateUsage]
 
 
 class TestSchemaVersion:
-    """Test CURRENT_SCHEMA_VERSION is 4."""
+    """Test CURRENT_SCHEMA_VERSION is 5."""
 
-    def test_schema_version_is_4(self):
-        assert install_state.CURRENT_SCHEMA_VERSION == 4
+    def test_schema_version_is_5(self):
+        assert install_state.CURRENT_SCHEMA_VERSION == 5
 
 
 class TestFreshState:
-    """Test _empty_state() returns schema v3 with container fields."""
+    """Test _empty_state() returns schema v5 with container + bootstrap fields."""
 
     def test_fresh_state_has_container_fields(self):
         st = _empty_state()
-        assert st["schema_version"] == 4
+        assert st["schema_version"] == 5
         assert st["deployment"] is None
         assert st["runtime_binary"] is None
         assert st["image_tag"] is None
@@ -85,8 +85,8 @@ class TestV2ToV3Migration:
             importlib.reload(install_state)
             st = install_state.load_state()
 
-            # Should have been migrated to v4
-            assert st["schema_version"] == 4
+            # Should have been migrated through to v5 (v2 → v3 → v4 → v5)
+            assert st["schema_version"] == 5
             assert st["deployment"] is None
             assert st["runtime_binary"] is None
             assert st["image_tag"] == "agentalloy:local"
@@ -308,3 +308,98 @@ class TestStepTracking:
         assert output["step"] == "pull-models"
         assert output["models"] == ["ollama:text-embedding"]
         assert install_state.get_step_output(data, "missing") is None
+
+
+class TestBootstrapStateFields:
+    """[UT-37][UT-38] Bootstrap state fields in _empty_state()."""
+
+    def test_37_empty_state_includes_bootstrap_fields(self):
+        """[UT-37] _empty_state includes all 4 bootstrap fields."""
+        data = _empty_state()
+        assert "bootstrap_started_at" in data
+        assert "bootstrap_completed_at" in data
+        assert "bootstrap_packs_ingested" in data
+        assert "bootstrap_reembed_count" in data
+        # All should default to None/empty
+        assert data["bootstrap_started_at"] is None
+        assert data["bootstrap_completed_at"] is None
+        assert data["bootstrap_packs_ingested"] == []
+        assert data["bootstrap_reembed_count"] == 0
+
+    def test_38_bootstrap_fields_backward_compatible(self):
+        """[UT-38] Bootstrap state fields are backward compatible (no migration needed)."""
+        # Loading an old state file (schema v4, no bootstrap fields) should not crash
+        # and should fill in defaults via setdefault
+        data = _empty_state()
+        # Simulate an old state that lacks bootstrap fields
+        del data["bootstrap_started_at"]
+        del data["bootstrap_completed_at"]
+        del data["bootstrap_packs_ingested"]
+        del data["bootstrap_reembed_count"]
+
+        # _empty_state is the source of truth; migration uses setdefault
+        # to add new fields. Verify that setdefault works correctly.
+        data.setdefault("bootstrap_started_at", None)
+        data.setdefault("bootstrap_completed_at", None)
+        data.setdefault("bootstrap_packs_ingested", [])
+        data.setdefault("bootstrap_reembed_count", 0)
+
+        assert data["bootstrap_started_at"] is None
+        assert data["bootstrap_completed_at"] is None
+        assert data["bootstrap_packs_ingested"] == []
+        assert data["bootstrap_reembed_count"] == 0
+
+    def test_38_load_state_fills_bootstrap_defaults(self, tmp_path: Path):
+        """[UT-38] Loading old state fills bootstrap fields via migration."""
+        config_dir = tmp_path / ".config"
+        data_dir = tmp_path / ".local" / "share"
+        config_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True)
+        old_config = os.environ.get("XDG_CONFIG_HOME")
+        old_data = os.environ.get("XDG_DATA_HOME")
+        os.environ["XDG_CONFIG_HOME"] = str(config_dir)
+        os.environ["XDG_DATA_HOME"] = str(data_dir)
+
+        try:
+            import importlib
+
+            importlib.reload(install_state)
+            # Create a v4 state file WITHOUT bootstrap fields
+            agentalloy_dir = config_dir / "agentalloy"
+            agentalloy_dir.mkdir(parents=True)
+            state_file = agentalloy_dir / "install-state.json"
+            old_state: dict[str, Any] = {
+                "schema_version": 4,
+                "install_started_at": "2025-01-01T00:00:00",
+                "completed_steps": [],
+                "harness_files_written": [],
+                "models_pulled": [],
+                "env_path": None,
+                "port": 47950,
+                "last_verify_passed_at": None,
+                "pending_pack_selection": None,
+                "deployment": None,
+                "runtime_binary": None,
+                "image_tag": "agentalloy:local",
+                "container_name": None,
+                "data_volume": None,
+                # NO bootstrap_* fields — simulating old state
+            }
+            state_file.write_text(json.dumps(old_state))
+
+            st = install_state.load_state()
+
+            # Bootstrap fields should be filled in by migration
+            assert st["bootstrap_started_at"] is None
+            assert st["bootstrap_completed_at"] is None
+            assert st["bootstrap_packs_ingested"] == []
+            assert st["bootstrap_reembed_count"] == 0
+        finally:
+            if old_config is not None:
+                os.environ["XDG_CONFIG_HOME"] = old_config
+            elif "XDG_CONFIG_HOME" in os.environ:
+                del os.environ["XDG_CONFIG_HOME"]
+            if old_data is not None:
+                os.environ["XDG_DATA_HOME"] = old_data
+            elif "XDG_DATA_HOME" in os.environ:
+                del os.environ["XDG_DATA_HOME"]

@@ -1,9 +1,19 @@
-"""Enhanced health endpoint with dependency checks (NXS-775)."""
+"""Enhanced health endpoint with dependency checks (NXS-775).
+
+Also exposes ``/readiness`` (container deployment) which reports bootstrap
+state by reading filesystem markers written by the container entrypoint
+script. ``/health`` answers "is the service up and dependencies healthy";
+``/readiness`` answers "is bootstrap complete or still warming up".
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -14,6 +24,10 @@ from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import VectorStore
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# Health (dependency) models and checker (existing)
+# ---------------------------------------------------------------------------
 
 DepStatus = Literal["ok", "unavailable"]
 OverallStatus = Literal["healthy", "degraded", "unavailable"]
@@ -135,3 +149,140 @@ async def health(request: Request) -> HealthResponse:
     if checker is None:
         return HealthResponse(status="healthy")
     return await checker.check()
+
+
+# --------------------------------------------------------------------------- #
+# Readiness — container bootstrap state                                       #
+# --------------------------------------------------------------------------- #
+
+ReadinessStatus = Literal["ready", "warming_up", "error"]
+
+# Stale-lock threshold: if the bootstrap lock file's mtime is older than this,
+# we treat the previous bootstrap as crashed. The design picks 2 hours because
+# full pack ingest + re-embed takes 15-25 minutes in practice; 2h gives ample
+# headroom while still surfacing genuinely-stuck containers.
+_STALE_LOCK_SECONDS = 2 * 3600
+
+
+class ReadinessResponse(BaseModel):
+    status: ReadinessStatus
+    progress: dict[str, Any] | None = None
+
+
+class ReadinessChecker:
+    """Maps filesystem state to a readiness status.
+
+    The container entrypoint script writes four markers:
+      - ``.bootstrap-lock``         — bootstrap in progress (mtime = start)
+      - ``.bootstrap-complete``     — bootstrap finished
+      - ``.bootstrap-progress``     — atomic JSON snapshot of progress
+      - ``.bootstrap-checkpoints``  — per-pack checkpoint log (JSONL)
+
+    Decision order (highest priority first):
+      1. ``.bootstrap-complete`` exists → ``ready`` (covers crash-after-done).
+      2. ``.bootstrap-lock`` exists and is stale → ``error: stale_lock``.
+      3. ``.bootstrap-lock`` exists and is fresh → ``warming_up`` with progress.
+      4. Neither file exists → ``ready`` (no bootstrap was needed, or this
+         service was started outside the container flow).
+    """
+
+    def __init__(self, app_dir: Path) -> None:
+        self._app_dir = Path(app_dir)
+
+    def check(self) -> ReadinessResponse:
+        complete = self._app_dir / ".bootstrap-complete"
+        lock = self._app_dir / ".bootstrap-lock"
+
+        if complete.exists():
+            return ReadinessResponse(status="ready")
+
+        if not lock.exists():
+            return ReadinessResponse(status="ready")
+
+        # Lock file present — decide warming_up vs stale. We prefer the
+        # ISO8601 timestamp the entrypoint writes into the file (survives
+        # container restarts cleanly) and fall back to mtime if parsing
+        # fails. Either way: age compared against _STALE_LOCK_SECONDS.
+        lock_age = self._lock_age_seconds(lock)
+        if lock_age is None:
+            # Couldn't determine age at all — treat as fresh rather than
+            # poisoning a live bootstrap with a false stale_lock.
+            return ReadinessResponse(status="warming_up", progress=self._read_progress())
+
+        if lock_age > _STALE_LOCK_SECONDS:
+            return ReadinessResponse(
+                status="error",
+                progress={"error": "stale_lock", "lock_age_seconds": int(lock_age)},
+            )
+
+        return ReadinessResponse(status="warming_up", progress=self._read_progress())
+
+    @staticmethod
+    def _lock_age_seconds(lock: Path) -> float | None:
+        """Return seconds since the lock was created, or None if unknown.
+
+        Tries the ISO8601 timestamp inside the file first (the entrypoint
+        writes ``date -Iseconds > .bootstrap-lock`` so this is the canonical
+        source); falls back to mtime when the content is missing or
+        unparseable.
+        """
+        try:
+            content = lock.read_text().strip()
+        except OSError:
+            content = ""
+        if content:
+            try:
+                # ``fromisoformat`` accepts the ``%z`` offset produced by
+                # ``time.strftime("%Y-%m-%dT%H:%M:%S%z")`` and by ``date -Iseconds``.
+                parsed = datetime.fromisoformat(content)
+            except ValueError:
+                parsed = None
+            if parsed is not None:
+                now = datetime.now(parsed.tzinfo) if parsed.tzinfo is not None else datetime.now()
+                return (now - parsed).total_seconds()
+        try:
+            return time.time() - lock.stat().st_mtime
+        except OSError:
+            return None
+
+    def _read_progress(self) -> dict[str, Any]:
+        """Return progress dict; falls back to zeroed counts on any failure.
+
+        Returning zeros (rather than ``{}``) lets callers render a stable
+        "0 / N packs" line without a None-check; the host-side wait loop
+        treats this as "no signal yet, show elapsed time" anyway.
+        """
+        default = {"packs_ingested": 0, "packs_total": 0}
+        progress_file = self._app_dir / ".bootstrap-progress"
+        try:
+            raw = progress_file.read_text()
+        except OSError:
+            return default
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return default
+        if not isinstance(parsed, dict):
+            return default
+        # Merge so missing keys still surface defaults — atomic writes can
+        # still race with a reader if a writer is mid-rename, and a partial
+        # dict is more useful than a wholesale fallback.
+        merged = dict(default)
+        merged.update(parsed)
+        return merged
+
+
+@router.get(
+    "/readiness",
+    response_model=ReadinessResponse,
+    summary="Container bootstrap readiness (ready / warming_up / error)",
+)
+async def readiness(request: Request) -> ReadinessResponse:
+    checker: ReadinessChecker | None = getattr(request.app.state, "readiness_checker", None)
+    if checker is None:
+        # No checker wired (e.g. native deployment) — service is ready by
+        # definition; there is no bootstrap to wait on.
+        return ReadinessResponse(status="ready")
+    # Filesystem stat is cheap, but run off the event loop to keep the
+    # endpoint non-blocking under load.
+    return await asyncio.to_thread(checker.check)

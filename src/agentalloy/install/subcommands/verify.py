@@ -598,8 +598,74 @@ def _read_env_values(root: Path) -> dict[str, str]:  # noqa: ARG001 — back-com
     return values
 
 
+def _check_bootstrap_in_progress(port: int) -> dict[str, Any] | None:
+    """Return a short-circuit verify result if the container is mid-bootstrap.
+
+    Calls ``/readiness`` on the local API port. Behavior:
+
+    * ``warming_up``  → returns a ``bootstrap_in_progress`` result so the
+                        caller can skip the full check suite (which would
+                        otherwise misreport "port bound by non-agentalloy"
+                        and "diagnostics unreachable" as failures).
+    * ``error``       → returns a ``bootstrap_error`` result with details.
+    * ``ready``       → returns None (proceed with normal checks).
+    * Connection refused / timeout → returns None. We can't distinguish
+                        "service down" from "service starting" from this
+                        signal alone; the normal checks will surface the
+                        correct error in either case.
+    """
+    import json as _json  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    url = f"http://127.0.0.1:{port}/readiness"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:  # noqa: S310
+            body = _json.loads(resp.read().decode())
+    except (urllib.error.URLError, OSError, _json.JSONDecodeError):
+        return None
+
+    status = body.get("status")
+    progress = body.get("progress") or {}
+    if status == "warming_up":
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "all_checks_passed": False,
+            "status": "bootstrap_in_progress",
+            "guidance": (
+                "Bootstrap is still in progress. The service is warming up — "
+                "please wait a few more minutes and run `agentalloy verify` again."
+            ),
+            "progress": progress,
+            "checks": [],
+        }
+    if status == "error":
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "all_checks_passed": False,
+            "status": "bootstrap_error",
+            "guidance": (
+                "Bootstrap reported an error. Inspect the container log "
+                "(e.g. `podman logs agentalloy`) for details."
+            ),
+            "progress": progress,
+            "checks": [],
+        }
+    return None
+
+
 def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001
     """Run all 8 verify checks and return the contract-shaped result."""
+    # Container deployments may be in fast-start bootstrap — the API is up
+    # but packs haven't been ingested yet. Short-circuit on warming_up so the
+    # user sees "wait, bootstrap in progress" instead of a wall of false
+    # "port bound by other process" failures.
+    if st.get("deployment") == "container":
+        port = install_state.validate_port(st.get("port", 47950))
+        bootstrap_result = _check_bootstrap_in_progress(port)
+        if bootstrap_result is not None:
+            return bootstrap_result
+
     env = _read_env_values(install_state.user_config_dir())
 
     embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:11436")

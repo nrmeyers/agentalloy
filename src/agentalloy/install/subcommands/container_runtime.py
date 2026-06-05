@@ -313,30 +313,103 @@ def _generate_entrypoint(packs: str) -> Path:
 
 
 def _build_entrypoint_script(packs: str) -> str:
-    """Build the entrypoint wrapper script as a string."""
+    """Build the entrypoint wrapper script (fast-start + checkpointed).
+
+    Compared to the original "bootstrap then exec uvicorn" pattern, this
+    script:
+
+    1. Creates ``.bootstrap-lock`` with an ISO timestamp at the start of a
+       new bootstrap; removes it and creates ``.bootstrap-complete`` when
+       done. The host-side ``/readiness`` endpoint reads these markers.
+    2. Detects a stale lock (>2 h) left by a previous crashed container,
+       wipes lock + checkpoints, and starts fresh.
+    3. Starts ``uvicorn`` in the background **before** pack ingest so the
+       API serves ``/readiness`` (and ``/health``) while bootstrap is in
+       progress. The endpoint reports ``warming_up`` so callers don't
+       mistake "service up, packs not yet ingested" for "service healthy".
+    4. Iterates packs one-by-one, writes progress to ``.bootstrap-progress``
+       (atomic temp + mv) before each pack, and appends a checkpoint line to
+       ``.bootstrap-checkpoints`` after each pack succeeds.
+    5. On restart, parses the checkpoint file and skips packs already
+       recorded — partial bootstrap crashes resume from where they left off.
+       A corrupted checkpoint file is treated as "no checkpoints" so the
+       script never fails closed on a malformed line.
+    """
+    pack_list = [p for p in (packs or "").split(",") if p.strip()]
+    has_packs = len(pack_list) > 0
+    packs_total = len(pack_list)
+
+    # Build the per-pack loop body as a shell array. We quote each element so
+    # pack names with shell metacharacters (none in practice, but defense in
+    # depth) can't break out of the array.
+    pack_array_literal = " ".join(shlex.quote(p.strip()) for p in pack_list)
+
     lines = [
         "#!/bin/bash",
         "set -e",
         "",
         "# App directory (configurable via APP_DIR env var, default /app)",
         "APP_DIR=${APP_DIR:-/app}",
+        'LOCK="$APP_DIR/.bootstrap-lock"',
+        'COMPLETE="$APP_DIR/.bootstrap-complete"',
+        'PROGRESS="$APP_DIR/.bootstrap-progress"',
+        'PROGRESS_TMP="$APP_DIR/.bootstrap-progress.tmp"',
+        'CHECKPOINTS="$APP_DIR/.bootstrap-checkpoints"',
+        'INSTALL_LOCK="$APP_DIR/.install-packs-lock"',
         "",
-        "# Bootstrap completion check (early exit if already complete)",
-        'if [ -f "$APP_DIR/.bootstrap-complete" ]; then',
+        "# --- Stale lock recovery -------------------------------------------",
+        "# If the previous run crashed mid-bootstrap, the lock file persists",
+        "# in the data volume. A lock older than 2h is considered stale.",
+        'if [ -f "$LOCK" ] && [ ! -f "$COMPLETE" ]; then',
+        '    LOCK_MTIME=$(stat -c %Y "$LOCK" 2>/dev/null || echo 0)',
+        "    NOW=$(date +%s)",
+        '    if [ "$LOCK_MTIME" -gt 0 ] && [ $((NOW - LOCK_MTIME)) -gt 7200 ]; then',
+        '        echo ">> Stale bootstrap lock detected (>2h) - starting fresh"',
+        '        rm -f "$LOCK" "$CHECKPOINTS" "$PROGRESS" "$PROGRESS_TMP"',
+        "    fi",
+        "fi",
+        "",
+        "# --- Checkpoint helpers --------------------------------------------",
+        "# pack_already_done: 0 (true) if the pack name appears in checkpoints.",
+        "# A corrupt checkpoint file simply yields no matches — treated as",
+        '# "not done yet", so we re-run the pack rather than failing closed.',
+        "pack_already_done() {",
+        '    [ -f "$CHECKPOINTS" ] || return 1',
+        '    grep -Fq "\\"pack\\": \\"$1\\"" "$CHECKPOINTS" 2>/dev/null',
+        "}",
+        "",
+        "# write_progress <current_pack> <ingested> <total>",
+        "# Atomic JSON write: stage to .tmp then mv onto target. Readers either",
+        "# see the prior snapshot or the new one, never a torn write.",
+        "write_progress() {",
+        '    cat > "$PROGRESS_TMP" <<JSON',
+        '{"current_pack": "$1", "packs_ingested": $2, "packs_total": $3, "updated_at": "$(date -Iseconds)"}',
+        "JSON",
+        '    mv "$PROGRESS_TMP" "$PROGRESS"',
+        "}",
+        "",
+        "# --- Bootstrap decision -------------------------------------------",
+        "BOOTSTRAP_NEEDED=true",
+        'if [ -f "$COMPLETE" ]; then',
+        "    BOOTSTRAP_NEEDED=false",
         '    echo ">> Bootstrap already complete - skipping to uvicorn"',
-        "else",
+        "fi",
+        "",
+        'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
+        "    # Record bootstrap start. Content is the canonical timestamp;",
+        "    # mtime is the fallback for stale-lock detection.",
+        '    date -Iseconds > "$LOCK"',
+        "",
         "    # Ollama installation",
         "    if ! command -v ollama &> /dev/null; then",
         '        echo ">> Installing Ollama..."',
         "        curl -fsSL https://ollama.ai/install.sh | sh",
         "    fi",
         "",
-        "    # Start Ollama",
         '    echo ">> Starting Ollama..."',
         "    OLLAMA_HOST=127.0.0.1:11434 ollama serve &",
         "    OLLAMA_PID=$!",
         "",
-        "    # Wait for Ollama to be ready (30 s timeout)",
         "    for i in $(seq 1 30); do",
         "        if curl -sf http://127.0.0.1:11434 > /dev/null 2>&1; then",
         '            echo ">> Ollama is ready"',
@@ -345,25 +418,56 @@ def _build_entrypoint_script(packs: str) -> str:
         "        sleep 1",
         "    done",
         "",
-        "    # Pull embedding model",
         '    echo ">> Checking embedding model..."',
         "    if ! ollama list | grep -q qwen3-embedding; then",
         '        echo ">> Pulling qwen3-embedding:0.6b..."',
         "        ollama pull qwen3-embedding:0.6b",
         "    fi",
         "",
-        "    # Run migrations",
         '    echo ">> Running migrations..."',
         "    uv run python -m agentalloy.migrate",
+        "fi",
         "",
-        "    # Pack installation (conditional)",
+        "# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------",
+        "trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM",
+        "",
+        "# --- Fast-start uvicorn -------------------------------------------",
+        "# Start uvicorn BEFORE pack ingest so /readiness is reachable while",
+        "# bootstrap is in progress. The endpoint reads .bootstrap-lock and",
+        '# .bootstrap-progress to report "warming_up" with current state.',
+        'echo ">> Starting uvicorn (fast-start)..."',
+        "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &",
+        "UVICORN_PID=$!",
+        "",
+        'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
     ]
 
-    if packs.strip():
+    if has_packs:
         lines.extend(
             [
-                f'    echo "> Installing packs: {packs}"',
-                f"    uv run agentalloy install-packs --packs {shlex.quote(packs)}",
+                f"    PACK_LIST=({pack_array_literal})",
+                f"    TOTAL={packs_total}",
+                "    INGESTED=0",
+                '    if [ -f "$CHECKPOINTS" ]; then',
+                "        # Count previously-ingested packs (corrupt file ⇒ 0).",
+                '        INGESTED=$(grep -c "pack_ingested" "$CHECKPOINTS" 2>/dev/null || echo 0)',
+                "    fi",
+                '    for pack in "${PACK_LIST[@]}"; do',
+                '        if pack_already_done "$pack"; then',
+                '            echo ">> Pack $pack already ingested - skipping"',
+                "            continue",
+                "        fi",
+                '        write_progress "$pack" "$INGESTED" "$TOTAL"',
+                '        echo ">> Installing pack: $pack"',
+                "        # install-packs writes its own lock so a host-side",
+                "        # `agentalloy install-packs` cannot collide mid-ingest.",
+                '        touch "$INSTALL_LOCK"',
+                '        uv run agentalloy install-packs --packs "$pack" --no-restart',
+                '        rm -f "$INSTALL_LOCK"',
+                '        printf \'{"step": "pack_ingested", "pack": "%s", "at": "%s"}\\n\' "$pack" "$(date -Iseconds)" >> "$CHECKPOINTS"',
+                "        INGESTED=$((INGESTED + 1))",
+                "    done",
+                '    write_progress "" "$INGESTED" "$TOTAL"',
             ]
         )
     else:
@@ -372,18 +476,14 @@ def _build_entrypoint_script(packs: str) -> str:
     lines.extend(
         [
             "",
-            "# Mark bootstrap complete",
-            '    touch "$APP_DIR/.bootstrap-complete"',
+            "    # Mark bootstrap complete and clear the lock.",
+            '    rm -f "$LOCK"',
+            '    touch "$COMPLETE"',
+            '    echo ">> Bootstrap complete"',
             "fi",
             "",
-            "# SIGTERM trap for graceful shutdown (only if Ollama was started)",
-            'if [ -n "${OLLAMA_PID:-}" ]; then',
-            '    trap "kill ${OLLAMA_PID} 2>/dev/null; exit 0" SIGTERM',
-            "fi",
-            "",
-            "# Start uvicorn",
-            'echo ">> Starting uvicorn..."',
-            "exec uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info",
+            "# Block on uvicorn — its exit is the container's exit.",
+            "wait $UVICORN_PID",
         ]
     )
 
@@ -476,43 +576,135 @@ def _run_container(runtime: str, entrypoint: Path, packs: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Readiness polling (fast-start + bootstrap state)
 # ---------------------------------------------------------------------------
 
 
-def _wait_for_health(port: int, timeout: int = 300) -> bool:
-    """Poll the container's /health endpoint with exponential backoff.
+def _wait_for_readiness(
+    port: int,
+    timeout: int = 1800,
+    *,
+    runtime: str | None = None,
+    container_name: str = "agentalloy",
+    poll_interval: float = 30.0,
+    on_progress: Any = None,
+) -> bool:
+    """Poll ``/readiness`` until bootstrap completes or we time out.
 
-    Starts with a 2-second initial interval and doubles each retry
-    (2, 4, 8, 16, …) up to the given *timeout*.
+    The endpoint reports one of:
+
+    * ``ready``       — bootstrap done; return True.
+    * ``warming_up``  — still bootstrapping; surface progress (if a callback
+                        is supplied) and keep polling.
+    * ``error``       — fatal (e.g. ``stale_lock``); return False.
+
+    Connection errors are treated as "container not yet up" for the first
+    ~30 s, then as "container died" — we return False so the caller can
+    surface the container's own logs instead of waiting out the full
+    timeout. ``timeout`` defaults to 1800 s (30 min) because full pack
+    ingest + re-embed runs 15-25 min; callers pass 300 s for limited packs.
 
     Parameters
     ----------
     port : int
-        The port on which the container exposes the /health endpoint.
-    timeout : int, optional
-        Maximum seconds to wait (default 300).
-
-    Returns
-    -------
-    bool
-        True if the endpoint responds, False on timeout.
+        Port on which the container exposes ``/readiness``.
+    timeout : int
+        Max seconds to wait. Default 1800 (all-packs); pass 300 for
+        limited packs.
+    runtime, container_name :
+        Used to call ``_get_bootstrap_progress`` for the on_progress hook.
+    poll_interval : float
+        Seconds between polls. Default 30 s balances responsiveness with
+        the cost of repeatedly spawning ``runtime exec`` for progress.
+    on_progress : callable(dict) | None
+        Optional callback invoked once per poll with the parsed readiness
+        body (status + progress). Lets the caller render a live spinner.
     """
-    import time
+    import json as _json
+    import time as _time
+    import urllib.error
+    import urllib.request
 
-    url = f"http://127.0.0.1:{port}/health"
-    interval = 2
-    start = time.monotonic()
+    url = f"http://127.0.0.1:{port}/readiness"
+    start = _time.monotonic()
+    grace_window = 1800.0  # tolerate connection errors during full bootstrap (ollama install + model pull + migrations + uvicorn start)
+    consecutive_errors = 0
 
     while True:
+        elapsed = _time.monotonic() - start
         try:
-            import urllib.request
-
-            urllib.request.urlopen(url, timeout=5)
-            return True
-        except OSError:
-            elapsed = time.monotonic() - start
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                body = _json.loads(resp.read().decode())
+        except (urllib.error.URLError, OSError, _json.JSONDecodeError):
+            # If we never saw a 200 and the grace window has passed, give up.
+            if elapsed > grace_window:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    return False
             if elapsed >= timeout:
                 return False
-            time.sleep(interval)
-            interval = min(interval * 2, timeout)
+            _time.sleep(min(poll_interval, 5.0))
+            continue
+
+        consecutive_errors = 0
+        status = body.get("status")
+        if on_progress is not None:
+            # Caller wants progress updates. Best-effort enrichment from the
+            # in-container progress file via runtime exec, in addition to
+            # whatever /readiness reported.
+            extra: dict[str, Any] = {}
+            if runtime is not None:
+                extra = _get_bootstrap_progress(runtime, container_name)
+            # Progress reporting is best-effort; never break the wait loop
+            # on a callback failure.
+            import contextlib as _ctx  # noqa: PLC0415
+
+            with _ctx.suppress(Exception):
+                on_progress(
+                    {
+                        "status": status,
+                        "progress": body.get("progress") or {},
+                        "extra": extra,
+                        "elapsed": elapsed,
+                    }
+                )
+
+        if status == "ready":
+            return True
+        if status == "error":
+            return False
+
+        if elapsed >= timeout:
+            return False
+        _time.sleep(poll_interval)
+
+
+def _get_bootstrap_progress(runtime: str, container_name: str = "agentalloy") -> dict[str, Any]:
+    """Return the parsed ``.bootstrap-progress`` JSON, or ``{}`` on any failure.
+
+    Uses ``{runtime} exec <name> cat /app/.bootstrap-progress``. Every failure
+    mode (container stopped, file missing, JSON malformed, runtime missing)
+    collapses to an empty dict so the caller can fall back to elapsed-time
+    display without branching on error kind.
+    """
+    import json as _json
+
+    try:
+        result = subprocess.run(
+            [runtime, "exec", container_name, "cat", "/app/.bootstrap-progress"],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return {}
+    raw = result.stdout
+    if isinstance(raw, bytes):
+        raw = raw.decode(errors="replace")
+    if not raw:
+        return {}
+    try:
+        parsed = _json.loads(raw)
+    except (_json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -23,6 +24,147 @@ from agentalloy.install.subcommands.install_pack import install_local_pack
 
 SCHEMA_VERSION = 1
 STEP_NAME = "install-packs"
+
+# When the container reports an install-packs lock already in place, we wait
+# this long before declaring the lock stale and proceeding.
+_INSTALL_PACKS_STALE_SECONDS = 30 * 60
+
+
+def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
+    """Forward ``install-packs`` into the running container, if applicable.
+
+    Returns:
+      - ``None`` — not routing; caller should run the local code path.
+      - ``int``  — routing applied; return code from the container exec
+        (or an error code if the container is not running / locked).
+
+    The decision is driven by ``install-state.json``:
+      * ``deployment == "container"`` → route into the container.
+      * Any other value (or unset) → local path.
+
+    Routing is suppressed when this process is itself running inside the
+    container (``is_in_container()``) — the entrypoint script runs
+    ``install-packs`` directly and must NOT recurse back into a container
+    exec on itself.
+    """
+    # Local imports to keep module import time low (this function is on the
+    # cold path; install_packs is also imported by tests that don't need
+    # container plumbing).
+    from agentalloy.install.container_service import is_in_container  # noqa: PLC0415
+
+    if is_in_container():
+        return None
+
+    state = install_state.load_state()
+    if state.get("deployment") != "container":
+        return None
+
+    runtime = (state.get("runtime_binary") or "podman").split()[0]
+    container_name = state.get("container_name") or "agentalloy"
+
+    packs = getattr(args, "packs", None)
+    if not packs:
+        # No --packs given: routing into the container would be ambiguous
+        # (the container can't run an interactive prompt against this TTY).
+        # Fall through to local path so existing list/non-interactive flows
+        # still work for diagnostic purposes.
+        return None
+
+    # Concurrent-install guard: respect ``.install-packs-lock`` inside the
+    # container. A fresh lock means another install-packs is already running;
+    # a stale lock (>30 min) is forcibly cleared so a crashed prior run
+    # doesn't permanently block.
+    lock_state = _read_container_install_lock(runtime, container_name)
+    if lock_state == "fresh":
+        print(
+            "install-packs: another install-packs is already running inside "
+            f"the {container_name} container. Wait for it to finish, or remove "
+            "/app/.install-packs-lock manually if you know it's stale.",
+            file=sys.stderr,
+        )
+        return 2
+    if lock_state == "stale":
+        # Best-effort cleanup; failure is non-fatal — the install command
+        # will just touch the lock again.
+        subprocess.run(  # noqa: S603 — fixed argv, no shell
+            [runtime, "exec", container_name, "rm", "-f", "/app/.install-packs-lock"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+
+    cmd = [
+        runtime,
+        "exec",
+        container_name,
+        "sh",
+        "-c",
+        # Touch then run so concurrent host-side callers see the lock
+        # immediately; remove on exit so the lock doesn't outlive the run.
+        # `set -e` ensures the rm happens via the EXIT trap even on failure.
+        (
+            "set -e; "
+            "touch /app/.install-packs-lock; "
+            "trap 'rm -f /app/.install-packs-lock' EXIT; "
+            f"uv run agentalloy install-packs --packs {_shell_quote(packs)}"
+            + (" --no-restart" if getattr(args, "no_restart", False) else "")
+            + (" --ignore-unknown" if getattr(args, "ignore_unknown", False) else "")
+        ),
+    ]
+    try:
+        result = subprocess.run(cmd, check=False, timeout=3600)  # noqa: S603
+        return result.returncode
+    except FileNotFoundError:
+        print(
+            f"install-packs: container runtime '{runtime}' not found on PATH.",
+            file=sys.stderr,
+        )
+        return 3
+    except subprocess.TimeoutExpired:
+        print(
+            "install-packs: container install timed out after 1 hour.",
+            file=sys.stderr,
+        )
+        return 4
+
+
+def _read_container_install_lock(runtime: str, container_name: str) -> str:
+    """Return ``"missing"``, ``"fresh"``, ``"stale"``, or ``"error"``.
+
+    ``"error"`` covers "container not running" / "runtime missing" —
+    surfaced as a hard failure by the caller via a separate exec attempt.
+    """
+    # ``stat -c %Y`` returns mtime as a Unix timestamp; an empty stdout means
+    # the file doesn't exist (stat exits non-zero with --quiet, but we use
+    # plain stat which writes to stderr — we just check the rc).
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [runtime, "exec", container_name, "stat", "-c", "%Y", "/app/.install-packs-lock"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "error"
+    if proc.returncode != 0:
+        stderr = (proc.stderr or b"").decode(errors="replace").lower()
+        if "no such file" in stderr or "cannot stat" in stderr:
+            return "missing"
+        # Container not running, or some other exec failure.
+        return "error"
+    try:
+        mtime = int(proc.stdout.decode().strip())
+    except (ValueError, AttributeError):
+        return "error"
+    age = int(time.time()) - mtime
+    return "stale" if age > _INSTALL_PACKS_STALE_SECONDS else "fresh"
+
+
+def _shell_quote(value: str) -> str:
+    """Single-quote a string for safe embedding in an `sh -c` argument."""
+    import shlex  # noqa: PLC0415
+
+    return shlex.quote(value)
 
 
 def add_parser(
@@ -76,6 +218,15 @@ def _packs_dir() -> Path:
 
 def _run(args: argparse.Namespace) -> int:
     from agentalloy.install.state import pack_source_dir
+
+    # Container routing: if this is a container deployment AND we're NOT
+    # currently running inside the container, the corpus the user wants to
+    # write to lives in the container's data volume — running install-packs
+    # on the host would scribble onto the wrong (empty) corpus and fail.
+    # Forward the command into the running container instead.
+    rc = _maybe_route_to_container(args)
+    if rc is not None:
+        return rc
 
     root = pack_source_dir()
     root.mkdir(parents=True, exist_ok=True)
