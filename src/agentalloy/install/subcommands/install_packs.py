@@ -137,12 +137,15 @@ def _read_container_install_lock(runtime: str, container_name: str) -> str:
     # ``stat -c %Y`` returns mtime as a Unix timestamp; an empty stdout means
     # the file doesn't exist (stat exits non-zero with --quiet, but we use
     # plain stat which writes to stderr — we just check the rc).
-    proc = subprocess.run(  # noqa: S603
-        [runtime, "exec", container_name, "stat", "-c", "%Y", "/app/.install-packs-lock"],
-        check=False,
-        capture_output=True,
-        timeout=10,
-    )
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [runtime, "exec", container_name, "stat", "-c", "%Y", "/app/.install-packs-lock"],
+            check=False,
+            capture_output=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "error"
     if proc.returncode != 0:
         stderr = (proc.stderr or b"").decode(errors="replace").lower()
         if "no such file" in stderr or "cannot stat" in stderr:

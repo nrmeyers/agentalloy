@@ -627,7 +627,7 @@ def _wait_for_readiness(
 
     url = f"http://127.0.0.1:{port}/readiness"
     start = _time.monotonic()
-    grace_window = 30.0  # tolerate connection errors during initial start
+    grace_window = 1800.0  # tolerate connection errors during full bootstrap (ollama install + model pull + migrations + uvicorn start)
     consecutive_errors = 0
 
     while True:
