@@ -116,6 +116,8 @@ def wire_compat(
 
     if harness == "manual":
         # Manual harness prints to stderr, doesn't write files
+        if port is None:
+            raise TypeError("wire_compat() missing 1 required positional argument: 'port'")
         block = (
             "<!-- BEGIN agentalloy install -->\n"
             f"AgentAlloy proxy at http://localhost:{port}/v1\n"
