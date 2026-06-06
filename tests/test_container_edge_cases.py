@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
 # ---------------------------------------------------------------------------
 # EC-1: Existing container with same name -- handled
@@ -402,10 +405,11 @@ class TestEntrypointBootstrapComplete:
     def test_entrypoint_skips_bootstrap_when_flag_exists(self):
         """The entrypoint skips Ollama/pack ingest when .bootstrap-complete exists.
 
-        The fast-start design starts uvicorn in the background (not via
-        ``exec``) so /readiness is reachable even before pack ingest. The
-        bootstrap branch (Ollama install + ingest) sits between the
-        ``.bootstrap-complete`` check and the uvicorn launch.
+        The entrypoint starts uvicorn AFTER all bootstrap steps (Ollama install,
+        migrations, pack ingest) to avoid LadybugDB lock conflicts. When
+        ``.bootstrap-complete`` already exists, the bootstrap branch is skipped
+        entirely and uvicorn starts immediately. The sequence is:
+        .bootstrap-complete check → (skip bootstrap if complete) → start uvicorn.
         """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
@@ -1452,3 +1456,350 @@ class TestCancelDuringReview:
         )
         rc = _run_container_flow(cfg, 0.0)
         assert rc in (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# T8 — Edge Case Tests (EC-1 through EC-9)
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCases:
+    """EC-1 through EC-9: Various scenarios with different file states in APP_DIR.
+
+    These tests verify the generated script handles edge cases correctly
+    by asserting on script content and/or executing the script with
+    mocked binaries.
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_mock_path(tmp_path: Path) -> str:
+        """Create a temporary directory with stub binaries that exit 0."""
+        mock_dir = tmp_path / "mock_bin"
+        mock_dir.mkdir()
+        for name in ("ollama", "curl", "uv", "agentalloy", "uvicorn"):
+            script_path = mock_dir / name
+            script_path.write_text("#!/bin/sh\nexit 0\n")
+            script_path.chmod(0o755)
+        return str(mock_dir)
+
+    # ------------------------------------------------------------------
+    # EC-1: Stale lock from crashed container
+    # ------------------------------------------------------------------
+
+    def test_ec1_stale_lock_from_crashed_container(self, tmp_path: Path) -> None:
+        """EC-1: Stale lock + partial checkpoints → all packs re-installed."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        lock_file = app_dir / ".bootstrap-lock"
+        lock_file.touch()
+        three_hours_ago = int(time.time()) - 10800
+        os.utime(lock_file, (three_hours_ago, three_hours_ago))
+        checkpoints = app_dir / ".bootstrap-checkpoints"
+        checkpoints.write_text(
+            '{"step": "pack_ingested", "pack": "core", "at": "2025-01-01T00:00:00+00:00"}\n'
+        )
+        script = _build_entrypoint_script("core,documentation,engineering")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        result = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
+        )
+        assert not lock_file.exists()
+        content = checkpoints.read_text()
+        assert "core" in content
+        assert "documentation" in content
+        assert "engineering" in content
+        assert (app_dir / ".bootstrap-complete").exists()
+
+    # ------------------------------------------------------------------
+    # EC-2: Partial bootstrap — crash mid-pack
+    # ------------------------------------------------------------------
+
+    def test_ec2_partial_bootstrap_crash_mid_pack(self, tmp_path: Path) -> None:
+        """EC-2: Recent lock + partial checkpoints → resume from checkpoint."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        lock_file = app_dir / ".bootstrap-lock"
+        lock_file.touch()
+        checkpoints = app_dir / ".bootstrap-checkpoints"
+        checkpoints.write_text(
+            '{"step": "pack_ingested", "pack": "core", "at": "2025-01-01T00:00:00+00:00"}\n'
+        )
+        script = _build_entrypoint_script("core,documentation,engineering")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        result = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
+        )
+        output = result.stdout.decode(errors="replace")
+        assert "already ingested - skipping" in output
+        assert "Pack core" in output
+        content = checkpoints.read_text()
+        assert "core" in content
+        assert "documentation" in content
+        assert "engineering" in content
+        assert (app_dir / ".bootstrap-complete").exists()
+
+    # ------------------------------------------------------------------
+    # EC-3: Empty container data volume
+    # ------------------------------------------------------------------
+
+    def test_ec3_empty_container_data_volume(self, tmp_path: Path) -> None:
+        """EC-3: Fresh empty APP_DIR → migrations + install-packs + complete."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        script = _build_entrypoint_script("")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        result = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
+        )
+        output = result.stdout.decode(errors="replace")
+        assert "Installing always-on packs" in output
+        assert (app_dir / ".bootstrap-complete").exists()
+
+    # ------------------------------------------------------------------
+    # EC-4: Existing data volume from prior version
+    # ------------------------------------------------------------------
+
+    def test_ec4_existing_data_volume_from_prior_version(self, tmp_path: Path) -> None:
+        """EC-4: .bootstrap-complete exists → skip bootstrap, start uvicorn."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        (app_dir / ".bootstrap-complete").touch()
+        script = _build_entrypoint_script("")
+        bootstrap_check = script.index(".bootstrap-complete")
+        ollama_install = script.index("ollama.ai/install.sh")
+        uvicorn_start = script.index("uv run uvicorn agentalloy.app:app")
+        complete_marker = script.index('touch "$COMPLETE"')
+        assert bootstrap_check < ollama_install
+        assert bootstrap_check < uvicorn_start
+        assert complete_marker < uvicorn_start
+
+    # ------------------------------------------------------------------
+    # EC-5: Corrupt checkpoint file
+    # ------------------------------------------------------------------
+
+    def test_ec5_corrupt_checkpoint_file(self, tmp_path: Path) -> None:
+        """EC-5: Invalid checkpoint content → treat as no checkpoints, install all packs."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        checkpoints = app_dir / ".bootstrap-checkpoints"
+        checkpoints.write_text("not json at all!!!\n")
+        lock_file = app_dir / ".bootstrap-lock"
+        lock_file.touch()
+        script = _build_entrypoint_script("core,documentation")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        result = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, (
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
+        )
+        assert (app_dir / ".bootstrap-complete").exists()
+        content = checkpoints.read_text()
+        assert "core" in content
+        assert "documentation" in content
+
+    # ------------------------------------------------------------------
+    # EC-6: SIGTERM during pack install
+    # ------------------------------------------------------------------
+
+    def test_ec6_sigterm_during_pack_install(self, tmp_path: Path) -> None:
+        """EC-6: SIGTERM during pack install → trap fires, lock NOT removed."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        lock_file = app_dir / ".bootstrap-lock"
+        lock_file.touch()
+        script = _build_entrypoint_script("core,documentation")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        result = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0
+        assert "trap" in script
+        assert "SIGTERM" in script
+
+    # ------------------------------------------------------------------
+    # EC-7: Multiple container restarts
+    # ------------------------------------------------------------------
+
+    def test_ec7_multiple_container_restarts(self, tmp_path: Path) -> None:
+        """EC-7: Stale lock → fresh bootstrap → second restart skips bootstrap."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        lock_file = app_dir / ".bootstrap-lock"
+        lock_file.touch()
+        three_hours_ago = int(time.time()) - 10800
+        os.utime(lock_file, (three_hours_ago, three_hours_ago))
+        script = _build_entrypoint_script("core")
+        script_path = tmp_path / "entrypoint.sh"
+        script_path.write_text(script)
+        script_path.chmod(0o755)
+        mock_dir = self._make_mock_path(tmp_path)
+        env = os.environ.copy()
+        env["PATH"] = mock_dir + ":" + env.get("PATH", "")
+        env["APP_DIR"] = str(app_dir)
+        # First restart: stale lock detected, bootstrap runs
+        result1 = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result1.returncode == 0
+        assert not lock_file.exists()
+        assert (app_dir / ".bootstrap-complete").exists()
+        # Second restart: bootstrap should be skipped
+        result2 = subprocess.run(
+            ["bash", script_path],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result2.returncode == 0
+        output = result2.stdout.decode(errors="replace")
+        assert "Bootstrap already complete" in output
+
+    # ------------------------------------------------------------------
+    # EC-8: Packs flag with spaces or extra commas
+    # ------------------------------------------------------------------
+
+    def test_ec8_packs_flag_with_spaces_and_extra_commas(self) -> None:
+        """EC-8: Extra whitespace and commas in packs flag are handled."""
+        script = _build_entrypoint_script("core, ,documentation,  ,engineering")
+        assert "PACK_LIST=(core documentation engineering)" in script
+        assert "TOTAL=3" in script
+        assert "for pack in" in script
+        assert "PACK_LIST=()" not in script
+
+    # ------------------------------------------------------------------
+    # EC-9: Packs flag with special characters
+    # ------------------------------------------------------------------
+
+    def test_ec9_packs_flag_with_special_characters(self) -> None:
+        """EC-9: Pack names are properly shell-quoted in the array literal."""
+        script = _build_entrypoint_script("core,python")
+        assert "PACK_LIST=(core python)" in script
+        import shutil
+
+        if shutil.which("bash") is not None:
+            result = subprocess.run(
+                ["bash", "-n", "/dev/stdin"],
+                input=script.encode(),
+                capture_output=True,
+                timeout=10,
+            )
+            assert result.returncode == 0, (
+                f"bash -n failed: {result.stderr.decode(errors='replace')}"
+            )
+
+    def test_ec9_packs_with_shell_metacharacters_are_quoted(self) -> None:
+        """EC-9: Pack names containing shell metacharacters are shell-quoted."""
+        script = _build_entrypoint_script("core,my-pack,test!@#")
+        # shlex.quote only quotes strings that contain metacharacters
+        assert "PACK_LIST=(core my-pack 'test!@#')" in script
+
+
+# ---------------------------------------------------------------------------
+# T8 — Backward Compatibility Tests (BC-1 through BC-4)
+# ---------------------------------------------------------------------------
+
+
+class TestBackwardCompatibility:
+    """BC-1 through BC-4: Verify the generated script handles existing
+    containers with and without .bootstrap-complete correctly."""
+
+    def test_bc1_existing_container_bootstrap_complete(self) -> None:
+        """BC-1: Existing container with .bootstrap-complete → start uvicorn immediately."""
+        script = _build_entrypoint_script("")
+        bootstrap_check = script.index(".bootstrap-complete")
+        ollama_install = script.index("ollama.ai/install.sh")
+        uvicorn_start = script.index("uv run uvicorn agentalloy.app:app")
+        assert bootstrap_check < ollama_install
+        assert bootstrap_check < uvicorn_start
+
+    def test_bc2_existing_container_no_bootstrap_flag(self) -> None:
+        """BC-2: Existing container without .bootstrap-complete → full bootstrap."""
+        script = _build_entrypoint_script("")
+        assert "ollama.ai/install.sh" in script
+        assert "agentalloy.migrate" in script
+        assert "install-packs --non-interactive" in script
+        assert 'touch "$COMPLETE"' in script
+        assert "uv run uvicorn agentalloy.app:app" in script
+
+    def test_bc3_container_no_packs_installs_always_on(self) -> None:
+        """BC-3: Fresh container with no packs → always-on packs installed."""
+        script = _build_entrypoint_script("")
+        assert "Installing always-on packs" in script
+        assert "install-packs --non-interactive --no-restart" in script
+        assert "PACK_LIST=" not in script
+        assert "for pack in" not in script
+
+    def test_bc4_container_with_packs_installs_all(self) -> None:
+        """BC-4: Fresh container with explicit packs → per-pack install loop."""
+        script = _build_entrypoint_script("core,documentation")
+        assert "PACK_LIST=(core documentation)" in script
+        assert "TOTAL=2" in script
+        assert "for pack in" in script
+        assert "--non-interactive" not in script
+        assert "uv run agentalloy install-packs --packs" in script
+        assert "ollama.ai/install.sh" in script
+        assert "agentalloy.migrate" in script
+        assert 'touch "$COMPLETE"' in script
+        assert "uv run uvicorn agentalloy.app:app" in script

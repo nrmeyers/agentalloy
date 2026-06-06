@@ -246,8 +246,10 @@ class VectorStore:
     reader processes against the same file but writer is exclusive.
     """
 
-    def __init__(self, conn: duckdb.DuckDBPyConnection) -> None:
+    def __init__(self, conn: duckdb.DuckDBPyConnection, db_path: str | None = None) -> None:
         self._conn = conn
+        # Store the database path for connection reopen in rebuild_fts_index.
+        self._db_path = db_path
 
     def close(self) -> None:
         self._conn.close()
@@ -423,6 +425,12 @@ class VectorStore:
         (0.25s, 0.5s, 1s) on that specific error class and surface anything
         else immediately.
 
+        If the checkpoint-based retries all fail, we attempt a full catalog
+        reset: drop the index, checkpoint, release shared memory, then close
+        and reopen the DuckDB connection so the catalog is rebuilt from
+        scratch. This works around the DuckDB 1.5.2 FTS bug where the
+        internal stopwords table gets corrupted during index creation.
+
         Callers should still treat a final failure as non-fatal: vector search
         keeps working; the BM25 leg silently returns empty until the next
         successful rebuild.
@@ -430,6 +438,11 @@ class VectorStore:
         import contextlib
         import time
 
+        def _try_create() -> None:
+            """Attempt to create the FTS index."""
+            self._conn.execute(_FTS_CREATE_SQL)
+
+        # --- Phase 1: checkpoint-based retries (existing logic) ---------------
         with contextlib.suppress(Exception):
             self._conn.execute("PRAGMA drop_fts_index('fragment_embeddings');")
         self._conn.execute("CHECKPOINT;")
@@ -440,7 +453,7 @@ class VectorStore:
 
         for attempt in range(_fts_retries):
             try:
-                self._conn.execute(_FTS_CREATE_SQL)
+                _try_create()
                 return  # success
             except Exception as exc:  # noqa: BLE001 — narrow check below
                 msg = str(exc)
@@ -452,6 +465,31 @@ class VectorStore:
                 delay = _fts_delays[attempt] if attempt < len(_fts_delays) else _fts_delays[-1]
                 time.sleep(delay)
                 self._conn.execute("CHECKPOINT;")
+
+        # --- Phase 2: full catalog reset (DuckDB 1.5.2 FTS bug workaround) ---
+        # The checkpoint-based retries didn't clear the corrupted state.
+        # Do a full reset: drop index, checkpoint, release shared memory,
+        # then close and reopen the connection for a fresh catalog.
+        db_path = self._db_path
+        if db_path:
+            try:
+                self._conn.execute("PRAGMA drop_fts_index('fragment_embeddings');")
+                self._conn.execute("CHECKPOINT;")
+                self._conn.execute("PRAGMA lock_shm;")
+                # Close and reopen the connection for a completely fresh catalog.
+                self._conn.close()
+                self._conn = duckdb.connect(db_path)
+                # Re-install FTS extension.
+                self._conn.execute(_FTS_SETUP_SQL)
+                # Retry creation with the fresh catalog.
+                _try_create()
+                return
+            except Exception as reset_exc:  # noqa: BLE001
+                # If even the catalog reset failed, raise the last checkpoint-based error.
+                # Preserve the reset failure as context so both errors are visible.
+                if last_exc is not None:
+                    raise last_exc from reset_exc
+                raise
 
         # All retries exhausted — raise the last transient error.
         assert last_exc is not None
@@ -701,7 +739,7 @@ def open_or_create(path: str | Path) -> VectorStore:
         pass
 
     # D2: construct vs before return so embedding_dim() is accessible for the guard.
-    vs = VectorStore(conn)
+    vs = VectorStore(conn, db_path=str(p))
     stored_dim = vs.embedding_dim()  # int | None — None means corpus is empty
     assert stored_dim is None or stored_dim > 0, "stored embedding dim must be positive"  # P10-R5
     if stored_dim is not None and stored_dim != EMBEDDING_DIM:
