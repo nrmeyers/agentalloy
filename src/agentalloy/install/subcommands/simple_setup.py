@@ -1671,8 +1671,8 @@ def run_setup(cfg: SetupConfig) -> int:
     preset = _resolve_preset(cfg)
     # Preset is an internal write-env detail; not shown to the user.
 
-    # 8. Upstream LLM
-    if not cfg.non_interactive:
+    # 8. Upstream LLM (only when harness needs proxy wiring)
+    if cfg.harness != "manual" and not cfg.non_interactive:
         _prompt_upstream(cfg)
     # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
     # (which may be pre-set by the caller). We don't require them to be set — the proxy
