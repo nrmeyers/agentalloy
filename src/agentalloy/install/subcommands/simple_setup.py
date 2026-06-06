@@ -1672,7 +1672,15 @@ def run_setup(cfg: SetupConfig) -> int:
     # Preset is an internal write-env detail; not shown to the user.
 
     # 8. Upstream LLM (only when harness needs proxy wiring)
-    if cfg.harness != "manual" and not cfg.non_interactive:
+    # Proxy wiring is only needed for harnesses that honor base-URL overrides
+    # and aren't Claude Code (which uses per-turn hooks on native).
+    _needs_proxy = (
+        cfg.harness
+        and cfg.harness not in PROXY_UNABLE_HARNESSES
+        and cfg.harness != "manual"
+        and cfg.harness != "claude-code"
+    )
+    if _needs_proxy and not cfg.non_interactive:
         _prompt_upstream(cfg)
     # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
     # (which may be pre-set by the caller). We don't require them to be set — the proxy
