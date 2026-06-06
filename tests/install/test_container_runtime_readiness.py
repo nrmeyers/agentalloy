@@ -43,7 +43,9 @@ class TestEntrypointScript:
         # "Installing pack:"
         ingest_idx = script.find("Installing pack")
         assert uvicorn_idx != -1 and ingest_idx != -1, script
-        assert uvicorn_idx > ingest_idx, "uvicorn must start after pack ingest (moved after bootstrap)"
+        assert uvicorn_idx > ingest_idx, (
+            "uvicorn must start after pack ingest (moved after bootstrap)"
+        )
         # Uvicorn launched in background, not exec'd.
         assert (
             "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &"
@@ -162,7 +164,9 @@ class TestUvicornAfterBootstrap:
         )
         # uvicorn must be OUTSIDE the if [ "$BOOTSTRAP_NEEDED" = "true" ] block,
         # i.e. after the closing fi.
-        _bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
+        _bootstrap_if_idx = next(
+            i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line
+        )
         # Find the fi that closes this if — it's the fi at the same indent level
         # that appears after the complete marker.
         fi_idx = None
@@ -179,7 +183,9 @@ class TestUvicornAfterBootstrap:
         """Uvicorn starts AFTER pack install commands, not before."""
         script = _build_entrypoint_script("core")
         lines = script.split("\n")
-        install_idx = next(i for i, line in enumerate(lines) if "agentalloy install-packs --packs" in line)
+        install_idx = next(
+            i for i, line in enumerate(lines) if "agentalloy install-packs --packs" in line
+        )
         uvicorn_idx = next(i for i, line in enumerate(lines) if "uv run uvicorn" in line)
         assert uvicorn_idx > install_idx, (
             f"uvicorn line {uvicorn_idx} must be after install-packs line {install_idx}"
@@ -201,9 +207,7 @@ class TestUvicornAfterBootstrap:
         assert "# --- Start uvicorn AFTER all bootstrap steps" in script, (
             "Missing new uvicorn start comment"
         )
-        assert "# --- Fast-start uvicorn" not in script, (
-            "Old 'fast-start' comment must be removed"
-        )
+        assert "# --- Fast-start uvicorn" not in script, "Old 'fast-start' comment must be removed"
         assert "Start uvicorn BEFORE pack ingest" not in script, (
             "Old 'before pack ingest' comment must be removed"
         )
@@ -360,7 +364,9 @@ class TestSigtermTrapAndMarkerPosition:
         """touch $COMPLETE is inside the bootstrap block (REQ-5, C05)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
+        bootstrap_if_idx = next(
+            i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line
+        )
         complete_idx = next(i for i, line in enumerate(lines) if 'touch "$COMPLETE"' in line)
         assert complete_idx > bootstrap_if_idx, (
             f"touch $COMPLETE line {complete_idx} must be after bootstrap if at line {bootstrap_if_idx}"
@@ -380,7 +386,9 @@ class TestSigtermTrapAndMarkerPosition:
         """rm -f $LOCK is inside the bootstrap block, before touch $COMPLETE (REQ-5, C05)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
+        bootstrap_if_idx = next(
+            i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line
+        )
         lock_rm_idx = next(i for i, line in enumerate(lines) if line.strip() == 'rm -f "$LOCK"')
         complete_idx = next(i for i, line in enumerate(lines) if 'touch "$COMPLETE"' in line)
         assert lock_rm_idx > bootstrap_if_idx, (
@@ -456,8 +464,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
 
     def test_it2_no_uvicorn_during_bootstrap(self, tmp_path: Path) -> None:
@@ -478,8 +485,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         assert (app_dir / ".bootstrap-complete").exists(), (
             ".bootstrap-complete should be created after bootstrap"
@@ -494,9 +500,7 @@ class TestIntegrationTests:
         With packs='core,documentation', the script should install both packs
         and create checkpoints for each.
         """
-        script_path, mock_dir, app_dir = self._make_script_and_env(
-            "core,documentation", tmp_path
-        )
+        script_path, mock_dir, app_dir = self._make_script_and_env("core,documentation", tmp_path)
         env = os.environ.copy()
         env["PATH"] = mock_dir + ":" + env.get("PATH", "")
         env["APP_DIR"] = str(app_dir)
@@ -507,8 +511,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         # Checkpoints should be written for both packs
         checkpoints_file = app_dir / ".bootstrap-checkpoints"
@@ -552,8 +555,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         # 'core' should be skipped (already checkpointed)
         output = result.stdout.decode(errors="replace")
@@ -594,8 +596,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         # Stale lock should be removed
         assert not lock_file.exists(), "Stale lock should be removed"
@@ -622,8 +623,7 @@ class TestIntegrationTests:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         # .bootstrap-complete should still exist
         assert (app_dir / ".bootstrap-complete").exists()

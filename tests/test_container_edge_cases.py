@@ -1517,8 +1517,7 @@ class TestEdgeCases:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         assert not lock_file.exists()
         content = checkpoints.read_text()
@@ -1556,8 +1555,7 @@ class TestEdgeCases:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         output = result.stdout.decode(errors="replace")
         assert "already ingested - skipping" in output
@@ -1591,8 +1589,7 @@ class TestEdgeCases:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         output = result.stdout.decode(errors="replace")
         assert "Installing always-on packs" in output
@@ -1643,8 +1640,7 @@ class TestEdgeCases:
             timeout=30,
         )
         assert result.returncode == 0, (
-            f"Script exited with {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')}"
+            f"Script exited with {result.returncode}: {result.stderr.decode(errors='replace')}"
         )
         assert (app_dir / ".bootstrap-complete").exists()
         content = checkpoints.read_text()
@@ -1741,6 +1737,7 @@ class TestEdgeCases:
         script = _build_entrypoint_script("core,python")
         assert "PACK_LIST=(core python)" in script
         import shutil
+
         if shutil.which("bash") is not None:
             result = subprocess.run(
                 ["bash", "-n", "/dev/stdin"],

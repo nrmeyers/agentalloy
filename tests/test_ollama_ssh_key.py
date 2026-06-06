@@ -60,9 +60,7 @@ def test_target_already_exists_skips(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert target.read_text() == "existing-key"  # unchanged
 
 
-def test_copy_creates_dir_and_sets_perms(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_copy_creates_dir_and_sets_perms(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When source exists and target does not, copy with correct permissions."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
