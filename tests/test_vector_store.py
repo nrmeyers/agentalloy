@@ -417,8 +417,10 @@ def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> N
     AND the reset-path creation fail.  The reset path must close/reopen
     the connection, which exercises the full reset logic.
     """
-    import duckdb
     from unittest.mock import MagicMock, patch
+
+    import duckdb
+
     from agentalloy.storage import vector_store as vs_module
 
     db_path = tmp_path / "fts_reset_mock.duck"
@@ -455,9 +457,7 @@ def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> N
             nonlocal call_count
             call_count += 1
             if "create_fts_index" in sql or "INSTALL fts" in sql:
-                raise duckdb.CatalogException(
-                    'subject "stopwords" has been deleted.'
-                )
+                raise duckdb.CatalogException('subject "stopwords" has been deleted.')
 
         mock_conn.execute.side_effect = failing_execute
         mock_conn.close.return_value = None
@@ -466,7 +466,7 @@ def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> N
     # Patch at the module level so both the initial connect and the
     # reset-path connect (duckdb.connect(db_path) on line 481 of
     # vector_store.py) go through our mock.
-    with patch.object(vs_module.duckdb, 'connect', side_effect=mock_connect):
+    with patch.object(vs_module.duckdb, "connect", side_effect=mock_connect):
         # Open via VectorStore — the real connect is never reached.
         conn = duckdb.connect(str(db_path))
         vs = VectorStore(conn, db_path=str(db_path))
