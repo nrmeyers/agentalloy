@@ -90,3 +90,117 @@ def test_copy_preserves_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     target = home / ".ollama" / "id_ed25519"
     assert target.read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# SSH key missing warning (new)
+# ---------------------------------------------------------------------------
+
+
+def test_no_source_key_prints_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """When no source key exists, the function prints a warning to stdout."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # No source key — should print a warning
+    _ensure_ollama_ssh_key()
+
+    captured = capsys.readouterr()
+    assert "Ollama SSH key not found at ~/.ssh/id_ed25519 or ~/.ollama/id_ed25519" in captured.out
+
+
+def test_warning_includes_fix_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """The warning message includes the exact fix command."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    _ensure_ollama_ssh_key()
+
+    captured = capsys.readouterr()
+    assert "cp ~/.ssh/id_ed25519 ~/.ollama/id_ed25519" in captured.out
+
+
+def test_no_source_key_return_value_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return value is still False when no source key exists."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    result = _ensure_ollama_ssh_key()
+    assert result is False
+
+
+def test_no_source_key_no_dir_created(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No ~/.ollama/ directory is created when no source key exists."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    _ensure_ollama_ssh_key()
+
+    assert not (home / ".ollama").exists()
+
+
+# ---------------------------------------------------------------------------
+# SSH key copied notification (new)
+# ---------------------------------------------------------------------------
+
+
+def test_copy_prints_notification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """When source exists and target does not, print() is called with the copy confirmation message."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # Create source key
+    _write_key(home, ".ssh/id_ed25519", content="source-key-content")
+
+    _ensure_ollama_ssh_key()
+
+    captured = capsys.readouterr()
+    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." in captured.out
+
+
+def test_copy_prints_to_stdout_not_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """The notification goes to stdout, not stderr."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # Create source key
+    _write_key(home, ".ssh/id_ed25519", content="source-key-content")
+
+    _ensure_ollama_ssh_key()
+
+    captured = capsys.readouterr()
+    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." in captured.out
+    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." not in captured.err
+
+
+def test_copy_return_value_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return value is still True when key was copied."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # Create source key
+    _write_key(home, ".ssh/id_ed25519", content="source-key-content")
+
+    result = _ensure_ollama_ssh_key()
+    assert result is True
+
+
+def test_no_print_when_key_already_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    """When target already exists, no print is called."""
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # Pre-create both source and target
+    (home / ".ssh").mkdir(parents=True, exist_ok=True)
+    (home / ".ollama").mkdir(parents=True, exist_ok=True)
+
+    target = home / ".ollama" / "id_ed25519"
+    target.write_text("existing-key", encoding="utf-8")
+    os.chmod(str(target), 0o600)
+
+    _write_key(home, ".ssh/id_ed25519")
+
+    _ensure_ollama_ssh_key()
+
+    captured = capsys.readouterr()
+    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." not in captured.out

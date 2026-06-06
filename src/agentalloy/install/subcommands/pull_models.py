@@ -178,6 +178,11 @@ def _ensure_ollama_ssh_key() -> bool:
 
     # Skip if source doesn't exist.
     if not source.exists():
+        print(
+            "Ollama SSH key not found at ~/.ssh/id_ed25519 or ~/.ollama/id_ed25519. "
+            "Model pulls may fail. Run: "
+            "cp ~/.ssh/id_ed25519 ~/.ollama/id_ed25519 && chmod 600 ~/.ollama/id_ed25519"
+        )
         return False
 
     # Create ~/.ollama/ if needed.
@@ -186,6 +191,9 @@ def _ensure_ollama_ssh_key() -> bool:
     # Copy with restricted permissions (0600).
     _shutil.copy2(str(source), str(target))
     target.chmod(0o600)
+    print(
+        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
+    )
     return True
 
 
