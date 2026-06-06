@@ -1321,7 +1321,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     last_pack: str | None = None
 
-    def _on_progress(evt: dict) -> None:
+    def _on_progress(evt: dict[str, Any]) -> None:
         nonlocal last_pack
         progress = evt.get("progress") or {}
         extra = evt.get("extra") or {}
