@@ -391,7 +391,7 @@ def test_rebuild_fts_reset_on_persistent_stopwords_error(tmp_path: Path) -> None
         INSERT INTO fragment_embeddings
         VALUES (
             'frag-0',
-            ARRAY_REPEAT(0.0, 1024),
+            (SELECT array_agg(0.0)::float[1024] FROM generate_series(1, 1024)),
             's', 'e', 't', 0, 'm',
             'test prose with searchable content'
         );
