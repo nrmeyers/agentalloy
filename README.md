@@ -72,6 +72,14 @@ Things your agent gets composed-and-injected without you pasting them into the p
 
 **Note:** Windows is not currently supported.
 
+**Note (Linux):** Ollama 0.20.3+ expects its SSH key at `~/.ollama/id_ed25519`, but most Linux systems store it at `~/.ssh/id_ed25519`. If you get an SSH key error during setup, copy it first:
+
+```bash
+cp ~/.ssh/id_ed25519 ~/.ollama/id_ed25519 && chmod 600 ~/.ollama/id_ed25519
+```
+
+The setup wizard will auto-copy the key if it detects this mismatch.
+
 ```bash
 # Step 1: install uv (Linux / macOS)
 curl -LsSf https://astral.sh/uv/install.sh | sh

@@ -428,7 +428,7 @@ class VectorStore:
         If the checkpoint-based retries all fail, we attempt a full catalog
         reset: drop the index, checkpoint, release shared memory, then close
         and reopen the DuckDB connection so the catalog is rebuilt from
-        scratch. This works around the DuckDB 1.5.2 FTS bug where the
+        scratch. This works around the DuckDB 1.5.3 FTS bug where the
         internal stopwords table gets corrupted during index creation.
 
         Callers should still treat a final failure as non-fatal: vector search
@@ -466,7 +466,7 @@ class VectorStore:
                 time.sleep(delay)
                 self._conn.execute("CHECKPOINT;")
 
-        # --- Phase 2: full catalog reset (DuckDB 1.5.2 FTS bug workaround) ---
+        # --- Phase 2: full catalog reset (DuckDB 1.5.3 FTS bug workaround) ---
         # The checkpoint-based retries didn't clear the corrupted state.
         # Do a full reset: drop index, checkpoint, release shared memory,
         # then close and reopen the connection for a fresh catalog.
@@ -492,12 +492,12 @@ class VectorStore:
                 raise
 
         # All retries exhausted — log a user-friendly warning instead of raising.
-        # This is a known DuckDB 1.5.2 FTS bug (stopwords catalog corruption).
+        # This is a known DuckDB 1.5.3 FTS bug (stopwords catalog corruption).
         # Vector search continues to work; only BM25 (full-text search) is affected.
         import logging as _logging
         _logging.warning(
             "FTS index rebuild failed after all retries. "
-            "This is a known DuckDB 1.5.2 bug (stopwords catalog corruption) — "
+            "This is a known DuckDB 1.5.3 bug (stopwords catalog corruption) — "
             "it is NOT an agentalloy issue. Vector search continues to work correctly. "
             "Full-text search (BM25) will be unavailable until DuckDB is upgraded. "
             "To retry after upgrading DuckDB: agentalloy reembed --rebuild-fts"

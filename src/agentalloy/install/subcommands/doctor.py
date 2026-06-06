@@ -1,11 +1,13 @@
 """``doctor`` subcommand — runtime health check.
 
-Extends ``verify``'s 8 checks with 4 additional runtime checks:
+Extends ``verify``'s 8 checks with 6 additional runtime checks:
 
  9. agentalloy_service_reachable
 10. compose_endpoint_works
 11. state_file_consistent
 12. runner_processes_present
+13. fts_index_status
+14. duckdb_version_ok
 """
 
 from __future__ import annotations
@@ -226,18 +228,139 @@ def _check_runner_processes(st: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _check_duckdb_version() -> dict[str, Any]:
+    """Check 14: DuckDB version is >= 1.5.3 (fixes FTS stopwords bug)."""
+    t0 = time.monotonic()
+    try:
+        import duckdb
+
+        version_str = duckdb.__version__
+        # Parse version: "1.5.3" -> (1, 5, 3)
+        parts = version_str.split(".")
+        major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2]) if len(parts) > 2 else 0
+        version_tuple = (major, minor, patch)
+        con = duckdb.connect(":memory:")
+        con.close()
+        duration = int((time.monotonic() - t0) * 1000)
+
+        if version_tuple >= (1, 5, 3):
+            return {
+                "name": "duckdb_version_ok",
+                "passed": True,
+                "duration_ms": duration,
+                "detail": f"DuckDB {version_str} (>= 1.5.3, FTS bug fixed)",
+            }
+
+        return {
+            "name": "duckdb_version_ok",
+            "passed": False,
+            "duration_ms": duration,
+            "error": (
+                f"DuckDB {version_str} is too old — FTS stopwords bug present. "
+                "Upgrade to >= 1.5.3: pip install 'duckdb>=1.5.3'"
+            ),
+            "remediation": "pip install 'duckdb>=1.5.3' then run: agentalloy reembed --rebuild-fts",
+        }
+    except Exception as exc:
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "duckdb_version_ok",
+            "passed": False,
+            "duration_ms": duration,
+            "error": f"Could not check DuckDB version: {exc}",
+            "remediation": "Ensure DuckDB is installed",
+        }
+
+
+def _check_fts_status(duck_path: str) -> dict[str, Any]:
+    """Check 13: FTS (full-text search) index status.
+
+    Checks whether the BM25 FTS index exists in the DuckDB database.
+    If missing, reports it as a known DuckDB 1.5.3 bug (stopwords catalog
+    corruption) — vector search continues to work; only BM25 is affected.
+    """
+    t0 = time.monotonic()
+    from pathlib import Path as _Path
+
+    p = _Path(duck_path)
+    if not p.exists():
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "fts_index_status",
+            "passed": True,
+            "duration_ms": duration,
+            "detail": "DuckDB not present yet — FTS check deferred",
+        }
+
+    try:
+        import duckdb
+
+        con = duckdb.connect(str(p), read_only=True)
+        # Check for FTS tables in the fts_main_fragment_embeddings schema.
+        # DuckDB 1.5.3 FTS creates tables: dict, docs, fields, stats, stopwords, terms
+        # in this schema. The config table name varies by DuckDB version.
+        row = con.execute(
+            """
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = 'fts_main_fragment_embeddings'
+            """
+        ).fetchone()
+        fts_exists = row and int(row[0]) > 0 if row else False
+        con.close()
+        duration = int((time.monotonic() - t0) * 1000)
+
+        if fts_exists:
+            return {
+                "name": "fts_index_status",
+                "passed": True,
+                "duration_ms": duration,
+                "detail": "FTS (BM25 full-text search) index present",
+            }
+
+        # FTS index missing — this is a known DuckDB 1.5.3 bug
+        return {
+            "name": "fts_index_status",
+            "passed": False,
+            "duration_ms": duration,
+            "error": (
+                "FTS index rebuild failed due to a known DuckDB 1.5.3 bug "
+                "(stopwords catalog corruption). This is NOT an agentalloy issue — "
+                "vector search works correctly. Full-text search (BM25) will be "
+                "unavailable until DuckDB is upgraded. To retry: "
+                "agentalloy reembed --rebuild-fts"
+            ),
+            "remediation": "Upgrade DuckDB to >= 1.5.3, then run: agentalloy reembed --rebuild-fts",
+        }
+    except Exception as exc:
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "fts_index_status",
+            "passed": False,
+            "duration_ms": duration,
+            "error": f"Could not check FTS index: {exc}",
+            "remediation": "Run `agentalloy reembed --rebuild-fts` to rebuild the FTS index",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
 
 def run_doctor(root: Path | None = None) -> dict[str, Any]:
-    """Run all 12 checks (verify's 8 + doctor's 4)."""
+    """Run all 14 checks (verify's 8 + doctor's 6)."""
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
     st = install_state.load_state(root)
     port = install_state.validate_port(st.get("port", 47950))
+
+    # Resolve DuckDB path for FTS check
+    user_corpus = install_state.corpus_dir()
+    env = _read_env_values(install_state.user_config_dir())
+    duck_path = env.get("DUCKDB_PATH", str(user_corpus / "skills.duck"))
+    if not Path(duck_path).is_absolute():
+        duck_path = str(user_corpus / duck_path)
 
     # Run preflight early checks first — if uv is missing or PATH is
     # broken, every later check is downstream noise. Strip the severity
@@ -251,11 +374,13 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
     verify_result = verify_checks(st, root)
     checks.extend(verify_result["checks"])
 
-    # Add doctor's 4 additional checks
+    # Add doctor's 6 additional checks
     checks.append(_check_service_reachable(port))
     checks.append(_check_compose_endpoint(port))
     checks.append(_check_state_consistent(st))
     checks.append(_check_runner_processes(st))
+    checks.append(_check_fts_status(duck_path))
+    checks.append(_check_duckdb_version())
 
     all_passed = all(c["passed"] for c in checks)
     return {
@@ -263,6 +388,21 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
         "all_checks_passed": all_passed,
         "checks": checks,
     }
+
+
+def _read_env_values(root: Path) -> dict[str, str]:  # noqa: ARG001 — back-compat
+    """Read the user-scoped .env file into a dict."""
+    env_path = install_state.env_path()
+    values: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, val = line.partition("=")
+                values[key.strip()] = val.strip()
+    return values
 
 
 # ---------------------------------------------------------------------------

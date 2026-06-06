@@ -35,6 +35,7 @@ import pytest
 
 from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
+
 # ---------------------------------------------------------------------------
 # EC-1: Existing container with same name -- handled
 # ---------------------------------------------------------------------------
@@ -957,6 +958,7 @@ class TestCancelDuringCPUWarning:
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,
@@ -1046,10 +1048,20 @@ class TestCancelDuringCPUWarning:
     @patch("agentalloy.install.subcommands.simple_setup._discover_packs", return_value={})
     @patch("pathlib.Path.cwd", return_value=Path("/tmp"))
     @patch("pathlib.Path.exists", return_value=True)
+    @patch("pathlib.Path.read_text", return_value="")
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
-    @patch("urllib.request.urlopen")
-    @patch("builtins.input", return_value="y")
-    @pytest.mark.skip(reason="Timeout during collection - too many mock parameters")
+    @patch(
+        "urllib.request.urlopen",
+        return_value=MagicMock(
+            __enter__=MagicMock(
+                return_value=MagicMock(
+                    status=200,
+                    read=MagicMock(return_value=b'{"status": "ready"}'),
+                )
+            )
+        ),
+    )
+    @patch("builtins.input", side_effect=["y", "", "", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
     def test_accept_cpu_warning_continues(
         self,
@@ -1057,6 +1069,7 @@ class TestCancelDuringCPUWarning:
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,
@@ -1155,12 +1168,14 @@ class TestCancelDuringReview:
     @patch("urllib.request.urlopen")
     @patch("builtins.input", side_effect=["y", "n"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
+    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
     def test_cancel_on_review_aborts_setup(
         self,
         mock_print,
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,
@@ -1182,6 +1197,7 @@ class TestCancelDuringReview:
         mock_compose_msg,
         mock_compose_runtime,
         mock_preflight,
+        mock_subprocess_run,
     ):
         """When user declines the review prompt, setup returns exit code 1."""
         from agentalloy.install.subcommands.simple_setup import (
@@ -1239,14 +1255,16 @@ class TestCancelDuringReview:
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch("urllib.request.urlopen")
-    @patch("builtins.input", side_effect=["y", "y"])
+    @patch("builtins.input", side_effect=["y", "", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
+    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
     def test_accept_review_continues(
         self,
         mock_print,
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,
@@ -1268,6 +1286,7 @@ class TestCancelDuringReview:
         mock_compose_msg,
         mock_compose_runtime,
         mock_preflight,
+        mock_subprocess_run,
     ):
         """When user accepts the review confirmation, setup continues."""
         from agentalloy.install.subcommands.simple_setup import (
@@ -1325,14 +1344,16 @@ class TestCancelDuringReview:
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch("urllib.request.urlopen")
-    @patch("builtins.input", side_effect=["y", ""])
+    @patch("builtins.input", side_effect=["y", "", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
+    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
     def test_empty_review_response_accepts(
         self,
         mock_print,
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,
@@ -1411,14 +1432,16 @@ class TestCancelDuringReview:
     @patch("pathlib.Path.exists", return_value=True)
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch("urllib.request.urlopen")
-    @patch("builtins.input", side_effect=["y", "yes"])
+    @patch("builtins.input", side_effect=["y", "yes", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
+    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
     def test_yes_review_response_accepts(
         self,
         mock_print,
         mock_input,
         mock_urlopen,
         mock_resolve,
+        mock_read_text,
         mock_exists,
         mock_cwd,
         mock_discover,

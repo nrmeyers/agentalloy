@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace as dataclasses_replace
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,8 @@ def compute_metrics(
     all_scores: dict[int, dict[str, float]] = {}
     for idx, ex in enumerate(examples):
         text = ex["text"]
-        ctx.recent_prompt_text = text
+        # Create a fresh context for each example (PredicateContext is frozen)
+        example_ctx = dataclasses_replace(ctx, recent_prompt_text=text)  # type: ignore[arg-type]
         scores: dict[str, float] = {}
         for intent in ["completion", "approval", "redirection"]:
             refs = _INTENT_REFERENCES[intent]  # type: ignore[index]

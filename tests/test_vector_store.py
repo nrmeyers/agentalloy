@@ -526,7 +526,7 @@ def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCa
 
 
 def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """The warning message mentions DuckDB 1.5.2."""
+    """The warning message mentions DuckDB 1.5.3."""
     import logging
 
     conn = MagicMock()
@@ -543,7 +543,7 @@ def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytes
         with patch("time.sleep"):
             vs.rebuild_fts_index()
 
-    assert "DuckDB 1.5.2" in caplog.text, f"Expected 'DuckDB 1.5.2' in caplog.text, got: {caplog.text}"
+    assert "DuckDB 1.5.3" in caplog.text, f"Expected 'DuckDB 1.5.3' in caplog.text, got: {caplog.text}"
 
 
 def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -658,7 +658,7 @@ def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCa
 
 
 def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """The warning message mentions DuckDB 1.5.2."""
+    """The warning message mentions DuckDB 1.5.3."""
     import logging
 
     conn = MagicMock()
@@ -675,7 +675,7 @@ def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytes
         with patch("time.sleep"):
             vs.rebuild_fts_index()
 
-    assert "DuckDB 1.5.2" in caplog.text, f"Expected 'DuckDB 1.5.2' in caplog.text, got: {caplog.text}"
+    assert "DuckDB 1.5.3" in caplog.text, f"Expected 'DuckDB 1.5.3' in caplog.text, got: {caplog.text}"
 
 
 def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
