@@ -78,7 +78,9 @@ def wire_compat(
 
     # Unknown harnesses: delegate to deprecated wire_harness() which raises
     # SystemExit with the same error messages the CLI would produce.
-    if harness not in REGISTRY:
+    # "mcp-only" is exempted here — it has a dedicated handler below that
+    # prints a specific migration message instead.
+    if harness not in REGISTRY and harness != "mcp-only":
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             _deprecated_wire_harness(harness, port=port, root=root, **kwargs)
