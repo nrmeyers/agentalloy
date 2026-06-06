@@ -32,6 +32,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
 # ---------------------------------------------------------------------------

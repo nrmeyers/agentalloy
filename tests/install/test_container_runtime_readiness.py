@@ -155,14 +155,14 @@ class TestUvicornAfterBootstrap:
         """Uvicorn starts AFTER touch $COMPLETE (bootstrap complete marker)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        complete_idx = next(i for i, l in enumerate(lines) if 'touch "$COMPLETE"' in l)
-        uvicorn_idx = next(i for i, l in enumerate(lines) if "uv run uvicorn" in l)
+        complete_idx = next(i for i, line in enumerate(lines) if 'touch "$COMPLETE"' in line)
+        uvicorn_idx = next(i for i, line in enumerate(lines) if "uv run uvicorn" in line)
         assert uvicorn_idx > complete_idx, (
             f"uvicorn line {uvicorn_idx} must be after touch $COMPLETE line {complete_idx}"
         )
         # uvicorn must be OUTSIDE the if [ "$BOOTSTRAP_NEEDED" = "true" ] block,
         # i.e. after the closing fi.
-        _bootstrap_if_idx = next(i for i, l in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in l)
+        _bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
         # Find the fi that closes this if — it's the fi at the same indent level
         # that appears after the complete marker.
         fi_idx = None
@@ -179,8 +179,8 @@ class TestUvicornAfterBootstrap:
         """Uvicorn starts AFTER pack install commands, not before."""
         script = _build_entrypoint_script("core")
         lines = script.split("\n")
-        install_idx = next(i for i, l in enumerate(lines) if "agentalloy install-packs --packs" in l)
-        uvicorn_idx = next(i for i, l in enumerate(lines) if "uv run uvicorn" in l)
+        install_idx = next(i for i, line in enumerate(lines) if "agentalloy install-packs --packs" in line)
+        uvicorn_idx = next(i for i, line in enumerate(lines) if "uv run uvicorn" in line)
         assert uvicorn_idx > install_idx, (
             f"uvicorn line {uvicorn_idx} must be after install-packs line {install_idx}"
         )
@@ -189,8 +189,8 @@ class TestUvicornAfterBootstrap:
         """Uvicorn starts AFTER the migrations command."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        migrate_idx = next(i for i, l in enumerate(lines) if "agentalloy.migrate" in l)
-        uvicorn_idx = next(i for i, l in enumerate(lines) if "uv run uvicorn" in l)
+        migrate_idx = next(i for i, line in enumerate(lines) if "agentalloy.migrate" in line)
+        uvicorn_idx = next(i for i, line in enumerate(lines) if "uv run uvicorn" in line)
         assert uvicorn_idx > migrate_idx, (
             f"uvicorn line {uvicorn_idx} must be after migrate line {migrate_idx}"
         )
@@ -350,8 +350,8 @@ class TestSigtermTrapAndMarkerPosition:
         """SIGTERM trap fires before uvicorn PID assignment (REQ-5, C05)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        trap_idx = next(i for i, l in enumerate(lines) if "trap 'kill" in l)
-        uvicorn_pid_idx = next(i for i, l in enumerate(lines) if "UVICORN_PID=$!" in l)
+        trap_idx = next(i for i, line in enumerate(lines) if "trap 'kill" in line)
+        uvicorn_pid_idx = next(i for i, line in enumerate(lines) if "UVICORN_PID=$!" in line)
         assert trap_idx < uvicorn_pid_idx, (
             f"trap line {trap_idx} must be before UVICORN_PID line {uvicorn_pid_idx}"
         )
@@ -360,8 +360,8 @@ class TestSigtermTrapAndMarkerPosition:
         """touch $COMPLETE is inside the bootstrap block (REQ-5, C05)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        bootstrap_if_idx = next(i for i, l in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in l)
-        complete_idx = next(i for i, l in enumerate(lines) if 'touch "$COMPLETE"' in l)
+        bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
+        complete_idx = next(i for i, line in enumerate(lines) if 'touch "$COMPLETE"' in line)
         assert complete_idx > bootstrap_if_idx, (
             f"touch $COMPLETE line {complete_idx} must be after bootstrap if at line {bootstrap_if_idx}"
         )
@@ -380,9 +380,9 @@ class TestSigtermTrapAndMarkerPosition:
         """rm -f $LOCK is inside the bootstrap block, before touch $COMPLETE (REQ-5, C05)."""
         script = _build_entrypoint_script("")
         lines = script.split("\n")
-        bootstrap_if_idx = next(i for i, l in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in l)
-        lock_rm_idx = next(i for i, l in enumerate(lines) if l.strip() == 'rm -f "$LOCK"')
-        complete_idx = next(i for i, l in enumerate(lines) if 'touch "$COMPLETE"' in l)
+        bootstrap_if_idx = next(i for i, line in enumerate(lines) if 'if [ "$BOOTSTRAP_NEEDED" = "true" ]' in line)
+        lock_rm_idx = next(i for i, line in enumerate(lines) if line.strip() == 'rm -f "$LOCK"')
+        complete_idx = next(i for i, line in enumerate(lines) if 'touch "$COMPLETE"' in line)
         assert lock_rm_idx > bootstrap_if_idx, (
             f"rm -f $LOCK line {lock_rm_idx} must be after bootstrap if at line {bootstrap_if_idx}"
         )
