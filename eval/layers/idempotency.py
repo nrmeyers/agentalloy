@@ -99,7 +99,7 @@ def run(
             print(
                 f"  {task.task_id:35s} [{status}] "
                 f"out_hash={output_hash} src_hash={source_hash} "
-                f"avg_ms={sum(compose_times)/len(compose_times):.0f}"
+                f"avg_ms={sum(compose_times) / len(compose_times):.0f}"
             )
 
     summary = {

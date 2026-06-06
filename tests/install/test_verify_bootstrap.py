@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 from unittest.mock import patch
 
@@ -22,7 +21,7 @@ def _fake_resp(body: dict) -> object:
         def read(self) -> bytes:
             return self._payload
 
-        def __enter__(self) -> "_Resp":
+        def __enter__(self) -> _Resp:
             return self
 
         def __exit__(self, *_: object) -> None:
@@ -72,7 +71,7 @@ class TestCheckBootstrapInProgress:
             def read(self) -> bytes:
                 return b"not json"
 
-            def __enter__(self) -> "_BadResp":
+            def __enter__(self) -> _BadResp:
                 return self
 
             def __exit__(self, *_: object) -> None:
@@ -109,13 +108,34 @@ class TestRunChecksRouting:
         with (
             patch("urllib.request.urlopen", return_value=_fake_resp({"status": "ready"})),
             # Stub the suite so we don't need real DBs / network.
-            patch("agentalloy.install.subcommands.verify._check_embedding_via_diagnostics", return_value={"name": "embed", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_duckdb_present", return_value={"name": "duck", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_ladybug_present", return_value={"name": "ladybug", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_skill_count", return_value={"name": "count", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_harness_config_present", return_value={"name": "harness", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_harness_config_url", return_value={"name": "url", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_port_available", return_value={"name": "port", "passed": True}),
+            patch(
+                "agentalloy.install.subcommands.verify._check_embedding_via_diagnostics",
+                return_value={"name": "embed", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_duckdb_present",
+                return_value={"name": "duck", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_ladybug_present",
+                return_value={"name": "ladybug", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_skill_count",
+                return_value={"name": "count", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_harness_config_present",
+                return_value={"name": "harness", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_harness_config_url",
+                return_value={"name": "url", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_port_available",
+                return_value={"name": "port", "passed": True},
+            ),
             patch("agentalloy.install.subcommands.verify._probe_diagnostics", return_value=None),
         ):
             result = verify.run_checks(st)
@@ -135,14 +155,38 @@ class TestRunChecksRouting:
 
         with (
             patch("urllib.request.urlopen", side_effect=fake_urlopen),
-            patch("agentalloy.install.subcommands.verify._check_embedding_endpoint_reachable", return_value={"name": "embed", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_embedding_1024_dim", return_value={"name": "dim", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_duckdb_present", return_value={"name": "duck", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_ladybug_present", return_value={"name": "ladybug", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_skill_count", return_value={"name": "count", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_harness_config_present", return_value={"name": "harness", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_harness_config_url", return_value={"name": "url", "passed": True}),
-            patch("agentalloy.install.subcommands.verify._check_port_available", return_value={"name": "port", "passed": True}),
+            patch(
+                "agentalloy.install.subcommands.verify._check_embedding_endpoint_reachable",
+                return_value={"name": "embed", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_embedding_1024_dim",
+                return_value={"name": "dim", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_duckdb_present",
+                return_value={"name": "duck", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_ladybug_present",
+                return_value={"name": "ladybug", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_skill_count",
+                return_value={"name": "count", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_harness_config_present",
+                return_value={"name": "harness", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_harness_config_url",
+                return_value={"name": "url", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.verify._check_port_available",
+                return_value={"name": "port", "passed": True},
+            ),
             patch("agentalloy.install.subcommands.verify._probe_diagnostics", return_value=None),
         ):
             verify.run_checks(st)

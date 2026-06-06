@@ -51,7 +51,10 @@ def _stat_stale() -> subprocess.CompletedProcess:
 
 def _stat_container_dead() -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(
-        args=[], returncode=125, stdout=b"", stderr=b"Error: no container with name agentalloy is running\n"
+        args=[],
+        returncode=125,
+        stdout=b"",
+        stderr=b"Error: no container with name agentalloy is running\n",
     )
 
 
@@ -62,7 +65,11 @@ def _stat_container_dead() -> subprocess.CompletedProcess:
 
 class TestRouting:
     def test_ut26_routes_when_deployment_container(self) -> None:
-        state = {"deployment": "container", "runtime_binary": "podman", "container_name": "agentalloy"}
+        state = {
+            "deployment": "container",
+            "runtime_binary": "podman",
+            "container_name": "agentalloy",
+        }
         calls: list[list[str]] = []
 
         def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
@@ -73,7 +80,10 @@ class TestRouting:
 
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
             patch("subprocess.run", side_effect=fake_run),
         ):
             rc = install_packs._maybe_route_to_container(_ns(packs="python"))
@@ -94,7 +104,10 @@ class TestRouting:
         state = {"deployment": "native"}
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
         ):
             assert install_packs._maybe_route_to_container(_ns()) is None
 
@@ -103,12 +116,19 @@ class TestRouting:
         state = {"deployment": "container"}
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=True),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
         ):
             assert install_packs._maybe_route_to_container(_ns()) is None
 
     def test_ut28_returns_error_when_container_not_running(self) -> None:
-        state = {"deployment": "container", "runtime_binary": "podman", "container_name": "agentalloy"}
+        state = {
+            "deployment": "container",
+            "runtime_binary": "podman",
+            "container_name": "agentalloy",
+        }
 
         def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
             # stat call → container dead; install never gets to run.
@@ -117,11 +137,16 @@ class TestRouting:
             # The exec install_packs call still fires after error stat? No —
             # _read_container_install_lock returns "error" and we continue to
             # the exec, which surfaces the runtime error itself.
-            return subprocess.CompletedProcess(args=cmd, returncode=125, stdout=b"", stderr=b"no container")
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=125, stdout=b"", stderr=b"no container"
+            )
 
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
             patch("subprocess.run", side_effect=fake_run),
         ):
             rc = install_packs._maybe_route_to_container(_ns(packs="python"))
@@ -136,7 +161,11 @@ class TestRouting:
 
 class TestInstallLock:
     def test_ut29_fresh_lock_returns_busy(self) -> None:
-        state = {"deployment": "container", "runtime_binary": "podman", "container_name": "agentalloy"}
+        state = {
+            "deployment": "container",
+            "runtime_binary": "podman",
+            "container_name": "agentalloy",
+        }
         calls: list[list[str]] = []
 
         def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
@@ -147,7 +176,10 @@ class TestInstallLock:
 
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
             patch("subprocess.run", side_effect=fake_run),
         ):
             rc = install_packs._maybe_route_to_container(_ns())
@@ -157,7 +189,11 @@ class TestInstallLock:
         assert "stat" in calls[0]
 
     def test_ut30_stale_lock_is_cleared_and_install_proceeds(self) -> None:
-        state = {"deployment": "container", "runtime_binary": "podman", "container_name": "agentalloy"}
+        state = {
+            "deployment": "container",
+            "runtime_binary": "podman",
+            "container_name": "agentalloy",
+        }
         seq: list[str] = []
 
         def fake_run(cmd, **_kw):  # type: ignore[no-untyped-def]
@@ -172,7 +208,10 @@ class TestInstallLock:
 
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
             patch("subprocess.run", side_effect=fake_run),
         ):
             rc = install_packs._maybe_route_to_container(_ns())
@@ -230,7 +269,10 @@ class TestRuntimeBinaryFromState:
 
         with (
             patch("agentalloy.install.container_service.is_in_container", return_value=False),
-            patch("agentalloy.install.subcommands.install_packs.install_state.load_state", return_value=state),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_state.load_state",
+                return_value=state,
+            ),
             patch("subprocess.run", side_effect=fake_run),
         ):
             install_packs._maybe_route_to_container(_ns())

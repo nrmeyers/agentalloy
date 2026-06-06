@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         print("To run, omit --dry-run")
         return 0
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     out_dir = args.out or f"eval/runs/benchmark__{timestamp}"
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
@@ -93,9 +93,9 @@ def main(argv: list[str] | None = None) -> int:
 
     for ln in layer_nums:
         desc = LAYERS_DESC[ln]
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Layer {ln}: {desc}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Pass layer-specific kwargs
         layer_kwargs = {"out_dir": out_dir, "k": args.k, "n": args.n}
@@ -112,9 +112,9 @@ def main(argv: list[str] | None = None) -> int:
     summary_path = Path(out_dir) / "summary.json"
     summary_path.write_text(json.dumps(results, indent=2))
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"All done. Summary: {summary_path}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     return 0
 

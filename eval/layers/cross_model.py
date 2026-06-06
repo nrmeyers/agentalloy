@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from eval.tasks import TASKS, GRADERS
+from eval.tasks import GRADERS, TASKS
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 

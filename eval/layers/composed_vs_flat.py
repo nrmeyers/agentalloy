@@ -69,7 +69,11 @@ def _parse_poc_summary(run_dir: Path) -> dict[str, Any] | None:
             # For composed, precision = score (only useful skills injected)
             if cond == "flat":
                 precision = 1.0
-                k = len([t for t in TASKS if t.task_id == task_id][0].gold_skills) if any(t.task_id == task_id for t in TASKS) else 1
+                k = (
+                    len([t for t in TASKS if t.task_id == task_id][0].gold_skills)
+                    if any(t.task_id == task_id for t in TASKS)
+                    else 1
+                )
             else:
                 precision = d.get("mean_score", 0.0)
                 k = 4  # default compose k
@@ -97,9 +101,7 @@ def _parse_poc_summary(run_dir: Path) -> dict[str, Any] | None:
                     else None
                 ),
                 "token_savings_pct": (
-                    (f["mean_total_tokens"] - c["mean_total_tokens"])
-                    / f["mean_total_tokens"]
-                    * 100
+                    (f["mean_total_tokens"] - c["mean_total_tokens"]) / f["mean_total_tokens"] * 100
                     if f["mean_total_tokens"] > 0
                     else 0
                 ),

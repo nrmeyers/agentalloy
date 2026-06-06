@@ -23,7 +23,6 @@ import pytest
 
 from agentalloy.install.subcommands import container_runtime
 
-
 # ---------------------------------------------------------------------------
 # UT-1: _detect_runtime_binary()
 # ---------------------------------------------------------------------------
@@ -96,7 +95,7 @@ class TestLocateBuildContext:
             result = container_runtime._locate_build_context()
             assert result == cwd / "compose.yaml"
 
-    def test_finds_Dockerfile_as_alternative_to_Containerfile(self, tmp_path: Path):
+    def test_finds_dockerfile_as_alternative_to_containerfile(self, tmp_path: Path):
         """Containerfile or Dockerfile both count as build file."""
         assets_dir = tmp_path / "build_context"
         assets_dir.mkdir()
@@ -115,9 +114,7 @@ class TestLocateBuildContext:
         # Patch _has_assets to always return False (simulate no assets anywhere)
         with (
             patch("pathlib.Path.cwd", return_value=empty_dir),
-            patch.object(
-                container_runtime, "_has_assets", return_value=False
-            ),
+            patch.object(container_runtime, "_has_assets", return_value=False),
         ):
             result = container_runtime._locate_build_context()
             assert result is None
@@ -129,9 +126,7 @@ class TestLocateBuildContext:
 
         with (
             patch("pathlib.Path.cwd", return_value=empty_dir),
-            patch.object(
-                container_runtime, "_has_assets", return_value=False
-            ),
+            patch.object(container_runtime, "_has_assets", return_value=False),
         ):
             result = container_runtime._locate_build_context()
             assert result is None
@@ -149,7 +144,9 @@ class TestLocateBuildContext:
         (assets_dir / "compose.yaml").write_text("services: {}\n")
         (assets_dir / "Containerfile").write_text("FROM python:3.11\n")
 
-        fake_module = assets_dir / "src" / "agentalloy" / "install" / "subcommands" / "container_runtime.py"
+        fake_module = (
+            assets_dir / "src" / "agentalloy" / "install" / "subcommands" / "container_runtime.py"
+        )
         fake_module.parent.mkdir(parents=True)
 
         with (
@@ -186,9 +183,7 @@ class TestLocateBuildContext:
             if "dev/agentalloy" in str(d):
                 return False
             # The cache dir from auto-clone should have assets
-            if ".cache/agentalloy/repo" in str(d):
-                return True
-            return False
+            return ".cache/agentalloy/repo" in str(d)
 
         with (
             patch("pathlib.Path.cwd", return_value=empty_dir),
@@ -297,7 +292,7 @@ class TestBuildImage:
 
         with patch("subprocess.run", side_effect=exc):
             with patch("tempfile.gettempdir", return_value=str(tmp_path)):
-                result = container_runtime._build_image("podman", context)
+                container_runtime._build_image("podman", context)
 
                 # Check that a log file was written
                 log_files = list(tmp_path.glob("agentalloy-build.log"))

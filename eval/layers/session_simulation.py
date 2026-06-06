@@ -24,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from eval.tasks import TASKS, GRADERS
+from eval.tasks import GRADERS, TASKS
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 
@@ -122,9 +122,7 @@ def run(
 
             token_savings = max(0, flat_tokens_estimate - int(composed_tokens))
             token_savings_pct = (
-                (token_savings / flat_tokens_estimate * 100)
-                if flat_tokens_estimate > 0
-                else 0.0
+                (token_savings / flat_tokens_estimate * 100) if flat_tokens_estimate > 0 else 0.0
             )
 
             results.append(
@@ -153,9 +151,7 @@ def run(
             )
 
     total_savings = total_flat_tokens - total_composed_tokens
-    total_savings_pct = (
-        (total_savings / total_flat_tokens * 100) if total_flat_tokens > 0 else 0.0
-    )
+    total_savings_pct = (total_savings / total_flat_tokens * 100) if total_flat_tokens > 0 else 0.0
 
     summary = {
         "label": "session_simulation",

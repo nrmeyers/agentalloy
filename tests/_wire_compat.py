@@ -25,22 +25,23 @@ from agentalloy.install.subcommands.wire_harness import wire_harness as _depreca
 from agentalloy.providers import REGISTRY
 from agentalloy.providers.base import Capability
 
-
 # Harnesses whose REGISTRY providers do not match the legacy wire_harness()
 # proxy behavior (or are stubs). These are handled by delegating to the
 # deprecated wire_harness() function which has the correct legacy behavior.
-_REGISTRY_PROVIDERS_USING_HOME = frozenset({
-    "claude-code",
-    "hermes-agent",
-    "opencode",
-    "codex",
-    "openclaw",
-    # REGISTRY providers don't match legacy proxy behavior
-    "aider",
-    "continue-closed",
-    "continue-local",
-    "cursor",
-})
+_REGISTRY_PROVIDERS_USING_HOME = frozenset(
+    {
+        "claude-code",
+        "hermes-agent",
+        "opencode",
+        "codex",
+        "openclaw",
+        # REGISTRY providers don't match legacy proxy behavior
+        "aider",
+        "continue-closed",
+        "continue-local",
+        "cursor",
+    }
+)
 
 
 def wire_compat(
@@ -91,7 +92,9 @@ def wire_compat(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             return _deprecated_wire_harness(
-                harness, port=port, root=root,
+                harness,
+                port=port,
+                root=root,
                 legacy=legacy,
                 mcp_fallback=mcp_fallback,
                 **kwargs,
@@ -143,7 +146,10 @@ def wire_compat(
         with __import__("warnings").catch_warnings():
             __import__("warnings").simplefilter("ignore", DeprecationWarning)
             return _deprecated_wire_harness(
-                harness, port=port, root=root, **kwargs,
+                harness,
+                port=port,
+                root=root,
+                **kwargs,
             )
 
     # For other providers, use REGISTRY directly with Path.home() mocked.
@@ -153,10 +159,7 @@ def wire_compat(
         records = install_writer(port, root, force=force)  # type: ignore[call-arg]
 
     # Determine vector type from capabilities
-    if Capability.PROXY in spec.capabilities:
-        vector = "proxy"
-    else:
-        vector = "markdown_injection"
+    vector = "proxy" if Capability.PROXY in spec.capabilities else "markdown_injection"
 
     # Build file entries in the same shape as wire_harness._build_result
     files_written: list[dict[str, Any]] = []
