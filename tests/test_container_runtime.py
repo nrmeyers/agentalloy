@@ -562,27 +562,27 @@ class TestGenerateEntrypoint:
 
 
 # ---------------------------------------------------------------------------
-# UT-7: _generate_entrypoint — no install-packs when packs is empty
+# UT-7: _generate_entrypoint — install-packs for always-on packs (empty packs)
 # ---------------------------------------------------------------------------
 
 
 class TestGenerateEntrypointNoPacks:
-    """Test _generate_entrypoint() when packs is empty."""
+    """Test _generate_entrypoint() when packs is empty (always-on packs)."""
 
-    def test_no_install_packs_when_packs_empty(self, tmp_path: Path):
-        """When packs='', the script must not invoke ``agentalloy install-packs``.
+    def test_installs_always_on_packs_when_packs_empty(self, tmp_path: Path):
+        """When packs='', the script installs always-on packs via install-packs.
 
-        We probe specifically for the invocation token rather than any
-        ``install-packs`` substring — the fast-start design also references
-        ``.install-packs-lock`` (the concurrent-install guard) in the env
-        block, which is unrelated to whether install-packs actually runs.
+        The empty-packs path now runs ``agentalloy install-packs --non-interactive
+        --no-restart`` to install always-on packs (core, documentation, etc.)
+        rather than skipping pack installation entirely.
         """
         from agentalloy.install.subcommands.container_runtime import _generate_entrypoint
 
         content = _generate_entrypoint("").read_text()
 
-        assert "uv run agentalloy install-packs" not in content
-        assert "No packs specified" in content
+        assert "uv run agentalloy install-packs --non-interactive --no-restart" in content
+        assert "No packs specified - skipping pack installation" not in content
+        assert "Installing always-on packs..." in content
 
 
 # ---------------------------------------------------------------------------

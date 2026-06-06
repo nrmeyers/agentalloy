@@ -149,6 +149,46 @@ def _ensure_ollama_running() -> tuple[bool, str | None]:
 # ---------------------------------------------------------------------------
 
 
+def _ensure_ollama_ssh_key() -> bool:
+    """Ensure Ollama's SSH key exists at ``~/.ollama/id_ed25519``.
+
+    Ollama 0.20.3 (and possibly earlier) looks for its SSH key at
+    ``~/.ollama/id_ed25519`` instead of the standard ``~/.ssh/id_ed25519``.
+    When the standard key exists but the Ollama one does not, copy it
+    so that ``ollama pull`` (which uses SSH for authenticated pulls)
+    does not fail with ``open ~/.ollama/id_ed25519: no such file or
+    directory``.
+
+    Returns ``True`` if a copy was performed, ``False`` otherwise
+    (key already present or no source key to copy from).
+
+    This is a no-op for container installs because ``~/.ollama`` is
+    mounted from the host.
+    """
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    home = _Path.home()
+    source = home / ".ssh" / "id_ed25519"
+    target = home / ".ollama" / "id_ed25519"
+
+    # Skip if target already exists (idempotent).
+    if target.exists():
+        return False
+
+    # Skip if source doesn't exist.
+    if not source.exists():
+        return False
+
+    # Create ~/.ollama/ if needed.
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Copy with restricted permissions (0600).
+    _shutil.copy2(str(source), str(target))
+    target.chmod(0o600)
+    return True
+
+
 def _is_model_present_ollama(model: str) -> bool:
     """Check if a model is already pulled in Ollama."""
     binary = shutil.which("ollama")
@@ -607,6 +647,11 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                 "error": err or "ollama daemon unavailable",
                 "hint": "Start `ollama serve` manually and re-run pull-models.",
             }
+        # Ollama 0.20.3 looks for SSH key at ~/.ollama/id_ed25519, but the
+        # system key is at ~/.ssh/id_ed25519. Copy if needed so that
+        # `ollama pull` (authenticated SSH pull) does not fail with
+        # "open /home/.../.ollama/id_ed25519: no such file or directory".
+        _ensure_ollama_ssh_key()
 
     # `--` separator prevents argv option-injection if model name slipped
     # through the regex (defense in depth) or future regex relaxations

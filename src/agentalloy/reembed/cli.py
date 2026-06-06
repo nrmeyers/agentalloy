@@ -615,8 +615,10 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
                     logger.warning(
                         "FTS index rebuild failed (BM25 leg degraded): %s. "
-                        "If the background service was holding the DB, stop it and re-run "
-                        "with `agentalloy reembed --rebuild-fts`.",
+                        "This is a known issue with DuckDB 1.5.2's FTS extension "
+                        "(stopwords catalog corruption). If it persists, try closing "
+                        "all connections to the DB and re-running with "
+                        "`agentalloy reembed --rebuild-fts`.",
                         exc,
                     )
             return EXIT_OK if stats.failed == 0 else EXIT_LLM
