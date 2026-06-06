@@ -491,9 +491,18 @@ class VectorStore:
                     raise last_exc from reset_exc
                 raise
 
-        # All retries exhausted — raise the last transient error.
-        assert last_exc is not None
-        raise last_exc
+        # All retries exhausted — log a user-friendly warning instead of raising.
+        # This is a known DuckDB 1.5.2 FTS bug (stopwords catalog corruption).
+        # Vector search continues to work; only BM25 (full-text search) is affected.
+        import logging as _logging
+        _logging.warning(
+            "FTS index rebuild failed after all retries. "
+            "This is a known DuckDB 1.5.2 bug (stopwords catalog corruption) — "
+            "it is NOT an agentalloy issue. Vector search continues to work correctly. "
+            "Full-text search (BM25) will be unavailable until DuckDB is upgraded. "
+            "To retry after upgrading DuckDB: agentalloy reembed --rebuild-fts"
+        )
+        return
 
     def count_embeddings(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM fragment_embeddings").fetchone()

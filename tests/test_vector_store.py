@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from agentalloy.storage.vector_store import (
     EMBEDDING_DIM,
@@ -488,3 +489,267 @@ def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> N
         )
 
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# FTS rebuild — warning on final failure (all retries exhausted)
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """When all retries exhausted, logging.warning() is called (not raise).
+    Verify caplog captures the DuckDB bug explanation; no exception raised."""
+    import logging
+
+    conn = MagicMock()
+    create_count = 0
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        nonlocal create_count
+        if "create_fts_index" in sql:
+            create_count += 1
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            # Should NOT raise — logs warning instead
+            vs.rebuild_fts_index()
+
+    # Verify a warning was logged
+    assert any("stopwords" in record.message for record in caplog.records if record.levelno == logging.WARNING), (
+        f"Expected stopwords warning in caplog, got: {caplog.text}"
+    )
+
+
+def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning message mentions DuckDB 1.5.2."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "DuckDB 1.5.2" in caplog.text, f"Expected 'DuckDB 1.5.2' in caplog.text, got: {caplog.text}"
+
+
+def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning states this is not an agentalloy issue."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "NOT an agentalloy issue" in caplog.text, f"Expected 'NOT an agentalloy issue' in caplog.text, got: {caplog.text}"
+
+
+def test_rebuild_fts_warning_includes_retry_command(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning includes how to retry."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "agentalloy reembed --rebuild-fts" in caplog.text, (
+        f"Expected 'agentalloy reembed --rebuild-fts' in caplog.text, got: {caplog.text}"
+    )
+
+
+def test_rebuild_fts_returns_none_on_failure(tmp_path: Path) -> None:
+    """Function returns None (not raise) on final failure."""
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    # Should not raise — should return None
+    result = vs.rebuild_fts_index()
+    assert result is None
+
+
+def test_rebuild_fts_non_transient_still_raises(tmp_path: Path) -> None:
+    """Non-transient errors (e.g., FTS extension not loaded) still raise."""
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('Extension "fts" not loaded')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with pytest.raises(Exception, match='Extension "fts" not loaded'):
+        vs.rebuild_fts_index()
+
+
+# ---------------------------------------------------------------------------
+# FTS rebuild — warning on final failure (all retries exhausted)
+# ---------------------------------------------------------------------------
+
+
+def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """When all retries exhausted, logging.warning() is called (not raise).
+    Verify caplog captures the DuckDB bug explanation; no exception raised."""
+    import logging
+
+    conn = MagicMock()
+    create_count = 0
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        nonlocal create_count
+        if "create_fts_index" in sql:
+            create_count += 1
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            # Should NOT raise — logs warning instead
+            vs.rebuild_fts_index()
+
+    # Verify a warning was logged
+    assert any("stopwords" in record.message for record in caplog.records if record.levelno == logging.WARNING), (
+        f"Expected stopwords warning in caplog, got: {caplog.text}"
+    )
+
+
+def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning message mentions DuckDB 1.5.2."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "DuckDB 1.5.2" in caplog.text, f"Expected 'DuckDB 1.5.2' in caplog.text, got: {caplog.text}"
+
+
+def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning states this is not an agentalloy issue."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "NOT an agentalloy issue" in caplog.text, f"Expected 'NOT an agentalloy issue' in caplog.text, got: {caplog.text}"
+
+
+def test_rebuild_fts_warning_includes_retry_command(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """The warning includes how to retry."""
+    import logging
+
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING):
+        with patch("time.sleep"):
+            vs.rebuild_fts_index()
+
+    assert "agentalloy reembed --rebuild-fts" in caplog.text, (
+        f"Expected 'agentalloy reembed --rebuild-fts' in caplog.text, got: {caplog.text}"
+    )
+
+
+def test_rebuild_fts_returns_none_on_failure(tmp_path: Path) -> None:
+    """Function returns None (not raise) on final failure."""
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('subject "stopwords" has been deleted.')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    # Should not raise — should return None
+    result = vs.rebuild_fts_index()
+    assert result is None
+
+
+def test_rebuild_fts_non_transient_still_raises(tmp_path: Path) -> None:
+    """Non-transient errors (e.g., FTS extension not loaded) still raise."""
+    conn = MagicMock()
+
+    def mock_execute(sql: str, *a: object, **kw: object) -> None:
+        if "create_fts_index" in sql:
+            raise Exception('Extension "fts" not loaded')
+        return None
+
+    conn.execute = mock_execute
+    vs = VectorStore(conn)  # type: ignore[arg-type]
+
+    with pytest.raises(Exception, match='Extension "fts" not loaded'):
+        vs.rebuild_fts_index()
