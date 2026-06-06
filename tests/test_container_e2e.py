@@ -17,8 +17,9 @@ import contextlib
 import json
 import tempfile
 from pathlib import Path
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
