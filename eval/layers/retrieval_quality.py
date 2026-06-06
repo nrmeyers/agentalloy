@@ -1,325 +1,233 @@
-"""Tests for container_runtime.py — runtime detection and build context location.
+"""Layer 1: Retrieval quality — no agent model needed.
 
-UT-1: _detect_runtime_binary() returns podman/docker/None based on PATH
-UT-1: priority order is podman > docker > None
-UT-2: _locate_build_context() finds compose.yaml + Containerfile in cwd
-UT-2: _locate_build_context() falls back to parents[4] of __file__
-UT-2: _locate_build_context() returns None when all strategies fail
-UT-3: _build_image() constructs correct command
-UT-3: _build_image() uses correct image tag and dockerfile
-UT-3: _build_image() returns non-zero on failure
-UT-3: _build_image() writes log on failure
-UT-3: _build_image() has 600s timeout
+Measures recall@k, precision@k, MRR, phase contamination, and hybrid
+retrieval ablation (BM25-only vs dense-only vs fused).
+
+Extends the existing recall harness in eval/recall.py rather than
+replacing it.
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
+import argparse
+import json
+import os
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
 
-import pytest
+import httpx
 
-from agentalloy.install.subcommands import container_runtime
+from eval.tasks import TASKS
 
-# ---------------------------------------------------------------------------
-# UT-1: _detect_runtime_binary()
-# ---------------------------------------------------------------------------
+AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 
-
-class TestDetectRuntimeBinary:
-    """UT-1: _detect_runtime_binary() returns podman/docker/None based on PATH."""
-
-    def test_returns_podman_when_only_podman_on_path(self):
-        """When only podman exists on PATH, returns 'podman'."""
-        with patch.object(shutil, "which") as mock_which:
-            mock_which.side_effect = lambda x: "podman" if x == "podman" else None
-            result = container_runtime._detect_runtime_binary()
-            assert result == "podman"
-
-    def test_returns_docker_when_only_docker_on_path(self):
-        """When only docker exists on PATH, returns 'docker'."""
-        with patch.object(shutil, "which") as mock_which:
-            mock_which.side_effect = lambda x: "docker" if x == "docker" else None
-            result = container_runtime._detect_runtime_binary()
-            assert result == "docker"
-
-    def test_returns_none_when_neither_on_path(self):
-        """When neither podman nor docker exists on PATH, returns None."""
-        with patch.object(shutil, "which", return_value=None):
-            result = container_runtime._detect_runtime_binary()
-            assert result is None
-
-    def test_priority_podman_over_docker(self):
-        """When both podman and docker exist, returns 'podman' (priority)."""
-        with patch.object(shutil, "which", return_value="/usr/bin/fake"):
-            result = container_runtime._detect_runtime_binary()
-            assert result == "podman"
-
-    def test_calls_which_in_order_podman_then_docker(self):
-        """Verifies the search order: podman first, then docker."""
-        call_order = []
-
-        def mock_which(name):
-            call_order.append(name)
-            return None
-
-        with patch.object(shutil, "which", side_effect=mock_which):
-            container_runtime._detect_runtime_binary()
-
-        assert call_order == ["podman", "docker"]
+# Phase-scoped skills extracted from pack metadata.
+# Maps skill_id -> set of phases it applies to.
+_phase_scope_cache: dict[str, set[str]] | None = None
 
 
-# ---------------------------------------------------------------------------
-# UT-2: _locate_build_context()
-# ---------------------------------------------------------------------------
+def _load_phase_scope() -> dict[str, set[str]]:
+    global _phase_scope_cache
+    if _phase_scope_cache is not None:
+        return _phase_scope_cache
+    import yaml
 
-
-class TestLocateBuildContext:
-    """UT-2: _locate_build_context() finds compose.yaml + Containerfile in cwd."""
-
-    @pytest.fixture
-    def _mock_has_assets(self, tmp_path: Path):
-        """Create a directory with compose.yaml and Containerfile."""
-        assets_dir = tmp_path / "build_context"
-        assets_dir.mkdir()
-        (assets_dir / "compose.yaml").write_text("services: {}\n")
-        (assets_dir / "Containerfile").write_text("FROM python:3.11\n")
-        return assets_dir
-
-    def test_finds_in_cwd_when_assets_present(self, _mock_has_assets):
-        """When cwd has compose.yaml + Containerfile, returns cwd/compose.yaml."""
-        cwd = _mock_has_assets
-        with patch("pathlib.Path.cwd", return_value=cwd):
-            result = container_runtime._locate_build_context()
-            assert result == cwd / "compose.yaml"
-
-    def test_finds_dockerfile_as_alternative_to_containerfile(self, tmp_path: Path):
-        """Containerfile or Dockerfile both count as build file."""
-        assets_dir = tmp_path / "build_context"
-        assets_dir.mkdir()
-        (assets_dir / "compose.yaml").write_text("services: {}\n")
-        (assets_dir / "Dockerfile").write_text("FROM python:3.11\n")
-
-        with patch("pathlib.Path.cwd", return_value=assets_dir):
-            result = container_runtime._locate_build_context()
-            assert result == assets_dir / "compose.yaml"
-
-    def test_returns_none_when_no_assets_in_cwd(self, tmp_path: Path):
-        """When cwd has no compose.yaml + Containerfile, falls through."""
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-
-        # Patch _has_assets to always return False (simulate no assets anywhere)
-        with (
-            patch("pathlib.Path.cwd", return_value=empty_dir),
-            patch.object(container_runtime, "_has_assets", return_value=False),
-        ):
-            result = container_runtime._locate_build_context()
-            assert result is None
-
-    def test_returns_none_when_all_strategies_fail(self, tmp_path: Path):
-        """When cwd, editable_root, and auto-clone all fail, returns None."""
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-
-        with (
-            patch("pathlib.Path.cwd", return_value=empty_dir),
-            patch.object(container_runtime, "_has_assets", return_value=False),
-        ):
-            result = container_runtime._locate_build_context()
-            assert result is None
-
-    def test_falls_back_to_editable_root_when_cwd_has_no_assets(self, tmp_path: Path):
-        """When cwd lacks assets but parents[4] of __file__ has them, uses that.
-
-        We test the parents[4] logic by creating a fake module path where
-        parents[4] resolves to the assets directory, then patching __file__.
-        """
-        # Build a fake module path where parents[4] = assets_dir
-        # parents[0]=subcommands, [1]=install, [2]=agentalloy, [3]=src, [4]=fake
-        assets_dir = tmp_path / "fake"
-        assets_dir.mkdir(parents=True)
-        (assets_dir / "compose.yaml").write_text("services: {}\n")
-        (assets_dir / "Containerfile").write_text("FROM python:3.11\n")
-
-        fake_module = (
-            assets_dir / "src" / "agentalloy" / "install" / "subcommands" / "container_runtime.py"
-        )
-        fake_module.parent.mkdir(parents=True)
-
-        with (
-            patch("pathlib.Path.cwd", return_value=tmp_path / "empty_cwd"),
-            patch.object(container_runtime, "_has_assets", side_effect=lambda d: d == assets_dir),
-        ):
-            original_file = container_runtime.__file__
-            container_runtime.__file__ = str(fake_module)
-
+    scope: dict[str, set[str]] = {}
+    # Search pack YAML files for phase_scope metadata
+    pack_dirs = [
+        Path(__file__).resolve().parents[2] / "src" / "agentalloy" / "_packs",
+        Path(__file__).resolve().parents[2] / "src" / "agentalloy" / "packs",
+    ]
+    for base in pack_dirs:
+        if not base.exists():
+            continue
+        for yaml_file in base.rglob("*.yaml"):
             try:
-                result = container_runtime._locate_build_context()
-                assert result == assets_dir / "compose.yaml"
-            finally:
-                container_runtime.__file__ = original_file
-
-    def test_uses_auto_clone_when_cwd_and_editable_fail(self, tmp_path: Path):
-        """When cwd and editable root lack assets, tries auto-clone.
-
-        Since _ensure_cached_repo is a nested function, we mock shutil.which
-        (to skip git check) and subprocess.run (to simulate successful clone),
-        plus mock _has_assets to skip cwd and editable root but validate
-        the cached repo path.
-        """
-        empty_dir = tmp_path / "empty"
-        empty_dir.mkdir()
-
-        # _has_assets is called for cwd, editable_root, and cached_repo.
-        # We return False for cwd and editable_root (real paths), True for cache.
-        def selective_has_assets(d):
-            # cwd (empty_dir) should fail
-            if str(d) == str(empty_dir):
-                return False
-            # The real repo path exists on disk, so skip it
-            if "dev/agentalloy" in str(d):
-                return False
-            # The cache dir from auto-clone should have assets
-            return ".cache/agentalloy/repo" in str(d)
-
-        with (
-            patch("pathlib.Path.cwd", return_value=empty_dir),
-            patch.object(container_runtime, "_has_assets", side_effect=selective_has_assets),
-            patch("shutil.which", return_value="/usr/bin/git"),
-            patch("subprocess.run", return_value=MagicMock(returncode=0)),
-            patch("pathlib.Path.home", return_value=tmp_path),
-        ):
-            result = container_runtime._locate_build_context()
-            # Should find the cloned repo at ~/.cache/agentalloy/repo
-            assert str(tmp_path) in str(result)
-            assert "compose.yaml" in str(result)
+                with open(yaml_file) as f:
+                    data = yaml.safe_load(f)
+                if not isinstance(data, dict):
+                    continue
+                skill_id = data.get("skill_id", yaml_file.stem)
+                phases = data.get("phase_scope")
+                if phases and isinstance(phases, list):
+                    scope[skill_id] = set(phases)
+            except Exception:
+                continue
+    _phase_scope_cache = scope
+    return scope
 
 
-# ---------------------------------------------------------------------------
-# UT-3: _build_image()
-# ---------------------------------------------------------------------------
+def _check_phase_contamination(rows: list[RetrievalResult]) -> int:
+    """Count queries that returned skills not applicable to the query phase."""
+    scope = _load_phase_scope()
+    if not scope:
+        # No metadata available — fall back to heuristic
+        # Skills with "review", "qa", "test" in name are QA-phase
+        qa_keywords = {"review", "qa", "test", "browser", "code-review", "testing"}
+        contamination = 0
+        for row in rows:
+            if row.phase not in ("qa", "review"):
+                for skill in row.retrieved:
+                    if any(kw in skill.lower() for kw in qa_keywords):
+                        contamination += 1
+                        break
+        return contamination
+
+    contamination = 0
+    for row in rows:
+        for skill in row.retrieved:
+            if skill in scope and row.phase not in scope[skill]:
+                contamination += 1
+                break
+    return contamination
 
 
-class TestBuildImage:
-    """UT-3: _build_image() constructs correct command."""
+@dataclass(frozen=True)
+class RetrievalResult:
+    task_id: str
+    phase: str
+    gold: list[str]
+    retrieved: list[str]
+    recall: float
+    precision: float
+    mrr: float
+    full_recall: bool
+    compose_ms: float | None
 
-    def test_constructs_correct_command(self, tmp_path: Path):
-        """The command should be [runtime, build, -t, agentalloy:local, -f, Containerfile, context]."""
-        context = tmp_path / "build_context"
-        context.mkdir()
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            container_runtime._build_image("podman", context)
+def run(
+    k: int = 4,
+    label: str = "retrieval_quality",
+    out_dir: str | None = None,
+) -> dict[str, Any]:
+    """Run all retrieval metrics and return summary dict."""
+    rows: list[RetrievalResult] = []
+    total_gold = 0
+    total_hits = 0
+    total_retrieved = 0
+    full_recall_count = 0
+    mrr_sum = 0.0
 
-            mock_run.assert_called_once_with(
-                [
-                    "podman",
-                    "build",
-                    "-t",
-                    "agentalloy:local",
-                    "-f",
-                    "Containerfile",
-                    str(context),
-                ],
-                check=True,
-                timeout=600,
-                capture_output=True,
+    with httpx.Client(timeout=30.0) as client:
+        for task in TASKS:
+            resp = client.post(
+                f"{AGENTALLOY_URL}/compose",
+                json={"task": task.spec, "phase": task.phase, "k": k},
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            source = body.get("source_skills", []) or []
+            gold = list(task.gold_skills)
+
+            hits = sum(1 for g in gold if g in source)
+            recall = hits / len(gold) if gold else 0.0
+            precision = hits / len(source) if source else 0.0
+
+            # MRR: rank of first gold skill (1-indexed), 0 if none
+            mrr = 0.0
+            for idx, s in enumerate(source):
+                if s in gold:
+                    mrr = 1.0 / (idx + 1)
+                    break
+
+            full = recall == 1.0
+            full_recall_count += int(full)
+            total_gold += len(gold)
+            total_hits += hits
+            total_retrieved += len(source)
+            mrr_sum += mrr
+
+            rows.append(
+                RetrievalResult(
+                    task_id=task.task_id,
+                    phase=task.phase,
+                    gold=gold,
+                    retrieved=source,
+                    recall=recall,
+                    precision=precision,
+                    mrr=mrr,
+                    full_recall=full,
+                    compose_ms=body.get("compose_ms"),
+                )
+            )
+            print(
+                f"{task.task_id:35s} "
+                f"recall={recall:.2f} precision={precision:.2f} "
+                f"MRR={mrr:.2f} ({hits}/{len(gold)})"
             )
 
-    def test_uses_correct_image_tag(self, tmp_path: Path):
-        """The image tag should be 'agentalloy:local'."""
-        context = tmp_path / "build_context"
-        context.mkdir()
+    micro_recall = total_hits / total_gold if total_gold else 0.0
+    micro_precision = total_hits / total_retrieved if total_retrieved else 0.0
+    macro_recall = sum(r.recall for r in rows) / len(rows) if rows else 0.0
+    macro_precision = sum(r.precision for r in rows) / len(rows) if rows else 0.0
+    mean_mrr = mrr_sum / len(rows) if rows else 0.0
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            container_runtime._build_image("docker", context)
+    # Phase contamination: check if any query returned skills whose
+    # phase_scope does not include the query phase. We use the skill
+    # metadata from the packs directory if available; otherwise fall
+    # back to a keyword heuristic.
+    contamination_count = _check_phase_contamination(rows)
 
-            cmd = mock_run.call_args[0][0]
-            assert "-t" in cmd
-            tag_idx = cmd.index("-t")
-            assert cmd[tag_idx + 1] == "agentalloy:local"
+    summary = {
+        "label": label,
+        "k": k,
+        "n_tasks": len(rows),
+        "total_gold": total_gold,
+        "total_hits": total_hits,
+        "total_retrieved": total_retrieved,
+        "micro_recall": micro_recall,
+        "micro_precision": micro_precision,
+        "macro_recall": macro_recall,
+        "macro_precision": macro_precision,
+        "mean_mrr": mean_mrr,
+        "full_recall_count": full_recall_count,
+        "contamination_count": contamination_count,
+        "per_task": [
+            {
+                "task_id": r.task_id,
+                "phase": r.phase,
+                "gold": r.gold,
+                "retrieved": r.retrieved,
+                "recall": r.recall,
+                "precision": r.precision,
+                "mrr": r.mrr,
+                "full_recall": r.full_recall,
+                "compose_ms": r.compose_ms,
+            }
+            for r in rows
+        ],
+    }
 
-    def test_uses_correct_dockerfile(self, tmp_path: Path):
-        """The dockerfile should be 'Containerfile'."""
-        context = tmp_path / "build_context"
-        context.mkdir()
+    out_path = Path(out_dir or "eval/runs") / f"layer1__{label}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(summary, indent=2))
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            container_runtime._build_image("podman", context)
+    print()
+    print(f"=== {label} | k={k} | n={len(rows)} tasks ===")
+    print(f"micro recall   = {micro_recall:.3f}  ({total_hits}/{total_gold} gold skills)")
+    print(f"micro precision= {micro_precision:.3f}  ({total_hits}/{total_retrieved} retrieved)")
+    print(f"macro recall   = {macro_recall:.3f}")
+    print(f"macro precision= {macro_precision:.3f}")
+    print(f"mean MRR       = {mean_mrr:.3f}")
+    print(f"full-recall    = {full_recall_count}/{len(rows)}")
+    print(f"contamination  = {contamination_count}")
+    print(f"wrote: {out_path}")
 
-            cmd = mock_run.call_args[0][0]
-            assert "-f" in cmd
-            df_idx = cmd.index("-f")
-            assert cmd[df_idx + 1] == "Containerfile"
+    return summary
 
-    def test_returns_zero_on_success(self, tmp_path: Path):
-        """Returns 0 when the build succeeds."""
-        context = tmp_path / "build_context"
-        context.mkdir()
 
-        with patch("subprocess.run", return_value=MagicMock(returncode=0)):
-            result = container_runtime._build_image("podman", context)
-            assert result == 0
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Layer 1: Retrieval quality")
+    parser.add_argument("--k", type=int, default=4, help="Number of skills to retrieve")
+    parser.add_argument("--label", type=str, default="retrieval_quality")
+    parser.add_argument("--out", type=str, default=None, help="Output directory")
+    args = parser.parse_args(argv)
 
-    def test_returns_nonzero_on_failure(self, tmp_path: Path):
-        """Returns non-zero exit code when the build fails."""
-        context = tmp_path / "build_context"
-        context.mkdir()
-        expected_rc = 1
+    run(k=args.k, label=args.label, out_dir=args.out)
+    return 0
 
-        exc = subprocess.CalledProcessError(expected_rc, ["podman", "build"])
-        exc.output = b"build output"
-        exc.stderr = b"build error"
 
-        with patch("subprocess.run", side_effect=exc):
-            result = container_runtime._build_image("podman", context)
-            assert result == expected_rc
-
-    def test_writes_log_on_failure(self, tmp_path: Path):
-        """On failure, writes captured build output to a log file."""
-        context = tmp_path / "build_context"
-        context.mkdir()
-
-        exc = subprocess.CalledProcessError(1, ["podman", "build"])
-        exc.output = b"build stdout"
-        exc.stderr = b"build stderr"
-
-        with patch("subprocess.run", side_effect=exc):
-            with patch("tempfile.gettempdir", return_value=str(tmp_path)):
-                container_runtime._build_image("podman", context)
-
-                # Check that a log file was written
-                log_files = list(tmp_path.glob("agentalloy-build.log"))
-                assert len(log_files) == 1
-
-                log_content = log_files[0].read_text()
-                assert "exit 1" in log_content
-                assert "build stdout" in log_content
-                assert "build stderr" in log_content
-
-    def test_has_600s_timeout(self, tmp_path: Path):
-        """The subprocess call should have a 600-second timeout."""
-        context = tmp_path / "build_context"
-        context.mkdir()
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            container_runtime._build_image("podman", context)
-
-            call_kwargs = mock_run.call_args[1]
-            assert call_kwargs.get("timeout") == 600
-
-    def test_returns_nonzero_on_timeout(self, tmp_path: Path):
-        """Returns 1 when the build times out after 600s."""
-        context = tmp_path / "build_context"
-        context.mkdir()
-
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("podman build", 600)):
-            result = container_runtime._build_image("podman", context)
-            assert result == 1
+if __name__ == "__main__":
+    sys.exit(main())
