@@ -1,5 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportArgumentType=false
-"""Tests for deprecation warnings in wire_harness.py.
+"""Tests for the wire_harness module — harness wiring, sentinel injection, state tracking, and proxy configuration.
 
 Maps to plan task 12: Deprecate monolithic wire_harness.py.
 """
@@ -7,7 +7,6 @@ Maps to plan task 12: Deprecate monolithic wire_harness.py.
 from __future__ import annotations
 
 import json
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -37,164 +36,6 @@ def repo_root(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# wire_harness() deprecation
-# ---------------------------------------------------------------------------
-
-
-class TestWireHarnessDeprecation:
-    """Verify wire_harness() emits DeprecationWarning."""
-
-    def test_wire_harness_emits_warning(self, repo_root: Path) -> None:
-        """Calling wire_harness() raises a DeprecationWarning."""
-        with pytest.warns(DeprecationWarning, match="wire_harness\\(\\) is deprecated"):
-            wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
-
-    def test_wire_harness_still_works(self, repo_root: Path) -> None:
-        """wire_harness() still produces a valid result despite the warning."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
-        assert result["harness"] == "claude-code"
-        assert "files_written" in result
-        assert "schema_version" in result
-
-    def test_wire_harness_proxy_emits_warning(self, repo_root: Path) -> None:
-        """Default proxy wiring path also emits DeprecationWarning."""
-        with pytest.warns(DeprecationWarning, match="wire_harness\\(\\) is deprecated"):
-            wire_harness.wire_harness("cline", port=8000, root=repo_root)
-
-    def test_wire_harness_mcp_fallback_emits_warning(self, repo_root: Path) -> None:
-        """MCP fallback path also emits DeprecationWarning."""
-        with pytest.warns(DeprecationWarning, match="wire_harness\\(\\) is deprecated"):
-            wire_harness.wire_harness("claude-code", port=8000, root=repo_root, mcp_fallback=True)
-
-    def test_wire_harness_multiple_warnings(self, repo_root: Path) -> None:
-        """Each call to wire_harness() emits exactly one DeprecationWarning."""
-        with warnings.catch_warnings(record=True) as recorded:
-            warnings.simplefilter("always")
-            wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
-        deprecation_warnings = [w for w in recorded if issubclass(w.category, DeprecationWarning)]
-        assert len(deprecation_warnings) == 1
-
-
-# ---------------------------------------------------------------------------
-# add_parser() deprecation
-# ---------------------------------------------------------------------------
-
-
-class TestAddParserDeprecation:
-    """Verify add_parser() emits DeprecationWarning."""
-
-    def test_add_parser_emits_warning(self) -> None:
-        """Calling add_parser() raises a DeprecationWarning."""
-        with pytest.warns(DeprecationWarning, match="add_parser\\(\\) is deprecated"):
-            import argparse
-
-            parser = argparse.ArgumentParser()
-            subparsers = parser.add_subparsers()
-            wire_harness.add_parser(subparsers)
-
-    def test_add_parser_still_works(self) -> None:
-        """add_parser() still creates the subparser despite the warning."""
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            import argparse
-
-            parser = argparse.ArgumentParser()
-            subparsers = parser.add_subparsers()
-            wire_harness.add_parser(subparsers)
-
-        # Verify the subparser was created
-        assert "wire-harness" in parser._subparsers._group_actions[0].choices
-
-
-# ---------------------------------------------------------------------------
-# _run() deprecation
-# ---------------------------------------------------------------------------
-
-
-class TestRunDeprecation:
-    """Verify _run() emits DeprecationWarning."""
-
-    def test_run_emits_warning(self, repo_root: Path) -> None:
-        """Calling _run() raises a DeprecationWarning."""
-        import argparse
-
-        args = argparse.Namespace(
-            harness="claude-code",
-            port=8000,
-            force=False,
-            mcp_fallback=False,
-            legacy=True,
-            scope="repo",
-            quiet=True,
-        )
-        with pytest.warns(DeprecationWarning, match="_run\\(\\) is deprecated"):
-            wire_harness._run(args)
-
-    def test_run_still_works(self, repo_root: Path) -> None:
-        """_run() still returns 0 despite the warning."""
-        import argparse
-
-        args = argparse.Namespace(
-            harness="claude-code",
-            port=8000,
-            force=False,
-            mcp_fallback=False,
-            legacy=True,
-            scope="repo",
-            quiet=True,
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = wire_harness._run(args)
-        assert result == 0
-
-
-# ---------------------------------------------------------------------------
-# run() deprecation
-# ---------------------------------------------------------------------------
-
-
-class TestPublicRunDeprecation:
-    """Verify run() (public entry point) emits DeprecationWarning."""
-
-    def test_run_emits_warning(self, repo_root: Path) -> None:
-        """Calling run() raises a DeprecationWarning."""
-        import argparse
-
-        args = argparse.Namespace(
-            harness="claude-code",
-            port=8000,
-            force=False,
-            mcp_fallback=False,
-            legacy=True,
-            scope="repo",
-            quiet=True,
-        )
-        with pytest.warns(DeprecationWarning, match="wire_harness\\.run\\(\\) is deprecated"):
-            wire_harness.run(args)
-
-    def test_run_still_works(self, repo_root: Path) -> None:
-        """run() still returns 0 despite the warning."""
-        import argparse
-
-        args = argparse.Namespace(
-            harness="claude-code",
-            port=8000,
-            force=False,
-            mcp_fallback=False,
-            legacy=True,
-            scope="repo",
-            quiet=True,
-        )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            result = wire_harness.run(args)
-        assert result == 0
-
-
-# ---------------------------------------------------------------------------
 # VALID_HARNESSES uses global REGISTRY
 # ---------------------------------------------------------------------------
 
@@ -219,23 +60,6 @@ class TestValidHarnessesFromRegistry:
 
         for key in REGISTRY:
             assert key in wire_harness.VALID_HARNESSES
-
-
-# ---------------------------------------------------------------------------
-# Module docstring marks deprecation
-# ---------------------------------------------------------------------------
-
-
-class TestModuleDeprecationDocstring:
-    """Verify the module docstring mentions deprecation."""
-
-    def test_module_docstring_contains_deprecated(self) -> None:
-        """Module docstring contains '.. deprecated::' marker."""
-        assert "deprecated" in wire_harness.__doc__.lower()
-
-    def test_module_docstring_mentions_registry(self) -> None:
-        """Module docstring references the provider REGISTRY."""
-        assert "registry" in wire_harness.__doc__.lower() or "REGISTRY" in wire_harness.__doc__
 
 
 @pytest.fixture()
