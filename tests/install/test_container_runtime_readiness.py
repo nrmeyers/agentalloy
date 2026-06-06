@@ -42,7 +42,10 @@ class TestEntrypointScript:
         assert uvicorn_idx != -1 and ingest_idx != -1, script
         assert uvicorn_idx < ingest_idx, "uvicorn must start before pack ingest (fast-start)"
         # Uvicorn launched in background, not exec'd.
-        assert "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &" in script
+        assert (
+            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &"
+            in script
+        )
         assert "UVICORN_PID=$!" in script
 
     def test_ut11_progress_writes_are_atomic(self) -> None:
@@ -75,8 +78,8 @@ class TestEntrypointScript:
     def test_ut15_reads_checkpoints_on_restart(self) -> None:
         script = _build_entrypoint_script("python,nodejs")
         assert "pack_already_done" in script
-        assert 'grep -Fq' in script
-        assert 'already ingested - skipping' in script
+        assert "grep -Fq" in script
+        assert "already ingested - skipping" in script
 
     def test_ut16_corrupt_checkpoints_treated_as_none(self) -> None:
         script = _build_entrypoint_script("python")
@@ -120,7 +123,7 @@ class _FakeResp:
     def read(self) -> bytes:
         return self._body
 
-    def __enter__(self) -> "_FakeResp":
+    def __enter__(self) -> _FakeResp:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -141,8 +144,12 @@ class TestWaitForReadiness:
 
     def test_ut19_continues_on_warming_up_then_ready(self) -> None:
         responses = [
-            _FakeResp({"status": "warming_up", "progress": {"packs_ingested": 1, "packs_total": 3}}),
-            _FakeResp({"status": "warming_up", "progress": {"packs_ingested": 2, "packs_total": 3}}),
+            _FakeResp(
+                {"status": "warming_up", "progress": {"packs_ingested": 1, "packs_total": 3}}
+            ),
+            _FakeResp(
+                {"status": "warming_up", "progress": {"packs_ingested": 2, "packs_total": 3}}
+            ),
             _FakeResp({"status": "ready"}),
         ]
         with patch("urllib.request.urlopen", side_effect=responses):
@@ -170,7 +177,9 @@ class TestWaitForReadiness:
     def test_on_progress_callback_invoked(self) -> None:
         seen: list[dict] = []
         responses = [
-            _FakeResp({"status": "warming_up", "progress": {"packs_ingested": 1, "packs_total": 2}}),
+            _FakeResp(
+                {"status": "warming_up", "progress": {"packs_ingested": 1, "packs_total": 2}}
+            ),
             _FakeResp({"status": "ready"}),
         ]
         with patch("urllib.request.urlopen", side_effect=responses):

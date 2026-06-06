@@ -307,4 +307,4 @@ A skill about "how to write tests" in category `ops` is a category-fit failure. 
 - [Harness Classification](harness-classification.md) — proxy-wired vs sidecar classification spec
 - [Harness Catalog](install/harness-catalog.md) — per-harness integration details, auto-detection, MCP fallback
 - [Skill Authoring and Overrides Spec](skill-authoring-and-overrides-spec.md) — skill authoring pipeline, override YAML schema
-- [POC: Composed vs Flat](experiments/poc-composed-vs-flat.md) — empirical comparison of injection methods
+- [POC: Composed vs MCP](experiments/poc-composed-vs-mcp.md) — empirical comparison of injection methods

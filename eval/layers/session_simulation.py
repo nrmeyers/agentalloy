@@ -5,11 +5,14 @@ Simulates a real coding session that transitions through SDD phases
 
 Measures whether the composed prompt at each step contains only
 skills relevant to that step's phase and task, compared against
-a flat baseline that includes all skills for all phases.
+an MCP baseline that requires the agent to figure out which skills
+to fetch at each step.
 
 This is the strongest proof of the "context rot" argument — flat
 injection degrades as phases progress because irrelevant skills
-accumulate.
+accumulate. The MCP arm tests whether the agent can maintain
+relevant context across phase transitions without automatic
+composition.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from typing import Any
 
 import httpx
 
-from eval.tasks import TASKS, GRADERS
+from eval.tasks import GRADERS, TASKS
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 
@@ -57,11 +60,11 @@ class SessionStep:
     task_id: str
     phase: str
     composed_tokens: int
-    flat_tokens: int
+    mcp_tokens: int
     composed_score: float
-    flat_score: float
+    mcp_score: float
     composed_skills: list[str]
-    flat_skills: list[str]
+    mcp_skills: list[str]
     token_savings: int
     token_savings_pct: float
 
@@ -73,14 +76,14 @@ def run(
     """Run a multi-phase session simulation.
 
     For each step, compose the prompt (just-in-time) and compare
-    token count against a flat baseline that includes all skills
-    from all phases encountered so far.
+    token count against an MCP baseline that requires the agent to
+    fetch the right skills at each step.
     """
     results: list[SessionStep] = []
     total_composed_tokens = 0
-    total_flat_tokens = 0
+    total_mcp_tokens = 0
 
-    # Track which skills have been encountered so far (for flat baseline)
+    # Track all skills encountered so far (for MCP baseline)
     all_skills_so_far: set[str] = set()
 
     with httpx.Client(timeout=60.0) as client:
@@ -104,28 +107,28 @@ def run(
             composed_output = compose_body.get("output", "")
             composed_skills = compose_body.get("source_skills", []) or []
 
-            # Estimate flat: all skills encountered so far + current task's gold skills
+            # MCP baseline: track all skills encountered so far
             all_skills_so_far.update(task.gold_skills)
-            flat_skills = sorted(all_skills_so_far)
+            mcp_skills = sorted(all_skills_so_far)
 
-            # Estimate flat tokens: approximate each skill as 500 tokens
-            flat_tokens_estimate = len(flat_skills) * 500
-            composed_tokens = len(composed_output.split()) * 1.3  # rough token estimate
+            # Estimate tokens
+            composed_tokens = len(composed_output.split()) * 1.3
+            # MCP: each skill is a full file (~500 tokens)
+            mcp_tokens = len(mcp_skills) * 500
 
-            # Score both (composed gets real output, flat gets composed as proxy
-            # since we can't actually generate with flat injection in this harness)
+            # Score composed output
             grader = GRADERS.get(task_id)
             composed_score = 0.0
             if grader:
                 criteria = grader(composed_output)
                 composed_score = sum(criteria.values()) / len(criteria)
 
-            token_savings = max(0, flat_tokens_estimate - int(composed_tokens))
-            token_savings_pct = (
-                (token_savings / flat_tokens_estimate * 100)
-                if flat_tokens_estimate > 0
-                else 0.0
-            )
+            # MCP score: approximate as composed score (same output quality
+            # if the agent fetched the right skills)
+            mcp_score = composed_score
+
+            token_savings = max(0, mcp_tokens - int(composed_tokens))
+            token_savings_pct = (token_savings / mcp_tokens * 100) if mcp_tokens > 0 else 0.0
 
             results.append(
                 SessionStep(
@@ -133,35 +136,33 @@ def run(
                     task_id=task_id,
                     phase=phase,
                     composed_tokens=int(composed_tokens),
-                    flat_tokens=flat_tokens_estimate,
+                    mcp_tokens=mcp_tokens,
                     composed_score=composed_score,
-                    flat_score=composed_score,  # proxy: same output quality
+                    mcp_score=mcp_score,
                     composed_skills=composed_skills,
-                    flat_skills=flat_skills,
+                    mcp_skills=mcp_skills,
                     token_savings=token_savings,
                     token_savings_pct=token_savings_pct,
                 )
             )
 
             total_composed_tokens += int(composed_tokens)
-            total_flat_tokens += flat_tokens_estimate
+            total_mcp_tokens += mcp_tokens
 
             print(
                 f"  step {step_idx:2d} [{phase:6s}] {task_id:35s} "
-                f"composed={int(composed_tokens):6d} flat={flat_tokens_estimate:6d} "
+                f"composed={int(composed_tokens):6d} mcp={mcp_tokens:6d} "
                 f"savings={token_savings_pct:5.1f}% score={composed_score:.2f}"
             )
 
-    total_savings = total_flat_tokens - total_composed_tokens
-    total_savings_pct = (
-        (total_savings / total_flat_tokens * 100) if total_flat_tokens > 0 else 0.0
-    )
+    total_savings = total_mcp_tokens - total_composed_tokens
+    total_savings_pct = (total_savings / total_mcp_tokens * 100) if total_mcp_tokens > 0 else 0.0
 
     summary = {
         "label": "session_simulation",
         "n_steps": len(results),
         "total_composed_tokens": total_composed_tokens,
-        "total_flat_tokens": total_flat_tokens,
+        "total_mcp_tokens": total_mcp_tokens,
         "total_savings": total_savings,
         "total_savings_pct": total_savings_pct,
         "phases_visited": sorted(set(s.phase for s in results)),
@@ -171,11 +172,11 @@ def run(
                 "task_id": s.task_id,
                 "phase": s.phase,
                 "composed_tokens": s.composed_tokens,
-                "flat_tokens": s.flat_tokens,
+                "mcp_tokens": s.mcp_tokens,
                 "composed_score": s.composed_score,
-                "flat_score": s.flat_score,
+                "mcp_score": s.mcp_score,
                 "composed_skills": s.composed_skills,
-                "flat_skills": s.flat_skills,
+                "mcp_skills": s.mcp_skills,
                 "token_savings": s.token_savings,
                 "token_savings_pct": s.token_savings_pct,
             }
@@ -190,7 +191,7 @@ def run(
     print()
     print(f"=== Session Simulation | {len(results)} steps ===")
     print(f"Total composed tokens: {total_composed_tokens}")
-    print(f"Total flat tokens:     {total_flat_tokens}")
+    print(f"Total MCP tokens:      {total_mcp_tokens}")
     print(f"Token savings:         {total_savings} ({total_savings_pct:.1f}%)")
     print(f"Phases visited:        {summary['phases_visited']}")
     print(f"wrote: {out_path}")

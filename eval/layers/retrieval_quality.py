@@ -78,10 +78,9 @@ def _check_phase_contamination(rows: list[RetrievalResult]) -> int:
     contamination = 0
     for row in rows:
         for skill in row.retrieved:
-            if skill in scope:
-                if row.phase not in scope[skill]:
-                    contamination += 1
-                    break
+            if skill in scope and row.phase not in scope[skill]:
+                contamination += 1
+                break
     return contamination
 
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -15,13 +14,15 @@ from pydantic import ValidationError
 from agentalloy.api.health_router import (
     ReadinessChecker,
     ReadinessResponse,
+)
+from agentalloy.api.health_router import (
     router as readiness_router,
 )
-
 
 # ---------------------------------------------------------------------------
 # UT-1: ReadinessResponse model validation
 # ---------------------------------------------------------------------------
+
 
 class TestReadinessResponseModel:
     """[UT-1] ReadinessResponse accepts valid status values and optional progress."""
@@ -61,6 +62,7 @@ class TestReadinessResponseModel:
 # ---------------------------------------------------------------------------
 # UT-2 to UT-7: ReadinessChecker file-based state machine
 # ---------------------------------------------------------------------------
+
 
 class TestReadinessChecker:
     """[UT-2]..[UT-7] ReadinessChecker maps file states to status values."""
