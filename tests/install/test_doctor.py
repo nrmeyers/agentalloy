@@ -138,7 +138,6 @@ class TestFtsStatus:
 
 class TestDuckdbVersion:
     def test_version_ok(self) -> None:
-        import duckdb
 
         result = _check_duckdb_version()
         # Current installed version should be >= 1.5.3

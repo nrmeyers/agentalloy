@@ -97,7 +97,9 @@ def test_copy_preserves_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 # ---------------------------------------------------------------------------
 
 
-def test_no_source_key_prints_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_no_source_key_prints_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     """When no source key exists, the function prints a warning to stdout."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -109,7 +111,9 @@ def test_no_source_key_prints_warning(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "Ollama SSH key not found at ~/.ssh/id_ed25519 or ~/.ollama/id_ed25519" in captured.out
 
 
-def test_warning_includes_fix_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_warning_includes_fix_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     """The warning message includes the exact fix command."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -120,7 +124,9 @@ def test_warning_includes_fix_command(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "cp ~/.ssh/id_ed25519 ~/.ollama/id_ed25519" in captured.out
 
 
-def test_no_source_key_return_value_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_source_key_return_value_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Return value is still False when no source key exists."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -144,7 +150,9 @@ def test_no_source_key_no_dir_created(tmp_path: Path, monkeypatch: pytest.Monkey
 # ---------------------------------------------------------------------------
 
 
-def test_copy_prints_notification(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_copy_prints_notification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     """When source exists and target does not, print() is called with the copy confirmation message."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -155,10 +163,15 @@ def test_copy_prints_notification(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     _ensure_ollama_ssh_key()
 
     captured = capsys.readouterr()
-    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." in captured.out
+    assert (
+        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
+        in captured.out
+    )
 
 
-def test_copy_prints_to_stdout_not_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_copy_prints_to_stdout_not_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     """The notification goes to stdout, not stderr."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -169,8 +182,14 @@ def test_copy_prints_to_stdout_not_stderr(tmp_path: Path, monkeypatch: pytest.Mo
     _ensure_ollama_ssh_key()
 
     captured = capsys.readouterr()
-    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." in captured.out
-    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." not in captured.err
+    assert (
+        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
+        in captured.out
+    )
+    assert (
+        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
+        not in captured.err
+    )
 
 
 def test_copy_return_value_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,7 +204,9 @@ def test_copy_return_value_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert result is True
 
 
-def test_no_print_when_key_already_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_no_print_when_key_already_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
     """When target already exists, no print is called."""
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -203,4 +224,7 @@ def test_no_print_when_key_already_exists(tmp_path: Path, monkeypatch: pytest.Mo
     _ensure_ollama_ssh_key()
 
     captured = capsys.readouterr()
-    assert "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull." not in captured.out
+    assert (
+        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
+        not in captured.out
+    )

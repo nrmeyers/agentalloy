@@ -35,7 +35,6 @@ import pytest
 
 from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
-
 # ---------------------------------------------------------------------------
 # EC-1: Existing container with same name -- handled
 # ---------------------------------------------------------------------------
@@ -1168,7 +1167,10 @@ class TestCancelDuringReview:
     @patch("urllib.request.urlopen")
     @patch("builtins.input", side_effect=["y", "n"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
-    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch(
+        "agentalloy.install.subcommands.simple_setup.subprocess.run",
+        return_value=MagicMock(returncode=0),
+    )
     def test_cancel_on_review_aborts_setup(
         self,
         mock_print,
@@ -1257,7 +1259,10 @@ class TestCancelDuringReview:
     @patch("urllib.request.urlopen")
     @patch("builtins.input", side_effect=["y", "", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
-    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch(
+        "agentalloy.install.subcommands.simple_setup.subprocess.run",
+        return_value=MagicMock(returncode=0),
+    )
     def test_accept_review_continues(
         self,
         mock_print,
@@ -1346,7 +1351,10 @@ class TestCancelDuringReview:
     @patch("urllib.request.urlopen")
     @patch("builtins.input", side_effect=["y", "", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
-    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch(
+        "agentalloy.install.subcommands.simple_setup.subprocess.run",
+        return_value=MagicMock(returncode=0),
+    )
     def test_empty_review_response_accepts(
         self,
         mock_print,
@@ -1434,7 +1442,10 @@ class TestCancelDuringReview:
     @patch("urllib.request.urlopen")
     @patch("builtins.input", side_effect=["y", "yes", "y"])
     @patch("agentalloy.install.subcommands.simple_setup._print")
-    @patch("agentalloy.install.subcommands.simple_setup.subprocess.run", return_value=MagicMock(returncode=0))
+    @patch(
+        "agentalloy.install.subcommands.simple_setup.subprocess.run",
+        return_value=MagicMock(returncode=0),
+    )
     def test_yes_review_response_accepts(
         self,
         mock_print,

@@ -10,9 +10,9 @@ from __future__ import annotations
 import math
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 from agentalloy.storage.vector_store import (
     EMBEDDING_DIM,
@@ -496,7 +496,9 @@ def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_rebuild_fts_warns_on_final_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """When all retries exhausted, logging.warning() is called (not raise).
     Verify caplog captures the DuckDB bug explanation; no exception raised."""
     import logging
@@ -520,12 +522,16 @@ def test_rebuild_fts_warns_on_final_failure(tmp_path: Path, caplog: pytest.LogCa
             vs.rebuild_fts_index()
 
     # Verify a warning was logged
-    assert any("stopwords" in record.message for record in caplog.records if record.levelno == logging.WARNING), (
-        f"Expected stopwords warning in caplog, got: {caplog.text}"
-    )
+    assert any(
+        "stopwords" in record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+    ), f"Expected stopwords warning in caplog, got: {caplog.text}"
 
 
-def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_rebuild_fts_warning_explains_upstream_bug(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """The warning message mentions DuckDB 1.5.3."""
     import logging
 
@@ -543,10 +549,14 @@ def test_rebuild_fts_warning_explains_upstream_bug(tmp_path: Path, caplog: pytes
         with patch("time.sleep"):
             vs.rebuild_fts_index()
 
-    assert "DuckDB 1.5.3" in caplog.text, f"Expected 'DuckDB 1.5.3' in caplog.text, got: {caplog.text}"
+    assert "DuckDB 1.5.3" in caplog.text, (
+        f"Expected 'DuckDB 1.5.3' in caplog.text, got: {caplog.text}"
+    )
 
 
-def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_rebuild_fts_warning_explains_not_agentalloy_issue(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """The warning states this is not an agentalloy issue."""
     import logging
 
@@ -564,10 +574,14 @@ def test_rebuild_fts_warning_explains_not_agentalloy_issue(tmp_path: Path, caplo
         with patch("time.sleep"):
             vs.rebuild_fts_index()
 
-    assert "NOT an agentalloy issue" in caplog.text, f"Expected 'NOT an agentalloy issue' in caplog.text, got: {caplog.text}"
+    assert "NOT an agentalloy issue" in caplog.text, (
+        f"Expected 'NOT an agentalloy issue' in caplog.text, got: {caplog.text}"
+    )
 
 
-def test_rebuild_fts_warning_includes_retry_command(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_rebuild_fts_warning_includes_retry_command(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """The warning includes how to retry."""
     import logging
 
@@ -626,5 +640,3 @@ def test_rebuild_fts_non_transient_still_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # FTS rebuild — warning on final failure (all retries exhausted)
 # ---------------------------------------------------------------------------
-
-

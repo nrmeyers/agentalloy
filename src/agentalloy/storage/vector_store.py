@@ -495,6 +495,7 @@ class VectorStore:
         # This is a known DuckDB 1.5.3 FTS bug (stopwords catalog corruption).
         # Vector search continues to work; only BM25 (full-text search) is affected.
         import logging as _logging
+
         _logging.warning(
             "FTS index rebuild failed after all retries. "
             "This is a known DuckDB 1.5.3 bug (stopwords catalog corruption) — "

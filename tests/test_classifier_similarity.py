@@ -329,12 +329,11 @@ def test_calibration_fixture_valid() -> None:
 
 def test_classifier_regression_against_live_server() -> None:
     """Regression test: F1 >= 0.85, false_met_rate <= 0.05 at committed threshold.
-    
+
     Requires a live OpenAI-compatible embed server (Ollama, llama-server,
     LM Studio, etc.) with the configured embedding model loaded. Skipped
     automatically when no embed server is configured or unreachable.
     """
-    import urllib.request
 
     from agentalloy.config import get_settings
     from agentalloy.lm_client import OpenAICompatClient
@@ -351,6 +350,7 @@ def test_classifier_regression_against_live_server() -> None:
 
     # Extract host and port from URL
     from urllib.parse import urlparse
+
     parsed = urlparse(embed_url)
     host = parsed.hostname or "localhost"
     port = parsed.port or 11434

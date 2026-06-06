@@ -99,7 +99,7 @@ def compute_metrics(
     for idx, ex in enumerate(examples):
         text = ex["text"]
         # Create a fresh context for each example (PredicateContext is frozen)
-        example_ctx = dataclasses_replace(ctx, recent_prompt_text=text)  # type: ignore[arg-type]
+        _ = dataclasses_replace(ctx, recent_prompt_text=text)  # type: ignore[arg-type]
         scores: dict[str, float] = {}
         for intent in ["completion", "approval", "redirection"]:
             refs = _INTENT_REFERENCES[intent]  # type: ignore[index]

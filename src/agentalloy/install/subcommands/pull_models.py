@@ -191,9 +191,7 @@ def _ensure_ollama_ssh_key() -> bool:
     # Copy with restricted permissions (0600).
     _shutil.copy2(str(source), str(target))
     target.chmod(0o600)
-    print(
-        "Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull."
-    )
+    print("Copied SSH key from ~/.ssh/id_ed25519 to ~/.ollama/id_ed25519 for Ollama model pull.")
     return True
 
 
