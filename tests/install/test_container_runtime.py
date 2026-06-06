@@ -95,7 +95,7 @@ class TestLocateBuildContext:
             result = container_runtime._locate_build_context()
             assert result == cwd / "compose.yaml"
 
-    def test_finds_dockerfile_as_alternative_to_containerfile(self, tmp_path: Path):  # noqa: N802 — proper-noun product names
+    def test_finds_dockerfile_as_alternative_to_containerfile(self, tmp_path: Path):
         """Containerfile or Dockerfile both count as build file."""
         assets_dir = tmp_path / "build_context"
         assets_dir.mkdir()
@@ -292,7 +292,7 @@ class TestBuildImage:
 
         with patch("subprocess.run", side_effect=exc):
             with patch("tempfile.gettempdir", return_value=str(tmp_path)):
-                _result = container_runtime._build_image("podman", context)
+                _ = container_runtime._build_image("podman", context)
 
                 # Check that a log file was written
                 log_files = list(tmp_path.glob("agentalloy-build.log"))

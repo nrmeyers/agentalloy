@@ -1,6 +1,6 @@
 """POC task definitions + per-task graders.
 
-Pre-registered in docs/experiments/poc-composed-vs-flat.md §5–6. Each task
+Pre-registered in docs/experiments/poc-composed-vs-mcp.md §4. Each task
 exposes a graded set of binary criteria; the harness aggregates pass-rates
 per condition.
 """

@@ -563,8 +563,15 @@ User-scope state (`~/.config/agentalloy/`, corpus DB) is preserved across the sw
 
 ## Benchmarks
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the composed vs flat comparison experiment and retrieval recall harness.
+AgentAlloy's benchmark suite evaluates the effectiveness of just-in-time
+instruction composition against real-world patterns. See
+[BENCHMARKS.md](BENCHMARKS.md) for the full runbook.
 
+The core experiment compares three arms: **AgentAlloy JIT composition**,
+**MCP skill dictionary** (the real competitive pattern — agent has all
+skills as tools and must decide which to fetch), and **no injection**
+(baseline). The benchmark proves that removing the agent's decision
+burden while preserving output quality is the win.
 ---
 
 ## License

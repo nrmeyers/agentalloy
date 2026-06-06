@@ -6,6 +6,7 @@ and locating the agentalloy build context (for building the container image).
 
 from __future__ import annotations
 
+import contextlib
 import shlex
 import shutil
 import subprocess
@@ -655,11 +656,7 @@ def _wait_for_readiness(
             extra: dict[str, Any] = {}
             if runtime is not None:
                 extra = _get_bootstrap_progress(runtime, container_name)
-            # Progress reporting is best-effort; never break the wait loop
-            # on a callback failure.
-            import contextlib as _ctx  # noqa: PLC0415
-
-            with _ctx.suppress(Exception):
+            with contextlib.suppress(Exception):
                 on_progress(
                     {
                         "status": status,
