@@ -14,6 +14,7 @@ and complete in <10s each.
 from __future__ import annotations
 
 import contextlib
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -65,11 +66,15 @@ def _make_urlopen_mock():
     """Return a mock for urllib.request.urlopen that works as a context manager.
 
     The mock returns a context-manager mock whose __enter__ yields a response
-    mock with status=200, so `with urlopen(...) as resp: resp.status == 200`
-    evaluates correctly.
+    mock with status=200 and a read() method that returns JSON strings.
     """
     ctx_mock = MagicMock()
-    ctx_mock.__enter__ = MagicMock(return_value=MagicMock(status=200))
+    inner = MagicMock()
+    inner.status = 200
+    inner.read.return_value = json.dumps({"data": [{"embedding": [0.1, 0.2, 0.3]}]}).encode()
+    inner.__enter__ = MagicMock(return_value=inner)
+    inner.__exit__ = MagicMock(return_value=False)
+    ctx_mock.__enter__ = MagicMock(return_value=inner)
     ctx_mock.__exit__ = MagicMock(return_value=False)
     return ctx_mock
 
@@ -266,7 +271,8 @@ def _run_container_flow_all_mocked(
 # ---------------------------------------------------------------------------
 
 
-class TestFullContainerSetup:
+@pytest.mark.integration
+    class TestFullContainerSetup:
     """E2E-1: Full container setup with mocked runtime binary.
 
     Verifies that _run_container_flow returns 0 when every step succeeds,
@@ -420,7 +426,8 @@ class TestFullContainerSetup:
 # ---------------------------------------------------------------------------
 
 
-class TestModelPullBootstrap:
+@pytest.mark.integration
+    class TestModelPullBootstrap:
     """E2E-2: Container bootstrap pulls qwen3-embedding:0.6b model.
 
     Verifies that the entrypoint script is generated and passed to the
@@ -593,7 +600,8 @@ class TestBootstrapIdempotency:
 # ---------------------------------------------------------------------------
 
 
-class TestCrashRecovery:
+@pytest.mark.integration
+    class TestCrashRecovery:
     """E2E-4: Container bootstrap crash recovery - re-runs migrations and install-packs.
 
     Verifies that when a step fails, the setup correctly reports the failure
