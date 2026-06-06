@@ -266,8 +266,8 @@ class TestDuplicateSentinels:
         from agentalloy.install.subcommands.wire_harness import (
             SENTINEL_BEGIN,
             SENTINEL_END,
-            wire_harness,
         )
+        from tests._wire_compat import wire_compat
 
         # Two BEGIN/END pairs in the user's CLAUDE.md
         claude = repo_root / "CLAUDE.md"
@@ -276,7 +276,7 @@ class TestDuplicateSentinels:
             f"More content\n\n{SENTINEL_BEGIN}\nsecond\n{SENTINEL_END}\n"
         )
         with pytest.raises(SystemExit):
-            wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
+            wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
 
 
 # ---------------------------------------------------------------------------

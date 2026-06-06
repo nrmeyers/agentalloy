@@ -175,15 +175,15 @@ class TestCodexWireHarness(TestCase):
     """Tests for wire_harness integration with codex."""
 
     def test_wire_harness_codex_creates_config(self):
-        """wire_harness('codex') creates ~/.codex/config.toml."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        """wire_compat('codex') creates ~/.codex/config.toml."""
+        from tests._wire_compat import wire_compat
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp) / "home"
             fake_home.mkdir()
 
             with patch.object(Path, "home", return_value=fake_home):
-                result = wire_harness("codex", port=7070, root=fake_home)
+                result = wire_compat("codex", port=7070, root=fake_home)
 
                 config_path = fake_home / ".codex" / "config.toml"
                 self.assertTrue(config_path.exists())
@@ -192,14 +192,14 @@ class TestCodexWireHarness(TestCase):
 
     def test_wire_harness_codex_has_api_base_url(self):
         """The config.toml contains the correct apiBaseUrl."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp) / "home"
             fake_home.mkdir()
 
             with patch.object(Path, "home", return_value=fake_home):
-                wire_harness("codex", port=9999, root=fake_home)
+                wire_compat("codex", port=9999, root=fake_home)
 
                 config_path = fake_home / ".codex" / "config.toml"
                 content = config_path.read_text()
@@ -207,22 +207,22 @@ class TestCodexWireHarness(TestCase):
 
     def test_wire_harness_codex_unknown_harness(self):
         """wire_harness rejects unknown harness names."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         with self.assertRaises(SystemExit):
-            wire_harness("nonexistent-harness", port=7070, root=Path("/tmp"))
+            wire_compat("nonexistent-harness", port=7070, root=Path("/tmp"))
 
     def test_wire_harness_codex_idempotent(self):
         """Re-running wire_harness for codex replaces existing block."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp) / "home"
             fake_home.mkdir()
 
             with patch.object(Path, "home", return_value=fake_home):
-                wire_harness("codex", port=7070, root=fake_home)
-                wire_harness("codex", port=8080, root=fake_home)
+                wire_compat("codex", port=7070, root=fake_home)
+                wire_compat("codex", port=8080, root=fake_home)
 
                 config_path = fake_home / ".codex" / "config.toml"
                 content = config_path.read_text()
@@ -237,14 +237,14 @@ class TestCodexWireHarness(TestCase):
 
     def test_wire_harness_codex_sentinel_markers(self):
         """The config file uses sentinel markers for uninstall."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp) / "home"
             fake_home.mkdir()
 
             with patch.object(Path, "home", return_value=fake_home):
-                wire_harness("codex", port=7070, root=fake_home)
+                wire_compat("codex", port=7070, root=fake_home)
 
                 config_path = fake_home / ".codex" / "config.toml"
                 content = config_path.read_text()

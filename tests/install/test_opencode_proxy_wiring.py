@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, wire_harness
+from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN
+from tests._wire_compat import wire_compat
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ class TestOpenCodeProxyWiring:
 
     def test_opencode_proxy_writes_env_file(self, repo_root: Path) -> None:
         """Default opencode wiring writes .opencode/.agentalloy-env with exports."""
-        result = wire_harness("opencode", port=4321, root=repo_root)
+        result = wire_compat("opencode", port=4321, root=repo_root)
         assert result["integration_vector"] == "proxy"
         assert result["harness"] == "opencode"
 
@@ -31,7 +32,7 @@ class TestOpenCodeProxyWiring:
 
     def test_opencode_proxy_writes_system_prompt(self, repo_root: Path) -> None:
         """Default opencode wiring also writes proxy guidance to system-prompt.md."""
-        wire_harness("opencode", port=4321, root=repo_root)
+        wire_compat("opencode", port=4321, root=repo_root)
 
         prompt_path = repo_root / ".opencode" / "system-prompt.md"
         assert prompt_path.exists()
@@ -41,7 +42,7 @@ class TestOpenCodeProxyWiring:
 
     def test_opencode_proxy_files_written_count(self, repo_root: Path) -> None:
         """Opencode proxy wiring writes exactly two file entries (env + prompt)."""
-        result = wire_harness("opencode", port=4321, root=repo_root)
+        result = wire_compat("opencode", port=4321, root=repo_root)
         assert len(result["files_written"]) == 2
         paths = [e["path"] for e in result["files_written"]]
         assert any(".agentalloy-env" in p for p in paths)

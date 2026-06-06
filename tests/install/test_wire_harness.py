@@ -23,6 +23,7 @@ from agentalloy.install.subcommands.wire_harness import (
     _detect_line_ending,
     _inject_sentinel_block,
 )
+from tests._wire_compat import wire_compat
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -36,20 +37,20 @@ def repo_root(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# wire_harness.wire_harness() deprecation
+# wire_harness() deprecation
 # ---------------------------------------------------------------------------
 
 
 class TestWireHarnessDeprecation:
-    """Verify wire_harness.wire_harness() emits DeprecationWarning."""
+    """Verify wire_harness() emits DeprecationWarning."""
 
     def test_wire_harness_emits_warning(self, repo_root: Path) -> None:
-        """Calling wire_harness.wire_harness() raises a DeprecationWarning."""
+        """Calling wire_harness() raises a DeprecationWarning."""
         with pytest.warns(DeprecationWarning, match="wire_harness\\(\\) is deprecated"):
             wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
 
     def test_wire_harness_still_works(self, repo_root: Path) -> None:
-        """wire_harness.wire_harness() still produces a valid result despite the warning."""
+        """wire_harness() still produces a valid result despite the warning."""
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
             result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
@@ -68,7 +69,7 @@ class TestWireHarnessDeprecation:
             wire_harness.wire_harness("claude-code", port=8000, root=repo_root, mcp_fallback=True)
 
     def test_wire_harness_multiple_warnings(self, repo_root: Path) -> None:
-        """Each call to wire_harness.wire_harness() emits exactly one DeprecationWarning."""
+        """Each call to wire_harness() emits exactly one DeprecationWarning."""
         with warnings.catch_warnings(record=True) as recorded:
             warnings.simplefilter("always")
             wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
@@ -296,7 +297,7 @@ class TestClaudeCode:
     """claude-code with legacy=True uses hooks-based wiring, not markdown injection."""
 
     def test_creates_hooks_config(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
         assert result["harness"] == "claude-code"
         assert result["integration_vector"] == "claude_code_hooks"
         assert len(result["files_written"]) >= 1
@@ -304,14 +305,14 @@ class TestClaudeCode:
         assert "claude-code-hooks.json" in hook_file
 
     def test_hooks_idempotent(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=True)
-        wire_harness.wire_harness("claude-code", port=9090, root=repo_root, legacy=True)
+        wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
+        wire_compat("claude-code", port=9090, root=repo_root, legacy=True)
         st = install_state.load_state(repo_root)
         # Should not duplicate entries
         assert len(st["harness_files_written"]) == 1
 
     def test_custom_port_hooks(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("claude-code", port=3000, root=repo_root, legacy=True)
+        result = wire_compat("claude-code", port=3000, root=repo_root, legacy=True)
         hook_file = result["files_written"][0]["path"]
         assert "claude-code-hooks.json" in hook_file
 
@@ -323,7 +324,7 @@ class TestClaudeCode:
 
 class TestHermesAgent:
     def test_user_scope_writes_soul_md(self, tmp_path: Path) -> None:
-        result = wire_harness.wire_harness(
+        result = wire_compat(
             "hermes-agent", port=8000, root=tmp_path, scope="user", legacy=True
         )
         assert result["integration_vector"] == "markdown_injection"
@@ -335,7 +336,7 @@ class TestHermesAgent:
         assert "/health" in content
 
     def test_repo_scope_writes_agents_md(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness(
+        result = wire_compat(
             "hermes-agent", port=8000, root=repo_root, scope="repo", legacy=True
         )
         assert result["integration_vector"] == "markdown_injection"
@@ -349,7 +350,7 @@ class TestHermesAgent:
         soul = tmp_path / ".hermes" / "SOUL.md"
         soul.parent.mkdir(parents=True)
         soul.write_text("# My persona\n\nBe terse.\n")
-        wire_harness.wire_harness(
+        wire_compat(
             "hermes-agent", port=8000, root=tmp_path, scope="user", legacy=True
         )
         content = soul.read_text()
@@ -365,7 +366,7 @@ class TestHermesAgent:
 
 class TestGeminiCli:
     def test_creates_gemini_md(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("gemini-cli", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         assert result["harness"] == "gemini-cli"
         gemini_md = repo_root / "GEMINI.md"
         assert gemini_md.exists()
@@ -383,7 +384,7 @@ class TestCursor:
     def test_modern_cursor_dir(self, repo_root: Path) -> None:
         """If .cursor/ exists, use .cursor/rules/agentalloy.mdc (dedicated)."""
         (repo_root / ".cursor").mkdir()
-        result = wire_harness.wire_harness("cursor", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("cursor", port=8000, root=repo_root, legacy=True)
         assert len(result["files_written"]) == 1
         mdc = repo_root / ".cursor" / "rules" / "agentalloy.mdc"
         assert mdc.exists()
@@ -396,7 +397,7 @@ class TestCursor:
 
     def test_legacy_cursorrules(self, repo_root: Path) -> None:
         """No .cursor/ → .cursorrules with sentinels."""
-        wire_harness.wire_harness("cursor", port=8000, root=repo_root, legacy=True)
+        wire_compat("cursor", port=8000, root=repo_root, legacy=True)
         cursorrules = repo_root / ".cursorrules"
         assert cursorrules.exists()
         content = cursorrules.read_text()
@@ -412,7 +413,7 @@ class TestWindsurf:
     def test_modern_windsurf_dir(self, repo_root: Path) -> None:
         """If .windsurf/ exists, use .windsurf/rules/agentalloy.md (dedicated)."""
         (repo_root / ".windsurf").mkdir()
-        result = wire_harness.wire_harness("windsurf", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("windsurf", port=8000, root=repo_root, legacy=True)
         assert len(result["files_written"]) == 1
         md = repo_root / ".windsurf" / "rules" / "agentalloy.md"
         assert md.exists()
@@ -425,7 +426,7 @@ class TestWindsurf:
 
     def test_legacy_windsurfrules(self, repo_root: Path) -> None:
         """No .windsurf/ → .windsurfrules with sentinels."""
-        wire_harness.wire_harness("windsurf", port=8000, root=repo_root, legacy=True)
+        wire_compat("windsurf", port=8000, root=repo_root, legacy=True)
         rules = repo_root / ".windsurfrules"
         assert rules.exists()
         content = rules.read_text()
@@ -440,7 +441,7 @@ class TestWindsurf:
 
 class TestGithubCopilot:
     def test_writes_copilot_instructions(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("github-copilot", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("github-copilot", port=8000, root=repo_root, legacy=True)
         assert result["integration_vector"] == "markdown_injection"
         path = repo_root / ".github" / "copilot-instructions.md"
         assert path.exists()
@@ -454,7 +455,7 @@ class TestGithubCopilot:
         gh_dir.mkdir()
         path = gh_dir / "copilot-instructions.md"
         path.write_text("# Project copilot rules\n\nUse TypeScript strict mode.\n")
-        wire_harness.wire_harness("github-copilot", port=8000, root=repo_root, legacy=True)
+        wire_compat("github-copilot", port=8000, root=repo_root, legacy=True)
         content = path.read_text()
         assert "Use TypeScript strict mode." in content
         assert SENTINEL_BEGIN in content
@@ -467,13 +468,13 @@ class TestGithubCopilot:
 
 class TestOpenHarnesses:
     def test_opencode(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("opencode", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("opencode", port=8000, root=repo_root, legacy=True)
         assert result["integration_vector"] == "system_prompt_snippet"
         path = repo_root / ".opencode" / "system-prompt.md"
         assert path.exists()
 
     def test_cline(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("cline", port=8000, root=repo_root, legacy=True)
+        wire_compat("cline", port=8000, root=repo_root, legacy=True)
         path = repo_root / ".clinerules"
         assert path.exists()
         content = path.read_text()
@@ -481,7 +482,7 @@ class TestOpenHarnesses:
 
     def test_cline_proxy(self, tmp_path: Path) -> None:
         """Proxy path writes .cline/settings.json with proxy API fields."""
-        result = wire_harness.wire_harness("cline", port=8000, root=tmp_path)
+        result = wire_compat("cline", port=8000, root=tmp_path)
         assert result["harness"] == "cline"
         assert result["integration_vector"] == "proxy"
         settings = tmp_path / ".cline" / "settings.json"
@@ -504,7 +505,7 @@ class TestOpenHarnesses:
         settings_dir.mkdir()
         (settings_dir / "settings.json").write_text(json.dumps(existing_settings, indent=2))
 
-        wire_harness.wire_harness("cline", port=9999, root=tmp_path)
+        wire_compat("cline", port=9999, root=tmp_path)
 
         config = json.loads((settings_dir / "settings.json").read_text())
 
@@ -519,7 +520,7 @@ class TestOpenHarnesses:
         assert config["someOtherSetting"] == "keep this"
 
     def test_aider(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("aider", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("aider", port=8000, root=repo_root, legacy=True)
         # Instructions file (dedicated)
         instructions = repo_root / ".agentalloy-aider-instructions.md"
         assert instructions.exists()
@@ -538,7 +539,7 @@ class TestOpenHarnesses:
 
 class TestContinue:
     def test_closed_creates_config(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness(
+        result = wire_compat(
             "continue-closed", port=8000, root=repo_root, legacy=True
         )
         assert result["harness"] == "continue-closed"
@@ -551,7 +552,7 @@ class TestContinue:
         assert "agentalloy:begin" in config["systemMessage"]
 
     def test_local_no_system_message(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("continue-local", port=8000, root=repo_root, legacy=True)
+        wire_compat("continue-local", port=8000, root=repo_root, legacy=True)
         config = json.loads((repo_root / ".continuerc.json").read_text())
         assert any(c["name"] == "skill" for c in config["customCommands"])
         assert "systemMessage" not in config
@@ -559,7 +560,7 @@ class TestContinue:
     def test_preserves_existing_config(self, repo_root: Path) -> None:
         existing = {"models": [{"title": "GPT-4"}], "customCommands": []}
         (repo_root / ".continuerc.json").write_text(json.dumps(existing))
-        wire_harness.wire_harness("continue-closed", port=8000, root=repo_root, legacy=True)
+        wire_compat("continue-closed", port=8000, root=repo_root, legacy=True)
         config = json.loads((repo_root / ".continuerc.json").read_text())
         assert config["models"] == [{"title": "GPT-4"}]
         assert any(c["name"] == "skill" for c in config["customCommands"])
@@ -576,7 +577,7 @@ class TestManual:
     ) -> None:
         # Block goes to stderr so stdout stays parseable as the result JSON.
         # The block is also returned in result["manual_block"].
-        result = wire_harness.wire_harness("manual", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("manual", port=8000, root=repo_root, legacy=True)
         assert result["files_written"] == []
         assert SENTINEL_BEGIN in result["manual_block"]
         assert "localhost:8000" in result["manual_block"]
@@ -592,14 +593,14 @@ class TestManual:
 
 class TestOutputSchema:
     def test_required_keys(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
+        result = wire_compat("claude-code", port=8000, root=repo_root)
         assert result["schema_version"] == 1
         assert "harness" in result
         assert "integration_vector" in result
         assert "files_written" in result
 
     def test_file_entry_shape(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
+        result = wire_compat("claude-code", port=8000, root=repo_root)
         entry = result["files_written"][0]
         assert "path" in entry
         assert "action" in entry
@@ -620,7 +621,7 @@ class TestState:
         # Schema v2: each harness_files_written entry carries its own
         # `harness` field (state may span multiple repos with different
         # harnesses wired). No top-level `harness` field exists.
-        wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
+        wire_compat("claude-code", port=8000, root=repo_root)
         st = install_state.load_state(repo_root)
         assert "harness" not in st
         assert st["harness_files_written"][0]["harness"] == "claude-code"
@@ -628,7 +629,7 @@ class TestState:
         assert install_state.is_step_completed(st, STEP_NAME)
 
     def test_records_files_written(self, repo_root: Path, mock_home: Path) -> None:
-        wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
+        wire_compat("claude-code", port=8000, root=repo_root)
         st = install_state.load_state(repo_root)
         assert len(st["harness_files_written"]) == 1  # env file only
         # Verify it wrote to the mocked home, not the real one
@@ -643,7 +644,7 @@ class TestState:
 class TestEdgeCases:
     def test_unknown_harness_exits(self, repo_root: Path) -> None:
         with pytest.raises(SystemExit):
-            wire_harness.wire_harness("nonexistent", root=repo_root)
+            wire_compat("nonexistent", root=repo_root)
 
     def test_all_valid_harnesses_accepted(self, repo_root: Path) -> None:
         """Smoke test: every registered harness produces a result without error.
@@ -662,9 +663,9 @@ class TestEdgeCases:
                 continue
             if harness == "mcp-only":
                 with pytest.raises(SystemExit):
-                    wire_harness.wire_harness(harness, port=8000, root=repo_root)
+                    wire_compat(harness, port=8000, root=repo_root)
                 continue
-            result = wire_harness.wire_harness(harness, port=8000, root=repo_root, legacy=True)
+            result = wire_compat(harness, port=8000, root=repo_root, legacy=True)
             assert result["harness"] == harness
 
 
@@ -675,13 +676,13 @@ class TestRewireMerge:
         from agentalloy.install.state import load_state
 
         # Wire gemini-cli first (uses markdown injection)
-        wire_harness.wire_harness("gemini-cli", port=8000, root=repo_root, legacy=True)
+        wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         st = load_state(repo_root)
         first_paths = {f["path"] for f in st["harness_files_written"]}
         assert any("GEMINI.md" in p for p in first_paths)
 
         # Now wire cursor — gemini-cli's GEMINI.md entry must remain
-        wire_harness.wire_harness("cursor", port=8000, root=repo_root, legacy=True)
+        wire_compat("cursor", port=8000, root=repo_root, legacy=True)
         st = load_state(repo_root)
         merged_paths = {f["path"] for f in st["harness_files_written"]}
         assert any("GEMINI.md" in p for p in merged_paths)
@@ -694,8 +695,8 @@ class TestRewireMerge:
         """Re-wiring the same harness must not duplicate the same path entry."""
         from agentalloy.install.state import load_state
 
-        wire_harness.wire_harness("gemini-cli", port=8000, root=repo_root, force=True, legacy=True)
-        wire_harness.wire_harness("gemini-cli", port=9000, root=repo_root, force=True, legacy=True)
+        wire_compat("gemini-cli", port=8000, root=repo_root, force=True, legacy=True)
+        wire_compat("gemini-cli", port=9000, root=repo_root, force=True, legacy=True)
         st = load_state(repo_root)
         paths = [f["path"] for f in st["harness_files_written"]]
         # No duplicates of the same path
@@ -716,7 +717,7 @@ class TestScopeFlag:
         # State directory also routes through HOME; force a fresh per-test state.
         monkeypatch.setenv("AGENTALLOY_STATE_DIR", str(fake_home / ".agentalloy"))
 
-        result = wire_harness.wire_harness("aider", port=8000, scope="user", legacy=True)
+        result = wire_compat("aider", port=8000, scope="user", legacy=True)
         for entry in result["files_written"]:
             assert str(fake_home) in entry["path"], entry
 
@@ -725,13 +726,13 @@ class TestScopeFlag:
     ) -> None:
         """scope='repo' falls back to the discovered repo root (cwd)."""
         monkeypatch.chdir(repo_root)
-        result = wire_harness.wire_harness("aider", port=8000, scope="repo", legacy=True)
+        result = wire_compat("aider", port=8000, scope="repo", legacy=True)
         for entry in result["files_written"]:
             assert str(repo_root) in entry["path"], entry
 
     def test_scope_invalid_raises(self) -> None:
         with pytest.raises(SystemExit):
-            wire_harness.wire_harness("aider", port=8000, scope="global")
+            wire_compat("aider", port=8000, scope="global")
 
 
 # ---------------------------------------------------------------------------
@@ -743,7 +744,7 @@ class TestAiderProxyWiring:
     """Proxy-mode wiring for aider writes .aider.conf.yml with proxy fields."""
 
     def test_writes_aider_conf_yml(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("aider", port=8000, root=repo_root)
+        result = wire_compat("aider", port=8000, root=repo_root)
         assert result["integration_vector"] == "proxy"
         conf = repo_root / ".aider.conf.yml"
         assert conf.exists()
@@ -757,7 +758,7 @@ class TestAiderProxyWiring:
 
     def test_merges_existing_aider_conf(self, repo_root: Path) -> None:
         (repo_root / ".aider.conf.yml").write_text("model: gpt-4\nread:\n  - my-docs.md\n")
-        wire_harness.wire_harness("aider", port=7777, root=repo_root)
+        wire_compat("aider", port=7777, root=repo_root)
         content = (repo_root / ".aider.conf.yml").read_text()
         # User settings preserved above sentinel
         assert "model: gpt-4" in content
@@ -767,8 +768,8 @@ class TestAiderProxyWiring:
         assert "# <!-- BEGIN agentalloy install -->" in content
 
     def test_idempotent_rewire(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("aider", port=8000, root=repo_root)
-        wire_harness.wire_harness("aider", port=9000, root=repo_root)
+        wire_compat("aider", port=8000, root=repo_root)
+        wire_compat("aider", port=9000, root=repo_root)
         content = (repo_root / ".aider.conf.yml").read_text()
         assert "localhost:9000" in content
         assert "localhost:8000" not in content
@@ -776,7 +777,7 @@ class TestAiderProxyWiring:
 
     def test_proxy_does_not_create_instructions_file(self, repo_root: Path) -> None:
         """Proxy mode writes .aider.conf.yml only, not the instructions file."""
-        wire_harness.wire_harness("aider", port=8000, root=repo_root)
+        wire_compat("aider", port=8000, root=repo_root)
         assert not (repo_root / ".agentalloy-aider-instructions.md").exists()
 
 
@@ -789,7 +790,7 @@ class TestOpenCodeProxyWiring:
     """Proxy-mode wiring for opencode writes env file + system prompt."""
 
     def test_writes_env_file(self, repo_root: Path) -> None:
-        result = wire_harness.wire_harness("opencode", port=8000, root=repo_root)
+        result = wire_compat("opencode", port=8000, root=repo_root)
         assert result["integration_vector"] == "proxy"
         env_path = repo_root / ".opencode" / ".agentalloy-env"
         assert env_path.exists()
@@ -798,7 +799,7 @@ class TestOpenCodeProxyWiring:
         assert "OPENAI_API_KEY" in content
 
     def test_writes_system_prompt(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("opencode", port=8000, root=repo_root)
+        wire_compat("opencode", port=8000, root=repo_root)
         prompt = repo_root / ".opencode" / "system-prompt.md"
         assert prompt.exists()
         content = prompt.read_text()
@@ -806,8 +807,8 @@ class TestOpenCodeProxyWiring:
         assert "localhost:8000" in content
 
     def test_idempotent_rewire(self, repo_root: Path) -> None:
-        wire_harness.wire_harness("opencode", port=8000, root=repo_root)
-        wire_harness.wire_harness("opencode", port=9000, root=repo_root)
+        wire_compat("opencode", port=8000, root=repo_root)
+        wire_compat("opencode", port=9000, root=repo_root)
         prompt = (repo_root / ".opencode" / "system-prompt.md").read_text()
         env = (repo_root / ".opencode" / ".agentalloy-env").read_text()
         assert "localhost:9000" in prompt
@@ -818,7 +819,7 @@ class TestOpenCodeProxyWiring:
     def test_prints_activation_guidance(
         self, repo_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        wire_harness.wire_harness("opencode", port=8000, root=repo_root)
+        wire_compat("opencode", port=8000, root=repo_root)
         captured = capsys.readouterr()
         assert "source" in captured.err
         assert ".agentalloy-env" in captured.err
@@ -843,7 +844,7 @@ class TestIntakeActivationMarkers:
     ]
 
     def test_hermes_agent_has_intake_markers(self, tmp_path: Path) -> None:
-        wire_harness.wire_harness(
+        wire_compat(
             "hermes-agent", port=8000, root=tmp_path, scope="user", legacy=True
         )
         content = (tmp_path / ".hermes" / "SOUL.md").read_text()
@@ -852,7 +853,7 @@ class TestIntakeActivationMarkers:
 
     def test_gemini_cli_has_intake_markers(self, repo_root: Path) -> None:
         """gemini-cli uses markdown injection (not hooks like claude-code)."""
-        wire_harness.wire_harness("gemini-cli", port=8000, root=repo_root, legacy=True)
+        wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         content = (repo_root / "GEMINI.md").read_text()
         for marker in self._INTAKE_MARKERS:
             assert marker in content, f"Missing marker: {marker}"
@@ -873,7 +874,7 @@ class TestIntakeActivationMarkers:
                 state_file.unlink()
             if harness in legacy_excluded:
                 continue
-            result = wire_harness.wire_harness(harness, port=8000, root=repo_root, legacy=True)
+            result = wire_compat(harness, port=8000, root=repo_root, legacy=True)
             for entry in result["files_written"]:
                 path = Path(entry["path"])
                 if path.exists() and path.suffix.lower() in instruction_extensions:
@@ -901,7 +902,7 @@ class TestMCPFallback:
         monkeypatch.setattr(Path, "home", lambda: fake_home)
         monkeypatch.setenv("AGENTALLOY_STATE_DIR", str(fake_home / ".agentalloy"))
 
-        result = wire_harness.wire_harness("claude-code", port=9999, mcp_fallback=True)
+        result = wire_compat("claude-code", port=9999, mcp_fallback=True)
         assert result["integration_vector"] == "mcp_server_config"
         assert result["harness"] == "claude-code"
 
@@ -914,7 +915,7 @@ class TestMCPFallback:
 
     def test_cursor_mcp_writes_repo_config(self, repo_root: Path) -> None:
         """cursor --mcp-fallback writes .cursor/mcp.json."""
-        result = wire_harness.wire_harness("cursor", port=8888, root=repo_root, mcp_fallback=True)
+        result = wire_compat("cursor", port=8888, root=repo_root, mcp_fallback=True)
         assert result["integration_vector"] == "mcp_server_config"
 
         mcp_config = repo_root / ".cursor" / "mcp.json"
@@ -926,7 +927,7 @@ class TestMCPFallback:
 
     def test_continue_closed_mcp_writes_continuerc(self, repo_root: Path) -> None:
         """continue-closed --mcp-fallback writes MCP entry to .continuerc.json."""
-        result = wire_harness.wire_harness(
+        result = wire_compat(
             "continue-closed", port=7777, root=repo_root, mcp_fallback=True
         )
         assert result["integration_vector"] == "mcp_server_config"
@@ -942,14 +943,14 @@ class TestMCPFallback:
 
     def test_continue_local_mcp_variant(self, repo_root: Path) -> None:
         """continue-local --mcp-fallback uses mcp-local variant marker."""
-        wire_harness.wire_harness("continue-local", port=7777, root=repo_root, mcp_fallback=True)
+        wire_compat("continue-local", port=7777, root=repo_root, mcp_fallback=True)
         config = json.loads((repo_root / ".continuerc.json").read_text())
         assert config["_agentalloy_install_marker"]["variant"] == "mcp-local"
 
     def test_unsupported_harness_raises(self, repo_root: Path) -> None:
         """--mcp-fallback on unsupported harness raises SystemExit(1)."""
         with pytest.raises(SystemExit, match=".*"):
-            wire_harness.wire_harness("hermes-agent", root=repo_root, mcp_fallback=True)
+            wire_compat("hermes-agent", root=repo_root, mcp_fallback=True)
 
     def test_preserves_existing_mcp_servers(self, repo_root: Path) -> None:
         """Existing MCP server entries survive re-wiring."""
@@ -958,7 +959,7 @@ class TestMCPFallback:
             "mcpServers": {"other-server": {"command": "other", "args": []}}
         }
         (repo_root / ".cursor" / "mcp.json").write_text(json.dumps(existing))
-        wire_harness.wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
+        wire_compat("cursor", port=8000, root=repo_root, mcp_fallback=True)
         config = json.loads((repo_root / ".cursor" / "mcp.json").read_text())
         assert "other-server" in config["mcpServers"]
         assert "agentalloy" in config["mcpServers"]
@@ -967,7 +968,7 @@ class TestMCPFallback:
         """MCP server entry uses sys.executable, not bare 'python'."""
         import sys
 
-        wire_harness.wire_harness("cursor", port=8000, root=repo_root, mcp_fallback=True)
+        wire_compat("cursor", port=8000, root=repo_root, mcp_fallback=True)
         config = json.loads((repo_root / ".cursor" / "mcp.json").read_text())
         entry = config["mcpServers"]["agentalloy"]
         assert entry["command"] == sys.executable
@@ -983,7 +984,7 @@ class TestProxyWiring:
 
     def test_continue_closed_proxy_writes_models(self, repo_root: Path) -> None:
         """continue-closed default wiring adds a proxy model to .continuerc.json."""
-        result = wire_harness.wire_harness("continue-closed", port=9999, root=repo_root)
+        result = wire_compat("continue-closed", port=9999, root=repo_root)
         assert result["integration_vector"] == "proxy"
         assert result["harness"] == "continue-closed"
 
@@ -1001,14 +1002,14 @@ class TestProxyWiring:
 
     def test_continue_local_proxy_variant(self, repo_root: Path) -> None:
         """continue-local default wiring uses proxy-local variant marker."""
-        wire_harness.wire_harness("continue-local", port=8888, root=repo_root)
+        wire_compat("continue-local", port=8888, root=repo_root)
         config = json.loads((repo_root / ".continuerc.json").read_text())
         assert config["_agentalloy_install_marker"]["variant"] == "proxy-local"
 
     def test_proxy_idempotent(self, repo_root: Path) -> None:
         """Re-wiring proxy removes old entry and adds new one."""
-        wire_harness.wire_harness("continue-closed", port=9999, root=repo_root)
-        wire_harness.wire_harness("continue-closed", port=7777, root=repo_root)
+        wire_compat("continue-closed", port=9999, root=repo_root)
+        wire_compat("continue-closed", port=7777, root=repo_root)
         config = json.loads((repo_root / ".continuerc.json").read_text())
         models = config.get("models", [])
         proxy_models = [m for m in models if m.get("agentalloy_proxy")]
@@ -1023,7 +1024,7 @@ class TestProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness.wire_harness("claude-code", port=5555, root=repo_root)
+        result = wire_compat("claude-code", port=5555, root=repo_root)
         assert result["integration_vector"] == "proxy"
 
         env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
@@ -1037,7 +1038,7 @@ class TestProxyWiring:
         self, repo_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """manual default wiring emits proxy instruction to stderr."""
-        result = wire_harness.wire_harness("manual", port=4444, root=repo_root)
+        result = wire_compat("manual", port=4444, root=repo_root)
         assert result["integration_vector"] == "proxy"
         assert result["files_written"] == []
         captured = capsys.readouterr()
@@ -1047,7 +1048,7 @@ class TestProxyWiring:
     def test_cursor_proxy_instruction(self, repo_root: Path) -> None:
         """cursor default wiring writes proxy instruction block."""
         (repo_root / ".cursor").mkdir()
-        result = wire_harness.wire_harness("cursor", port=6666, root=repo_root)
+        result = wire_compat("cursor", port=6666, root=repo_root)
         assert result["integration_vector"] == "proxy"
         mdc = repo_root / ".cursor" / "rules" / "agentalloy.mdc"
         assert mdc.exists()
@@ -1063,7 +1064,7 @@ class TestProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness.wire_harness("hermes-agent", port=3333, root=tmp_path, scope="user")
+        result = wire_compat("hermes-agent", port=3333, root=tmp_path, scope="user")
         assert result["integration_vector"] == "proxy"
         config = fake_home / ".hermes" / "config.yaml"
         assert config.exists()
@@ -1074,7 +1075,7 @@ class TestProxyWiring:
     def test_mcp_only_with_proxy_rejected(self, repo_root: Path) -> None:
         """mcp-only harness is rejected (blocked by top-level check)."""
         with pytest.raises(SystemExit):
-            wire_harness.wire_harness("mcp-only", port=8000, root=repo_root)
+            wire_compat("mcp-only", port=8000, root=repo_root)
 
 
 class TestLegacyFlag:
@@ -1083,7 +1084,7 @@ class TestLegacyFlag:
     def test_legacy_flag_uses_markdown_injection(self, repo_root: Path) -> None:
         """--legacy writes the markdown-injection block (gemini-cli, not claude-code)."""
         # claude-code legacy path uses hooks; gemini-cli uses markdown injection
-        result = wire_harness.wire_harness("gemini-cli", port=8000, root=repo_root, legacy=True)
+        result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         assert result["integration_vector"] == "markdown_injection"
         gemini_md = repo_root / "GEMINI.md"
         assert gemini_md.exists()
@@ -1093,17 +1094,17 @@ class TestLegacyFlag:
 
     def test_default_is_proxy_not_legacy(self, repo_root: Path) -> None:
         """Calling without --legacy uses proxy by default."""
-        result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root)
+        result = wire_compat("claude-code", port=8000, root=repo_root)
         assert result["integration_vector"] == "proxy"
 
     def test_legacy_false_is_proxy(self, repo_root: Path) -> None:
         """Explicitly passing legacy=False gives proxy wiring."""
-        result = wire_harness.wire_harness("claude-code", port=8000, root=repo_root, legacy=False)
+        result = wire_compat("claude-code", port=8000, root=repo_root, legacy=False)
         assert result["integration_vector"] == "proxy"
 
     def test_mcp_fallback_ignores_legacy(self, repo_root: Path) -> None:
         """--mcp-fallback takes precedence; legacy=True is ignored."""
-        result = wire_harness.wire_harness(
+        result = wire_compat(
             "claude-code", port=8000, root=repo_root, mcp_fallback=True, legacy=True
         )
         assert result["integration_vector"] == "mcp_server_config"

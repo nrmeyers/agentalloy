@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentalloy.install.subcommands.wire_harness import wire_harness
+from tests._wire_compat import wire_compat
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ class TestSidecarWatcherBehavior:
         with patch(
             "agentalloy.install.subcommands.wire_harness._wire_sidecar_watcher_config"
         ) as mock_sidecar:
-            wire_harness("aider", port=8000, root=repo_root)
+            wire_compat("aider", port=8000, root=repo_root)
             mock_sidecar.assert_not_called()
 
     def test_legacy_wiring_triggers_sidecar_watcher(self, repo_root: Path) -> None:
@@ -34,5 +34,5 @@ class TestSidecarWatcherBehavior:
         with patch(
             "agentalloy.install.subcommands.wire_harness._wire_sidecar_watcher_config"
         ) as mock_sidecar:
-            wire_harness("cursor", port=8000, root=repo_root, legacy=True)
+            wire_compat("cursor", port=8000, root=repo_root, legacy=True)
             mock_sidecar.assert_called_once_with("cursor", repo_root)

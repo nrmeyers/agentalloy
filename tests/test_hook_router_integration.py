@@ -523,11 +523,11 @@ class TestLegacyPathIntegration:
         self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch, reset_hook_cache
     ) -> None:
         """Legacy wiring for claude-code writes the hooks config."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness("claude-code", port=7070, root=tmp_path, legacy=True)
+        result = wire_compat("claude-code", port=7070, root=tmp_path, legacy=True)
 
         assert result["harness"] == "claude-code"
         assert result["integration_vector"] == "claude_code_hooks"
@@ -540,11 +540,11 @@ class TestLegacyPathIntegration:
         self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Legacy wiring for non-claude-code harnesses doesn't write hooks config."""
-        from agentalloy.install.subcommands.wire_harness import wire_harness
+        from tests._wire_compat import wire_compat
 
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness("aider", port=7070, root=tmp_path, legacy=True)
+        result = wire_compat("aider", port=7070, root=tmp_path, legacy=True)
 
         assert result["harness"] == "aider"
         hooks_path = fake_home / ".claude" / "claude-code-hooks.json"

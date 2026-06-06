@@ -276,7 +276,9 @@ class TestStreamAnthropicResponse:
             async for item in response.body_iterator:
                 collected.append(str(item))
 
-        asyncio.get_event_loop().run_until_complete(collect())
+        loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(collect())
 
         # Check that Anthropic SSE events are produced
         joined = "".join(collected)

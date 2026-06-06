@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, wire_harness
+from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN
+from tests._wire_compat import wire_compat
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ class TestHermesAgentProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness("hermes-agent", port=5555, root=tmp_path, scope="user")
+        result = wire_compat("hermes-agent", port=5555, root=tmp_path, scope="user")
         assert result["integration_vector"] == "proxy"
 
         config_path = fake_home / ".hermes" / "config.yaml"
@@ -44,7 +45,7 @@ class TestHermesAgentProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        wire_harness("hermes-agent", port=5555, root=tmp_path, scope="user")
+        wire_compat("hermes-agent", port=5555, root=tmp_path, scope="user")
         content = (fake_home / ".hermes" / "config.yaml").read_text()
         assert "# <!-- BEGIN agentalloy install -->" in content
         assert "# <!-- END agentalloy install -->" in content
@@ -55,8 +56,8 @@ class TestHermesAgentProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        wire_harness("hermes-agent", port=5555, root=tmp_path, scope="user")
-        wire_harness("hermes-agent", port=9999, root=tmp_path, scope="user")
+        wire_compat("hermes-agent", port=5555, root=tmp_path, scope="user")
+        wire_compat("hermes-agent", port=9999, root=tmp_path, scope="user")
         content = (fake_home / ".hermes" / "config.yaml").read_text()
         assert "localhost:9999" in content
         assert "localhost:5555" not in content
@@ -64,7 +65,7 @@ class TestHermesAgentProxyWiring:
 
     def test_repo_scope_writes_agents_md(self, repo_root: Path) -> None:
         """Repo scope writes proxy instruction block to AGENTS.md."""
-        result = wire_harness("hermes-agent", port=6666, root=repo_root, scope="repo")
+        result = wire_compat("hermes-agent", port=6666, root=repo_root, scope="repo")
         assert result["integration_vector"] == "proxy"
 
         agents_md = repo_root / "AGENTS.md"
@@ -77,7 +78,7 @@ class TestHermesAgentProxyWiring:
         """Repo scope appends to existing AGENTS.md without clobbering it."""
         agents_md = repo_root / "AGENTS.md"
         agents_md.write_text("# Existing agents guidance\n\nKeep this.\n")
-        wire_harness("hermes-agent", port=6666, root=repo_root, scope="repo")
+        wire_compat("hermes-agent", port=6666, root=repo_root, scope="repo")
         content = agents_md.read_text()
         assert "# Existing agents guidance" in content
         assert "Keep this." in content

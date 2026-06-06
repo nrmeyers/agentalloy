@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.install.subcommands.wire_harness import wire_harness
+from tests._wire_compat import wire_compat
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ class TestClaudeCodeProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        result = wire_harness("claude-code", port=7070, root=tmp_path)
+        result = wire_compat("claude-code", port=7070, root=tmp_path)
         assert result["integration_vector"] == "proxy"
         assert result["harness"] == "claude-code"
 
@@ -43,7 +43,7 @@ class TestClaudeCodeProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        wire_harness("claude-code", port=7070, root=tmp_path)
+        wire_compat("claude-code", port=7070, root=tmp_path)
         content = (fake_home / ".agentalloy" / "claude-code-env.sh").read_text()
         assert "# <!-- BEGIN agentalloy install -->" in content
         assert "# <!-- END agentalloy install -->" in content
@@ -56,8 +56,8 @@ class TestClaudeCodeProxyWiring:
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
-        wire_harness("claude-code", port=7070, root=tmp_path)
-        wire_harness("claude-code", port=8080, root=tmp_path)
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        wire_compat("claude-code", port=8080, root=tmp_path)
         content = (fake_home / ".agentalloy" / "claude-code-env.sh").read_text()
         assert "localhost:8080" in content
         assert "localhost:7070" not in content
