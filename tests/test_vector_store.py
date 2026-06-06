@@ -406,3 +406,85 @@ def test_rebuild_fts_reset_on_persistent_stopwords_error(tmp_path: Path) -> None
     # This should succeed (no error injected) — basic sanity check
     vs.rebuild_fts_index()
     conn.close()
+
+
+def test_rebuild_fts_catalog_reset_on_stopwords_persistence(tmp_path: Path) -> None:
+    """When checkpoint-based retries fail, rebuild_fts_index attempts a
+    full catalog reset (drop + close + reopen) before giving up.
+
+    This test patches duckdb.connect to return a connection whose execute
+    always raises a CatalogException, so both the initial FTS creation
+    AND the reset-path creation fail.  The reset path must close/reopen
+    the connection, which exercises the full reset logic.
+    """
+    import duckdb
+    from unittest.mock import MagicMock, patch
+    from agentalloy.storage import vector_store as vs_module
+
+    db_path = tmp_path / "fts_reset_mock.duck"
+    # Create a real DB with schema so the reset-path re-open doesn't fail
+    # on missing tables (the mock execute never reaches DuckDB).
+    conn = duckdb.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS fragment_embeddings (
+            fragment_id VARCHAR PRIMARY KEY,
+            embedding FLOAT[1024] NOT NULL,
+            skill_id VARCHAR NOT NULL,
+            category VARCHAR NOT NULL,
+            fragment_type VARCHAR NOT NULL,
+            embedded_at BIGINT NOT NULL,
+            embedding_model VARCHAR NOT NULL,
+            prose VARCHAR NOT NULL DEFAULT ''
+        );
+    """)
+    conn.close()
+
+    # Track how many times duckdb.connect is called
+    connect_calls: list[str] = []
+
+    def mock_connect(database: str, *args, **kwargs) -> MagicMock:  # type: ignore[no-untyped-def]
+        connect_calls.append(database)
+        mock_conn = MagicMock()
+
+        # The mock must fail on FTS creation/setup (so checkpoint retries
+        # and the reset path both fail), but succeed on drop/checkpoint
+        # so the reset path can actually reach duckdb.connect(db_path).
+        call_count = 0
+
+        def failing_execute(sql: str, *a, **kw) -> None:  # type: ignore[no-untyped-def]
+            nonlocal call_count
+            call_count += 1
+            if "create_fts_index" in sql or "INSTALL fts" in sql:
+                raise duckdb.CatalogException(
+                    'subject "stopwords" has been deleted.'
+                )
+
+        mock_conn.execute.side_effect = failing_execute
+        mock_conn.close.return_value = None
+        return mock_conn
+
+    # Patch at the module level so both the initial connect and the
+    # reset-path connect (duckdb.connect(db_path) on line 481 of
+    # vector_store.py) go through our mock.
+    with patch.object(vs_module.duckdb, 'connect', side_effect=mock_connect):
+        # Open via VectorStore — the real connect is never reached.
+        conn = duckdb.connect(str(db_path))
+        vs = VectorStore(conn, db_path=str(db_path))
+
+        # The rebuild should attempt checkpoint retries (3×), then the
+        # catalog-reset path, then raise the stopwords error.
+        with pytest.raises(
+            Exception,
+            match="stopwords",
+        ):
+            vs.rebuild_fts_index()
+
+        # Verify that duckdb.connect was called at least twice:
+        # once during VectorStore.__init__ (open_or_create) and once
+        # during the reset path.
+        assert len(connect_calls) >= 2, (
+            f"Expected duckdb.connect to be called at least twice "
+            f"(initial + reset), but was called {len(connect_calls)} times"
+        )
+
+        conn.close()

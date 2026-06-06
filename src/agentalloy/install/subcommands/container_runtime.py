@@ -464,8 +464,8 @@ def _build_entrypoint_script(packs: str) -> str:
             ]
         )
     else:
-        lines.append('        echo ">> Installing always-on packs..."')
-        lines.append("        uv run agentalloy install-packs --non-interactive --no-restart")
+        lines.append('    echo ">> Installing always-on packs..."')
+        lines.append('    uv run agentalloy install-packs --non-interactive --no-restart')
 
     lines.extend(
         [

@@ -1749,6 +1749,12 @@ class TestEdgeCases:
                 f"bash -n failed: {result.stderr.decode(errors='replace')}"
             )
 
+    def test_ec9_packs_with_shell_metacharacters_are_quoted(self) -> None:
+        """EC-9: Pack names containing shell metacharacters are shell-quoted."""
+        script = _build_entrypoint_script("core,my-pack,test!@#")
+        # shlex.quote only quotes strings that contain metacharacters
+        assert "PACK_LIST=(core my-pack 'test!@#')" in script
+
 
 # ---------------------------------------------------------------------------
 # T8 — Backward Compatibility Tests (BC-1 through BC-4)

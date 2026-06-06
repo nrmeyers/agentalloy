@@ -484,9 +484,12 @@ class VectorStore:
                 # Retry creation with the fresh catalog.
                 _try_create()
                 return
-            except Exception:  # noqa: BLE001
+            except Exception as reset_exc:  # noqa: BLE001
                 # If even the catalog reset failed, raise the last checkpoint-based error.
-                pass
+                # Preserve the reset failure as context so both errors are visible.
+                if last_exc is not None:
+                    raise last_exc from reset_exc
+                raise
 
         # All retries exhausted — raise the last transient error.
         assert last_exc is not None
