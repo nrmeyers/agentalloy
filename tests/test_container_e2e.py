@@ -272,7 +272,7 @@ def _run_container_flow_all_mocked(
 
 
 @pytest.mark.integration
-    class TestFullContainerSetup:
+class TestFullContainerSetup:
     """E2E-1: Full container setup with mocked runtime binary.
 
     Verifies that _run_container_flow returns 0 when every step succeeds,
@@ -427,7 +427,7 @@ def _run_container_flow_all_mocked(
 
 
 @pytest.mark.integration
-    class TestModelPullBootstrap:
+class TestModelPullBootstrap:
     """E2E-2: Container bootstrap pulls qwen3-embedding:0.6b model.
 
     Verifies that the entrypoint script is generated and passed to the
@@ -601,7 +601,7 @@ class TestBootstrapIdempotency:
 
 
 @pytest.mark.integration
-    class TestCrashRecovery:
+class TestCrashRecovery:
     """E2E-4: Container bootstrap crash recovery - re-runs migrations and install-packs.
 
     Verifies that when a step fails, the setup correctly reports the failure
