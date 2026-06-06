@@ -1835,12 +1835,18 @@ def run_setup(cfg: SetupConfig) -> int:
         # use legacy markdown-injection so we don't write a misleading
         # proxy-instruction.md file that claims traffic flows through the proxy.
         # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
+        # Claude Code on native: use per-turn hooks (not proxy).
+        # Proxy wiring is for container mode where Claude Code runs in a
+        # separate container and needs to route through the AgentAlloy proxy.
+        legacy = cfg.harness in PROXY_UNABLE_HARNESSES or (
+            cfg.harness == "claude-code" and cfg.deployment == "native"
+        )
         rc = wire_harness.run(
             _build_namespace(
                 cfg,
                 harness=cfg.harness,
                 force=False,
-                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
+                legacy=legacy,
             )
         )
         if rc not in (0, 4):
