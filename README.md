@@ -43,34 +43,17 @@ Things your agent gets composed-and-injected without you pasting them into the p
 
 ---
 
-## Contents
+## Quick Install
 
-- [Quickstart](#quickstart)
-- [Demo](#demo)
-- [What makes the composition different](#what-makes-the-composition-different)
-- [How it works: phases, contracts, signal layer](#how-it-works-phases-contracts-signal-layer)
-- [How to use it](#how-to-use-it)
-- [Container deployment](#container-deployment)
-- [Profiles](#profiles)
-- [Harness support](#harness-support)
-- [Standalone CLI](#standalone-cli)
-- [REST API](#rest-api)
-- [MCP Server](#mcp-server)
-- [Hardware presets](#hardware-presets)
-- [Packs shipping in-tree](#packs-shipping-in-tree)
-- [Architecture](#architecture)
-- [Telemetry](#telemetry)
-- [Configuration](#configuration)
-- [Development](#development)
-- [Contributing](#contributing)
-- [Benchmarks](#benchmarks)
-- [License](#license)
+Choose your path:
 
----
+| I want... | Run this |
+|---|---|
+| Full control, GPU acceleration, IDE integration | Native install (default) |
+| Zero host dependencies, air-gapped / offline | Container deployment |
+| Just try it out | [Run the demo](#demo) |
 
-## Quickstart
-
-**Note:** Windows is not currently supported.
+### Native install
 
 ```bash
 # Step 1: install uv (Linux / macOS)
@@ -85,27 +68,59 @@ agentalloy setup
 
 The setup wizard walks you through everything: hardware detection, runner selection (`ollama`, `lm-studio`, or `llama-server`), model and port, service mode, **skill pack selection** (with tier-grouped listing), IDE harness wiring, and hardware target. It then executes all install steps and validates the result. **3–5 minutes** on a warm machine.
 
-The pack selection screen groups packs by tier (Foundation, Languages, Frameworks, Tooling, etc.) and marks always-on packs. Select by pack name, tier name (e.g., `foundation`, `languages`), `all`, or leave blank for always-on packs only. You can always add more packs later with `agentalloy install-pack <name>`.
-
 Non-interactive / scripted installs: pass flags directly:
 
 ```bash
 agentalloy setup -n --runner ollama --hardware nvidia --packs all --harness cursor
 ```
 
-**Agent-driven install.** If you'd rather have your coding harness drive the install for you, clone the repo and tell it:
+### Container install
 
 ```bash
-git clone https://github.com/nrmeyers/agentalloy.git && cd agentalloy
-# then in your coding harness:
-> Install this tool by following INSTALL.md
+agentalloy setup --deployment container
 ```
 
-Works in any of the [supported harnesses](#harness-support).
-
-**Container alternative.** `agentalloy setup --deployment container` — runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Port 47950 is the only external surface. Container inference is CPU-only on every host; for GPU acceleration (NVIDIA/AMD/Metal) pick the native install instead.
+Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Port 47950 is the only external surface. Container inference is **CPU-only** on every host; for GPU acceleration (NVIDIA / AMD / Metal) pick the native install instead.
 
 > **Container install pulls a pre-built image from GHCR.** Setup pulls `ghcr.io/nrmeyers/agentalloy:latest` directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
+
+### Hardware presets
+
+The runtime needs only an embedding service. The install agent picks one for you, but here's the matrix:
+
+| Preset | Hardware | Backend | VRAM / RAM |
+|---|---|---|---|
+| `cpu` | x86_64 / ARM64 | Ollama (CPU) | 8 GB RAM |
+| `apple-silicon` | M1 / M2 / M3 / M4 | Ollama (Metal) | 8 GB unified |
+| `nvidia` | NVIDIA + CUDA | Ollama (CUDA) | 4 GB VRAM |
+| `radeon` | AMD Radeon dGPU/iGPU | LM Studio (Vulkan) | 4 GB VRAM |
+
+All presets use **`qwen3-embedding:0.6b`** at 1024 dimensions. Default ports per runner: Ollama `localhost:11434`, LM Studio `localhost:1234`, llama-server `localhost:11434`. The on-disk index is portable across backends — switching is an env-var flip.
+
+---
+
+## Contents
+
+- [Quick Install](#quick-install)
+- [Demo](#demo)
+- [What makes the composition different](#what-makes-the-composition-different)
+- [How it works: phases, contracts, signal layer](#how-it-works-phases-contracts-signal-layer)
+- [How to use it](#how-to-use-it)
+- [Container deployment](#container-deployment)
+- [Profiles](#profiles)
+- [Harness support](#harness-support)
+- [Standalone CLI](#standalone-cli)
+- [REST API](#rest-api)
+- [MCP Server](#mcp-server)
+- [Packs shipping in-tree](#packs-shipping-in-tree)
+- [Architecture](#architecture)
+- [Telemetry](#telemetry)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Need Help?](#need-help)
+- [Contributing](#contributing)
+- [Benchmarks](#benchmarks)
+- [License](#license)
 
 ---
 
@@ -201,6 +216,8 @@ Steps 2–7 are skipped on subsequent starts (idempotent bootstrap).
 
 ### Operational commands
 
+<details><summary>Click to expand — full operational command reference</summary>
+
 ```bash
 # Start the container (first-time setup)
 agentalloy setup --deployment container
@@ -240,6 +257,8 @@ podman exec agentalloy uv run agentalloy install-packs --packs all
 podman exec agentalloy uv run agentalloy install-packs --packs all --no-restart
 ```
 
+</details>
+
 ### Hardware requirements
 
 Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled Ollama runs on CPU using `qwen3-embedding:0.6b` — functional for embeddings but slower than GPU.
@@ -264,6 +283,8 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 ---
 
 ## How it works: phases, contracts, signal layer
+
+<details><summary>Click to expand — deep dive into the signal layer internals</summary>
 
 Three small artifacts on disk drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
 
@@ -332,6 +353,8 @@ phase transition          system skill fires
 ```
 
 Everything between the agent and the embed model is deterministic Python. Zero paid-LLM tokens spent on "where am I?", "what should I be doing?", or "should I call AgentAlloy now?"
+
+</details>
 
 ---
 
@@ -443,28 +466,6 @@ Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § 
 
 ---
 
-## Hardware presets
-
-The runtime needs only an embedding service. The install agent picks one for you, but here's the matrix:
-
-| Preset | Hardware | Backend | VRAM / RAM |
-|---|---|---|---|
-| `cpu` | x86_64 / ARM64 | Ollama (CPU) | 8 GB RAM |
-| `apple-silicon` | M1 / M2 / M3 / M4 | Ollama (Metal) | 8 GB unified |
-| `nvidia` | NVIDIA + CUDA | Ollama (CUDA) | 4 GB VRAM |
-| `radeon` | AMD Radeon dGPU/iGPU | LM Studio (Vulkan) | 4 GB VRAM |
-
-All presets use **`qwen3-embedding:0.6b`** at 1024 dimensions. Default ports per runner: Ollama `localhost:11434`, LM Studio `localhost:1234`, llama-server `localhost:11434`. The on-disk index is portable across backends — switching is an env-var flip.
-
-```bash
-# Ollama presets
-ollama pull qwen3-embedding:0.6b
-
-# Radeon: open LM Studio → search qwen3-embedding:0.6b → Q8 → start server
-```
-
----
-
 ## Packs shipping in-tree
 
 The corpus is **packs** — opt-in groups of related skills. `main` ships **35+ packs / 300+ declared skills** organized across 9 tiers:
@@ -534,6 +535,15 @@ uv run pytest -m integration     # integration — requires Ollama with qwen3-em
 ```
 
 Tests live under `tests/` and cover the install pipeline (`tests/install/`), retrieval, composition, applicability filtering, telemetry, and the harness-wiring catalog.
+
+---
+
+## Need Help?
+
+- [Installation guide](docs/install/) — step-by-step setup for each harness
+- [Operator guide](docs/operator.md) — CLI reference, service management
+- [Troubleshooting](docs/troubleshooting.md) — common errors and fixes
+- [Discussions](https://github.com/nrmeyers/agentalloy/discussions) — ask questions, share setups
 
 ---
 
