@@ -30,44 +30,14 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-def _make_compose_file(tmp_path: Path) -> Path:
-    """Create a minimal compose.yaml so _has_assets returns True."""
-    compose = tmp_path / "compose.yaml"
-    compose.write_text(
-        "version: '3'\n"
-        "services:\n"
-        "  agentalloy:\n"
-        "    image: agentalloy:local\n"
-        "    ports:\n"
-        "      - '47950:47950'\n"
-    )
-    return compose
-
-
-def _make_containerfile(tmp_path: Path) -> Path:
-    """Create a minimal Containerfile so _has_assets returns True."""
-    cf = tmp_path / "Containerfile"
-    cf.write_text("FROM python:3.12\n")
-    return cf
-
-
-def _inject_preflight_mocks():
-    """Inject mock versions of container_runtime functions into the
-    preflight module (kept for backward compat with tests that still use it).
-    """
-    pass
-
-
-def _run_with_all_patches(tmp_path: Path, tmp_compose: Path, extra_patches=None):
+def _run_with_all_patches(tmp_path: Path, extra_patches=None):
     """Helper to run _run_container_flow with all necessary patches applied.
 
     Uses contextlib.ExitStack to avoid Python's AST nested block limit.
 
-    The new single-container flow uses container_runtime functions:
+    The single-container flow uses container_runtime functions:
     _pull_image, _ensure_volume, _run_container, _wait_for_readiness,
-    _generate_entrypoint, _cleanup_temp_entrypoint. (The legacy
-    ``_wait_for_health`` was dead code and was removed alongside the
-    fast-start redesign.)
+    _generate_entrypoint, _cleanup_temp_entrypoint.
     """
     patches = [
         patch(
@@ -148,13 +118,7 @@ class TestFullContainerFlow:
         dependencies to mock individually. The mock verifies the function
         is called with the correct config parameters.
         """
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
-
-            _inject_preflight_mocks()
-
+        with tempfile.TemporaryDirectory():
             # Track calls to _run_container_flow
             call_args = []
 
@@ -296,8 +260,6 @@ class TestPullFailureExitCode:
         """When image pull fails, exit code is 1."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            compose_file = _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             extra = [
                 patch(
@@ -306,7 +268,7 @@ class TestPullFailureExitCode:
                 ),
             ]
 
-            rc = _run_with_all_patches(tmp_path, compose_file, extra_patches=extra)
+            rc = _run_with_all_patches(tmp_path, extra_patches=extra)
 
             assert rc == 1, f"Expected exit code 1, got {rc}"
 
@@ -323,8 +285,6 @@ class TestContainerStartFailure:
         """When container start fails, state is NOT saved to disk."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            compose_file = _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
             state_saved = [False]
 
             def fake_save_state(st):
@@ -338,7 +298,7 @@ class TestContainerStartFailure:
                 ),
             ]
 
-            rc = _run_with_all_patches(tmp_path, compose_file, extra_patches=extra)
+            rc = _run_with_all_patches(tmp_path, extra_patches=extra)
 
             assert rc == 1, f"Expected exit code 1, got {rc}"
             assert not state_saved[0], "State should NOT be saved when container start fails"
@@ -356,8 +316,6 @@ class TestHealthCheckTimeout:
         """When health check times out, a warning is printed but flow continues."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            compose_file = _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
             captured_prints = []
 
             def capture_print(*args, **kwargs):
@@ -387,7 +345,7 @@ class TestHealthCheckTimeout:
                 patch("time.monotonic", side_effect=fake_monotonic),
             ]
 
-            _run_with_all_patches(tmp_path, compose_file, extra_patches=extra)
+            _run_with_all_patches(tmp_path, extra_patches=extra)
 
             # The new fast-start design uses "Service not ready" / "readiness".
             assert any(
@@ -416,8 +374,6 @@ class TestStateRecording:
             def fake_save_state(st):
                 saved_state.clear()
                 saved_state.update(st)
-
-            _inject_preflight_mocks()
 
             def mock_run_container_flow(cfg, t0):
                 cfg.runtime_binary = "podman"
