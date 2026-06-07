@@ -202,13 +202,13 @@ class TestImagePullFailure:
         """When pulling the GHCR image fails, exit code is 1 and
         remediation guidance (network / --image-path) is printed."""
         import tempfile
-        
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             # Create compose.yaml and Containerfile so _has_assets returns True
             (tmp_path / "compose.yaml").write_text("version: '3'\nservices: {}\n")
             (tmp_path / "Containerfile").write_text("FROM ubuntu\n")
-            
+
             with (
                 patch(
                     "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
@@ -244,7 +244,8 @@ class TestImagePullFailure:
                         return_value=125,
                     ),
                     patch(
-                        "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+                        "agentalloy.install.subcommands.simple_setup._print",
+                        side_effect=capture_print,
                     ),
                 ):
                     rc = _run_container_flow(cfg, 0.0)
@@ -254,7 +255,6 @@ class TestImagePullFailure:
                 assert "image" in output.lower() or "pull" in output.lower(), (
                     f"Expected pull failure message in output: {output}"
                 )
-
 
 
 class TestPullFailureExitCode:

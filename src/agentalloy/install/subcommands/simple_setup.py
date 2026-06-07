@@ -972,12 +972,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 2. Detect container runtime (standalone, before image selection)
     from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415
-        _pull_image,
         _cleanup_temp_entrypoint,
         _detect_runtime_binary,
         _ensure_ollama_dir,
         _ensure_volume,
         _generate_entrypoint,
+        _pull_image,
         _run_container,
         _wait_for_readiness,
     )
@@ -1156,7 +1156,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("  [dim]-> Preflight (container)[/dim]")
     container_preflight = preflight.run_preflight(
         phase="container",
-        build_context=str(compose_path.parent),
+
         runtime=cfg.runtime_binary,
     )
     container_fatal = [
@@ -1674,7 +1674,9 @@ def run_setup(cfg: SetupConfig) -> int:
     if not cfg.non_interactive and cfg.harness not in PROXY_UNABLE_HARNESSES:
         _prompt_upstream(cfg)
     elif not cfg.non_interactive:
-        _print(f"  [dim]Harness '{cfg.harness}' is sidecar-only (no proxy wiring). Skipping upstream LLM prompt.[/dim]")
+        _print(
+            f"  [dim]Harness '{cfg.harness}' is sidecar-only (no proxy wiring). Skipping upstream LLM prompt.[/dim]"
+        )
     # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
     # (which may be pre-set by the caller). We don't require them to be set — the proxy
     # can be configured later via env vars.
