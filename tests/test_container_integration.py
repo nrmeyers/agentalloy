@@ -266,11 +266,14 @@ class TestImagePullFailure:
                 captured.append(" ".join(str(a) for a in args))
 
             # Patch _pull_image to simulate a failure (exit 125)
-            with patch(
-                "agentalloy.install.subcommands.container_runtime._pull_image",
-                return_value=125,
-            ), patch(
-                "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+            with (
+                patch(
+                    "agentalloy.install.subcommands.container_runtime._pull_image",
+                    return_value=125,
+                ),
+                patch(
+                    "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+                ),
             ):
                 rc = _run_container_flow(cfg, 0.0)
 
