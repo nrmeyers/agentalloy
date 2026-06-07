@@ -91,3 +91,9 @@ experiments/
 .cgr-stat-cache.json
 memory/
 .claude/settings.local.json
+
+# SDD workflow internal artifacts (specs, designs, test plans, reviews)
+docs/specs/
+docs/design/
+docs/tests/
+docs/reviews/
