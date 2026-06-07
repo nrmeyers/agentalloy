@@ -1308,12 +1308,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 10. Wait for container readiness (fast-start uvicorn serves /readiness
     # while pack ingest runs in the background). Timeout tiers:
-    #   - always-on only (empty cfg.packs)  → 600s  (model pull + 4 always-on packs)
+    #   - always-on only (empty cfg.packs)  → 900s  (model pull + 5 always-on packs)
     #   - explicit pack subset (1-7 packs)   → 900s  (model pull + pack ingest)
     #   - all packs (8+ packs)                → 1800s (model pull + full ingest)
     pack_count = len([p for p in (cfg.packs or "").split(",") if p.strip()])
     if pack_count == 0:
-        readiness_timeout = 600
+        readiness_timeout = 900
     elif pack_count >= 8:
         readiness_timeout = 1800
     else:

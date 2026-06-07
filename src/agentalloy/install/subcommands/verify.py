@@ -218,12 +218,19 @@ def _check_embedding_1024_dim(embed_url: str, model: str) -> dict[str, Any]:
         }
 
 
-def _check_duckdb_present(duck_path: str, diag: dict[str, Any] | None = None) -> dict[str, Any]:
+def _check_duckdb_present(
+    duck_path: str,
+    diag: dict[str, Any] | None = None,
+    is_container: bool = False,
+) -> dict[str, Any]:
     """Check 3: DuckDB file exists with fragment rows.
 
     When the service is running (``diag`` is non-None), defer to its
     telemetry-store readiness probe instead of opening the file directly —
     a concurrent open races the service for the file lock.
+
+    In container mode, direct file access is not available on the host;
+    the diagnostics endpoint is the only reliable source.
     """
     t0 = time.monotonic()
     if diag is not None:
@@ -243,6 +250,22 @@ def _check_duckdb_present(duck_path: str, diag: dict[str, Any] | None = None) ->
             "duration_ms": duration,
             "error": f"/diagnostics/runtime reports telemetry_store status={status!r}",
             "remediation": "Inspect server log; restart with `agentalloy server-restart`",
+        }
+    # Container fallback: direct file access not available on host
+    if is_container:
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "duckdb_present",
+            "passed": False,
+            "duration_ms": duration,
+            "error": (
+                "Service not reachable on the runtime port; "
+                "cannot verify DuckDB without the diagnostics endpoint"
+            ),
+            "remediation": (
+                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "for startup errors. The service may still be bootstrapping."
+            ),
         }
     p = Path(duck_path)
     if not p.exists():
@@ -277,12 +300,19 @@ def _check_duckdb_present(duck_path: str, diag: dict[str, Any] | None = None) ->
         }
 
 
-def _check_ladybug_present(ladybug_path: str, diag: dict[str, Any] | None = None) -> dict[str, Any]:
+def _check_ladybug_present(
+    ladybug_path: str,
+    diag: dict[str, Any] | None = None,
+    is_container: bool = False,
+) -> dict[str, Any]:
     """Check 4: Kuzu directory exists with Skill nodes.
 
     When the service is running (``diag`` is non-None), defer to its
     runtime-store readiness probe — Kuzu holds an exclusive lock that
     blocks a second open from this process.
+
+    In container mode, direct file access is not available on the host;
+    the diagnostics endpoint is the only reliable source.
     """
     t0 = time.monotonic()
     if diag is not None:
@@ -306,6 +336,22 @@ def _check_ladybug_present(ladybug_path: str, diag: dict[str, Any] | None = None
             "duration_ms": duration,
             "error": f"/diagnostics/runtime reports runtime_store status={status!r}",
             "remediation": "Inspect server log; restart with `agentalloy server-restart`",
+        }
+    # Container fallback: direct file access not available on host
+    if is_container:
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "ladybug_present",
+            "passed": False,
+            "duration_ms": duration,
+            "error": (
+                "Service not reachable on the runtime port; "
+                "cannot verify Kuzu DB without the diagnostics endpoint"
+            ),
+            "remediation": (
+                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "for startup errors. The service may still be bootstrapping."
+            ),
         }
     p = Path(ladybug_path)
     if not p.exists():
@@ -343,11 +389,18 @@ def _check_ladybug_present(ladybug_path: str, diag: dict[str, Any] | None = None
         }
 
 
-def _check_skill_count(ladybug_path: str, diag: dict[str, Any] | None = None) -> dict[str, Any]:
+def _check_skill_count(
+    ladybug_path: str,
+    diag: dict[str, Any] | None = None,
+    is_container: bool = False,
+) -> dict[str, Any]:
     """Check 5: Skill count >= MIN_SKILL_COUNT.
 
     When the service is running, count active skills via
     /diagnostics/runtime; otherwise fall back to a direct Kuzu read.
+
+    In container mode, direct file access is not available on the host;
+    the diagnostics endpoint is the only reliable source.
     """
     t0 = time.monotonic()
     if diag is not None:
@@ -366,6 +419,22 @@ def _check_skill_count(ladybug_path: str, diag: dict[str, Any] | None = None) ->
             "duration_ms": duration,
             "error": f"{count} < {MIN_SKILL_COUNT} (via /diagnostics/runtime)",
             "remediation": "Corpus is incomplete. Run `python -m agentalloy.install install-packs`",
+        }
+    # Container fallback: direct file access not available on host
+    if is_container:
+        duration = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "skill_count_meets_minimum",
+            "passed": False,
+            "duration_ms": duration,
+            "error": (
+                "Service not reachable on the runtime port; "
+                "cannot count skills without the diagnostics endpoint"
+            ),
+            "remediation": (
+                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "for startup errors. The service may still be bootstrapping."
+            ),
         }
     try:
         import ladybug
@@ -706,9 +775,9 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
 
     checks = [
         *embed_checks,
-        _check_duckdb_present(duck_path, diag=diag),
-        _check_ladybug_present(ladybug_path, diag=diag),
-        _check_skill_count(ladybug_path, diag=diag),
+        _check_duckdb_present(duck_path, diag=diag, is_container=is_container),
+        _check_ladybug_present(ladybug_path, diag=diag, is_container=is_container),
+        _check_skill_count(ladybug_path, diag=diag, is_container=is_container),
         _check_harness_config_present(st),
         _check_harness_config_url(st),
         _check_port_available(port),

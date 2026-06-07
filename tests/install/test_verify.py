@@ -421,6 +421,48 @@ class TestDBChecksWithServiceUp:
 
 
 # ---------------------------------------------------------------------------
+# Container fallback: diag is None, is_container=True
+# ---------------------------------------------------------------------------
+
+
+class TestContainerFallback:
+    """When diag is None and is_container=True, the DB checks must
+    skip direct file access and return a clear service-unreachable error.
+
+    This covers the container deployment scenario where _probe_diagnostics()
+    fails (service unreachable from the host) and the fallback would
+    previously try to open DB files that only exist inside the container.
+    """
+
+    def test_duckdb_fallback_skips_file_access(self) -> None:
+        result = _check_duckdb_present("/nonexistent.duck", diag=None, is_container=True)
+        assert result["passed"] is False
+        assert "Service not reachable" in result["error"]
+        assert "diagnostics endpoint" in result["error"]
+        assert "container logs" in result["remediation"]
+
+    def test_ladybug_fallback_skips_file_access(self) -> None:
+        result = _check_ladybug_present("/nonexistent/ladybug", diag=None, is_container=True)
+        assert result["passed"] is False
+        assert "Service not reachable" in result["error"]
+        assert "Kuzu DB" in result["error"]
+        assert "container logs" in result["remediation"]
+
+    def test_skill_count_fallback_skips_file_access(self) -> None:
+        result = _check_skill_count("/nonexistent/ladybug", diag=None, is_container=True)
+        assert result["passed"] is False
+        assert "Service not reachable" in result["error"]
+        assert "count skills" in result["error"]
+        assert "container logs" in result["remediation"]
+
+    def test_non_container_fallback_still_tries_file(self, tmp_path: Path) -> None:
+        """Non-container mode with diag=None should still try direct file access."""
+        result = _check_duckdb_present("/nonexistent/path.duck", diag=None, is_container=False)
+        assert result["passed"] is False
+        assert "/nonexistent/path.duck not found" in result["error"]
+
+
+# ---------------------------------------------------------------------------
 # Full run_checks
 # ---------------------------------------------------------------------------
 

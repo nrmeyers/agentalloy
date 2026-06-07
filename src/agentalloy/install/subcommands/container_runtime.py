@@ -317,7 +317,7 @@ def _generate_entrypoint(packs: str) -> Path:
 
 
 def _build_entrypoint_script(packs: str) -> str:
-    """Build the entrypoint wrapper script (fast-start + checkpointed).
+    """Build the entrypoint wrapper script (checkpointed bootstrap + uvicorn).
 
     Compared to the original "bootstrap then exec uvicorn" pattern, this
     script:
@@ -327,17 +327,16 @@ def _build_entrypoint_script(packs: str) -> str:
        done. The host-side ``/readiness`` endpoint reads these markers.
     2. Detects a stale lock (>2 h) left by a previous crashed container,
        wipes lock + checkpoints, and starts fresh.
-    3. Starts ``uvicorn`` in the background **before** pack ingest so the
-       API serves ``/readiness`` (and ``/health``) while bootstrap is in
-       progress. The endpoint reports ``warming_up`` so callers don't
-       mistake "service up, packs not yet ingested" for "service healthy".
-    4. Iterates packs one-by-one, writes progress to ``.bootstrap-progress``
+    3. Iterates packs one-by-one, writes progress to ``.bootstrap-progress``
        (atomic temp + mv) before each pack, and appends a checkpoint line to
        ``.bootstrap-checkpoints`` after each pack succeeds.
-    5. On restart, parses the checkpoint file and skips packs already
+    4. On restart, parses the checkpoint file and skips packs already
        recorded — partial bootstrap crashes resume from where they left off.
        A corrupted checkpoint file is treated as "no checkpoints" so the
        script never fails closed on a malformed line.
+    5. Starts ``uvicorn`` **after** pack ingestion completes, avoiding the
+       Kuzu file-lock conflict that occurred when uvicorn opened Ladybug
+       before pack ingestion finished.
     """
     pack_list = [p for p in (packs or "").split(",") if p.strip()]
     has_packs = len(pack_list) > 0
@@ -435,14 +434,6 @@ def _build_entrypoint_script(packs: str) -> str:
         "# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------",
         "trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM",
         "",
-        "# --- Fast-start uvicorn -------------------------------------------",
-        "# Start uvicorn BEFORE pack ingest so /readiness is reachable while",
-        "# bootstrap is in progress. The endpoint reads .bootstrap-lock and",
-        '# .bootstrap-progress to report "warming_up" with current state.',
-        'echo ">> Starting uvicorn (fast-start)..."',
-        "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &",
-        "UVICORN_PID=$!",
-        "",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
     ]
 
@@ -494,6 +485,11 @@ def _build_entrypoint_script(packs: str) -> str:
             '    touch "$COMPLETE"',
             '    echo ">> Bootstrap complete"',
             "fi",
+            "",
+            "# Start uvicorn AFTER bootstrap completes to avoid Ladybug lock conflicts.",
+            'echo ">> Starting uvicorn..."',
+            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &",
+            "UVICORN_PID=$!",
             "",
             "# Block on uvicorn — its exit is the container's exit.",
             "wait $UVICORN_PID",
