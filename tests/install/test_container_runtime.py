@@ -99,7 +99,9 @@ class TestPullImage:
 
     def test_returns_nonzero_on_failure(self):
         """Returns non-zero exit code when the pull fails."""
-        exc = subprocess.CalledProcessError(1, ["podman", "pull", "ghcr.io/nrmeyers/agentalloy:latest"])
+        exc = subprocess.CalledProcessError(
+            1, ["podman", "pull", "ghcr.io/nrmeyers/agentalloy:latest"]
+        )
         exc.stderr = b"pull error"
 
         with patch("subprocess.run", side_effect=exc):
@@ -148,10 +150,10 @@ class TestOfflineLoad:
         tarball = tmp_path / "image.tar"
         tarball.write_bytes(b"fake-tarball")
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ghcr.io/nrmeyers/agentalloy:latest\n")
-            result = container_runtime._pull_image(
-                "podman", offline=True, tarball_path=tarball
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="ghcr.io/nrmeyers/agentalloy:latest\n"
             )
+            result = container_runtime._pull_image("podman", offline=True, tarball_path=tarball)
             assert result == 0
             # First call is podman load; verify the load command
             load_call = mock_run.call_args_list[0]
@@ -161,9 +163,7 @@ class TestOfflineLoad:
     def test_offline_missing_tarball(self, tmp_path: Path):
         """Returns 1 when tarball does not exist."""
         missing = tmp_path / "nonexistent.tar"
-        result = container_runtime._pull_image(
-            "podman", offline=True, tarball_path=missing
-        )
+        result = container_runtime._pull_image("podman", offline=True, tarball_path=missing)
         assert result == 1
 
     def test_offline_load_failure(self, tmp_path: Path):
@@ -173,19 +173,17 @@ class TestOfflineLoad:
         exc = subprocess.CalledProcessError(1, ["podman", "load"])
         exc.stderr = b"invalid image format"
         with patch("subprocess.run", side_effect=exc):
-            result = container_runtime._pull_image(
-                "podman", offline=True, tarball_path=tarball
-            )
+            result = container_runtime._pull_image("podman", offline=True, tarball_path=tarball)
             assert result == 1
 
     def test_offline_timeout(self, tmp_path: Path):
         """Returns 1 on load timeout."""
         tarball = tmp_path / "image.tar"
         tarball.write_bytes(b"fake-tarball")
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["podman", "load"], 300)):
-            result = container_runtime._pull_image(
-                "podman", offline=True, tarball_path=tarball
-            )
+        with patch(
+            "subprocess.run", side_effect=subprocess.TimeoutExpired(["podman", "load"], 300)
+        ):
+            result = container_runtime._pull_image("podman", offline=True, tarball_path=tarball)
             assert result == 1
 
 
@@ -199,7 +197,12 @@ class TestPullImageFailureScenarios:
 
     def test_network_timeout(self):
         """Returns 1 when pull times out."""
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["podman", "pull", "ghcr.io/nrmeyers/agentalloy:latest"], 600)):
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(
+                ["podman", "pull", "ghcr.io/nrmeyers/agentalloy:latest"], 600
+            ),
+        ):
             result = container_runtime._pull_image("podman")
             assert result == 1
 
@@ -215,7 +218,9 @@ class TestPullImageFailureScenarios:
         """Uses custom image_ref when provided."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            container_runtime._pull_image("podman", image_ref="ghcr.io/nrmeyers/agentalloy@sha256:abc123")
+            container_runtime._pull_image(
+                "podman", image_ref="ghcr.io/nrmeyers/agentalloy@sha256:abc123"
+            )
             cmd = mock_run.call_args[0][0]
             assert cmd == ["podman", "pull", "ghcr.io/nrmeyers/agentalloy@sha256:abc123"]
 

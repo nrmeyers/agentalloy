@@ -610,7 +610,7 @@ def _check_disk_space(min_bytes: int = 2 * 1024**3) -> dict[str, Any]:
             started=t0,
             severity="fatal",
             error=f"Insufficient disk space: {available // (1024**2)}MB available, "
-                  f"{min_bytes // (1024**2)}MB required",
+            f"{min_bytes // (1024**2)}MB required",
             remediation="Free disk space or use --image-path with a smaller tarball.",
         )
     return _check(
@@ -713,6 +713,7 @@ def _check_volume_exists(runtime: str) -> dict[str, Any]:
         started=t0,
         detail="Volume 'agentalloy-data' does not exist yet (will be created during setup)",
     )
+
 
 # ---------------------------------------------------------------------------
 # Phase orchestration
@@ -892,7 +893,6 @@ def _run(args: argparse.Namespace) -> int:
         phase=args.phase,
         runner=args.runner,
         port=args.port,
-
         runtime=None,
     )
     install_state.save_output_file(result, f"preflight-{args.phase}.json")

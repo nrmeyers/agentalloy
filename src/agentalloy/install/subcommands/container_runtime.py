@@ -141,13 +141,17 @@ def _pull_image(
             return 0
         except subprocess.CalledProcessError as exc:
             _print(f"  [red]Failed to pull image (exit {exc.returncode})[/red]")
-            _print("  [dim]Remediation: Check network connectivity to ghcr.io, "
-                   "or use --image-path for offline mode.[/dim]")
+            _print(
+                "  [dim]Remediation: Check network connectivity to ghcr.io, "
+                "or use --image-path for offline mode.[/dim]"
+            )
             return exc.returncode
         except subprocess.TimeoutExpired:
             _print("  [red]Image pull timed out after 600s[/red]")
-            _print("  [dim]Remediation: Check network connectivity, "
-                   "or use --image-path for offline mode.[/dim]")
+            _print(
+                "  [dim]Remediation: Check network connectivity, "
+                "or use --image-path for offline mode.[/dim]"
+            )
             return 1
 
 

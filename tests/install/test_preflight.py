@@ -226,6 +226,8 @@ class TestCheckNameConflicts:
         with patch("subprocess.run", side_effect=run_side_effect):
             result = _check_name_conflicts("podman")
         assert result["passed"] is True
+
+
 class TestCheckVolumeExists:
     """_check_volume_exists() — existing volume detection."""
 
@@ -264,4 +266,3 @@ class TestCheckVolumeExists:
         with patch("subprocess.run", side_effect=run_side_effect):
             result = _check_volume_exists("podman")
         assert result["passed"] is True
-
