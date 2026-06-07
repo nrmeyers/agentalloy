@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -635,7 +634,6 @@ class TestPackDiscovery:
 
         # Also need detect.json
         import tempfile
-        import json
 
         tmpdir = tempfile.mkdtemp()
         detect_file = f"{tmpdir}/detect.json"

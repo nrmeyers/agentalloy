@@ -1024,7 +1024,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # 3. Pull or load image
     from pathlib import Path as _Path  # noqa: PLC0415
     if cfg.image_path:
-        _print("  [dim]-> Loading image from tarball: {}[/dim]".format(cfg.image_path))
+        _print(f"  [dim]-> Loading image from tarball: {cfg.image_path}[/dim]")
         pull_rc = _pull_image(
             binary_path,
             offline=True,
