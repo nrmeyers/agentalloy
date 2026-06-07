@@ -79,9 +79,10 @@ class SetupConfig:
 
     # Container runtime fields (used when deployment="container")
     runtime_binary: str = ""  # resolved path to container runtime (podman/docker)
-    image_tag: str = "agentalloy:local"  # container image tag
+    image_tag: str = "ghcr.io/nrmeyers/agentalloy:latest"  # container image tag for GHCR
     container_name: str = "agentalloy"  # base name for containers
     data_volume: str = "agentalloy-data"  # named volume for persistent data
+    image_path: str = ""  # path to image tarball for offline mode
 
     # Upstream LLM (proxy target)
     upstream_url: str = ""
@@ -972,12 +973,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 2. Detect container runtime (standalone, before image selection)
     from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415
-        _build_image,
         _cleanup_temp_entrypoint,
         _detect_runtime_binary,
         _ensure_ollama_dir,
         _ensure_volume,
         _generate_entrypoint,
+        _pull_image,
         _run_container,
         _wait_for_readiness,
     )
@@ -1020,293 +1021,41 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print("[yellow]Setup cancelled.[/yellow]")
             return 1
 
-    # 3. Select compose file
-    # The Containerfile build context needs the full repo (pyproject.toml,
-    # uv.lock, src/, data/), so container deployment requires a checkout on
-    # disk. Search order:
-    #   1. cwd (user ran setup from inside the clone)
-    #   2. parents[4] of __file__ (editable install — points at repo root)
-    #   3. fall back to cloning into ~/.cache/agentalloy/repo so users who
-    #      installed via `uv tool install agentalloy` don't have to clone
-    #      manually. Pinned to `main` for now; revisit when we tag releases.
-    default_compose = "compose.yaml"
-
-    def _has_assets(d: Path) -> bool:
-        # Match _check_image_build_deps in preflight.py: Containerfile OR Dockerfile.
-        has_build_file = (d / "Containerfile").exists() or (d / "Dockerfile").exists()
-        return (d / default_compose).exists() and has_build_file
-
-    def _resolve_user_path(raw: str) -> Path:
-        """Accept either a directory (append default_compose) or a compose file path."""
-        p = Path(raw).expanduser().resolve()
-        if p.is_dir():
-            return p / default_compose
-        return p
-
-    def _ensure_cached_repo() -> Path | None:
-        """Clone (or refresh) the agentalloy repo into ~/.cache/agentalloy/repo.
-
-        Returns the cache dir on success, None on failure. Uses --depth=1 so the
-        clone is fast (~few MB). On refresh, hard-resets to origin/main so any
-        local edits or stale state in the cache don't break the build context.
-        """
-        cache_dir = Path.home() / ".cache" / "agentalloy" / "repo"
-        if shutil.which("git") is None:
-            _print(
-                "  [red]git not found on PATH — cannot clone the agentalloy repo "
-                "for the build context.[/red]"
-            )
-            return None
-        repo_url = "https://github.com/nrmeyers/agentalloy.git"
-        # If the cache dir exists but isn't a valid git checkout (no .git/
-        # — possibly a partial clone, leftover files, or a manually-placed
-        # directory), `git clone <url> <dest>` would fail with "destination
-        # path already exists and is not an empty directory". Nuke it so
-        # the clone branch below can recreate cleanly.
-        if cache_dir.exists() and not (cache_dir / ".git").exists():
-            _print(
-                f"  [yellow]-> Cache dir {cache_dir} exists but isn't a git "
-                "checkout; recreating.[/yellow]"
-            )
-            try:
-                shutil.rmtree(cache_dir)
-            except OSError as exc:
-                _print(f"  [red]Could not remove stale cache dir: {exc}[/red]")
-                return None
-        try:
-            if (cache_dir / ".git").exists():
-                _print(f"  [dim]-> Refreshing cached repo at {cache_dir}[/dim]")
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "fetch", "--depth=1", "origin", "main"],
-                    check=True,
-                    timeout=120,
-                )
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "reset", "--hard", "origin/main"],
-                    check=True,
-                    timeout=60,
-                )
-            else:
-                cache_dir.parent.mkdir(parents=True, exist_ok=True)
-                _print(f"  [dim]-> Cloning {repo_url} into {cache_dir}[/dim]")
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "--depth=1",
-                        "--branch=main",
-                        repo_url,
-                        str(cache_dir),
-                    ],
-                    check=True,
-                    timeout=180,
-                )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            _print(f"  [red]git clone/fetch failed: {exc}[/red]")
-            return None
-        if not _has_assets(cache_dir):
-            _print(
-                f"  [red]Cached repo at {cache_dir} is missing {default_compose} "
-                "or Containerfile after clone.[/red]"
-            )
-            return None
-        return cache_dir
-
-    candidates = [Path.cwd(), Path(__file__).resolve().parents[4]]
-    compose_path: Path | None = None
-    for cand in candidates:
-        if _has_assets(cand):
-            compose_path = cand / default_compose
-            break
-
-    if compose_path is None:
-        cached = _ensure_cached_repo()
-        if cached is not None:
-            compose_path = cached / default_compose
-
-    if compose_path is None:
-        if cfg.non_interactive:
-            _print(
-                "  [red]Could not locate or fetch the agentalloy repo.[/red]\n"
-                f"  Looked for {default_compose} + (Containerfile or Dockerfile) in:\n"
-                + "\n".join(f"    - {c}" for c in candidates)
-                + "\n  Auto-clone fallback also failed (see error above).\n"
-                "  Container deployment requires a checkout (the build context\n"
-                "  needs pyproject.toml, src/, data/). Either:\n"
-                "    a) cd into your agentalloy clone and re-run setup, or\n"
-                "    b) install editably: `git clone … && cd agentalloy && \n"
-                "       uv tool install --editable .`"
-            )
-            return 1
-        _print(
-            "  [yellow]Could not auto-locate or fetch the agentalloy repo.[/yellow] "
-            "Enter the\n"
-            "  path to your agentalloy clone (or directly to a compose YAML):"
+    # 3. Pull or load image
+    from pathlib import Path as _Path  # noqa: PLC0415
+    if cfg.image_path:
+        _print("  [dim]-> Loading image from tarball: {}[/dim]".format(cfg.image_path))
+        pull_rc = _pull_image(
+            binary_path,
+            offline=True,
+            tarball_path=_Path(cfg.image_path),
         )
-        custom = input("  ").strip()
-        compose_path = _resolve_user_path(custom)
-    elif not cfg.non_interactive:
-        _print(f"\n  Detected compose file: {compose_path} — correct? [Y/n]")
-        ans = input("  ").strip().lower()
-        if ans in ("n", "no"):
-            custom = input("  Enter compose file path (or repo dir): ").strip()
-            compose_path = _resolve_user_path(custom)
-    cfg.image_tag = "agentalloy:local"
+    else:
+        _print("  [dim]-> Pulling pre-built image from GHCR[/dim]")
+        pull_rc = _pull_image(binary_path)
+    if pull_rc != 0:
+        _print("  [red]Failed to pull image. Check your network connection and try again.[/red]")
+        return pull_rc
 
-    # 4. Run container preflight
-    _print("  [dim]-> Preflight (container)[/dim]")
-    container_preflight = preflight.run_preflight(
-        phase="container",
-        build_context=str(compose_path.parent),
-        runtime=cfg.runtime_binary,
-    )
-    container_fatal = [
-        c["name"]
-        for c in container_preflight.get("checks", [])
-        if not c["passed"] and c.get("severity") == "fatal"
-    ]
-    if container_fatal:
-        _print("  [red]Container preflight failed:[/red]")
-        for name in container_fatal:
-            check = next(c for c in container_preflight["checks"] if c["name"] == name)
-            _print(f"    - {name}: {check.get('error', 'unknown')}")
-            if check.get("remediation"):
-                _print(f"      FIX: {check['remediation']}")
-        _print("  [red]Fix the issues above and re-run setup.[/red]")
-        return 1
-    _print("  [green]  Preflight (container) passed.[/green]")
-
-    # 5. Set fixed values (container mode overrides)
-    cfg.runner = "ollama"
-    cfg.port = 47950
-    cfg.mode = "manual"
-    cfg.harness = "manual"
-    cfg.deployment = "container"
-
-    # 5b. Skill pack selection. Mirrors the native flow at step 6
-    # (simple_setup.py:1696). Done here — after all preflight, before
-    # any compose work — so a Ctrl-C costs nothing and the chosen packs
-    # show up in the review summary below. Selection is threaded into
-    # the one-shot install-packs container at step 8b via --packs.
-    if not cfg.non_interactive and not cfg.packs:
-        cfg.packs = _prompt_for_packs()
-    # Expand 'all' keyword to the full pack list before validation.
-    # Without this, 'all' is treated as an unknown pack name and silently
-    # stripped — the user gets "always-on only" instead of all packs.
-    if cfg.packs and cfg.packs.strip().lower() == "all":
-        _all_packs = _discover_packs()
-        cfg.packs = ",".join(sorted(_all_packs.keys()))
-        _print(f"  [dim]-> Resolved packs: {len(_all_packs)} packs[/dim]")
-    # Strip names that don't resolve against the host's seeds/packs dir.
-    # Host and image are built from the same tree, so this is a reliable
-    # pre-check that turns a typo into an immediate warning instead of a
-    # five-minute wait followed by install-packs exit 1.
-    if cfg.packs:
-        _available_packs = _discover_packs()
-        _requested = [p.strip() for p in cfg.packs.split(",") if p.strip()]
-        _unknown = [p for p in _requested if p not in _available_packs]
-        _valid = [p for p in _requested if p in _available_packs]
-        if _unknown:
-            _print(f"  [yellow]Unknown pack(s) skipped: {sorted(_unknown)}[/yellow]")
-        cfg.packs = ",".join(_valid)
-
-    # 6. Show summary
-    _print("\n[dim]" + "─" * 40)
-    _print("\n[bold]Review your container setup:[/bold]")
-    _print("  Deployment:   container")
-    _print(f"  Runtime:      {cfg.runtime_binary}")
-    _print(f"  Image:        {cfg.image_tag}")
-    _print(f"  Port:         {cfg.port}")
-    _print(f"  Packs:        {cfg.packs or '(always-on only)'}")
-
-    if not cfg.non_interactive:
-        confirm = input("  Confirm and continue? [Y/n]: ").strip().lower()
-        if confirm not in ("", "y", "yes"):
-            _print("[yellow]Setup cancelled.[/yellow]")
-            return 1
-    _print()
-
-    # 6.5. Check for stale containers from a prior project run. podman-compose
-    # papers over "name already in use" errors by silently `podman start`ing
-    # the existing container — which "succeeds" but the container immediately
-    # re-exits with its old exit code, and the wizard then bails with a
-    # confusing "init exited 1" message. Surface this up front and let the
-    # user remove them. We filter by the project label so we don't touch
-    # other agentalloy:local containers (e.g. from a parallel checkout).
-    existing = _list_project_containers(binary_path)
-    if existing:
-        _print("[bold]Existing AgentAlloy containers detected:[/bold]")
-        for name, status in existing:
-            _print(f"  - {name}  [dim]({status})[/dim]")
-        _print(
-            f"  [dim]{cfg.runtime_binary} will misbehave if these stay around "
-            "(name collisions, stale exit codes, dangling dependency graphs).[/dim]"
-        )
-        if cfg.non_interactive:
-            _print("  [dim]non-interactive: removing automatically[/dim]")
-            confirm_rm = "y"
-        else:
-            # Use _prompt() so non-TTY stdin (CI pipes, redirected input)
-            # falls back to the default ("Y") instead of EOFError'ing on
-            # raw input(). Defaulting to "yes" matches the [Y/n] UX shown.
-            confirm_rm = _prompt("  Remove them and continue?", default="Y").strip().lower()
-        if confirm_rm not in ("", "y", "yes"):
-            _print(
-                "[yellow]Setup cancelled. Remove the containers manually "
-                "or re-run setup and accept removal.[/yellow]"
-            )
-            return 1
-        if not _remove_containers(binary_path, [name for name, _ in existing]):
-            _print(
-                "  [red]Failed to remove one or more containers; see errors above. Aborting.[/red]"
-            )
-            return 1
-        _print("  [green]  Removed.[/green]\n")
-
-    # 7. Build the image, start the single agentalloy container, and wait
-    # for it to become healthy.  The entrypoint script handles the full
-    # bootstrap sequence internally (in order):
-    #
-    #   1. Run DB schema migrations  (agentalloy-init equivalent)
-    #   2. Start Ollama and wait for it to be healthy
-    #   3. Pull the embedding model  (ollama-pull equivalent)
-    #   4. Install skill packs       (if cfg.packs is non-empty)
-    #   5. Start uvicorn
-    #
-    # This replaces the old multi-container compose model
-    # (agentalloy-init, ollama, ollama-pull, agentalloy) with a single
-    # container.  The entrypoint script's sequential flow (set -e) ensures
-    # no race conditions between steps — migrations finish before ollama
-    # starts, ollama is healthy before the model is pulled, the model is
-    # cached before packs are installed, and uvicorn only starts after all
-    # bootstrap steps succeed.
-    log_path = _container_setup_log_path()
-    _print("[bold]Running container setup...[/bold]")
-    _print(f"  [dim]Full setup log: {log_path}[/dim]")
-
-    # 7a. Build the agentalloy image (or use existing).
-    _print("  [dim]-> Building container image (1-2 min)...[/dim]")
-    build_ctx = compose_path.parent  # build context is the compose file's dir
-    build_rc = _build_image(binary_path, build_ctx)
-    if build_rc != 0:
-        return build_rc
-
-    # 7b. Ensure the agentalloy-data volume exists.
+    # 4. Ensure data volume and ollama directory
+    _print("  [dim]-> Ensuring data volume[/dim]")
     _ensure_volume(binary_path)
-
-    # 7c. Ensure ~/.ollama exists on the host (bind-mounted into the container).
     _ensure_ollama_dir()
+    _print("  [green]  Volume and ollama directory ensured.[/green]")
 
-    # 7d. Generate the entrypoint script and start the container.
-    _print("  [dim]-> Starting agentalloy container (1-3 min)...[/dim]")
+    # 5. Generate entrypoint script
+    _print("  [dim]-> Generating entrypoint script[/dim]")
     entrypoint = _generate_entrypoint(cfg.packs)
-    rc = _run_container(binary_path, entrypoint, cfg.packs)
-    if rc != 0:
-        return rc
-    _cleanup_temp_entrypoint(entrypoint)
-    _print("  [green]  Done.[/green]")
 
-    # 10. Wait for container readiness (fast-start uvicorn serves /readiness
+    # 6. Run container
+    _print("  [dim]-> Starting container[/dim]")
+    run_rc = _run_container(binary_path, entrypoint, cfg.packs)
+    if run_rc != 0:
+        _print(f"  [red]Container failed to start (exit {run_rc})[/red]")
+        _cleanup_temp_entrypoint(entrypoint)
+        return run_rc
+
+    # 7. Wait for container readiness (fast-start uvicorn serves /readiness
     # while pack ingest runs in the background). Timeout tiers:
     #   - always-on only (empty cfg.packs)  → 600s  (model pull + 4 always-on packs)
     #   - explicit pack subset (1-7 packs)   → 900s  (model pull + pack ingest)
@@ -1361,7 +1110,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     else:
         _print("  [green]  Service ready.[/green]")
 
-    # 10. Record state + write .env (before verify so it reads fresh values)
+    # Record state + write .env (before verify so it reads fresh values)
     st = install_state.load_state()
     st["deployment"] = "container"
     st["runtime_binary"] = cfg.runtime_binary
@@ -1401,57 +1150,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         env_fp, f"RUNTIME_PORT={cfg.port}\n"
     )
 
-    # 11. Run verify
-    _print("  [dim]-> Verifying installation[/dim]")
-    rc = verify.run(_build_namespace(cfg))
-    if rc not in (0, 4):
-        _print("  [red]Validation failed.[/red]")
-        _report_verify_failures()
-        return rc
-    _print("  [green]  All checks passed.[/green]")
-
-    # 12. Wire harness
-    if not cfg.non_interactive:
-        cfg.harness = _prompt_harness()
-    else:
-        h = (cfg.harness or "manual").strip().lower()
-        if h == "continue":
-            h = "continue-closed"
-        cfg.harness = h
-
-    if cfg.harness and cfg.harness != "manual":
-        _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
-        # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
-        # use legacy markdown-injection so we don't write a misleading
-        # proxy-instruction.md file that claims traffic flows through the proxy.
-        # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
-        rc = wire_harness.run(
-            _build_namespace(
-                cfg,
-                harness=cfg.harness,
-                force=False,
-                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
-            )
-        )
-        if rc not in (0, 4):
-            _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
-            return rc
-        _print("  [green]  Done.[/green]")
-
-    # -- Done --
-    _print(
-        f"\n[green]  Container setup complete in {int((time.monotonic() - t0) * 1000)}ms[/green]\n"
-    )
-    _print(f"  URL:      http://localhost:{cfg.port}")
-    _print(f"  Runtime:  {cfg.runtime_binary}")
-    _print(f"  Image:    {cfg.image_tag}")
-    _print(f"  Container: {cfg.container_name}")
-    _print(f"  Volume:   {cfg.data_volume}")
-
-    _print(f"\n  [bold]Logs:[/bold] {cfg.runtime_binary} logs {cfg.container_name}")
-    _print(f"\n  [bold]Stop:[/bold] {cfg.runtime_binary} stop {cfg.container_name}")
     return 0
-
 
 def run_setup(cfg: SetupConfig) -> int:
     """Execute the simple interactive setup flow.
@@ -1981,6 +1680,11 @@ def add_parser(
         default=None,
         help="Deployment type (default: native for non-interactive, prompted interactively).",
     )
+    p.add_argument(
+        "--image-path",
+        default=None,
+        help="Path to a container image tarball for offline mode (podman save / docker save output).",
+    )
     p.set_defaults(func=_run_from_args)
 
 
@@ -1995,6 +1699,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         harness=args.harness or "manual",
         hardware_target=getattr(args, "hardware", None) or "",
         deployment=getattr(args, "deployment", None) or "",
+        image_path=args.image_path or "",
         non_interactive=args.non_interactive,
         force=getattr(args, "force", False),
         acknowledge_sidecar=getattr(args, "acknowledge_sidecar", False),

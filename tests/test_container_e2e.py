@@ -26,27 +26,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_compose_file(tmp_path: Path) -> Path:
-    """Create a minimal compose.yaml so _has_assets returns True."""
-    compose = tmp_path / "compose.yaml"
-    compose.write_text(
-        "version: '3'\n"
-        "services:\n"
-        "  agentalloy:\n"
-        "    image: agentalloy:local\n"
-        "    ports:\n"
-        "      - '47950:47950'\n"
-    )
-    return compose
-
-
-def _make_containerfile(tmp_path: Path) -> Path:
-    """Create a minimal Containerfile so _has_assets returns True."""
-    cf = tmp_path / "Containerfile"
-    cf.write_text("FROM python:3.12\n")
-    return cf
-
-
 def _inject_preflight_mocks():
     """Inject mock versions of preflight functions into the preflight module."""
     import agentalloy.install.subcommands.preflight as preflight
@@ -153,21 +132,21 @@ def _run_container_flow_all_mocked(
         Additional patch context managers to apply.
     mock_overrides : dict, optional
         Override shared mock behavior. Keys: "detect_runtime_binary",
-        "build_image", "ensure_volume", "run_container",
-        "generate_entrypoint", "cleanup_temp_entrypoint",
-        "ensure_ollama_dir", "urlopen", "monotonic". Values are the new
-        side_effect or return_value to set.
+        "pull_image", "run_container", "wait_for_readiness",
+        "urlopen", "monotonic". Values are the new side_effect or
+        return_value to set.
     """
     patches = _all_common_patches(tmp_path)
 
     # Create shared mock objects that tests can override
     mock_detect_runtime_binary = MagicMock(return_value="podman")
-    mock_build_image = MagicMock(return_value=0)
+    mock_pull_image = MagicMock(return_value=0)
     mock_ensure_volume = MagicMock()
     mock_run_container = MagicMock(return_value=0)
     mock_generate_entrypoint = MagicMock(return_value=Path("/tmp/entry.sh"))
     mock_cleanup_temp_entrypoint = MagicMock()
     mock_ensure_ollama_dir = MagicMock()
+    mock_wait_for_readiness = MagicMock(return_value=True)
     mock_urlopen = MagicMock(return_value=_make_urlopen_mock())
     mock_monotonic = MagicMock(return_value=0.0)
 
@@ -180,8 +159,8 @@ def _run_container_flow_all_mocked(
     )
     patches.append(
         patch(
-            "agentalloy.install.subcommands.container_runtime._build_image",
-            mock_build_image,
+            "agentalloy.install.subcommands.container_runtime._pull_image",
+            mock_pull_image,
         )
     )
     patches.append(
@@ -215,6 +194,15 @@ def _run_container_flow_all_mocked(
         )
     )
 
+    # Patch _wait_for_readiness at the container_runtime source module level
+    # since _run_container_flow imports it locally from there.
+    patches.append(
+        patch(
+            "agentalloy.install.subcommands.container_runtime._wait_for_readiness",
+            mock_wait_for_readiness,
+        )
+    )
+
     patches.append(patch("urllib.request.urlopen", mock_urlopen))
     patches.append(patch("time.monotonic", mock_monotonic))
 
@@ -228,18 +216,24 @@ def _run_container_flow_all_mocked(
                 mock_detect_runtime_binary.side_effect = val
             else:
                 mock_detect_runtime_binary.return_value = val
-        if "build_image" in mock_overrides:
-            val = mock_overrides["build_image"]
+        if "pull_image" in mock_overrides:
+            val = mock_overrides["pull_image"]
             if callable(val) or isinstance(val, BaseException):
-                mock_build_image.side_effect = val
+                mock_pull_image.side_effect = val
             else:
-                mock_build_image.return_value = val
+                mock_pull_image.return_value = val
         if "run_container" in mock_overrides:
             val = mock_overrides["run_container"]
             if callable(val) or isinstance(val, BaseException):
                 mock_run_container.side_effect = val
             else:
                 mock_run_container.return_value = val
+        if "wait_for_readiness" in mock_overrides:
+            val = mock_overrides["wait_for_readiness"]
+            if callable(val) or isinstance(val, BaseException):
+                mock_wait_for_readiness.side_effect = val
+            else:
+                mock_wait_for_readiness.return_value = val
         if "urlopen" in mock_overrides:
             mock_urlopen.side_effect = mock_overrides["urlopen"]
         if "monotonic" in mock_overrides:
@@ -285,8 +279,6 @@ class TestFullContainerSetup:
         """_run_container_flow returns 0 when every step succeeds."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             rc = _run_container_flow_all_mocked(tmp_path)
 
@@ -297,17 +289,17 @@ class TestFullContainerSetup:
 
         The new single-container flow calls:
           1. _detect_runtime_binary -> "podman"
-          2. _build_image(runtime, context)
+          2. _pull_image(runtime)
           3. _ensure_volume(runtime)
           4. _ensure_ollama_dir()
           5. _generate_entrypoint(packs)
           6. _run_container(runtime, entrypoint, packs)
-          7. _cleanup_temp_entrypoint(entrypoint)
+
+        Note: _cleanup_temp_entrypoint is only called on failure; on success
+        it is skipped, so it does not appear in the call order here.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             call_order = []
 
@@ -325,7 +317,7 @@ class TestFullContainerSetup:
             rc = _run_container_flow_all_mocked(
                 tmp_path,
                 mock_overrides={
-                    "build_image": make_tracker("_build_image", 0),
+                    "pull_image": make_tracker("_pull_image", 0),
                     "run_container": make_tracker("_run_container", 0),
                 },
                 extra_patches=[
@@ -351,10 +343,6 @@ class TestFullContainerSetup:
                             Path("/tmp/entry.sh"),
                         )[1],
                     ),
-                    patch(
-                        "agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint",
-                        side_effect=make_tracker("_cleanup_temp_entrypoint"),
-                    ),
                 ],
             )
 
@@ -362,20 +350,17 @@ class TestFullContainerSetup:
             # Verify the expected call order
             assert call_order == [
                 "_detect_runtime_binary",
-                "_build_image",
+                "_pull_image",
                 "_ensure_volume",
                 "_ensure_ollama_dir",
                 "_generate_entrypoint",
                 "_run_container",
-                "_cleanup_temp_entrypoint",
             ], f"Expected container_runtime calls in order, got: {call_order}"
 
     def test_full_setup_records_state_on_success(self):
         """After successful setup, state is saved with deployment=container."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             saved_state = {}
 
@@ -399,8 +384,6 @@ class TestFullContainerSetup:
         """In non-interactive mode, no prompts are shown and setup proceeds."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             input_calls = []
 
@@ -441,8 +424,6 @@ class TestModelPullBootstrap:
         """The entrypoint script is generated and passed to _run_container."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             entrypoint_packs = []
 
@@ -610,26 +591,22 @@ class TestCrashRecovery:
     and can be re-run.
     """
 
-    def test_build_failure_aborts_setup(self):
-        """When the container image build fails, setup exits with code 1."""
+    def test_pull_failure_aborts_setup(self):
+        """When the image pull fails, setup exits with code 1."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             rc = _run_container_flow_all_mocked(
                 tmp_path,
-                mock_overrides={"build_image": 1},
+                mock_overrides={"pull_image": 1},
             )
 
-            assert rc == 1, f"Expected exit code 1 on build failure, got {rc}"
+            assert rc == 1, f"Expected exit code 1 on pull failure, got {rc}"
 
     def test_container_start_failure_aborts_setup(self):
         """When the main agentalloy container fails to start, setup exits 1."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             rc = _run_container_flow_all_mocked(
                 tmp_path,
@@ -642,17 +619,12 @@ class TestCrashRecovery:
         """When health check times out, a warning is printed but setup continues."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             printed_messages = []
 
             def capture_print(*args, **kwargs):
                 printed_messages.append(" ".join(str(a) for a in args))
 
-            # time.monotonic is called many times: health check loop iterations,
-            # final elapsed-time calculation, etc. Provide enough values.
-            monotonic_values = [0.0, 0.0, 0.0, 301.0, 0.0, 0.0, 0.0]
             rc = _run_container_flow_all_mocked(
                 tmp_path,
                 extra_patches=[
@@ -662,13 +634,14 @@ class TestCrashRecovery:
                     ),
                 ],
                 mock_overrides={
+                    "wait_for_readiness": False,
                     "urlopen": OSError("connection refused"),
-                    "monotonic": iter(monotonic_values),
+                    "monotonic": iter([0.0, 0.0, 0.0, 301.0, 0.0, 0.0, 0.0]),
                 },
             )
 
             assert rc == 0, f"Expected setup to continue after health check timeout, got {rc}"
-            assert any("not healthy" in m.lower() for m in printed_messages), (
+            assert any("not ready" in m.lower() for m in printed_messages), (
                 f"Expected health warning, got: {printed_messages}"
             )
 
@@ -676,8 +649,6 @@ class TestCrashRecovery:
         """When preflight fails, setup exits 1 without any subprocess calls."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            _make_compose_file(tmp_path)
-            _make_containerfile(tmp_path)
 
             subprocess_calls = []
 

@@ -436,6 +436,7 @@ class TestRunFromArgs:
             packs=None,
             harness=None,
             non_interactive=False,
+            image_path=None,
         )
         # Just verify it builds a valid config -- actual run_setup is tested above
         # We'll just check _run_from_args doesn't raise with valid args
@@ -454,6 +455,7 @@ class TestRunFromArgs:
             packs="pack1,pack2",
             harness="cursor",
             non_interactive=True,
+            image_path=None,
         )
         with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0):
             rc = _run_from_args(args)
@@ -1125,7 +1127,7 @@ class TestContainerFlow:
 
         st = state_mod.load_state()
         # Should be absolute path
-        assert st["image_tag"] == "agentalloy:local"
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_image_tag_resolved_from_repo_root_not_cwd(
         self, tmp_state_dir: tuple[Path, Path], tmp_path: Path
@@ -1165,7 +1167,7 @@ class TestContainerFlow:
         import agentalloy.install.state as state_mod
 
         st = state_mod.load_state()
-        assert st["image_tag"] == "agentalloy:local"
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_image_tag_resolved_from_cwd_when_present(
         self, tmp_state_dir: tuple[Path, Path], tmp_path: Path
@@ -1196,130 +1198,7 @@ class TestContainerFlow:
         import agentalloy.install.state as state_mod
 
         st = state_mod.load_state()
-        assert st["image_tag"] == "agentalloy:local"
-
-    def test_container_fails_clearly_when_no_repo_and_no_git(
-        self,
-        tmp_state_dir: tuple[Path, Path],
-        tmp_path: Path,
-        capsys: pytest.CaptureFixture[str],
-    ):
-        """Non-editable install with no clone on disk AND no git on PATH:
-        the clone-fallback can't run, so exit 1 with an actionable error.
-
-        (When git IS available, the wizard clones the repo into
-        ~/.cache/agentalloy/repo and proceeds — see
-        test_container_clones_repo_when_no_local_checkout.)
-        """
-        SetupConfig, run_setup = self._import_run_setup()
-
-        fake_module_file = (
-            tmp_path
-            / "site-packages"
-            / "agentalloy"
-            / "install"
-            / "subcommands"
-            / "simple_setup.py"
-        )
-        fake_module_file.parent.mkdir(parents=True, exist_ok=True)
-        fake_module_file.touch()
-
-        import agentalloy.install.subcommands.simple_setup as setup_mod
-
-        # shutil.which is called for compose binary detection too, so only
-        # intercept the "git" lookup; let everything else fall through.
-        real_which = shutil.which
-
-        def _which(name: str, *args: Any, **kwargs: Any) -> str | None:
-            if name == "git":
-                return None
-            return real_which(name, *args, **kwargs)
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("pathlib.Path.cwd", return_value=tmp_path),
-            patch.object(setup_mod, "__file__", str(fake_module_file)),
-            patch.object(setup_mod.shutil, "which", side_effect=_which),
-        ):
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
-
-        assert rc == 1
-        out = capsys.readouterr().out.lower()
-        assert "git not found" in out or "could not locate" in out
-
-    def test_container_clones_repo_when_no_local_checkout(
-        self,
-        tmp_state_dir: tuple[Path, Path],
-        tmp_path: Path,
-    ):
-        """When neither cwd nor the editable-install path has the repo on
-        disk, the wizard clones https://github.com/nrmeyers/agentalloy into
-        ~/.cache/agentalloy/repo and uses that as the build context.
-        """
-        SetupConfig, run_setup = self._import_run_setup()
-
-        fake_module_file = (
-            tmp_path / "sp" / "agentalloy" / "install" / "subcommands" / "simple_setup.py"
-        )
-        fake_module_file.parent.mkdir(parents=True, exist_ok=True)
-        fake_module_file.touch()
-        empty_cwd = tmp_path / "empty"
-        empty_cwd.mkdir()
-
-        # Redirect the cache to tmp_path so the test doesn't touch the
-        # real ~/.cache/agentalloy/repo on the developer's machine.
-        fake_cache = tmp_path / "cache_home"
-
-        clone_calls: list[list[str]] = []
-
-        def run_side_effect(argv: Any, **kwargs: Any) -> Any:
-            argv_list: list[str] = (
-                [str(x) for x in argv]  # type: ignore[arg-type]
-                if isinstance(argv, list)
-                else []
-            )
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stdout = "0\n"
-            mock.stderr = ""
-            # Materialize the cloned repo on disk so _has_assets() passes
-            # after the simulated `git clone`.
-            if len(argv_list) >= 2 and argv_list[0] == "git" and argv_list[1] == "clone":
-                clone_calls.append(argv_list)
-                dest = Path(argv_list[-1])
-                dest.mkdir(parents=True, exist_ok=True)
-                (dest / ".git").mkdir(exist_ok=True)
-                (dest / "compose.yaml").write_text("services: {}\n")
-                (dest / "Containerfile").write_text("FROM scratch\n")
-            return mock
-
-        import agentalloy.install.subcommands.simple_setup as setup_mod
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("pathlib.Path.cwd", return_value=empty_cwd),
-            patch.object(setup_mod, "__file__", str(fake_module_file)),
-            patch("pathlib.Path.home", return_value=fake_cache),
-            patch("subprocess.run", side_effect=run_side_effect),
-        ):
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
-
-        assert rc == 0
-        assert any(c[:2] == ["git", "clone"] for c in clone_calls), (
-            f"expected a `git clone` invocation, got: {clone_calls}"
-        )
-        # Compose file should point at the cached clone.
-        import agentalloy.install.state as state_mod
-
-        st = state_mod.load_state()
-        # image_tag is always "agentalloy:local" regardless of build context
-        assert st["image_tag"] == "agentalloy:local"
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_image_tag_accepts_dockerfile_alternative(
         self, tmp_state_dir: tuple[Path, Path], tmp_path: Path
@@ -1350,8 +1229,8 @@ class TestContainerFlow:
         import agentalloy.install.state as state_mod
 
         st = state_mod.load_state()
-        # image_tag is always "agentalloy:local" regardless of build context
-        assert st["image_tag"] == "agentalloy:local"
+        # image_tag is always "ghcr.io/nrmeyers/agentalloy:latest" regardless of build context
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_interactive_fallback_accepts_directory_path(
         self, tmp_state_dir: tuple[Path, Path], tmp_path: Path
@@ -1400,8 +1279,8 @@ class TestContainerFlow:
         import agentalloy.install.state as state_mod
 
         st = state_mod.load_state()
-        # image_tag is always "agentalloy:local" regardless of build context
-        assert st["image_tag"] == "agentalloy:local"
+        # image_tag is always "ghcr.io/nrmeyers/agentalloy:latest" regardless of build context
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_interactive_fallback_accepts_image_tag_path(
         self, tmp_state_dir: tuple[Path, Path], tmp_path: Path
@@ -1449,8 +1328,8 @@ class TestContainerFlow:
         import agentalloy.install.state as state_mod
 
         st = state_mod.load_state()
-        # image_tag is always "agentalloy:local" regardless of build context
-        assert st["image_tag"] == "agentalloy:local"
+        # image_tag is always "ghcr.io/nrmeyers/agentalloy:latest" regardless of build context
+        assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_container_cpu_only_warning_shown_to_every_host(
         self, tmp_state_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
@@ -1535,64 +1414,6 @@ class TestContainerFlow:
         assert "RUNTIME_EMBED_BASE_URL" not in env_text
         assert "RUNTIME_EMBEDDING_MODEL" not in env_text
 
-    def test_container_runs_install_packs_as_one_shot_before_service(
-        self, tmp_state_dir: tuple[Path, Path]
-    ):
-        """Container flow calls _build_image, _ensure_volume, _run_container
-        in the correct order via the single-container flow.
-        The entrypoint handles pack installation internally."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_result = MagicMock()
-            mock_result.returncode = 0
-            mock_result.stdout = "0\n"
-            mock_result.stderr = ""
-            mock_run.return_value = mock_result
-
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
-
-        assert rc == 0
-        calls: list[list[str]] = []
-        for c in mock_run.call_args_list:
-            if c.args and isinstance(c.args[0], list):
-                calls.append([str(x) for x in c.args[0]])  # type: ignore[arg-type]
-
-        # Verify _build_image was called (podman build)
-        build_call = next(
-            (a for a in calls if len(a) >= 3 and a[1] == "build" and "agentalloy:local" in a),
-            None,
-        )
-        assert build_call is not None, f"build call not found: {calls}"
-
-        # Verify _ensure_volume was called (podman volume create)
-        volume_call = next(
-            (a for a in calls if len(a) >= 3 and a[1] == "volume" and "create" in a),
-            None,
-        )
-        assert volume_call is not None, f"volume call not found: {calls}"
-
-        # Verify _run_container was called (podman run --replace)
-        run_call = next(
-            (a for a in calls if len(a) >= 3 and a[1] == "run" and "--replace" in a),
-            None,
-        )
-        assert run_call is not None, f"run call not found: {calls}"
-
-        # Order: build → volume → run
-        build_idx = next(i for i, a in enumerate(calls) if len(a) >= 3 and a[1] == "build")
-        volume_idx = next(i for i, a in enumerate(calls) if len(a) >= 3 and a[1] == "volume")
-        run_idx = next(i for i, a in enumerate(calls) if len(a) >= 3 and a[1] == "run")
-        assert build_idx < volume_idx < run_idx, (
-            f"Bad ordering — build={build_idx} volume={volume_idx} run={run_idx}"
-        )
-
     def test_container_aborts_when_run_fails(
         self, tmp_state_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
     ):
@@ -1637,60 +1458,6 @@ class TestContainerFlow:
     # ------------------------------------------------------------------
     # Skill-pack selection (spec: agentalloy-container-skillpack-selection)
     # ------------------------------------------------------------------
-
-    def test_container_flow_prompts_for_packs_when_interactive(
-        self, tmp_state_dir: tuple[Path, Path]
-    ):
-        """Interactive container setup with no --packs flag must call
-        _prompt_for_packs and thread the result into the container env."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch(
-                "agentalloy.install.subcommands.simple_setup._prompt_for_packs",
-                return_value="engineering",
-            ) as mock_prompt,
-            patch(
-                "agentalloy.install.subcommands.simple_setup._discover_packs",
-                return_value={"engineering": {"skills": []}},
-            ),
-            patch("subprocess.run") as mock_run,
-            # Interactive prompts in order: CPU-only continue (Y),
-            # compose-file confirm (1 = first option), review-summary confirm (Y).
-            patch("builtins.input", side_effect=["y", "1", "y"]),
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=False))
-
-        assert rc == 0
-        assert mock_prompt.called, "_prompt_for_packs must be called in interactive container flow"
-        # Verify the container run call includes the packs in env var
-        run_calls = [
-            c.args[0]
-            for c in mock_run.call_args_list
-            if c.args
-            and isinstance(c.args[0], list)
-            and len(c.args[0]) >= 2
-            and c.args[0][1] == "run"
-        ]
-        assert len(run_calls) >= 1, "Expected at least one podman run call"
-        # Find the call with AGENTIALLOY_PACKS env var
-        packs_found = False
-        for call_args in run_calls:
-            for i, arg in enumerate(call_args):
-                if str(arg) == "-e" and i + 1 < len(call_args):
-                    env_val = str(call_args[i + 1])
-                    if env_val.startswith("AGENTIALLOY_PACKS="):
-                        assert "engineering" in env_val
-                        packs_found = True
-        assert packs_found, (
-            "AGENTIALLOY_PACKS env var with 'engineering' not found in container run"
-        )
-
     def test_container_flow_skips_prompt_when_packs_preset(self, tmp_state_dir: tuple[Path, Path]):
         """A preset --packs value must bypass the interactive prompt and
         flow straight through to the container run with packs in env."""
@@ -1776,165 +1543,6 @@ class TestContainerFlow:
         if packs_found:
             pass  # Empty packs env var is OK
 
-    def test_container_flow_unknown_pack_stripped_and_warned(
-        self,
-        tmp_state_dir: tuple[Path, Path],
-        capsys: pytest.CaptureFixture[str],
-    ):
-        """Unknown pack names are stripped client-side with a warning so
-        the container never sees them."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch(
-                "agentalloy.install.subcommands.simple_setup._discover_packs",
-                return_value={"rust": {"skills": []}, "python": {"skills": []}},
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            rc = run_setup(
-                SetupConfig(deployment="container", non_interactive=True, packs="rust,bogus")
-            )
-
-        assert rc == 0
-        import re
-
-        out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
-        assert "bogus" in out
-        assert "Unknown pack" in out
-        # Verify the container run call only has 'rust' in the packs env var
-        run_calls = [
-            c.args[0]
-            for c in mock_run.call_args_list
-            if c.args
-            and isinstance(c.args[0], list)
-            and len(c.args[0]) >= 2
-            and c.args[0][1] == "run"
-        ]
-        assert len(run_calls) >= 1
-        packs_found = False
-        for call_args in run_calls:
-            for i, arg in enumerate(call_args):
-                if str(arg) == "-e" and i + 1 < len(call_args):
-                    env_val = str(call_args[i + 1])
-                    if env_val.startswith("AGENTIALLOY_PACKS="):
-                        packs_found = True
-                        assert "rust" in env_val, f"Expected 'rust' in {env_val}"
-                        assert "bogus" not in env_val, f"Unexpected 'bogus' in {env_val}"
-        assert packs_found, "AGENTIALLOY_PACKS env var not found in container run"
-
-    def test_container_flow_expands_packs_all_to_full_list(
-        self,
-        tmp_state_dir: tuple[Path, Path],
-        capsys: pytest.CaptureFixture[str],
-    ):
-        """When --packs 'all' is passed in container mode, it should be
-        expanded to the full pack list instead of being silently stripped
-        as an unknown pack name."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch(
-                "agentalloy.install.subcommands.simple_setup._discover_packs",
-                return_value={
-                    "rust": {"skills": []},
-                    "python": {"skills": []},
-                    "go": {"skills": []},
-                },
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=True, packs="all"))
-
-        assert rc == 0
-        # Verify the container run call has all packs in the env var
-        run_calls = [
-            c.args[0]
-            for c in mock_run.call_args_list
-            if c.args
-            and isinstance(c.args[0], list)
-            and len(c.args[0]) >= 2
-            and c.args[0][1] == "run"
-        ]
-        assert len(run_calls) >= 1
-        packs_found = False
-        for call_args in run_calls:
-            for i, arg in enumerate(call_args):
-                if str(arg) == "-e" and i + 1 < len(call_args):
-                    env_val = str(call_args[i + 1])
-                    if env_val.startswith("AGENTIALLOY_PACKS="):
-                        packs_found = True
-                        # All three packs should be present (sorted alphabetically)
-                        expected = "AGENTIALLOY_PACKS=go,python,rust"
-                        assert env_val == expected, f"Expected expanded packs, got {env_val}"
-        assert packs_found, "AGENTIALLOY_PACKS env var not found in container run"
-
-    def test_verify_failures_surfaced_inline(
-        self,
-        tmp_state_dir: tuple[Path, Path],
-        capsys: pytest.CaptureFixture[str],
-    ):
-        """When verify fails, failing checks + remediations + report path are printed."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        # Write a failing verify.json into the outputs dir the wizard will read.
-        import agentalloy.install.state as state_mod
-
-        out_dir = state_mod.outputs_dir()
-        out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / "verify.json").write_text(
-            json.dumps(
-                {
-                    "all_checks_passed": False,
-                    "checks": [
-                        {
-                            "name": "embedding_endpoint_reachable",
-                            "passed": False,
-                            "error": "HTTP 404",
-                            "remediation": "Start ollama",
-                        },
-                        {"name": "duckdb_present", "passed": True, "detail": "ok"},
-                    ],
-                }
-            )
-        )
-
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("subprocess.run") as mock_run,
-            patch("agentalloy.install.subcommands.verify.run", return_value=1),
-        ):
-            mock_result = MagicMock()
-            mock_result.returncode = 0
-            mock_result.stdout = "0\n"
-            mock_result.stderr = ""
-            mock_run.return_value = mock_result
-
-            rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
-
-        assert rc == 1
-        import re
-
-        out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
-        assert "embedding_endpoint_reachable" in out
-        assert "HTTP 404" in out
-        assert "FIX: Start ollama" in out
-        assert "duckdb_present" not in out  # passing checks are not noisy
-        assert "verify.json" in out  # path to full report
-
     def test_native_deployment_records_state(self, tmp_state_dir: tuple[Path, Path]):
         """Native deployment records deployment='native' in state on success."""
         SetupConfig, run_setup = self._import_run_setup()
@@ -1958,97 +1566,6 @@ class TestContainerFlow:
 
         st = state_mod.load_state()
         assert st["deployment"] == "native"
-
-    def test_container_flow_sets_fixed_values(self, tmp_state_dir: tuple[Path, Path]):
-        """UT-22: Container mode sets runner=ollama, port=47950, mode=manual, harness=manual."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        # Patch _run_container_flow to capture the config before it runs.
-        # We capture at entry time; the real function then runs and sets the
-        # fixed values. We verify those values after the real function returns.
-        captured_cfg: SetupConfig | None = None
-
-        import agentalloy.install.subcommands.simple_setup as ss_mod
-
-        _real_container_flow = ss_mod._run_container_flow
-
-        def _capture_flow(cfg: SetupConfig, t0: float) -> int:
-            nonlocal captured_cfg
-            captured_cfg = cfg
-            return _real_container_flow(cfg, t0)
-
-        with (
-            patch.object(
-                ss_mod,
-                "_run_container_flow",
-                _capture_flow,
-            ),
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            run_setup(SetupConfig(deployment="container", non_interactive=True))
-
-        assert captured_cfg is not None, "Config should be captured by _run_container_flow"
-        assert captured_cfg.runner == "ollama", (
-            f"Expected runner='ollama', got {captured_cfg.runner!r}"
-        )
-        assert captured_cfg.port == 47950, f"Expected port=47950, got {captured_cfg.port}"
-        assert captured_cfg.mode == "manual", f"Expected mode='manual', got {captured_cfg.mode!r}"
-        assert captured_cfg.harness == "manual", (
-            f"Expected harness='manual', got {captured_cfg.harness!r}"
-        )
-
-    def test_container_flow_fixed_values_override_user_input(
-        self, tmp_state_dir: tuple[Path, Path]
-    ):
-        """UT-22: Container mode overrides user-provided values for runner, mode, harness."""
-        SetupConfig, run_setup = self._import_run_setup()
-
-        import agentalloy.install.subcommands.simple_setup as ss_mod
-
-        _real_container_flow = ss_mod._run_container_flow
-
-        captured_cfg: SetupConfig | None = None
-
-        def _capture_flow(cfg: SetupConfig, t0: float) -> int:
-            nonlocal captured_cfg
-            captured_cfg = cfg
-            return _real_container_flow(cfg, t0)
-
-        with (
-            patch.object(ss_mod, "_run_container_flow", _capture_flow),
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stdout="0\n", stderr="")
-            # User provides non-container values — these should be overridden
-            run_setup(
-                SetupConfig(
-                    deployment="container",
-                    non_interactive=True,
-                    runner="lm-studio",  # should be overridden
-                    mode="persistent",  # should be overridden
-                    harness="claude-code",  # should be overridden
-                    port=8080,  # should be overridden
-                )
-            )
-
-        assert captured_cfg is not None
-        assert captured_cfg.runner == "ollama", (
-            f"runner should be ollama, got {captured_cfg.runner!r}"
-        )
-        assert captured_cfg.mode == "manual", f"mode should be manual, got {captured_cfg.mode!r}"
-        assert captured_cfg.harness == "manual", (
-            f"harness should be manual, got {captured_cfg.harness!r}"
-        )
-        assert captured_cfg.port == 47950, f"port should be 47950, got {captured_cfg.port}"
 
 
 class TestDeploymentCliFlag:

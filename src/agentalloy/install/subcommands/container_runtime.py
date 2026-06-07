@@ -24,17 +24,6 @@ def _print(*args: Any, **kwargs: Any) -> None:
     print(*args, **kwargs)
 
 
-def _has_assets(d: Path) -> bool:
-    """Return True if *d* looks like a valid agentalloy build context.
-
-    Checks for the presence of both a compose file and a build file
-    (Containerfile or Dockerfile).
-    """
-    default_compose = "compose.yaml"
-    has_build_file = (d / "Containerfile").exists() or (d / "Dockerfile").exists()
-    return (d / default_compose).exists() and has_build_file
-
-
 # ---------------------------------------------------------------------------
 # Runtime detection
 # ---------------------------------------------------------------------------
@@ -59,170 +48,107 @@ def _detect_runtime_binary() -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Build context location
+# Image pull / load
 # ---------------------------------------------------------------------------
 
-
-def _locate_build_context() -> Path | None:
-    """Locate the agentalloy build context for container image builds.
-
-    Search order:
-
-    1. **cwd** — if the user ran setup from inside the clone.
-    2. **parents[4] of __file__** — editable install (points at repo root).
-    3. **auto-clone** — clone into ``~/.cache/agentalloy/repo`` if git is
-       available (for users who installed via ``uv tool install agentalloy``).
-
-    Returns
-    -------
-    Path | None
-        Path to ``compose.yaml`` in the found context, or ``None`` if all
-        strategies fail.
-    """
-    default_compose = "compose.yaml"
-
-    def _ensure_cached_repo() -> Path | None:
-        """Clone (or refresh) the agentalloy repo into ~/.cache/agentalloy/repo.
-
-        Returns the cache dir on success, None on failure. Uses --depth=1 so the
-        clone is fast (~few MB). On refresh, hard-resets to origin/main so any
-        local edits or stale state in the cache don't break the build context.
-        """
-        cache_dir = Path.home() / ".cache" / "agentalloy" / "repo"
-        if shutil.which("git") is None:
-            _print(
-                "  [red]git not found on PATH — cannot clone the agentalloy repo "
-                "for the build context.[/red]"
-            )
-            return None
-        repo_url = "https://github.com/nrmeyers/agentalloy.git"
-        # If the cache dir exists but isn't a valid git checkout (no .git/
-        # — possibly a partial clone, leftover files, or a manually-placed
-        # directory), `git clone <url> <dest>` would fail with "destination
-        # path already exists and is not an empty directory". Nuke it so
-        # the clone branch below can recreate cleanly.
-        if cache_dir.exists() and not (cache_dir / ".git").exists():
-            _print(
-                f"  [yellow]-> Cache dir {cache_dir} exists but isn't a git "
-                "checkout; recreating.[/yellow]"
-            )
-            try:
-                shutil.rmtree(cache_dir)
-            except OSError as exc:
-                _print(f"  [red]Could not remove stale cache dir: {exc}[/red]")
-                return None
-        try:
-            if (cache_dir / ".git").exists():
-                _print(f"  [dim]-> Refreshing cached repo at {cache_dir}[/dim]")
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "fetch", "--depth=1", "origin", "main"],
-                    check=True,
-                    timeout=120,
-                )
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "reset", "--hard", "origin/main"],
-                    check=True,
-                    timeout=60,
-                )
-            else:
-                cache_dir.parent.mkdir(parents=True, exist_ok=True)
-                _print(f"  [dim]-> Cloning {repo_url} into {cache_dir}[/dim]")
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "--depth=1",
-                        "--branch=main",
-                        repo_url,
-                        str(cache_dir),
-                    ],
-                    check=True,
-                    timeout=180,
-                )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            _print(f"  [red]git clone/fetch failed: {exc}[/red]")
-            return None
-        if not _has_assets(cache_dir):
-            _print(
-                f"  [red]Cached repo at {cache_dir} is missing {default_compose} "
-                "or Containerfile after clone.[/red]"
-            )
-            return None
-        return cache_dir
-
-    # Strategy 1: cwd
-    cwd = Path.cwd()
-    if _has_assets(cwd):
-        return cwd / default_compose
-
-    # Strategy 2: parents[4] of __file__ (editable install)
-    module_file = Path(__file__).resolve()
-    editable_root = module_file.parents[4]
-    if _has_assets(editable_root):
-        return editable_root / default_compose
-
-    # Strategy 3: auto-clone
-    cached = _ensure_cached_repo()
-    if cached is not None:
-        return cached / default_compose
-
-    return None
+_DEFAULT_IMAGE = "ghcr.io/nrmeyers/agentalloy:latest"
 
 
-# ---------------------------------------------------------------------------
-# Image build
-# ---------------------------------------------------------------------------
+def _pull_image(
+    runtime: str,
+    image_ref: str | None = None,
+    offline: bool = False,
+    tarball_path: Path | None = None,
+) -> int:
+    """Pull or load the agentalloy container image.
 
-
-def _build_image(runtime: str, context: Path) -> int:
-    """Build the agentalloy container image.
-
-    Runs ``{runtime} build -t agentalloy:local -f Containerfile <context>``
-    with a 600-second timeout.  Build output is captured and written to a
-    log file on failure for debugging.  Returns the exit code (0 on success).
+    In online mode (default): pulls from GHCR.
+    In offline mode: loads from a local tarball (podman save / docker save output).
 
     Parameters
     ----------
     runtime : str
         Container runtime binary (e.g. ``"podman"`` or ``"docker"``).
-    context : Path
-        Path to the build context directory.
+    image_ref : str | None
+        Image reference to pull. Defaults to ``ghcr.io/nrmeyers/agentalloy:latest``.
+    offline : bool
+        If True, load from tarball instead of pulling.
+    tarball_path : Path | None
+        Path to the image tarball (required when offline=True).
 
     Returns
     -------
     int
-        Exit code from the runtime command.
+        Exit code (0 on success).
     """
-    log_path = Path(tempfile.gettempdir()) / "agentalloy-build.log"
-    try:
-        subprocess.run(
-            [
-                runtime,
-                "build",
-                "-t",
-                "agentalloy:local",
-                "-f",
-                "Containerfile",
-                str(context),
-            ],
-            check=True,
-            timeout=600,
-            capture_output=True,
-        )
-        return 0
-    except subprocess.CalledProcessError as exc:
-        # Write captured build output to log file for debugging
-        log_path.write_text(
-            f"=== agentalloy build failed (exit {exc.returncode}) ===\n"
-            f"Command: {shlex.join(exc.cmd)}\n\n"
-            f"--- stdout ---\n{(exc.output or b'').decode(errors='replace')}\n"
-            f"--- stderr ---\n{(exc.stderr or b'').decode(errors='replace')}\n"
-        )
-        _print(f"  [red]Build failed (exit {exc.returncode}) — log: {log_path}[/red]")
-        return exc.returncode
-    except subprocess.TimeoutExpired:
-        _print("  [red]Build timed out after 600s[/red]")
-        return 1
+    image = image_ref or _DEFAULT_IMAGE
+
+    if offline:
+        if tarball_path is None or not tarball_path.exists():
+            _print(f"  [red]Offline mode: tarball not found at {tarball_path}[/red]")
+            return 1
+        _print(f"  [dim]-> Loading image from tarball: {tarball_path}[/dim]")
+        try:
+            subprocess.run(
+                [runtime, "load", "-i", str(tarball_path)],
+                check=True,
+                capture_output=True,
+                timeout=300,
+            )
+            _print("  [green]-> Image loaded from tarball[/green]")
+            # Verify the expected image tag is present after load (handles tarball tag mismatch)
+            result = subprocess.run(
+                [runtime, "images", "--format", "{{.Repository}}:{{.Tag}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # Also check by ID for digest-based matching as fallback
+            id_result = subprocess.run(
+                [runtime, "images", "--format", "{{.ID}}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            # Must verify the SPECIFIC image we expected — the ID check alone is
+            # too permissive (any image would satisfy it).  First try exact
+            # reference match; only fall back to ID for digest-only images
+            # where the tag format renders as "<none>:<none>".
+            image_found = image in result.stdout
+            if not image_found and result.stdout.strip() == "<none>:<none>":
+                # Digest-only image — verify an ID was loaded (not empty).
+                image_found = id_result.returncode == 0 and bool(id_result.stdout.strip())
+            if not image_found:
+                _print(f"  [red]Image {image} not found after load[/red]")
+                return 1
+            return 0
+        except subprocess.CalledProcessError as exc:
+            _print(f"  [red]Failed to load image from tarball (exit {exc.returncode})[/red]")
+            _print(f"  stderr: {(exc.stderr or b'').decode(errors='replace')[:200]}")
+            return exc.returncode
+        except subprocess.TimeoutExpired:
+            _print("  [red]Image load timed out after 300s[/red]")
+            return 1
+    else:
+        _print(f"  [dim]-> Pulling {image}[/dim]")
+        try:
+            subprocess.run(
+                [runtime, "pull", image],
+                check=True,
+                timeout=600,
+            )
+            _print("  [green]-> Image pulled successfully[/green]")
+            return 0
+        except subprocess.CalledProcessError as exc:
+            _print(f"  [red]Failed to pull image (exit {exc.returncode})[/red]")
+            _print("  [dim]Remediation: Check network connectivity to ghcr.io, "
+                   "or use --image-path for offline mode.[/dim]")
+            return exc.returncode
+        except subprocess.TimeoutExpired:
+            _print("  [red]Image pull timed out after 600s[/red]")
+            _print("  [dim]Remediation: Check network connectivity, "
+                   "or use --image-path for offline mode.[/dim]")
+            return 1
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +448,12 @@ def _cleanup_temp_entrypoint(entrypoint: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_container(runtime: str, entrypoint: Path, packs: str) -> int:
+def _run_container(
+    runtime: str,
+    entrypoint: Path,
+    packs: str,
+    image_ref: str | None = None,
+) -> int:
     """Run the agentalloy container with volumes, env, and port mapping.
 
     Runs ``{runtime} run --replace -d --name agentalloy`` with:
@@ -540,6 +471,8 @@ def _run_container(runtime: str, entrypoint: Path, packs: str) -> int:
         Path to the generated entrypoint script (mounted as a volume).
     packs : str
         Comma-separated list of packs to install.
+    image_ref : str | None
+        Image reference to run. Defaults to ``ghcr.io/nrmeyers/agentalloy:latest``.
 
     Returns
     -------
@@ -558,6 +491,7 @@ def _run_container(runtime: str, entrypoint: Path, packs: str) -> int:
         env_cmd.extend(["-e", f"{k}={v}"])
 
     home = Path.home()
+    image = image_ref or _DEFAULT_IMAGE
     cmd = [
         runtime,
         "run",
@@ -574,7 +508,7 @@ def _run_container(runtime: str, entrypoint: Path, packs: str) -> int:
         "-v",
         f"{entrypoint}:/app/entrypoint.sh:ro",
         *env_cmd,
-        "agentalloy:local",
+        image,
         "/app/entrypoint.sh",
     ]
 

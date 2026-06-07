@@ -553,7 +553,8 @@ class TestRootlessPodman:
                 assert "run" in call_args
                 assert "--replace" in call_args
                 assert "-d" in call_args
-                assert "agentalloy:local" in call_args
+                # Uses GHCR image by default
+                assert "ghcr.io/nrmeyers/agentalloy:latest" in call_args
             finally:
                 entrypoint.unlink(missing_ok=True)
 
@@ -678,7 +679,7 @@ class TestNonInteractiveMode:
         "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._build_image", return_value=0)
+    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
     @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
     @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
     @patch(
@@ -753,7 +754,7 @@ class TestNonInteractiveMode:
         mock_compose_runtime,
         mock_preflight,
         mock_detect_runtime,
-        mock_build_image,
+        mock_pull_image,
         mock_ensure_volume,
         mock_run_container,
         mock_generate_entrypoint,
@@ -802,7 +803,7 @@ class TestNonInteractiveMode:
         "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._build_image", return_value=0)
+    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
     @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
     @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
     @patch(
@@ -872,7 +873,7 @@ class TestNonInteractiveMode:
         mock_compose_runtime,
         mock_preflight,
         mock_detect_runtime,
-        mock_build_image,
+        mock_pull_image,
         mock_ensure_volume,
         mock_run_container,
         mock_generate_entrypoint,
@@ -1017,7 +1018,7 @@ class TestCancelDuringCPUWarning:
         "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._build_image", return_value=0)
+    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
     @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
     @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
     @patch(
@@ -1075,7 +1076,7 @@ class TestCancelDuringCPUWarning:
         mock_compose_runtime,
         mock_preflight,
         mock_detect_runtime,
-        mock_build_image,
+        mock_pull_image,
         mock_ensure_volume,
         mock_run_container,
         mock_generate_entrypoint,

@@ -64,7 +64,7 @@ def _run_with_all_patches(tmp_path: Path, tmp_compose: Path, extra_patches=None)
     Uses contextlib.ExitStack to avoid Python's AST nested block limit.
 
     The new single-container flow uses container_runtime functions:
-    _build_image, _ensure_volume, _run_container, _wait_for_readiness,
+    _pull_image, _ensure_volume, _run_container, _wait_for_readiness,
     _generate_entrypoint, _cleanup_temp_entrypoint. (The legacy
     ``_wait_for_health`` was dead code and was removed alongside the
     fast-start redesign.)
@@ -81,7 +81,7 @@ def _run_with_all_patches(tmp_path: Path, tmp_compose: Path, extra_patches=None)
             "agentalloy.install.subcommands.simple_setup._container_setup_log_path",
             return_value=tmp_path / "setup.log",
         ),
-        patch("agentalloy.install.subcommands.container_runtime._build_image", return_value=0),
+        patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0),
         patch("agentalloy.install.subcommands.container_runtime._ensure_volume"),
         patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0),
         patch(
@@ -282,7 +282,7 @@ class TestImageBuildFailure:
 
             extra = [
                 patch(
-                    "agentalloy.install.subcommands.container_runtime._build_image",
+                    "agentalloy.install.subcommands.container_runtime._pull_image",
                     return_value=1,
                 ),
             ]
@@ -402,7 +402,7 @@ class TestStateRecording:
 
             def mock_run_container_flow(cfg, t0):
                 cfg.runtime_binary = "podman"
-                cfg.image_tag = "agentalloy:local"
+                cfg.image_tag = "ghcr.io/nrmeyers/agentalloy:latest"
                 cfg.container_name = "agentalloy"
                 cfg.data_volume = "agentalloy-data"
                 # Simulate state save
@@ -441,7 +441,7 @@ class TestStateRecording:
                     assert rc == 0
                     assert saved_state.get("deployment") == "container"
                     assert saved_state.get("runtime_binary") == "podman"
-                    assert saved_state.get("image_tag") == "agentalloy:local"
+                    assert saved_state.get("image_tag") == "ghcr.io/nrmeyers/agentalloy:latest"
                     assert saved_state.get("port") == 47950
 
 

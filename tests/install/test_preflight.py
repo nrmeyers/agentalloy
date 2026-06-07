@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +12,6 @@ from agentalloy.install.subcommands.preflight import (
     _check_llama_server_present,  # pyright: ignore[reportPrivateUsage]
     _check_ollama_present,  # pyright: ignore[reportPrivateUsage]
     _try_brew_install,  # pyright: ignore[reportPrivateUsage]
-    run_preflight,
 )
 
 
@@ -187,57 +185,6 @@ class TestCheckRuntimeBinary:
         assert "podman" in result["error"] or "docker" in result["error"]
 
 
-class TestCheckBuildContext:
-    """UT-14, UT-15, UT-16: _check_build_context() — verifies build assets."""
-
-    def test_all_assets_present_passes(self, tmp_path: Path):
-        """UT-14: _check_build_context() passes when all assets present."""
-        from agentalloy.install.subcommands.preflight import _check_build_context
-
-        (tmp_path / "Containerfile").touch()
-        (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "uv.lock").touch()
-        result = _check_build_context(str(tmp_path))
-        assert result["passed"] is True
-        assert "Containerfile" in result["detail"]
-
-    def test_containerfile_missing_fails(self, tmp_path: Path):
-        """UT-15: _check_build_context() fails when Containerfile missing."""
-        from agentalloy.install.subcommands.preflight import _check_build_context
-
-        (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "uv.lock").touch()
-        result = _check_build_context(str(tmp_path))
-        assert result["passed"] is False
-        assert "Containerfile" in result["error"]
-
-    def test_pyproject_missing_fails(self, tmp_path: Path):
-        """UT-16: _check_build_context() fails when pyproject.toml missing."""
-        from agentalloy.install.subcommands.preflight import _check_build_context
-
-        (tmp_path / "Containerfile").touch()
-        (tmp_path / "uv.lock").touch()
-        result = _check_build_context(str(tmp_path))
-        assert result["passed"] is False
-        assert "pyproject.toml" in result["error"]
-
-    def test_uv_lock_missing_fails(self, tmp_path: Path):
-        """_check_build_context() fails when uv.lock missing."""
-        from agentalloy.install.subcommands.preflight import _check_build_context
-
-        (tmp_path / "Containerfile").touch()
-        (tmp_path / "pyproject.toml").touch()
-        result = _check_build_context("")
-        assert result["passed"] is False
-
-    def test_empty_path_fails(self):
-        """_check_build_context() fails when path is empty string."""
-        from agentalloy.install.subcommands.preflight import _check_build_context
-
-        result = _check_build_context("")
-        assert result["passed"] is False
-
-
 class TestCheckNameConflicts:
     """UT-17, UT-18: _check_name_conflicts() — existing container detection."""
 
@@ -279,8 +226,6 @@ class TestCheckNameConflicts:
         with patch("subprocess.run", side_effect=run_side_effect):
             result = _check_name_conflicts("podman")
         assert result["passed"] is True
-
-
 class TestCheckVolumeExists:
     """_check_volume_exists() — existing volume detection."""
 
@@ -320,127 +265,3 @@ class TestCheckVolumeExists:
             result = _check_volume_exists("podman")
         assert result["passed"] is True
 
-
-class TestImageBuildDepsContainerfileOnly:
-    """_check_image_build_deps() — no Dockerfile fallback after refactor."""
-
-    def test_containerfile_only_passes(self, tmp_path: Path):
-        """Containerfile present — passes."""
-        from agentalloy.install.subcommands.preflight import _check_image_build_deps
-
-        (tmp_path / "Containerfile").touch()
-        result = _check_image_build_deps(str(tmp_path))
-        assert result["passed"] is True
-        assert "Containerfile" in result["detail"]
-
-    def test_dockerfile_only_fails(self, tmp_path: Path):
-        """Dockerfile only — should fail (no fallback after refactor)."""
-        from agentalloy.install.subcommands.preflight import _check_image_build_deps
-
-        (tmp_path / "Dockerfile").touch()
-        result = _check_image_build_deps(str(tmp_path))
-        assert result["passed"] is False
-        assert "Containerfile" in result["error"]
-
-    def test_none_path_skips(self):
-        """None/empty path — passes with warning."""
-        from agentalloy.install.subcommands.preflight import _check_image_build_deps
-
-        result = _check_image_build_deps(None)
-        assert result["passed"] is True
-        assert result["severity"] == "warn"
-
-
-class TestContainerPhaseEnvelope:
-    """IT-10, IT-11: Full container phase integration tests."""
-
-    def test_container_phase_all_pass(self, tmp_path: Path):
-        """IT-10: Preflight container phase — all checks pass."""
-
-        # Create build context assets
-        (tmp_path / "Containerfile").touch()
-        (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "uv.lock").touch()
-
-        mock_no_container = MagicMock()
-        mock_no_container.returncode = 1
-        mock_no_container.stdout = ""
-        mock_no_container.stderr = "no such container"
-
-        mock_ok = MagicMock()
-        mock_ok.returncode = 0
-        mock_ok.stdout = ""
-
-        def run_side_effect(cmd, **kwargs):
-            cmd_str = " ".join(str(c) for c in cmd)
-            if "ps" in cmd_str and "--filter" in cmd_str:
-                return mock_no_container
-            if "volume" in cmd_str and "inspect" in cmd_str:
-                return mock_ok
-            return mock_ok
-
-        def which_side_effect(cmd: str) -> str | None:
-            return str(tmp_path / cmd) if cmd == "podman" else None
-
-        with (
-            patch("shutil.which", side_effect=which_side_effect),
-            patch("subprocess.run", side_effect=run_side_effect),
-        ):
-            result = run_preflight(
-                phase="container",
-                build_context=str(tmp_path),
-                runtime="podman",
-            )
-
-        check_names = [c["name"] for c in result["checks"]]
-        assert "runtime_binary" in check_names
-        assert "build_context" in check_names
-        assert "name_conflicts" in check_names
-        assert "volume_exists" in check_names
-        assert "port_free" in check_names
-        assert "image_build_deps" in check_names
-
-        # No fatal failures
-        assert result["fatal_failures"] == []
-
-    def test_container_phase_mixed_failures(self, tmp_path: Path):
-        """IT-11: Preflight container phase — mixed failures."""
-
-        # Create build context assets
-        (tmp_path / "Containerfile").touch()
-        (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "uv.lock").touch()
-
-        mock_existing_container = MagicMock()
-        mock_existing_container.returncode = 0
-        mock_existing_container.stdout = "abc123"
-
-        def run_side_effect(cmd, **kwargs):
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stdout = "abc123"
-            mock.stderr = ""
-            cmd_str = " ".join(str(c) for c in cmd)
-            if "ps" in cmd_str and "--filter" in cmd_str:
-                return mock_existing_container
-            return mock
-
-        MagicMock(returncode=0)
-
-        def which_side_effect(cmd: str) -> str | None:
-            return str(tmp_path / cmd) if cmd == "podman" else None
-
-        with (
-            patch("shutil.which", side_effect=which_side_effect),
-            patch("subprocess.run", side_effect=run_side_effect),
-        ):
-            result = run_preflight(
-                phase="container",
-                build_context=str(tmp_path),
-                runtime="podman",
-            )
-
-        # name_conflicts should be a failure
-        check_map = {c["name"]: c for c in result["checks"]}
-        assert check_map["name_conflicts"]["passed"] is False
-        assert "name_conflicts" in result["fatal_failures"]

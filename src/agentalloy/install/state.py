@@ -533,7 +533,7 @@ def _migrate(data: dict[str, Any], from_version: int) -> dict[str, Any]:
             data.pop("compose_binary")
         if "compose_file" in data:
             data.pop("compose_file")
-        data["image_tag"] = "agentalloy:local"
+        data["image_tag"] = "ghcr.io/nrmeyers/agentalloy:latest"
         data.pop("compose_binary_path", None)
     if from_version < 5:
         # v4 → v5: bootstrap state fields. Purely additive — no renames,

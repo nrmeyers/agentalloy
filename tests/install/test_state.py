@@ -89,7 +89,7 @@ class TestV2ToV3Migration:
             assert st["schema_version"] == 5
             assert st["deployment"] is None
             assert st["runtime_binary"] is None
-            assert st["image_tag"] == "agentalloy:local"
+            assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
             assert st["container_name"] is None
             assert st["data_volume"] is None
         finally:
@@ -146,7 +146,7 @@ class TestV2ToV3Migration:
             # New fields added
             assert st["deployment"] is None
             assert st["runtime_binary"] is None
-            assert st["image_tag"] == "agentalloy:local"
+            assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
             assert st["container_name"] is None
             assert st["data_volume"] is None
         finally:
@@ -380,7 +380,7 @@ class TestBootstrapStateFields:
                 "pending_pack_selection": None,
                 "deployment": None,
                 "runtime_binary": None,
-                "image_tag": "agentalloy:local",
+                "image_tag": "ghcr.io/nrmeyers/agentalloy:latest",
                 "container_name": None,
                 "data_volume": None,
                 # NO bootstrap_* fields — simulating old state

@@ -321,7 +321,7 @@ class TestContainerUninstall:
         state: dict[str, Any] = {
             "deployment": "container",
             "runtime_binary": "podman",
-            "image_tag": "agentalloy:local",
+            "image_tag": "ghcr.io/nrmeyers/agentalloy:latest",
         }
         warnings: list[str] = []
 
@@ -333,9 +333,9 @@ class TestContainerUninstall:
 
         assert len(actions) == 1
         assert actions[0]["action"] == "image_removed"
-        assert actions[0]["image"] == "agentalloy:local"
+        assert actions[0]["image"] == "ghcr.io/nrmeyers/agentalloy:latest"
         mock_run.assert_called_once_with(
-            ["podman", "rmi", "-f", "agentalloy:local"],
+            ["podman", "rmi", "-f", "ghcr.io/nrmeyers/agentalloy:latest"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -361,7 +361,7 @@ class TestContainerUninstall:
         assert "runtime binary unresolved" in warnings[0]
 
     def test_remove_container_image_none_tag_defaults(self):
-        """None or missing image_tag falls back to agentalloy:local."""
+        """None or missing image_tag falls back to ghcr.io/nrmeyers/agentalloy:latest."""
         state: dict[str, Any] = {
             "deployment": "container",
             "runtime_binary": "podman",
@@ -377,16 +377,16 @@ class TestContainerUninstall:
 
         assert len(actions) == 1
         assert actions[0]["action"] == "image_removed"
-        assert actions[0]["image"] == "agentalloy:local"
+        assert actions[0]["image"] == "ghcr.io/nrmeyers/agentalloy:latest"
         mock_run.assert_called_once_with(
-            ["podman", "rmi", "-f", "agentalloy:local"],
+            ["podman", "rmi", "-f", "ghcr.io/nrmeyers/agentalloy:latest"],
             capture_output=True,
             text=True,
             timeout=30,
         )
 
     def test_remove_container_image_missing_key_defaults(self):
-        """Missing image_tag key falls back to agentalloy:local."""
+        """Missing image_tag key falls back to ghcr.io/nrmeyers/agentalloy:latest."""
         state: dict[str, Any] = {
             "deployment": "container",
             "runtime_binary": "podman",
@@ -401,7 +401,7 @@ class TestContainerUninstall:
 
         assert len(actions) == 1
         assert actions[0]["action"] == "image_removed"
-        assert actions[0]["image"] == "agentalloy:local"
+        assert actions[0]["image"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_remove_ollama_cache_success(self, tmp_path: Path):
         """Ollama cache directory is removed when it exists."""

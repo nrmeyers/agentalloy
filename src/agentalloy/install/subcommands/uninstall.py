@@ -16,7 +16,7 @@ Full teardown for a agentalloy install. By default removes:
 - Outputs directory (``${XDG_DATA_HOME}/agentalloy/outputs/``) and
   ``server.log`` — derivable artifacts that hold no user content.
 - The ``uv tool`` installation of agentalloy.
-- Container image (``agentalloy:local``) for container
+- Container image (``ghcr.io/nrmeyers/agentalloy:latest``) for container
   deployments.
 
 With ``--remove-data`` (or the ``full`` preset), also removes:
@@ -45,6 +45,7 @@ from typing import Any, cast
 
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import uninstall_proxy
+from agentalloy.install.subcommands.container_runtime import _DEFAULT_IMAGE
 from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
 
 SCHEMA_VERSION = 1
@@ -363,11 +364,11 @@ def _remove_container_image(
         warnings.append(
             "Container deployment detected but runtime binary unresolved — "
             "skipping image cleanup. Remove manually with your runtime: "
-            "`<podman|docker> rmi -f agentalloy:local`"
+            "`<podman|docker> rmi -f ghcr.io/nrmeyers/agentalloy:latest`"
         )
         return actions
 
-    image_tag = st.get("image_tag") or "agentalloy:local"
+    image_tag = st.get("image_tag") or _DEFAULT_IMAGE
     try:
         result = subprocess.run(  # noqa: S603 — fixed argv, binary resolved above
             [binary, "rmi", "-f", image_tag],
