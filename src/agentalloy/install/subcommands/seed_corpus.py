@@ -78,10 +78,10 @@ def _check_duckdb(duck_path: Path) -> dict[str, Any]:
 
 def _check_ladybug(ladybug_path: Path) -> int:
     """Query Kuzu for skill count."""
-    import kuzu
+    import ladybug
 
-    db = kuzu.Database(str(ladybug_path))
-    conn = kuzu.Connection(db)
+    db = ladybug.Database(str(ladybug_path))
+    conn = ladybug.Connection(db)
     result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
     count = 0
     if result.has_next():

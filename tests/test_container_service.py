@@ -320,8 +320,8 @@ class TestTestKuzuLockReleased:
             return mock_conn
 
         with monkeypatch.context() as m:
-            m.setattr("kuzu.Database", fake_db_init)
-            m.setattr("kuzu.Connection", fake_conn_init)
+            m.setattr("ladybug.Database", fake_db_init)
+            m.setattr("ladybug.Connection", fake_conn_init)
             m.setattr(time, "sleep", lambda s: None)
             m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
 
@@ -345,8 +345,8 @@ class TestTestKuzuLockReleased:
             return MagicMock()
 
         with monkeypatch.context() as m:
-            m.setattr("kuzu.Database", fake_db_init)
-            m.setattr("kuzu.Connection", fake_conn_init)
+            m.setattr("ladybug.Database", fake_db_init)
+            m.setattr("ladybug.Connection", fake_conn_init)
             m.setattr(time, "sleep", lambda s: None)
             m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
 
@@ -367,8 +367,8 @@ class TestTestKuzuLockReleased:
             raise Exception("Database is locked")
 
         with monkeypatch.context() as m:
-            m.setattr("kuzu.Database", fake_db_init)
-            m.setattr("kuzu.Connection", fake_conn_init)
+            m.setattr("ladybug.Database", fake_db_init)
+            m.setattr("ladybug.Connection", fake_conn_init)
             m.setattr(time, "sleep", lambda s: None)
             m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
 

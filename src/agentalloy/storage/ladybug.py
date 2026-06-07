@@ -16,7 +16,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
 
-import kuzu
+import ladybug
 
 from agentalloy.storage.schema_cypher import ALTER_TABLES, NODE_TABLES, REL_TABLES
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class LadybugStore:
-    """Thin wrapper around ``kuzu.Database`` + ``kuzu.Connection``.
+    """Thin wrapper around ``ladybug.Database`` + ``ladybug.Connection``.
 
     Owns the connection lifecycle. Safe to use as a context manager. Single-process
     service — one store instance is created at app startup and shared across requests.
@@ -32,13 +32,13 @@ class LadybugStore:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
-        self._db: kuzu.Database | None = None
-        self._conn: kuzu.Connection | None = None
+        self._db: ladybug.Database | None = None
+        self._conn: ladybug.Connection | None = None
 
     def open(self) -> None:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._db = kuzu.Database(self._db_path)
-        self._conn = kuzu.Connection(self._db)
+        self._db = ladybug.Database(self._db_path)
+        self._conn = ladybug.Connection(self._db)
 
     def close(self) -> None:
         self._conn = None
@@ -61,8 +61,8 @@ class LadybugStore:
         if self._conn is None:
             raise RuntimeError("LadybugStore is not open")
         result = self._conn.execute(cypher, parameters=params or {})
-        # kuzu returns QueryResult or list; normalize.
-        results: list[kuzu.QueryResult]
+        # ladybug returns QueryResult or list; normalize.
+        results: list[ladybug.QueryResult]
         results = result if isinstance(result, list) else [result]
         out: list[list[Any]] = []
         for r in results:

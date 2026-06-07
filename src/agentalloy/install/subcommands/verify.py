@@ -317,10 +317,10 @@ def _check_ladybug_present(ladybug_path: str, diag: dict[str, Any] | None = None
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        import kuzu
+        import ladybug
 
-        db = kuzu.Database(str(p))
-        conn = kuzu.Connection(db)
+        db = ladybug.Database(str(p))
+        conn = ladybug.Connection(db)
         result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
         count = 0
         if result.has_next():
@@ -368,10 +368,10 @@ def _check_skill_count(ladybug_path: str, diag: dict[str, Any] | None = None) ->
             "remediation": "Corpus is incomplete. Run `python -m agentalloy.install install-packs`",
         }
     try:
-        import kuzu
+        import ladybug
 
-        db = kuzu.Database(str(ladybug_path))
-        conn = kuzu.Connection(db)
+        db = ladybug.Database(str(ladybug_path))
+        conn = ladybug.Connection(db)
         result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
         count = 0
         if result.has_next():

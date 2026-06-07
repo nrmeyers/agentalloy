@@ -19,7 +19,7 @@ from agentalloy.install import server_proc
 from agentalloy.install import state as install_state
 
 if TYPE_CHECKING:
-    import kuzu  # annotation-only; runtime import lives inside test_kuzu_lock_released()
+    import ladybug  # annotation-only; runtime import lives inside test_kuzu_lock_released()
 
 _DEFAULT_UVICORN_CMD = "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950"
 
@@ -281,12 +281,12 @@ def test_kuzu_lock_released() -> bool:
     retry_interval = 0.5
 
     for attempt in range(max_retries):  # P10-R2: bounded = max_retries = 10
-        db: kuzu.Database | None = None  # P10-R9: TYPE_CHECKING-imported annotation
+        db: ladybug.Database | None = None  # P10-R9: TYPE_CHECKING-imported annotation
         try:
-            import kuzu as _kuzu  # runtime import kept inside function per existing pattern
+            import ladybug as _ladybug  # runtime import kept inside function per existing pattern
 
-            db = _kuzu.Database(str(ladybug_path))
-            _kuzu.Connection(db)
+            db = _ladybug.Database(str(ladybug_path))
+            _ladybug.Connection(db)
             # Success — lock is released.
             return True
         except Exception:
