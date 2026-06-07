@@ -405,7 +405,7 @@ Then based on the answer:
 > agentalloy enable-service --mode manual
 > ```
 
-The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments use the single-container model (`agentalloy setup --deployment container`), which bundles agentalloy + Ollama in one container with a runtime-generated entrypoint script (CPU-only inference; GPU acceleration requires the native install). On success, the mode is recorded in `install-state.json`.
+The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments pull a pre-built image from GHCR — the CI pipeline publishes `ghcr.io/nrmeyers/agentalloy:latest` on every merge to `main`. No repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`). On success, the mode is recorded in `install-state.json`.
 
 > **Container deployments pull a pre-built image from GHCR.** The CI pipeline builds and publishes `ghcr.io/nrmeyers/agentalloy:latest` on every merge to `main`. Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
 

@@ -260,7 +260,7 @@ It has been superseded by the GHCR pull-based flow. See:
 ### EC-9: Container Setup with Empty Packs
 - What to test:
   - User selects no packs (empty string)
-  - Container runs without AGENTALLOY_PACKS env var
+  - Container runs without AGENTIALLOY_PACKS env var
   - Setup completes successfully
 - Expected: Empty packs handled correctly
 
