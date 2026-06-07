@@ -79,7 +79,7 @@ class SetupConfig:
 
     # Container runtime fields (used when deployment="container")
     runtime_binary: str = ""  # resolved path to container runtime (podman/docker)
-    image_tag: str = "agentalloy:local"  # container image tag
+    image_tag: str = "ghcr.io/nrmeyers/agentalloy:latest"  # container image tag (GHCR)
     container_name: str = "agentalloy"  # base name for containers
     data_volume: str = "agentalloy-data"  # named volume for persistent data
 
@@ -972,7 +972,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 2. Detect container runtime (standalone, before image selection)
     from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415
-        _build_image,
+        _pull_image,
         _cleanup_temp_entrypoint,
         _detect_runtime_binary,
         _ensure_ollama_dir,
@@ -1151,7 +1151,6 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         if ans in ("n", "no"):
             custom = input("  Enter compose file path (or repo dir): ").strip()
             compose_path = _resolve_user_path(custom)
-    cfg.image_tag = "agentalloy:local"
 
     # 4. Run container preflight
     _print("  [dim]-> Preflight (container)[/dim]")
@@ -1284,12 +1283,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("[bold]Running container setup...[/bold]")
     _print(f"  [dim]Full setup log: {log_path}[/dim]")
 
-    # 7a. Build the agentalloy image (or use existing).
-    _print("  [dim]-> Building container image (1-2 min)...[/dim]")
-    build_ctx = compose_path.parent  # build context is the compose file's dir
-    build_rc = _build_image(binary_path, build_ctx)
+    # 7a. Pull the agentalloy image from GHCR.
+    _print("  [dim]-> Pulling container image from GHCR...[/dim]")
+    # Pull the agentalloy image from GHCR
+    build_rc = _pull_image(binary_path)
     if build_rc != 0:
-        return build_rc
+        return 1
 
     # 7b. Ensure the agentalloy-data volume exists.
     _ensure_volume(binary_path)

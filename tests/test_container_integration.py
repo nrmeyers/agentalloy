@@ -201,56 +201,60 @@ class TestImagePullFailure:
     def test_pull_failure_returns_exit_1_with_remediation(self):
         """When pulling the GHCR image fails, exit code is 1 and
         remediation guidance (network / --image-path) is printed."""
-        with (
-            patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
-            ),
-            patch("shutil.which", return_value="/usr/bin/podman"),
-            patch(
-                "agentalloy.install.subcommands.preflight.run_preflight",
-                return_value={"checks": []},
-            ),
-            patch("pathlib.Path.exists", return_value=False),
-        ):
-            from agentalloy.install.subcommands.simple_setup import (
-                SetupConfig,
-                _run_container_flow,
-            )
-
-            cfg = SetupConfig(
-                deployment="container",
-                non_interactive=True,
-                port=47950,
-            )
-
-            captured = []
-
-            def capture_print(*args, **kwargs):
-                captured.append(" ".join(str(a) for a in args))
-
-            # Patch _pull_image to simulate a failure (exit 125)
+        import tempfile
+        
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            # Create compose.yaml and Containerfile so _has_assets returns True
+            (tmp_path / "compose.yaml").write_text("version: '3'\nservices: {}\n")
+            (tmp_path / "Containerfile").write_text("FROM ubuntu\n")
+            
             with (
                 patch(
-                    "agentalloy.install.subcommands.container_runtime._pull_image",
-                    return_value=125,
+                    "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                    return_value="podman",
                 ),
+                patch("shutil.which", return_value="/usr/bin/podman"),
                 patch(
-                    "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+                    "agentalloy.install.subcommands.preflight.run_preflight",
+                    return_value={"checks": []},
                 ),
+                patch("pathlib.Path.cwd", return_value=tmp_path),
             ):
-                rc = _run_container_flow(cfg, 0.0)
+                from agentalloy.install.subcommands.simple_setup import (
+                    SetupConfig,
+                    _run_container_flow,
+                )
 
-            assert rc == 1, f"Expected exit code 1, got {rc}"
-            output = " ".join(captured)
-            assert "image" in output.lower() or "pull" in output.lower(), (
-                f"Expected pull failure message in output: {output}"
-            )
+                cfg = SetupConfig(
+                    deployment="container",
+                    non_interactive=True,
+                    port=47950,
+                )
 
+                captured = []
 
-# ---------------------------------------------------------------------------
-# IT-4: Image pull failure — exit code 1
-# ---------------------------------------------------------------------------
+                def capture_print(*args, **kwargs):
+                    captured.append(" ".join(str(a) for a in args))
+
+                # Patch _pull_image to simulate a failure (exit 125)
+                with (
+                    patch(
+                        "agentalloy.install.subcommands.container_runtime._pull_image",
+                        return_value=125,
+                    ),
+                    patch(
+                        "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+                    ),
+                ):
+                    rc = _run_container_flow(cfg, 0.0)
+
+                assert rc == 1, f"Expected exit code 1, got {rc}"
+                output = " ".join(captured)
+                assert "image" in output.lower() or "pull" in output.lower(), (
+                    f"Expected pull failure message in output: {output}"
+                )
+
 
 
 class TestPullFailureExitCode:
