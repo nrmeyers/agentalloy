@@ -1156,7 +1156,6 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("  [dim]-> Preflight (container)[/dim]")
     container_preflight = preflight.run_preflight(
         phase="container",
-
         runtime=cfg.runtime_binary,
     )
     container_fatal = [
