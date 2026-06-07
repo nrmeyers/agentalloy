@@ -40,7 +40,9 @@ class TestEntrypointScript:
         # "Installing pack:"
         ingest_idx = script.find("Installing pack")
         assert uvicorn_idx != -1 and ingest_idx != -1, script
-        assert uvicorn_idx > ingest_idx, "uvicorn must start after pack ingest (avoids Ladybug lock conflict)"
+        assert uvicorn_idx > ingest_idx, (
+            "uvicorn must start after pack ingest (avoids Ladybug lock conflict)"
+        )
         # Uvicorn launched in background, not exec'd.
         assert (
             "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &"
