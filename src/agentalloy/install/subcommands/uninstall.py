@@ -45,7 +45,7 @@ from typing import Any, cast
 
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import uninstall_proxy
-from agentalloy.install.subcommands.container_runtime import _DEFAULT_IMAGE
+from agentalloy.install.subcommands.container_runtime import DEFAULT_IMAGE
 from agentalloy.install.subcommands.wire_harness import SENTINEL_BEGIN, SENTINEL_END
 
 SCHEMA_VERSION = 1
@@ -368,7 +368,7 @@ def _remove_container_image(
         )
         return actions
 
-    image_tag = st.get("image_tag") or _DEFAULT_IMAGE
+    image_tag = st.get("image_tag") or DEFAULT_IMAGE
     try:
         result = subprocess.run(  # noqa: S603 — fixed argv, binary resolved above
             [binary, "rmi", "-f", image_tag],

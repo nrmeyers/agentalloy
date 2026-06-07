@@ -475,41 +475,6 @@ def _check_fastflowlm_present() -> dict[str, Any]:
     )
 
 
-def _check_git_present() -> dict[str, Any]:
-    """Container install clones the agentalloy repo into a cache dir when the
-    user runs setup without a local checkout (the Containerfile build context
-    needs the full source tree). Surface a missing git here so the user knows
-    upfront, but only as a WARNING — if they already have a local checkout
-    (cwd or editable install), the auto-clone fallback never fires and git
-    isn't needed. The actual hard-fail happens in `_ensure_cached_repo` if
-    and only if the clone is actually needed.
-    """
-    t0 = time.monotonic()
-    git_path = shutil.which("git")
-    if git_path:
-        return _check(
-            "git_present",
-            passed=True,
-            started=t0,
-            detail=f"git at {git_path}",
-        )
-    return _check(
-        "git_present",
-        passed=False,
-        started=t0,
-        severity="warn",
-        error="git not found on PATH",
-        remediation=(
-            "Install git (e.g. `apt install git`, `brew install git`, "
-            "`dnf install git`) if you don't have a local agentalloy checkout. "
-            "Container setup falls back to cloning the repo into "
-            "~/.cache/agentalloy/repo when no clone is found on disk; that "
-            "step needs git. If you DO have a clone (cwd or editable install), "
-            "this warning is informational."
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Container-phase checks
 # ---------------------------------------------------------------------------

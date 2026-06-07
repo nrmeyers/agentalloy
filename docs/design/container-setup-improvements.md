@@ -340,7 +340,7 @@ no fields are removed or renamed.
 
 1. **User runs `agentalloy setup --packs all`**
 2. **`_run_container_flow()`** detects runtime binary (podman/docker)
-3. **Builds container image** via `_pull_image()`
+3. **Pulls** the container image via `_pull_image()`
 4. **Ensures data volume** via `_ensure_volume()`
 5. **Generates entrypoint script** via `_generate_entrypoint()`:
    - Script creates `.bootstrap-lock` at start

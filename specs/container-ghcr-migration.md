@@ -24,8 +24,7 @@ Replace the local container build path in `agentalloy setup --deployment contain
 ### Current `_run_container_flow()` in simple_setup.py
 - **File:** `src/agentalloy/install/subcommands/simple_setup.py`, function at line 949
 - Lines 1024-1038: calls `_pull_image()` — but the surrounding code and tests treat this as a "build" step
-- The function name `_pull_image` in `container_runtime.py` actually does `podman build` when a build context is passed (per test expectations at `tests/install/test_container_runtime.py` lines 209-316)
-- **Conflict:** The function name implies "pull" but the tests show it runs `podman build`. The GHCR migration means `_pull_image()` should only pull from GHCR, not build locally.
+- The function name `_pull_image` in `container_runtime.py` pulls from GHCR using `podman pull` (online) or `podman load -i` (offline). The GHCR migration means `_pull_image()` only pulls/loads — no local build context.
 
 ### Existing Offline Mode
 - `SetupConfig.image_path` (line 85 in `simple_setup.py`): path to image tarball for offline mode

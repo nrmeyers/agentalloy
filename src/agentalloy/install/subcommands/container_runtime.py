@@ -53,6 +53,9 @@ def _detect_runtime_binary() -> str | None:
 
 _DEFAULT_IMAGE = "ghcr.io/nrmeyers/agentalloy:latest"
 
+# Public alias for cross-module access (unprefixed consumers import this)
+DEFAULT_IMAGE = _DEFAULT_IMAGE
+
 
 def _pull_image(
     runtime: str,
@@ -115,9 +118,17 @@ def _pull_image(
             # reference match; only fall back to ID for digest-only images
             # where the tag format renders as "<none>:<none>".
             image_found = image in result.stdout
-            if not image_found and result.stdout.strip() == "<none>:<none>":
-                # Digest-only image — verify an ID was loaded (not empty).
-                image_found = id_result.returncode == 0 and bool(id_result.stdout.strip())
+            if not image_found:
+                # The images listing may contain many lines (all local images).
+                # A digest-based load produces one or more "<none>:<none>" entries
+                # (untagged images). Fall back to ID verification whenever ANY
+                # line is "<none>:<none>" rather than requiring the entire output
+                # to be that single value.
+                has_untagged = any(
+                    line.strip() == "<none>:<none>" for line in result.stdout.splitlines()
+                )
+                if has_untagged:
+                    image_found = id_result.returncode == 0 and bool(id_result.stdout.strip())
             if not image_found:
                 _print(f"  [red]Image {image} not found after load[/red]")
                 return 1

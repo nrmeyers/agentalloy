@@ -144,7 +144,7 @@ The setup wizard:
 2. **Pulls** the pre-built image from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`).
 3. **Creates** a named volume `agentalloy-data` for persistent corpus data.
 4. **Runs** the container with volume mounts, env vars, and port mapping.
-5. **Waits** for the health endpoint (`/health`) to respond.
+5. **Waits** for the readiness endpoint (`/readiness`) to respond.
 
 > **Note:** Container install pulls a pre-built image from GHCR — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
@@ -244,11 +244,11 @@ podman exec agentalloy uv run agentalloy install-packs --packs all --no-restart
 
 Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled Ollama runs on CPU using `qwen3-embedding:0.6b` — functional for embeddings but slower than GPU.
 
-|| Requirement | Minimum |
+| Requirement | Minimum |
 |---|---|
-|| RAM | 8 GB |
-|| Disk (image + model + data) | ~4 GB |
-|| Container runtime | Podman (recommended) or Docker |
+| RAM | 8 GB |
+| Disk (image + model + data) | ~4 GB |
+| Container runtime | Podman (recommended) or Docker |
 
 ---
 

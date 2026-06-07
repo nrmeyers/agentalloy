@@ -84,7 +84,7 @@ class SetupConfig:
     deployment: str = ""
 
     # Container runtime fields (used when deployment="container")
-    runtime_binary: str = ""  # resolved path to container runtime (podman/docker)
+    runtime_binary: str = ""  # runtime label (e.g. "podman" or "docker")
     image_tag: str = "ghcr.io/nrmeyers/agentalloy:latest"  # container image tag for GHCR
     container_name: str = "agentalloy"  # base name for containers
     data_volume: str = "agentalloy-data"  # named volume for persistent data
@@ -1123,6 +1123,11 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # Clean up temp entrypoint (mounted as a volume; only needed during start)
     _cleanup_temp_entrypoint(entrypoint)
+
+    # The container always binds _CONTAINER_PORT (47950). Force cfg.port to
+    # match so state and host .env record the port the container is actually
+    # listening on — a user-supplied --port would otherwise be misleading.
+    cfg.port = _CONTAINER_PORT
 
     # Record state + write .env (before verify so it reads fresh values)
     st = install_state.load_state()
