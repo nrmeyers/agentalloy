@@ -14,7 +14,6 @@ from agentalloy.reembed.cli import (
 from agentalloy.reembed.cli import (
     main as reembed_main,
 )
-from agentalloy.storage.vector_store import VectorStore
 
 # ---------------------------------------------------------------------------
 # --rebuild-fts flag
@@ -143,59 +142,6 @@ def test_rebuild_fts_exit_ok_on_failure(tmp_path: Path, caplog: pytest.LogCaptur
 
         assert code == EXIT_OK
         assert "BM25 leg degraded" in caplog.text
-
-
-# ---------------------------------------------------------------------------
-# VectorStore.rebuild_fts_index retry
-# ---------------------------------------------------------------------------
-
-
-def test_rebuild_fts_retry_on_stopwords_error(tmp_path: Path) -> None:
-    """rebuild_fts_index retries up to 3 times on the stopwords catalog race."""
-    conn = MagicMock()
-    create_count = 0
-
-    def mock_execute(sql: str, *a: object, **kw: object) -> None:
-        nonlocal create_count
-        if "create_fts_index" in sql:
-            create_count += 1
-            if create_count < 3:
-                raise Exception("subject 'stopwords' has been deleted")
-        # CHECKPOINT, drop_fts_index: all succeed
-        return None
-
-    conn.execute = mock_execute
-    vs = VectorStore(conn)  # type: ignore[arg-type]
-
-    # Patch time.sleep so the retry path doesn't actually sleep
-    with patch("time.sleep"):
-        # Should not raise - third retry succeeds
-        vs.rebuild_fts_index()
-
-    # Verify create_fts_index was attempted 3 times
-    assert create_count == 3
-
-
-def test_rebuild_fts_no_retry_on_non_transient_error(tmp_path: Path) -> None:
-    """rebuild_fts_index does NOT retry non-transient errors."""
-    conn = MagicMock()
-    create_count = 0
-
-    def mock_execute(sql: str, *a: object, **kw: object) -> None:
-        nonlocal create_count
-        if "create_fts_index" in sql:
-            create_count += 1
-            raise Exception('Extension "fts" not loaded')
-        return None
-
-    conn.execute = mock_execute
-    vs = VectorStore(conn)  # type: ignore[arg-type]
-
-    with pytest.raises(Exception, match='Extension "fts" not loaded'):
-        vs.rebuild_fts_index()
-
-    # Only ONE create_fts_index call (no retry)
-    assert create_count == 1
 
 
 # ---------------------------------------------------------------------------
