@@ -569,20 +569,18 @@ class TestGenerateEntrypoint:
 class TestGenerateEntrypointNoPacks:
     """Test _generate_entrypoint() when packs is empty."""
 
-    def test_no_install_packs_when_packs_empty(self, tmp_path: Path):
-        """When packs='', the script must not invoke ``agentalloy install-packs``.
+    def test_install_packs_when_packs_empty(self, tmp_path: Path):
+        """When packs='', the script installs always-on packs.
 
-        We probe specifically for the invocation token rather than any
-        ``install-packs`` substring — the fast-start design also references
-        ``.install-packs-lock`` (the concurrent-install guard) in the env
-        block, which is unrelated to whether install-packs actually runs.
+        An empty packs list means “use the default always-on packs” rather
+        than “install nothing”.  This ensures the container reaches
+        MIN_SKILL_COUNT on cold start.
         """
         from agentalloy.install.subcommands.container_runtime import _generate_entrypoint
 
         content = _generate_entrypoint("").read_text()
 
-        assert "uv run agentalloy install-packs" not in content
-        assert "No packs specified" in content
+        assert "uv run agentalloy install-packs --no-restart" in content
 
 
 # ---------------------------------------------------------------------------

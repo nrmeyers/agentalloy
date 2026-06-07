@@ -88,8 +88,11 @@ class TestEntrypointScript:
         assert "|| echo 0" in script
 
     def test_ec12_ec13_no_packs_path(self) -> None:
+        # When packs="" the entrypoint still installs always-on packs
+        # (so the container reaches MIN_SKILL_COUNT) and still wires
+        # uvicorn + the complete marker.
         script = _build_entrypoint_script("")
-        assert "No packs specified" in script
+        assert "uv run agentalloy install-packs --no-restart" in script
         # Still wires uvicorn + complete marker even with no packs.
         assert "uvicorn agentalloy.app:app" in script
         assert 'touch "$COMPLETE"' in script
