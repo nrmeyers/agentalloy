@@ -77,7 +77,7 @@ def _check_duckdb(duck_path: Path) -> dict[str, Any]:
 
 
 def _check_ladybug(ladybug_path: Path) -> int:
-    """Query Kuzu for skill count."""
+    """Query LadybugDB for skill count."""
     import ladybug
 
     db = ladybug.Database(str(ladybug_path))
