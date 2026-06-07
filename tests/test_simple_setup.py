@@ -1605,13 +1605,13 @@ class TestPromptUpstream:
     def test_prompt_upstream_uses_defaults_non_tty(self):
         """_prompt_upstream returns defaults in non-TTY mode."""
         cfg = SetupConfig(
-            upstream_url="http://localhost:2099/v1",
+            upstream_url="http://localhost:2099",
             upstream_model="",
             upstream_api_key="",
         )
         with patch.object(sys.stdin, "isatty", return_value=False):
             _prompt_upstream(cfg)
-        assert cfg.upstream_url == "http://localhost:2099/v1"
+        assert cfg.upstream_url == "http://localhost:2099"
 
     def test_prompt_upstream_updates_cfg_fields(self):
         """_prompt_upstream writes user input into cfg fields."""
@@ -1628,7 +1628,7 @@ class TestPromptUpstream:
 
     def test_prompt_upstream_accepts_empty_api_key(self):
         """_prompt_upstream accepts an empty API key (for local runners)."""
-        cfg = SetupConfig(upstream_url="http://localhost:2099/v1", upstream_model="qwen3")
+        cfg = SetupConfig(upstream_url="http://localhost:2099", upstream_model="qwen3")
         # Empty response = accept default (which is empty)
         with patch.object(sys.stdin, "isatty", return_value=False):
             _prompt_upstream(cfg)
@@ -1642,7 +1642,7 @@ class TestWriteUpstreamEnv:
         """Writes UPSTREAM_* vars when .env doesn't exist."""
         with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
             cfg = SetupConfig(
-                upstream_url="http://localhost:2099/v1",
+                upstream_url="http://localhost:2099",
                 upstream_model="qwen3-14b",
                 upstream_api_key="sk-test",
             )
@@ -1650,7 +1650,7 @@ class TestWriteUpstreamEnv:
 
         env_fp = tmp_path / ".env"
         content = env_fp.read_text()
-        assert "UPSTREAM_URL=http://localhost:2099/v1" in content
+        assert "UPSTREAM_URL=http://localhost:2099" in content
         assert "UPSTREAM_MODEL=qwen3-14b" in content
         assert "UPSTREAM_API_KEY=sk-test" in content
 
@@ -1661,7 +1661,7 @@ class TestWriteUpstreamEnv:
 
         with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
             cfg = SetupConfig(
-                upstream_url="http://localhost:2099/v1",
+                upstream_url="http://localhost:2099",
                 upstream_model="qwen3",
                 upstream_api_key="",
             )
@@ -1669,7 +1669,7 @@ class TestWriteUpstreamEnv:
 
         content = env_fp.read_text()
         assert "RUNTIME_EMBED_BASE_URL=http://localhost:11434" in content
-        assert "UPSTREAM_URL=http://localhost:2099/v1" in content
+        assert "UPSTREAM_URL=http://localhost:2099" in content
         assert "UPSTREAM_MODEL=qwen3" in content
 
     def test_replaces_existing_upstream_vars(self, tmp_path: Path):
@@ -1705,7 +1705,7 @@ class TestWriteUpstreamEnv:
         """Writes UPSTREAM_API_KEY= with empty value when no key is set."""
         with patch("agentalloy.install.state.user_config_dir", return_value=tmp_path):
             cfg = SetupConfig(
-                upstream_url="http://localhost:2099/v1",
+                upstream_url="http://localhost:2099",
                 upstream_model="qwen3",
                 upstream_api_key="",
             )
@@ -1721,7 +1721,7 @@ class TestTestUpstreamEndpoint:
     def test_returns_true_on_200(self, tmp_path: Path):
         """Returns True when upstream /v1/models responds with 200."""
         cfg = SetupConfig(
-            upstream_url="http://localhost:2099/v1",
+            upstream_url="http://localhost:2099",
             upstream_model="qwen3",
             upstream_api_key="sk-test",
         )
@@ -1754,7 +1754,7 @@ class TestTestUpstreamEndpoint:
     def test_returns_false_on_non_200(self):
         """Returns False when upstream returns non-200 HTTP status."""
         cfg = SetupConfig(
-            upstream_url="http://localhost:2099/v1",
+            upstream_url="http://localhost:2099",
             upstream_model="qwen3",
             upstream_api_key="",
         )
@@ -1770,7 +1770,7 @@ class TestTestUpstreamEndpoint:
     def test_includes_auth_header_when_api_key_set(self):
         """Sends Authorization: Bearer header when api key is configured."""
         cfg = SetupConfig(
-            upstream_url="http://localhost:2099/v1",
+            upstream_url="http://localhost:2099",
             upstream_model="qwen3",
             upstream_api_key="sk-mysecret",
         )

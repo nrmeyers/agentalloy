@@ -75,7 +75,7 @@ def test_upstream_configured_false_when_partial(
 ) -> None:
     """API key is optional — URL + model is enough for upstream_configured()."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099")
     monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
     monkeypatch.delenv("UPSTREAM_API_KEY", raising=False)
     s = Settings()
@@ -100,7 +100,7 @@ def test_upstream_configured_false_when_model_missing(
 ) -> None:
     """upstream_configured() returns False when model is missing."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099")
     monkeypatch.delenv("UPSTREAM_MODEL", raising=False)
     monkeypatch.setenv("UPSTREAM_API_KEY", "sk-test")
     s = Settings()
@@ -112,7 +112,7 @@ def test_upstream_configured_true_when_all_set(
 ) -> None:
     """upstream_configured() returns True when all three vars are set."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099")
     monkeypatch.setenv("UPSTREAM_MODEL", "qwen3-14b")
     monkeypatch.setenv("UPSTREAM_API_KEY", "sk-test")
     s = Settings()
@@ -137,7 +137,7 @@ def test_upstream_configured_false_when_api_key_empty_string(
 ) -> None:
     """API key is optional — upstream_configured() returns True with just URL + model."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099/v1")
+    monkeypatch.setenv("UPSTREAM_URL", "http://localhost:2099")
     monkeypatch.setenv("UPSTREAM_MODEL", "my-model")
     monkeypatch.setenv("UPSTREAM_API_KEY", "")
     s = Settings()
