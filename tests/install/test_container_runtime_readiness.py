@@ -1,5 +1,5 @@
 # ruff: noqa: I001 -- testing private module members intentionally
-"""Tests for fast-start entrypoint generation and readiness polling.
+"""Tests for entrypoint generation and readiness polling.
 
 Covers UT-9..UT-25 from docs/tests/container-setup-improvements.md and
 IT-2 (bash syntax check) and EC-12/EC-13 (no-packs path).
@@ -33,14 +33,16 @@ class TestEntrypointScript:
         assert 'date -Iseconds > "$LOCK"' in script
         assert 'LOCK="$APP_DIR/.bootstrap-lock"' in script
 
-    def test_ut10_uvicorn_starts_before_pack_ingest(self) -> None:
+    def test_ut10_uvicorn_starts_after_pack_ingest(self) -> None:
         script = _build_entrypoint_script("python,nodejs")
         uvicorn_idx = script.find("uvicorn agentalloy.app:app")
         # Pack ingest happens inside the per-pack loop, identified by
         # "Installing pack:"
         ingest_idx = script.find("Installing pack")
         assert uvicorn_idx != -1 and ingest_idx != -1, script
-        assert uvicorn_idx < ingest_idx, "uvicorn must start before pack ingest (fast-start)"
+        assert uvicorn_idx > ingest_idx, (
+            "uvicorn must start after pack ingest (avoids Ladybug lock conflict)"
+        )
         # Uvicorn launched in background, not exec'd.
         assert (
             "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &"

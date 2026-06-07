@@ -84,19 +84,6 @@ Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-
 
 > **Container install pulls a pre-built image from GHCR.** Setup pulls `ghcr.io/nrmeyers/agentalloy:latest` directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
-### Hardware presets
-
-The runtime needs only an embedding service. The install agent picks one for you, but here's the matrix:
-
-| Preset | Hardware | Backend | VRAM / RAM |
-|---|---|---|---|
-| `cpu` | x86_64 / ARM64 | Ollama (CPU) | 8 GB RAM |
-| `apple-silicon` | M1 / M2 / M3 / M4 | Ollama (Metal) | 8 GB unified |
-| `nvidia` | NVIDIA + CUDA | Ollama (CUDA) | 4 GB VRAM |
-| `radeon` | AMD Radeon dGPU/iGPU | LM Studio (Vulkan) | 4 GB VRAM |
-
-All presets use **`qwen3-embedding:0.6b`** at 1024 dimensions. Default ports per runner: Ollama `localhost:11434`, LM Studio `localhost:1234`, llama-server `localhost:11434`. The on-disk index is portable across backends — switching is an env-var flip.
-
 ---
 
 ## Contents
