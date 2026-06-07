@@ -482,7 +482,7 @@ def _build_entrypoint_script(packs: str) -> str:
         lines.extend(
             [
                 '    echo ">> No explicit packs specified — installing always-on packs"',
-               "    uv run agentalloy install-packs --no-restart",
+                "    uv run agentalloy install-packs --no-restart",
             ]
         )
 
