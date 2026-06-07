@@ -761,7 +761,6 @@ def run_preflight(
                     break
 
         checks.append(_check_runtime_binary(runtime))
-        checks.append(_check_git_present())
         checks.append(_check_ghcr_reachable())
         checks.append(_check_disk_space())
         checks.append(_check_name_conflicts(runtime or "podman"))

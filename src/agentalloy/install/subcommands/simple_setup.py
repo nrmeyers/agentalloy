@@ -58,6 +58,12 @@ def _print(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-untyped-def]
         print(*args, **kwargs)
 
 
+# The container always exposes /readiness on this port (hardcoded in the
+# entrypoint script and the _run_container port mapping).  The user-facing
+# cfg.port is only used for the host-side .env file and preflight checks.
+_CONTAINER_PORT = 47950
+
+
 @dataclass
 class SetupConfig:
     """User-facing configuration gathered during the interactive wizard."""
@@ -1100,7 +1106,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print(f"     [dim]bootstrap: still warming up  elapsed={elapsed}s[/dim]")
 
     healthy = _wait_for_readiness(
-        cfg.port,
+        _CONTAINER_PORT,
         timeout=readiness_timeout,
         runtime=binary_path,
         container_name=cfg.container_name or "agentalloy",
@@ -1114,6 +1120,9 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         )
     else:
         _print("  [green]  Service ready.[/green]")
+
+    # Clean up temp entrypoint (mounted as a volume; only needed during start)
+    _cleanup_temp_entrypoint(entrypoint)
 
     # Record state + write .env (before verify so it reads fresh values)
     st = install_state.load_state()
