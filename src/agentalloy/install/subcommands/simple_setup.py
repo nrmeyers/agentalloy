@@ -84,7 +84,7 @@ class SetupConfig:
     data_volume: str = "agentalloy-data"  # named volume for persistent data
 
     # Upstream LLM (proxy target)
-    upstream_url: str = "http://localhost:2099/v1"
+    upstream_url: str = ""
     upstream_model: str = ""
     upstream_api_key: str = ""
 
@@ -516,8 +516,8 @@ def _prompt_upstream(cfg: SetupConfig) -> None:
 
     cfg.upstream_url = _prompt_context(
         "  Upstream URL",
-        "  Base URL of the upstream LLM (e.g. http://localhost:2099/v1)",
-        default=cfg.upstream_url or "http://localhost:2099/v1",
+        "  Base URL of the upstream LLM (e.g. http://localhost:11434 for Ollama, https://api.openai.com for OpenAI)",
+        default=cfg.upstream_url or "",
     )
     cfg.upstream_model = _prompt_context(
         "  Upstream model",

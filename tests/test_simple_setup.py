@@ -2276,10 +2276,10 @@ class TestTestUpstreamEndpoint:
 class TestSetupConfigUpstreamDefaults:
     """Test that SetupConfig has correct upstream defaults."""
 
-    def test_default_upstream_url(self):
-        """SetupConfig defaults upstream_url to http://localhost:2099/v1."""
+    def test_default_upstream_url_empty(self):
+        """SetupConfig defaults upstream_url to empty string."""
         cfg = SetupConfig()
-        assert cfg.upstream_url == "http://localhost:2099/v1"
+        assert cfg.upstream_url == ""
 
     def test_default_upstream_model_empty(self):
         """SetupConfig defaults upstream_model to empty string."""

@@ -73,7 +73,7 @@ AgentAlloy's FastAPI service acts as an OpenAI-compatible proxy — a gateway th
 Configured in `~/.config/agentalloy/.env`:
 
 ```
-AGENTALLOY_UPSTREAM_URL=http://localhost:2099/v1
+AGENTALLOY_UPSTREAM_URL=http://localhost:11434
 AGENTALLOY_UPSTREAM_MODEL=qwen/qwen2.5-coder-14b
 AGENTALLOY_UPSTREAM_API_KEY=sk-xxx
 ```
