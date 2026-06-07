@@ -1,3 +1,11 @@
+# OBSOLETE — Pre-migration
+
+This document describes the pre-GHCR-migration container setup (build-based approach).
+It has been superseded by the GHCR pull-based flow. See:
+- `design/container-ghcr-migration.md` — design doc
+- `specs/container-ghcr-migration.md` — spec
+- `plans/container-ghcr-migration-plan.md` — implementation plan
+
 # AgentAlloy Spec: Unified Setup With Direct Container Runtime
 
 ## Summary

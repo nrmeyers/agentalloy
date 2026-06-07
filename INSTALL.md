@@ -407,7 +407,7 @@ Then based on the answer:
 
 The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments use the single-container model (`agentalloy setup --deployment container`), which bundles agentalloy + Ollama in one container with a runtime-generated entrypoint script (CPU-only inference; GPU acceleration requires the native install). On success, the mode is recorded in `install-state.json`.
 
-> **Container deployments build from source.** The `Containerfile` builds the image from local source, so `Containerfile`, `pyproject.toml`, `uv.lock`, `src/`, and `README.md` must be available as the build context. The wizard auto-handles this in three steps: (a) checks `cwd` for the repo, (b) checks the editable-install source root, (c) falls back to a shallow `git clone` of `https://github.com/nrmeyers/agentalloy.git` into `~/.cache/agentalloy/repo` and uses that as the build context. A `uv tool install`'d CLI works fine — `git` and a container runtime (`podman` or `docker`) are the only host prereqs. Native mode has no such requirement.
+> **Container deployments pull a pre-built image from GHCR.** The CI pipeline builds and publishes `ghcr.io/nrmeyers/agentalloy:latest` on every merge to `main`. Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
 
 ---
 

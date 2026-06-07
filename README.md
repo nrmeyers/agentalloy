@@ -105,7 +105,7 @@ Works in any of the [supported harnesses](#harness-support).
 
 **Container alternative.** `agentalloy setup --deployment container` — runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Port 47950 is the only external surface. Container inference is CPU-only on every host; for GPU acceleration (NVIDIA/AMD/Metal) pick the native install instead.
 
-> **Container install builds from source.** The container image is built from the repo's `Containerfile`, so setup needs the repo on disk for the build context. Setup handles this automatically: if you ran `uv tool install agentalloy` without a manual `git clone`, setup falls back to a shallow clone of the repo into `~/.cache/agentalloy/repo` and uses that as the build context. The only extra host prereq beyond `podman` / `docker` is `git`.
+> **Container install pulls a pre-built image from GHCR.** Setup pulls `ghcr.io/nrmeyers/agentalloy:latest` directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
 ---
 
@@ -248,7 +248,7 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 | RAM | 8 GB |
 | Disk (image + model + data) | ~4 GB |
 | Container runtime | Podman (recommended) or Docker |
-| Git | Required for auto-clone build context |
+| Git | Not required |
 
 ---
 

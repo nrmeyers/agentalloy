@@ -103,7 +103,7 @@ User runs: agentalloy setup --deployment container --packs all
     v
 simple_setup._run_container_flow()
     |
-    +-- _build_image()
+    +-- _pull_image()
     +-- _ensure_volume()
     +-- _generate_entrypoint()  <-- NEW: fast-start entrypoint
     +-- _run_container()
