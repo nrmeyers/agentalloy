@@ -73,14 +73,14 @@ AgentAlloy's FastAPI service acts as an OpenAI-compatible proxy — a gateway th
 Configured in `~/.config/agentalloy/.env`:
 
 ```
-AGENTALLOY_UPSTREAM_URL=http://localhost:11434
-AGENTALLOY_UPSTREAM_MODEL=qwen/qwen2.5-coder-14b
-AGENTALLOY_UPSTREAM_API_KEY=sk-xxx
+UPSTREAM_URL=http://localhost:11434
+UPSTREAM_MODEL=qwen/qwen2.5-coder-14b
+UPSTREAM_API_KEY=***
 ```
 
-- `AGENTALLOY_UPSTREAM_URL` — base URL of the LLM provider (OpenAI-compatible `/v1` endpoint)
-- `AGENTALLOY_UPSTREAM_MODEL` — model name to forward requests to
-- `AGENTALLOY_UPSTREAM_API_KEY` — API key for the upstream provider (optional for local runners)
+- `UPSTREAM_URL` — base URL of the LLM provider (OpenAI-compatible `/v1` endpoint)
+- `UPSTREAM_MODEL` — model name to forward requests to
+- `UPSTREAM_API_KEY` — API key for the upstream provider (optional for local runners)
 
 These are set during `agentalloy setup` and read by the proxy at startup. The harness never sees these values — it only talks to localhost:47950.
 

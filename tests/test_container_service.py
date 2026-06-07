@@ -296,19 +296,19 @@ class TestRestartServiceInContainer:
 
 
 class TestTestKuzuLockReleased:
-    """test_kuzu_lock_released() retry logic."""
+    """test_kuzu_lock_released() retry logic for LadybugDB."""
 
     def _make_fake_ladybug_dir(self, tmp_path: Path) -> Path:
-        """Create a fake ladybug directory that looks like a Kuzu DB."""
+        """Create a fake ladybug directory that looks like a real LadybugDB DB."""
         ladybug = tmp_path / "ladybug"
         ladybug.mkdir()
-        # Create a dummy node directory to make it look like a real Kuzu DB.
+        # Create a dummy node directory to make it look like a real LadybugDB DB.
         (ladybug / "nodes").mkdir()
         (ladybug / "edges").mkdir()
         return ladybug
 
     def test_lock_released_immediately(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Kuzu connection succeeds on first try, should return True."""
+        """When Ladybug connection succeeds on first try, should return True."""
         ladybug = self._make_fake_ladybug_dir(tmp_path)
         mock_db = MagicMock()
         mock_conn = MagicMock()
@@ -331,7 +331,7 @@ class TestTestKuzuLockReleased:
             assert result is True
 
     def test_lock_still_held_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Kuzu fails initially then succeeds, should retry and return True."""
+        """When Ladybug fails initially then succeeds, should retry and return True."""
         ladybug = self._make_fake_ladybug_dir(tmp_path)
         call_count = [0]
 
@@ -357,7 +357,7 @@ class TestTestKuzuLockReleased:
             assert call_count[0] == 3  # 2 failures + 1 success
 
     def test_lock_still_held_after_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Kuzu keeps failing, should return False after retries exhausted."""
+        """When Ladybug keeps failing, should return False after retries exhausted."""
         ladybug = self._make_fake_ladybug_dir(tmp_path)
 
         def fake_db_init(*args, **kwargs):

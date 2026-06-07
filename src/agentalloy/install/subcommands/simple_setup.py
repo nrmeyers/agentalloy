@@ -516,7 +516,7 @@ def _prompt_upstream(cfg: SetupConfig) -> None:
 
     cfg.upstream_url = _prompt_context(
         "  Upstream URL",
-        "  Base URL of the upstream LLM (e.g. http://localhost:11434 for Ollama, https://api.openai.com for OpenAI)",
+        "  Base URL of the upstream LLM (e.g. http://localhost:11434 for Ollama, https://api.openai.com/v1 for OpenAI). /v1 appended automatically for host-only URLs.",
         default=cfg.upstream_url or "",
     )
     cfg.upstream_model = _prompt_context(
