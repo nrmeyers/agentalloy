@@ -1670,12 +1670,14 @@ def run_setup(cfg: SetupConfig) -> int:
     # Preset is an internal write-env detail; not shown to the user.
 
     # 8. Upstream LLM
-    if not cfg.non_interactive and cfg.harness not in PROXY_UNABLE_HARNESSES and cfg.harness != "manual":
+    if (
+        not cfg.non_interactive
+        and cfg.harness not in PROXY_UNABLE_HARNESSES
+        and cfg.harness != "manual"
+    ):
         _prompt_upstream(cfg)
     elif cfg.harness == "manual":
-        _print(
-            "  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]"
-        )
+        _print("  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]")
     elif not cfg.non_interactive:
         _print(
             f"  [dim]Harness '{cfg.harness}' is sidecar-only (no proxy wiring). Skipping upstream LLM prompt.[/dim]"
