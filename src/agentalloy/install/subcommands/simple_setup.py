@@ -1035,8 +1035,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         _print("  [dim]-> Pulling pre-built image from GHCR[/dim]")
         pull_rc = _pull_image(binary_path)
     if pull_rc != 0:
-        _print("  [red]Failed to pull image. Check your network connection and try again.[/red]")
-        return pull_rc
+        _print(
+            f"  [red]Failed to pull image (exit {pull_rc})[/red]\n"
+            "  Remediation: Check network connectivity to ghcr.io, "
+            "or use --image-path for offline mode."
+        )
+        return 1
 
     # 4. Ensure data volume and ollama directory
     _print("  [dim]-> Ensuring data volume[/dim]")

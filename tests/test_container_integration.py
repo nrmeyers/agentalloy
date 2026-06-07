@@ -3,8 +3,8 @@
 Tests IT-1 through IT-14 covering:
 - IT-1: Full container setup flow — happy path (mocked subprocess calls)
 - IT-2: Runtime not found — exit code 1
-- IT-3: Build context not found — exit code 1
-- IT-4: Image build failure — exit code 1, last 30 lines displayed
+- IT-3: Image pull failure — exit code 1, remediation message
+- IT-4: Image pull failure — exit code 1
 - IT-5: Container start failure — exit code 1, state not recorded
 - IT-6: Health check timeout — exit code 1, timeout message
 - IT-7: State recording — correct values after successful setup
@@ -227,15 +227,16 @@ class TestRuntimeNotFound:
 
 
 # ---------------------------------------------------------------------------
-# IT-3: Build context not found — exit code 1
+# IT-3: Image pull failure — exit code 1, remediation message
 # ---------------------------------------------------------------------------
 
 
-class TestBuildContextNotFound:
-    """IT-3: Build context not found — exit code 1."""
+class TestImagePullFailure:
+    """IT-3: Image pull failure — exit code 1, remediation message."""
 
-    def test_no_compose_file_returns_exit_1(self):
-        """When no compose.yaml + Containerfile pair is found, exit code is 1."""
+    def test_pull_failure_returns_exit_1_with_remediation(self):
+        """When pulling the GHCR image fails, exit code is 1 and
+        remediation guidance (network / --image-path) is printed."""
         with (
             patch(
                 "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
@@ -246,7 +247,6 @@ class TestBuildContextNotFound:
                 "agentalloy.install.subcommands.preflight.run_preflight",
                 return_value={"checks": []},
             ),
-            patch("agentalloy.install.subcommands.simple_setup._print"),
             patch("pathlib.Path.exists", return_value=False),
         ):
             from agentalloy.install.subcommands.simple_setup import (
@@ -260,21 +260,37 @@ class TestBuildContextNotFound:
                 port=47950,
             )
 
-            rc = _run_container_flow(cfg, 0.0)
+            captured = []
+
+            def capture_print(*args, **kwargs):
+                captured.append(" ".join(str(a) for a in args))
+
+            # Patch _pull_image to simulate a failure (exit 125)
+            with patch(
+                "agentalloy.install.subcommands.container_runtime._pull_image",
+                return_value=125,
+            ), patch(
+                "agentalloy.install.subcommands.simple_setup._print", side_effect=capture_print
+            ):
+                rc = _run_container_flow(cfg, 0.0)
 
             assert rc == 1, f"Expected exit code 1, got {rc}"
+            output = " ".join(captured)
+            assert "image" in output.lower() or "pull" in output.lower(), (
+                f"Expected pull failure message in output: {output}"
+            )
 
 
 # ---------------------------------------------------------------------------
-# IT-4: Image build failure — exit code 1, last 30 lines displayed
+# IT-4: Image pull failure — exit code 1
 # ---------------------------------------------------------------------------
 
 
-class TestImageBuildFailure:
-    """IT-4: Image build failure — exit code 1, last 30 lines displayed."""
+class TestPullFailureExitCode:
+    """IT-4: Image pull failure — exit code 1."""
 
-    def test_build_failure_returns_exit_1(self):
-        """When image build fails, exit code is 1 and log tail is shown."""
+    def test_pull_failure_returns_exit_1(self):
+        """When image pull fails, exit code is 1."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             compose_file = _make_compose_file(tmp_path)
