@@ -1395,8 +1395,10 @@ def run_setup(cfg: SetupConfig) -> int:
     # Preset is an internal write-env detail; not shown to the user.
 
     # 8. Upstream LLM
-    if not cfg.non_interactive:
+    if not cfg.non_interactive and cfg.harness not in PROXY_UNABLE_HARNESSES:
         _prompt_upstream(cfg)
+    elif not cfg.non_interactive:
+        _print(f"  [dim]Harness '{cfg.harness}' is sidecar-only (no proxy wiring). Skipping upstream LLM prompt.[/dim]")
     # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
     # (which may be pre-set by the caller). We don't require them to be set — the proxy
     # can be configured later via env vars.
