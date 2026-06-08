@@ -235,8 +235,14 @@ def _generate_entrypoint(packs: str) -> Path:
        (no --packs) to install always-on packs (core, documentation, engineering,
        performance).
     8. Create the ``$APP_DIR/.bootstrap-complete`` flag file.
-    9. Trap SIGTERM for graceful shutdown (only if Ollama was started).
-    10. Start uvicorn on ``0.0.0.0:47950``.
+    9. Writes ``.bootstrap-progress`` with ``phase="model_pull"`` before
+       running ``ollama pull``, so the host-side readiness polling can
+       surface model download progress to the user.
+    10. Prints ``Model pull complete`` to stdout after the model download
+        finishes — the host-side log streamer uses this as a transition
+        marker to switch from log streaming to readiness polling.
+    11. Trap SIGTERM for graceful shutdown (only if Ollama was started).
+    12. Start uvicorn on ``0.0.0.0:47950``.
 
     Parameters
     ----------
@@ -365,7 +371,12 @@ def _build_entrypoint_script(packs: str) -> str:
         '    echo ">> Checking embedding model..."',
         "    if ! ollama list | grep -q qwen3-embedding; then",
         '        echo ">> Pulling qwen3-embedding:0.6b..."',
+        '        cat > "$PROGRESS_TMP" <<JSON',
+        '{"current_pack": "qwen3-embedding:0.6b", "packs_ingested": 0, "packs_total": 1, "phase": "model_pull", "model": "qwen3-embedding:0.6b", "status": "in_progress", "updated_at": "$(date -Iseconds)"}',
+        "JSON",
+        '        mv "$PROGRESS_TMP" "$PROGRESS"',
         "        ollama pull qwen3-embedding:0.6b",
+        '        echo "Model pull complete"',
         "    fi",
         "",
         '    echo ">> Running migrations..."',
@@ -538,6 +549,64 @@ def _run_container(
 # ---------------------------------------------------------------------------
 
 
+def _check_container_running(
+    runtime: str,
+    container_name: str = "agentalloy",
+) -> bool:
+    """Check whether the named container is currently running.
+
+    Returns True if the container appears in ``{runtime} ps`` output,
+    False otherwise (container not started, stopped, or crashed).
+    """
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "ps",
+                "--format",
+                "{{.Names}}",
+                "--filter",
+                f"name={container_name}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return container_name in result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def _tail_container_logs(
+    runtime: str,
+    container_name: str = "agentalloy",
+    tail_lines: int = 10,
+) -> str:
+    """Return the last *tail_lines* lines of the container's stdout.
+
+    Used to surface bootstrap progress to the user during readiness polling.
+    Returns an empty string on any failure.
+    """
+    try:
+        result = subprocess.run(
+            [
+                runtime,
+                "logs",
+                "--tail",
+                str(tail_lines),
+                container_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return ""
+
+
 def _wait_for_readiness(
     port: int,
     timeout: int = 1800,
@@ -546,6 +615,7 @@ def _wait_for_readiness(
     container_name: str = "agentalloy",
     poll_interval: float = 30.0,
     on_progress: Any = None,
+    stream_logs: bool = True,
 ) -> bool:
     """Poll ``/readiness`` until bootstrap completes or we time out.
 
@@ -556,11 +626,16 @@ def _wait_for_readiness(
                         is supplied) and keep polling.
     * ``error``       — fatal (e.g. ``stale_lock``); return False.
 
-    Connection errors are treated as "container not yet up" for the first
-    ~30 s, then as "container died" — we return False so the caller can
-    surface the container's own logs instead of waiting out the full
-    timeout. ``timeout`` defaults to 1800 s (30 min) because full pack
-    ingest + re-embed runs 15-25 min; callers pass 300 s for limited packs.
+    Uses a **first-success** model: connection errors before any successful
+    ``/readiness`` response are silently ignored — they are expected during
+    bootstrap. Only consecutive errors **after** the first successful response
+    (meaning the container is alive but /readiness reports warming_up) are
+    counted toward the 3-strike limit. The timeout is the only hard exit
+    condition during bootstrap.
+
+    ``timeout`` defaults to 1800 s (30 min) because full pack ingest +
+    re-embed runs 15-25 min; callers pass shorter values for limited packs
+    or re-installs.
 
     Parameters
     ----------
@@ -568,7 +643,7 @@ def _wait_for_readiness(
         Port on which the container exposes ``/readiness``.
     timeout : int
         Max seconds to wait. Default 1800 (all-packs); pass 300 for
-        limited packs.
+        limited packs or re-installs.
     runtime, container_name :
         Used to call ``_get_bootstrap_progress`` for the on_progress hook.
     poll_interval : float
@@ -577,6 +652,9 @@ def _wait_for_readiness(
     on_progress : callable(dict) | None
         Optional callback invoked once per poll with the parsed readiness
         body (status + progress). Lets the caller render a live spinner.
+    stream_logs : bool
+        If True, stream container logs (including ``ollama pull`` output)
+        to the user during the polling loop. Defaults to True.
     """
     import json as _json
     import time as _time
@@ -585,17 +663,22 @@ def _wait_for_readiness(
 
     url = f"http://127.0.0.1:{port}/readiness"
     start = _time.monotonic()
-    grace_window = 30.0  # tolerate connection errors during initial start
+    first_success = False  # True once we've seen the first 200 response
     consecutive_errors = 0
+    last_tail: str = ""  # Last container logs seen (for diffing new lines)
 
     while True:
         elapsed = _time.monotonic() - start
         try:
             with urllib.request.urlopen(url, timeout=5) as resp:
                 body = _json.loads(resp.read().decode())
+            # First successful connection — container is alive.
+            first_success = True
+            consecutive_errors = 0
         except (urllib.error.URLError, OSError, _json.JSONDecodeError):
-            # If we never saw a 200 and the grace window has passed, give up.
-            if elapsed > grace_window:
+            # Only count errors after we've seen the container alive at least once.
+            # Before first success, connection errors are expected during bootstrap.
+            if first_success:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
                     return False
@@ -604,7 +687,17 @@ def _wait_for_readiness(
             _time.sleep(min(poll_interval, 5.0))
             continue
 
-        consecutive_errors = 0
+        # Stream container logs (e.g. ``ollama pull`` output) so the user
+        # can see what's happening inside the container during bootstrap.
+        if stream_logs and runtime is not None:
+            new_tail = _tail_container_logs(runtime, container_name)
+            if new_tail and new_tail != last_tail:
+                new_lines = (
+                    new_tail[len(last_tail) :] if new_tail.startswith(last_tail) else new_tail
+                )
+                _print(new_lines.rstrip())
+                last_tail = new_tail
+
         status = body.get("status")
         if on_progress is not None:
             # Caller wants progress updates. Best-effort enrichment from the

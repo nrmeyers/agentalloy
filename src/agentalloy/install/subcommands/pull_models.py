@@ -61,6 +61,175 @@ _MANUAL_INSTRUCTIONS: dict[str, str] = {
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
 
+# SSH key error patterns — matches the Ollama error:
+#   pull model manifest: open /home/user/.ollama/id_ed25519: no such file or directory
+_SSH_KEY_ERROR_PATTERNS = [
+    "id_ed25519",
+    "no such file",
+    "open",
+]
+
+
+def _ollama_requires_auth() -> bool:
+    """Check if Ollama appears to require SSH authentication.
+
+    Heuristic: run ``ollama list`` and check whether the stderr
+    contains auth-related keywords. Returns False if we can't
+    determine (daemon not running, binary missing, etc.).
+    """
+    binary = shutil.which("ollama")
+    if not binary:
+        return False
+    try:
+        result = subprocess.run(
+            [binary, "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.lower()
+            return any(
+                term in stderr
+                for term in [
+                    "id_ed25519",
+                    "ssh",
+                    "auth",
+                    "unauthorized",
+                    "permission denied",
+                ]
+            )
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return False
+
+
+def _is_remote_ollama() -> bool:
+    """Return True if OLLAMA_HOST points to a non-localhost address.
+
+    Handles common formats:
+      - bare host: ``127.0.0.1``, ``localhost``, ``192.168.1.100``
+      - with port: ``127.0.0.1:11434``, ``localhost:11434``
+      - with protocol: ``http://127.0.0.1:11434``, ``https://remote.example.com``
+    """
+    host = os.environ.get("OLLAMA_HOST", "")
+    if not host:
+        return False
+    # Strip protocol prefix (http://, https://, etc.)
+    cleaned = host.strip().strip("/")
+    if "://" in cleaned:
+        cleaned = cleaned.split("://", 1)[1]
+    # Remove port suffix for the host check
+    host_only = cleaned.split(":")[0]
+    return host_only not in ("127.0.0.1", "localhost", "0.0.0.0", "")
+
+
+def _ssh_key_error_hint(stderr: str) -> str | None:
+    """Detect the SSH key error and return actionable guidance, or None.
+
+    Requires ALL patterns to match so we don't flag unrelated errors
+    that happen to contain one of the keywords (e.g. a file-not-found
+    error mentioning "open").
+    """
+    if not all(p in stderr for p in _SSH_KEY_ERROR_PATTERNS):
+        return None
+
+    hint_lines = [
+        "Ollama requires SSH key authentication but the key file "
+        "(~/.ollama/id_ed25519) is missing.",
+        "",
+        "Fix:",
+        '  1. Generate a key: ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""',
+        "  2. Register the public key on your Ollama server:",
+        "     cat ~/.ollama/id_ed25519.pub >> ~/.ollama/server_user.pub",
+        "  3. Re-run pull-models.",
+    ]
+
+    if _is_remote_ollama():
+        hint_lines.append("")
+        hint_lines.append(
+            "Remote Ollama: the public key must be registered on the remote "
+            "server's ~/.ollama/server_user.pub. Contact your Ollama administrator."
+        )
+    else:
+        hint_lines.append("")
+        hint_lines.append(
+            "If your Ollama instance does NOT require auth, check that it's "
+            "running correctly (ollama list)."
+        )
+
+    return "\n".join(hint_lines)
+
+
+def _generate_ollama_ssh_key() -> tuple[bool, str | None]:
+    """Generate an Ollama SSH key at ~/.ollama/id_ed25519.
+
+    Returns (ok, error_message). If ok is True, the key was generated
+    and the public key is at ~/.ollama/id_ed25519.pub.
+    """
+    ollama_dir = Path.home() / ".ollama"
+    key_path = ollama_dir / "id_ed25519"
+    pub_path = ollama_dir / "id_ed25519.pub"
+
+    # Idempotent: if key already exists, nothing to do.
+    if key_path.exists() and pub_path.exists():
+        return True, None
+
+    ollama_dir.mkdir(parents=True, exist_ok=True)
+
+    keygen = shutil.which("ssh-keygen")
+    if not keygen:
+        return False, "ssh-keygen not found on PATH — cannot generate SSH key."
+
+    try:
+        result = subprocess.run(
+            [keygen, "-t", "ed25519", "-f", str(key_path), "-N", "", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return (
+                False,
+                result.stderr.strip() or f"ssh-keygen exited with code {result.returncode}",
+            )
+        return True, None
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, str(exc)
+
+
+def _register_ollama_ssh_key() -> tuple[bool, str | None]:
+    """Register the Ollama SSH public key with the local Ollama server.
+
+    Appends ~/.ollama/id_ed25519.pub to ~/.ollama/server_user.pub.
+    Returns (ok, error_message).
+    """
+    pub_path = Path.home() / ".ollama" / "id_ed25519.pub"
+    server_pub = Path.home() / ".ollama" / "server_user.pub"
+
+    if not pub_path.exists():
+        return False, f"Public key not found at {pub_path}. Generate a key first."
+
+    try:
+        pub_content = pub_path.read_text().strip()
+        if not pub_content:
+            return False, "Public key file is empty."
+
+        # Idempotent: skip if already registered.
+        if server_pub.exists():
+            existing = server_pub.read_text()
+            if pub_content in existing:
+                return True, None
+
+        # Append to server_user.pub, preserving existing content.
+        if server_pub.exists() and server_pub.read_text().strip():
+            server_pub.write_text(server_pub.read_text() + "\n" + pub_content)
+        else:
+            server_pub.write_text(pub_content)
+        return True, None
+    except OSError as exc:
+        return False, f"Failed to register key: {exc}"
+
 
 def _ollama_daemon_running(timeout: float = 1.0) -> bool:
     """Return True if the Ollama API is reachable on the default port.
@@ -608,6 +777,14 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                 "hint": "Start `ollama serve` manually and re-run pull-models.",
             }
 
+        # Pre-flight: warn if Ollama appears to require SSH auth.
+        if _ollama_requires_auth():
+            print(
+                "  WARNING: Ollama appears to require SSH key authentication. "
+                "The pull may fail if the key is not configured.",
+                file=sys.stderr,
+            )
+
     # `--` separator prevents argv option-injection if model name slipped
     # through the regex (defense in depth) or future regex relaxations
     # admit a leading-`-` form.
@@ -622,12 +799,116 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
         )
         duration_ms = int((time.monotonic() - t0) * 1000)
         if result.returncode != 0:
+            hint = None
+            stderr = result.stderr or ""
+            if runner == "ollama":
+                hint = _ssh_key_error_hint(stderr)
+                # Auto-fix: generate key, ask to register, retry pull.
+                # Only for local Ollama instances (remote needs admin action).
+                if hint and not _is_remote_ollama() and sys.stdin.isatty():
+                    print(
+                        "\n  [yellow]SSH key error detected — attempting automatic fix...[/yellow]",
+                        file=sys.stderr,
+                    )
+                    key_ok, key_err = _generate_ollama_ssh_key()
+                    if not key_ok:
+                        print(
+                            f"  [red]Key generation failed: {key_err}[/red]",
+                            file=sys.stderr,
+                        )
+                        return {
+                            "runner": runner,
+                            "model": model,
+                            "success": False,
+                            "error": result.stderr.strip() or f"exit code {result.returncode}",
+                            "duration_ms": duration_ms,
+                            "hint": hint,
+                        }
+                    print(
+                        "  [green]SSH key generated at ~/.ollama/id_ed25519[/green]",
+                        file=sys.stderr,
+                    )
+
+                    # Ask user for permission to register.
+                    ans = (
+                        input("  Register this key with the Ollama server? [y/N]: ").strip().lower()
+                    )
+                    if ans not in ("y", "yes"):
+                        print(
+                            "  [dim]Registration skipped. The pull will fail until "
+                            "the key is registered manually.[/dim]",
+                            file=sys.stderr,
+                        )
+                        return {
+                            "runner": runner,
+                            "model": model,
+                            "success": False,
+                            "error": result.stderr.strip() or f"exit code {result.returncode}",
+                            "duration_ms": duration_ms,
+                            "hint": hint,
+                        }
+
+                    reg_ok, reg_err = _register_ollama_ssh_key()
+                    if not reg_ok:
+                        print(
+                            f"  [red]Registration failed: {reg_err}[/red]",
+                            file=sys.stderr,
+                        )
+                        return {
+                            "runner": runner,
+                            "model": model,
+                            "success": False,
+                            "error": result.stderr.strip() or f"exit code {result.returncode}",
+                            "duration_ms": duration_ms,
+                            "hint": hint,
+                        }
+                    print("  [green]Key registered. Retrying pull...[/green]", file=sys.stderr)
+
+                    # Retry the pull.
+                    retry_t0 = time.monotonic()
+                    retry_duration_ms = 0
+                    try:
+                        retry_result = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=600,
+                        )
+                        retry_duration_ms = int((time.monotonic() - retry_t0) * 1000)
+                        if retry_result.returncode != 0:
+                            return {
+                                "runner": runner,
+                                "model": model,
+                                "success": False,
+                                "error": retry_result.stderr.strip()
+                                or f"exit code {retry_result.returncode}",
+                                "duration_ms": retry_duration_ms,
+                                "hint": hint,
+                            }
+                        return {
+                            "runner": runner,
+                            "model": model,
+                            "success": True,
+                            "duration_ms": retry_duration_ms,
+                            "ssh_key_auto_fixed": True,
+                        }
+                    except subprocess.TimeoutExpired:
+                        retry_duration_ms = int((time.monotonic() - retry_t0) * 1000)
+                        return {
+                            "runner": runner,
+                            "model": model,
+                            "success": False,
+                            "error": "Pull timed out after key registration",
+                            "duration_ms": retry_duration_ms,
+                            "hint": hint,
+                        }
             return {
                 "runner": runner,
                 "model": model,
                 "success": False,
                 "error": result.stderr.strip() or f"exit code {result.returncode}",
                 "duration_ms": duration_ms,
+                "hint": hint,
             }
         return {
             "runner": runner,
@@ -777,6 +1058,9 @@ def pull_models(
                 f"ERROR: Failed to pull {err.get('model', '?')} via {err.get('runner', '?')}: {err.get('error', 'unknown')}",
                 file=sys.stderr,
             )
+            hint = err.get("hint")
+            if hint:
+                print(f"HINT: {hint}", file=sys.stderr)
         # Don't record completion when any pull failed — otherwise the
         # idempotency check will permanently skip this step on rerun and
         # the user has no path to retry without `reset-step pull-models`.
@@ -835,7 +1119,10 @@ def _render_human(result: dict[str, Any]) -> None:
     if auto_pulled:
         print_rich("  [green]Pulled:[/green]")
         for p in auto_pulled:
-            print_rich(f"    {p.get('runner', '?')}:{p.get('model', '?')}")
+            line = f"    {p.get('runner', '?')}:{p.get('model', '?')}"
+            if p.get("ssh_key_auto_fixed"):
+                line += " [dim](SSH key auto-generated & registered)[/dim]"
+            print_rich(line)
 
     if skipped:
         print_rich("  [dim]Already present:[/dim]")
@@ -852,6 +1139,9 @@ def _render_human(result: dict[str, Any]) -> None:
         print_rich("  [red]Errors:[/red]")
         for e in errors:
             print_rich(f"    {e.get('runner', '?')}:{e.get('model', '?')} — {e.get('error', '')}")
+            hint = e.get("hint")
+            if hint:
+                print_rich(f"      [yellow]Hint:[/yellow] {hint}")
 
     print_rich()
 

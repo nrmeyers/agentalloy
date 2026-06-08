@@ -67,6 +67,21 @@ For missing binaries (`uv`, `ollama`), **stop and ask the user to install them**
 
 After installing Ollama, the user must have `ollama serve` running (the official installer sets this up as a service on macOS/Windows; on Linux the install script registers a systemd unit). Step 0's runner-phase preflight confirms reachability.
 
+> **Ollama SSH key authentication:** If your Ollama instance requires SSH key authentication
+> (common when `OLLAMA_HOST` is set to a remote instance, or when SSH auth is enabled on a
+> local instance), you must have an ed25519 key at `~/.ollama/id_ed25519` before pulling
+> models. Ollama 0.20.3+ looks for the key at this path (not `~/.ssh/id_ed25519`).
+>
+> - **Check if auth is required:** Run `ollama list`. If it succeeds without a key, your
+>   instance does not require auth. If it fails with
+>   `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory`, you need
+>   to set up a key.
+> - **Generate a key:** `ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`
+> - **Register the public key:** Copy the contents of `~/.ollama/id_ed25519.pub` to the
+>   Ollama server's `~/.ollama/server_user.pub` (or the equivalent auth config for your setup).
+> - **Remote Ollama:** If `OLLAMA_HOST` points to a remote instance, the public key must be
+>   registered on that remote server's Ollama configuration.
+
 ---
 
 ## Step 0: Preflight (run this first, every time)
@@ -187,6 +202,15 @@ The output lists `{embed_model, embed_runner}` options valid for the chosen host
 ---
 
 ## Step 5: Pull models
+
+> **Pre-pull check:** If your Ollama instance requires SSH key authentication, verify the
+> key exists before pulling:
+>
+> ```bash
+> test -f ~/.ollama/id_ed25519 && echo "Key present" || echo "Key missing — see prerequisites"
+> ```
+>
+> If the key is missing, generate it as described in the prerequisites section above.
 
 > RUN
 > ```bash
@@ -405,9 +429,27 @@ Then based on the answer:
 > agentalloy enable-service --mode manual
 > ```
 
-The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments pull a pre-built image from GHCR — the CI pipeline publishes `ghcr.io/nrmeyers/agentalloy:latest` on every merge to `main`. No repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`). On success, the mode is recorded in `install-state.json`.
+The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments pull a pre-built image from GHCR — the CI pipeline publishes two image variants on every merge to `main`: `ghcr.io/nrmeyers/agentalloy:latest` (~300 MB, lightweight) and `ghcr.io/nrmeyers/agentalloy:full` (~975 MB, with model pre-pulled for air-gapped environments). No repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`). On success, the mode is recorded in `install-state.json`.
 
-> **Container deployments pull a pre-built image from GHCR.** The CI pipeline builds and publishes `ghcr.io/nrmeyers/agentalloy:latest` on every merge to `main`. Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
+> **Container deployments pull a pre-built image from GHCR.** The CI pipeline builds and publishes two image variants on every merge to `main`:
+>
+> | Variant | Size | Model | Use case |
+> |---|---|---|---|
+> | `ghcr.io/nrmeyers/agentalloy:latest` | ~300 MB | Not included | General users with network access. The model is pulled at first container start. |
+> | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-pulled (`qwen3-embedding:0.6b`) | Air-gapped/enterprise environments that need the model baked into the image. |
+>
+> Select the variant with `--image-tag` during setup:
+> ```bash
+> # Lightweight (default) — model downloaded at first start
+> agentalloy setup --deployment container
+>
+> # Full — model pre-pulled into the image
+> agentalloy setup --deployment container --image-tag full
+> ```
+>
+> Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
+>
+> **SSH key authentication (container):** The container mounts the host's `~/.ollama` directory into `/root/.ollama` inside the container. If your Ollama instance requires SSH key authentication (see the prerequisites section), the same key at `~/.ollama/id_ed25519` on the host is automatically available to the container — no additional configuration needed. If the model pull fails with an SSH key error inside the container, fix the key on the host as described in the prerequisites.
 
 ---
 
@@ -497,8 +539,9 @@ For container deployments (`--deployment container`), use these commands to mana
 | Host              |          | Container (agentalloy)    |
 |-------------------|          |---------------------------|
 |                   |          |                           |
-| ~/.ollama/        | :ro:     | /root/.ollama/            |
-| (Ollama models)   |--------->| (Ollama model cache)      |
+| ~/.ollama/        | :rw:     | /root/.ollama/            |
+| (Ollama models +  |--------->| (Ollama model cache +     |
+| SSH keys)         |          | SSH keys)                 |
 |                   |          |                           |
 | agentalloy-data/  | :rw:     | /app/data/                |
 | (named volume)    |--------->| (LadybugDB + DuckDB)      |
@@ -513,7 +556,7 @@ Volume table:
 | Volume / Path | Purpose | Persists across restarts? |
 |---|---|---|
 | `agentalloy-data:/app/data` | LadybugDB index, DuckDB skills database | Yes (named volume) |
-| `~/.ollama:/root/.ollama` | Ollama model cache (`qwen3-embedding:0.6b`) | Yes (host bind mount) |
+| `~/.ollama:/root/.ollama` | Ollama model cache (`qwen3-embedding:0.6b`) and SSH keys | Yes (host bind mount) |
 
 ### Health check
 
@@ -580,3 +623,18 @@ Common stuck-states:
 - The CLI exits 4 (already-completed). That step ran successfully before. Read the user-scope state file to see what's done; skip ahead. (`agentalloy status` shows this concisely.)
 - A required external tool (Ollama, LM Studio) is missing. Tell the user the tool's install URL and wait for them to install it manually. Do NOT auto-execute install scripts.
 - A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `wire-harness` so the harness config gets the new URL.
+- **Ollama SSH key missing:** You see the error
+  `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory` when
+  pulling models. This means your Ollama instance requires SSH key authentication but
+  the key file doesn't exist at `~/.ollama/id_ed25519`.
+  **Fix:** Generate the key with `ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`,
+  then register the public key (`~/.ollama/id_ed25519.pub`) on your Ollama server.
+  See the prerequisites section for full details.
+- **Container model pull fails with SSH key error (container only):** The container
+  starts but the model pull fails inside the container with an SSH key error, even
+  though the key exists on the host at `~/.ollama/id_ed25519`. This can happen if the
+  `~/.ollama` directory doesn't exist or isn't readable by the container runtime.
+  **Fix:** Create the directory and key on the host first:
+  `mkdir -p ~/.ollama && ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`,
+  then restart the container (`podman restart agentalloy` or `docker restart agentalloy`).
+  The container re-reads the mounted `~/.ollama` directory on each start.

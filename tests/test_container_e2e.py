@@ -147,6 +147,8 @@ def _run_container_flow_all_mocked(
     mock_cleanup_temp_entrypoint = MagicMock()
     mock_ensure_ollama_dir = MagicMock()
     mock_wait_for_readiness = MagicMock(return_value=True)
+    mock_check_container_running = MagicMock(return_value=True)
+    mock_tail_container_logs = MagicMock(return_value="")
     mock_urlopen = MagicMock(return_value=_make_urlopen_mock())
     mock_monotonic = MagicMock(return_value=0.0)
 
@@ -191,6 +193,20 @@ def _run_container_flow_all_mocked(
         patch(
             "agentalloy.install.subcommands.container_runtime._ensure_ollama_dir",
             mock_ensure_ollama_dir,
+        )
+    )
+    # Patch at the simple_setup import location since simple_setup.py does
+    # `from container_runtime import _check_container_running, _tail_container_logs`
+    patches.append(
+        patch(
+            "agentalloy.install.subcommands.simple_setup._check_container_running",
+            mock_check_container_running,
+        )
+    )
+    patches.append(
+        patch(
+            "agentalloy.install.subcommands.simple_setup._tail_container_logs",
+            mock_tail_container_logs,
         )
     )
 

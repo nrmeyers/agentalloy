@@ -15,6 +15,20 @@
 # This file is NOT used by `agentalloy setup --deployment container`.
 # ============================================================================
 #
+# Image variants (tiered strategy):
+#
+#   :latest  (~300 MB, no pre-pulled model) — for general users with network
+#            access. The model (qwen3-embedding:0.6b, ~600 MB) is pulled at
+#            first container start via the entrypoint script.
+#
+#   :full    (~975 MB, model pre-pulled) — for air-gapped/enterprise users
+#            who need the model baked into the image. Built with:
+#              podman build --build-arg PULL_MODEL=true -t agentalloy:full -f Containerfile .
+#
+# Select the image via the --image-tag CLI flag:
+#   agentalloy setup --deployment container          # :latest (default)
+#   agentalloy setup --deployment container --image-tag full   # :full
+#
 # AgentAlloy container stack (DEPRECATED — one stack, every host, CPU-only inference).
 # Works with both `podman compose up` and `docker compose up`.
 #

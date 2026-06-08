@@ -6,6 +6,8 @@ Maps to test-plan.md § Model pulling.
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -17,7 +19,12 @@ from agentalloy.install.subcommands.pull_models import (
     STEP_NAME,
     _auto_pull,  # pyright: ignore[reportPrivateUsage]
     _collect_model_runner_pairs,  # pyright: ignore[reportPrivateUsage]
+    _generate_ollama_ssh_key,  # pyright: ignore[reportPrivateUsage]
     _is_model_present_ollama,  # pyright: ignore[reportPrivateUsage]
+    _is_remote_ollama,  # pyright: ignore[reportPrivateUsage]
+    _ollama_requires_auth,  # pyright: ignore[reportPrivateUsage]
+    _register_ollama_ssh_key,  # pyright: ignore[reportPrivateUsage]
+    _ssh_key_error_hint,  # pyright: ignore[reportPrivateUsage]
     pull_models,
 )
 
@@ -133,10 +140,16 @@ class TestAutoPull:
     def test_successful_pull(self) -> None:
         # Daemon-running probe must return True so _auto_pull skips
         # the spawn path and goes straight to the pull subprocess.
+        # _ollama_requires_auth must also return False so the pre-flight
+        # check does not call subprocess.run (which is mocked).
         with (
             patch(
                 "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
                 return_value=True,
+            ),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_requires_auth",
+                return_value=False,
             ),
             patch("shutil.which", return_value="/usr/bin/ollama"),
             patch("subprocess.run") as mock_run,
@@ -154,6 +167,10 @@ class TestAutoPull:
             patch(
                 "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
                 return_value=True,
+            ),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_requires_auth",
+                return_value=False,
             ),
             patch("shutil.which", return_value="/usr/bin/ollama"),
             patch("subprocess.run") as mock_run,
@@ -478,3 +495,507 @@ class TestRunExitCodes:
             }
             rc = _run(Namespace(models=str(models_path), runner=None, quiet=True))
         assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# SSH key error detection
+# ---------------------------------------------------------------------------
+
+
+_EXACT_ERROR = "pull model manifest: open /home/user/.ollama/id_ed25519: no such file or directory"
+
+
+class TestSshKeyErrorHint:
+    """Tests for _ssh_key_error_hint() — must require ALL patterns."""
+
+    def test_exact_ollama_error(self) -> None:
+        hint = _ssh_key_error_hint(_EXACT_ERROR)
+        assert hint is not None
+        assert "id_ed25519" in hint
+        assert "ssh-keygen" in hint
+        assert "server_user.pub" in hint
+
+    def test_all_patterns_required(self) -> None:
+        """Missing any ONE pattern → no hint (regression guard)."""
+        # Has id_ed25519 + "no such file" but not "open"
+        partial = "id_ed25519: no such file"
+        assert _ssh_key_error_hint(partial) is None
+        # Has "open" + "no such file" but not "id_ed25519"
+        partial2 = "open /tmp/foo: no such file"
+        assert _ssh_key_error_hint(partial2) is None
+        # Has "open" + "id_ed25519" but not "no such file"
+        partial3 = "open id_ed25519 succeeded"
+        assert _ssh_key_error_hint(partial3) is None
+
+    def test_no_match_unrelated_error(self) -> None:
+        assert _ssh_key_error_hint("connection refused") is None
+        assert _ssh_key_error_hint("network timeout") is None
+        assert _ssh_key_error_hint("") is None
+
+    def test_remote_host_adds_remote_guidance(self) -> None:
+        with patch.dict(os.environ, {"OLLAMA_HOST": "https://remote.example.com"}):
+            hint = _ssh_key_error_hint(_EXACT_ERROR)
+        assert hint is not None
+        assert "Remote Ollama" in hint
+        assert "Contact your Ollama administrator" in hint
+
+    def test_local_host_adds_local_guidance(self) -> None:
+        with patch.dict(os.environ, {"OLLAMA_HOST": "http://127.0.0.1:11434"}):
+            hint = _ssh_key_error_hint(_EXACT_ERROR)
+        assert hint is not None
+        assert "does NOT require auth" in hint
+        assert "Remote Ollama" not in hint
+
+    def test_no_ollama_host_defaults_to_local(self) -> None:
+        env = os.environ.copy()
+        env.pop("OLLAMA_HOST", None)
+        with patch.dict(os.environ, env, clear=False):
+            # Need to clear it — patch.dict with clear=False won't remove
+            pass
+        # Use a direct approach: set env var to empty
+        with patch("os.environ", {"OLLAMA_HOST": ""}):
+            hint = _ssh_key_error_hint(_EXACT_ERROR)
+        assert hint is not None
+        assert "does NOT require auth" in hint
+        assert "Remote Ollama" not in hint
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight auth check
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaRequiresAuth:
+    """Tests for _ollama_requires_auth() heuristic."""
+
+    def test_binary_missing_returns_false(self) -> None:
+        with patch("shutil.which", return_value=None):
+            assert _ollama_requires_auth() is False
+
+    def test_list_succeeds_returns_false(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            assert _ollama_requires_auth() is False
+
+    def test_list_fails_with_auth_error_returns_true(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr="pull model manifest: open ~/.ollama/id_ed25519: no such file",
+            )
+            assert _ollama_requires_auth() is True
+
+    def test_list_fails_unrelated_error_returns_false(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr="could not connect to ollama server",
+            )
+            assert _ollama_requires_auth() is False
+
+    def test_timeout_returns_false(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ollama", 10)),
+        ):
+            assert _ollama_requires_auth() is False
+
+    def test_oserror_returns_false(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run", side_effect=OSError("permission denied")),
+        ):
+            assert _ollama_requires_auth() is False
+
+    def test_ssh_keyword_triggers(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr="ssh authentication required")
+            assert _ollama_requires_auth() is True
+
+    def test_permission_denied_triggers(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr="permission denied")
+            assert _ollama_requires_auth() is True
+
+
+# ---------------------------------------------------------------------------
+# Remote vs local detection
+# ---------------------------------------------------------------------------
+
+
+class TestIsRemoteOllama:
+    """Tests for _is_remote_ollama() — host format handling."""
+
+    def _set_host(self, value: str) -> None:
+        os.environ["OLLAMA_HOST"] = value
+
+    def _unset_host(self) -> None:
+        os.environ.pop("OLLAMA_HOST", None)
+
+    def test_empty_env_returns_false(self) -> None:
+        self._unset_host()
+        assert _is_remote_ollama() is False
+
+    def test_bare_localhost_returns_false(self) -> None:
+        for host in ("127.0.0.1", "localhost", "0.0.0.0"):
+            self._set_host(host)
+            assert _is_remote_ollama() is False, f"expected False for {host}"
+
+    def test_localhost_with_port_returns_false(self) -> None:
+        for host in ("127.0.0.1:11434", "localhost:11434", "0.0.0.0:11434"):
+            self._set_host(host)
+            assert _is_remote_ollama() is False, f"expected False for {host}"
+
+    def test_protocol_prefix_localhost_returns_false(self) -> None:
+        """Critical: http://127.0.0.1 must not be classified as remote."""
+        for host in ("http://127.0.0.1:11434", "https://localhost:11434"):
+            self._set_host(host)
+            assert _is_remote_ollama() is False, f"expected False for {host}"
+
+    def test_remote_host_returns_true(self) -> None:
+        for host in ("192.168.1.100", "10.0.0.5:11434", "remote.example.com"):
+            self._set_host(host)
+            assert _is_remote_ollama() is True, f"expected True for {host}"
+
+    def test_remote_with_protocol_returns_true(self) -> None:
+        for host in ("http://remote.example.com", "https://192.168.1.100:11434"):
+            self._set_host(host)
+            assert _is_remote_ollama() is True, f"expected True for {host}"
+
+    def test_trailing_slash_stripped(self) -> None:
+        self._set_host("127.0.0.1/")
+        assert _is_remote_ollama() is False
+
+    def test_whitespace_stripped(self) -> None:
+        self._set_host("  127.0.0.1  ")
+        assert _is_remote_ollama() is False
+
+    def tearDown(self) -> None:
+        os.environ.pop("OLLAMA_HOST", None)
+
+
+# ---------------------------------------------------------------------------
+# Auto-pull SSH error detection integration
+# ---------------------------------------------------------------------------
+
+
+class TestAutoPullSshError:
+    """Integration: _auto_pull must detect SSH key errors and set hint."""
+
+    def test_ssh_error_sets_hint(self) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None
+        assert "id_ed25519" in result["hint"]
+        assert "ssh-keygen" in result["hint"]
+
+    def test_non_ssh_error_no_hint(self) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr="connection refused")
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is None
+
+    def test_fastflowlm_no_ssh_hint(self) -> None:
+        """Non-ollama runners must not trigger SSH hint."""
+        with (
+            patch("shutil.which", return_value="/usr/bin/flm"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            result = _auto_pull("fastflowlm", "embed-gemma:300m")
+        assert result["success"] is False
+        assert result.get("hint") is None
+
+    def test_success_no_hint(self) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is True
+        assert result.get("hint") is None
+
+
+# ---------------------------------------------------------------------------
+# SSH key auto-generation tests
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateOllamaSshKey:
+    """Tests for _generate_ollama_ssh_key()."""
+
+    def test_key_already_exists_returns_success(self, tmp_path: Path) -> None:
+        """Idempotent: if key already exists, return success."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        (ollama_dir / "id_ed25519").write_text("private_key")
+        (ollama_dir / "id_ed25519.pub").write_text("public_key")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            ok, err = _generate_ollama_ssh_key()
+        assert ok is True
+        assert err is None
+
+    def test_ssh_keygen_missing_returns_failure(self, tmp_path: Path) -> None:
+        """When ssh-keygen is not on PATH, return failure."""
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            with patch("shutil.which", return_value=None):
+                ok, err = _generate_ollama_ssh_key()
+        assert ok is False
+        assert "ssh-keygen not found" in err  # type: ignore[operator]
+
+    def test_ssh_keygen_failure_returns_error(self, tmp_path: Path) -> None:
+        """When ssh-keygen fails, return the error."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            with patch("shutil.which", return_value="/usr/bin/ssh-keygen"):
+                with patch(
+                    "subprocess.run",
+                    return_value=MagicMock(returncode=1, stderr="permission denied"),
+                ):
+                    ok, err = _generate_ollama_ssh_key()
+        assert ok is False
+        assert err is not None
+        assert "permission denied" in err  # type: ignore[operator]
+
+
+class TestRegisterOllamaSshKey:
+    """Tests for _register_ollama_ssh_key()."""
+
+    def test_public_key_missing_returns_failure(self, tmp_path: Path) -> None:
+        """When public key doesn't exist, return failure."""
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            ok, err = _register_ollama_ssh_key()
+        assert ok is False
+        assert "Public key not found" in err  # type: ignore[operator]
+
+    def test_key_already_registered_returns_success(self, tmp_path: Path) -> None:
+        """Idempotent: if key already in server_user.pub, return success."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        (ollama_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA... user@host")
+        (ollama_dir / "server_user.pub").write_text("ssh-ed25519 AAAA... user@host\n")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            ok, err = _register_ollama_ssh_key()
+        assert ok is True
+        assert err is None
+
+    def test_register_appends_to_server_user_pub(self, tmp_path: Path) -> None:
+        """New key should be appended to server_user.pub."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        pub_key = "ssh-ed25519 AAAA... user@host"
+        (ollama_dir / "id_ed25519.pub").write_text(pub_key)
+        (ollama_dir / "server_user.pub").write_text("ssh-ed25519 BBBB... other@host\n")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            ok, err = _register_ollama_ssh_key()
+        assert ok is True
+        assert err is None
+        server_pub = ollama_dir / "server_user.pub"
+        content = server_pub.read_text()
+        assert "BBBB" in content
+        assert "AAAA" in content
+
+    def test_register_creates_server_user_pub_if_missing(self, tmp_path: Path) -> None:
+        """server_user.pub should be created if it doesn't exist."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        pub_key = "ssh-ed25519 AAAA... user@host"
+        (ollama_dir / "id_ed25519.pub").write_text(pub_key)
+        # server_user.pub does NOT exist
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            ok, err = _register_ollama_ssh_key()
+        assert ok is True
+        assert err is None
+        server_pub = ollama_dir / "server_user.pub"
+        assert server_pub.exists()
+        assert pub_key in server_pub.read_text()
+
+
+class TestAutoPullSshKeyAutoFix:
+    """Integration: _auto_pull SSH key auto-generation and retry flow."""
+
+    def test_ssh_error_auto_fix_succeeds(self, tmp_path: Path) -> None:
+        """When SSH key error occurs on local Ollama, auto-generate and retry."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        pub_key = "ssh-ed25519 AAAA... user@host"
+        (ollama_dir / "id_ed25519.pub").write_text(pub_key)
+
+        call_count = 0
+
+        def fake_run(cmd, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Call 1: ollama list (auth check) - SSH error
+            # Call 2: ollama pull - SSH error
+            # Call 3: ssh-keygen - success
+            # Call 4: ollama pull (retry) - success
+            if call_count in (1, 2):
+                return MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            else:
+                return MagicMock(returncode=0, stderr="")
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run", side_effect=fake_run),
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is True
+        assert result.get("ssh_key_auto_fixed") is True
+        assert call_count == 4  # list + pull + ssh-keygen + retry
+
+    def test_ssh_error_auto_fix_user_declines(self, tmp_path: Path) -> None:
+        """When user declines registration, return original error."""
+        with (
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="n"),
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None
+        assert "id_ed25519" in result["hint"]
+
+    def test_ssh_error_remote_ollama_no_auto_fix(self) -> None:
+        """Remote Ollama instances should NOT trigger auto-fix."""
+        with (
+            patch.dict(os.environ, {"OLLAMA_HOST": "https://remote.example.com"}),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+            patch("sys.stdin.isatty", return_value=True),
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None
+        # No auto-fix attempt — 2 calls: list (auth check) + pull
+        assert mock_run.call_count == 2
+
+    def test_ssh_error_non_interactive_no_auto_fix(self, tmp_path: Path) -> None:
+        """Non-interactive mode should NOT trigger auto-fix."""
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+            patch("sys.stdin.isatty", return_value=False),
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None
+        # No auto-fix attempt — 2 calls: list (auth check) + pull
+        assert mock_run.call_count == 2
+
+    def test_ssh_error_key_generation_fails(self, tmp_path: Path) -> None:
+        """When key generation fails, return original error with hint."""
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stderr=_EXACT_ERROR),  # Call 1: ollama list
+                MagicMock(returncode=1, stderr=_EXACT_ERROR),  # Call 2: ollama pull
+                MagicMock(returncode=1, stderr="ssh-keygen failed"),  # Call 3: ssh-keygen
+            ]
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None
+
+    def test_ssh_error_registration_fails(self, tmp_path: Path) -> None:
+        """When registration fails, return original error with hint."""
+        ollama_dir = tmp_path / ".ollama"
+        ollama_dir.mkdir()
+        (ollama_dir / "id_ed25519.pub").write_text("ssh-ed25519 AAAA... user@host")
+
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
+                return_value=True,
+            ),
+            patch("shutil.which", return_value="/usr/bin/ollama"),
+            patch("subprocess.run") as mock_run,
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y"),
+            patch("pathlib.Path.write_text", side_effect=OSError("permission denied")),
+        ):
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stderr=_EXACT_ERROR),  # Call 1: ollama list
+                MagicMock(returncode=1, stderr=_EXACT_ERROR),  # Call 2: ollama pull
+                MagicMock(returncode=0, stderr=""),  # Call 3: ssh-keygen
+                MagicMock(returncode=1, stderr="permission denied"),  # Call 4: retry pull
+            ]
+            result = _auto_pull("ollama", "embeddinggemma")
+        assert result["success"] is False
+        assert result["hint"] is not None

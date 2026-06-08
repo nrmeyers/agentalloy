@@ -49,6 +49,21 @@ try:
 except ImportError:
     console = None  # type: ignore[assignment]
 
+# Import container_runtime helpers at module level so tests can mock them.
+# These are also imported locally inside run_setup for the same reason.
+from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415, F401
+    _check_container_running,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    _cleanup_temp_entrypoint,  # noqa: F401
+    _detect_runtime_binary,  # noqa: F401
+    _ensure_ollama_dir,  # noqa: F401
+    _ensure_volume,  # noqa: F401
+    _generate_entrypoint,  # noqa: F401
+    _pull_image,  # noqa: F401
+    _run_container,  # noqa: F401
+    _tail_container_logs,  # noqa: F401  # pyright: ignore[reportUnusedImport]
+    _wait_for_readiness,  # noqa: F401
+)
+
 
 def _print(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-untyped-def]
     """Print with Rich if available, plain stdout otherwise."""
@@ -56,6 +71,117 @@ def _print(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-untyped-def]
         console.print(*args, **kwargs)  # type: ignore[union-attr, arg-type]
     else:
         print(*args, **kwargs)
+
+
+def _image_variant_label(image_ref: str) -> str:
+    """Return a human-readable label for the image variant.
+
+    Handles both full image refs (e.g. 'ghcr.io/nrmeyers/agentalloy:latest')
+    and bare tag suffixes (e.g. 'latest').
+
+    Examples:
+        'ghcr.io/nrmeyers/agentalloy:latest' -> 'latest (~300 MB, no model)'
+        'ghcr.io/nrmeyers/agentalloy:full'   -> 'full (~975 MB, pre-pulled model)'
+        'latest'                              -> 'latest (~300 MB, no model)'
+        'full'                                -> 'full (~975 MB, pre-pulled model)'
+    """
+    # Extract the tag from the image ref (everything after the last ':')
+    tag = image_ref.rsplit(":", 1)[-1] if ":" in image_ref else image_ref
+    if tag == "latest":
+        return "latest (~300 MB, no model)"
+    elif tag == "full":
+        return "full (~975 MB, pre-pulled model)"
+    return f"custom ({image_ref})"
+
+
+def _check_network_speed() -> tuple[str, int]:
+    """Measure network speed to ollama.ai and return (warning_message, adjusted_timeout).
+
+    Performs a quick download of the ollama.ai landing page (~50 KB) and
+    estimates the effective bandwidth. Used to warn users on slow networks
+    and to adjust the readiness timeout for first-run model downloads.
+
+    Returns
+    -------
+    tuple[str, int]
+        (warning_message, adjusted_timeout_seconds).
+        Returns an empty message and 1800s timeout on any failure.
+    """
+    try:
+        t0 = time.monotonic()
+        urllib.request.urlopen("https://ollama.ai/", timeout=5)
+        elapsed = time.monotonic() - t0
+        # ollama.ai is ~50 KB
+        speed_mbps = (50 * 8) / (elapsed * 1024)
+
+        if speed_mbps < 1:
+            est_minutes = 600 / (speed_mbps * 60 / 8)
+            return (
+                f"  [yellow]\u26a0 Slow network ({speed_mbps:.1f} Mbps) \u2014 "
+                f"model download may take ~{est_minutes:.0f} minutes.[/yellow]",
+                int(est_minutes * 60) + 600,
+            )
+        elif speed_mbps < 5:
+            est_minutes = 600 / (speed_mbps * 60 / 8)
+            return (
+                f"  [yellow]\u26a0 Slow network ({speed_mbps:.1f} Mbps) \u2014 "
+                f"model download may take ~{est_minutes:.0f} minutes.[/yellow]",
+                int(est_minutes * 60) + 300,
+            )
+        return ("", 1800)
+    except Exception:
+        return ("", 1800)
+
+
+def _get_readiness_timeout(
+    cfg: SetupConfig,
+    first_run: bool,
+    pack_count: int,
+) -> int:
+    """Compute the base readiness timeout (without network-speed adjustment).
+
+    Dynamic timeout based on install scenario:
+      - Re-install (no packs, models cached, not force): 300s
+      - First-run with always-on packs (models need download): 1800s
+      - First-run with 8+ packs (models need download): 2400s
+      - First-run with 1-7 packs (models need download): 1500s
+      - Fresh install with always-on packs (models cached): 600s
+      - Fresh install with 8+ packs: 1200s
+      - Fresh install with 1-7 packs: 300s
+      - User override via --timeout takes precedence.
+    """
+    # User explicitly set --timeout.
+    user_timeout = getattr(cfg, "readiness_timeout", None)
+    if user_timeout is not None:
+        return user_timeout
+
+    # Determine whether this is a re-install (bootstrap already complete).
+    # A re-install has no packs to install and the data volume likely
+    # already contains .bootstrap-complete.
+    is_reinstall = pack_count == 0 and not cfg.force
+
+    if is_reinstall:
+        # Re-install: bootstrap already done, uvicorn starts immediately.
+        return 300
+    elif first_run:
+        # Fresh install — model download dominates first-run time (5-15 min).
+        # Add 1200s (20 min) on top of the base timeout to account for this.
+        if pack_count == 0:
+            return 600 + 1200  # always-on packs + model download
+        elif pack_count >= 8:
+            return 1200 + 1200  # many packs + model download
+        else:
+            return 300 + 1200  # few packs + model download
+    elif pack_count == 0:
+        # Fresh install with always-on packs (core, documentation, engineering,
+        # performance). Covers 99% of cases within 10 minutes.
+        return 600
+    elif pack_count >= 8:
+        # Many explicit packs — generous timeout.
+        return 1200
+    else:
+        # Few explicit packs (1–7).
+        return 300
 
 
 @dataclass
@@ -79,9 +205,10 @@ class SetupConfig:
 
     # Container runtime fields (used when deployment="container")
     runtime_binary: str = ""  # resolved path to container runtime (podman/docker)
-    image_tag: str = "ghcr.io/nrmeyers/agentalloy:latest"  # container image tag (GHCR)
+    image_tag: str = "ghcr.io/nrmeyers/agentalloy:latest"  # full container image reference (GHCR)
     container_name: str = "agentalloy"  # base name for containers
     data_volume: str = "agentalloy-data"  # named volume for persistent data
+    readiness_timeout: int | None = None  # user override for readiness timeout (seconds)
 
     # Upstream LLM (proxy target)
     upstream_url: str = ""
@@ -971,16 +1098,8 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("  [green]  Preflight (early) passed.[/green]")
 
     # 2. Detect container runtime (standalone, before image selection)
-    from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415
-        _cleanup_temp_entrypoint,
-        _detect_runtime_binary,
-        _ensure_ollama_dir,
-        _ensure_volume,
-        _generate_entrypoint,
-        _pull_image,
-        _run_container,
-        _wait_for_readiness,
-    )
+    # NOTE: container_runtime helpers are already imported at module level
+    # (lines 54-67) so tests can mock them — no need to re-import here.
 
     label = _detect_runtime_binary()
     if label is None:
@@ -1213,7 +1332,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("\n[bold]Review your container setup:[/bold]")
     _print("  Deployment:   container")
     _print(f"  Runtime:      {cfg.runtime_binary}")
-    _print(f"  Image:        {cfg.image_tag}")
+    _print(f"  Image:        {cfg.image_tag} ({_image_variant_label(cfg.image_tag)})")
     _print(f"  Port:         {cfg.port}")
     _print(f"  Packs:        {cfg.packs or '(always-on only)'}")
 
@@ -1296,7 +1415,17 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _ensure_ollama_dir()
 
     # 7d. Generate the entrypoint script and start the container.
-    _print("  [dim]-> Starting agentalloy container (1-3 min)...[/dim]")
+    # Dynamic timing message: first-run needs model download time,
+    # re-installs are fast (models persist in ~/.ollama).
+    ollama_models_dir = Path.home() / ".ollama" / "models"
+    is_first_run = not ollama_models_dir.exists()
+    if is_first_run:
+        _print(
+            "  [dim]-> Starting agentalloy container "
+            "(may take 10-20 min on first run — downloading models)...[/dim]"
+        )
+    else:
+        _print("  [dim]-> Starting agentalloy container (30-60s)...[/dim]")
     entrypoint = _generate_entrypoint(cfg.packs)
     rc = _run_container(binary_path, entrypoint, cfg.packs)
     if rc != 0:
@@ -1305,13 +1434,38 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("  [green]  Done.[/green]")
 
     # 10. Wait for container readiness (fast-start uvicorn serves /readiness
-    # while pack ingest runs in the background). All-packs gets 1800s; any
-    # explicit pack subset gets 300s — see the design doc for rationale.
-    all_packs = (cfg.packs or "").strip() == "" or "," in (cfg.packs or "")
-    # The "all-packs" expansion happens upstream; here we approximate by
-    # counting comma-separated entries. >=8 packs triggers the long timeout.
+    # while pack ingest runs in the background).
+    #
+    # Dynamic timeout based on install scenario:
+    #   - Re-install (no packs, models cached): 300s
+    #   - Fresh install, always-on packs (models cached): 600s
+    #   - Fresh install, always-on packs (models downloaded): 1800s
+    #   - Fresh install, 8+ packs (models downloaded): 2400s
+    #   - Fresh install, 1-7 packs (models downloaded): 1800s
+    #   - Re-install with explicit packs: 600s
+    #   - User override via --timeout takes precedence.
+    #
+    # Network speed check: warn on slow connections and adjust timeout.
+    network_msg, network_timeout = _check_network_speed()
+    if network_msg:
+        _print(network_msg)
+
+    # First-run detection: models persist in ~/.ollama (bind-mounted into the
+    # container), so a fresh install needs the full model download time while
+    # a re-install skips it entirely.
+    ollama_models_dir = Path.home() / ".ollama" / "models"
+    is_first_run = not ollama_models_dir.exists()
+
+    # Count valid pack names (filter out empty strings from splitting).
     pack_count = len([p for p in (cfg.packs or "").split(",") if p.strip()])
-    readiness_timeout = 1800 if (all_packs and pack_count >= 8) else 300
+
+    # Compute base timeout (without network-speed adjustment).
+    readiness_timeout = _get_readiness_timeout(cfg, is_first_run, pack_count)
+
+    # Apply network-speed-based timeout adjustment (if slow network detected).
+    if network_timeout > readiness_timeout:
+        readiness_timeout = network_timeout
+
     _print(
         f"  [dim]-> Waiting for container readiness "
         f"(timeout {readiness_timeout}s, ~30s per progress update)...[/dim]"
@@ -1329,8 +1483,22 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         ingested = extra.get("packs_ingested", progress.get("packs_ingested"))
         total = extra.get("packs_total", progress.get("packs_total"))
         elapsed = int(evt.get("elapsed") or 0)
-        # Only print on change (pack rolled over) or every ~minute on the
-        # same pack so the user sees liveness without log spam.
+        # Model download phase — show as a distinct status.
+        # The entrypoint writes {"phase": "model_pull", "model": "...", ...}
+        # to .bootstrap-progress before running ollama pull.
+        phase = extra.get("phase") or progress.get("phase")
+        if phase == "model_pull":
+            model = current or progress.get("model", "")
+            if model and model != last_pack:
+                last_pack = model
+                _print(f"     [dim]bootstrap: downloading {model}  elapsed={elapsed}s[/dim]")
+            elif elapsed and elapsed % 60 < 30:
+                _print(f"     [dim]bootstrap: downloading {model}  elapsed={elapsed}s[/dim]")
+            return
+
+        # Pack ingestion phase — only print on change (pack rolled over) or
+        # every ~minute on the same pack so the user sees liveness without
+        # log spam.
         if current and current != last_pack:
             last_pack = current
             suffix = f" ({ingested}/{total})" if ingested is not None and total else ""
@@ -1346,6 +1514,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         container_name=cfg.container_name or "agentalloy",
         poll_interval=30.0,
         on_progress=_on_progress,
+        stream_logs=True,
     )
     if not healthy:
         _print(
@@ -1438,7 +1607,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     )
     _print(f"  URL:      http://localhost:{cfg.port}")
     _print(f"  Runtime:  {cfg.runtime_binary}")
-    _print(f"  Image:    {cfg.image_tag}")
+    _print(f"  Image:    {cfg.image_tag} ({_image_variant_label(cfg.image_tag)})")
     _print(f"  Container: {cfg.container_name}")
     _print(f"  Volume:   {cfg.data_volume}")
 
@@ -1985,11 +2154,20 @@ def add_parser(
         default=None,
         help="Deployment type (default: native for non-interactive, prompted interactively).",
     )
+    p.add_argument(
+        "--image-tag",
+        choices=["latest", "full"],
+        default="latest",
+        help="Container image variant: 'latest' (~300 MB, no pre-pulled model) or 'full' (~975 MB, model pre-pulled for air-gapped/enterprise). Default: latest.",
+    )
     p.set_defaults(func=_run_from_args)
 
 
 def _run_from_args(args: argparse.Namespace) -> int:
     """Bridge from argparse.Namespace to SetupConfig -> run_setup()."""
+    # Build the full image reference from the CLI-provided tag suffix.
+    image_tag_suffix = getattr(args, "image_tag", "latest")
+    image_ref = f"ghcr.io/nrmeyers/agentalloy:{image_tag_suffix}"
     cfg = SetupConfig(
         runner=args.runner,  # may be None; resolved inside run_setup
         model=args.model or "",
@@ -2002,6 +2180,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         non_interactive=args.non_interactive,
         force=getattr(args, "force", False),
         acknowledge_sidecar=getattr(args, "acknowledge_sidecar", False),
+        image_tag=image_ref,
     )
     # Model default is resolved inside run_setup() after cfg.runner is finalized.
     return run_setup(cfg)

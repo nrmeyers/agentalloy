@@ -200,6 +200,88 @@ class TestWaitForReadiness:
         assert "warming_up" in statuses
         assert "ready" in statuses
 
+    def test_first_success_model_connection_errors_before_200(self) -> None:
+        """Connection errors before the first 200 response are silently ignored.
+
+        This is the critical fix from the review: the old grace-window model
+        counted these errors and gave up after 3 consecutive failures (~120s).
+        The new first-success model ignores them entirely until the container
+        proves it is alive.
+        """
+        import urllib.error
+
+        call_count = [0]
+
+        def fake_urlopen(url, timeout=5):  # type: ignore[no-untyped-def]
+            call_count[0] += 1
+            if call_count[0] <= 5:
+                # First 5 calls: connection refused (container not ready yet)
+                raise urllib.error.URLError("connection refused")
+            # 6th call onwards: container is alive, eventually ready
+            if call_count[0] <= 7:
+                return _FakeResp({"status": "warming_up"})
+            # 8th call: container is ready
+            return _FakeResp({"status": "ready"})
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=60,
+                poll_interval=0.01,
+            )
+        # The key assertion: it did NOT return False after 3 errors.
+        assert ok is True, "Should succeed after initial errors resolve"
+        assert call_count[0] > 3, (
+            "Should have made more than 3 calls (did not short-circuit on errors)"
+        )
+
+    def test_first_success_model_errors_after_200_count(self) -> None:
+        """After first 200, consecutive errors count toward the 3-strike limit.
+
+        Once the container has proven it is alive (returned 200), errors
+        indicate a crash or network issue and should be counted.
+        """
+        import urllib.error
+
+        responses = [
+            _FakeResp({"status": "warming_up"}),  # 1st: success, resets counter
+            urllib.error.URLError("connection refused"),  # 2nd: error, count=1
+            urllib.error.URLError("connection refused"),  # 3rd: error, count=2
+            urllib.error.URLError("connection refused"),  # 4th: error, count=3 → FAIL
+        ]
+
+        with patch("urllib.request.urlopen", side_effect=responses):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=60,
+                poll_interval=0.01,
+            )
+        assert ok is False, "Should return False after 3 consecutive errors post-first-success"
+
+    def test_first_success_model_recovers_after_error(self) -> None:
+        """After first 200, a single error followed by success resets the counter.
+
+        A transient error after the container is alive should not cause
+        early exit — only 3 consecutive errors should.
+        """
+        import urllib.error
+
+        responses = [
+            _FakeResp({"status": "warming_up"}),  # 1st: success, resets counter
+            urllib.error.URLError("connection refused"),  # 2nd: error, count=1
+            _FakeResp({"status": "warming_up"}),  # 3rd: success, resets counter
+            urllib.error.URLError("connection refused"),  # 4th: error, count=1
+            _FakeResp({"status": "ready"}),  # 5th: success → return True
+        ]
+
+        with patch("urllib.request.urlopen", side_effect=responses):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=60,
+                poll_interval=0.01,
+            )
+        assert ok is True, "Should recover from transient errors and return True on ready"
+
 
 # ---------------------------------------------------------------------------
 # _get_bootstrap_progress — UT-23..UT-25

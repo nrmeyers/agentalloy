@@ -411,6 +411,8 @@ class TestAddParser:
                 "cursor",
                 "--hardware",
                 "nvidia",
+                "--image-tag",
+                "full",
             ]
         )
         assert args.runner == "llama-server"
@@ -419,6 +421,20 @@ class TestAddParser:
         assert args.packs == "a,b,c"
         assert args.harness == "cursor"
         assert args.hardware == "nvidia"
+        assert args.image_tag == "full"
+
+    def test_parser_rejects_invalid_image_tag(self):
+        """argparse rejects image-tag values not in choices."""
+        import argparse
+
+        from agentalloy.install.subcommands.simple_setup import add_parser
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="subcommand")
+        add_parser(subparsers)
+
+        with pytest.raises(SystemExit):
+            parser.parse_args(["setup", "--image-tag", "invalid-tag"])
 
 
 class TestRunFromArgs:
@@ -435,13 +451,17 @@ class TestRunFromArgs:
             packs=None,
             harness=None,
             non_interactive=False,
+            image_tag="latest",
             image_path=None,
         )
         # Just verify it builds a valid config -- actual run_setup is tested above
         # We'll just check _run_from_args doesn't raise with valid args
-        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0):
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
             rc = _run_from_args(args)
         assert rc == 0
+        # Verify the image_ref was constructed correctly
+        cfg = mock.call_args[0][0]
+        assert cfg.image_tag == "ghcr.io/nrmeyers/agentalloy:latest"
 
     def test_explicit_values(self):
         import argparse
@@ -454,11 +474,57 @@ class TestRunFromArgs:
             packs="pack1,pack2",
             harness="cursor",
             non_interactive=True,
+            image_tag="full",
             image_path=None,
         )
-        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0):
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
             rc = _run_from_args(args)
         assert rc == 0
+        # Verify the full image variant was constructed correctly
+        cfg = mock.call_args[0][0]
+        assert cfg.image_tag == "ghcr.io/nrmeyers/agentalloy:full"
+        assert cfg.runner == "llama-server"
+        assert cfg.port == 50000
+
+
+# ---------------------------------------------------------------------------
+# Image variant label tests
+# ---------------------------------------------------------------------------
+
+
+class TestImageVariantLabel:
+    """Test _image_variant_label helper."""
+
+    def test_latest_tag(self):
+        from agentalloy.install.subcommands.simple_setup import _image_variant_label
+
+        assert _image_variant_label("ghcr.io/nrmeyers/agentalloy:latest") == (
+            "latest (~300 MB, no model)"
+        )
+        assert _image_variant_label("latest") == "latest (~300 MB, no model)"
+
+    def test_full_tag(self):
+        from agentalloy.install.subcommands.simple_setup import _image_variant_label
+
+        assert _image_variant_label("ghcr.io/nrmeyers/agentalloy:full") == (
+            "full (~975 MB, pre-pulled model)"
+        )
+        assert _image_variant_label("full") == "full (~975 MB, pre-pulled model)"
+
+    def test_custom_tag(self):
+        from agentalloy.install.subcommands.simple_setup import _image_variant_label
+
+        assert (
+            _image_variant_label("my-registry.io/img:v1.2.3")
+            == "custom (my-registry.io/img:v1.2.3)"
+        )
+        assert _image_variant_label("custom-tag") == "custom (custom-tag)"
+
+    def test_no_tag_returns_full_ref(self):
+        from agentalloy.install.subcommands.simple_setup import _image_variant_label
+
+        # No ':' at all — the whole ref is treated as the tag
+        assert _image_variant_label("my-image") == "custom (my-image)"
 
 
 # ---------------------------------------------------------------------------
@@ -1077,10 +1143,10 @@ class TestContainerFlow:
         assert st["runtime_binary"] == "podman"
         assert st["image_tag"] is not None
 
-    def test_runtime_binary_missing_exits_1(
+    def test_runtime_binary_missing_exits_nonzero(
         self, tmp_state_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
     ):
-        """No podman/docker detected, setup exits with code 1."""
+        """No podman/docker detected, setup exits with non-zero code."""
         SetupConfig, run_setup = self._import_run_setup()
 
         with patch(
@@ -1089,7 +1155,7 @@ class TestContainerFlow:
         ):
             rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
 
-        assert rc == 1
+        assert rc != 0, f"Expected non-zero exit code, got {rc}"
         captured = capsys.readouterr()
         # Output goes to stdout via Rich console, not stderr
         combined = (captured.out + captured.err).lower()

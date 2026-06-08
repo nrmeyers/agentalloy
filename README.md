@@ -68,6 +68,11 @@ agentalloy setup
 
 The setup wizard walks you through everything: hardware detection, runner selection (`ollama`, `lm-studio`, or `llama-server`), model and port, service mode, **skill pack selection** (with tier-grouped listing), IDE harness wiring, and hardware target. It then executes all install steps and validates the result. **3–5 minutes** on a warm machine.
 
+> **Note:** If your Ollama instance requires SSH key authentication (e.g., when
+> `OLLAMA_HOST` points to a remote instance), you'll need an ed25519 key at
+> `~/.ollama/id_ed25519` before running setup. See [docs/troubleshooting.md](docs/troubleshooting.md)
+> for details.
+
 Non-interactive / scripted installs: pass flags directly:
 
 ```bash

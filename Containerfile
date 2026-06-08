@@ -1,12 +1,18 @@
 # Containerfile for the AgentAlloy service.
 # Compatible with Podman (project preference) and Docker (works as Dockerfile via --file Containerfile).
 #
-# Build:  podman build -t agentalloy -f Containerfile .
+# Build variants:
+#   # Lightweight image (~300 MB, no pre-pulled model) — for general users
+#   podman build -t agentalloy:latest -f Containerfile .
+#
+#   # Full image (~975 MB, model pre-pulled) — for air-gapped/enterprise
+#   podman build --build-arg PULL_MODEL=true -t agentalloy:full -f Containerfile .
+#
 # Run:    agentalloy setup --deployment container  (recommended — single-container with entrypoint)
 #         or manually: podman run --replace -d --name agentalloy -p 47950:47950 \
 #                      -v agentalloy-data:/app/data -v ~/.ollama:/root/.ollama \
 #                      -e AGENTIALLOY_PACKS= -e ENTRYPOINT=/app/entrypoint.sh \
-#                      agentalloy:local /app/entrypoint.sh
+#                      agentalloy:latest /app/entrypoint.sh
 
 FROM python:3.12-slim AS base
 
@@ -47,6 +53,23 @@ ENV LADYBUG_DB_PATH=/app/data/ladybug \
     LOG_LEVEL=INFO
 
 EXPOSE 47950
+
+# Conditional model pre-pull for the "full" image variant.
+# When PULL_MODEL=true, this layer pulls the embedding model into the image.
+# This is useful for air-gapped/enterprise deployments where the model
+# should be baked into the image rather than downloaded at runtime.
+ARG PULL_MODEL=false
+RUN if [ "$PULL_MODEL" = "true" ]; then \
+        echo "Pre-pulling embedding model into image (this may take several minutes)..." && \
+        curl -fsSL https://ollama.ai/install.sh | sh && \
+        OLLAMA_HOST=127.0.0.1:11434 ollama serve & \
+        sleep 5 && \
+        ollama pull qwen3-embedding:0.6b && \
+        kill %1 2>/dev/null || true && \
+        echo "Model pre-pulled successfully."; \
+    else \
+        echo "Skipping model pre-pull (latest variant)."; \
+    fi
 
 # Note: HEALTHCHECK is intentionally omitted — the container runtime module
 # uses _wait_for_health() to poll /health with exponential backoff rather
