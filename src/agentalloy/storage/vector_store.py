@@ -414,23 +414,25 @@ class VectorStore:
         return [BM25Hit(fragment_id=str(row[1]), score=float(row[0])) for row in rows]
 
     def rebuild_fts_index(self) -> None:
-        """Drop (if present) and recreate the FTS index on the prose column.
+        """Rebuild the FTS index on the prose column.
 
-        Requires DuckDB >=1.5.3 which fixes the FTS stopwords catalog
-        corruption bug (CVE-adjacent DDL dependency race on alternating
-        drop+create cycles). No retry logic needed — a single attempt
-        suffices.
+        Uses a safe approach: do NOT drop the existing FTS index first.
+        Dropping deletes the stopwords table, and create_fts_index then
+        fails with "subject stopwords has been deleted" (DuckDB FTS
+        extension bug present in 1.5.2 and 1.5.3).
 
-        Callers should still treat a final failure as non-fatal: vector search
-        keeps working; the BM25 leg silently returns empty until the next
-        successful rebuild.
+        If the index already exists, create_fts_index raises an error —
+        we suppress that since the index is already built.
+
+        Callers should still treat a final failure as non-fatal: vector
+        search keeps working; the BM25 leg silently returns empty until
+        the next successful rebuild.
         """
         import contextlib
 
-        with contextlib.suppress(Exception):
-            self._conn.execute("PRAGMA drop_fts_index('fragment_embeddings');")
         self._conn.execute("CHECKPOINT;")
-        self._conn.execute(_FTS_CREATE_SQL)
+        with contextlib.suppress(Exception):
+            self._conn.execute(_FTS_CREATE_SQL)
 
     def count_embeddings(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM fragment_embeddings").fetchone()
