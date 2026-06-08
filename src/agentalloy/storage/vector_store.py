@@ -416,13 +416,13 @@ class VectorStore:
     def rebuild_fts_index(self) -> None:
         """Rebuild the FTS index on the prose column.
 
-        Uses a safe approach: do NOT drop the existing FTS index first.
-        Dropping deletes the stopwords table, and create_fts_index then
-        fails with "subject stopwords has been deleted" (DuckDB FTS
-        extension bug present in 1.5.2 and 1.5.3).
+        Workaround for a DuckDB FTS extension bug (present in 1.5.2 and
+        1.5.3): drop_fts_index deletes the stopwords catalog entry, and
+        create_fts_index then fails with "subject stopwords has been
+        deleted" during commit.
 
-        If the index already exists, create_fts_index raises an error —
-        we suppress that since the index is already built.
+        Fix: drop the entire FTS schema CASCADE (which clears catalog
+        entries cleanly), then call create_fts_index fresh.
 
         Callers should still treat a final failure as non-fatal: vector
         search keeps working; the BM25 leg silently returns empty until
@@ -431,6 +431,8 @@ class VectorStore:
         import contextlib
 
         self._conn.execute("CHECKPOINT;")
+        with contextlib.suppress(Exception):
+            self._conn.execute("DROP SCHEMA IF EXISTS fts_main_fragment_embeddings CASCADE")
         with contextlib.suppress(Exception):
             self._conn.execute(_FTS_CREATE_SQL)
 
