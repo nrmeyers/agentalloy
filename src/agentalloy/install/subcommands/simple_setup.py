@@ -1297,7 +1297,6 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     cfg.runner = "ollama"
     cfg.port = 47950
     cfg.mode = "manual"
-    cfg.harness = "manual"
     cfg.deployment = "container"
 
     # 5b. Skill pack selection. Mirrors the native flow at step 6
@@ -1327,6 +1326,16 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print(f"  [yellow]Unknown pack(s) skipped: {sorted(_unknown)}[/yellow]")
         cfg.packs = ",".join(_valid)
 
+    # 5c. Harness selection — before container setup so the user can
+    # cancel before waiting for the model download.
+    if not cfg.non_interactive:
+        cfg.harness = _prompt_harness()
+    else:
+        h = (cfg.harness or "manual").strip().lower()
+        if h == "continue":
+            h = "continue-closed"
+        cfg.harness = h
+
     # 6. Show summary
     _print("\n[dim]" + "─" * 40)
     _print("\n[bold]Review your container setup:[/bold]")
@@ -1335,6 +1344,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print(f"  Image:        {cfg.image_tag} ({_image_variant_label(cfg.image_tag)})")
     _print(f"  Port:         {cfg.port}")
     _print(f"  Packs:        {cfg.packs or '(always-on only)'}")
+    _print(f"  Harness:      {cfg.harness}")
 
     if not cfg.non_interactive:
         confirm = input("  Confirm and continue? [Y/n]: ").strip().lower()
@@ -1472,9 +1482,11 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     )
 
     last_pack: str | None = None
+    _last_heartbeat: int = 0  # last elapsed time we printed a heartbeat
+    _HEARTBEAT_INTERVAL = 60  # seconds between heartbeats
 
     def _on_progress(evt: dict[str, Any]) -> None:
-        nonlocal last_pack
+        nonlocal last_pack, _last_heartbeat
         progress = evt.get("progress") or {}
         extra = evt.get("extra") or {}
         # Prefer the in-container progress file; fall back to whatever
@@ -1492,7 +1504,8 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             if model and model != last_pack:
                 last_pack = model
                 _print(f"     [dim]bootstrap: downloading {model}  elapsed={elapsed}s[/dim]")
-            elif elapsed and elapsed % 60 < 30:
+            elif elapsed and (elapsed - _last_heartbeat) >= _HEARTBEAT_INTERVAL:
+                _last_heartbeat = elapsed
                 _print(f"     [dim]bootstrap: downloading {model}  elapsed={elapsed}s[/dim]")
             return
 
@@ -1503,8 +1516,14 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             last_pack = current
             suffix = f" ({ingested}/{total})" if ingested is not None and total else ""
             _print(f"     [dim]bootstrap: {current}{suffix}  elapsed={elapsed}s[/dim]")
-        elif evt.get("status") == "warming_up" and elapsed and elapsed % 60 < 30:
-            # Heartbeat for slow packs — show every 60s window.
+            _last_heartbeat = elapsed
+        elif (
+            evt.get("status") == "warming_up"
+            and elapsed
+            and (elapsed - _last_heartbeat) >= _HEARTBEAT_INTERVAL
+        ):
+            # Heartbeat for slow packs — show every ~60s since last update.
+            _last_heartbeat = elapsed
             _print(f"     [dim]bootstrap: still warming up  elapsed={elapsed}s[/dim]")
 
     healthy = _wait_for_readiness(
@@ -1573,15 +1592,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         return rc
     _print("  [green]  All checks passed.[/green]")
 
-    # 12. Wire harness
-    if not cfg.non_interactive:
-        cfg.harness = _prompt_harness()
-    else:
-        h = (cfg.harness or "manual").strip().lower()
-        if h == "continue":
-            h = "continue-closed"
-        cfg.harness = h
-
+    # 12. Wire harness (if selected)
     if cfg.harness and cfg.harness != "manual":
         _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
         # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
