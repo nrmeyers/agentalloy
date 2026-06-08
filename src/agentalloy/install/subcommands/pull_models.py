@@ -811,9 +811,7 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                     )
                     key_ok, key_err = _generate_ollama_ssh_key()
                     if not key_ok:
-                        print_rich_stderr(
-                            f"  [red]Key generation failed: {key_err}[/red]"
-                        )
+                        print_rich_stderr(f"  [red]Key generation failed: {key_err}[/red]")
                         return {
                             "runner": runner,
                             "model": model,
@@ -822,9 +820,7 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                             "duration_ms": duration_ms,
                             "hint": hint,
                         }
-                    print_rich_stderr(
-                        "  [green]SSH key generated at ~/.ollama/id_ed25519[/green]"
-                    )
+                    print_rich_stderr("  [green]SSH key generated at ~/.ollama/id_ed25519[/green]")
 
                     # Ask user for permission to register.
                     ans = (
@@ -846,9 +842,7 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
 
                     reg_ok, reg_err = _register_ollama_ssh_key()
                     if not reg_ok:
-                        print_rich_stderr(
-                            f"  [red]Registration failed: {reg_err}[/red]"
-                        )
+                        print_rich_stderr(f"  [red]Registration failed: {reg_err}[/red]")
                         return {
                             "runner": runner,
                             "model": model,
