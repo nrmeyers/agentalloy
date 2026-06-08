@@ -62,10 +62,10 @@ ARG PULL_MODEL=false
 RUN if [ "$PULL_MODEL" = "true" ]; then \
         echo "Pre-pulling embedding model into image (this may take several minutes)..." && \
         curl -fsSL https://ollama.ai/install.sh | sh && \
-        OLLAMA_HOST=127.0.0.1:11434 ollama serve & \
+        OLLAMA_HOST=127.0.0.1:11434 ollama serve & OLLAMA_PID=$! && \
         sleep 5 && \
         ollama pull qwen3-embedding:0.6b && \
-        kill %1 2>/dev/null || true && \
+        kill "$OLLAMA_PID" 2>/dev/null || true && \
         echo "Model pre-pulled successfully."; \
     else \
         echo "Skipping model pre-pull (latest variant)."; \

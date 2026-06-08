@@ -50,7 +50,7 @@ except ImportError:
     console = None  # type: ignore[assignment]
 
 # Import container_runtime helpers at module level so tests can mock them.
-# These are also imported locally inside run_setup for the same reason.
+# These are re-exported for test mocking via the module scope (not inside run_setup).
 from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415, F401
     _check_container_running,  # noqa: F401  # pyright: ignore[reportUnusedImport]
     _cleanup_temp_entrypoint,  # noqa: F401
@@ -109,10 +109,10 @@ def _check_network_speed() -> tuple[str, int]:
     """
     try:
         t0 = time.monotonic()
-        urllib.request.urlopen("https://ollama.ai/", timeout=5)
+        with urllib.request.urlopen("https://ollama.ai/", timeout=5) as resp:
+            body = resp.read()
         elapsed = time.monotonic() - t0
-        # ollama.ai is ~50 KB
-        speed_mbps = (50 * 8) / (elapsed * 1024)
+        speed_mbps = (len(body) * 8) / (elapsed * 1024)
 
         if speed_mbps < 1:
             est_minutes = 600 / (speed_mbps * 60 / 8)
@@ -148,7 +148,7 @@ def _get_readiness_timeout(
       - Fresh install with always-on packs (models cached): 600s
       - Fresh install with 8+ packs: 1200s
       - Fresh install with 1-7 packs: 300s
-      - User override via --timeout takes precedence.
+      - User override via SetupConfig.readiness_timeout takes precedence.
     """
     # User explicitly set --timeout.
     user_timeout = getattr(cfg, "readiness_timeout", None)

@@ -79,7 +79,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha
+            type=sha,suffix=-full
             type=raw,value=full,enable={{is_default_branch}}
 
       - name: Build and push (full — model pre-pulled)

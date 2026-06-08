@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
-from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.install.output import add_json_flag, print_rich, print_rich_stderr, write_result
 
 SCHEMA_VERSION = 1
 STEP_NAME = "pull-models"
@@ -131,7 +131,7 @@ def _ssh_key_error_hint(stderr: str) -> str | None:
     that happen to contain one of the keywords (e.g. a file-not-found
     error mentioning "open").
     """
-    if not all(p in stderr for p in _SSH_KEY_ERROR_PATTERNS):
+    if not all(p in stderr.lower() for p in _SSH_KEY_ERROR_PATTERNS):
         return None
 
     hint_lines = [
@@ -806,15 +806,13 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                 # Auto-fix: generate key, ask to register, retry pull.
                 # Only for local Ollama instances (remote needs admin action).
                 if hint and not _is_remote_ollama() and sys.stdin.isatty():
-                    print(
-                        "\n  [yellow]SSH key error detected — attempting automatic fix...[/yellow]",
-                        file=sys.stderr,
+                    print_rich_stderr(
+                        "\n  [yellow]SSH key error detected — attempting automatic fix...[/yellow]"
                     )
                     key_ok, key_err = _generate_ollama_ssh_key()
                     if not key_ok:
-                        print(
-                            f"  [red]Key generation failed: {key_err}[/red]",
-                            file=sys.stderr,
+                        print_rich_stderr(
+                            f"  [red]Key generation failed: {key_err}[/red]"
                         )
                         return {
                             "runner": runner,
@@ -824,9 +822,8 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                             "duration_ms": duration_ms,
                             "hint": hint,
                         }
-                    print(
-                        "  [green]SSH key generated at ~/.ollama/id_ed25519[/green]",
-                        file=sys.stderr,
+                    print_rich_stderr(
+                        "  [green]SSH key generated at ~/.ollama/id_ed25519[/green]"
                     )
 
                     # Ask user for permission to register.
@@ -834,10 +831,9 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                         input("  Register this key with the Ollama server? [y/N]: ").strip().lower()
                     )
                     if ans not in ("y", "yes"):
-                        print(
+                        print_rich_stderr(
                             "  [dim]Registration skipped. The pull will fail until "
-                            "the key is registered manually.[/dim]",
-                            file=sys.stderr,
+                            "the key is registered manually.[/dim]"
                         )
                         return {
                             "runner": runner,
@@ -850,9 +846,8 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
 
                     reg_ok, reg_err = _register_ollama_ssh_key()
                     if not reg_ok:
-                        print(
-                            f"  [red]Registration failed: {reg_err}[/red]",
-                            file=sys.stderr,
+                        print_rich_stderr(
+                            f"  [red]Registration failed: {reg_err}[/red]"
                         )
                         return {
                             "runner": runner,
@@ -862,7 +857,7 @@ def _auto_pull(runner: str, model: str) -> dict[str, Any]:
                             "duration_ms": duration_ms,
                             "hint": hint,
                         }
-                    print("  [green]Key registered. Retrying pull...[/green]", file=sys.stderr)
+                    print_rich_stderr("  [green]Key registered. Retrying pull...[/green]")
 
                     # Retry the pull.
                     retry_t0 = time.monotonic()
@@ -1016,13 +1011,14 @@ def pull_models(
         elif runner in _AUTO_PULL_RUNNERS:
             result = _auto_pull(runner, model)
             if result.get("success"):
-                auto_pulled.append(
-                    {
-                        "runner": runner,
-                        "model": model,
-                        "duration_ms": result.get("duration_ms", 0),
-                    }
-                )
+                entry: dict[str, Any] = {
+                    "runner": runner,
+                    "model": model,
+                    "duration_ms": result.get("duration_ms", 0),
+                }
+                if result.get("ssh_key_auto_fixed"):
+                    entry["ssh_key_auto_fixed"] = True
+                auto_pulled.append(entry)
             else:
                 errors.append(result)
         elif runner in _MANUAL_INSTRUCTIONS:
