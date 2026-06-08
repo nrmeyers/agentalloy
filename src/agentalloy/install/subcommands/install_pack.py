@@ -179,10 +179,6 @@ def _ingest_yaml(
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
-        print(
-            f"WARNING: skipping deprecated skill '{skill_id}', superseded by '{superseded_by}'",
-            file=sys.stderr,
-        )
         return {
             "yaml": yaml_path.name,
             "exit_code": 0,
