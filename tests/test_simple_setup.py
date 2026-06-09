@@ -1150,7 +1150,7 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with patch(
-            "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+            "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
             return_value=None,
         ):
             rc = run_setup(SetupConfig(deployment="container", non_interactive=True))

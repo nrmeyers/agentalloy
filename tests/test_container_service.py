@@ -32,11 +32,8 @@ class TestIsInContainer:
             def is_dir(self) -> bool:
                 return False
 
-        def fake_path(path_str: str) -> FakePath:
-            return FakePath(path_str)
-
         with monkeypatch.context() as m:
-            m.setattr(Path, "__new__", lambda cls, path_str: FakePath(path_str))
+            m.setattr("agentalloy.install.container_service.Path", FakePath)
             from agentalloy.install.container_service import is_in_container
 
             assert is_in_container() is True
@@ -54,11 +51,8 @@ class TestIsInContainer:
             def is_dir(self) -> bool:
                 return self._path_str == "/app"
 
-        def fake_path(path_str: str) -> FakePath:
-            return FakePath(path_str)
-
         with monkeypatch.context() as m:
-            m.setattr(Path, "__new__", lambda cls, path_str: FakePath(path_str))
+            m.setattr("agentalloy.install.container_service.Path", FakePath)
             from agentalloy.install.container_service import is_in_container
 
             assert is_in_container() is True
@@ -76,11 +70,8 @@ class TestIsInContainer:
             def is_dir(self) -> bool:
                 return False
 
-        def fake_path(path_str: str) -> FakePath:
-            return FakePath(path_str)
-
         with monkeypatch.context() as m:
-            m.setattr(Path, "__new__", lambda cls, path_str: FakePath(path_str))
+            m.setattr("agentalloy.install.container_service.Path", FakePath)
             from agentalloy.install.container_service import is_in_container
 
             assert is_in_container() is False
@@ -623,7 +614,7 @@ class TestIntegration:
                 return False
 
         with monkeypatch.context() as m:
-            m.setattr(Path, "__new__", lambda cls, path_str: FakePath(path_str))
+            m.setattr("agentalloy.install.container_service.Path", FakePath)
 
             from agentalloy.install.container_service import is_in_container
 
@@ -641,7 +632,7 @@ class TestIntegration:
                 return False
 
         with monkeypatch.context() as m:
-            m.setattr(Path, "__new__", lambda cls, path_str: FakePathNoEnv(path_str))
+            m.setattr("agentalloy.install.container_service.Path", FakePathNoEnv)
 
             # Re-import to get fresh function (module-level cache cleared).
             import importlib
