@@ -31,11 +31,12 @@ def _set_phase(tmp_path: Path, phase: str) -> None:
     (phase_dir / "phase").write_text(f"phase: {phase}\n")
 
 
-def _skill(keywords: list[str], phases: list[str] | None = None) -> dict[str, Any]:
+def _skill(keywords: list[str], phases: list[str] | None = None, domain_tags: list[str] | None = None) -> dict[str, Any]:
     return {
         "signal_keywords": keywords,
         "exit_gates": {},
         "applies_to_phases": phases or ["build"],
+        "domain_tags": domain_tags,
     }
 
 
@@ -211,7 +212,7 @@ class TestEvaluateSignal:
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                return_value=_skill(["test"], phases=["build", "qa"]),
+                return_value=_skill(["test"], domain_tags=["auth", "payments"]),
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.check_prefilter",
@@ -224,4 +225,4 @@ class TestEvaluateSignal:
         ):
             result = asyncio.run(evaluate_signal(_req("run tests"), tmp_path))
         assert result.should_compose is True
-        assert result.domain_tags == ["build", "qa"]
+        assert result.domain_tags == ["auth", "payments"]
