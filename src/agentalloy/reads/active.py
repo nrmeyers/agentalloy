@@ -33,6 +33,7 @@ def get_active_skills(
 ) -> list[ActiveSkill]:
     """Return every skill whose CURRENT_VERSION is active, after consistency checks."""
     from agentalloy.storage.ladybug import LadybugStore  # noqa: F401 — breaks circular import
+
     _run_consistency_guard(store, skill_class=skill_class)
 
     params: dict[str, Any] = {}
