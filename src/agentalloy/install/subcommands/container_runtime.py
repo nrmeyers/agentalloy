@@ -137,6 +137,9 @@ def _pull_image(
             _print(f"  [red]Failed to load image from tarball (exit {exc.returncode})[/red]")
             _print(f"  stderr: {(exc.stderr or b'').decode(errors='replace')[:200]}")
             return exc.returncode
+        except UnicodeDecodeError:
+            _print("  [red]Failed to decode image load output[/red]")
+            return 1
         except subprocess.TimeoutExpired:
             _print("  [red]Image load timed out after 300s[/red]")
             return 1
@@ -589,7 +592,7 @@ def _check_container_running(
             timeout=10,
         )
         return container_name in result.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
         return False
 
 
@@ -619,7 +622,7 @@ def _tail_container_logs(
         if result.returncode != 0:
             return ""
         return result.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
         return ""
 
 

@@ -60,7 +60,7 @@ def find_listening_pid(port: int, host: str = DEFAULT_HOST) -> int | None:
             check=False,
             timeout=2.0,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return None
     if result.returncode != 0:
         return None
