@@ -41,6 +41,7 @@ AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
 AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen3.6-35b-a3b")
 
+
 @functools.cache
 def _pack_skill_index() -> dict[str, Path]:
     """Map skill_id -> pack YAML path across the bundled pack corpus."""
