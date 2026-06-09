@@ -663,12 +663,16 @@ def _run_container_guard(
     )
 
     no_restart: bool = getattr(args, "no_restart", False)
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
 
     container_stopped: bool = False
     if is_in_container() and not no_restart:
         container_stopped = stop_service_in_container()
-        assert isinstance(container_stopped, bool), "stop must return bool"  # P10-R5
+        if not isinstance(container_stopped, bool):
+            raise TypeError(
+                f"stop_service_in_container must return bool, got {type(container_stopped).__name__}"
+            )
         if container_stopped:
             print(
                 "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
@@ -688,7 +692,10 @@ def _run_container_guard(
     finally:
         if container_stopped and not no_restart:
             ok: bool = restart_service_in_container()
-            assert isinstance(ok, bool), "restart must return bool"  # P10-R5
+            if not isinstance(ok, bool):
+                raise TypeError(
+                    f"restart_service_in_container must return bool, got {type(ok).__name__}"
+                )
             if not ok:
                 print(
                     "[agentalloy] WARNING: Failed to restart service after install-packs. "

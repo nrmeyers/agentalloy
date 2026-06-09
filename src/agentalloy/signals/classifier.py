@@ -11,7 +11,8 @@ similarity threshold.
 
 Four semantic predicates:
   user_intent_matches      — prompt similarity against named intent references
-  agent_intent_matches     — same (proxy: recent_prompt_text)
+  agent_intent_matches     — agent-tool use similarity against named intent references
+                             (falls back to prompt if no tool use event)
   artifact_completeness    — soft advisory only; always returns UNKNOWN (gate handling in gates.py)
   prompt_topic_matches     — prompt similarity against topic phrases
 """
@@ -167,10 +168,25 @@ def eval_agent_intent_matches(
     lm_client: EmbedClient,
     model: str,
 ) -> PredicateResult:
+    """Evaluate whether the agent's intent matches a named intent.
+
+    Reads from recent_tool_use (the tool the agent is invoking) rather than
+    recent_prompt_text (the user's prompt), since this predicate is about
+    the agent's own intent, not the user's request.
+    Falls back to recent_prompt_text if no tool use event is available.
+    """
     intent = args.get("intent", "")
-    # agent_response not in PredicateContext; use recent_prompt_text as proxy
-    text = (ctx.recent_prompt_text or "").strip()
-    if not text or not intent:
+    if not intent:
+        return PredicateResult.UNKNOWN
+
+    # Prefer recent_tool_use (agent's action) over recent_prompt_text (user's request)
+    if ctx.recent_tool_use is not None:
+        tool_name = ctx.recent_tool_use.get("tool", "")
+        text = tool_name.strip()
+    else:
+        text = (ctx.recent_prompt_text or "").strip()
+
+    if not text:
         return PredicateResult.UNKNOWN
     return _intent_similarity(text, intent, lm_client, model)
 

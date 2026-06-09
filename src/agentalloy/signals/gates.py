@@ -71,12 +71,6 @@ def _is_composite(spec: dict[str, Any]) -> bool:
     return any(k in spec for k in ("all_of", "any_of", "not"))
 
 
-def _is_semantic(predicate_name: str) -> bool:
-    from agentalloy.signals.classifier import SEMANTIC_PREDICATES
-
-    return predicate_name in SEMANTIC_PREDICATES
-
-
 def _evaluate_single(
     predicate_name: str,
     args: dict[str, Any],
@@ -182,17 +176,6 @@ def evaluate_node(
         advisory=advisory,
     )
     return result, [eval_record]
-
-
-def evaluate_gates(
-    gate_spec: dict[str, Any],
-    ctx: PredicateContext,
-    lm_client: EmbedClient | None = None,
-) -> list[GateEvaluation]:
-    """Evaluate the exit_gates spec and return a flat list of GateEvaluation records."""
-    qwen_calls: list[int] = [0]
-    _, evals = evaluate_node(gate_spec, ctx, lm_client, qwen_calls)
-    return evals
 
 
 def aggregate(operator: str, children: list[PredicateResult]) -> PredicateResult:

@@ -179,7 +179,8 @@ def _ingest_yaml(
     True. Defense-in-depth alongside the AGENTALLOY_DB_LOCK_HELD sentinel:
     if a future caller adds ``env={}`` to subprocess.run(), the flag still fires.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
@@ -381,7 +382,8 @@ def install_local_pack(
     (e.g. ``_run_container_guard()`` in install-packs) rather than each
     individual ingest subprocess.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     t0 = time.monotonic()
     pack_dir = pack_dir.resolve()
 

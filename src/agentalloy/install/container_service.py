@@ -107,7 +107,8 @@ def stop_service_in_container(no_restart: bool = False) -> bool:
     When ``no_restart`` is True, this function is a no-op (returns False).
     Returns ``True`` if a process was found and stopped, ``False`` otherwise.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     if no_restart:
         return False
     # Sentinel check: if an ancestor process already owns the lifecycle, no-op.
@@ -177,7 +178,8 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
     When ``no_restart`` is True, this function is a no-op (returns True).
     Returns ``True`` if the service became healthy (or no-op), ``False`` otherwise.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     if no_restart:
         return True
     # T6: clear sentinel BEFORE env copy — spawned uvicorn must not inherit it.

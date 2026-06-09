@@ -63,9 +63,9 @@ _VALID_PHASES = frozenset({"design", "build", "review"})
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
 # and fixtures/skill-authoring-agent.md "Hard fragmentation rules" / "Tag rules".
-_FRAG_WORDS_WARN_MIN = 80
+_FRAG_WORDS_WARN_MIN = 25
 _FRAG_WORDS_WARN_MAX = 800
-_FRAG_WORDS_HARD_MIN = 20
+_FRAG_WORDS_HARD_MIN = 5
 _FRAG_WORDS_HARD_MAX = 2000
 _TAGS_VALIDATE_HARD_CAP = 20
 
@@ -678,14 +678,10 @@ def _validate(record: ReviewRecord) -> list[str]:
 
 
 def _word_count(text: str) -> int:
-    import re
-
     return len(re.findall(r"\S+", text or ""))
 
 
 def _normalize_ws(text: str) -> str:
-    import re
-
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 

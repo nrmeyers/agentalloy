@@ -41,8 +41,18 @@ class LadybugStore:
         self._conn = ladybug.Connection(self._db)
 
     def close(self) -> None:
-        self._conn = None
-        self._db = None
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:  # pragma: no cover — defensive; Kùzu may already be closed
+                logger.debug("failed to close Ladybug connection", exc_info=True)
+            self._conn = None
+        if self._db is not None:
+            try:
+                self._db.close()
+            except Exception:  # pragma: no cover — defensive
+                logger.debug("failed to close Ladybug database", exc_info=True)
+            self._db = None
 
     def __enter__(self) -> LadybugStore:
         self.open()
