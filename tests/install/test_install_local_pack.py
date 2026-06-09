@@ -299,6 +299,11 @@ class TestInstallLocalPack:
         _write_pack_manifest(
             tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 2}]
         )
+        # Create corpus dir + files so the Pattern E corpus verification passes.
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "skills.duck").touch()
+        (corpus_dir / "ladybug").mkdir()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(
@@ -315,6 +320,7 @@ class TestInstallLocalPack:
             patch.object(ip.install_state, "load_state", return_value={}),
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
         ):
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         assert result["action"] == "already_installed"

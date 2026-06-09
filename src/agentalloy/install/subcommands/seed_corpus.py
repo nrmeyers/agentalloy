@@ -307,8 +307,22 @@ def run(args: argparse.Namespace) -> int:
                 import json as _json
 
                 cached: dict[str, Any] = _json.loads(p.read_text())
-                write_result(cached, args, human_fn=_render_seed_corpus)
-                return 4  # EXIT_NOOP
+                # Re-verify corpus files are still readable before trusting cache.
+                # A stale cache would otherwise report success on a deleted or
+                # corrupted corpus (Pattern E: idempotency cache returns success
+                # without verifying artifact exists).
+                try:
+                    _check_duckdb(user_corpus / "skills.duck")
+                except Exception as exc:
+                    # Corpus is present but unreadable — cache is stale.
+                    print(
+                        f"WARN: cached result exists but corpus is unreadable ({exc}); "
+                        "re-verifying…",
+                        file=sys.stderr,
+                    )
+                else:
+                    write_result(cached, args, human_fn=_render_seed_corpus)
+                    return 4  # EXIT_NOOP
 
     result = check_corpus()
     action = result["action"]

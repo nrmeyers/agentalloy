@@ -485,6 +485,27 @@ def install_local_pack(
     install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
     install_state.save_state(state, root)
 
+    # Verify corpus files were actually created (Pattern E fix).
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not duck_path.exists() or not ladybug_path.exists():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "corpus_verification_failed",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "error": (
+                f"Corpus files missing after ingest: "
+                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+            ),
+            "remediation": (
+                "Re-run `agentalloy seed-corpus` to initialize the corpus, "
+                "then re-install the pack."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
     if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
     else:
@@ -763,6 +784,27 @@ def install_pack(
     state["installed_packs"] = packs
     install_state.record_step(state, STEP_NAME, extra={"pack": name})
     install_state.save_state(state, root)
+
+    # Verify corpus files were actually created (Pattern E fix).
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not duck_path.exists() or not ladybug_path.exists():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "corpus_verification_failed",
+            "pack": name,
+            "manifest_url": url,
+            "error": (
+                f"Corpus files missing after ingest: "
+                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+            ),
+            "remediation": (
+                "Re-run `agentalloy seed-corpus` to initialize the corpus, "
+                "then re-install the pack."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
 
     if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"

@@ -266,11 +266,42 @@ def _start_ollama(model: str, args: argparse.Namespace) -> int:
         time.sleep(2)
     else:
         print(
-            "WARN: Ollama not reachable on port "
+            f"ERROR: Ollama not reachable on port "
             f"{OLLAMA_EMBED_PORT} after 30s. "
             "Ensure ollama is running (e.g. `ollama serve`).",
             file=sys.stderr,
         )
+        return 1
+
+    # Verify the model was actually loaded via the Ollama API.
+    # The port being open doesn't guarantee the requested model is available.
+    if model:
+        import urllib.request
+
+        model_check_url = f"http://{EMBED_HOST}:{OLLAMA_EMBED_PORT}/api/tags"
+        model_ok = False
+        for _attempt in range(3):
+            try:
+                req = urllib.request.Request(model_check_url, method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read())
+                        loaded_names: list[str] = [
+                            m.get("name", "") for m in data.get("models", [])
+                        ]
+                        if any(model in name for name in loaded_names):
+                            model_ok = True
+                        break
+            except Exception:
+                time.sleep(2)
+        if not model_ok:
+            print(
+                f"WARN: Ollama is running on port {OLLAMA_EMBED_PORT} but model "
+                f"'{model}' was not found in loaded models. "
+                "Run `ollama pull {model}` to download it.",
+                file=sys.stderr,
+            )
+            # Don't fail — the model may be pulled separately; just warn.
 
     result = {
         "schema_version": SCHEMA_VERSION,
