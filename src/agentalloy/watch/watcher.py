@@ -176,6 +176,13 @@ class _AgentAlloyHandler(FileSystemEventHandler):
             except Exception as exc:
                 _log.warning("Regeneration failed: %s", exc)
 
+    def shutdown(self) -> None:
+        """Cancel any pending debounce timer so late callbacks cannot fire."""
+        with self._lock:
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+                self._debounce_timer = None
+
     def on_modified(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
             self._schedule("modified", str(event.src_path))
@@ -211,9 +218,12 @@ def run_watcher(config: WatchConfig) -> None:
     logging.getLogger().addHandler(fh)
     logging.getLogger().setLevel(logging.INFO)
 
-    # Write pidfile
+    # Write pidfile atomically (temp + os.replace) so readers never see
+    # a partial write.
     pid_file = log_dir / f"{config.profile_name}.pid"
-    pid_file.write_text(str(os.getpid()))
+    pid_tmp = pid_file.with_suffix(".pid.tmp")
+    pid_tmp.write_text(str(os.getpid()))
+    os.replace(pid_tmp, pid_file)
 
     watch_path = config.project_root / ".agentalloy"
     watch_path.mkdir(parents=True, exist_ok=True)
@@ -239,6 +249,7 @@ def run_watcher(config: WatchConfig) -> None:
         while not stop_event.is_set():
             stop_event.wait(timeout=config.poll_interval_s)
     finally:
+        handler.shutdown()
         observer.stop()
         observer.join()
         if pid_file.exists():

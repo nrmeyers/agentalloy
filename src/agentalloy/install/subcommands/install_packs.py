@@ -99,12 +99,14 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
         container_name,
         "sh",
         "-c",
-        # Touch then run so concurrent host-side callers see the lock
-        # immediately; remove on exit so the lock doesn't outlive the run.
-        # `set -e` ensures the rm happens via the EXIT trap even on failure.
+        # Atomic lock creation: `set -C` + `: >` fails if the file already
+        # exists (EEXIST), preventing two concurrent install-packs from both
+        # proceeding. `set -e` ensures the EXIT trap fires on any failure.
+        # `trap 'rm -f ...' EXIT` removes the lock when the shell exits.
         (
             "set -e; "
-            "touch /app/.install-packs-lock; "
+            "set -C; "
+            ": > /app/.install-packs-lock || exit 1; "
             "trap 'rm -f /app/.install-packs-lock' EXIT; "
             f"uv run agentalloy install-packs --packs {_shell_quote(packs)}"
             + (" --no-restart" if getattr(args, "no_restart", False) else "")

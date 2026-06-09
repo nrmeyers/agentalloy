@@ -58,6 +58,13 @@ class _CachedSignalResult:
 _cache_lock = threading.Lock()
 _cache: _CachedSignalResult | None = None
 
+# In-flight guard: prevents thundering herd when cache is stale.
+# Only one background revalidation runs at a time; concurrent requests
+# that see a stale cache while one is in-flight simply return the stale
+# value without spawning another background thread.
+_inflight_guard = threading.Lock()
+_inflight_active = False
+
 
 def _get_cached() -> _CachedSignalResult | None:
     """Return the current cache entry (may be stale)."""
@@ -207,6 +214,9 @@ def _revalidate_background(
         )
     except Exception:
         logger.warning("Hook revalidation failed", exc_info=True)
+    finally:
+        global _inflight_active
+        _inflight_active = False
 
 
 # ---------------------------------------------------------------------------
@@ -260,12 +270,21 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
                 },
             )
         else:
-            # Cache stale — start background revalidation, return stale value
-            threading.Thread(
-                target=_revalidate_background,
-                args=(prompt, cwd, phase),
-                daemon=True,
-            ).start()
+            # Cache stale — attempt to start background revalidation.
+            # In-flight guard: only one revalidator runs at a time to
+            # prevent thundering herd on cache miss.
+            global _inflight_active
+            if _inflight_guard.acquire(blocking=False):
+                try:
+                    if not _inflight_active:
+                        _inflight_active = True
+                        threading.Thread(
+                            target=_revalidate_background,
+                            args=(prompt, cwd, phase),
+                            daemon=True,
+                        ).start()
+                finally:
+                    _inflight_guard.release()
             latency_ms = int((time.monotonic() - start) * 1000)
             return JSONResponse(
                 content={

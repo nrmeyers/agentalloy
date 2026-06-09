@@ -228,25 +228,27 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
         return False
 
     # Poll /health endpoint up to 30 seconds.
+    # The `finally` block guarantees cleanup (terminate + kill) so the child
+    # process is never orphaned when the timeout fires.
     deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        if server_proc.port_reachable(port):
-            # Verify the process is still alive (not crashed immediately).
-            if proc.poll() is None:
+    try:
+        while time.monotonic() < deadline:
+            if server_proc.port_reachable(port):
+                # Verify the process is still alive (not crashed immediately).
+                if proc.poll() is not None:
+                    # Process died — fall through to cleanup.
+                    break
                 return True
-            # Process died — fall through to cleanup.
-            break
-        time.sleep(0.5)
-
-    # Cleanup on failure.
-    if started:
-        try:
-            assert proc is not None
-            proc.terminate()
-            proc.wait(timeout=5)
-        except (subprocess.TimeoutExpired, Exception):
-            with contextlib.suppress(OSError):
-                proc.kill()
+            time.sleep(0.5)
+    finally:
+        # Always clean up the child process to prevent orphans.
+        if started:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except (subprocess.TimeoutExpired, Exception):
+                with contextlib.suppress(OSError):
+                    proc.kill()
     return False
 
 
