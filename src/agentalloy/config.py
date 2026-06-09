@@ -26,12 +26,12 @@ class AuthoringConfig(BaseSettings):
         extra="ignore",
     )
 
-    authoring_model: str = "qwen3-14b-instruct"
+    model: str = "qwen3-14b-instruct"
     critic_model: str = "qwen3.6-27b"
-    authoring_lm_base_url: str = "http://localhost:11435"
+    lm_base_url: str = "http://localhost:11435"
     lm_studio_base_url: str = "http://localhost:11434"
-    authoring_embed_base_url: str = "http://localhost:11436"
-    authoring_embedding_model: str = "qwen3-embedding:0.6b"
+    embed_base_url: str = "http://localhost:11436"
+    embedding_model: str = "qwen3-embedding:0.6b"
 
 
 def _user_corpus_dir() -> Path:
@@ -129,12 +129,12 @@ class Settings(BaseSettings):
         """
         ac = AuthoringConfig()
         required = {
-            "authoring_model": ac.authoring_model,
+            "model": ac.model,
             "critic_model": ac.critic_model,
-            "authoring_lm_base_url": ac.authoring_lm_base_url,
+            "lm_base_url": ac.lm_base_url,
             "lm_studio_base_url": ac.lm_studio_base_url,
-            "authoring_embed_base_url": ac.authoring_embed_base_url,
-            "authoring_embedding_model": ac.authoring_embedding_model,
+            "embed_base_url": ac.embed_base_url,
+            "embedding_model": ac.embedding_model,
         }
         missing = [k for k, v in required.items() if not v]
         if missing:

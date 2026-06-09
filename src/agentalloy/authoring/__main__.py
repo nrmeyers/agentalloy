@@ -207,7 +207,7 @@ def _cmd_run_batched(
         except Exception as e:  # noqa: BLE001 — surface but continue
             logger.warning("warmup failed (continuing): %s", e)
 
-    _warm("author", ac.authoring_lm_base_url, ac.authoring_model)
+    _warm("author", ac.lm_base_url, ac.model)
     rc = _cmd_author(source_dir, repo_root, paths)
     if rc == EXIT_USAGE:
         return rc
@@ -225,7 +225,7 @@ def _cmd_run_batched(
             break
 
         print(f"\n=== revision round {round_num} ({len(pending_rev)} draft(s)) ===")
-        _warm("author", ac.authoring_lm_base_url, ac.authoring_model)
+        _warm("author", ac.lm_base_url, ac.model)
         rc = _cmd_revise(repo_root, paths)
         if rc != EXIT_OK:
             return rc
