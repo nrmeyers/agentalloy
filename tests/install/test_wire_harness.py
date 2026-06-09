@@ -111,6 +111,20 @@ class TestSentinelInjection:
     def test_detect_crlf(self) -> None:
         assert _detect_line_ending("a\r\nb\r\n") == "\r\n"
 
+    def test_inverted_sentinel_order_raises(self) -> None:
+        """END before BEGIN must raise ValueError to prevent file corruption."""
+        existing = f"before\n{SENTINEL_END}\nbad\n{SENTINEL_BEGIN}\nafter\n"
+        with pytest.raises(ValueError, match="END marker appears before BEGIN"):
+            _inject_sentinel_block(existing, "new content")
+
+    def test_duplicate_sentinels_raises(self) -> None:
+        """Multiple BEGIN or END markers must raise ValueError."""
+        existing = (
+            f"{SENTINEL_BEGIN}\nfirst\n{SENTINEL_END}\n{SENTINEL_BEGIN}\nsecond\n{SENTINEL_END}\n"
+        )
+        with pytest.raises(ValueError, match="expected at most 1 of each"):
+            _inject_sentinel_block(existing, "new content")
+
 
 # ---------------------------------------------------------------------------
 # Claude Code

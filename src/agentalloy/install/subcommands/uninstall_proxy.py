@@ -19,16 +19,40 @@ def _remove_sentinel_block(content: str) -> str:
     commented-out variants (# <!-- BEGIN ... -->) used by YAML/shell files.
     Operates on whole lines so leading '#' fragments are not left behind.
 
+    If the END marker appears before the BEGIN marker, the content is
+    returned unchanged (no valid block to remove).
+
     Returns the original content unchanged if no sentinels are found.
     """
-    lines = content.split("\n")
-    result: list[str] = []
-    skip = False
-    found_sentinel = False
     sentinel_begin_raw = "<!-- BEGIN agentalloy install -->"
     sentinel_end_raw = "<!-- END agentalloy install -->"
     sentinel_begin_commented = "# " + sentinel_begin_raw
     sentinel_end_commented = "# " + sentinel_end_raw
+
+    # Validate order: find first occurrence of each sentinel (raw or commented)
+    # and ensure END does not appear before BEGIN. If inverted, return content
+    # unchanged (no valid block to remove).
+    first_begin = len(content)
+    first_end = len(content)
+
+    for variant in (sentinel_begin_raw, sentinel_begin_commented):
+        idx = content.find(variant)
+        if idx != -1 and idx < first_begin:
+            first_begin = idx
+
+    for variant in (sentinel_end_raw, sentinel_end_commented):
+        idx = content.find(variant)
+        if idx != -1 and idx < first_end:
+            first_end = idx
+
+    if first_begin < len(content) and first_end < len(content) and first_end < first_begin:
+        # Inverted order — no valid block to remove; return unchanged.
+        return content
+
+    lines = content.split("\n")
+    result: list[str] = []
+    skip = False
+    found_sentinel = False
 
     i = 0
     while i < len(lines):

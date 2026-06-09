@@ -275,7 +275,7 @@ class TestDuplicateSentinels:
             f"# Project\n\n{SENTINEL_BEGIN}\nfirst\n{SENTINEL_END}\n\n"
             f"More content\n\n{SENTINEL_BEGIN}\nsecond\n{SENTINEL_END}\n"
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(ValueError):
             wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
 
 
