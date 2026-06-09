@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
-from agentalloy.storage.ladybug import LadybugStore
 
 
 class InconsistentActiveVersion(Exception):
@@ -30,6 +29,7 @@ def get_active_skills(
     store: LadybugStore, *, skill_class: SkillClass | tuple[str, ...] | None = None
 ) -> list[ActiveSkill]:
     """Return every skill whose CURRENT_VERSION is active, after consistency checks."""
+    from agentalloy.storage.ladybug import LadybugStore  # noqa: F401 — breaks circular import
     _run_consistency_guard(store, skill_class=skill_class)
 
     filters = "WHERE v.status = 'active' AND s.deprecated = false"
