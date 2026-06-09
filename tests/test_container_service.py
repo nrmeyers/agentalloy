@@ -162,6 +162,53 @@ class TestStopServiceInContainer:
             result = stop_service_in_container()
             assert result is True
 
+    def test_process_already_gone_clears_sentinel(self, monkeypatch: pytest.MonkeyPatch):
+        """P1 #7: ProcessLookupError must clear the AGENTALLOY_DB_LOCK_HELD
+        sentinel so subsequent stop/restart calls work correctly.
+
+        Uses a custom dict-like wrapper to intercept all os.environ operations
+        so writes and reads are consistent across the mock boundary.
+        """
+        fake_env: dict[str, str] = {}
+
+        class EnvWrapper:
+            """Thin wrapper around a dict that mimics os.environ operations."""
+
+            def get(self, key: str, default=None):  # type: ignore[no-untyped-def]
+                return fake_env.get(key, default)
+
+            def __setitem__(self, key: str, value: str) -> None:  # type: ignore[no-untyped-def]
+                fake_env[key] = value
+
+            def pop(self, key: str, default=None):  # type: ignore[no-untyped-def]
+                return fake_env.pop(key, default)
+
+            def items(self):  # type: ignore[no-untyped-def]
+                return fake_env.items()
+
+            def keys(self):  # type: ignore[no-untyped-def]
+                return fake_env.keys()
+
+            def values(self):  # type: ignore[no-untyped-def]
+                return fake_env.values()
+
+        wrapper = EnvWrapper()
+
+        with monkeypatch.context() as m:
+            m.setattr("agentalloy.install.container_service._find_uvicorn_pid", lambda: 1111)
+            m.setattr("os.environ", wrapper)
+
+            def raise_lookup(pid: int, sig: int) -> None:
+                raise ProcessLookupError
+
+            m.setattr("os.kill", raise_lookup)
+
+            from agentalloy.install.container_service import stop_service_in_container
+
+            result = stop_service_in_container()
+            assert result is True
+            assert fake_env.get("AGENTALLOY_DB_LOCK_HELD") is None
+
     def test_sigkill_permission_error_clears_sentinel(self, monkeypatch: pytest.MonkeyPatch):
         """SIGKILL PermissionError must return False and clear the sentinel."""
 
@@ -377,8 +424,13 @@ class TestTestKuzuLockReleased:
             result = test_kuzu_lock_released()
             assert result is False
 
-    def test_no_ladybug_dir_returns_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When no ladybug DB dir exists, lock is considered released."""
+    def test_no_ladybug_dir_returns_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """When no ladybug DB dir exists, function attempts to open DB and
+        returns False (can't confirm lock released without opening DB).
+
+        This is the correct behavior after P1 #8: the function must actually
+        attempt to open the database rather than assuming the lock is released.
+        """
 
         def fake_user_data_dir():
             return tmp_path / "nonexistent"
@@ -389,7 +441,7 @@ class TestTestKuzuLockReleased:
             from agentalloy.install.container_service import test_kuzu_lock_released
 
             result = test_kuzu_lock_released()
-            assert result is True
+            assert result is False
 
 
 class TestStopServiceNoRestart:

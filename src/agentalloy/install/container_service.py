@@ -129,6 +129,7 @@ def stop_service_in_container(no_restart: bool = False) -> bool:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         # Process already exited between scan and kill.
+        os.environ.pop("AGENTALLOY_DB_LOCK_HELD", None)
         return True
     except PermissionError:
         # Cannot signal — pop sentinel since no stop occurred.
@@ -272,10 +273,6 @@ def test_kuzu_lock_released() -> bool:
         ladybug_path = install_state.user_data_dir() / "ladybug"
 
     assert ladybug_path is not None, "ladybug_path must resolve to a non-None Path"  # P10-R5
-
-    if not ladybug_path.is_dir():
-        # No database yet — not locked.
-        return True
 
     max_retries = 10  # P10-R2: 10 iterations × 0.5s = 5s max wait
     retry_interval = 0.5

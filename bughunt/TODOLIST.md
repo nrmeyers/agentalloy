@@ -50,8 +50,8 @@
 30. ⏳ P1 #7 review — Verify sentinel cleared on ProcessLookupError, subsequent stops work
 31. ⏳ P1 #8 — In-container lock check returns released without opening DB when LADYBUG_DB_PATH unset (container_service.py:270-278)
 32. ⏳ P1 #8 review — Verify DB opened before lock check, LADYBUG_DB_PATH handled
-33. ⏳ P1 #9 — cline settings data loss: decode error → {} → write proxy-only (providers/cline/install.py:50, wire_harness.py:1258, R-INSTALL-2 #2)
-34. ⏳ P1 #9 review — Verify original settings preserved on decode error, no partial write
+33. ✅ P1 #9 — cline settings data loss: decode error → {} → write proxy-only (providers/cline/install.py:50, wire_harness.py:1258, R-INSTALL-2 #2)
+34. ✅ P1 #9 review — Verify original settings preserved on decode error, no partial write
 35. ⏳ P1 #10 — _reset_skill deletes override with no confirmation when --yes omitted AND stdin not TTY (customize.py:668-672)
 36. ⏳ P1 #10 review — Verify TTY check before destructive operation, proper error
 37. ⏳ P1 #11 — New .env written before original backed up (write_env.py:154-163)
