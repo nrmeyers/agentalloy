@@ -164,8 +164,8 @@ def _anthropic_to_openai(request: AnthropicRequest) -> ProxyRequest:
             # by the branches above), so no isinstance(list) check is needed.
             text_parts: list[str] = []
             for block in request.system:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
+                if isinstance(block, AnthropicContentBlock) and block.type == "text":
+                    text_parts.append(block.text or "")
             messages.append(ProxyMessage(role="system", content="".join(text_parts) or None))
 
     # User / assistant / tool messages
@@ -204,7 +204,20 @@ def _openai_to_anthropic(openai_body: dict[str, Any], model: str) -> dict[str, A
     - ``finish_reason`` → ``stop_reason`` (``"stop"`` → ``"end_turn"``,
       ``"length"`` → ``"max_tokens"``, ``"tool_calls"`` → ``"tool_use"``)
     """
-    choices: list[dict[str, Any]] = openai_body.get("choices") or [{}]
+    choices: list[dict[str, Any]] | None = openai_body.get("choices")
+    if not choices:
+        return {
+            "id": openai_body.get("id") or f"msg_{uuid.uuid4().hex[:24]}",
+            "model": openai_body.get("model") or model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "error": {
+                "type": "invalid_request_error",
+                "message": "Upstream returned no choices",
+            },
+        }
     choice: dict[str, Any] = choices[0]
     message: dict[str, Any] = choice.get("message") or {}
 
