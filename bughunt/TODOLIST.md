@@ -90,16 +90,16 @@
 
 ### Config & Corpus (CFG1-3, YS1-2)
 
-64. ⏳ CFG1 — AGENTIALLOY_PACKS injected but never read (typo + dead)
-65. ⏳ CFG1 review — Verify env var wired correctly or removed
-66. ⏳ CFG2 — uv pip install -e ".[dev]" bypasses uv.lock; two divergent dev groups (CI)
-67. ⏳ CFG2 review — Verify CI uses uv.lock, dev groups consolidated
-68. ⏳ CFG3 — asyncpg declared never imported; settings.log_level never applied to logging (deps)
-69. ⏳ CFG3 review — Verify asyncpg removed or used, log_level applied to logging config
-70. ⏳ YS1 — react-rendering-keys-and-memoization.yaml has no execution fragment (ingest hard-errors)
-71. ⏳ YS1 review — Verify execution fragment added or ingest handles gracefully
-72. ⏳ YS2 — sdd-build.yaml absent from sdd/pack.yaml; phase_scope vs applies_to_phases mismatch
-73. ⏳ YS2 review — Verify pack.yaml includes sdd-build, phase_scope/applies_to_phases aligned
+64. ✅ CFG1 — AGENTIALLOY_PACKS injected but never read (typo + dead)
+65. ✅ CFG1 review — Verify env var wired correctly or removed
+66. ✅ CFG2 — uv pip install -e ".[dev]" bypasses uv.lock; two divergent dev groups (CI)
+67. ✅ CFG2 review — Verify CI uses uv.lock, dev groups consolidated
+68. ✅ CFG3 — asyncpg declared never imported; settings.log_level never applied to logging (deps)
+69. ✅ CFG3 review — Verify asyncpg removed or used, log_level applied to logging config
+70. ✅ YS1 — react-rendering-keys-and-memoization.yaml has no execution fragment (ingest hard-errors)
+71. ✅ YS1 review — Verify execution fragment added or ingest handles gracefully
+72. ✅ YS2 — sdd-build.yaml absent from sdd/pack.yaml; phase_scope vs applies_to_phases mismatch
+73. ✅ YS2 review — Verify pack.yaml includes sdd-build, phase_scope/applies_to_phases aligned
 74. ⏳ TEST SUITE — Run full suite after Config/corpus tier
 
 ### Low Severity (LOW-1 through LOW-7)
