@@ -252,11 +252,12 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-# Named volumes declared in compose.yaml. `compose down -v` removes the
-# compose network and anonymous volumes, but NOT named volumes — those
-# survive uninstall by default, which means a "fresh" reinstall reuses
-# the prior corpus and Ollama model cache. We remove them explicitly
-# when the caller asks for --remove-data.
+# Named volumes the container deployment may have created. Stopping/removing
+# the container does NOT remove its named volumes — those survive uninstall by
+# default, which means a "fresh" reinstall reuses the prior corpus and Ollama
+# model cache. We remove them explicitly when the caller asks for --remove-data.
+# (``agentalloy-ollama-models`` is from the retired compose model; it's removed
+# best-effort for users upgrading and is a no-op when absent.)
 _COMPOSE_NAMED_VOLUMES: tuple[str, ...] = ("agentalloy-data", "agentalloy-ollama-models")
 
 
@@ -284,7 +285,7 @@ def _remove_compose_volumes(
     st: dict[str, Any],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
-    """Force-remove the named volumes declared in compose.yaml.
+    """Force-remove the container deployment's named volumes.
 
     Must run AFTER ``_stop_container_stack`` — `volume rm` errors with
     "volume is being used" if any container still mounts it. Idempotent:
@@ -939,11 +940,11 @@ def uninstall(
     if stop_services:
         container_actions = _stop_container_stack(st, warnings)
         # 0b. Remove named volumes when the caller asked for --remove-data.
-        # `compose down -v` only removes ANONYMOUS volumes; the named
-        # volumes declared in compose.yaml (agentalloy-data, agentalloy-
-        # ollama-models) survive otherwise and silently carry old corpus
-        # state + cached model into the next reinstall. Volume rm must
-        # run after compose down so containers no longer hold them.
+        # Stopping/removing the container leaves its named volumes
+        # (agentalloy-data, and legacy agentalloy-ollama-models) in place;
+        # they silently carry old corpus state + cached model into the next
+        # reinstall. Volume rm must run after the container is stopped so it
+        # no longer holds them open.
         if remove_data:
             container_actions.extend(_remove_compose_volumes(st, warnings))
         # 0b. Remove the local container image — must run after container
@@ -959,9 +960,9 @@ def uninstall(
         warnings.append(
             "remove_data=True requested without stop_services — named "
             "volumes (agentalloy-data, agentalloy-ollama-models) cannot "
-            "be removed while containers still mount them. Re-run with "
-            "stop_services=True or remove the volumes manually after "
-            "`compose down -v`."
+            "be removed while the container still mounts them. Re-run with "
+            "stop_services=True, or stop the container and remove the "
+            "volumes manually with `<podman|docker> volume rm`."
         )
 
     # 1. Remove harness wiring. State is user-scoped and may carry entries

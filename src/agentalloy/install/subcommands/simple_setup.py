@@ -459,7 +459,7 @@ def _prompt_deployment() -> str:
             ("native", "Native  — runs directly on this host (systemd or manual)"),
             (
                 "container",
-                "Container — managed by podman/docker compose (recommended for new installs)",
+                "Container — single container pulled from GHCR (recommended for new installs)",
             ),
         ],
         default_index=2,
@@ -1076,7 +1076,8 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     """Execute the container deployment flow.
 
     Skips native prompts (runner, model, hardware, port, mode, packs).
-    Validates container prerequisites, runs compose up, and validates.
+    Validates container prerequisites, pulls the pre-built image from GHCR,
+    and runs a single self-contained container.
     """
     # 1. Run early preflight
     _print("  [dim]-> Preflight (early)[/dim]")
@@ -1139,137 +1140,10 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print("[yellow]Setup cancelled.[/yellow]")
             return 1
 
-    # 3. Select compose file
-    # The Containerfile build context needs the full repo (pyproject.toml,
-    # uv.lock, src/, data/), so container deployment requires a checkout on
-    # disk. Search order:
-    #   1. cwd (user ran setup from inside the clone)
-    #   2. parents[4] of __file__ (editable install — points at repo root)
-    #   3. fall back to cloning into ~/.cache/agentalloy/repo so users who
-    #      installed via `uv tool install agentalloy` don't have to clone
-    #      manually. Pinned to `main` for now; revisit when we tag releases.
-    default_compose = "compose.yaml"
-
-    def _has_assets(d: Path) -> bool:
-        # Match _check_image_build_deps in preflight.py: Containerfile OR Dockerfile.
-        has_build_file = (d / "Containerfile").exists() or (d / "Dockerfile").exists()
-        return (d / default_compose).exists() and has_build_file
-
-    def _resolve_user_path(raw: str) -> Path:
-        """Accept either a directory (append default_compose) or a compose file path."""
-        p = Path(raw).expanduser().resolve()
-        if p.is_dir():
-            return p / default_compose
-        return p
-
-    def _ensure_cached_repo() -> Path | None:
-        """Clone (or refresh) the agentalloy repo into ~/.cache/agentalloy/repo.
-
-        Returns the cache dir on success, None on failure. Uses --depth=1 so the
-        clone is fast (~few MB). On refresh, hard-resets to origin/main so any
-        local edits or stale state in the cache don't break the build context.
-        """
-        cache_dir = Path.home() / ".cache" / "agentalloy" / "repo"
-        if shutil.which("git") is None:
-            _print(
-                "  [red]git not found on PATH — cannot clone the agentalloy repo "
-                "for the build context.[/red]"
-            )
-            return None
-        repo_url = "https://github.com/nrmeyers/agentalloy.git"
-        # If the cache dir exists but isn't a valid git checkout (no .git/
-        # — possibly a partial clone, leftover files, or a manually-placed
-        # directory), `git clone <url> <dest>` would fail with "destination
-        # path already exists and is not an empty directory". Nuke it so
-        # the clone branch below can recreate cleanly.
-        if cache_dir.exists() and not (cache_dir / ".git").exists():
-            _print(
-                f"  [yellow]-> Cache dir {cache_dir} exists but isn't a git "
-                "checkout; recreating.[/yellow]"
-            )
-            try:
-                shutil.rmtree(cache_dir)
-            except OSError as exc:
-                _print(f"  [red]Could not remove stale cache dir: {exc}[/red]")
-                return None
-        try:
-            if (cache_dir / ".git").exists():
-                _print(f"  [dim]-> Refreshing cached repo at {cache_dir}[/dim]")
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "fetch", "--depth=1", "origin", "main"],
-                    check=True,
-                    timeout=120,
-                )
-                subprocess.run(
-                    ["git", "-C", str(cache_dir), "reset", "--hard", "origin/main"],
-                    check=True,
-                    timeout=60,
-                )
-            else:
-                cache_dir.parent.mkdir(parents=True, exist_ok=True)
-                _print(f"  [dim]-> Cloning {repo_url} into {cache_dir}[/dim]")
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "--depth=1",
-                        "--branch=main",
-                        repo_url,
-                        str(cache_dir),
-                    ],
-                    check=True,
-                    timeout=180,
-                )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
-            _print(f"  [red]git clone/fetch failed: {exc}[/red]")
-            return None
-        if not _has_assets(cache_dir):
-            _print(
-                f"  [red]Cached repo at {cache_dir} is missing {default_compose} "
-                "or Containerfile after clone.[/red]"
-            )
-            return None
-        return cache_dir
-
-    candidates = [Path.cwd(), Path(__file__).resolve().parents[4]]
-    compose_path: Path | None = None
-    for cand in candidates:
-        if _has_assets(cand):
-            compose_path = cand / default_compose
-            break
-
-    if compose_path is None:
-        cached = _ensure_cached_repo()
-        if cached is not None:
-            compose_path = cached / default_compose
-
-    if compose_path is None:
-        if cfg.non_interactive:
-            _print(
-                "  [red]Could not locate or fetch the agentalloy repo.[/red]\n"
-                f"  Looked for {default_compose} + (Containerfile or Dockerfile) in:\n"
-                + "\n".join(f"    - {c}" for c in candidates)
-                + "\n  Auto-clone fallback also failed (see error above).\n"
-                "  Container deployment requires a checkout (the build context\n"
-                "  needs pyproject.toml, src/, data/). Either:\n"
-                "    a) cd into your agentalloy clone and re-run setup, or\n"
-                "    b) install editably: `git clone … && cd agentalloy && \n"
-                "       uv tool install --editable .`"
-            )
-            return 1
-        _print(
-            "  [yellow]Could not auto-locate or fetch the agentalloy repo.[/yellow] "
-            "Enter the\n"
-            "  path to your agentalloy clone (or directly to a compose YAML):"
-        )
-        custom = input("  ").strip()
-        compose_path = _resolve_user_path(custom)
-    elif not cfg.non_interactive:
-        _print(f"\n  Detected compose file: {compose_path} — correct? [Y/n]")
-        ans = input("  ").strip().lower()
-        if ans in ("n", "no"):
-            custom = input("  Enter compose file path (or repo dir): ").strip()
-            compose_path = _resolve_user_path(custom)
+    # 3. (Removed) Compose-file / build-context discovery. The single-container
+    # GHCR model pulls a self-contained image (_pull_image below), so no repo
+    # checkout, compose.yaml, or Containerfile build context is needed at
+    # install time.
 
     # 4. Run container preflight
     _print("  [dim]-> Preflight (container)[/dim]")

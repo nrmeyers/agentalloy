@@ -3,8 +3,8 @@
 Registers AgentAlloy as a persistent background service so it starts
 automatically without requiring ``agentalloy serve`` each session.
 
-Three modes
------------
+Two modes
+---------
 native
     Linux: writes a systemd user unit (~/.config/systemd/user/agentalloy.service)
     and enables + starts it. No root required.
@@ -14,15 +14,14 @@ native
 
     Windows: not implemented (v1.1).
 
-container
-    Runs ``podman compose`` or ``docker compose up -d`` with compose.yaml,
-    which bundles agentalloy + an Ollama sidecar (CPU-only inference; GPU
-    passthrough is intentionally out of scope — users wanting GPU acceleration
-    should pick the native install instead).
-
 manual
     No-op: prints the ``agentalloy serve`` command and exits. Records the
     choice in state so subsequent steps know the mode.
+
+The persistent *container* deployment is no longer enabled here: the
+single-container GHCR model (``setup --deployment container``) runs the
+container detached with ``--restart unless-stopped``, so it already persists
+across reboots without a compose service.
 """
 
 from __future__ import annotations
@@ -74,25 +73,6 @@ def _native_available() -> bool:
     if os_name == "macos":
         return shutil.which("launchctl") is not None
     return False
-
-
-def _detect_container_runtimes() -> list[str]:
-    """Return available container runtimes, podman first."""
-    runtimes: list[str] = []
-    for rt in ("podman", "docker"):
-        if shutil.which(rt):
-            runtimes.append(rt)
-    return runtimes
-
-
-def _resolve_compose_file(repo_root: Path, preset: str | None) -> Path:  # noqa: ARG001 — preset kept for signature stability across native callers
-    """Return the compose file path.
-
-    All container deployments share compose.yaml (bundled Ollama, CPU-only).
-    The ``preset`` parameter is retained so the function signature matches
-    other native-path resolvers in this module; it is intentionally ignored.
-    """
-    return repo_root / "compose.yaml"
 
 
 def _poll_health(port: int) -> bool:
@@ -360,42 +340,12 @@ def _enable_native_macos(
 
 
 # ---------------------------------------------------------------------------
-# Container path
-# ---------------------------------------------------------------------------
-
-
-def _enable_container(
-    runtime: str,
-    compose_file: Path,
-    port: int,
-) -> dict[str, Any]:
-    cmd = [runtime, "compose", "-f", str(compose_file), "up", "-d", "--build"]
-    print(f"Running: {' '.join(cmd)}", file=sys.stderr)
-    subprocess.run(cmd, check=True)
-
-    print(f"Waiting up to {_HEALTH_TIMEOUT_S}s for service health...", file=sys.stderr)
-    healthy = _poll_health(port)
-    if not healthy:
-        print(
-            f"WARNING: /health did not return ok within {_HEALTH_TIMEOUT_S}s. "
-            f"Check `{runtime} compose logs agentalloy` for details.",
-            file=sys.stderr,
-        )
-
-    return {
-        "compose_file": str(compose_file),
-        "service_started": healthy,
-    }
-
-
-# ---------------------------------------------------------------------------
 # Main enable_service function
 # ---------------------------------------------------------------------------
 
 
 def enable_service(
     mode: str,
-    runtime: str | None = None,
     port: int = 47950,
     repo_root: Path | None = None,
     preset: str | None = None,
@@ -412,7 +362,6 @@ def enable_service(
         "mode": mode,
         "runtime": None,
         "unit_path": None,
-        "compose_file": None,
         "ollama_unit_written": False,
         "service_started": False,
     }
@@ -421,7 +370,7 @@ def enable_service(
         os_name = _detect_os()
         if os_name == "windows":
             print("ERROR: Native service mode is not supported on Windows (v1.1).", file=sys.stderr)
-            print("FIX:   Use --mode container or --mode manual.", file=sys.stderr)
+            print("FIX:   Use --mode manual.", file=sys.stderr)
             raise SystemExit(1)
         if os_name == "linux":
             details = _enable_native_linux(uv_bin, repo_root, port, preset)
@@ -429,26 +378,6 @@ def enable_service(
             details = _enable_native_macos(uv_bin, repo_root, port, preset)
         result.update(details)
         result["service_started"] = True
-
-    elif mode == "container":
-        runtimes = _detect_container_runtimes()
-        if not runtimes:
-            print("ERROR: No container runtime found (podman or docker).", file=sys.stderr)
-            print(
-                "FIX:   Install podman (https://podman.io) or docker, then re-run.", file=sys.stderr
-            )
-            raise SystemExit(1)
-
-        resolved_runtime = runtime if runtime in runtimes else runtimes[0]
-        compose_file = _resolve_compose_file(repo_root, preset)
-        if not compose_file.exists():
-            print(f"ERROR: Compose file not found: {compose_file}", file=sys.stderr)
-            raise SystemExit(1)
-
-        details = _enable_container(resolved_runtime, compose_file, port)
-        result["runtime"] = resolved_runtime
-        result["compose_file"] = details["compose_file"]
-        result["service_started"] = details["service_started"]
 
     elif mode == "manual":
         print(
@@ -459,7 +388,7 @@ def enable_service(
         result["service_started"] = False
 
     else:
-        print(f"ERROR: Unknown mode '{mode}'. Use native, container, or manual.", file=sys.stderr)
+        print(f"ERROR: Unknown mode '{mode}'. Use native or manual.", file=sys.stderr)
         raise SystemExit(1)
 
     return result
@@ -479,15 +408,9 @@ def add_parser(
     )
     p.add_argument(
         "--mode",
-        choices=["native", "container", "manual"],
+        choices=["native", "manual"],
         default=None,
         help="Service mode. If omitted, available modes are detected and the user is prompted.",
-    )
-    p.add_argument(
-        "--runtime",
-        choices=["podman", "docker"],
-        default=None,
-        help="Container runtime (container mode only). Default: podman if available, else docker.",
     )
     p.add_argument(
         "--port",
@@ -528,17 +451,7 @@ def run(args: argparse.Namespace) -> int:
     if mode is None:
         mode = _prompt_mode()
 
-    # For container mode with both runtimes available and no --runtime flag,
-    # auto-select podman (project preference) without prompting.
-    runtime = args.runtime
-    if mode == "container" and runtime is None:
-        runtimes = _detect_container_runtimes()
-        if len(runtimes) > 1:
-            runtime = _prompt_runtime(runtimes)
-        elif runtimes:
-            runtime = runtimes[0]
-
-    result = enable_service(mode=mode, runtime=runtime, port=port, preset=preset)
+    result = enable_service(mode=mode, port=port, preset=preset)
 
     fp, digest = install_state.save_output_file(result, "enable-service.json")
     install_state.record_step(
@@ -568,16 +481,12 @@ def run(args: argparse.Namespace) -> int:
 
 def _prompt_mode() -> str:
     os_name = _detect_os()
-    runtimes = _detect_container_runtimes()
     native_ok = _native_available()
 
     options: list[tuple[str, str]] = []
     if native_ok:
         mgr = "systemd" if os_name == "linux" else "launchd"
         options.append(("native", f"Persistent — native service ({mgr}, starts at login)"))
-    if runtimes:
-        rt = runtimes[0]
-        options.append(("container", f"Persistent — container ({rt} compose up -d)"))
     options.append(("manual", "Manual — I'll run `agentalloy serve` myself"))
 
     print("\nHow should AgentAlloy run between coding sessions?", file=sys.stderr)
@@ -596,25 +505,3 @@ def _prompt_mode() -> str:
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
         print(f"  Please enter a number between 1 and {len(options)}.", file=sys.stderr)
-
-
-def _prompt_runtime(runtimes: list[str]) -> str:
-    print(
-        "\nBoth podman and docker are available. Which should run the container?", file=sys.stderr
-    )
-    for i, rt in enumerate(runtimes, 1):
-        suffix = " (recommended)" if rt == "podman" else ""
-        print(f"  {i}. {rt}{suffix}", file=sys.stderr)
-    print(file=sys.stderr)
-
-    while True:
-        try:
-            raw = input(f"Choice [1–{len(runtimes)}] (default 1): ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print(file=sys.stderr)
-            raise SystemExit(1) from None
-        if raw == "":
-            return runtimes[0]
-        if raw.isdigit() and 1 <= int(raw) <= len(runtimes):
-            return runtimes[int(raw) - 1]
-        print(f"  Please enter a number between 1 and {len(runtimes)}.", file=sys.stderr)

@@ -8,14 +8,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentalloy.install.subcommands.enable_service import (
-    _detect_container_runtimes,  # pyright: ignore[reportPrivateUsage]
     _detect_os,  # pyright: ignore[reportPrivateUsage]
     _native_available,  # pyright: ignore[reportPrivateUsage]
     _poll_health,  # pyright: ignore[reportPrivateUsage]
     _read_env_file,  # pyright: ignore[reportPrivateUsage]
     _render_launchd_plist,  # pyright: ignore[reportPrivateUsage]
     _render_systemd_unit,  # pyright: ignore[reportPrivateUsage]
-    _resolve_compose_file,  # pyright: ignore[reportPrivateUsage]
     enable_service,
 )
 
@@ -63,38 +61,6 @@ class TestNativeAvailable:
     def test_windows_always_false(self) -> None:
         with patch("platform.system", return_value="Windows"):
             assert _native_available() is False
-
-
-class TestDetectContainerRuntimes:
-    def test_podman_first(self) -> None:
-        def which(cmd: str) -> str | None:
-            return f"/usr/bin/{cmd}" if cmd in ("podman", "docker") else None
-
-        with patch("shutil.which", side_effect=which):
-            result = _detect_container_runtimes()
-        assert result == ["podman", "docker"]
-
-    def test_only_docker(self) -> None:
-        def which(cmd: str) -> str | None:
-            return "/usr/bin/docker" if cmd == "docker" else None
-
-        with patch("shutil.which", side_effect=which):
-            result = _detect_container_runtimes()
-        assert result == ["docker"]
-
-    def test_none_available(self) -> None:
-        with patch("shutil.which", return_value=None):
-            assert _detect_container_runtimes() == []
-
-
-class TestResolveComposeFile:
-    """One stack now. Preset is ignored — every container deployment uses compose.yaml."""
-
-    def test_always_returns_compose_yaml_regardless_of_preset(self, tmp_path: Path) -> None:
-        (tmp_path / "compose.yaml").touch()
-        for preset in ("radeon", "cpu", "nvidia", "apple-silicon", None):
-            result = _resolve_compose_file(tmp_path, preset)
-            assert result.name == "compose.yaml", f"preset={preset!r} returned {result.name!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -245,71 +211,6 @@ class TestEnableServiceInvalidMode:
             enable_service(mode="bogus", port=8000, repo_root=tmp_path)
 
 
-class TestEnableServiceContainer:
-    def test_container_mode_no_runtime_exits(self, tmp_path: Path) -> None:
-        with patch("shutil.which", return_value=None), pytest.raises(SystemExit):
-            enable_service(mode="container", port=8000, repo_root=tmp_path)
-
-    def test_container_mode_missing_compose_file_exits(self, tmp_path: Path) -> None:
-        with patch("shutil.which", return_value="/usr/bin/podman"), pytest.raises(SystemExit):
-            enable_service(mode="container", runtime="podman", port=8000, repo_root=tmp_path)
-
-    def test_container_mode_runs_compose_up(self, tmp_path: Path) -> None:
-        compose_file = tmp_path / "compose.yaml"
-        compose_file.touch()
-
-        mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s  # type: ignore[misc]
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = b'{"status": "ok"}'
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/podman"),
-            patch("subprocess.run") as mock_run,
-            patch("urllib.request.urlopen", return_value=mock_resp),
-        ):
-            result = enable_service(
-                mode="container",
-                runtime="podman",
-                port=8000,
-                repo_root=tmp_path,
-            )
-
-        assert result["mode"] == "container"
-        assert result["runtime"] == "podman"
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert cmd[0] == "podman"
-        assert "up" in cmd
-
-    def test_radeon_preset_falls_back_to_compose_yaml(self, tmp_path: Path) -> None:
-        """Post-simplification: every preset (incl. radeon) resolves to compose.yaml."""
-        (tmp_path / "compose.yaml").touch()
-        # No compose.radeon.yaml on disk — it was retired.
-
-        mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s  # type: ignore[misc]
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.read.return_value = b'{"status": "ok"}'
-
-        with (
-            patch("shutil.which", return_value="/usr/bin/podman"),
-            patch("subprocess.run"),
-            patch("urllib.request.urlopen", return_value=mock_resp),
-        ):
-            result = enable_service(
-                mode="container",
-                runtime="podman",
-                port=8000,
-                repo_root=tmp_path,
-                preset="radeon",
-            )
-
-        assert Path(result["compose_file"]).name == "compose.yaml"
-        # Note: not asserting "radeon" absent from the full path string — pytest's
-        # tmp_path includes the test name, which itself contains "radeon".
-
-
 class TestEnableServiceNativeWindows:
     def test_windows_native_exits(self, tmp_path: Path) -> None:
         with patch("platform.system", return_value="Windows"), pytest.raises(SystemExit):
@@ -324,7 +225,6 @@ class TestOutputSchema:
             "mode",
             "runtime",
             "unit_path",
-            "compose_file",
             "ollama_unit_written",
             "service_started",
         ):

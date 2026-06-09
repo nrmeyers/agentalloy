@@ -244,28 +244,9 @@ class TestPortInUse:
 
 
 # ---------------------------------------------------------------------------
-# EC-4: Auto-clone fails -- clear error message
+# EC-4: (Removed) Auto-clone failure — the GHCR single-container model pulls a
+# self-contained image, so there is no repo-clone/build-context step to fail.
 # ---------------------------------------------------------------------------
-
-
-class TestAutoCloneFailure:
-    """EC-4: Auto-clone failure produces a clear error message."""
-
-    def test_auto_clone_git_not_found(self, tmp_path: Path):
-        """When git is not on PATH, _ensure_cached_repo returns None with error message."""
-        with (
-            patch("agentalloy.install.subcommands.simple_setup.shutil.which", return_value=None),
-            patch("agentalloy.install.subcommands.simple_setup._print"),
-        ):
-            pass
-
-    def test_auto_clone_git_clone_fails(self):
-        """When git clone fails, setup returns exit code 1 with error message."""
-        with (
-            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git clone", 180)),
-            patch("agentalloy.install.subcommands.simple_setup._print"),
-        ):
-            pass
 
 
 # ---------------------------------------------------------------------------
