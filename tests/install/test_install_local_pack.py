@@ -251,7 +251,7 @@ class TestInstallLocalPack:
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
             patch("agentalloy.config.get_settings") as mock_settings,
-            patch.object(ip.LadybugStore, "__new__", return_value=mock_store),
+            patch("agentalloy.install.subcommands.install_pack.LadybugStore", return_value=mock_store),
         ):
             mock_settings.return_value.ladybug_db_path = str(tmp_path / "test.duck")
             result = ip.install_local_pack(tmp_path, root=tmp_path)
