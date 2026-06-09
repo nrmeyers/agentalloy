@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from agentalloy.providers.base import WireRecord
@@ -47,8 +48,10 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     if settings_path.exists():
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            settings = {}
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: {settings_path} is not valid JSON", file=sys.stderr)
+            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
+            raise SystemExit(1) from exc
     else:
         settings = {}
 

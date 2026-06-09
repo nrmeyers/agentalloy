@@ -466,7 +466,8 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                 error_details.append(f"{f.name}: {record.skill_id} — {exc}")
                 logger.error(
                     "Batch ingest failure during %s: %s",
-                    record.skill_id, exc,
+                    record.skill_id,
+                    exc,
                 )
                 # Roll back all previously inserted skills to maintain consistency
                 if inserted_skill_ids:

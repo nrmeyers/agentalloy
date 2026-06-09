@@ -83,7 +83,7 @@ class LadybugStore:
         """Delete a skill and all its versions/fragments. Returns number of nodes deleted."""
         if self._conn is None:
             raise RuntimeError("LadybugStore is not open")
-        result = self._conn.execute(
+        self._conn.execute(
             """
             MATCH (s:Skill {skill_id: $id})
             OPTIONAL MATCH (s)-[:HAS_VERSION]->(v:SkillVersion)

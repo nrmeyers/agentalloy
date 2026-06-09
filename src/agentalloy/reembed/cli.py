@@ -22,6 +22,7 @@ picks up where this one stopped).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import platform
@@ -419,10 +420,8 @@ def reembed_fragments(
                 stats.failures.append((frag.fragment_id, f"insert: {exc}"))
                 logger.error("insert failed for %s: %s", frag.fragment_id, exc)
                 # Roll back the entire batch on any insert failure
-                try:
+                with contextlib.suppress(Exception):
                     vector_store.rollback_transaction()
-                except Exception:
-                    pass
                 raise  # Re-raise to trigger top-level rollback
 
             stats.embedded += 1
@@ -441,13 +440,13 @@ def reembed_fragments(
 
     except Exception as exc:
         # Top-level error — rollback the entire batch
-        try:
+        with contextlib.suppress(Exception):
             vector_store.rollback_transaction()
-        except Exception:
-            pass
         logger.error(
             "reembed batch failed after %d embedded, %d failed — rolled back: %s",
-            stats.embedded, stats.failed, exc,
+            stats.embedded,
+            stats.failed,
+            exc,
         )
         raise
 
@@ -578,19 +577,21 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     if args.skill_id:
                         n = vs.delete_skill(args.skill_id)
-                        logger.info("--force: deleted %d existing embeddings for %s", n, args.skill_id)
+                        logger.info(
+                            "--force: deleted %d existing embeddings for %s", n, args.skill_id
+                        )
                     else:
                         # Full wipe: required when changing embedding models (dimension change
                         # makes existing vectors incompatible with the new index).
                         n = vs.count_embeddings()
                         vs._conn.execute("DELETE FROM fragment_embeddings")  # pyright: ignore[reportPrivateUsage]
-                        logger.info("--force: deleted all %d existing embeddings for full reindex", n)
+                        logger.info(
+                            "--force: deleted all %d existing embeddings for full reindex", n
+                        )
                     vs.commit_transaction()
                 except Exception as exc:
-                    try:
+                    with contextlib.suppress(Exception):
                         vs.rollback_transaction()
-                    except Exception:
-                        pass
                     logger.error("--force delete failed, rolled back: %s", exc)
                     raise
 

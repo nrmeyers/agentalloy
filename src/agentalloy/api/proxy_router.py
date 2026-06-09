@@ -125,13 +125,23 @@ def _stream_upstream_response(
     """Forward a streaming (SSE) response from the upstream LLM."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
-            if resp.status_code >= 500:
-                logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                yield f'data: {{"error": "Upstream returned HTTP {resp.status_code}"}}\n\n'
-                return
-            async for chunk in resp.aiter_text():
-                yield chunk
+        try:
+            async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+                if resp.status_code >= 500:
+                    logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
+                    yield f'data: {{"error": "Upstream returned HTTP {resp.status_code}"}}\n\n'
+                    return
+                async for chunk in resp.aiter_text():
+                    yield chunk
+        except httpx.ConnectError as exc:
+            logger.warning("Upstream streaming connection failed: %s", exc)
+            yield f'data: {{"error": "Upstream connection failed: {exc}"}}\n\n'
+        except httpx.TimeoutException as exc:
+            logger.warning("Upstream streaming timed out: %s", exc)
+            yield f'data: {{"error": "Upstream timeout: {exc}"}}\n\n'
+        except httpx.HTTPError as exc:
+            logger.warning("Upstream streaming HTTP error: %s", exc)
+            yield f'data: {{"error": "Upstream HTTP error: {exc}"}}\n\n'
 
     return StreamingResponse(
         content=event_generator(),
@@ -499,7 +509,44 @@ async def proxy_embeddings(
         )
 
     body = await request.json()
-    resp = await embed_async_client.post("/v1/embeddings", json=body)
+    try:
+        resp = await embed_async_client.post("/v1/embeddings", json=body)
+    except httpx.ConnectError as e:
+        logger.warning("Embed server connection failed: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": f"Embed server unavailable: {e}",
+                    "type": "api_error",
+                    "code": "embed_connection_error",
+                }
+            },
+        )
+    except httpx.TimeoutException as e:
+        logger.warning("Embed server timeout: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": f"Embed server timeout: {e}",
+                    "type": "api_error",
+                    "code": "embed_timeout",
+                }
+            },
+        )
+    except httpx.HTTPError as e:
+        logger.warning("Embed server HTTP error: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "message": f"Embed server HTTP error: {e}",
+                    "type": "api_error",
+                    "code": "embed_http_error",
+                }
+            },
+        )
 
     return JSONResponse(
         status_code=resp.status_code,

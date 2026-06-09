@@ -662,210 +662,288 @@ def _stream_anthropic_response(
             """Format an SSE event string."""
             return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
-        async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
-            if resp.status_code != 200:
-                logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
-                msg_start_data = {
-                    "type": "message_start",
-                    "message": {
-                        "id": "msg_error",
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [],
-                        "model": model,
-                        "stop_reason": None,
-                        "stop_sequence": None,
-                        "usage": {"input_tokens": 0, "output_tokens": 0},
-                    },
-                }
-                yield _sse_event("message_start", msg_start_data)
-                error_data = {
-                    "type": "error",
-                    "error": {
-                        "type": "api_error",
-                        "message": f"Upstream returned HTTP {resp.status_code}",
-                    },
-                }
-                yield _sse_event("error", error_data)
-                return
-
-            async for line in resp.aiter_lines():
-                line = line.strip()
-                if not line.startswith("data: "):
-                    continue
-                data = line[6:]
-                if data == "[DONE]":
-                    # End of stream: stop all pending blocks
-                    if pending_text:
-                        pending_text = False
-                        yield _sse_event(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": 0},
-                        )
-                    for tc_idx in list(tool_states.keys()):
-                        if tool_states[tc_idx].get("emitted_start"):
-                            yield _sse_event(
-                                "content_block_stop",
-                                {"type": "content_block_stop", "index": tc_idx + 1},
-                            )
-                            tool_states[tc_idx]["emitted_start"] = False
-
-                    # Final message events
-                    yield _sse_event(
-                        "message_delta",
-                        {
-                            "type": "message_delta",
-                            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                            "usage": {"output_tokens": output_tokens},
+        try:
+            async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+                if resp.status_code != 200:
+                    logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
+                    msg_start_data = {
+                        "type": "message_start",
+                        "message": {
+                            "id": "msg_error",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                            "model": model,
+                            "stop_reason": None,
+                            "stop_sequence": None,
+                            "usage": {"input_tokens": 0, "output_tokens": 0},
                         },
-                    )
+                    }
+                    yield _sse_event("message_start", msg_start_data)
+                    error_data = {
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": f"Upstream returned HTTP {resp.status_code}",
+                        },
+                    }
+                    yield _sse_event("error", error_data)
                     yield "event: message_stop\ndata: {}\n\n"
                     return
 
-                try:
-                    chunk: dict[str, Any] = json.loads(data)
-                except json.JSONDecodeError:
-                    logger.warning("Failed to parse SSE chunk: %s", data[:100])
-                    continue
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        # End of stream: stop all pending blocks
+                        if pending_text:
+                            pending_text = False
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": 0},
+                            )
+                        for tc_idx in list(tool_states.keys()):
+                            if tool_states[tc_idx].get("emitted_start"):
+                                yield _sse_event(
+                                    "content_block_stop",
+                                    {"type": "content_block_stop", "index": tc_idx + 1},
+                                )
+                                tool_states[tc_idx]["emitted_start"] = False
 
-                choices: list[dict[str, Any]] = chunk.get("choices") or []
-                if not choices:
-                    usage: dict[str, Any] = chunk.get("usage") or {}
+                        # Final message events
+                        yield _sse_event(
+                            "message_delta",
+                            {
+                                "type": "message_delta",
+                                "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+                                "usage": {"output_tokens": output_tokens},
+                            },
+                        )
+                        yield "event: message_stop\ndata: {}\n\n"
+                        return
+
+                    try:
+                        chunk: dict[str, Any] = json.loads(data)
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse SSE chunk: %s", data[:100])
+                        continue
+
+                    choices: list[dict[str, Any]] = chunk.get("choices") or []
+                    if not choices:
+                        usage: dict[str, Any] = chunk.get("usage") or {}
+                        if usage:
+                            input_tokens = int(usage.get("prompt_tokens") or input_tokens)
+                            output_tokens = int(usage.get("completion_tokens") or output_tokens)
+                        continue
+
+                    choice: dict[str, Any] = choices[0]
+                    delta: dict[str, Any] = choice.get("delta") or {}
+                    finish: str | None = choice.get("finish_reason")
+                    tc_list: list[dict[str, Any]] | None = delta.get("tool_calls")
+                    text: str | None = delta.get("content")
+
+                    # Emit message_start on first chunk
+                    if first_chunk:
+                        yield _sse_event(
+                            "message_start",
+                            {
+                                "message": {
+                                    "id": msg_id,
+                                    "type": "message",
+                                    "role": "assistant",
+                                    "content": [],
+                                    "model": model,
+                                    "stop_reason": None,
+                                    "stop_sequence": None,
+                                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                                },
+                            },
+                        )
+                        first_chunk = False
+
+                    # --- Process tool calls ---
+                    if tc_list:
+                        # Stop any pending text before starting tool_use
+                        if pending_text:
+                            pending_text = False
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": 0},
+                            )
+
+                        for i, tc in enumerate(tc_list):
+                            tc_idx = tc.get("index", i)
+                            fn = tc.get("function", {})
+
+                            if tc_idx not in tool_states:
+                                tool_states[tc_idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "partial_json": "",
+                                    "emitted_start": False,
+                                }
+                            ts = tool_states[tc_idx]
+
+                            # Emit tool_use content_block_start on first arrival
+                            if not ts["emitted_start"]:
+                                if tc.get("id"):
+                                    ts["id"] = tc["id"]
+                                if fn.get("name"):
+                                    ts["name"] = fn["name"]
+                                yield _sse_event(
+                                    "content_block_start",
+                                    {
+                                        "type": "content_block_start",
+                                        "index": tc_idx + 1,
+                                        "content_block": {
+                                            "type": "tool_use",
+                                            "id": ts["id"] or f"toolu_{uuid.uuid4().hex[:24]}",
+                                            "name": ts["name"],
+                                        },
+                                    },
+                                )
+                                ts["emitted_start"] = True
+
+                            # Accumulate partial JSON arguments and emit delta
+                            if fn.get("arguments"):
+                                ts["partial_json"] += fn["arguments"]
+                                yield _sse_event(
+                                    "content_block_delta",
+                                    {
+                                        "type": "content_block_delta",
+                                        "index": tc_idx + 1,
+                                        "delta": {
+                                            "type": "input_json_delta",
+                                            "partial_json": fn["arguments"],
+                                        },
+                                    },
+                                )
+
+                    # --- Process text content ---
+                    if text:
+                        # Stop any pending tool_use before text
+                        for tc_idx in list(tool_states.keys()):
+                            if tool_states[tc_idx].get("emitted_start"):
+                                yield _sse_event(
+                                    "content_block_stop",
+                                    {"type": "content_block_stop", "index": tc_idx + 1},
+                                )
+                                tool_states[tc_idx]["emitted_start"] = False
+
+                        yield _sse_event(
+                            "content_block_delta",
+                            {
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {"type": "text_delta", "text": text},
+                            },
+                        )
+                        pending_text = True
+
+                    # --- Handle finish_reason ---
+                    if finish:
+                        # Stop all pending blocks
+                        if pending_text:
+                            pending_text = False
+                            yield _sse_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": 0},
+                            )
+                        for tc_idx in list(tool_states.keys()):
+                            if tool_states[tc_idx].get("emitted_start"):
+                                yield _sse_event(
+                                    "content_block_stop",
+                                    {"type": "content_block_stop", "index": tc_idx + 1},
+                                )
+                                tool_states[tc_idx]["emitted_start"] = False
+
+                        stop_reason = "end_turn" if finish == "stop" else "max_tokens"
+                        if finish == "tool_calls":
+                            stop_reason = "tool_use"
+
+                    # --- Handle usage chunks ---
+                    usage = chunk.get("usage") or {}
                     if usage:
                         input_tokens = int(usage.get("prompt_tokens") or input_tokens)
                         output_tokens = int(usage.get("completion_tokens") or output_tokens)
-                    continue
 
-                choice: dict[str, Any] = choices[0]
-                delta: dict[str, Any] = choice.get("delta") or {}
-                finish: str | None = choice.get("finish_reason")
-                tc_list: list[dict[str, Any]] | None = delta.get("tool_calls")
-                text: str | None = delta.get("content")
-
-                # Emit message_start on first chunk
-                if first_chunk:
-                    yield _sse_event(
-                        "message_start",
-                        {
-                            "message": {
-                                "id": msg_id,
-                                "type": "message",
-                                "role": "assistant",
-                                "content": [],
-                                "model": model,
-                                "stop_reason": None,
-                                "stop_sequence": None,
-                                "usage": {"input_tokens": 0, "output_tokens": 0},
-                            },
-                        },
-                    )
-                    first_chunk = False
-
-                # --- Process tool calls ---
-                if tc_list:
-                    # Stop any pending text before starting tool_use
-                    if pending_text:
-                        pending_text = False
-                        yield _sse_event(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": 0},
-                        )
-
-                    for i, tc in enumerate(tc_list):
-                        tc_idx = tc.get("index", i)
-                        fn = tc.get("function", {})
-
-                        if tc_idx not in tool_states:
-                            tool_states[tc_idx] = {
-                                "id": "",
-                                "name": "",
-                                "partial_json": "",
-                                "emitted_start": False,
-                            }
-                        ts = tool_states[tc_idx]
-
-                        # Emit tool_use content_block_start on first arrival
-                        if not ts["emitted_start"]:
-                            if tc.get("id"):
-                                ts["id"] = tc["id"]
-                            if fn.get("name"):
-                                ts["name"] = fn["name"]
-                            yield _sse_event(
-                                "content_block_start",
-                                {
-                                    "type": "content_block_start",
-                                    "index": tc_idx + 1,
-                                    "content_block": {
-                                        "type": "tool_use",
-                                        "id": ts["id"] or f"toolu_{uuid.uuid4().hex[:24]}",
-                                        "name": ts["name"],
-                                    },
-                                },
-                            )
-                            ts["emitted_start"] = True
-
-                        # Accumulate partial JSON arguments and emit delta
-                        if fn.get("arguments"):
-                            ts["partial_json"] += fn["arguments"]
-                            yield _sse_event(
-                                "content_block_delta",
-                                {
-                                    "type": "content_block_delta",
-                                    "index": tc_idx + 1,
-                                    "delta": {
-                                        "type": "input_json_delta",
-                                        "partial_json": fn["arguments"],
-                                    },
-                                },
-                            )
-
-                # --- Process text content ---
-                if text:
-                    # Stop any pending tool_use before text
-                    for tc_idx in list(tool_states.keys()):
-                        if tool_states[tc_idx].get("emitted_start"):
-                            yield _sse_event(
-                                "content_block_stop",
-                                {"type": "content_block_stop", "index": tc_idx + 1},
-                            )
-                            tool_states[tc_idx]["emitted_start"] = False
-
-                    yield _sse_event(
-                        "content_block_delta",
-                        {
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": {"type": "text_delta", "text": text},
-                        },
-                    )
-                    pending_text = True
-
-                # --- Handle finish_reason ---
-                if finish:
-                    # Stop all pending blocks
-                    if pending_text:
-                        pending_text = False
-                        yield _sse_event(
-                            "content_block_stop",
-                            {"type": "content_block_stop", "index": 0},
-                        )
-                    for tc_idx in list(tool_states.keys()):
-                        if tool_states[tc_idx].get("emitted_start"):
-                            yield _sse_event(
-                                "content_block_stop",
-                                {"type": "content_block_stop", "index": tc_idx + 1},
-                            )
-                            tool_states[tc_idx]["emitted_start"] = False
-
-                    stop_reason = "end_turn" if finish == "stop" else "max_tokens"
-                    if finish == "tool_calls":
-                        stop_reason = "tool_use"
-
-                # --- Handle usage chunks ---
-                usage = chunk.get("usage") or {}
-                if usage:
-                    input_tokens = int(usage.get("prompt_tokens") or input_tokens)
-                    output_tokens = int(usage.get("completion_tokens") or output_tokens)
+        except httpx.ConnectError as exc:
+            logger.warning("Upstream streaming connection failed: %s", exc)
+            msg_start_data = {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_error_connect",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+            yield _sse_event("message_start", msg_start_data)
+            error_data = {
+                "type": "error",
+                "error": {
+                    "type": "overloaded_error",
+                    "message": f"Upstream connection failed: {exc}",
+                },
+            }
+            yield _sse_event("error", error_data)
+            yield "event: message_stop\ndata: {}\n\n"
+        except httpx.TimeoutException as exc:
+            logger.warning("Upstream streaming timed out: %s", exc)
+            msg_start_data = {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_error_timeout",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+            yield _sse_event("message_start", msg_start_data)
+            error_data = {
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": f"Upstream timeout: {exc}",
+                },
+            }
+            yield _sse_event("error", error_data)
+            yield "event: message_stop\ndata: {}\n\n"
+        except httpx.HTTPError as exc:
+            logger.warning("Upstream streaming HTTP error: %s", exc)
+            msg_start_data = {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_error_http",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                    "model": model,
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                },
+            }
+            yield _sse_event("message_start", msg_start_data)
+            error_data = {
+                "type": "error",
+                "error": {
+                    "type": "api_error",
+                    "message": f"Upstream HTTP error: {exc}",
+                },
+            }
+            yield _sse_event("error", error_data)
+            yield "event: message_stop\ndata: {}\n\n"
 
     return StreamingResponse(
         content=event_generator(),
@@ -927,6 +1005,24 @@ async def proxy_anthropic_messages(
             content={
                 "type": "error",
                 "error": {"type": "overloaded_error", "message": f"Upstream unavailable: {e}"},
+            },
+        )
+    except httpx.TimeoutException as e:
+        logger.warning("Upstream timeout: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "type": "error",
+                "error": {"type": "api_error", "message": f"Upstream timeout: {e}"},
+            },
+        )
+    except httpx.HTTPError as e:
+        logger.warning("Upstream HTTP error: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "type": "error",
+                "error": {"type": "api_error", "message": f"Upstream HTTP error: {e}"},
             },
         )
 

@@ -18,6 +18,7 @@ deferred — flagged in the install spec's open questions.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -413,7 +414,14 @@ def install_local_pack(
         for r in ingest_results:
             if r["outcome"] == "ingested" and r["yaml"] not in failed_yaml_names:
                 # Extract skill_id from the YAML file
-                yaml_entry = next((e for e in skills_entries if pack_dir / str(e["file"]) == pack_dir / r["yaml"]), None)
+                yaml_entry = next(
+                    (
+                        e
+                        for e in skills_entries
+                        if pack_dir / str(e["file"]) == pack_dir / r["yaml"]
+                    ),
+                    None,
+                )
                 if yaml_entry:
                     ingested_skill_ids.append(str(yaml_entry.get("skill_id", "")))
 
@@ -713,10 +721,8 @@ def install_pack(
         for r in ingest_results:
             if r["outcome"] == "ingested":
                 yaml_path = pending_dir / r["yaml"]
-                try:
+                with contextlib.suppress(OSError):
                     yaml_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
         duration_ms = int((time.monotonic() - t0) * 1000)
         return {

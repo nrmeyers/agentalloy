@@ -2,11 +2,11 @@
 
 ## Summary
 
-- **Status:** P0 tier merged (PR #70). Pattern-A merged (PR #71). Pattern-B merged (PR #72).
+- **Status:** P0 tier merged (PR #70). Pattern-A merged (PR #71). Pattern-B in progress (PR #73, contains B+C). Pattern-C in progress (PR #73).
 - **Total tasks:** 91 (42 build + 42 review + 7 test suite checkpoints)
 - **Order: P0 → Pattern A-H → P1 confirmed → Test integrity → Concurrency → Config/corpus → Low-sev**
-- **PRs:** #70 (P0), #71 (Pattern-A), #72 (Pattern-B)
-- **Branch:** `fix/p0-domain-tags-authoring-config`
+- **PRs:** #70 (P0), #71 (Pattern-A), #73 (Pattern-B+C, pending review)
+- **Branch:** `fix/pattern-c-non-transactional-batch`
 
 ## Tasks
 
