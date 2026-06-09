@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from agentalloy.providers.base import WireRecord
@@ -48,7 +49,12 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            settings = {}
+            print(
+                f"WARNING: {settings_path} is not valid JSON — skipping cline wiring; "
+                f"original file preserved",
+                file=sys.stderr,
+            )
+            return []
     else:
         settings = {}
 

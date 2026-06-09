@@ -1256,7 +1256,12 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
         try:
             settings = json.loads(settings_path.read_text())
         except json.JSONDecodeError:
-            settings = {}
+            print(
+                f"WARNING: {settings_path} is not valid JSON — skipping cline wiring; "
+                f"original file preserved",
+                file=sys.stderr,
+            )
+            return []
     else:
         settings = {}
 

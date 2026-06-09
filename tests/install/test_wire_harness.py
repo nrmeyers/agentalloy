@@ -337,6 +337,60 @@ class TestOpenHarnesses:
         assert config["modelId"] == "claude-3-sonnet"
         assert config["someOtherSetting"] == "keep this"
 
+    def test_cline_proxy_malformed_json_preserves_file(self, tmp_path: Path, capsys) -> None:
+        """Malformed JSON in settings.json does NOT overwrite with empty data.
+
+        This is the Pattern B bug fix: previously, json.JSONDecodeError was
+        caught and settings was set to {}, causing the entire file to be
+        overwritten with empty settings. Now the function returns early
+        (empty list) without writing anything, preserving the original file.
+        """
+        from agentalloy.install.subcommands.wire_harness import _wire_proxy_cline
+
+        # Create a malformed settings.json
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_path = settings_dir / "settings.json"
+        original_content = "{ invalid json {{{"
+        settings_path.write_text(original_content)
+
+        # Run the wiring — should not crash and should not overwrite
+        result = _wire_proxy_cline(7070, tmp_path)
+
+        # Should return empty list (skip wiring)
+        assert result == []
+
+        # File should still exist with original content (not overwritten)
+        assert settings_path.exists()
+        assert settings_path.read_text() == original_content
+
+        # Warning should be printed to stderr
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.err
+        assert "not valid JSON" in captured.err
+
+    def test_cline_proxy_malformed_json_no_data_loss(self, tmp_path: Path) -> None:
+        """Malformed JSON content is preserved — no data loss.
+
+        Even if the file contains content that would normally be lost,
+        the fix ensures the file is left untouched.
+        """
+        from agentalloy.install.subcommands.wire_harness import _wire_proxy_cline
+
+        settings_dir = tmp_path / ".cline"
+        settings_dir.mkdir()
+        settings_path = settings_dir / "settings.json"
+        original_content = '{"modelId": "claude-3-sonnet", "broken":'
+        settings_path.write_text(original_content)
+
+        result = _wire_proxy_cline(7070, tmp_path)
+
+        # Should return empty list
+        assert result == []
+
+        # File should be unchanged
+        assert settings_path.read_text() == original_content
+
     def test_aider(self, repo_root: Path) -> None:
         result = wire_compat("aider", port=8000, root=repo_root, legacy=True)
         # Instructions file (dedicated)
