@@ -32,8 +32,8 @@
 15. ⏳ Pattern F review — Verify UnicodeDecodeError caught in all subprocess paths
 16. ⏳ Pattern G — Dead/unwired CLI flags (--quiet 11× refs, --json on wrap unimplemented)
 17. ⏳ Pattern G review — Verify flags removed or wired, no dead code remaining
-18. ⏳ Pattern H — Cypher built by f-string interpolation of skill_class (reads/active.py:38/97/190)
-19. ⏳ Pattern H review — Verify all Cypher queries parameterized, no injection risk
+18. ✅ Pattern H — Cypher built by f-string interpolation of skill_class (reads/active.py:38/97/190)
+19. ✅ Pattern H review — Verify all Cypher queries parameterized, no injection risk
 20. ⏳ TEST SUITE — Run full suite after Cross-cutting patterns tier
 
 ### P1 Confirmed (#3-#15)
