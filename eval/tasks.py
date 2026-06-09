@@ -1,8 +1,8 @@
 """POC task definitions + per-task graders.
 
-Pre-registered in docs/experiments/poc-composed-vs-flat.md §5–6. Each task
-exposes a graded set of binary criteria; the harness aggregates pass-rates
-per condition.
+Each task exposes a graded set of binary criteria; the harness aggregates
+pass-rates per condition (see BENCHMARKS.md). ``gold_skills`` reference
+``skill_id``s in the current pack corpus (``src/agentalloy/_packs/``).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ TASKS: list[Task] = [
             "Assume the repo follows conventional commits."
         ),
         phase="build",
-        gold_skills=("git-workflow-and-versioning", "debugging-and-error-recovery"),
+        gold_skills=("git-workflow", "debugging-systematic"),
     ),
     Task(
         task_id="task_3_code_review_checklist",
@@ -51,7 +51,7 @@ TASKS: list[Task] = [
             "you'd ask in review."
         ),
         phase="qa",
-        gold_skills=("code-review-and-quality",),
+        gold_skills=("code-review-practices",),
     ),
     Task(
         task_id="task_4_flaky_ci_debug",
@@ -61,7 +61,7 @@ TASKS: list[Task] = [
             "fix strategy. Budget: ~300 words."
         ),
         phase="qa",
-        gold_skills=("debugging-and-error-recovery", "test-driven-development"),
+        gold_skills=("debugging-systematic", "testing-flaky-tests"),
     ),
     Task(
         task_id="task_5_browser_test_plan",
@@ -71,7 +71,7 @@ TASKS: list[Task] = [
             "tools, what to capture."
         ),
         phase="qa",
-        gold_skills=("browser-testing-with-devtools", "code-review-and-quality"),
+        gold_skills=("testing-browser-and-e2e",),
     ),
     # ----- Phase 2 tasks (added 2026-04-25 to test variant findings on a fresh set) -----
     Task(
@@ -82,7 +82,9 @@ TASKS: list[Task] = [
             "pattern and a short example showing it correctly matches each format."
         ),
         phase="build",
-        gold_skills=("api-and-interface-design", "security-and-hardening"),
+        # Corpus has no regex-specific skill; closest lexical neighbor. Treat
+        # this task as a soft control for retrieval scoring.
+        gold_skills=("python-pattern-matching",),
     ),
     Task(
         task_id="task_7_friday_deploy_risks",
@@ -91,7 +93,7 @@ TASKS: list[Task] = [
             "afternoon. Number them 1-3."
         ),
         phase="ops",
-        gold_skills=("deprecation-and-migration", "security-and-hardening"),
+        gold_skills=("incident-response",),
     ),
     Task(
         task_id="task_8_postmortem",
@@ -101,7 +103,7 @@ TASKS: list[Task] = [
             "Include: Timeline, Root Cause, Contributing Factors, Action Items."
         ),
         phase="qa",
-        gold_skills=("debugging-and-error-recovery", "documentation-and-adrs"),
+        gold_skills=("postmortem", "incident-response"),
     ),
     Task(
         task_id="task_9_retry_strategy",
@@ -110,7 +112,7 @@ TASKS: list[Task] = [
             "retry budget, backoff scheme, idempotency-key handling, when to give up."
         ),
         phase="design",
-        gold_skills=("api-and-interface-design", "debugging-and-error-recovery"),
+        gold_skills=("webhooks-idempotency", "rest-common-patterns"),
     ),
     Task(
         task_id="task_10_db_perf_runbook",
@@ -121,9 +123,9 @@ TASKS: list[Task] = [
         ),
         phase="qa",
         gold_skills=(
-            "debugging-and-error-recovery",
-            "performance-optimization",
-            "documentation-and-adrs",
+            "debugging-systematic",
+            "finding-the-bottleneck",
+            "incident-response",
         ),
     ),
 ]

@@ -17,15 +17,15 @@ from typing import Any
 
 from eval.tasks import TASKS
 
-AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen2.5-coder-14b")
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen3.6-35b-a3b")
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
 
 # Approximate cost per 1M input/output tokens (USD) for common models
 MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "qwen/qwen2.5-coder-14b": (0.0, 0.0),  # free local
-    "qwen/qwen2.5-coder-7b": (0.0, 0.0),
-    "meta-llama/llama-3.1-70b": (0.0, 0.0),
+    "qwen/qwen3.6-35b-a3b": (0.0, 0.0),  # free local
+    "qwen/qwen3-coder-30b-a3b": (0.0, 0.0),
+    "qwen/qwen3.5-0.8b": (0.0, 0.0),
 }
 
 

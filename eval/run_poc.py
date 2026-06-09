@@ -4,15 +4,17 @@ Composed arm: POST /compose to a running agentalloy (uvicorn at $AGENTALLOY_URL,
 default http://localhost:47950), then call the agent model with /compose's
 ``output`` field as a system prompt + the task spec as user prompt.
 
-Flat arm: concatenate the gold skills' raw SKILL.md files as the system
-prompt + task spec as user prompt.
+Flat arm: concatenate the gold skills' ``raw_prose`` from the pack corpus
+(``src/agentalloy/_packs/``) as the system prompt + task spec as user prompt.
 
-Both arms hit LM Studio (qwen/qwen2.5-coder-14b) for the agent call.
+Both arms hit an OpenAI-compatible local server ($LM_STUDIO_URL, default
+LM Studio on :1234) with $AGENT_MODEL for the agent call.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import logging
@@ -25,18 +27,33 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import yaml
 
 from eval.tasks import GRADERS, TASKS, Task
 
 logger = logging.getLogger("eval.run_poc")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILL_SOURCE_ROOT = REPO_ROOT / "skill-source" / "agent-skills" / "skills"
+PACKS_ROOT = REPO_ROOT / "src" / "agentalloy" / "_packs"
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
-AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen2.5-coder-14b")
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen/qwen3.6-35b-a3b")
+
+@functools.cache
+def _pack_skill_index() -> dict[str, Path]:
+    """Map skill_id -> pack YAML path across the bundled pack corpus."""
+    index: dict[str, Path] = {}
+    for yaml_path in PACKS_ROOT.glob("*/*.yaml"):
+        if yaml_path.name == "pack.yaml":
+            continue
+        doc: Any = yaml.safe_load(yaml_path.read_text())
+        if isinstance(doc, dict):
+            skill_id = doc.get("skill_id")
+            if isinstance(skill_id, str):
+                index[skill_id] = yaml_path
+    return index
 
 
 @dataclass
@@ -60,10 +77,12 @@ def load_flat_prompt(task: Task) -> str:
         "guidance to answer the task that follows.\n"
     ]
     for skill_id in task.gold_skills:
-        skill_md = SKILL_SOURCE_ROOT / skill_id / "SKILL.md"
-        if not skill_md.exists():
-            raise FileNotFoundError(f"flat skill source missing: {skill_md}")
-        parts.append(f"\n# Skill: {skill_id}\n\n{skill_md.read_text()}\n")
+        yaml_path = _pack_skill_index().get(skill_id)
+        if yaml_path is None:
+            raise FileNotFoundError(f"flat skill source missing from packs: {skill_id}")
+        doc: Any = yaml.safe_load(yaml_path.read_text())
+        prose = doc.get("raw_prose") if isinstance(doc, dict) else None
+        parts.append(f"\n# Skill: {skill_id}\n\n{prose or ''}\n")
     return "\n".join(parts)
 
 
