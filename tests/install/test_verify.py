@@ -106,7 +106,7 @@ class TestEmbeddingViaDiagnostics:
         result = _check_embedding_via_diagnostics(diag, "embedding_endpoint_returns_1024_dim")
         assert result["passed"] is False
         assert "unavailable" in result["error"]
-        assert "compose logs" in result["remediation"]
+        assert "logs agentalloy" in result["remediation"]
 
     def test_accepts_legacy_dep_readiness_key(self) -> None:
         """Older snapshots / cached responses may still carry the legacy key."""

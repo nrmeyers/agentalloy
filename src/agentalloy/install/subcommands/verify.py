@@ -87,7 +87,7 @@ def _check_embedding_via_diagnostics(
     """Read embedder status from /diagnostics/runtime.
 
     Used by container deployments where the host can't reach the embedder
-    directly (Ollama lives on the compose-internal network only). The
+    directly (Ollama runs inside the agentalloy container). The
     diagnostics endpoint reports the same embedding_runtime dep status the
     agentalloy service uses internally — "ok" means the service successfully
     embedded against the configured backend at startup or last refresh.
@@ -106,8 +106,8 @@ def _check_embedding_via_diagnostics(
             "error": "/diagnostics/runtime unreachable",
             "remediation": (
                 "Container not responding on the configured port. Check the "
-                "container logs (e.g. `podman compose logs agentalloy` or "
-                "`docker compose logs agentalloy`) for startup errors."
+                "container logs (e.g. `podman logs agentalloy` or "
+                "`docker logs agentalloy`) for startup errors."
             ),
         }
     readiness = diag.get("dependency_readiness") or diag.get("dep_readiness") or {}
@@ -125,9 +125,9 @@ def _check_embedding_via_diagnostics(
         "duration_ms": int((time.monotonic() - t0) * 1000),
         "error": f"embedding_runtime status={status!r} (via /diagnostics/runtime)",
         "remediation": (
-            "Bundled Ollama sidecar isn't healthy yet. Check the container "
-            "logs — e.g. `podman compose logs ollama` and `podman compose "
-            "logs agentalloy` (substitute `docker compose` if you're on Docker)."
+            "Bundled Ollama isn't healthy yet. Check the container logs — "
+            "e.g. `podman logs agentalloy` (Ollama runs inside the same "
+            "container; substitute `docker` if you're on Docker)."
         ),
     }
 
@@ -263,7 +263,7 @@ def _check_duckdb_present(
                 "cannot verify DuckDB without the diagnostics endpoint"
             ),
             "remediation": (
-                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
@@ -349,7 +349,7 @@ def _check_ladybug_present(
                 "cannot verify Kuzu DB without the diagnostics endpoint"
             ),
             "remediation": (
-                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
@@ -432,7 +432,7 @@ def _check_skill_count(
                 "cannot count skills without the diagnostics endpoint"
             ),
             "remediation": (
-                "Check the container logs (e.g. `podman compose logs agentalloy`) "
+                "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
@@ -757,7 +757,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     diag = _probe_diagnostics(port)
 
     # Container deployments: the host can't reach the embedder directly
-    # (Ollama lives on the compose-internal network). Both embedding checks
+    # (Ollama runs inside the agentalloy container). Both embedding checks
     # collapse to a single source — the embedding_runtime dep status exposed
     # via /diagnostics/runtime, which the agentalloy service computes from
     # its actual embed probes inside the container.

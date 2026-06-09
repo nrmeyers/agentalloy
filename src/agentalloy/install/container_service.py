@@ -252,7 +252,7 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
 def test_kuzu_lock_released() -> bool:
     """Test whether the Kuzu database lock is released.
 
-    Prefers ``LADYBUG_DB_PATH`` env var (set in compose.yaml to
+    Prefers ``LADYBUG_DB_PATH`` env var (set by the container run env to
     ``/app/data/ladybug``) over ``user_data_dir()`` — the latter
     resolves to the host home directory and silently skips the check
     inside a container where the volume-mounted DB lives elsewhere.
@@ -264,7 +264,7 @@ def test_kuzu_lock_released() -> bool:
     Retries up to 5 seconds at 0.5-second intervals.
     Returns ``True`` if the lock is released, ``False`` if still locked.
     """
-    # T3: prefer LADYBUG_DB_PATH env (compose.yaml sets /app/data/ladybug)
+    # T3: prefer LADYBUG_DB_PATH env (container run env sets /app/data/ladybug)
     env_path = os.environ.get("LADYBUG_DB_PATH")
     if env_path is not None:
         ladybug_path = Path(env_path)

@@ -519,6 +519,11 @@ def _run_container(
         "run",
         "--replace",
         "-d",
+        # restart-on-boot parity with the retired compose path (which set
+        # `restart: unless-stopped`); the single-container model is the
+        # persistent deployment, so the container must survive a reboot.
+        "--restart",
+        "unless-stopped",
         "--name",
         "agentalloy",
         "-p",
