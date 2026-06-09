@@ -100,8 +100,13 @@ def run(
                 )
                 agent_resp.raise_for_status()
                 agent_body = agent_resp.json()
-                output = agent_body["choices"][0]["message"]["content"]
-                usage = agent_body.get("usage", {})
+                choices = agent_body.get("choices")
+                if not choices:
+                    output = ""
+                    usage = {}
+                else:
+                    output = choices[0]["message"]["content"]
+                    usage = agent_body.get("usage", {})
 
                 # Grade the output
                 grader = GRADERS.get(task.task_id)

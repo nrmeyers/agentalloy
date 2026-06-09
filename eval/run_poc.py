@@ -13,6 +13,7 @@ Both arms hit LM Studio (qwen/qwen2.5-coder-14b) for the agent call.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -126,7 +127,9 @@ def run_one(
     out_dir: Path,
     k: int,
 ) -> RunResult:
-    seed = abs(hash((task.task_id, condition, run_index))) % (2**31)
+    seed = int(
+        hashlib.sha256(f"{task.task_id}:{condition}:{run_index}".encode()).hexdigest(), 16
+    ) % (2**31)
     compose_result_type: str | None = None
     compose_latency_ms: int | None = None
     if condition == "composed":

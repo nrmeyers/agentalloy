@@ -145,8 +145,7 @@ def _evaluate_sync(
         from agentalloy.embed_provider import get_embed_client
 
         cfg = get_settings()
-        if get_embed_client is not None:
-            lm_client = get_embed_client(cfg)
+        lm_client = get_embed_client(cfg)
     except Exception:
         pass
 

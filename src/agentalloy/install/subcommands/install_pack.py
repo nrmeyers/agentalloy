@@ -196,13 +196,32 @@ def _ingest_yaml(
     if no_restart:
         cmd.append("--no-restart")
 
-    result = subprocess.run(  # noqa: S603 — fixed args, no shell
-        cmd,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 — fixed args, no shell
+            cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        # Clean up any leftover processes from the timed-out ingest run.
+        import contextlib as _contextlib
+
+        with _contextlib.suppress(FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            subprocess.run(
+                ["pkill", "-f", f"agentalloy.ingest.*{yaml_path.name}"],
+                capture_output=True,
+                timeout=5,
+            )
+        logger.error("ingest subprocess timed out after 120s for %s", yaml_path.name)
+        return {
+            "yaml": yaml_path.name,
+            "exit_code": -1,
+            "outcome": "failed",
+            "stdout_tail": "",
+            "stderr_tail": "ingest subprocess timed out after 120s",
+        }
     rc = result.returncode
     return {
         "yaml": yaml_path.name,
