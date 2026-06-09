@@ -100,13 +100,13 @@ class TestCollectPairs:
 
 class TestOllamaPresence:
     def test_model_present(self) -> None:
-        output = "NAME           ID          SIZE    MODIFIED\nembeddinggemma:latest   abc123   622 MB  2 days ago\n"
+        output = "NAME           ID          SIZE    MODIFIED\nqwen3-embedding:latest   abc123   622 MB  2 days ago\n"
         with (
             patch("shutil.which", return_value="/usr/bin/ollama"),
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout=output)
-            assert _is_model_present_ollama("embeddinggemma") is True
+            assert _is_model_present_ollama("qwen3-embedding") is True
 
     def test_model_absent(self) -> None:
         output = "NAME           ID          SIZE    MODIFIED\nother:latest   abc123   100 MB  1 day ago\n"
@@ -115,11 +115,11 @@ class TestOllamaPresence:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stdout=output)
-            assert _is_model_present_ollama("embeddinggemma") is False
+            assert _is_model_present_ollama("qwen3-embedding") is False
 
     def test_ollama_not_installed(self) -> None:
         with patch("shutil.which", return_value=None):
-            assert _is_model_present_ollama("embeddinggemma") is False
+            assert _is_model_present_ollama("qwen3-embedding") is False
 
     def test_tagged_model_match(self) -> None:
         output = "NAME              ID       SIZE    MODIFIED\nqwen3.5:0.8b      xyz789   1.0 GB  1 day ago\n"
@@ -155,12 +155,12 @@ class TestAutoPull:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stderr="")
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
             assert result["success"] is True
             assert "duration_ms" in result
             mock_run.assert_called_once()
             args = mock_run.call_args[0][0]
-            assert args == ["/usr/bin/ollama", "pull", "--", "embeddinggemma"]
+            assert args == ["/usr/bin/ollama", "pull", "--", "qwen3-embedding"]
 
     def test_pull_failure(self) -> None:
         with (
@@ -176,13 +176,13 @@ class TestAutoPull:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr="connection refused")
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
             assert result["success"] is False
             assert "connection refused" in result["error"]
 
     def test_binary_not_found(self) -> None:
         with patch("shutil.which", return_value=None):
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
             assert result["success"] is False
             assert "not found" in result["error"]
 
@@ -192,10 +192,10 @@ class TestAutoPull:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stderr="")
-            result = _auto_pull("fastflowlm", "embed-gemma:300m")
+            result = _auto_pull("fastflowlm", "qwen3-embedding:0.6b")
             assert result["success"] is True
             args = mock_run.call_args[0][0]
-            assert args == ["/usr/bin/flm", "pull", "--", "embed-gemma:300m"]
+            assert args == ["/usr/bin/flm", "pull", "--", "qwen3-embedding:0.6b"]
 
 
 # ---------------------------------------------------------------------------
@@ -707,7 +707,7 @@ class TestAutoPullSshError:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None
         assert "id_ed25519" in result["hint"]
@@ -723,7 +723,7 @@ class TestAutoPullSshError:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr="connection refused")
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is None
 
@@ -734,7 +734,7 @@ class TestAutoPullSshError:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
-            result = _auto_pull("fastflowlm", "embed-gemma:300m")
+            result = _auto_pull("fastflowlm", "qwen3-embedding:0.6b")
         assert result["success"] is False
         assert result.get("hint") is None
 
@@ -748,7 +748,7 @@ class TestAutoPullSshError:
             patch("subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(returncode=0, stderr="")
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is True
         assert result.get("hint") is None
 
@@ -889,7 +889,7 @@ class TestAutoPullSshKeyAutoFix:
             patch("sys.stdin.isatty", return_value=True),
             patch("builtins.input", return_value="y"),
         ):
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is True
         assert result.get("ssh_key_auto_fixed") is True
         assert call_count == 4  # list + pull + ssh-keygen + retry
@@ -907,7 +907,7 @@ class TestAutoPullSshKeyAutoFix:
             patch("builtins.input", return_value="n"),
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None
         assert "id_ed25519" in result["hint"]
@@ -925,7 +925,7 @@ class TestAutoPullSshKeyAutoFix:
             patch("sys.stdin.isatty", return_value=True),
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None
         # No auto-fix attempt — 2 calls: list (auth check) + pull
@@ -944,7 +944,7 @@ class TestAutoPullSshKeyAutoFix:
             patch("sys.stdin.isatty", return_value=False),
         ):
             mock_run.return_value = MagicMock(returncode=1, stderr=_EXACT_ERROR)
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None
         # No auto-fix attempt — 2 calls: list (auth check) + pull
@@ -968,7 +968,7 @@ class TestAutoPullSshKeyAutoFix:
                 MagicMock(returncode=1, stderr=_EXACT_ERROR),  # Call 2: ollama pull
                 MagicMock(returncode=1, stderr="ssh-keygen failed"),  # Call 3: ssh-keygen
             ]
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None
 
@@ -996,6 +996,6 @@ class TestAutoPullSshKeyAutoFix:
                 MagicMock(returncode=0, stderr=""),  # Call 3: ssh-keygen
                 MagicMock(returncode=1, stderr="permission denied"),  # Call 4: retry pull
             ]
-            result = _auto_pull("ollama", "embeddinggemma")
+            result = _auto_pull("ollama", "qwen3-embedding")
         assert result["success"] is False
         assert result["hint"] is not None

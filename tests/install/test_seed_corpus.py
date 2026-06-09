@@ -83,14 +83,14 @@ class TestVerifiedPresent:
         mock_duck.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
-            "embedding_model": "embed-gemma:300m",
+            "embedding_model": "qwen3-embedding:0.6b",
             "embedding_dim": 768,
         }
         result = check_corpus(repo_root)
         assert result["action"] == "verified_present"
         assert result["skill_count"] == 93
         assert result["fragment_count"] == 1003
-        assert result["embedding_model"] == "embed-gemma:300m"
+        assert result["embedding_model"] == "qwen3-embedding:0.6b"
         assert result["embedding_dim"] == 768
         assert result["schema_version"] == SCHEMA_VERSION
 
@@ -109,7 +109,7 @@ class TestUnderMinimumSkillCount:
         mock_duck.return_value = {
             "skill_count": 10,
             "fragment_count": 50,
-            "embedding_model": "embed-gemma:300m",
+            "embedding_model": "qwen3-embedding:0.6b",
             "embedding_dim": 768,
         }
         result = check_corpus(repo_root)
@@ -128,7 +128,7 @@ class TestNoNetworkCalls:
         mock_duck.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
-            "embedding_model": "embed-gemma:300m",
+            "embedding_model": "qwen3-embedding:0.6b",
             "embedding_dim": 768,
         }
         # Patch urllib to detect any network call
@@ -168,7 +168,7 @@ class TestDurationTracking:
         mock_duck.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
-            "embedding_model": "embed-gemma:300m",
+            "embedding_model": "qwen3-embedding:0.6b",
             "embedding_dim": 768,
         }
         result = check_corpus(repo_root)
