@@ -286,3 +286,17 @@ fragments:
       - [ ] `grep -rnE '<[A-Z][A-Za-z]*\.Provider value=\{\{' src/` returns no matches — inline-object Provider values force every consumer to re-render. Each Provider value is either a `useMemo` result or a stable reference.
       - [ ] For any deliberate `key={recordId}`-style state-reset, a comment on the line names the intent ("remount to clear draft state on record change"). Drive-by readers will otherwise read it as a normal list key.
       - [ ] If the React Compiler is enabled, `npx react-compiler-healthcheck` (or the project's equivalent) reports zero opt-outs in the changed files; opt-outs imply the compiler found something it could not safely memoize and the code may need adjustment.
+
+  - sequence: 10
+    fragment_type: execution
+    content: |
+      ## Execution checklist
+
+      When reviewing a React codebase for rendering correctness:
+
+      1. **Audit list keys.** Run `grep -rnE 'key=\{(index|i|idx)\}' src/` on any list that can reorder, filter, or accept inserts. Replace index keys with stable data ids.
+      2. **Verify `React.memo` usage.** For each `memo()` call, check that all props are either primitives, stable ids, `useMemo`/`useCallback` results, or hoisted constants. Inline `{...}`, `[...]`, or `() => ...` props defeat memo.
+      3. **Check Context Provider values.** Run `grep -rnE '<[A-Z][A-Za-z]*\.Provider value=\{\{' src/` — inline-object Provider values force every consumer to re-render. Wrap in `useMemo` or use stable references.
+      4. **Profile unexpected re-renders.** Use React DevTools Profiler "Highlight updates" overlay. Record a stable interaction and confirm memoized subtrees do not flash.
+      5. **Stabilize event handlers.** Any callback passed to a memoized child should use `useCallback` or be hoisted.
+      6. **Review key-as-state-reset.** For `key={recordId}`-style patterns, verify a comment explains the intent to prevent confusion with list keys.

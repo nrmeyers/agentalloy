@@ -16,6 +16,7 @@ for use by ``wire-harness``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -142,6 +143,20 @@ def write_env(
         )
         raise SystemExit(1)
 
+    # Backup original .env BEFORE writing — if the write fails, the original
+    # must still be recoverable from the backup file (not just the in-memory
+    # copy, which would be lost if the process crashes between write and
+    # persisting to state).
+    _backup_path: Path | None = None
+    if original_content is not None:
+        _backup_path = env_path.with_suffix(env_path.suffix + ".bak")
+        _backup_path.write_text(original_content)
+        # Backup may contain secrets; restrict to owner-only on POSIX.
+        import os as _os
+
+        with __import__("contextlib").suppress(NotImplementedError, OSError):
+            _os.chmod(_backup_path, 0o600)
+
     defaults = _load_preset(preset)
 
     # Apply overrides on top of preset defaults
@@ -161,6 +176,11 @@ def write_env(
         if st.get("env_original_content") is None:
             st["env_original_content"] = original_content
             install_state.save_state(st)
+
+    # Clean up backup on success
+    if _backup_path is not None:
+        with contextlib.suppress(FileNotFoundError):
+            _backup_path.unlink()
 
     # `.env` may carry tokens or runtime URLs; restrict to owner-only on
     # POSIX. Windows ignores chmod and falls back to NTFS ACL defaults.

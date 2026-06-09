@@ -1556,15 +1556,13 @@ class TestContainerFlow:
             and c.args[0][1] == "run"
         ]
         assert len(run_calls) >= 1
-        packs_found = False
-        for call_args in run_calls:
-            for i, arg in enumerate(call_args):
-                if str(arg) == "-e" and i + 1 < len(call_args):
-                    env_val = str(call_args[i + 1])
-                    if env_val.startswith("AGENTIALLOY_PACKS="):
-                        assert "go" in env_val
-                        packs_found = True
-        assert packs_found, "AGENTIALLOY_PACKS env var with 'go' not found in container run"
+        # AGENTIALLOY_PACKS env var is no longer used — packs are baked into
+        # the entrypoint script via _generate_entrypoint(packs).  Verify the
+        # entrypoint path is mounted (it contains the packs list).
+        entrypoint_mounted = any(
+            "/app/entrypoint.sh" in str(arg) for call_args in run_calls for arg in call_args
+        )
+        assert entrypoint_mounted, "entrypoint.sh should be mounted in the container"
 
     def test_container_flow_non_interactive_no_packs_uses_defaults(
         self, tmp_state_dir: tuple[Path, Path]

@@ -1,6 +1,6 @@
-"""Openclaw runtime module — env_builder for Openclaw plugin harness.
+"""Openclaw runtime module — build_launch_env for Openclaw plugin harness.
 
-The env_builder configures the environment so openclaw routes API calls
+The build_launch_env configures the environment so openclaw routes API calls
 through the AgentAlloy proxy.
 """
 
@@ -22,18 +22,3 @@ def build_launch_env(port: int) -> dict[str, str]:
         "OPENAI_BASE_URL": f"http://localhost:{port}/v1",
         "OPENAI_API_KEY": "agentalloy",
     }
-
-
-def env_builder(port: int) -> dict[str, str]:
-    """Build environment dict for the openclaw subprocess.
-
-    Sets OPENAI_BASE_URL so openclaw routes API calls through the
-    AgentAlloy proxy.
-
-    Args:
-        port: The AgentAlloy proxy port.
-
-    Returns:
-        Environment dict with proxy configuration.
-    """
-    return build_launch_env(port)

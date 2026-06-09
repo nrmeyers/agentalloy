@@ -509,6 +509,16 @@ def _check_runtime_binary(runtime: str | None) -> dict[str, Any]:
             ),
         )
     binary = shutil.which(runtime)
+    if binary is None:
+        return _check(
+            "runtime_binary",
+            passed=False,
+            started=t0,
+            error=f"``{runtime}`` not found on PATH",
+            remediation=(
+                f"Install {runtime} and ensure it is on PATH:\\n  Verify:  {runtime} --version"
+            ),
+        )
     return _check(
         "runtime_binary",
         passed=True,

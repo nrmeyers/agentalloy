@@ -46,7 +46,7 @@ def test_query_params_from_full_contract(tmp_path: Path):
         )
         params = code_indexer_query_params(contract, tmp_path)
 
-    assert params.repo == "nrmeyers__agentalloy"
+    assert params.repo == "github.com/nrmeyers__agentalloy"
     assert params.semantic_q == "Add Auth Middleware"
     assert params.lexical_q == "NestJS JWT validation"
     assert "src/auth/**" in params.path_globs
@@ -78,7 +78,7 @@ def test_query_params_handles_non_github_remote(tmp_path: Path):
         )
         params = code_indexer_query_params(contract, tmp_path)
 
-    assert params.repo == "myorg__myrepo"
+    assert params.repo == "gitlab.com/myorg__myrepo"
 
 
 def test_query_params_falls_back_to_dir_name(tmp_path: Path):

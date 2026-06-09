@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -204,7 +204,7 @@ class TestInstallLocalPack:
         assert "768-dim" in result["error"]
 
     def test_outcome_classification(self, tmp_path: Path) -> None:
-        """`outcome` field in ingest_results distinguishes ingested / duplicate / failed."""
+        """Partial failure triggers rollback — no skills remain ingested."""
         # Three fake ingest results, one of each
         fake_results = [
             {
@@ -240,19 +240,29 @@ class TestInstallLocalPack:
                 {"skill_id": "c", "file": "c.yaml", "fragment_count": 2},
             ],
         )
-        # Stub embedding-dim check (no corpus to compare against in tmp)
+        # Stub embedding-dim check and LadybugStore for rollback
+        mock_store = MagicMock()
+        mock_store.open = MagicMock()
+        mock_store.close = MagicMock()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(ip, "_ingest_yaml", side_effect=fake_results),
             patch.object(ip.install_state, "load_state", return_value={}),
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
+            patch("agentalloy.config.get_settings") as mock_settings,
+            patch(
+                "agentalloy.install.subcommands.install_pack.LadybugStore", return_value=mock_store
+            ),
         ):
+            mock_settings.return_value.ladybug_db_path = str(tmp_path / "test.duck")
             result = ip.install_local_pack(tmp_path, root=tmp_path)
-        assert result["skills_ingested"] == 1
+        # Rollback: successfully ingested skills are deleted, so 0 remain
+        assert result["skills_ingested"] == 0
         assert result["skills_already_present"] == 1
         assert result["ingest_failures"] == 1
         assert result["action"] == "ingested_with_errors"
+        assert "rolled back" in (result.get("remediation") or "").lower()
 
     def test_embed_model_mismatch_soft_warns(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -291,6 +301,11 @@ class TestInstallLocalPack:
         _write_pack_manifest(
             tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 2}]
         )
+        # Create corpus dir + files so the Pattern E corpus verification passes.
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "skills.duck").touch()
+        (corpus_dir / "ladybug").mkdir()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(
@@ -307,6 +322,7 @@ class TestInstallLocalPack:
             patch.object(ip.install_state, "load_state", return_value={}),
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
         ):
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         assert result["action"] == "already_installed"

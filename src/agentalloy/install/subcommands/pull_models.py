@@ -203,6 +203,8 @@ def _register_ollama_ssh_key() -> tuple[bool, str | None]:
 
     Appends ~/.ollama/id_ed25519.pub to ~/.ollama/server_user.pub.
     Returns (ok, error_message).
+
+    Uses atomic temp-write + os.replace to prevent partial writes.
     """
     pub_path = Path.home() / ".ollama" / "id_ed25519.pub"
     server_pub = Path.home() / ".ollama" / "server_user.pub"
@@ -210,22 +212,33 @@ def _register_ollama_ssh_key() -> tuple[bool, str | None]:
     if not pub_path.exists():
         return False, f"Public key not found at {pub_path}. Generate a key first."
 
+    # Read the public key content once to avoid triple-read TOCTOU.
     try:
         pub_content = pub_path.read_text().strip()
-        if not pub_content:
-            return False, "Public key file is empty."
+    except OSError as exc:
+        return False, f"Failed to read public key: {exc}"
+
+    if not pub_content:
+        return False, "Public key file is empty."
+
+    try:
+        # Read existing content once.
+        existing = ""
+        if server_pub.exists():
+            try:
+                existing = server_pub.read_text()
+            except OSError:
+                existing = ""
 
         # Idempotent: skip if already registered.
-        if server_pub.exists():
-            existing = server_pub.read_text()
-            if pub_content in existing:
-                return True, None
+        if pub_content in existing:
+            return True, None
 
-        # Append to server_user.pub, preserving existing content.
-        if server_pub.exists() and server_pub.read_text().strip():
-            server_pub.write_text(server_pub.read_text() + "\n" + pub_content)
-        else:
-            server_pub.write_text(pub_content)
+        # Write new content atomically via temp file + os.replace.
+        combined = existing.rstrip("\n") + "\n" + pub_content if existing.strip() else pub_content
+        tmp_path = server_pub.with_suffix(".pub.tmp")
+        tmp_path.write_text(combined)
+        os.replace(tmp_path, server_pub)
         return True, None
     except OSError as exc:
         return False, f"Failed to register key: {exc}"

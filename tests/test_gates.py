@@ -7,7 +7,6 @@ from pathlib import Path
 from agentalloy.signals.gates import (
     aggregate,
     decide_transition,
-    evaluate_gates,
     evaluate_node,
 )
 from agentalloy.signals.predicates import PredicateContext, PredicateResult
@@ -168,16 +167,8 @@ def test_decide_transition_unknown_leaves_phase(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# evaluate_gates
+# evaluate_gates (REMOVED: dead code — LOW-3)
 # ---------------------------------------------------------------------------
-
-
-def test_evaluate_gates_returns_list(tmp_path: Path):
-    (tmp_path / "f.md").write_text("hi")
-    ctx = _ctx(tmp_path)
-    evals = evaluate_gates({"artifact_exists": {"path": "f.md"}}, ctx)
-    assert isinstance(evals, list)
-    assert evals[0].result == MET
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ picks up where this one stopped).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import os
 import platform
@@ -372,58 +373,92 @@ def reembed_fragments(
     ``embed_fn`` takes a content string and returns a raw (non-normalized)
     vector. The vector_store normalizes on insert. Injected rather than
     hard-wired to the LM client so tests can pass a fake.
+
+    Transactional: the entire batch is wrapped in a DuckDB transaction.
+    If any fragment fails to embed or insert, the whole batch is rolled back
+    so the caller can retry without leaving partial state.
     """
     stats = ReembedStats(discovered=len(fragments))
     now = int(time.time())
+    if not fragments:
+        return stats
 
-    for frag in fragments:
-        try:
-            vec = _embed_with_retry(embed_fn, frag.content)
-        except LMClientError as exc:
-            stats.failed += 1
-            stats.failures.append((frag.fragment_id, str(exc)))
-            logger.error("failed %s: %s", frag.fragment_id, exc)
-            continue
-        except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
-            stats.failed += 1
-            stats.failures.append((frag.fragment_id, f"unexpected: {exc}"))
-            logger.error("unexpected error on %s: %s", frag.fragment_id, exc)
-            continue
+    # Wrap the entire batch in a transaction for atomicity
+    vector_store.begin_transaction()
+    try:
+        for frag in fragments:
+            try:
+                vec = _embed_with_retry(embed_fn, frag.content)
+            except LMClientError as exc:
+                stats.failed += 1
+                stats.failures.append((frag.fragment_id, str(exc)))
+                logger.error("failed %s: %s", frag.fragment_id, exc)
+                # Roll back the entire batch on any embed failure
+                with contextlib.suppress(Exception):
+                    vector_store.rollback_transaction()
+                raise  # Re-raise to trigger top-level rollback
+            except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+                stats.failed += 1
+                stats.failures.append((frag.fragment_id, f"unexpected: {exc}"))
+                logger.error("unexpected error on %s: %s", frag.fragment_id, exc)
+                # Roll back the entire batch on any embed failure
+                with contextlib.suppress(Exception):
+                    vector_store.rollback_transaction()
+                raise  # Re-raise to trigger top-level rollback
 
-        try:
-            vector_store.insert_embeddings(
-                [
-                    FragmentEmbedding(
-                        fragment_id=frag.fragment_id,
-                        embedding=vec,
-                        skill_id=frag.skill_id,
-                        category=frag.category,
-                        fragment_type=frag.fragment_type,
-                        embedded_at=now,
-                        embedding_model=embedding_model,
-                        prose=frag.content,
-                    )
-                ]
-            )
-        except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
-            stats.failed += 1
-            stats.failures.append((frag.fragment_id, f"insert: {exc}"))
-            logger.error("insert failed for %s: %s", frag.fragment_id, exc)
-            continue
+            try:
+                vector_store.insert_embeddings(
+                    [
+                        FragmentEmbedding(
+                            fragment_id=frag.fragment_id,
+                            embedding=vec,
+                            skill_id=frag.skill_id,
+                            category=frag.category,
+                            fragment_type=frag.fragment_type,
+                            embedded_at=now,
+                            embedding_model=embedding_model,
+                            prose=frag.content,
+                        )
+                    ]
+                )
+            except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+                stats.failed += 1
+                stats.failures.append((frag.fragment_id, f"insert: {exc}"))
+                logger.error("insert failed for %s: %s", frag.fragment_id, exc)
+                # Roll back the entire batch on any insert failure
+                with contextlib.suppress(Exception):
+                    vector_store.rollback_transaction()
+                raise  # Re-raise to trigger top-level rollback
 
-        stats.embedded += 1
+            stats.embedded += 1
+            if progress_tty:
+                print(
+                    f"\r  embedded {stats.embedded}/{stats.discovered}",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            elif stats.embedded % 10 == 0:
+                logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
+
+        # All fragments processed — commit the batch
+        vector_store.commit_transaction()
+
+    except Exception as exc:
+        # Top-level error — rollback the entire batch
+        with contextlib.suppress(Exception):
+            vector_store.rollback_transaction()
+        logger.error(
+            "reembed batch failed after %d embedded, %d failed — rolled back: %s",
+            stats.embedded,
+            stats.failed,
+            exc,
+        )
+        raise
+
+    finally:
         if progress_tty:
-            print(
-                f"\r  embedded {stats.embedded}/{stats.discovered}",
-                end="",
-                file=sys.stderr,
-                flush=True,
-            )
-        elif stats.embedded % 10 == 0:
-            logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
-
-    if progress_tty:
-        print(file=sys.stderr)  # newline after progress
+            print(file=sys.stderr)  # newline after progress
     return stats
 
 
@@ -542,16 +577,29 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with LadybugStore(settings.ladybug_db_path) as store, open_or_create(duck_path) as vs:
             # --force: clear scope first so the primary-key constraint doesn't trip.
+            # Wrap in a transaction so rollback is possible if embedding fails.
             if args.force:
-                if args.skill_id:
-                    n = vs.delete_skill(args.skill_id)
-                    logger.info("--force: deleted %d existing embeddings for %s", n, args.skill_id)
-                else:
-                    # Full wipe: required when changing embedding models (dimension change
-                    # makes existing vectors incompatible with the new index).
-                    n = vs.count_embeddings()
-                    vs._conn.execute("DELETE FROM fragment_embeddings")  # pyright: ignore[reportPrivateUsage]
-                    logger.info("--force: deleted all %d existing embeddings for full reindex", n)
+                vs.begin_transaction()
+                try:
+                    if args.skill_id:
+                        n = vs.delete_skill(args.skill_id)
+                        logger.info(
+                            "--force: deleted %d existing embeddings for %s", n, args.skill_id
+                        )
+                    else:
+                        # Full wipe: required when changing embedding models (dimension change
+                        # makes existing vectors incompatible with the new index).
+                        n = vs.count_embeddings()
+                        vs._conn.execute("DELETE FROM fragment_embeddings")  # pyright: ignore[reportPrivateUsage]
+                        logger.info(
+                            "--force: deleted all %d existing embeddings for full reindex", n
+                        )
+                    vs.commit_transaction()
+                except Exception as exc:
+                    with contextlib.suppress(Exception):
+                        vs.rollback_transaction()
+                    logger.error("--force delete failed, rolled back: %s", exc)
+                    raise
 
             fragments = discover_unembedded_fragments(
                 store, vs, skill_id=args.skill_id, force=args.force

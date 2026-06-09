@@ -722,3 +722,72 @@ class TestAnthropicToOpenAIWithTools:
         )
         openai_req = _anthropic_to_openai(req)
         assert openai_req.stream is True
+
+    def test_system_content_blocks_merged_to_string(self) -> None:
+        """System as content-block array is merged into a single string.
+
+        Regression test for P1 #6: AnthropicContentBlock objects were
+        being checked with isinstance(block, dict), which always failed,
+        causing the system prompt to be lost.
+        """
+        from agentalloy.api.proxy_anthropic_models import AnthropicContentBlock
+
+        req = AnthropicRequest(
+            model="claude-3-opus",
+            max_tokens=1024,
+            system=[
+                AnthropicContentBlock(type="text", text="You are helpful. "),
+                AnthropicContentBlock(type="text", text="Be concise."),
+            ],
+            messages=[AnthropicMessage(role="user", content="Hello")],
+        )
+        openai_req = _anthropic_to_openai(req)
+        # System blocks merged into single string
+        assert openai_req.messages[0].role == "system"
+        assert openai_req.messages[0].content == "You are helpful. Be concise."
+
+    def test_system_content_blocks_with_non_text_skipped(self) -> None:
+        """Non-text content blocks in system are skipped, text blocks merged."""
+        from agentalloy.api.proxy_anthropic_models import AnthropicContentBlock
+
+        req = AnthropicRequest(
+            model="claude-3-opus",
+            max_tokens=1024,
+            system=[
+                AnthropicContentBlock(type="text", text="Instruction"),
+                AnthropicContentBlock(type="tool_use", id="t1", name="noop", input={}),
+                AnthropicContentBlock(type="text", text=" More"),
+            ],
+            messages=[AnthropicMessage(role="user", content="Hi")],
+        )
+        openai_req = _anthropic_to_openai(req)
+        assert openai_req.messages[0].role == "system"
+        assert openai_req.messages[0].content == "Instruction More"
+
+
+class TestOpenAItoAnthropicEmptyChoices:
+    """Regression tests for P1 #5: empty/null choices → proper error."""
+
+    def test_empty_choices_returns_error(self) -> None:
+        """Empty choices list returns error dict, not 200 with empty content."""
+        body: dict[str, Any] = {
+            "id": "chatcmpl-1",
+            "model": "gpt-4",
+            "choices": [],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        }
+        result = _openai_to_anthropic(body, "claude-3-opus")
+        assert "error" in result
+        assert result["error"]["type"] == "invalid_request_error"
+        assert result["error"]["message"] == "Upstream returned no choices"
+
+    def test_null_choices_returns_error(self) -> None:
+        """Missing choices key returns error dict."""
+        body: dict[str, Any] = {
+            "id": "chatcmpl-1",
+            "model": "gpt-4",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+        }
+        result = _openai_to_anthropic(body, "claude-3-opus")
+        assert "error" in result
+        assert result["error"]["type"] == "invalid_request_error"

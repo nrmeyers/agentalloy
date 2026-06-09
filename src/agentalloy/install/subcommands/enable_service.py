@@ -43,6 +43,8 @@ from typing import Any
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
+logger = __import__("logging").getLogger(__name__)
+
 SCHEMA_VERSION = 1
 
 # How long to poll /health after starting the container stack.
@@ -212,16 +214,47 @@ def _enable_native_linux(
     install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
 
     ollama_unit_written = False
+    ollama_enabled = False
     if preset != "radeon" and not _ollama_unit_exists():
         written = _write_ollama_unit(uv_bin)
         ollama_unit_written = written is not None
         if ollama_unit_written:
-            subprocess.run(
-                ["systemctl", "--user", "enable", "--now", "ollama.service"], check=False
+            result = subprocess.run(
+                ["systemctl", "--user", "enable", "--now", "ollama.service"],
+                capture_output=True,
+                text=True,
             )
+            if result.returncode == 0:
+                ollama_enabled = True
+            else:
+                logger.warning(
+                    "ollama.service enable failed (rc=%d): %s",
+                    result.returncode,
+                    (result.stderr or "").strip(),
+                )
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "--now", "agentalloy.service"], check=True)
+    result = subprocess.run(
+        ["systemctl", "--user", "enable", "--now", "agentalloy.service"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Roll back ollama enable if agentalloy enable failed.
+        if ollama_enabled:
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "disable", "--now", "ollama.service"],
+                    capture_output=True,
+                    text=True,
+                )
+                logger.warning("Rolled back ollama.service enable after agentalloy.service failure")
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"agentalloy.service enable failed (rc={result.returncode}): "
+            f"{(result.stderr or '').strip()}"
+        )
 
     if preset == "radeon":
         print(

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import signal
 import subprocess
@@ -129,6 +130,15 @@ def _run(args: argparse.Namespace) -> int:
     via = args.via  # "hook" or "proxy"
     no_start_server = args.no_start_server
     child_args = args.child_args
+    json_output = getattr(args, "json", False)
+
+    # Helper: route human-readable output to stderr in --json mode so stdout
+    # contains only JSON (machine-parseable).
+    def _out(msg: str) -> None:
+        if json_output:
+            print_rich_stderr(msg)
+        else:
+            print_rich(msg)
 
     # ------------------------------------------------------------------
     # 1. Validate harness
@@ -160,15 +170,15 @@ def _run(args: argparse.Namespace) -> int:
     port_owned = _port_owned_by_us(port, host=host)
 
     if existing_pid is not None:
-        print_rich(f"  Port {port}: server already running (pid {existing_pid})")
+        _out(f"  Port {port}: server already running (pid {existing_pid})")
     elif port_owned:
         # PID file says we own it but ss didn't find it — probably a race.
         # Try to connect.
         if server_proc.port_reachable(port, host=host):
-            print_rich(f"  Port {port}: server reachable (PID file owner)")
+            _out(f"  Port {port}: server reachable (PID file owner)")
             existing_pid = _read_pid_file()
         else:
-            print_rich(f"  Port {port}: PID file stale, server not running")
+            _out(f"  Port {port}: PID file stale, server not running")
             existing_pid = None
             _remove_pid_file()
 
@@ -204,7 +214,7 @@ def _run(args: argparse.Namespace) -> int:
     # ------------------------------------------------------------------
     # 5. Apply wiring
     # ------------------------------------------------------------------
-    print_rich(f"  Wiring harness '{harness}' via {via} ...")
+    _out(f"  Wiring harness '{harness}' via {via} ...")
 
     if via == "hook":
         # Hook wiring: use the legacy markdown-injection path
@@ -225,7 +235,7 @@ def _run(args: argparse.Namespace) -> int:
         )
 
     files_written = result.get("files_written", [])
-    print_rich(f"  Wired {len(files_written)} file(s)")
+    _out(f"  Wired {len(files_written)} file(s)")
 
     # ------------------------------------------------------------------
     # 6. Spawn child process
@@ -239,7 +249,7 @@ def _run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print_rich(f"  Spawning child: {' '.join(child_args)}")
+    _out(f"  Spawning child: {' '.join(child_args)}")
 
     # Build child environment: inherit parent env, but ensure the proxy
     # port is accessible. The wiring files already point to localhost:port.
@@ -263,7 +273,7 @@ def _run(args: argparse.Namespace) -> int:
         print_rich_stderr(f"       {e}")
         return 2
 
-    print_rich(f"  Child PID: {child_pid}")
+    _out(f"  Child PID: {child_pid}")
 
     # ------------------------------------------------------------------
     # 7. Set up signal handlers for teardown
@@ -281,7 +291,7 @@ def _run(args: argparse.Namespace) -> int:
     def _signal_handler(signum: int, _frame: Any) -> None:
         """Handle SIGINT/SIGTERM: kill child, teardown wiring, stop server."""
         sig_name = signal.Signals(signum).name
-        print_rich(f"\n  Received {sig_name}, tearing down ...")
+        _out(f"\n  Received {sig_name}, tearing down ...")
 
         # Kill child process group.
         with contextlib.suppress(ProcessLookupError, OSError):
@@ -297,7 +307,7 @@ def _run(args: argparse.Namespace) -> int:
         if via == "hook":
             # For hook wiring, we'd need to run unwire logic.
             # The unwire subcommand handles this.
-            print_rich("  Hook wiring teardown skipped (use unwire to clean up)")
+            _out("  Hook wiring teardown skipped (use unwire to clean up)")
 
         # Stop server if we started it.
         if server_started and existing_pid is not None:
@@ -305,7 +315,7 @@ def _run(args: argparse.Namespace) -> int:
                 server_proc.stop(existing_pid, timeout_s=5)
             _remove_pid_file()
 
-        print_rich("  Teardown complete.")
+        _out("  Teardown complete.")
         sys.exit(signum)
 
     # Register handlers for SIGINT and SIGTERM.
@@ -318,7 +328,7 @@ def _run(args: argparse.Namespace) -> int:
     # ------------------------------------------------------------------
     # 8. Teardown on normal exit
     # ------------------------------------------------------------------
-    print_rich(f"\n  Child exited with code {exit_code}, tearing down ...")
+    _out(f"\n  Child exited with code {exit_code}, tearing down ...")
 
     # Stop server if we started it.
     if server_started and existing_pid is not None:
@@ -326,7 +336,24 @@ def _run(args: argparse.Namespace) -> int:
             server_proc.stop(existing_pid, timeout_s=5)
         _remove_pid_file()
 
-    print_rich("  Teardown complete.")
+    _out("  Teardown complete.")
+
+    # ------------------------------------------------------------------
+    # 9. JSON output (if --json requested)
+    # ------------------------------------------------------------------
+    if json_output:
+        result = {
+            "action": "wrap_complete",
+            "harness": harness,
+            "port": port,
+            "via": via,
+            "child_pid": child_pid,
+            "server_started": server_started,
+            "child_exit_code": exit_code,
+            "files_written": files_written,
+        }
+        json.dump(result, sys.stdout, indent=2)
+        sys.stdout.write("\n")
 
     return exit_code
 
@@ -342,10 +369,12 @@ def add_parser(
             "then tears down on exit."
         ),
     )
+    # Optional flags must come before positional args when child_args uses REMAINDER
     p.add_argument(
-        "harness",
-        choices=sorted(VALID_HARNESSES),
-        help="Coding agent harness to wire.",
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output raw JSON instead of human-readable text.",
     )
     p.add_argument(
         "--port",
@@ -363,6 +392,11 @@ def add_parser(
         "--no-start-server",
         action="store_true",
         help="Do not start the server; expect it to be already running.",
+    )
+    p.add_argument(
+        "harness",
+        choices=sorted(VALID_HARNESSES),
+        help="Coding agent harness to wire.",
     )
     p.add_argument(
         "child_args",

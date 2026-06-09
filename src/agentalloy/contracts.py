@@ -348,10 +348,13 @@ def code_indexer_query_params(contract: Contract, project_root: Path) -> CodeInd
             cwd=project_root,
         )
         url = result.stdout.strip()
-        # github.com/owner/repo or git@github.com:owner/repo → owner__repo
-        m = re.search(r"[:/]([^/]+)/([^/]+?)(?:\.git)?$", url)
+        # github.com/owner/repo, git@github.com:owner/repo, or https://gitlab.com/owner/repo
+        # → hostname/owner__repo (preserves non-GitHub hostnames)
+        m = re.search(r"(?:https?://)?([^/:]+)/([^/]+)/([^/]+?)(?:\.git)?$", url)
+        if not m:
+            m = re.search(r"git@([^:]+):([^/]+)/([^/]+?)(?:\.git)?$", url)
         if m:
-            repo = f"{m.group(1)}__{m.group(2)}"
+            repo = f"{m.group(1)}/{m.group(2)}__{m.group(3)}"
     except Exception:
         pass
 

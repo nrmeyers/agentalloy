@@ -258,6 +258,20 @@ class VectorStore:
     def __exit__(self, *_: object) -> None:
         self.close()
 
+    # -- transactions --------------------------------------------------------
+
+    def begin_transaction(self) -> None:
+        """Begin a DuckDB transaction for batch operations."""
+        self._conn.execute("BEGIN TRANSACTION")
+
+    def commit_transaction(self) -> None:
+        """Commit the current transaction."""
+        self._conn.execute("COMMIT")
+
+    def rollback_transaction(self) -> None:
+        """Rollback the current transaction, undoing all writes since begin_transaction."""
+        self._conn.execute("ROLLBACK")
+
     # -- embeddings ----------------------------------------------------------
 
     def insert_embeddings(self, items: Iterable[FragmentEmbedding]) -> int:
@@ -541,7 +555,9 @@ class VectorStore:
                    system_skill_ids, assembly_tier, assembly_model,
                    retrieval_latency_ms, assembly_latency_ms, total_latency_ms,
                    status, error_code, response_size_chars, prompt_version,
-                   workflow_skill_ids
+                   workflow_skill_ids, event_type, pre_filter_matched,
+                   gates_met, gates_unmet, qwen_calls,
+                   contract_path, contract_tags, bm25_source
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -569,6 +585,14 @@ class VectorStore:
                 response_size_chars=r[16],
                 prompt_version=r[17],
                 workflow_skill_ids=list(r[18] or []),
+                event_type=r[19] or "compose",
+                pre_filter_matched=r[20],
+                gates_met=list(r[21] or []),
+                gates_unmet=list(r[22] or []),
+                qwen_calls=int(r[23]) if r[23] else 0,
+                contract_path=r[24],
+                contract_tags=list(r[25] or []),
+                bm25_source=r[26] or "rule-extracted",
             )
             for r in rows
         ]

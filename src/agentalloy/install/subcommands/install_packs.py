@@ -99,12 +99,14 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
         container_name,
         "sh",
         "-c",
-        # Touch then run so concurrent host-side callers see the lock
-        # immediately; remove on exit so the lock doesn't outlive the run.
-        # `set -e` ensures the rm happens via the EXIT trap even on failure.
+        # Atomic lock creation: `set -C` + `: >` fails if the file already
+        # exists (EEXIST), preventing two concurrent install-packs from both
+        # proceeding. `set -e` ensures the EXIT trap fires on any failure.
+        # `trap 'rm -f ...' EXIT` removes the lock when the shell exits.
         (
             "set -e; "
-            "touch /app/.install-packs-lock; "
+            "set -C; "
+            ": > /app/.install-packs-lock || exit 1; "
             "trap 'rm -f /app/.install-packs-lock' EXIT; "
             f"uv run agentalloy install-packs --packs {_shell_quote(packs)}"
             + (" --no-restart" if getattr(args, "no_restart", False) else "")
@@ -449,7 +451,13 @@ def _installed_pack_names() -> set[str]:
     except Exception:  # noqa: BLE001
         return set()
     packs = data.get("installed_packs") or []
-    return {str(p) for p in packs if isinstance(p, str)}
+    names: set[str] = set()
+    for p in packs:
+        if isinstance(p, str):
+            names.add(p)
+        elif isinstance(p, dict):
+            names.add(str(p.get("name", "")))
+    return names
 
 
 _TIER_ORDER: tuple[str, ...] = (
@@ -661,12 +669,16 @@ def _run_container_guard(
     )
 
     no_restart: bool = getattr(args, "no_restart", False)
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
 
     container_stopped: bool = False
     if is_in_container() and not no_restart:
         container_stopped = stop_service_in_container()
-        assert isinstance(container_stopped, bool), "stop must return bool"  # P10-R5
+        if not isinstance(container_stopped, bool):
+            raise TypeError(
+                f"stop_service_in_container must return bool, got {type(container_stopped).__name__}"
+            )
         if container_stopped:
             print(
                 "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
@@ -686,7 +698,10 @@ def _run_container_guard(
     finally:
         if container_stopped and not no_restart:
             ok: bool = restart_service_in_container()
-            assert isinstance(ok, bool), "restart must return bool"  # P10-R5
+            if not isinstance(ok, bool):
+                raise TypeError(
+                    f"restart_service_in_container must return bool, got {type(ok).__name__}"
+                )
             if not ok:
                 print(
                     "[agentalloy] WARNING: Failed to restart service after install-packs. "

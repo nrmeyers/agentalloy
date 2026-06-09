@@ -137,6 +137,9 @@ def _pull_image(
             _print(f"  [red]Failed to load image from tarball (exit {exc.returncode})[/red]")
             _print(f"  stderr: {(exc.stderr or b'').decode(errors='replace')[:200]}")
             return exc.returncode
+        except UnicodeDecodeError:
+            _print("  [red]Failed to decode image load output[/red]")
+            return 1
         except subprocess.TimeoutExpired:
             _print("  [red]Image load timed out after 300s[/red]")
             return 1
@@ -482,7 +485,7 @@ def _run_container(
     Docker uses a preceding ``docker rm -f agentalloy`` instead) with:
 
     * Volume mounts: ``agentalloy-data:/app/data`` and ``~/.ollama:/root/.ollama``
-    * Env vars: ``AGENTIALLOY_PACKS``, ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
+    * Env vars: ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
       ``DUCKDB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
 
@@ -503,7 +506,6 @@ def _run_container(
         Exit code from the runtime command.
     """
     env = {
-        "AGENTIALLOY_PACKS": packs,
         "ENTRYPOINT": str(entrypoint),
         "LADYBUG_DB_PATH": "/app/data/ladybug",
         "DUCKDB_PATH": "/app/data/skills.duck",
@@ -589,7 +591,7 @@ def _check_container_running(
             timeout=10,
         )
         return container_name in result.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
         return False
 
 
@@ -619,7 +621,7 @@ def _tail_container_logs(
         if result.returncode != 0:
             return ""
         return result.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
         return ""
 
 

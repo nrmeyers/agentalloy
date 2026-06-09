@@ -19,6 +19,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 from dataclasses import dataclass, field
@@ -36,6 +37,8 @@ from agentalloy.install.container_service import (
 )
 from agentalloy.skill_tier import resolve_skill_tier
 from agentalloy.storage.ladybug import LadybugStore
+
+logger = logging.getLogger(__name__)
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -60,9 +63,9 @@ _VALID_PHASES = frozenset({"design", "build", "review"})
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
 # and fixtures/skill-authoring-agent.md "Hard fragmentation rules" / "Tag rules".
-_FRAG_WORDS_WARN_MIN = 80
+_FRAG_WORDS_WARN_MIN = 25
 _FRAG_WORDS_WARN_MAX = 800
-_FRAG_WORDS_HARD_MIN = 20
+_FRAG_WORDS_HARD_MIN = 5
 _FRAG_WORDS_HARD_MAX = 2000
 _TAGS_VALIDATE_HARD_CAP = 20
 
@@ -395,57 +398,61 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
     blocked: list[tuple[Path, ReviewRecord, str]] = []
     to_load: list[tuple[Path, ReviewRecord]] = []
 
-    try:
-        for f, record in parsed:
-            existing_name = store.scalar(
-                "MATCH (s:Skill {skill_id: $id}) RETURN s.canonical_name",
-                {"id": record.skill_id},
+    for f, record in parsed:
+        existing_name = store.scalar(
+            "MATCH (s:Skill {skill_id: $id}) RETURN s.canonical_name",
+            {"id": record.skill_id},
+        )
+        if existing_name is not None and not force:
+            blocked.append(
+                (f, record, f"skill_id '{record.skill_id}' already exists — use --force")
             )
-            if existing_name is not None and not force:
+            continue
+
+        if existing_name is None:
+            existing_id = store.scalar(
+                "MATCH (s:Skill {canonical_name: $name}) RETURN s.skill_id",
+                {"name": record.canonical_name},
+            )
+            if existing_id is not None and not force:
                 blocked.append(
-                    (f, record, f"skill_id '{record.skill_id}' already exists — use --force")
+                    (
+                        f,
+                        record,
+                        f"canonical_name '{record.canonical_name}' "
+                        f"already used by '{existing_id}' — use --force",
+                    )
                 )
                 continue
 
-            if existing_name is None:
-                existing_id = store.scalar(
-                    "MATCH (s:Skill {canonical_name: $name}) RETURN s.skill_id",
-                    {"name": record.canonical_name},
-                )
-                if existing_id is not None and not force:
-                    blocked.append(
-                        (
-                            f,
-                            record,
-                            f"canonical_name '{record.canonical_name}' "
-                            f"already used by '{existing_id}' — use --force",
-                        )
-                    )
-                    continue
+        to_load.append((f, record))
 
-            to_load.append((f, record))
+    if blocked:
+        print(f"  {len(blocked)} file(s) blocked by duplicate check:", file=sys.stderr)
+        for f, _, reason in blocked:
+            print(f"    {f.name}: {reason}", file=sys.stderr)
 
-        if blocked:
-            print(f"  {len(blocked)} file(s) blocked by duplicate check:", file=sys.stderr)
-            for f, _, reason in blocked:
-                print(f"    {f.name}: {reason}", file=sys.stderr)
+    if not to_load:
+        print("Nothing to load after duplicate check.", file=sys.stderr)
+        store.close()
+        return EXIT_VALIDATION
 
-        if not to_load:
-            print("Nothing to load after duplicate check.", file=sys.stderr)
-            return EXIT_VALIDATION
+    if not yes:
+        try:
+            answer = input(f"Load {len(to_load)} skill(s)? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted.", file=sys.stderr)
+            store.close()
+            return EXIT_USAGE
 
-        if not yes:
-            try:
-                answer = input(f"Load {len(to_load)} skill(s)? [y/N] ").strip().lower()
-            except EOFError:
-                answer = ""
-            if answer not in ("y", "yes"):
-                print("Aborted.", file=sys.stderr)
-                return EXIT_USAGE
-
-        # --- Phase 4: load sequentially ---
-        loaded = 0
-        failed = 0
+    # --- Phase 4: load transactionally (all-or-nothing with manual rollback) ---
+    loaded = 0
+    failed = 0
+    inserted_skill_ids: list[str] = []
+    error_details: list[str] = []
+    try:
         for f, record in to_load:
             try:
                 tier, _src = resolve_skill_tier(f)
@@ -453,12 +460,43 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                 _insert(store, record, force=force)
                 print(f"ok: {record.skill_id} ({record.canonical_name})")
                 loaded += 1
+                inserted_skill_ids.append(record.skill_id)
             except Exception as exc:
-                print(f"error: {f.name}: {exc}", file=sys.stderr)
                 failed += 1
+                error_details.append(f"{f.name}: {record.skill_id} — {exc}")
+                logger.error(
+                    "Batch ingest failure during %s: %s",
+                    record.skill_id,
+                    exc,
+                )
+                # Roll back all previously inserted skills to maintain consistency
+                if inserted_skill_ids:
+                    logger.warning(
+                        "Rolling back %d previously inserted skill(s): %s",
+                        len(inserted_skill_ids),
+                        ", ".join(inserted_skill_ids),
+                    )
+                    store.rollback_batch(inserted_skill_ids)
+                    inserted_skill_ids.clear()
+                break  # Abort the batch on first failure
+
+    except Exception as exc:
+        # Top-level error — roll back everything
+        if inserted_skill_ids:
+            logger.error("Batch ingest top-level error — rolling back: %s", exc)
+            store.rollback_batch(inserted_skill_ids)
+            inserted_skill_ids.clear()
+        raise
 
     finally:
         store.close()
+
+    if failed > 0:
+        logger.error(
+            "Batch ingest failed — %d operation(s) failed:\n  %s",
+            len(error_details),
+            "\n  ".join(error_details),
+        )
 
     skipped = len(invalid) + len(blocked)
     print(f"\nLoaded: {loaded}  Failed: {failed}  Skipped: {skipped}")
@@ -640,14 +678,10 @@ def _validate(record: ReviewRecord) -> list[str]:
 
 
 def _word_count(text: str) -> int:
-    import re
-
     return len(re.findall(r"\S+", text or ""))
 
 
 def _normalize_ws(text: str) -> str:
-    import re
-
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 

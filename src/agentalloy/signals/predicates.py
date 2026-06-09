@@ -82,6 +82,14 @@ def eval_artifact_absent(args: dict[str, Any], ctx: PredicateContext) -> Predica
 
 
 def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """Check whether artifact files contain specified sections or regex patterns.
+
+    Semantics: ALL files matching the pattern must pass ALL checks.
+    - ``sections``: every listed section heading must appear in every file.
+    - ``pattern``: the regex must match in every file.
+    Returns NOT_MET if any file fails any check, MET if all files pass all checks,
+    UNKNOWN on IO failure.
+    """
     pattern = args.get("path", "")
     if not pattern:
         return PredicateResult.UNKNOWN
@@ -243,6 +251,11 @@ def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> Predica
 
 
 def eval_contract_has_tags(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """Check whether any contract in the phase directory has matching domain_tags.
+
+    Semantics: ANY contract file with ANY matching tag → MET.
+    Returns NOT_MET if no contract has any of the specified tags, UNKNOWN on IO failure.
+    """
     import yaml as _yaml
 
     phase = args.get("phase", ctx.current_phase)

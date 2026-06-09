@@ -1214,8 +1214,10 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
     if settings_path.exists():
         try:
             settings = json.loads(settings_path.read_text())
-        except json.JSONDecodeError:
-            settings = {}
+        except json.JSONDecodeError as exc:
+            print(f"ERROR: {settings_path} is not valid JSON", file=sys.stderr)
+            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
+            raise SystemExit(1) from exc
     else:
         settings = {}
 

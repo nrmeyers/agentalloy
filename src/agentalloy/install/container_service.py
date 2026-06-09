@@ -107,7 +107,8 @@ def stop_service_in_container(no_restart: bool = False) -> bool:
     When ``no_restart`` is True, this function is a no-op (returns False).
     Returns ``True`` if a process was found and stopped, ``False`` otherwise.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     if no_restart:
         return False
     # Sentinel check: if an ancestor process already owns the lifecycle, no-op.
@@ -129,6 +130,7 @@ def stop_service_in_container(no_restart: bool = False) -> bool:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         # Process already exited between scan and kill.
+        os.environ.pop("AGENTALLOY_DB_LOCK_HELD", None)
         return True
     except PermissionError:
         # Cannot signal — pop sentinel since no stop occurred.
@@ -176,7 +178,8 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
     When ``no_restart`` is True, this function is a no-op (returns True).
     Returns ``True`` if the service became healthy (or no-op), ``False`` otherwise.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     if no_restart:
         return True
     # T6: clear sentinel BEFORE env copy — spawned uvicorn must not inherit it.
@@ -227,25 +230,27 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
         return False
 
     # Poll /health endpoint up to 30 seconds.
+    # The `finally` block guarantees cleanup (terminate + kill) so the child
+    # process is never orphaned when the timeout fires.
     deadline = time.monotonic() + 30.0
-    while time.monotonic() < deadline:
-        if server_proc.port_reachable(port):
-            # Verify the process is still alive (not crashed immediately).
-            if proc.poll() is None:
+    try:
+        while time.monotonic() < deadline:
+            if server_proc.port_reachable(port):
+                # Verify the process is still alive (not crashed immediately).
+                if proc.poll() is not None:
+                    # Process died — fall through to cleanup.
+                    break
                 return True
-            # Process died — fall through to cleanup.
-            break
-        time.sleep(0.5)
-
-    # Cleanup on failure.
-    if started:
-        try:
-            assert proc is not None
-            proc.terminate()
-            proc.wait(timeout=5)
-        except (subprocess.TimeoutExpired, Exception):
-            with contextlib.suppress(OSError):
-                proc.kill()
+            time.sleep(0.5)
+    finally:
+        # Always clean up the child process to prevent orphans.
+        if started:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except (subprocess.TimeoutExpired, Exception):
+                with contextlib.suppress(OSError):
+                    proc.kill()
     return False
 
 
@@ -272,10 +277,6 @@ def test_kuzu_lock_released() -> bool:
         ladybug_path = install_state.user_data_dir() / "ladybug"
 
     assert ladybug_path is not None, "ladybug_path must resolve to a non-None Path"  # P10-R5
-
-    if not ladybug_path.is_dir():
-        # No database yet — not locked.
-        return True
 
     max_retries = 10  # P10-R2: 10 iterations × 0.5s = 5s max wait
     retry_interval = 0.5

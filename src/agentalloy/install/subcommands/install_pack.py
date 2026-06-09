@@ -18,6 +18,7 @@ deferred — flagged in the install spec's open questions.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -37,6 +38,9 @@ import yaml as _yaml
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.storage.ladybug import LadybugStore
+
+logger = __import__("logging").getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
@@ -175,7 +179,8 @@ def _ingest_yaml(
     True. Defense-in-depth alongside the AGENTALLOY_DB_LOCK_HELD sentinel:
     if a future caller adds ``env={}`` to subprocess.run(), the flag still fires.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
@@ -192,13 +197,32 @@ def _ingest_yaml(
     if no_restart:
         cmd.append("--no-restart")
 
-    result = subprocess.run(  # noqa: S603 — fixed args, no shell
-        cmd,
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 — fixed args, no shell
+            cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        # Clean up any leftover processes from the timed-out ingest run.
+        import contextlib as _contextlib
+
+        with _contextlib.suppress(FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            subprocess.run(
+                ["pkill", "-f", f"agentalloy.ingest.*{yaml_path.name}"],
+                capture_output=True,
+                timeout=5,
+            )
+        logger.error("ingest subprocess timed out after 120s for %s", yaml_path.name)
+        return {
+            "yaml": yaml_path.name,
+            "exit_code": -1,
+            "outcome": "failed",
+            "stdout_tail": "",
+            "stderr_tail": "ingest subprocess timed out after 120s",
+        }
     rc = result.returncode
     return {
         "yaml": yaml_path.name,
@@ -358,7 +382,8 @@ def install_local_pack(
     (e.g. ``_run_container_guard()`` in install-packs) rather than each
     individual ingest subprocess.
     """
-    assert isinstance(no_restart, bool), "no_restart must be bool"  # P10-R5
+    if not isinstance(no_restart, bool):
+        raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     t0 = time.monotonic()
     pack_dir = pack_dir.resolve()
 
@@ -401,8 +426,90 @@ def install_local_pack(
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
+    if failed:
+        # Partial failure — roll back ingested skills and clean up state.
+        # Extract skill_ids from the YAML files to identify what to delete.
+        failed_yaml_names = {f["yaml"] for f in failed}
+        # Collect skill_ids that were successfully ingested
+        ingested_skill_ids: list[str] = []
+        for r in ingest_results:
+            if r["outcome"] == "ingested" and r["yaml"] not in failed_yaml_names:
+                # Extract skill_id from the YAML file
+                yaml_entry = next(
+                    (
+                        e
+                        for e in skills_entries
+                        if pack_dir / str(e["file"]) == pack_dir / r["yaml"]
+                    ),
+                    None,
+                )
+                if yaml_entry:
+                    ingested_skill_ids.append(str(yaml_entry.get("skill_id", "")))
+
+        # Roll back ingested skills from DB
+        if ingested_skill_ids:
+            try:
+                settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
+                store = LadybugStore(settings.ladybug_db_path)
+                try:
+                    store.open()
+                    for sid in ingested_skill_ids:
+                        if sid:
+                            store.delete_skill(sid)
+                            logger.info("rollback: deleted ingested skill %s", sid)
+                    logger.warning(
+                        "install_local_pack: rolled back %d ingested skill(s) due to partial failure",
+                        len(ingested_skill_ids),
+                    )
+                finally:
+                    store.close()
+            except Exception as exc:
+                logger.error("rollback failed for local pack %s: %s", name, exc)
+
+        # Clean up state — don't record this pack as installed
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "ingested_with_errors",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "skills_ingested": 0,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_results": ingest_results,
+            "ingest_failures": len(failed),
+            "remediation": (
+                "Batch install failed — rolled back all ingested skills. "
+                "Fix the failures and re-run `agentalloy install-pack <path>`."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
+
+    # Verify corpus files were actually created (Pattern E fix).
+    # Must happen BEFORE saving install state so partial installs don't
+    # leave the pack recorded as installed.
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not duck_path.exists() or not ladybug_path.exists():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "corpus_verification_failed",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "error": (
+                f"Corpus files missing after ingest: "
+                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+            ),
+            "remediation": (
+                "Re-run `agentalloy seed-corpus` to initialize the corpus, "
+                "then re-install the pack."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
     packs.append(
         {
             "name": name,
@@ -415,7 +522,7 @@ def install_local_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
-            "ingest_failures": len(failed),
+            "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
     )
@@ -423,9 +530,7 @@ def install_local_pack(
     install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
     install_state.save_state(state, root)
 
-    if failed:
-        action = "ingested_with_errors"
-    elif new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
+    if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
     else:
         action = "ingested"
@@ -623,7 +728,91 @@ def install_pack(
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
-    # 5. Record in install state
+    if failed:
+        # Partial failure — roll back ingested skills and clean up copied files.
+        ingested_skill_ids: list[str] = []
+        for r in ingest_results:
+            if r["outcome"] == "ingested":
+                # Try to extract skill_id from the YAML file
+                try:
+                    data = _yaml.safe_load((pending_dir / r["yaml"]).read_text()) or {}
+                    sid = str(data.get("skill_id", ""))
+                    if sid:
+                        ingested_skill_ids.append(sid)
+                except Exception:
+                    pass
+
+        # Roll back ingested skills from DB
+        if ingested_skill_ids:
+            try:
+                settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
+                store = LadybugStore(settings.ladybug_db_path)
+                try:
+                    store.open()
+                    for sid in ingested_skill_ids:
+                        if sid:
+                            store.delete_skill(sid)
+                            logger.info("rollback: deleted ingested skill %s", sid)
+                    logger.warning(
+                        "install_pack: rolled back %d ingested skill(s) due to partial failure",
+                        len(ingested_skill_ids),
+                    )
+                finally:
+                    store.close()
+            except Exception as exc:
+                logger.error("rollback failed for pack %s: %s", name, exc)
+
+        # Clean up copied YAML files from pending-review
+        for r in ingest_results:
+            if r["outcome"] == "ingested":
+                yaml_path = pending_dir / r["yaml"]
+                with contextlib.suppress(OSError):
+                    yaml_path.unlink(missing_ok=True)
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "ingested_with_errors",
+            "pack": name,
+            "manifest_url": url,
+            "manifest_sha256": expected_sha,
+            "yaml_files": copied,
+            "skills_ingested": 0,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_results": ingest_results,
+            "ingest_failures": len(failed),
+            "remediation": (
+                "Batch install failed — rolled back all ingested skills. "
+                "Fix the failures and re-run `agentalloy install-pack <name>`."
+            ),
+            "duration_ms": duration_ms,
+        }
+
+    # 5. Verify corpus files were actually created (Pattern E fix).
+    # Must happen BEFORE saving install state so partial installs don't
+    # leave the pack recorded as installed.
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not duck_path.exists() or not ladybug_path.exists():
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "corpus_verification_failed",
+            "pack": name,
+            "manifest_url": url,
+            "error": (
+                f"Corpus files missing after ingest: "
+                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+            ),
+            "remediation": (
+                "Re-run `agentalloy seed-corpus` to initialize the corpus, "
+                "then re-install the pack."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
+    # 6. Record in install state (only on full success)
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
     packs.append(
@@ -635,7 +824,7 @@ def install_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
-            "ingest_failures": len(failed),
+            "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
     )
@@ -643,9 +832,7 @@ def install_pack(
     install_state.record_step(state, STEP_NAME, extra={"pack": name})
     install_state.save_state(state, root)
 
-    if failed:
-        action = "ingested_with_errors"
-    elif new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
+    if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
     else:
         action = "ingested"

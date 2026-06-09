@@ -353,3 +353,74 @@ def test_bm25_hit_has_positive_score(store: VectorStore) -> None:
     assert len(hits) == 1
     assert isinstance(hits[0], BM25Hit)
     assert hits[0].score > 0
+
+
+def test_query_traces_returns_all_27_fields(store: VectorStore) -> None:
+    """Regression test for P1 #3: query_traces must return all 27 columns.
+
+    The INSERT writes 27 columns but the old SELECT only fetched 19,
+    leaving event_type, pre_filter_matched, gates_met, gates_unmet,
+    qwen_calls, contract_path, contract_tags, and bm25_source as NULL.
+    """
+    trace = CompositionTrace(
+        trace_id="trace-full",
+        request_ts=int(time.time()),
+        phase="build",
+        task_prompt="full trace test",
+        status="ok",
+        correlation_id="corr-1",
+        category="engineering",
+        selected_fragment_ids=["frag-0"],
+        source_skill_ids=["skill-a"],
+        system_skill_ids=["sys-gov"],
+        assembly_tier="tier2",
+        assembly_model="qwen/qwen2.5-coder-14b",
+        retrieval_latency_ms=50,
+        assembly_latency_ms=200,
+        total_latency_ms=250,
+        error_code=None,
+        response_size_chars=1024,
+        prompt_version="v1.0",
+        workflow_skill_ids=["wf-1"],
+        event_type="compose",
+        pre_filter_matched="prompt_keyword",
+        gates_met=["test_passed"],
+        gates_unmet=["lint_clean"],
+        qwen_calls=3,
+        contract_path="/contracts/test.yaml",
+        contract_tags=["tag1", "tag2"],
+        bm25_source="contract",
+    )
+    store.record_composition_trace(trace)
+    assert store.count_traces() == 1
+
+    results = store.query_traces(limit=10, offset=0)
+    assert len(results) == 1
+    r = results[0]
+    # Verify all 27 fields round-trip correctly
+    assert r.trace_id == "trace-full"
+    assert r.correlation_id == "corr-1"
+    assert r.phase == "build"
+    assert r.category == "engineering"
+    assert r.task_prompt == "full trace test"
+    assert r.selected_fragment_ids == ["frag-0"]
+    assert r.source_skill_ids == ["skill-a"]
+    assert r.system_skill_ids == ["sys-gov"]
+    assert r.assembly_tier == "tier2"
+    assert r.assembly_model == "qwen/qwen2.5-coder-14b"
+    assert r.retrieval_latency_ms == 50
+    assert r.assembly_latency_ms == 200
+    assert r.total_latency_ms == 250
+    assert r.status == "ok"
+    assert r.error_code is None
+    assert r.response_size_chars == 1024
+    assert r.prompt_version == "v1.0"
+    assert r.workflow_skill_ids == ["wf-1"]
+    assert r.event_type == "compose"
+    assert r.pre_filter_matched == "prompt_keyword"
+    assert r.gates_met == ["test_passed"]
+    assert r.gates_unmet == ["lint_clean"]
+    assert r.qwen_calls == 3
+    assert r.contract_path == "/contracts/test.yaml"
+    assert r.contract_tags == ["tag1", "tag2"]
+    assert r.bm25_source == "contract"

@@ -665,7 +665,17 @@ def _reset_skill(args: argparse.Namespace) -> int:
         print(f"  No override found for '{name}' — nothing to reset.")
         return 0
 
-    if not yes and sys.stdin.isatty():
+    if not yes and not sys.stdin.isatty():
+        print(
+            f"  [error] Cannot delete override for '{name}' without --yes flag "
+            "when stdin is not a TTY.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if yes or not sys.stdin.isatty():
+        pass  # --yes provided or non-interactive: skip confirmation
+    else:
         confirm = input(f"  Delete override for '{name}'? (yes/n): ").strip()
         if confirm.lower() != "yes":
             print("  Cancelled.")

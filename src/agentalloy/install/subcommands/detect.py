@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import os
 import platform
 import re
@@ -245,7 +246,7 @@ def _detect_gpu_linux() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             for i, line in enumerate(mem.strip().splitlines()):
                 if i < len(discrete):
                     with contextlib.suppress(ValueError):
-                        discrete[i]["vram_gb"] = round(int(line.strip()) / 1024)
+                        discrete[i]["vram_gb"] = math.ceil(int(line.strip()) / 1024)
 
     # lspci for anything else. Classify discrete vs. integrated by model
     # signature so an AMD Radeon RX or Intel Arc dGPU isn't silently
