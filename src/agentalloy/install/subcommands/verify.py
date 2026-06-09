@@ -738,7 +738,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     env = _read_env_values(install_state.user_config_dir())
 
     embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:11436")
-    embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "embeddinggemma")
+    embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
     user_corpus = install_state.corpus_dir()
     duck_path = env.get("DUCKDB_PATH", str(user_corpus / "skills.duck"))
     ladybug_path = env.get("LADYBUG_DB_PATH", str(user_corpus / "ladybug"))

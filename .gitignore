@@ -97,3 +97,6 @@ docs/specs/
 docs/design/
 docs/tests/
 docs/reviews/
+
+# Serena MCP tooling state
+.serena/
