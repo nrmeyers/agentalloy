@@ -32,13 +32,15 @@ def get_active_skills(
     from agentalloy.storage.ladybug import LadybugStore  # noqa: F401 — breaks circular import
     _run_consistency_guard(store, skill_class=skill_class)
 
+    params: dict[str, Any] = {}
     filters = "WHERE v.status = 'active' AND s.deprecated = false"
     if skill_class is not None:
         if isinstance(skill_class, tuple):
-            list_literal = "[" + ", ".join(f"'{v}'" for v in skill_class) + "]"
-            filters += f" AND s.skill_class IN {list_literal}"
+            params["skill_class"] = list(skill_class)
+            filters += " AND s.skill_class IN $skill_class"
         else:
-            filters += f" AND s.skill_class = '{skill_class}'"
+            params["skill_class"] = skill_class
+            filters += " AND s.skill_class = $skill_class"
 
     cypher = f"""
     MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion)
@@ -48,7 +50,7 @@ def get_active_skills(
            v.version_id, s.tier
     ORDER BY s.skill_id
     """
-    return [_row_to_active_skill(row) for row in store.execute(cypher)]
+    return [_row_to_active_skill(row) for row in store.execute(cypher, params)]
 
 
 def get_deprecated_skill_ids(store: LadybugStore) -> list[str]:
@@ -94,10 +96,11 @@ def get_active_fragments(
     filters = ["v.status = 'active'", "s.deprecated = false"]
     if skill_class is not None:
         if isinstance(skill_class, tuple):
-            list_literal = "[" + ", ".join(f"'{v}'" for v in skill_class) + "]"
-            filters.append(f"s.skill_class IN {list_literal}")
+            params["skill_class"] = list(skill_class)
+            filters.append("s.skill_class IN $skill_class")
         else:
-            filters.append(f"s.skill_class = '{skill_class}'")
+            params["skill_class"] = skill_class
+            filters.append("s.skill_class = $skill_class")
     if categories is not None:
         params["categories"] = list(categories)
         filters.append("s.category IN $categories")
@@ -184,13 +187,15 @@ def _run_consistency_guard(
     For solo-scale corpora (tens of skills) this is cheap. If the corpus grows, move
     this to a startup-time check and a scheduled audit.
     """
+    params: dict[str, Any] = {}
     if skill_class is None:
         class_filter = ""
     elif isinstance(skill_class, tuple):
-        list_literal = "[" + ", ".join(f"'{v}'" for v in skill_class) + "]"
-        class_filter = f" WHERE s.skill_class IN {list_literal}"
+        params["skill_class"] = list(skill_class)
+        class_filter = " WHERE s.skill_class IN $skill_class"
     else:
-        class_filter = f" WHERE s.skill_class = '{skill_class}'"
+        params["skill_class"] = skill_class
+        class_filter = " WHERE s.skill_class = $skill_class"
 
     # (a) CURRENT_VERSION points at non-active version.
     cypher_a = f"""
@@ -201,7 +206,7 @@ def _run_consistency_guard(
     RETURN s.skill_id, v.status
     LIMIT 1
     """
-    rows = store.execute(cypher_a)
+    rows = store.execute(cypher_a, params)
     if rows:
         sid, status = rows[0][0], rows[0][1]
         raise InconsistentActiveVersion(sid, f"CURRENT_VERSION points at status={status!r} version")
@@ -215,7 +220,7 @@ def _run_consistency_guard(
     RETURN s.skill_id
     LIMIT 1
     """
-    rows = store.execute(cypher_b)
+    rows = store.execute(cypher_b, params)
     if rows:
         sid = rows[0][0]
         raise InconsistentActiveVersion(
