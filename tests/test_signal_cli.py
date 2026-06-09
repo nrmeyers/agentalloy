@@ -398,3 +398,50 @@ def test_check_returns_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert rc == 0
     data = json.loads(captured.getvalue())
     assert data["current_phase"] == "build"
+
+
+# ---------------------------------------------------------------------------
+# Hook event routing test (simulates agentalloy-signal.sh logic)
+# ---------------------------------------------------------------------------
+
+
+def test_hook_routing_ups_calls_evaluate_phase(tmp_path: Path):
+    """AGENTALLOY_HOOK_EVENT=UserPromptSubmit routes to evaluate-phase."""
+    _write_phase(tmp_path, "build")
+
+    with (
+        patch("agentalloy.install.subcommands.signal._evaluate_phase", return_value=0) as mock_ep,
+        patch(
+            "agentalloy.install.subcommands.signal._load_workflow_skill_for_phase",
+            return_value=None,
+        ),
+    ):
+        import argparse
+
+        from agentalloy.install.subcommands.signal import (
+            _dispatch,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        args = argparse.Namespace(
+            signal_cmd="evaluate-phase", prompt_file=None, tool=None, tool_path=None
+        )
+        rc = _dispatch(args)
+
+    assert rc == 0
+    mock_ep.assert_called_once()
+
+
+def test_hook_routing_pretool_calls_evaluate_system(tmp_path: Path):
+    """signal_cmd=evaluate-system routes to _evaluate_system."""
+    import argparse
+
+    from agentalloy.install.subcommands.signal import (
+        _dispatch,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    with patch("agentalloy.install.subcommands.signal._evaluate_system", return_value=0) as mock_es:
+        args = argparse.Namespace(signal_cmd="evaluate-system", tool="Bash")
+        rc = _dispatch(args)
+
+    assert rc == 0
+    mock_es.assert_called_once()

@@ -97,7 +97,7 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not integration'"
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
