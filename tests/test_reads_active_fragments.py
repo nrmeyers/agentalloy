@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from agentalloy.fixtures.loader import load_fixtures
+from agentalloy.ingest import (
+    FragmentRecord,
+    ReviewRecord,
+    _insert,  # type: ignore[reportPrivateUsage]
+)
 from agentalloy.reads import get_active_fragments, get_active_fragments_for_skill
+from agentalloy.reads import active as reads_active
 from agentalloy.storage.ladybug import LadybugStore
 
 
@@ -18,6 +24,56 @@ def store(tmp_path: Path) -> LadybugStore:
     s.migrate()
     load_fixtures(s)
     return s
+
+
+def _workflow_record() -> ReviewRecord:
+    return ReviewRecord(
+        skill_type="domain",
+        skill_id="test-workflow-skill",
+        canonical_name="Test Workflow Skill",
+        category="engineering",
+        skill_class="workflow",
+        domain_tags=["testing", "workflow"],
+        always_apply=False,
+        phase_scope=[],
+        category_scope=[],
+        author="test-author",
+        change_summary="initial",
+        raw_prose="Follow the workflow steps carefully.",
+        fragments=[
+            FragmentRecord(
+                sequence=1,
+                fragment_type="execution",
+                content="Step 1: plan. Step 2: execute.",
+            )
+        ],
+        tier=None,
+    )
+
+
+def _domain_record() -> ReviewRecord:
+    return ReviewRecord(
+        skill_type="domain",
+        skill_id="test-domain-skill",
+        canonical_name="Test Domain Skill",
+        category="engineering",
+        skill_class="domain",
+        domain_tags=["testing", "domain"],
+        always_apply=False,
+        phase_scope=[],
+        category_scope=[],
+        author="test-author",
+        change_summary="initial",
+        raw_prose="Apply domain knowledge.",
+        fragments=[
+            FragmentRecord(
+                sequence=1,
+                fragment_type="execution",
+                content="Apply the domain pattern here.",
+            )
+        ],
+        tier=None,
+    )
 
 
 def test_returns_fragments_with_full_context(store: LadybugStore) -> None:
@@ -103,3 +159,52 @@ def test_superseded_version_fragments_excluded(store: LadybugStore) -> None:
     )
     ids = {f.fragment_id for f in get_active_fragments(store)}
     assert "should-not-appear" not in ids
+
+
+# ---------------------------------------------------------------------------
+# Workflow skill_class tests (moved from test_retrieval_workflow_class.py)
+#
+# Note: test_domain_filter_excludes_workflow_fragments was dropped as a
+# duplicate of test_skill_class_filter_domain_only (same invariant,
+# different assertion style).
+# ---------------------------------------------------------------------------
+
+
+def test_workflow_fragment_included_in_tuple_query(store: LadybugStore) -> None:
+    """get_active_fragments(skill_class=("domain","workflow")) returns workflow fragments."""
+    _insert(store, _workflow_record(), force=False)
+
+    fragments = reads_active.get_active_fragments(store, skill_class=("domain", "workflow"))
+    fragment_skill_ids = [f.skill_id for f in fragments]
+    assert "test-workflow-skill" in fragment_skill_ids
+
+
+def test_workflow_fragment_included_in_string_query(store: LadybugStore) -> None:
+    """get_active_fragments(skill_class="workflow") returns workflow fragments."""
+    _insert(store, _workflow_record(), force=False)
+
+    fragments = reads_active.get_active_fragments(store, skill_class="workflow")
+    fragment_skill_ids = [f.skill_id for f in fragments]
+    assert "test-workflow-skill" in fragment_skill_ids
+
+
+def test_tuple_query_includes_both_classes(store: LadybugStore) -> None:
+    """get_active_fragments(skill_class=("domain","workflow")) returns both domain and workflow."""
+    _insert(store, _workflow_record(), force=False)
+    _insert(store, _domain_record(), force=False)
+
+    fragments = reads_active.get_active_fragments(store, skill_class=("domain", "workflow"))
+    fragment_skill_ids = {f.skill_id for f in fragments}
+    assert "test-workflow-skill" in fragment_skill_ids
+    assert "test-domain-skill" in fragment_skill_ids
+
+
+def test_domain_string_query_excludes_workflow(store: LadybugStore) -> None:
+    """get_active_fragments(skill_class="domain") only returns domain, not workflow."""
+    _insert(store, _workflow_record(), force=False)
+    _insert(store, _domain_record(), force=False)
+
+    fragments = reads_active.get_active_fragments(store, skill_class="domain")
+    fragment_skill_ids = {f.skill_id for f in fragments}
+    assert "test-domain-skill" in fragment_skill_ids
+    assert "test-workflow-skill" not in fragment_skill_ids
