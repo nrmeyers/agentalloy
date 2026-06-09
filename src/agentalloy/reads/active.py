@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
 
 if TYPE_CHECKING:
-    from agentalloy.storage.ladybug import LadybugStore
+    from agentalloy.storage.ladybug import LadybugStore  # pyright: ignore[reportUnusedImport]
 
 
 class InconsistentActiveVersion(Exception):
@@ -32,8 +32,6 @@ def get_active_skills(
     store: LadybugStore, *, skill_class: SkillClass | tuple[str, ...] | None = None
 ) -> list[ActiveSkill]:
     """Return every skill whose CURRENT_VERSION is active, after consistency checks."""
-    from agentalloy.storage.ladybug import LadybugStore  # noqa: F401 — breaks circular import
-
     _run_consistency_guard(store, skill_class=skill_class)
 
     params: dict[str, Any] = {}
