@@ -8,9 +8,12 @@ compose-time callers by construction: the underlying Cypher only traverses
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
+
+if TYPE_CHECKING:
+    from agentalloy.storage.ladybug import LadybugStore
 
 
 class InconsistentActiveVersion(Exception):
