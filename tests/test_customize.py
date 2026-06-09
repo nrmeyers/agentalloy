@@ -205,6 +205,66 @@ def test_customize_validate_rejects_domain(
 
 
 # ---------------------------------------------------------------------------
+# Workflow skill schema (Phase 2 additions to customize validator)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_workflow_requires_contract_template():
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    data: dict[str, Any] = {
+        "skill_id": "wf",
+        "skill_class": "workflow",
+        "raw_prose": "A" * 120,
+        "applies_to_phases": ["build"],
+        "exit_gates": {"all_of": []},
+        # missing contract_template
+    }
+    errors = _validate_skill_data(data, "wf")
+    assert any("contract_template" in e for e in errors)
+
+
+def test_workflow_schema_accepts_phase2_minimal_gates():
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    data: dict[str, Any] = {
+        "skill_id": "wf",
+        "skill_class": "workflow",
+        "raw_prose": "A" * 120,
+        "applies_to_phases": ["build"],
+        "exit_gates": {"all_of": [{"artifact_exists": {"path": "src/**"}}]},
+        "contract_template": "---\nphase: build\n---\n\nbody\n",
+    }
+    errors = _validate_skill_data(data, "wf")
+    assert errors == []
+
+
+def test_sdd_workflow_skills_pass_validation():
+    """All shipped sdd-*.yaml files must pass the Phase 2 validator."""
+    import yaml as _yaml
+
+    import agentalloy
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    packs_root = Path(agentalloy.__file__).resolve().parent / "_packs" / "sdd"
+    failures: list[str] = []
+    for f in sorted(packs_root.glob("sdd-*.yaml")):
+        data: dict[str, Any] = _yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        if data.get("skill_class") == "workflow":
+            errors = _validate_skill_data(data, f.stem)
+            if errors:
+                failures.append(f"{f.name}: {errors}")
+
+    assert not failures, "SDD workflow skill validation failures:\n" + "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
 # Three-layer list output includes provenance
 # ---------------------------------------------------------------------------
 
