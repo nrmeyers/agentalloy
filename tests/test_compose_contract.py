@@ -22,7 +22,6 @@ from agentalloy.api.compose_models import (
     LatencyBreakdown,
 )
 
-
 # ---------------------------------------------------------------------------
 # ComposeRequest.resolved_contract_tags
 # ---------------------------------------------------------------------------
