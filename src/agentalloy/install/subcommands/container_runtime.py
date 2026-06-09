@@ -478,7 +478,8 @@ def _run_container(
 ) -> int:
     """Run the agentalloy container with volumes, env, and port mapping.
 
-    Runs ``{runtime} run --replace -d --name agentalloy`` with:
+    Runs ``{runtime} run -d --name agentalloy`` with (``--replace`` for Podman only;
+    Docker uses a preceding ``docker rm -f agentalloy`` instead) with:
 
     * Volume mounts: ``agentalloy-data:/app/data`` and ``~/.ollama:/root/.ollama``
     * Env vars: ``AGENTIALLOY_PACKS``, ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
@@ -514,10 +515,20 @@ def _run_container(
 
     home = Path.home()
     image = image_ref or _DEFAULT_IMAGE
+
+    # `--replace` is a Podman extension; Docker does not support it.
+    # For Docker, explicitly remove any existing container before running.
+    if runtime == "docker":
+        subprocess.run(
+            [runtime, "rm", "-f", "agentalloy"],
+            check=False,
+            capture_output=True,
+        )
+
     cmd = [
         runtime,
         "run",
-        "--replace",
+        *( ["--replace"] if runtime != "docker" else [] ),
         "-d",
         # restart-on-boot parity with the retired compose path (which set
         # `restart: unless-stopped`); the single-container model is the
