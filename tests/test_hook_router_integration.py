@@ -563,7 +563,7 @@ class TestHookRouterToolNameFix:
     Moved from tests/test_hook_router_fixes.py.
     """
 
-    def test_evaluate_sync_does_not_read_request_class_attr(self):
+    def test_evaluate_sync_does_not_read_request_class_attr(self, reset_hook_cache):
         """_evaluate_sync should pass tool_name=None for UserPromptSubmit,
         not getattr(Request, 'tool_name', None)."""
         from agentalloy.api.hook_router import _evaluate_sync
@@ -592,7 +592,7 @@ class TestHookRouterToolNameFix:
             assert result["composed_block"] == ""
             assert result["should_compose"] is False
 
-    def test_pre_tool_use_passes_tool_name_from_body(self):
+    def test_pre_tool_use_passes_tool_name_from_body(self, reset_hook_cache):
         """The pre-tool-use endpoint extracts tool_name from request body."""
         # Build a minimal test app
         from fastapi import FastAPI
@@ -615,7 +615,7 @@ class TestHookRouterToolNameFix:
         assert data["status"] == "fresh"
         assert "system_skills" in data
 
-    def test_user_prompt_submit_passes_none_tool_name(self):
+    def test_user_prompt_submit_passes_none_tool_name(self, reset_hook_cache):
         """UserPromptSubmit endpoint should pass tool_name=None."""
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
