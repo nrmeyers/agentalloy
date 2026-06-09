@@ -74,6 +74,7 @@ def test_resolved_contract_tags_none_when_not_set():
     req = ComposeRequest(task="do thing", phase="build")
     assert req.resolved_contract_tags is None
 
+
 # -------- AC-1: request --------
 
 
