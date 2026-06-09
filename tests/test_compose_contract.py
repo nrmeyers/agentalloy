@@ -6,7 +6,11 @@ AC-2..4: response shapes exist for composed, empty, and 503 stages.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from agentalloy.api.compose_models import (
@@ -17,6 +21,59 @@ from agentalloy.api.compose_models import (
     ErrorResponse,
     LatencyBreakdown,
 )
+
+
+# ---------------------------------------------------------------------------
+# ComposeRequest.resolved_contract_tags
+# ---------------------------------------------------------------------------
+
+
+def _write_contract(path: Path, phase: str = "build", domain_tags: list[str] | None = None) -> Path:
+    fm: dict[str, Any] = {
+        "phase": phase,
+        "task_slug": "test-task",
+        "domain_tags": domain_tags or ["NestJS", "JWT"],
+        "scope": {"touches": [], "avoids": []},
+        "success_criteria": [],
+        "related_contracts": [],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{yaml.dump(fm)}---\n\nTest task.\n")
+    return path
+
+
+def test_resolved_contract_tags_from_explicit(tmp_path: Path):
+    from agentalloy.api.compose_models import ComposeRequest
+
+    req = ComposeRequest(task="do thing", phase="build", contract_tags=["A", "B"])
+    assert req.resolved_contract_tags == ["A", "B"]
+
+
+def test_resolved_contract_tags_from_path(tmp_path: Path):
+    from agentalloy.api.compose_models import ComposeRequest
+
+    # Must live under a project's .agentalloy/contracts/<phase>/ directory
+    # to pass the path-containment guard.
+    contract_dir = tmp_path / ".agentalloy" / "contracts" / "build"
+    f = _write_contract(contract_dir / "c.md", domain_tags=["NestJS", "JWT"])
+    req = ComposeRequest(task="do thing", phase="build", contract_path=str(f))
+    assert req.resolved_contract_tags == ["NestJS", "JWT"]
+
+
+def test_resolved_contract_tags_rejects_unsafe_path(tmp_path: Path):
+    """Paths outside any .agentalloy/contracts/ tree are silently rejected (returns None)."""
+    from agentalloy.api.compose_models import ComposeRequest
+
+    f = _write_contract(tmp_path / "loose-contract.md", domain_tags=["X"])
+    req = ComposeRequest(task="do thing", phase="build", contract_path=str(f))
+    assert req.resolved_contract_tags is None
+
+
+def test_resolved_contract_tags_none_when_not_set():
+    from agentalloy.api.compose_models import ComposeRequest
+
+    req = ComposeRequest(task="do thing", phase="build")
+    assert req.resolved_contract_tags is None
 
 # -------- AC-1: request --------
 
