@@ -2,10 +2,10 @@
 
 ## Summary
 
-- **Status:** P0 tier merged (PR #70). Pattern-A merged (PR #71). Pattern-B in progress.
+- **Status:** P0 tier merged (PR #70). Pattern-A merged (PR #71). Pattern-B merged (PR #72).
 - **Total tasks:** 91 (42 build + 42 review + 7 test suite checkpoints)
 - **Order: P0 → Pattern A-H → P1 confirmed → Test integrity → Concurrency → Config/corpus → Low-sev**
-- **PRs:** #70 (P0), #71 (Pattern-A)
+- **PRs:** #70 (P0), #71 (Pattern-A), #72 (Pattern-B)
 - **Branch:** `fix/p0-domain-tags-authoring-config`
 
 ## Tasks
@@ -20,8 +20,8 @@
 
 4. ✅ Pattern A — Sentinel BEGIN/END order never validated → shared replace_marked_block()
 5. ✅ Pattern A review — Verify fix applied to all call sites, shared helper tested
-6. ⏳ Pattern B — Silent JSON-decode → whole-file overwrite (cline, wire_harness, R-INSTALL-2)
-7. ⏳ Pattern B review — Verify all JSON decode sites handle errors without data loss
+6. ✅ Pattern B — Silent JSON-decode → whole-file overwrite (cline, wire_harness, R-INSTALL-2)
+7. ✅ Pattern B review — Verify all JSON decode sites handle errors without data loss
 8. ⏳ Pattern C — Non-transactional batch writes leave partial state (ingest.py:449, reembed/cli.py:393 & 553, install partial-failure paths)
 9. ⏳ Pattern C review — Verify transactional wrapping, rollback on failure
 10. ⏳ Pattern D — Streaming/upstream httpx exceptions unhandled → raw 500s (upstream.stream ctx mgrs, non-streaming Anthropic path)
