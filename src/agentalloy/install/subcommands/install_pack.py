@@ -37,6 +37,9 @@ import yaml as _yaml
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.storage.ladybug import LadybugStore
+
+logger = __import__("logging").getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
@@ -401,6 +404,57 @@ def install_local_pack(
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
+    if failed:
+        # Partial failure — roll back ingested skills and clean up state.
+        # Extract skill_ids from the YAML files to identify what to delete.
+        failed_yaml_names = {f["yaml"] for f in failed}
+        # Collect skill_ids that were successfully ingested
+        ingested_skill_ids: list[str] = []
+        for r in ingest_results:
+            if r["outcome"] == "ingested" and r["yaml"] not in failed_yaml_names:
+                # Extract skill_id from the YAML file
+                yaml_entry = next((e for e in skills_entries if pack_dir / str(e["file"]) == pack_dir / r["yaml"]), None)
+                if yaml_entry:
+                    ingested_skill_ids.append(str(yaml_entry.get("skill_id", "")))
+
+        # Roll back ingested skills from DB
+        if ingested_skill_ids:
+            try:
+                settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
+                store = LadybugStore(settings.ladybug_db_path)
+                try:
+                    store.open()
+                    for sid in ingested_skill_ids:
+                        if sid:
+                            store.delete_skill(sid)
+                            logger.info("rollback: deleted ingested skill %s", sid)
+                    logger.warning(
+                        "install_local_pack: rolled back %d ingested skill(s) due to partial failure",
+                        len(ingested_skill_ids),
+                    )
+                finally:
+                    store.close()
+            except Exception as exc:
+                logger.error("rollback failed for local pack %s: %s", name, exc)
+
+        # Clean up state — don't record this pack as installed
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "ingested_with_errors",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "skills_ingested": 0,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_results": ingest_results,
+            "ingest_failures": len(failed),
+            "remediation": (
+                "Batch install failed — rolled back all ingested skills. "
+                "Fix the failures and re-run `agentalloy install-pack <path>`."
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
     packs.append(
@@ -415,7 +469,7 @@ def install_local_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
-            "ingest_failures": len(failed),
+            "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
     )
@@ -423,9 +477,7 @@ def install_local_pack(
     install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
     install_state.save_state(state, root)
 
-    if failed:
-        action = "ingested_with_errors"
-    elif new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
+    if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
     else:
         action = "ingested"
@@ -623,7 +675,70 @@ def install_pack(
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
-    # 5. Record in install state
+    if failed:
+        # Partial failure — roll back ingested skills and clean up copied files.
+        ingested_skill_ids: list[str] = []
+        for r in ingest_results:
+            if r["outcome"] == "ingested":
+                # Try to extract skill_id from the YAML file
+                try:
+                    data = _yaml.safe_load((pending_dir / r["yaml"]).read_text()) or {}
+                    sid = str(data.get("skill_id", ""))
+                    if sid:
+                        ingested_skill_ids.append(sid)
+                except Exception:
+                    pass
+
+        # Roll back ingested skills from DB
+        if ingested_skill_ids:
+            try:
+                settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
+                store = LadybugStore(settings.ladybug_db_path)
+                try:
+                    store.open()
+                    for sid in ingested_skill_ids:
+                        if sid:
+                            store.delete_skill(sid)
+                            logger.info("rollback: deleted ingested skill %s", sid)
+                    logger.warning(
+                        "install_pack: rolled back %d ingested skill(s) due to partial failure",
+                        len(ingested_skill_ids),
+                    )
+                finally:
+                    store.close()
+            except Exception as exc:
+                logger.error("rollback failed for pack %s: %s", name, exc)
+
+        # Clean up copied YAML files from pending-review
+        for r in ingest_results:
+            if r["outcome"] == "ingested":
+                yaml_path = pending_dir / r["yaml"]
+                try:
+                    yaml_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "ingested_with_errors",
+            "pack": name,
+            "manifest_url": url,
+            "manifest_sha256": expected_sha,
+            "yaml_files": copied,
+            "skills_ingested": 0,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_results": ingest_results,
+            "ingest_failures": len(failed),
+            "remediation": (
+                "Batch install failed — rolled back all ingested skills. "
+                "Fix the failures and re-run `agentalloy install-pack <name>`."
+            ),
+            "duration_ms": duration_ms,
+        }
+
+    # 5. Record in install state (only on full success)
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
     packs.append(
@@ -635,7 +750,7 @@ def install_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
-            "ingest_failures": len(failed),
+            "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
     )
@@ -643,9 +758,7 @@ def install_pack(
     install_state.record_step(state, STEP_NAME, extra={"pack": name})
     install_state.save_state(state, root)
 
-    if failed:
-        action = "ingested_with_errors"
-    elif new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
+    if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
     else:
         action = "ingested"

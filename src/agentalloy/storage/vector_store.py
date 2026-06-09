@@ -258,6 +258,20 @@ class VectorStore:
     def __exit__(self, *_: object) -> None:
         self.close()
 
+    # -- transactions --------------------------------------------------------
+
+    def begin_transaction(self) -> None:
+        """Begin a DuckDB transaction for batch operations."""
+        self._conn.execute("BEGIN TRANSACTION")
+
+    def commit_transaction(self) -> None:
+        """Commit the current transaction."""
+        self._conn.execute("COMMIT")
+
+    def rollback_transaction(self) -> None:
+        """Rollback the current transaction, undoing all writes since begin_transaction."""
+        self._conn.execute("ROLLBACK")
+
     # -- embeddings ----------------------------------------------------------
 
     def insert_embeddings(self, items: Iterable[FragmentEmbedding]) -> int:

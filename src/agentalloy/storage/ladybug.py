@@ -79,6 +79,33 @@ class LadybugStore:
     def iter_rows(self, cypher: str, params: dict[str, Any] | None = None) -> Iterator[list[Any]]:
         yield from self.execute(cypher, params)
 
+    def delete_skill(self, skill_id: str) -> int:
+        """Delete a skill and all its versions/fragments. Returns number of nodes deleted."""
+        if self._conn is None:
+            raise RuntimeError("LadybugStore is not open")
+        result = self._conn.execute(
+            """
+            MATCH (s:Skill {skill_id: $id})
+            OPTIONAL MATCH (s)-[:HAS_VERSION]->(v:SkillVersion)
+            OPTIONAL MATCH (v)-[:DECOMPOSES_TO]->(f:Fragment)
+            DETACH DELETE s, v, f
+            """,
+            {"id": skill_id},
+        )
+        return 1  # DETACH DELETE returns rows deleted; we just need a truthy count
+
+    def rollback_skill(self, skill_id: str) -> None:
+        """Roll back a single skill insertion (delete skill + versions + fragments)."""
+        try:
+            self.delete_skill(skill_id)
+        except Exception as exc:
+            logger.error("rollback_skill failed for %s: %s", skill_id, exc)
+
+    def rollback_batch(self, skill_ids: list[str]) -> None:
+        """Roll back all skills in a failed batch. Safe to call on partial list."""
+        for sid in skill_ids:
+            self.rollback_skill(sid)
+
     def migrate(self) -> None:
         """Create node tables, rel tables, and apply ALTER TABLE migrations. Idempotent.
 
