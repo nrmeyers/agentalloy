@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
+from agentalloy.install.sentinel_utils import replace_marked_block
 from agentalloy.providers import REGISTRY
 
 SCHEMA_VERSION = 1
@@ -213,47 +214,11 @@ def _inject_sentinel_block(
 
     If sentinels already exist, replaces the content between them.
     If not, appends the full sentinel block at the end.
+
+    Delegates to the shared ``replace_marked_block`` helper which
+    validates BEGIN-before-END ordering and duplicate counts.
     """
-    nl = _detect_line_ending(existing) if existing else "\n"
-
-    full_block = f"{SENTINEL_BEGIN}{nl}{block}{nl}{SENTINEL_END}"
-
-    # Reject duplicate sentinel pairs. Multiple BEGIN/END pairs in a single
-    # file would mean modifying the first leaves a stranded second pair
-    # that uninstall can never clean up. Force the user to manually
-    # consolidate before we touch the file.
-    begin_count = existing.count(SENTINEL_BEGIN)
-    end_count = existing.count(SENTINEL_END)
-    if begin_count > 1 or end_count > 1:
-        print(
-            f"ERROR: target file contains {begin_count} BEGIN and {end_count} END "
-            f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
-            file=sys.stderr,
-        )
-        print(
-            "FIX:   Remove duplicate sentinel blocks manually, leaving at most one pair.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    if SENTINEL_BEGIN in existing and SENTINEL_END in existing:
-        # Replace existing block
-        begin_idx = existing.index(SENTINEL_BEGIN)
-        end_idx = existing.index(SENTINEL_END) + len(SENTINEL_END)
-        # Consume trailing newline if present
-        if end_idx < len(existing) and existing[end_idx] in ("\n", "\r"):
-            if existing[end_idx : end_idx + 2] == "\r\n":
-                end_idx += 2
-            else:
-                end_idx += 1
-        return existing[:begin_idx] + full_block + nl + existing[end_idx:]
-
-    # Append at end
-    if existing and not existing.endswith(nl):
-        existing += nl
-    if existing:
-        existing += nl  # blank line separator
-    return existing + full_block + nl
+    return replace_marked_block(existing, block, SENTINEL_BEGIN, SENTINEL_END)
 
 
 def _resolve_cursor_path(root: Path) -> tuple[str, bool]:
@@ -496,16 +461,10 @@ def _wire_legacy(
         begin_count = existing_content.count(SENTINEL_BEGIN)
         end_count = existing_content.count(SENTINEL_END)
         if begin_count > 1 or end_count > 1:
-            print(
-                f"ERROR: target file contains {begin_count} BEGIN and {end_count} END "
-                f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
-                file=sys.stderr,
+            raise ValueError(
+                f"target file contains {begin_count} BEGIN and {end_count} END "
+                f"agentalloy sentinels (expected at most 1 of each). Refusing to write."
             )
-            print(
-                "FIX:   Remove duplicate sentinel blocks manually, leaving at most one pair.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
     if harness == "claude-code":
         from agentalloy.install.subcommands.claude_code import (
             _wire_claude_code_hooks,

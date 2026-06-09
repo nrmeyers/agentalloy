@@ -31,7 +31,9 @@ def _set_phase(tmp_path: Path, phase: str) -> None:
     (phase_dir / "phase").write_text(f"phase: {phase}\n")
 
 
-def _skill(keywords: list[str], phases: list[str] | None = None, domain_tags: list[str] | None = None) -> dict[str, Any]:
+def _skill(
+    keywords: list[str], phases: list[str] | None = None, domain_tags: list[str] | None = None
+) -> dict[str, Any]:
     return {
         "signal_keywords": keywords,
         "exit_gates": {},

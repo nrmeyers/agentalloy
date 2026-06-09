@@ -7,9 +7,9 @@ pointing to the AgentAlloy proxy.
 from __future__ import annotations
 
 import hashlib
-import sys
 from pathlib import Path
 
+from agentalloy.install.sentinel_utils import replace_marked_block
 from agentalloy.providers.base import WireRecord
 
 _SENTINEL_BEGIN = "# <!-- BEGIN agentalloy install -->"
@@ -28,58 +28,13 @@ def _capture_original(path: Path) -> str | None:
     return None
 
 
-def _detect_line_ending(content: str) -> str:
-    """Detect whether file uses CRLF or LF."""
-    if "\r\n" in content:
-        return "\r\n"
-    return "\n"
-
-
 def _inject_sentinel_block(existing: str, block: str) -> str:
     """Insert or replace a sentinel-bounded block in existing content.
 
-    If sentinels already exist, replaces the content between them.
-    If not, appends the full sentinel block at the end.
-
-    The ``block`` argument should contain the INNER content (without
-    sentinel markers). This function wraps it with sentinels.
+    Delegates to the shared ``replace_marked_block`` helper which
+    validates BEGIN-before-END ordering and duplicate counts.
     """
-    nl = _detect_line_ending(existing) if existing else "\n"
-
-    full_block = f"{_SENTINEL_BEGIN}{nl}{block}{nl}{_SENTINEL_END}"
-
-    begin_count = existing.count(_SENTINEL_BEGIN)
-    end_count = existing.count(_SENTINEL_END)
-    if begin_count > 1 or end_count > 1:
-        print(
-            f"ERROR: target file contains {begin_count} BEGIN and {end_count} END "
-            f"agentalloy sentinels (expected at most 1 of each). Refusing to write.",
-            file=sys.stderr,
-        )
-        print(
-            "FIX:   Remove duplicate sentinel blocks manually, leaving at most one pair.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    if _SENTINEL_BEGIN in existing and _SENTINEL_END in existing:
-        # Replace existing block — find the FIRST pair of markers
-        begin_idx = existing.index(_SENTINEL_BEGIN)
-        end_idx = existing.index(_SENTINEL_END) + len(_SENTINEL_END)
-        # Consume trailing newline if present
-        if end_idx < len(existing) and existing[end_idx] in ("\n", "\r"):
-            if existing[end_idx : end_idx + 2] == "\r\n":
-                end_idx += 2
-            else:
-                end_idx += 1
-        return existing[:begin_idx] + full_block + nl + existing[end_idx:]
-
-    # Append at end
-    if existing and not existing.endswith(nl):
-        existing += nl
-    if existing:
-        existing += nl  # blank line separator
-    return existing + full_block + nl
+    return replace_marked_block(existing, block, _SENTINEL_BEGIN, _SENTINEL_END)
 
 
 def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[WireRecord]:

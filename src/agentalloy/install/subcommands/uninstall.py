@@ -608,8 +608,16 @@ def _remove_sentinel_block(text: str, begin: str, end: str) -> str:
     """Remove the sentinel block (inclusive) from text."""
     if begin not in text or end not in text:
         return text
+
     b = text.index(begin)
     e = text.index(end) + len(end)
+
+    # Validate order: if end appears before begin, there's no valid block
+    # to remove; return content unchanged.
+    end_marker_start = text.index(end)
+    if end_marker_start < b:
+        return text
+
     # Consume trailing newline
     if e < len(text) and text[e] == "\n":
         e += 1
