@@ -755,9 +755,7 @@ class TestAnthropicToOpenAIWithTools:
             max_tokens=1024,
             system=[
                 AnthropicContentBlock(type="text", text="Instruction"),
-                AnthropicContentBlock(
-                    type="tool_use", id="t1", name="noop", input={}
-                ),
+                AnthropicContentBlock(type="tool_use", id="t1", name="noop", input={}),
                 AnthropicContentBlock(type="text", text=" More"),
             ],
             messages=[AnthropicMessage(role="user", content="Hi")],

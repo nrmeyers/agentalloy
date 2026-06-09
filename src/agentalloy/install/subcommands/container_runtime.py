@@ -485,7 +485,7 @@ def _run_container(
     Docker uses a preceding ``docker rm -f agentalloy`` instead) with:
 
     * Volume mounts: ``agentalloy-data:/app/data`` and ``~/.ollama:/root/.ollama``
-    * Env vars: ``AGENTIALLOY_PACKS``, ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
+    * Env vars: ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
       ``DUCKDB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
 
@@ -506,7 +506,6 @@ def _run_container(
         Exit code from the runtime command.
     """
     env = {
-        "AGENTIALLOY_PACKS": packs,
         "ENTRYPOINT": str(entrypoint),
         "LADYBUG_DB_PATH": "/app/data/ladybug",
         "DUCKDB_PATH": "/app/data/skills.duck",

@@ -45,7 +45,7 @@ contract_template: |
   ## Implementation plan
 
   <outline key changes, files affected, and approach>
-phase_scope: [design]
+phase_scope: [build]
 category_scope: [process]
 author: navistone
 change_summary: initial build-phase workflow skill
