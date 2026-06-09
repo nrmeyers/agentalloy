@@ -528,7 +528,7 @@ def _run_container(
     cmd = [
         runtime,
         "run",
-        *( ["--replace"] if runtime != "docker" else [] ),
+        *(["--replace"] if runtime != "docker" else []),
         "-d",
         # restart-on-boot parity with the retired compose path (which set
         # `restart: unless-stopped`); the single-container model is the
