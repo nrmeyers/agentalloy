@@ -393,12 +393,18 @@ def reembed_fragments(
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, str(exc)))
                 logger.error("failed %s: %s", frag.fragment_id, exc)
-                continue
+                # Roll back the entire batch on any embed failure
+                with contextlib.suppress(Exception):
+                    vector_store.rollback_transaction()
+                raise  # Re-raise to trigger top-level rollback
             except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, f"unexpected: {exc}"))
                 logger.error("unexpected error on %s: %s", frag.fragment_id, exc)
-                continue
+                # Roll back the entire batch on any embed failure
+                with contextlib.suppress(Exception):
+                    vector_store.rollback_transaction()
+                raise  # Re-raise to trigger top-level rollback
 
             try:
                 vector_store.insert_embeddings(

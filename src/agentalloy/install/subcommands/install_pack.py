@@ -486,27 +486,10 @@ def install_local_pack(
 
     state = install_state.load_state(root)
     packs = state.get("installed_packs") or []
-    packs.append(
-        {
-            "name": name,
-            "source": f"local:{pack_dir}",
-            "version": str(manifest.get("version", "")),
-            "embed_model": str(manifest.get("embed_model", "")),
-            "embedding_dim": int(manifest.get("embedding_dim", 0)),
-            "yaml_files": [str(e["file"]) for e in skills_entries],
-            "skill_count": len(skills_entries),
-            "skills_ingested": new_count,
-            "skills_already_present": duplicate_count,
-            "skills_deprecated": deprecated_count,
-            "ingest_failures": 0,
-            "installed_at": int(time.time()),
-        }
-    )
-    state["installed_packs"] = packs
-    install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
-    install_state.save_state(state, root)
 
     # Verify corpus files were actually created (Pattern E fix).
+    # Must happen BEFORE saving install state so partial installs don't
+    # leave the pack recorded as installed.
     corpus = install_state.corpus_dir()
     duck_path = corpus / "skills.duck"
     ladybug_path = corpus / "ladybug"
@@ -526,6 +509,26 @@ def install_local_pack(
             ),
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
+
+    packs.append(
+        {
+            "name": name,
+            "source": f"local:{pack_dir}",
+            "version": str(manifest.get("version", "")),
+            "embed_model": str(manifest.get("embed_model", "")),
+            "embedding_dim": int(manifest.get("embedding_dim", 0)),
+            "yaml_files": [str(e["file"]) for e in skills_entries],
+            "skill_count": len(skills_entries),
+            "skills_ingested": new_count,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_failures": 0,
+            "installed_at": int(time.time()),
+        }
+    )
+    state["installed_packs"] = packs
+    install_state.record_step(state, STEP_NAME, extra={"pack": name, "source": "local"})
+    install_state.save_state(state, root)
 
     if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"
@@ -786,27 +789,9 @@ def install_pack(
             "duration_ms": duration_ms,
         }
 
-    # 5. Record in install state (only on full success)
-    state = install_state.load_state(root)
-    packs = state.get("installed_packs") or []
-    packs.append(
-        {
-            "name": name,
-            "manifest_url": url,
-            "manifest_sha256": expected_sha,
-            "yaml_files": copied,
-            "skills_ingested": new_count,
-            "skills_already_present": duplicate_count,
-            "skills_deprecated": deprecated_count,
-            "ingest_failures": 0,
-            "installed_at": int(time.time()),
-        }
-    )
-    state["installed_packs"] = packs
-    install_state.record_step(state, STEP_NAME, extra={"pack": name})
-    install_state.save_state(state, root)
-
-    # Verify corpus files were actually created (Pattern E fix).
+    # 5. Verify corpus files were actually created (Pattern E fix).
+    # Must happen BEFORE saving install state so partial installs don't
+    # leave the pack recorded as installed.
     corpus = install_state.corpus_dir()
     duck_path = corpus / "skills.duck"
     ladybug_path = corpus / "ladybug"
@@ -826,6 +811,26 @@ def install_pack(
             ),
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
+
+    # 6. Record in install state (only on full success)
+    state = install_state.load_state(root)
+    packs = state.get("installed_packs") or []
+    packs.append(
+        {
+            "name": name,
+            "manifest_url": url,
+            "manifest_sha256": expected_sha,
+            "yaml_files": copied,
+            "skills_ingested": new_count,
+            "skills_already_present": duplicate_count,
+            "skills_deprecated": deprecated_count,
+            "ingest_failures": 0,
+            "installed_at": int(time.time()),
+        }
+    )
+    state["installed_packs"] = packs
+    install_state.record_step(state, STEP_NAME, extra={"pack": name})
+    install_state.save_state(state, root)
 
     if new_count == 0 and duplicate_count > 0 and deprecated_count == 0:
         action = "already_installed"

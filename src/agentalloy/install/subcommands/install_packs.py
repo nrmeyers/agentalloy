@@ -451,7 +451,13 @@ def _installed_pack_names() -> set[str]:
     except Exception:  # noqa: BLE001
         return set()
     packs = data.get("installed_packs") or []
-    return {str(p) for p in packs if isinstance(p, (str, dict))}
+    names: set[str] = set()
+    for p in packs:
+        if isinstance(p, str):
+            names.add(p)
+        elif isinstance(p, dict):
+            names.add(str(p.get("name", "")))
+    return names
 
 
 _TIER_ORDER: tuple[str, ...] = (

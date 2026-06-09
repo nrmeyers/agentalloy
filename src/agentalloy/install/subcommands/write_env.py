@@ -151,6 +151,11 @@ def write_env(
     if original_content is not None:
         _backup_path = env_path.with_suffix(env_path.suffix + ".bak")
         _backup_path.write_text(original_content)
+        # Backup may contain secrets; restrict to owner-only on POSIX.
+        import os as _os
+
+        with __import__("contextlib").suppress(NotImplementedError, OSError):
+            _os.chmod(_backup_path, 0o600)
 
     defaults = _load_preset(preset)
 

@@ -298,7 +298,7 @@ def _start_ollama(model: str, args: argparse.Namespace) -> int:
             print(
                 f"WARN: Ollama is running on port {OLLAMA_EMBED_PORT} but model "
                 f"'{model}' was not found in loaded models. "
-                "Run `ollama pull {model}` to download it.",
+                f"Run `ollama pull {model}` to download it.",
                 file=sys.stderr,
             )
             # Don't fail — the model may be pulled separately; just warn.
