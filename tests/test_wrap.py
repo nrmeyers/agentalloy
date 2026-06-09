@@ -272,18 +272,23 @@ class TestRun:
 
     def test_no_child_args_returns_error(self, tmp_state_dir: tuple[Path, Path]):
         """Wrap with no child args should return exit code 1."""
-        with patch(
-            "agentalloy.install.subcommands.wrap.server_proc.find_listening_pid",
-            return_value=None,
-        ), patch(
-            "agentalloy.install.subcommands.wrap.server_proc.start_background",
-            return_value=12345,
-        ), patch(
-            "agentalloy.install.subcommands.wrap.server_proc.wait_until_listening",
-            return_value=True,
-        ), patch(
-            "agentalloy.install.subcommands.wrap.wire_harness",
-            return_value={"files_written": []},
+        with (
+            patch(
+                "agentalloy.install.subcommands.wrap.server_proc.find_listening_pid",
+                return_value=None,
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap.server_proc.start_background",
+                return_value=12345,
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap.server_proc.wait_until_listening",
+                return_value=True,
+            ),
+            patch(
+                "agentalloy.install.subcommands.wrap.wire_harness",
+                return_value={"files_written": []},
+            ),
         ):
             args = self._make_args(child_args=[])
             rc = _run(args)
