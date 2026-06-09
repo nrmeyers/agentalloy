@@ -117,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m agentalloy.install",
         description="AgentAlloy installer CLI.",
     )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        default=False,
+        help="Suppress non-error output (silent mode).",
+    )
     subparsers = parser.add_subparsers(dest="subcommand")
     for mod in _SUBCOMMANDS:
         mod.add_parser(subparsers)

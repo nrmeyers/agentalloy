@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import signal
 import subprocess
@@ -129,6 +130,7 @@ def _run(args: argparse.Namespace) -> int:
     via = args.via  # "hook" or "proxy"
     no_start_server = args.no_start_server
     child_args = args.child_args
+    json_output = getattr(args, "json", False)
 
     # ------------------------------------------------------------------
     # 1. Validate harness
@@ -328,6 +330,23 @@ def _run(args: argparse.Namespace) -> int:
 
     print_rich("  Teardown complete.")
 
+    # ------------------------------------------------------------------
+    # 9. JSON output (if --json requested)
+    # ------------------------------------------------------------------
+    if json_output:
+        result = {
+            "action": "wrap_complete",
+            "harness": harness,
+            "port": port,
+            "via": via,
+            "child_pid": child_pid,
+            "server_started": server_started,
+            "child_exit_code": exit_code,
+            "files_written": files_written,
+        }
+        json.dump(result, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+
     return exit_code
 
 
@@ -342,10 +361,12 @@ def add_parser(
             "then tears down on exit."
         ),
     )
+    # Optional flags must come before positional args when child_args uses REMAINDER
     p.add_argument(
-        "harness",
-        choices=sorted(VALID_HARNESSES),
-        help="Coding agent harness to wire.",
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output raw JSON instead of human-readable text.",
     )
     p.add_argument(
         "--port",
@@ -363,6 +384,11 @@ def add_parser(
         "--no-start-server",
         action="store_true",
         help="Do not start the server; expect it to be already running.",
+    )
+    p.add_argument(
+        "harness",
+        choices=sorted(VALID_HARNESSES),
+        help="Coding agent harness to wire.",
     )
     p.add_argument(
         "child_args",
