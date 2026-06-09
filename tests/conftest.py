@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
@@ -35,10 +36,8 @@ def _kill_port(port: int) -> None:
                     continue
                 end = line.index(",", start)
                 pid = int(line[start + 4 : end])
-                try:
+                with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.kill(pid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    pass
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
