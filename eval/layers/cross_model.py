@@ -30,17 +30,17 @@ DEFAULT_MODELS = [
     {
         "name": "small",
         "url": os.environ.get("MODEL_SMALL_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_SMALL_NAME", "qwen/qwen2.5-coder-1.5b"),
+        "model": os.environ.get("MODEL_SMALL_NAME", "qwen/qwen3.5-0.8b"),
     },
     {
         "name": "medium",
         "url": os.environ.get("MODEL_MEDIUM_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_MEDIUM_NAME", "qwen/qwen2.5-coder-14b"),
+        "model": os.environ.get("MODEL_MEDIUM_NAME", "qwen/qwen3-coder-30b-a3b"),
     },
     {
         "name": "large",
         "url": os.environ.get("MODEL_LARGE_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_LARGE_NAME", "meta-llama/llama-3.1-70b"),
+        "model": os.environ.get("MODEL_LARGE_NAME", "qwen/qwen3.6-35b-a3b"),
     },
 ]
 
