@@ -85,7 +85,7 @@ Emit the YAML now.
 
 ```bash
 # Save model output to candidate.yaml, then:
-cd /home/nmeyers/dev/agentalloy/skill-source/upstream/curated
+cd <repo-root>/skill-source/upstream/curated
 python3 -c "
 import yaml, urllib.request, sys
 data = yaml.safe_load(open('candidate.yaml'))
