@@ -649,7 +649,7 @@ class TestPackDiscovery:
             # Unknown packs are ignored, returns empty
             assert result == ""
 
-    def test_non_interactive_skips_pack_prompt(self):
+    def test_non_interactive_skips_pack_prompt(self, tmp_path):
         """Non-interactive mode does not call _prompt_for_packs()."""
         from agentalloy.install.subcommands.simple_setup import run_setup
 
@@ -699,16 +699,12 @@ class TestPackDiscovery:
         mock.setup_all()
 
         # Also need detect.json
-        import tempfile
-
-        tmpdir = tempfile.mkdtemp()
-        detect_file = f"{tmpdir}/detect.json"
-        with open(detect_file, "w") as f:
-            json.dump({"gpu": {"discrete": [], "integrated": []}}, f)
+        detect_file = tmp_path / "detect.json"
+        detect_file.write_text(json.dumps({"gpu": {"discrete": [], "integrated": []}}))
 
         outputs_patch = patch(
             "agentalloy.install.state.outputs_dir",
-            return_value=__import__("pathlib").Path(tmpdir),
+            return_value=tmp_path,
         )
         mock.patchers.append(outputs_patch)
         outputs_patch.start()

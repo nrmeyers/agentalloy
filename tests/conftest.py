@@ -6,6 +6,7 @@ import contextlib
 import os
 import signal
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,6 +19,28 @@ from agentalloy.storage.vector_store import VectorStore, open_or_create
 
 # Port used by the agentalloy server — must be freed between tests.
 _DEFAULT_PORT = 47950
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_ambient_tmpdir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Pin TMPDIR to the pytest tmp tree for the whole session.
+
+    Ambient temp-file writers — ``tempfile`` defaults in production code
+    (e.g. the entrypoint ``NamedTemporaryFile`` in container_runtime),
+    podman's ``$TMPDIR/containers-user-$UID`` storage, leaked ``mkdtemp``
+    dirs — otherwise fall back to the repo working directory when /tmp
+    isn't writable (sandboxed runners), leaving residue in the checkout.
+    """
+    tmp = tmp_path_factory.mktemp("ambient-tmp")
+    old = os.environ.get("TMPDIR")
+    os.environ["TMPDIR"] = str(tmp)
+    tempfile.tempdir = None  # drop cached resolution so the new TMPDIR takes effect
+    yield
+    if old is None:
+        os.environ.pop("TMPDIR", None)
+    else:
+        os.environ["TMPDIR"] = old
+    tempfile.tempdir = None
 
 
 def _kill_port(port: int) -> None:

@@ -32,8 +32,10 @@ README.backup.md
 _check_*.py
 _verify_*.py
 uv-*.lock
-.hermes/contracts/
-.hermes/plans/
+.hermes/
+.hermes.md
+.home/
+.copilot-review-comments.md
 .ruff_cache/
 .pyright/
 .coverage
@@ -97,6 +99,17 @@ docs/specs/
 docs/design/
 docs/tests/
 docs/reviews/
+docs/plan/
+docs/audit/
+docs/archive/
+/specs/
+/plans/
+/design/
 
 # Serena MCP tooling state
 .serena/
+
+# Test-run residue (podman storage + tmp scripts from test suite)
+containers-user-1000/
+tmp*.sh
+tmp*/
