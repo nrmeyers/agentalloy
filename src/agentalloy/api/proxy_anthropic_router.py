@@ -30,6 +30,10 @@ from agentalloy.api.proxy_router import (  # pyright: ignore[reportPrivateUsage]
     get_settings_for_proxy,
     get_upstream_client,
 )
+from agentalloy.api.upstream.error_sse import (
+    make_http_error_sse,
+    make_network_error_sse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -869,81 +873,32 @@ def _stream_anthropic_response(
                         input_tokens = int(usage.get("prompt_tokens") or input_tokens)
                         output_tokens = int(usage.get("completion_tokens") or output_tokens)
 
+        except httpx.HTTPStatusError as exc:
+            logger.warning("Upstream streaming HTTP status error: %s", exc)
+            for event in make_http_error_sse(
+                exc.response.status_code, f"Upstream HTTP error: {exc}", model
+            ):
+                yield event
         except httpx.ConnectError as exc:
             logger.warning("Upstream streaming connection failed: %s", exc)
-            msg_start_data = {
-                "type": "message_start",
-                "message": {
-                    "id": "msg_error_connect",
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model,
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                },
-            }
-            yield _sse_event("message_start", msg_start_data)
-            error_data = {
-                "type": "error",
-                "error": {
-                    "type": "overloaded_error",
-                    "message": f"Upstream connection failed: {exc}",
-                },
-            }
-            yield _sse_event("error", error_data)
-            yield "event: message_stop\ndata: {}\n\n"
+            for event in make_network_error_sse(exc, model):
+                yield event
         except httpx.TimeoutException as exc:
             logger.warning("Upstream streaming timed out: %s", exc)
-            msg_start_data = {
-                "type": "message_start",
-                "message": {
-                    "id": "msg_error_timeout",
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model,
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                },
-            }
-            yield _sse_event("message_start", msg_start_data)
-            error_data = {
-                "type": "error",
-                "error": {
-                    "type": "api_error",
-                    "message": f"Upstream timeout: {exc}",
-                },
-            }
-            yield _sse_event("error", error_data)
-            yield "event: message_stop\ndata: {}\n\n"
+            for event in make_network_error_sse(exc, model):
+                yield event
+        except httpx.RequestError as exc:
+            logger.warning("Upstream streaming request error: %s", exc)
+            for event in make_network_error_sse(exc, model):
+                yield event
         except httpx.HTTPError as exc:
             logger.warning("Upstream streaming HTTP error: %s", exc)
-            msg_start_data = {
-                "type": "message_start",
-                "message": {
-                    "id": "msg_error_http",
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                    "model": model,
-                    "stop_reason": None,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
-                },
-            }
-            yield _sse_event("message_start", msg_start_data)
-            error_data = {
-                "type": "error",
-                "error": {
-                    "type": "api_error",
-                    "message": f"Upstream HTTP error: {exc}",
-                },
-            }
-            yield _sse_event("error", error_data)
-            yield "event: message_stop\ndata: {}\n\n"
+            for event in make_http_error_sse(500, f"Upstream HTTP error: {exc}", model):
+                yield event
+        except Exception as exc:
+            logger.warning("Upstream streaming unexpected error: %s", exc, exc_info=True)
+            for event in make_http_error_sse(500, f"Upstream error: {exc}", model):
+                yield event
 
     return StreamingResponse(
         content=event_generator(),
@@ -1016,6 +971,15 @@ async def proxy_anthropic_messages(
                 "error": {"type": "api_error", "message": f"Upstream timeout: {e}"},
             },
         )
+    except httpx.RequestError as e:
+        logger.warning("Upstream request error: %s", e)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "type": "error",
+                "error": {"type": "api_error", "message": f"Upstream request error: {e}"},
+            },
+        )
     except httpx.HTTPError as e:
         logger.warning("Upstream HTTP error: %s", e)
         return JSONResponse(
@@ -1023,6 +987,15 @@ async def proxy_anthropic_messages(
             content={
                 "type": "error",
                 "error": {"type": "api_error", "message": f"Upstream HTTP error: {e}"},
+            },
+        )
+    except Exception as e:
+        logger.warning("Upstream unexpected error: %s", e, exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "error",
+                "error": {"type": "api_error", "message": f"Upstream error: {e}"},
             },
         )
 
