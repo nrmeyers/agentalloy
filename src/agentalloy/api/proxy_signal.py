@@ -151,7 +151,7 @@ async def evaluate_signal(
             should_compose=True,
             phase=phase,
             task=task,
-            domain_tags=skill.get("applies_to_phases"),
+            domain_tags=skill.get("domain_tags"),
             pre_filter_matched=match.detail,
             gates_met=gates_met,
             gates_unmet=gates_unmet,

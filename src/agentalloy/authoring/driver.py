@@ -138,7 +138,7 @@ def run_author(
     settings = get_settings()
     ac = settings.require_authoring_config()
     owned_client = client is None
-    _client = client or OpenAICompatClient(ac.authoring_lm_base_url)
+    _client = client or OpenAICompatClient(ac.lm_base_url)
     system_prompt = load_authoring_prompt(repo_root)
     paths.ensure_all()
 
@@ -149,7 +149,7 @@ def run_author(
             result = author_one(
                 source,
                 client=_client,
-                model=ac.authoring_model,
+                model=ac.model,
                 system_prompt=system_prompt,
                 paths=paths,
             )
@@ -260,7 +260,7 @@ def run_revise(
     settings = get_settings()
     ac = settings.require_authoring_config()
     owned = client is None
-    _client = client or OpenAICompatClient(ac.authoring_lm_base_url)
+    _client = client or OpenAICompatClient(ac.lm_base_url)
     system_prompt = load_authoring_prompt(repo_root)
     paths.ensure_all()
 
@@ -271,7 +271,7 @@ def run_revise(
             result = revise_one(
                 draft,
                 client=_client,
-                model=ac.authoring_model,
+                model=ac.model,
                 system_prompt=system_prompt,
                 paths=paths,
             )

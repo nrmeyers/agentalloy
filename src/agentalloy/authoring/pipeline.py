@@ -77,7 +77,7 @@ def process_one_skill(
     draft = author_one(
         source,
         client=lm_client,
-        model=ac.authoring_model,
+        model=ac.model,
         system_prompt=system_prompt,
         paths=paths,
     )
@@ -113,7 +113,7 @@ def process_one_skill(
             paths=paths,
             hard_threshold=settings.dedup_hard_threshold,
             soft_threshold=settings.dedup_soft_threshold,
-            embedding_model=ac.authoring_embedding_model,
+            embedding_model=ac.embedding_model,
             critic_model=ac.critic_model,
             budget=settings.bounce_budget,
             bounces=bounces,
@@ -136,7 +136,7 @@ def process_one_skill(
         revise_result = revise_one(
             gate.draft_path,
             client=lm_client,
-            model=ac.authoring_model,
+            model=ac.model,
             system_prompt=system_prompt,
             paths=paths,
         )
@@ -185,7 +185,7 @@ def run_per_skill(
     owned_embed = embed_client is None
     owned_vs = vector_store is None
     _lm = lm_client or OpenAICompatClient(ac.lm_studio_base_url)
-    _embed = embed_client or OpenAICompatClient(ac.authoring_embed_base_url)
+    _embed = embed_client or OpenAICompatClient(ac.embed_base_url)
     _vs = vector_store or open_or_create(settings.duckdb_path)
 
     system_prompt = load_authoring_prompt(repo_root)

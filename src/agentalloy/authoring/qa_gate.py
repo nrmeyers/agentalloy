@@ -507,7 +507,7 @@ def run_qa(
     owned_lm = lm_client is None
     owned_embed = embed_client is None
     _lm = lm_client or OpenAICompatClient(ac.lm_studio_base_url)
-    _embed = embed_client or OpenAICompatClient(ac.authoring_embed_base_url)
+    _embed = embed_client or OpenAICompatClient(ac.embed_base_url)
 
     qa_fixture = repo_root / "fixtures" / "skill-qa-agent.md"
     if not qa_fixture.exists():
@@ -532,7 +532,7 @@ def run_qa(
                 paths=paths,
                 hard_threshold=settings.dedup_hard_threshold,
                 soft_threshold=settings.dedup_soft_threshold,
-                embedding_model=ac.authoring_embedding_model,
+                embedding_model=ac.embedding_model,
                 critic_model=ac.critic_model,
                 budget=settings.bounce_budget,
                 bounces=bounces,
