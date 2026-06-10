@@ -37,3 +37,6 @@ class ActiveFragment:
     skill_class: SkillClass
     category: str
     domain_tags: list[str]
+    # Authored Skill.phase_scope (e.g. ("build", "review")); None when the
+    # skill declares no scope. Eligibility unions this with the category map.
+    phase_scope: tuple[str, ...] | None = None

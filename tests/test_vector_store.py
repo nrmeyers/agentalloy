@@ -424,3 +424,84 @@ def test_query_traces_returns_all_27_fields(store: VectorStore) -> None:
     assert r.contract_path == "/contracts/test.yaml"
     assert r.contract_tags == ["tag1", "tag2"]
     assert r.bm25_source == "contract"
+
+
+# ---------------------------------------------------------------------------
+# phase_scope union eligibility
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseScopeUnion:
+    """Eligibility = category map OR authored phase_scope (union).
+
+    A quality-category fragment authored phase_scope=[build] must be
+    retrievable for build even though 'quality' is not in build's
+    category list — the defect that stranded the testing pack.
+    """
+
+    def _seed(self, store) -> None:
+        frags = [
+            FragmentEmbedding(
+                fragment_id="frag-quality-build",
+                embedding=_unit_vec(0),
+                skill_id="testing-flaky-tests",
+                category="quality",
+                fragment_type="execution",
+                embedded_at=int(time.time()),
+                embedding_model="qwen3-embedding:0.6b",
+                prose="flaky test isolation retry budget",
+                phase_scope=("build",),
+            ),
+            FragmentEmbedding(
+                fragment_id="frag-quality-unscoped",
+                embedding=_unit_vec(1),
+                skill_id="quality-unscoped",
+                category="quality",
+                fragment_type="execution",
+                embedded_at=int(time.time()),
+                embedding_model="qwen3-embedding:0.6b",
+                prose="quality skill without authored scope",
+            ),
+            FragmentEmbedding(
+                fragment_id="frag-engineering",
+                embedding=_unit_vec(2),
+                skill_id="eng-skill",
+                category="engineering",
+                fragment_type="execution",
+                embedded_at=int(time.time()),
+                embedding_model="qwen3-embedding:0.6b",
+                prose="engineering prose",
+            ),
+        ]
+        store.insert_embeddings(frags)
+
+    def test_phase_scope_admits_outside_category_map(self, store) -> None:
+        self._seed(store)
+        hits = store.search_similar(
+            _unit_vec(0), categories=["build", "engineering"], phases=["build"], k=10
+        )
+        ids = {h.fragment_id for h in hits}
+        assert "frag-quality-build" in ids  # admitted via phase_scope
+        assert "frag-engineering" in ids  # admitted via category
+        assert "frag-quality-unscoped" not in ids  # NULL scope -> category map only
+
+    def test_categories_alone_unchanged(self, store) -> None:
+        self._seed(store)
+        hits = store.search_similar(_unit_vec(0), categories=["build", "engineering"], k=10)
+        ids = {h.fragment_id for h in hits}
+        assert "frag-quality-build" not in ids
+        assert "frag-engineering" in ids
+
+    def test_phases_alone_filters_on_scope(self, store) -> None:
+        self._seed(store)
+        hits = store.search_similar(_unit_vec(0), phases=["build"], k=10)
+        ids = {h.fragment_id for h in hits}
+        assert ids == {"frag-quality-build"}
+
+    def test_bm25_union(self, store) -> None:
+        self._seed(store)
+        store.rebuild_fts_index()
+        hits = store.search_bm25(
+            "flaky test retry", categories=["build", "engineering"], phases=["build"], k=10
+        )
+        assert "frag-quality-build" in {h.fragment_id for h in hits}

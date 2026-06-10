@@ -89,9 +89,15 @@ def get_active_fragments(
     *,
     skill_class: SkillClass | tuple[str, ...] | None = None,
     categories: list[str] | None = None,
+    phases: list[str] | None = None,
     domain_tags: list[str] | None = None,
 ) -> list[ActiveFragment]:
-    """Return fragments of active versions, optionally filtered by class, categories, tags."""
+    """Return fragments of active versions, optionally filtered by class, categories, tags.
+
+    ``phases`` (authored phase_scope vocabulary) unions with ``categories``:
+    a skill is eligible when either admits it. Passing ``phases`` alone
+    filters on phase_scope only.
+    """
     _run_consistency_guard(store, skill_class=skill_class)
 
     params: dict[str, Any] = {}
@@ -103,9 +109,20 @@ def get_active_fragments(
         else:
             params["skill_class"] = skill_class
             filters.append("s.skill_class = $skill_class")
-    if categories is not None:
+    if categories is not None and phases:
+        params["categories"] = list(categories)
+        params["phases"] = list(phases)
+        filters.append(
+            "(s.category IN $categories"
+            " OR (s.phase_scope IS NOT NULL"
+            " AND ANY(p IN $phases WHERE p IN s.phase_scope)))"
+        )
+    elif categories is not None:
         params["categories"] = list(categories)
         filters.append("s.category IN $categories")
+    elif phases:
+        params["phases"] = list(phases)
+        filters.append("(s.phase_scope IS NOT NULL AND ANY(p IN $phases WHERE p IN s.phase_scope))")
     if domain_tags is not None:
         params["domain_tags"] = list(domain_tags)
         # ANY of the requested tags must be present on the skill.
@@ -116,7 +133,8 @@ def get_active_fragments(
     MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion)-[:DECOMPOSES_TO]->(f:Fragment)
     {where_clause}
     RETURN f.fragment_id, f.fragment_type, f.sequence, f.content,
-           s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags
+           s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags,
+           s.phase_scope
     ORDER BY s.skill_id, f.sequence
     """
     return [_row_to_active_fragment(row) for row in store.execute(cypher, params)]
@@ -131,7 +149,8 @@ def get_active_fragments_for_skill(store: LadybugStore, skill_id: str) -> list[A
         -[:DECOMPOSES_TO]->(f:Fragment)
     WHERE v.status = 'active' AND s.deprecated = false
     RETURN f.fragment_id, f.fragment_type, f.sequence, f.content,
-           s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags
+           s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags,
+           s.phase_scope
     ORDER BY f.sequence
     """
     return [_row_to_active_fragment(row) for row in store.execute(cypher, {"skill_id": skill_id})]
@@ -276,6 +295,7 @@ def _row_to_active_skill(row: list[Any]) -> ActiveSkill:
 
 
 def _row_to_active_fragment(row: list[Any]) -> ActiveFragment:
+    raw_scope = row[9] if len(row) > 9 else None
     return ActiveFragment(
         fragment_id=cast("str", row[0]),
         fragment_type=cast("str", row[1]),
@@ -286,6 +306,7 @@ def _row_to_active_fragment(row: list[Any]) -> ActiveFragment:
         skill_class=cast("SkillClass", row[6]),
         category=cast("str", row[7]),
         domain_tags=list(cast("list[str]", row[8])),
+        phase_scope=tuple(cast("list[str]", raw_scope)) if raw_scope else None,
     )
 
 

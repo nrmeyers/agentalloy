@@ -56,6 +56,10 @@ class FragmentEmbedding:
     embedded_at: int  # unix epoch seconds
     embedding_model: str
     prose: str = ""  # raw fragment text; indexed for BM25
+    # Authored phase eligibility (Skill.phase_scope, authored vocabulary —
+    # e.g. build/design/review). None = no authored scope; such fragments
+    # are eligible via the phase->category map only.
+    phase_scope: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -137,7 +141,8 @@ CREATE TABLE IF NOT EXISTS fragment_embeddings (
     fragment_type VARCHAR NOT NULL,
     embedded_at BIGINT NOT NULL,
     embedding_model VARCHAR NOT NULL,
-    prose VARCHAR NOT NULL DEFAULT ''
+    prose VARCHAR NOT NULL DEFAULT '',
+    phase_scope VARCHAR[]
 );
 
 CREATE INDEX IF NOT EXISTS idx_frag_emb_skill ON fragment_embeddings(skill_id);
@@ -300,6 +305,7 @@ class VectorStore:
                 f.embedded_at,
                 f.embedding_model,
                 f.prose,
+                list(f.phase_scope) if f.phase_scope else None,
             )
             for f in batch
         ]
@@ -307,18 +313,35 @@ class VectorStore:
             """
             INSERT INTO fragment_embeddings
                 (fragment_id, embedding, skill_id, category, fragment_type,
-                 embedded_at, embedding_model, prose)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 embedded_at, embedding_model, prose, phase_scope)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
         return len(rows)
+
+    def backfill_phase_scope(self, scope_by_skill: dict[str, list[str] | None]) -> int:
+        """Set ``phase_scope`` for every fragment of each skill. Returns rows updated.
+
+        Used by ``python -m agentalloy.migrate`` to populate the column on
+        corpora built before it existed. Embeddings are untouched.
+        """
+        updated = 0
+        for skill_id, scope in scope_by_skill.items():
+            cur = self._conn.execute(
+                "UPDATE fragment_embeddings SET phase_scope = ? WHERE skill_id = ?",
+                [scope if scope else None, skill_id],
+            )
+            row = cur.fetchone()
+            updated += int(row[0]) if row else 0
+        return updated
 
     def search_similar(
         self,
         query_vec: Sequence[float],
         *,
         categories: list[str] | None = None,
+        phases: list[str] | None = None,
         fragment_types: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
         k: int = 10,
@@ -341,9 +364,21 @@ class VectorStore:
 
         where_clauses: list[str] = []
         params: list[object] = [q]
-        if categories:
+        if categories and phases:
+            # Union eligibility: the category map OR the skill's authored
+            # phase_scope may admit a fragment. NULL phase_scope falls back
+            # to the category map alone.
+            where_clauses.append(
+                "(category = ANY(?) OR (phase_scope IS NOT NULL AND list_has_any(phase_scope, ?)))"
+            )
+            params.append(categories)
+            params.append(phases)
+        elif categories:
             where_clauses.append("category = ANY(?)")
             params.append(categories)
+        elif phases:
+            where_clauses.append("(phase_scope IS NOT NULL AND list_has_any(phase_scope, ?))")
+            params.append(phases)
         if fragment_types:
             where_clauses.append("fragment_type = ANY(?)")
             params.append(fragment_types)
@@ -381,6 +416,7 @@ class VectorStore:
         query: str,
         *,
         categories: list[str] | None = None,
+        phases: list[str] | None = None,
         deprecated_skill_ids: list[str] | None = None,
         k: int = 10,
     ) -> list[BM25Hit]:
@@ -400,9 +436,19 @@ class VectorStore:
         try:
             where_clauses: list[str] = ["score IS NOT NULL"]
             params: list[object] = [query]
-            if categories:
+            if categories and phases:
+                where_clauses.append(
+                    "(category = ANY(?) "
+                    "OR (phase_scope IS NOT NULL AND list_has_any(phase_scope, ?)))"
+                )
+                params.append(categories)
+                params.append(phases)
+            elif categories:
                 where_clauses.append("category = ANY(?)")
                 params.append(categories)
+            elif phases:
+                where_clauses.append("(phase_scope IS NOT NULL AND list_has_any(phase_scope, ?))")
+                params.append(phases)
             if deprecated_skill_ids:
                 where_clauses.append("skill_id != ALL(?)")
                 params.append(deprecated_skill_ids)
@@ -651,20 +697,43 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# Same pattern for ``fragment_embeddings``: additive columns picked up by
+# existing installs on next open. phase_scope is backfilled from the graph
+# by ``python -m agentalloy.migrate`` (NULL rows fall back to the category map).
+_FRAGMENT_EMBEDDINGS_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("phase_scope", "VARCHAR[]", ""),
+)
+
+
 def _apply_migrations(conn: duckdb.DuckDBPyConnection) -> None:
-    """Apply additive schema migrations to ``composition_traces``.
+    """Apply additive schema migrations.
 
     Existing installs predate columns added in later phases. ``CREATE TABLE
     IF NOT EXISTS`` does not back-fill missing columns, so each subsequent
     INSERT would raise. This walks the live schema and issues ``ALTER TABLE
     ADD COLUMN`` for any missing column. Idempotent and soft-fail.
     """
+    import contextlib
+
+    try:
+        frag_rows = conn.execute("PRAGMA table_info('fragment_embeddings')").fetchall()
+        frag_existing = {str(row[1]) for row in frag_rows}
+        for col, col_type, default_clause in _FRAGMENT_EMBEDDINGS_MIGRATIONS:
+            if col in frag_existing:
+                continue
+            stmt = f"ALTER TABLE fragment_embeddings ADD COLUMN {col} {col_type}"
+            if default_clause:
+                stmt = f"{stmt} {default_clause}"
+            with contextlib.suppress(Exception):
+                conn.execute(stmt)
+    except Exception:
+        pass
+
     try:
         rows = conn.execute("PRAGMA table_info('composition_traces')").fetchall()
     except Exception:
         return
     existing = {str(row[1]) for row in rows}
-    import contextlib
 
     for col, col_type, default_clause in _COMPOSITION_TRACES_MIGRATIONS:
         if col in existing:

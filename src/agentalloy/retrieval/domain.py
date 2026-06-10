@@ -101,6 +101,7 @@ class FragmentSource(Protocol):
         *,
         skill_class: SkillClass | tuple[str, ...] | None = None,
         categories: list[str] | None = None,
+        phases: list[str] | None = None,
         domain_tags: list[str] | None = None,
     ) -> list[ActiveFragment]: ...
 
@@ -142,6 +143,34 @@ def phase_to_categories(phase: Phase) -> list[str]:
     return list(_PHASE_TO_CATEGORIES[phase])
 
 
+# Runtime phase -> authored phase_scope vocabulary. Authors write
+# phase_scope in {build, design, review}; "review" maps to the qa and
+# governance runtime phases. Phases with no authored vocabulary (meta)
+# rely on the category map alone.
+_PHASE_SCOPE_TERMS: dict[Phase, list[str]] = {
+    "spec": ["spec"],
+    "design": ["design"],
+    "build": ["build"],
+    "qa": ["qa", "review"],
+    "ops": ["ops"],
+    "meta": [],
+    "governance": ["governance", "review"],
+}
+
+
+def phase_to_scope_terms(phase: Phase) -> list[str]:
+    """Authored phase_scope values that admit a fragment for *phase*.
+
+    Eligibility is the UNION of this and ``phase_to_categories`` — the
+    authored scope can only widen what the category map admits (it never
+    narrows), so skills whose category/phase metadata disagree (e.g. the
+    testing pack: category=quality, phase_scope=[build]) stay reachable
+    in their authored phases. Measured by eval/retrieval_audit.py: the
+    category map alone stranded 48 skills (quality/review hit rate 0.00).
+    """
+    return list(_PHASE_SCOPE_TERMS.get(phase, []))
+
+
 @dataclass(frozen=True)
 class RetrievalResult:
     candidates: list[ActiveFragment]
@@ -163,6 +192,7 @@ class StoreFragmentSource:
         *,
         skill_class: SkillClass | tuple[str, ...] | None = None,
         categories: list[str] | None = None,
+        phases: list[str] | None = None,
         domain_tags: list[str] | None = None,
     ) -> list[ActiveFragment]:
         from agentalloy.reads import get_active_fragments  # local import avoids cycle
@@ -171,6 +201,7 @@ class StoreFragmentSource:
             self._store,  # type: ignore[arg-type]
             skill_class=skill_class,
             categories=categories,
+            phases=phases,
             domain_tags=domain_tags,
         )
 
@@ -226,12 +257,14 @@ def _bm25_fallback_result(
 ) -> EmbeddingErrorResult:
     """Run the lexical leg only and package the degraded retrieval result."""
     categories = phase_to_categories(phase)
+    scope_terms = phase_to_scope_terms(phase)
     pool_size = max(k * 2, 50)
     deprecated_ids = frag_src.get_deprecated_skill_ids()
     bm25_query, bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(
         bm25_query,
         categories=categories,
+        phases=scope_terms or None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
@@ -239,6 +272,7 @@ def _bm25_fallback_result(
     metadata = frag_src.get_active_fragments(
         skill_class=("domain", "workflow"),
         categories=categories,
+        phases=scope_terms or None,
         domain_tags=domain_tags,
     )
     by_id = {f.fragment_id: f for f in metadata}
@@ -373,12 +407,14 @@ def retrieve_domain_candidates(
         )
 
     categories = phase_to_categories(phase)
+    scope_terms = phase_to_scope_terms(phase)
     pool_size = max(k * 2, 50)
     deprecated_ids = frag_src.get_deprecated_skill_ids()
 
     dense_hits = vector_store.search_similar(
         query_vec,
         categories=categories,
+        phases=scope_terms or None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
@@ -391,6 +427,7 @@ def retrieve_domain_candidates(
     bm25_hits = vector_store.search_bm25(
         bm25_query,
         categories=categories,
+        phases=scope_terms or None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
@@ -413,6 +450,7 @@ def retrieve_domain_candidates(
     metadata = frag_src.get_active_fragments(
         skill_class=("domain", "workflow"),
         categories=categories,
+        phases=scope_terms or None,
         domain_tags=domain_tags,
     )
     by_id = {f.fragment_id: f for f in metadata}
