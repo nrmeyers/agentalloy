@@ -186,6 +186,10 @@ def run_one(
         )
     elif condition == "flat":
         system_prompt = load_flat_prompt(task)
+    elif condition == "none":
+        # Control arm: no skill injection at all — measures whether either
+        # injection method beats the bare model.
+        system_prompt = "You are an experienced software engineer."
     else:
         raise ValueError(f"unknown condition: {condition}")
 
@@ -246,8 +250,8 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
 
     summary: dict[str, Any] = {"by_task": {}, "totals": {}}
     totals: dict[str, dict[str, float]] = {
-        "composed": {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0},
-        "flat": {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0},
+        cond: {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0}
+        for cond in ("composed", "flat", "none")
     }
 
     for task_id, by_cond in by_task.items():
@@ -301,7 +305,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
             )
         summary["by_task"][task_id] = task_summary
 
-    for cond in ("composed", "flat"):
+    for cond in ("composed", "flat", "none"):
         if totals[cond]["n"]:
             n = totals[cond]["n"]
             summary["totals"][cond] = {
@@ -329,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         "--conditions",
         nargs="+",
         default=["composed", "flat"],
-        choices=["composed", "flat"],
+        choices=["composed", "flat", "none"],
     )
     args = parser.parse_args(argv)
 
@@ -376,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     print("        tps = total_tok / wall_seconds (effective throughput).")
     for task_id, task_summary in summary["by_task"].items():
         print(f"\n{task_id}")
-        for cond in ("composed", "flat"):
+        for cond in ("composed", "flat", "none"):
             if cond in task_summary:
                 ts = task_summary[cond]
                 print(
@@ -425,6 +429,12 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"        wall:   composed={c_ms / 1000:.1f}s  flat={f_ms / 1000:.1f}s  "
             f"({wall_pct:.0f}% faster with composed)"
+        )
+    if "none" in summary["totals"]:
+        b = summary["totals"]["none"]
+        print(
+            f"BASELINE (no skills)  score={b['mean_score']:.2f}  "
+            f"tokens={b['total_tokens']}  wall={b['total_wall_clock_ms'] / 1000:.1f}s"
         )
     return 0
 
