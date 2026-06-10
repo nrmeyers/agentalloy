@@ -536,10 +536,18 @@ class TestRepairSchemaMissing:
             call_order.append("install-packs")
             return mock_sub
 
+        def fake_reembed(args: Any) -> int:
+            call_order.append("reembed")
+            return 0
+
         with (
             patch("agentalloy.storage.ladybug.LadybugStore", return_value=mock_store),
             patch("agentalloy.config.get_settings"),
             patch("subprocess.run", side_effect=fake_subprocess_run),
+            # _repair imports reembed's main function-locally; patch at source
+            # so the real reembed (host-dependent: embed server, corpus) never
+            # runs inside a unit test.
+            patch("agentalloy.reembed.cli.main", side_effect=fake_reembed),
             patch(
                 "agentalloy.install.subcommands.doctor.run_doctor",
                 return_value={
@@ -551,9 +559,7 @@ class TestRepairSchemaMissing:
         ):
             rc = _repair(result)
 
-        assert "migrate" in call_order
-        assert "install-packs" in call_order
-        assert call_order.index("migrate") < call_order.index("install-packs")
+        assert call_order == ["migrate", "install-packs", "reembed"]
         assert rc == 0
 
 
