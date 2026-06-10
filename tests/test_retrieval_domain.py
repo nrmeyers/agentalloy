@@ -89,6 +89,7 @@ def test_phase_to_categories_locked_mapping() -> None:
         "qa",
         "quality",
         "review",
+        "design",
         "engineering",
         "tooling",
         "governance",
@@ -105,6 +106,7 @@ def test_phase_to_categories_locked_mapping() -> None:
     ]
     assert phase_to_categories("ops") == [
         "ops",
+        "design",
         "engineering",
         "tooling",
         "governance",

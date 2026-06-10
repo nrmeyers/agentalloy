@@ -115,7 +115,12 @@ class FragmentSource(Protocol):
 _PHASE_TO_CATEGORIES: dict[Phase, list[str]] = {
     "spec": ["spec", "design", "tooling", "governance", "meta"],
     "design": ["design", "engineering", "tooling", "governance", "meta"],
-    "qa": ["qa", "quality", "review", "engineering", "tooling", "governance", "meta"],
+    # "design" in qa/ops for the same reason as build (below): protocol-
+    # convention packs (webhooks, REST, ...) are category=design, and
+    # review/incident tasks need them. Measured: qa-phase "review this
+    # webhook receiver" retrieved redis/nodejs noise instead of
+    # webhooks-signature-verification before this line.
+    "qa": ["qa", "quality", "review", "design", "engineering", "tooling", "governance", "meta"],
     # "design" is included for build: domain packs author API/protocol
     # convention skills (webhooks, REST, ...) as category=design with
     # phase_scope=[build] — excluding the category made 494 fragments
@@ -123,7 +128,7 @@ _PHASE_TO_CATEGORIES: dict[Phase, list[str]] = {
     # domain benchmark: gold-skill retrieval missed on every build-phase
     # webhook task, hit on every design-phase one).
     "build": ["build", "design", "engineering", "tooling", "ops", "governance", "meta"],
-    "ops": ["ops", "engineering", "tooling", "governance", "meta"],
+    "ops": ["ops", "design", "engineering", "tooling", "governance", "meta"],
     "meta": ["meta", "tooling", "governance"],
     "governance": ["governance", "review", "quality", "meta"],
 }
