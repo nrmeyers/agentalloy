@@ -124,25 +124,32 @@ def call_agent(
 ) -> tuple[str, int | None, int | None, int]:
     """Returns (content, prompt_tokens, completion_tokens, latency_ms)."""
     start_ns = time.perf_counter_ns()
+    payload: dict[str, Any] = {
+        "model": AGENT_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 4096,
+        "seed": seed,
+        "stream": False,
+    }
+    # Reasoning-effort hint. Historically hardcoded to "none" to curb
+    # Qwen3.6-A3B's CoT loop — but measured token counts show the Qwen/LFM
+    # templates ignore it while Gemma honors it, silently disabling Gemma's
+    # thinking. Default stays "none" so earlier runs reproduce; set
+    # AGENT_REASONING_EFFORT="" to omit the field (model default), or any
+    # other value to pass through.
+    effort = os.environ.get("AGENT_REASONING_EFFORT", "none")
+    if effort:
+        payload["reasoning_effort"] = effort
     resp = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             resp = client.post(
                 f"{LM_STUDIO_URL}/v1/chat/completions",
-                json={
-                    "model": AGENT_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 4096,
-                    "seed": seed,
-                    "stream": False,
-                    # Disables Qwen3.6-A3B's chain-of-thought loop. Silently ignored
-                    # by non-reasoning models, so safe to leave on for any agent.
-                    "reasoning_effort": "none",
-                },
+                json=payload,
                 timeout=httpx.Timeout(connect=5.0, read=900.0, write=10.0, pool=5.0),
             )
             break
