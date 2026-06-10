@@ -561,9 +561,11 @@ User-scope state (`~/.config/agentalloy/`, corpus DB) is preserved across the sw
 
 ## Benchmarks
 
-Measured on a 4-model × 3-condition matrix (composed / flat / no skills; 10 pre-registered tasks, 3 seeded runs per cell). Two results stand out:
+Measured on a 4-model × 3-condition matrix (composed / flat / no skills; 10 generic + 8 domain pre-registered tasks, 3 seeded runs per cell). Results that stand out:
 
-- **A 1.5B-active edge model with composed skills matched a bare 27B dense model — at 12.6× the speed.** LFM2.5-8B-A1B + composed scored 0.850 vs the bare Qwen3.6-27B's 0.855, in 42s vs 534s for the same workload. That quality runs on a laptop or NPU; the 27B doesn't.
+- **On domain tasks, composed injection lifted every model (+0.07 to +0.19) and landed within 0.01–0.03 of a hand-picked oracle injection** — automatic skill selection is doing the job a human curator would.
+- **A 12B dense model with composed skills tied a 27B dense model on domain tasks (0.975 vs 0.971) at 2.5× the speed.** Bare, the 12B scored 0.906 — composition moved it up a weight class, on hardware a 27B doesn't fit.
+- **A 1.5B-active edge model with composed skills matched a bare 27B dense model on generic tasks — at 12.6× the speed.** LFM2.5-8B-A1B + composed scored 0.850 vs the bare Qwen3.6-27B's 0.855, in 42s vs 534s for the same workload. That quality runs on a laptop or NPU; the 27B doesn't.
 - **Composed injection made the edge model better *and* faster than itself**: +0.05 quality over its own no-skill baseline while finishing 29% faster — focused skill prose cut its output rambling nearly in half. Flat injection of the same skills delivered zero lift on that model.
 
 Full matrix, methodology, and caveats in [BENCHMARKS.md](BENCHMARKS.md).

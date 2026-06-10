@@ -85,9 +85,50 @@ Findings, stated as measured:
   (webhooks, temporal, snowflake conventions, …) target knowledge models
   don't ship with, which these tasks do not measure.
 
-Caveats: heuristic binary graders measure surface criteria, not depth;
-n=3 per cell; single host; quants differ per model. Treat deltas under
-~0.05 as noise.
+**Replication note.** After a retrieval-hardening pass (phase-eligibility
+fixes, corpus-wide tagging), the 35B and 27B composed legs were rerun
+end-to-end: 0.93 → 0.92 and 0.90 → 0.915 respectively — both within
+noise. The generic numbers above are stable across the fix.
+
+### Domain tasks (2026-06-10)
+
+The 10 generic tasks measure general software-engineering competence,
+where strong models are near ceiling without help. A second pre-registered
+set (`eval/domain_tasks.py`, 8 tasks × 3 seeded runs) targets what the
+corpus actually carries: pack conventions — webhook signature/dedup/DLQ
+handling, Temporal determinism, GitHub Actions OIDC, dbt incremental
+models, SCD Type 2. Same conditions; note **flat is an oracle arm** here —
+it hand-injects exactly the task's gold skills, the ceiling automatic
+retrieval is chasing.
+
+| Model | None | Composed | Flat (oracle) | Composed lift | Composed tok/s |
+|-------|------|----------|---------------|---------------|----------------|
+| Qwen3.6-35B-A3B | 0.86 | **0.99** | 1.00 | +0.13 | 319 |
+| Qwen3.6-27B | 0.88 | **0.97** | 1.00 | +0.10 | 105 |
+| Gemma 4 12B IT | 0.91 | **0.98** | 0.98 | +0.07 | 210 |
+| LFM2.5-8B-A1B (coder) | 0.62 | **0.81** | 0.83 | +0.19 | 779 |
+
+Findings, stated as measured:
+
+- **Composed beat the bare model on every architecture** (+0.07 to +0.19),
+  and the weaker the model, the bigger the lift. On conventions the model
+  doesn't ship with, injection is the difference between guessing and
+  knowing.
+- **Automatic retrieval lands within 0.01–0.03 of the hand-picked
+  oracle** on all four models, at roughly equal token cost (±7%). Skill
+  selection is not the bottleneck; residual gaps are model capacity.
+- **A 12B dense model with composed skills tied a 27B dense model**
+  (0.975 vs 0.971) at 2× the throughput and 2.5× faster wall-clock
+  (210 vs 105 tok/s; 148s vs 364s for the full leg). Bare Gemma scored
+  0.906 — composition closed the gap to the next weight class.
+- **Capacity still matters at the low end.** Composed LFM2.5 (0.81)
+  did not match the bare 27B (0.88) on domain tasks the way it did on
+  generic ones; convention-heavy work rewards parameters as well as
+  context.
+
+Caveats (both task sets): heuristic binary graders measure surface
+criteria, not depth; n=3 per cell; single host; quants differ per model.
+Treat deltas under ~0.05 as noise.
 
 Reproduce a leg:
 
@@ -96,6 +137,9 @@ AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
   uv run python -m eval.run_poc --n 3                  # composed + flat
 AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
   uv run python -m eval.run_poc --n 3 --conditions none --label baseline
+AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
+  uv run python -m eval.run_poc --n 3 --task-set domain --label domain \
+  --conditions composed flat none                      # domain set
 ```
 
 Requires a running AgentAlloy service and an agent model behind any
