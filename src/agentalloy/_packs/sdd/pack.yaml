@@ -25,6 +25,6 @@ skills:
 - skill_id: sdd-verify-and-review
   file: sdd-verify-and-review.yaml
   fragment_count: 7
-- skill_id: sdd-build
+- skill_id: sys-sdd-build
   file: sdd-build.yaml
   fragment_count: 0
