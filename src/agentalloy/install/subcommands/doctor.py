@@ -1,19 +1,26 @@
-"""``doctor`` subcommand — runtime health check.
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
+"""``doctor`` subcommand — diagnose and optionally repair a broken install.
 
-Extends ``verify``'s 8 checks with 4 additional runtime checks:
+Eight checks covering the full install surface:
 
- 9. agentalloy_service_reachable
-10. compose_endpoint_works
-11. state_file_consistent
-12. runner_processes_present
+ 1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
+ 2. embed_server    — GET {RUNTIME_EMBED_BASE_URL} reachable; model listed (warn, not fail)
+ 3. corpus_files    — ladybug/ + skills.duck present at corpus_dir()
+ 4. ladybug_schema  — Skill table exists; lock-held → report PID + stop-service remediation
+ 5. corpus_count    — skill count >= 25 (LadybugDB); embedded-vector count > 0 (DuckDB)
+ 6. embedding_dim   — stored DuckDB dim matches EMBEDDING_DIM constant
+ 7. service         — port /health responding (down is ok; up-degraded is warned)
+ 8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
+
+``--repair``:  migrate → install-packs → reembed → re-diagnose (in that order).
+Lock-held aborts repair immediately — repair must not kill processes.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -21,208 +28,367 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from agentalloy.install import state as install_state
-from agentalloy.install.output import add_json_flag, write_result
-from agentalloy.install.subcommands.preflight import run_preflight
-from agentalloy.install.subcommands.verify import run_checks as verify_checks
+from agentalloy.install.output import add_json_flag, print_rich, write_result
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_MIN_SKILL_COUNT = 25
 
 
 # ---------------------------------------------------------------------------
-# Additional runtime checks (9–12)
+# Individual checks
 # ---------------------------------------------------------------------------
 
 
-def _check_service_reachable(port: int) -> dict[str, Any]:
-    """Check 9: GET http://localhost:<port>/health returns 200 + status ok."""
-    url = f"http://localhost:{port}/health"
+def _check_config() -> dict[str, Any]:
+    """Check 1: .env exists and has required keys."""
     t0 = time.monotonic()
-    try:
-        req = Request(url, method="GET")
-        with urlopen(req, timeout=10) as resp:  # noqa: S310
-            body = json.loads(resp.read())
-            duration = int((time.monotonic() - t0) * 1000)
-            if body.get("status") == "ok":
-                return {
-                    "name": "agentalloy_service_reachable",
-                    "passed": True,
-                    "duration_ms": duration,
-                    "detail": f"GET {url} → status ok",
-                }
-            return {
-                "name": "agentalloy_service_reachable",
-                "passed": False,
-                "duration_ms": duration,
-                "error": f"Unexpected response: {body}",
-                "remediation": f"Start agentalloy: `uv run python -m agentalloy` or check port {port}",
-            }
-    except (URLError, OSError, json.JSONDecodeError) as exc:
-        duration = int((time.monotonic() - t0) * 1000)
+    env_file = install_state.env_path()
+    if not env_file.exists():
         return {
-            "name": "agentalloy_service_reachable",
+            "name": "config",
             "passed": False,
-            "duration_ms": duration,
-            "error": str(exc),
-            "remediation": f"Start the service: `uv run python -m agentalloy`, or check that port {port} is correct",
-        }
-
-
-def _check_compose_endpoint(port: int) -> dict[str, Any]:
-    """Check 10: POST /compose with a minimal request returns fragments."""
-    url = f"http://localhost:{port}/compose"
-    payload = json.dumps({"task": "write a unit test", "phase": "build"}).encode()
-    t0 = time.monotonic()
-    try:
-        req = Request(
-            url, data=payload, method="POST", headers={"Content-Type": "application/json"}
-        )
-        with urlopen(req, timeout=30) as resp:  # noqa: S310
-            body = json.loads(resp.read())
-            duration = int((time.monotonic() - t0) * 1000)
-            if body.get("output"):
-                return {
-                    "name": "compose_endpoint_works",
-                    "passed": True,
-                    "duration_ms": duration,
-                    "detail": f"POST /compose returned {len(body.get('source_skills', []))} source skills",
-                }
-            return {
-                "name": "compose_endpoint_works",
-                "passed": False,
-                "duration_ms": duration,
-                "error": "Empty output from /compose",
-                "remediation": "Check that the corpus is loaded and the embedding endpoint is running",
-            }
-    except (URLError, OSError, json.JSONDecodeError) as exc:
-        duration = int((time.monotonic() - t0) * 1000)
-        return {
-            "name": "compose_endpoint_works",
-            "passed": False,
-            "duration_ms": duration,
-            "error": str(exc),
-            "remediation": "Ensure agentalloy is running and the embedding endpoint is reachable",
-        }
-
-
-def _check_state_consistent(st: dict[str, Any]) -> dict[str, Any]:
-    """Check 11: install-state.json is present and internally consistent."""
-    t0 = time.monotonic()
-    warnings: list[str] = []
-
-    if not st.get("completed_steps"):
-        duration = int((time.monotonic() - t0) * 1000)
-        return {
-            "name": "state_file_consistent",
-            "passed": False,
-            "duration_ms": duration,
-            "error": "No completed steps in install state",
-            "remediation": "Run the install flow from the beginning: follow INSTALL.md",
-        }
-
-    # Check harness files still have matching sentinels
-    for entry in st.get("harness_files_written", []):
-        path = Path(entry.get("path", ""))
-        if not path.exists():
-            warnings.append(f"Harness file missing: {path}")
-            continue
-        content = path.read_text()
-        sentinel = entry.get("sentinel_begin", "")
-        if sentinel and sentinel not in content:
-            warnings.append(f"Sentinel block missing from {path}")
-
-    duration = int((time.monotonic() - t0) * 1000)
-    detail = "State file consistent"
-    if warnings:
-        detail += f" (warnings: {'; '.join(warnings)})"
-    return {
-        "name": "state_file_consistent",
-        "passed": True,
-        "duration_ms": duration,
-        "detail": detail,
-    }
-
-
-def _check_runner_processes(st: dict[str, Any]) -> dict[str, Any]:
-    """Check 12: expected runner processes are running."""
-    t0 = time.monotonic()
-    models_pulled = st.get("models_pulled", [])
-
-    # Map runner names to process names to check
-    runner_process_map = {
-        "ollama": "ollama",
-        "fastflowlm": "flm",
-    }
-    known_runners = frozenset(runner_process_map.keys())
-
-    runners_needed: set[str] = set()
-    malformed: list[str] = []
-    for entry in models_pulled:
-        if not isinstance(entry, str) or ":" not in entry:
-            malformed.append(str(entry))
-            continue
-        runner = entry.split(":", 1)[0]
-        if runner not in known_runners:
-            malformed.append(entry)
-            continue
-        runners_needed.add(runner)
-
-    missing: list[str] = []
-    skipped: list[str] = []
-
-    for runner in runners_needed:
-        proc_name = runner_process_map[runner]
-        binary = shutil.which(proc_name)
-        if not binary:
-            missing.append(f"{proc_name} not in PATH")
-            continue
-        # Check if process is running via pgrep. On Windows or systems
-        # without pgrep, mark the check as skipped — passing silently
-        # would falsely greenlight a system where the runner isn't up.
-        try:
-            result = subprocess.run(  # noqa: S603 — fixed args, no shell
-                ["pgrep", "-x", proc_name],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                missing.append(f"{proc_name} not running")
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            skipped.append(proc_name)
-
-    duration = int((time.monotonic() - t0) * 1000)
-    if missing:
-        return {
-            "name": "runner_processes_present",
-            "passed": False,
-            "duration_ms": duration,
-            "error": "; ".join(missing),
-            "remediation": "Start the model runners: `ollama serve` and/or `flm serve`",
-        }
-    if malformed:
-        return {
-            "name": "runner_processes_present",
-            "passed": False,
-            "duration_ms": duration,
-            "error": f"Malformed models_pulled entries (expected 'runner:model'): {malformed}",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f".env not found at {env_file}",
             "remediation": (
-                "Run `python -m agentalloy.install reset-step pull-models` then "
-                "re-run pull-models to rebuild state."
+                "Run `agentalloy write-env` to create the config file, "
+                "or copy one of the .env.* presets: `cp .env.cpu .env`"
             ),
         }
-    detail_parts: list[str] = []
-    if runners_needed:
-        detail_parts.append(f"runners present: {', '.join(sorted(runners_needed))}")
-    else:
-        detail_parts.append("no runners configured")
-    if skipped:
-        detail_parts.append(
-            f"process check skipped (pgrep unavailable): {', '.join(sorted(skipped))}"
-        )
+    env = install_state.parse_env_file(env_file)
+    missing = [k for k in ("RUNTIME_EMBED_BASE_URL", "RUNTIME_EMBEDDING_MODEL") if k not in env]
+    if missing:
+        return {
+            "name": "config",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Missing keys in .env: {', '.join(missing)}",
+            "remediation": (
+                f"Add the missing keys to {env_file}. See a .env.* preset for reference values."
+            ),
+        }
     return {
-        "name": "runner_processes_present",
+        "name": "config",
         "passed": True,
-        "duration_ms": duration,
-        "detail": "; ".join(detail_parts),
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": (
+            f"RUNTIME_EMBED_BASE_URL={env['RUNTIME_EMBED_BASE_URL']!r}  "
+            f"RUNTIME_EMBEDDING_MODEL={env['RUNTIME_EMBEDDING_MODEL']!r}"
+        ),
+    }
+
+
+def _check_embed_server(base_url: str, model: str) -> dict[str, Any]:
+    """Check 2: embed server reachable; model listed via /api/tags (best-effort warn)."""
+    t0 = time.monotonic()
+    try:
+        req = Request(base_url, method="GET")
+        with urlopen(req, timeout=5) as resp:  # noqa: S310
+            resp.read()
+    except (URLError, OSError) as exc:
+        return {
+            "name": "embed_server",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Cannot reach {base_url}: {exc}",
+            "remediation": (
+                "Start the embedding server (e.g. `ollama serve`) and ensure "
+                f"RUNTIME_EMBED_BASE_URL={base_url!r} is correct in .env"
+            ),
+        }
+
+    # Best-effort: check /api/tags for model presence (Ollama-specific; warn only)
+    tags_url = base_url.rstrip("/") + "/api/tags"
+    try:
+        req2 = Request(tags_url, method="GET")
+        with urlopen(req2, timeout=5) as resp2:  # noqa: S310
+            body = json.loads(resp2.read())
+        models = [m.get("name", "") for m in (body.get("models") or [])]
+        listed = any(model in m for m in models)
+        if not listed:
+            return {
+                "name": "embed_server",
+                "passed": True,
+                "severity": "warn",
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "detail": f"Server reachable but model {model!r} not found in /api/tags",
+                "remediation": f"Pull the model: `ollama pull {model}`",
+            }
+        return {
+            "name": "embed_server",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Server reachable; model {model!r} listed",
+        }
+    except (URLError, OSError, json.JSONDecodeError):
+        # Non-Ollama server or /api/tags unavailable — server is up, model check skipped
+        return {
+            "name": "embed_server",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Server reachable at {base_url} (model listing not available)",
+        }
+
+
+def _check_corpus_files(cdir: Path) -> dict[str, Any]:
+    """Check 3: ladybug/ and skills.duck present."""
+    t0 = time.monotonic()
+    ladybug = cdir / "ladybug"
+    duckdb = cdir / "skills.duck"
+    missing = [str(p) for p in (ladybug, duckdb) if not p.exists()]
+    if missing:
+        return {
+            "name": "corpus_files",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Missing corpus files: {', '.join(missing)}",
+            "remediation": "Run `agentalloy install-packs` to populate the corpus.",
+        }
+    return {
+        "name": "corpus_files",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"ladybug/ and skills.duck present at {cdir}",
+    }
+
+
+def _check_ladybug_schema(ladybug_path: str) -> dict[str, Any]:
+    """Check 4: Skill table exists; distinguish lock-held from schema-missing."""
+    t0 = time.monotonic()
+    from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, LadybugStore, is_lock_held_error
+
+    try:
+        with LadybugStore(ladybug_path) as store:
+            rows = store.execute("MATCH (s:Skill) RETURN count(s) LIMIT 1")
+            _ = rows  # just confirming the table exists
+        return {
+            "name": "ladybug_schema",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "Skill table present",
+        }
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)
+        if is_lock_held_error(err):
+            return {
+                "name": "ladybug_schema",
+                "passed": False,
+                "lock_held": True,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "error": f"DB lock held: {err}",
+                "remediation": LOCK_HELD_REMEDIATION,
+            }
+        return {
+            "name": "ladybug_schema",
+            "passed": False,
+            "lock_held": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Schema missing or corrupt: {err}",
+            "remediation": (
+                "Run `agentalloy doctor --repair` to migrate the schema, "
+                "or run `agentalloy install-packs` directly."
+            ),
+        }
+
+
+def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
+    """Check 5: skill count >= 25 in LadybugDB; embedded-vector count > 0 in DuckDB."""
+    t0 = time.monotonic()
+    from agentalloy.storage.ladybug import LadybugStore, is_lock_held_error
+    from agentalloy.storage.vector_store import open_or_create
+
+    skill_count = 0
+    vec_count = 0
+    skill_err: str | None = None
+    vec_err: str | None = None
+
+    try:
+        with LadybugStore(ladybug_path) as store:
+            rows = store.execute("MATCH (s:Skill) RETURN count(s)")
+            skill_count = int(rows[0][0]) if rows and rows[0] else 0
+    except Exception as exc:  # noqa: BLE001
+        skill_err = str(exc)
+        if is_lock_held_error(skill_err):
+            # Lock-held is already caught in check 4; skip double-reporting
+            return {
+                "name": "corpus_count",
+                "passed": False,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "error": f"Cannot count skills — DB lock held: {skill_err}",
+                "remediation": "Stop the agentalloy service and retry.",
+            }
+
+    try:
+        vs = open_or_create(Path(duckdb_path))
+        vec_count = vs.count_embeddings()
+    except Exception as exc:  # noqa: BLE001
+        vec_err = str(exc)
+
+    errors: list[str] = []
+    remediations: list[str] = []
+    if skill_err:
+        errors.append(f"LadybugDB: {skill_err}")
+    elif skill_count < _MIN_SKILL_COUNT:
+        errors.append(f"skill count {skill_count} < {_MIN_SKILL_COUNT}")
+        remediations.append("Run `agentalloy install-packs` to install skills.")
+    if vec_err:
+        errors.append(f"DuckDB: {vec_err}")
+    elif vec_count == 0:
+        errors.append("no embedded vectors in DuckDB")
+        remediations.append("Run `agentalloy reembed` to populate embeddings.")
+
+    if errors:
+        return {
+            "name": "corpus_count",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": "; ".join(errors),
+            "remediation": " ".join(remediations) if remediations else None,
+        }
+    return {
+        "name": "corpus_count",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"{skill_count} skills; {vec_count} embedded vectors",
+    }
+
+
+def _check_embedding_dim(duckdb_path: str) -> dict[str, Any]:
+    """Check 6: stored DuckDB embedding dim matches EMBEDDING_DIM constant."""
+    t0 = time.monotonic()
+    from agentalloy.storage.vector_store import EMBEDDING_DIM, open_or_create
+
+    try:
+        vs = open_or_create(Path(duckdb_path))
+        stored_dim = vs.embedding_dim()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "name": "embedding_dim",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Cannot read DuckDB dim: {exc}",
+            "remediation": "Run `agentalloy reembed --force` after checking EMBEDDING_DIM.",
+        }
+
+    if stored_dim is None:
+        # Empty corpus — not a dim-mismatch
+        return {
+            "name": "embedding_dim",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"No embeddings yet (expected dim={EMBEDDING_DIM})",
+        }
+
+    if stored_dim != EMBEDDING_DIM:
+        return {
+            "name": "embedding_dim",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Stored dim {stored_dim} != expected {EMBEDDING_DIM}",
+            "remediation": (
+                "Embedding model changed. Run `agentalloy reembed --force` "
+                "to rebuild the vector store at the current dimension."
+            ),
+        }
+    return {
+        "name": "embedding_dim",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"dim={stored_dim} matches EMBEDDING_DIM={EMBEDDING_DIM}",
+    }
+
+
+def _check_service(port: int) -> dict[str, Any]:
+    """Check 7: service /health (down is ok; up-but-degraded is warned)."""
+    t0 = time.monotonic()
+    url = f"http://localhost:{port}/health"
+    try:
+        req = Request(url, method="GET")
+        with urlopen(req, timeout=5) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+        if body.get("status") == "ok":
+            return {
+                "name": "service",
+                "passed": True,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "detail": f"Service up on port {port}, status=ok",
+            }
+        return {
+            "name": "service",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Service up but degraded: {body}",
+            "remediation": f"Check service logs. Port {port}.",
+        }
+    except (URLError, OSError):
+        return {
+            "name": "service",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Service not running on port {port} (not required for corpus ops)",
+        }
+    except json.JSONDecodeError as exc:
+        return {
+            "name": "service",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Service responded but body not JSON: {exc}",
+        }
+
+
+def _check_pack_manifests() -> dict[str, Any]:
+    """Check 8: every bundled pack manifest passes full drift validation."""
+    t0 = time.monotonic()
+    try:
+        import agentalloy
+
+        packs_root = Path(agentalloy.__file__).resolve().parent / "_packs"
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "name": "pack_manifests",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Cannot locate _packs dir: {exc}",
+            "remediation": "Reinstall agentalloy: `uv tool install agentalloy`",
+        }
+
+    if not packs_root.is_dir():
+        return {
+            "name": "pack_manifests",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"_packs directory not found at {packs_root}",
+            "remediation": "Reinstall agentalloy: `uv tool install agentalloy`",
+        }
+
+    from agentalloy.install.subcommands.install_pack import _read_pack_manifest
+
+    bad: list[str] = []
+    total = 0
+    for pack_dir in sorted(packs_root.iterdir()):
+        if not (pack_dir / "pack.yaml").is_file():
+            continue
+        total += 1
+        manifest, errors = _read_pack_manifest(pack_dir)
+        if manifest is None:
+            bad.append(f"{pack_dir.name}: manifest failed to parse")
+        elif errors:
+            bad.append(f"{pack_dir.name}: {errors[0]}")
+
+    if bad:
+        return {
+            "name": "pack_manifests",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"{len(bad)}/{total} manifest(s) failed: {'; '.join(bad[:5])}",
+            "remediation": "Reinstall agentalloy to restore bundled packs.",
+        }
+    return {
+        "name": "pack_manifests",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"{total} pack manifest(s) valid",
     }
 
 
@@ -231,31 +397,42 @@ def _check_runner_processes(st: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def run_doctor(root: Path | None = None) -> dict[str, Any]:
-    """Run all 12 checks (verify's 8 + doctor's 4)."""
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+def run_doctor() -> dict[str, Any]:
+    """Run all 8 doctor checks. Returns a result dict."""
+    from agentalloy.config import get_settings
+    from agentalloy.install.state import corpus_dir, env_path, parse_env_file
 
-    root = root or _repo_root()
-    st = install_state.load_state(root)
+    # Config check first — need env values for subsequent checks
+    config_check = _check_config()
+    checks: list[dict[str, Any]] = [config_check]
+
+    # Resolve embed URL / model from .env (fall back to Settings defaults)
+    env = parse_env_file(env_path())
+    base_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:11434")
+    model = env.get("RUNTIME_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
+
+    checks.append(_check_embed_server(base_url, model))
+
+    cdir = corpus_dir()
+    checks.append(_check_corpus_files(cdir))
+
+    # Resolve DB paths via Settings (honours XDG overrides in tests)
+    try:
+        settings = get_settings()
+        ladybug_path = settings.ladybug_db_path
+        duckdb_path = settings.duckdb_path
+    except Exception:  # noqa: BLE001
+        ladybug_path = str(cdir / "ladybug")
+        duckdb_path = str(cdir / "skills.duck")
+
+    checks.append(_check_ladybug_schema(ladybug_path))
+    checks.append(_check_corpus_count(ladybug_path, duckdb_path))
+    checks.append(_check_embedding_dim(duckdb_path))
+
+    st = install_state.load_state()
     port = install_state.validate_port(st.get("port", 47950))
-
-    # Run preflight early checks first — if uv is missing or PATH is
-    # broken, every later check is downstream noise. Strip the severity
-    # field so the shape matches verify/doctor checks (which don't carry it).
-    preflight_result = run_preflight(phase="early", port=port)
-    checks: list[dict[str, Any]] = [
-        {k: v for k, v in c.items() if k != "severity"} for c in preflight_result["checks"]
-    ]
-
-    # Run verify's 8 checks
-    verify_result = verify_checks(st, root)
-    checks.extend(verify_result["checks"])
-
-    # Add doctor's 4 additional checks
-    checks.append(_check_service_reachable(port))
-    checks.append(_check_compose_endpoint(port))
-    checks.append(_check_state_consistent(st))
-    checks.append(_check_runner_processes(st))
+    checks.append(_check_service(port))
+    checks.append(_check_pack_manifests())
 
     all_passed = all(c["passed"] for c in checks)
     return {
@@ -263,6 +440,123 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
         "all_checks_passed": all_passed,
         "checks": checks,
     }
+
+
+# ---------------------------------------------------------------------------
+# Repair
+# ---------------------------------------------------------------------------
+
+
+def _repair(result: dict[str, Any]) -> int:
+    """Execute repair sequence for failed checks. Returns 0 on success."""
+    checks_by_name = {c["name"]: c for c in result["checks"]}
+
+    # Lock-held: abort immediately — must not kill processes
+    schema_check = checks_by_name.get("ladybug_schema", {})
+    if schema_check.get("lock_held"):
+        print_rich(
+            "[red]ABORT:[/red] DB lock is held by another process. "
+            "Stop the agentalloy service first, then re-run doctor --repair."
+        )
+        rem = schema_check.get("remediation", "")
+        if rem:
+            print_rich(f"  {rem}")
+        return 1
+
+    any_failed = not result["all_checks_passed"]
+    if not any_failed:
+        print_rich("[green]All checks passed — nothing to repair.[/green]")
+        return 0
+
+    rc = 0
+
+    # Step 1: migrate schema (idempotent)
+    schema_failed = not checks_by_name.get("ladybug_schema", {}).get("passed", True)
+    corpus_failed = not checks_by_name.get("corpus_files", {}).get("passed", True)
+    if schema_failed and not corpus_failed:
+        print_rich("[yellow]→ Running schema migration…[/yellow]")
+        from agentalloy.config import get_settings
+        from agentalloy.storage.ladybug import LadybugStore
+
+        try:
+            settings = get_settings()
+            with LadybugStore(settings.ladybug_db_path) as store:
+                store.migrate()
+            print_rich("[green]  Schema migration OK[/green]")
+        except Exception as exc:  # noqa: BLE001
+            print_rich(f"[red]  Schema migration failed: {exc}[/red]")
+            rc = 1
+
+    # Step 2: install-packs if corpus is empty or files missing
+    count_check = checks_by_name.get("corpus_count", {})
+    corpus_needs_packs = corpus_failed or not count_check.get("passed", True)
+    if corpus_needs_packs:
+        print_rich("[yellow]→ Running install-packs --packs all…[/yellow]")
+        try:
+            import subprocess
+
+            sub_rc = subprocess.run(  # noqa: S603
+                [sys.executable, "-m", "agentalloy.install", "install-packs", "--packs", "all"],
+                check=False,
+            ).returncode
+            if sub_rc == 0:
+                print_rich("[green]  install-packs OK[/green]")
+            else:
+                print_rich(f"[red]  install-packs exited {sub_rc}[/red]")
+                rc = 1
+        except Exception as exc:  # noqa: BLE001
+            print_rich(f"[red]  install-packs error: {exc}[/red]")
+            rc = 1
+
+    # Step 3: reembed if dim mismatch or no vectors
+    dim_check = checks_by_name.get("embedding_dim", {})
+    reembed_needed = not count_check.get("passed", True) or not dim_check.get("passed", True)
+    if reembed_needed:
+        force_flag = ["--force"] if not dim_check.get("passed", True) else []
+        print_rich(f"[yellow]→ Running reembed {' '.join(force_flag)}…[/yellow]")
+        try:
+            from agentalloy.reembed.cli import main as reembed_main
+
+            reembed_rc = reembed_main(force_flag)
+            if reembed_rc == 0:
+                print_rich("[green]  reembed OK[/green]")
+            else:
+                print_rich(f"[red]  reembed exited {reembed_rc}[/red]")
+                rc = 1
+        except Exception as exc:  # noqa: BLE001
+            print_rich(f"[red]  reembed error: {exc}[/red]")
+            rc = 1
+
+    # Step 4: re-diagnose and print after-picture
+    print_rich("")
+    print_rich("[bold]After repair:[/bold]")
+    after = run_doctor()
+    _render_human_result(after)
+    if not after["all_checks_passed"]:
+        rc = 1
+
+    return rc
+
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+
+def _render_human_result(result: dict[str, Any]) -> None:
+    from agentalloy.install.output import render_checklist
+
+    render_checklist(result, title="Doctor")
+
+    warns = [
+        c
+        for c in result["checks"]
+        if c.get("passed") is not False  # skip failures
+        and c.get("severity") == "warn"
+    ]
+    if warns:
+        print_rich()
+        print_rich(f"  [yellow]{len(warns)} warning(s) — install functional.[/yellow]")
 
 
 # ---------------------------------------------------------------------------
@@ -275,21 +569,36 @@ def add_parser(
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         "doctor",
-        help="Runtime health check across all components.",
+        help=(
+            "Diagnose broken installs: config, embed server, corpus files, schema, "
+            "skill count, embedding dim, service, and pack manifests. "
+            "Pass --repair to auto-fix what's broken."
+        ),
+    )
+    p.add_argument(
+        "--repair",
+        action="store_true",
+        default=False,
+        help=(
+            "Attempt to repair detected failures: migrate schema → install-packs "
+            "→ reembed → re-diagnose. Lock-held state aborts with a remediation message."
+        ),
     )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
 
 def _render_human(result: dict[str, Any]) -> None:
-    """Render doctor check results in human-readable format."""
-    from agentalloy.install.output import render_checklist
-
-    render_checklist(result, title="Health Check")
+    _render_human_result(result)
 
 
 def _run(args: argparse.Namespace) -> int:
     result = run_doctor()
     install_state.save_output_file(result, "doctor.json")
+
+    if getattr(args, "repair", False):
+        write_result(result, args, human_fn=_render_human)
+        return _repair(result)
+
     write_result(result, args, human_fn=_render_human)
     return 0 if result["all_checks_passed"] else 1

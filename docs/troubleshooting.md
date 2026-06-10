@@ -92,12 +92,16 @@ Multiple processes are trying to write to the corpus database simultaneously.
 
 **Fix:** Stop all AgentAlloy services, then run `agentalloy reembed`.
 
+Or run `agentalloy doctor --repair` to diagnose and fix automatically.
+
 ### Skill count is zero after install
 
 The corpus was not populated. This usually means the pack installation step failed
 or was skipped.
 
 **Fix:** Run `agentalloy install-packs --packs all` to re-install all packs.
+
+Or run `agentalloy doctor --repair` to diagnose and fix automatically.
 
 ## Harness / Wiring Issues
 
