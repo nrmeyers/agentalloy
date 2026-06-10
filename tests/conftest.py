@@ -21,6 +21,25 @@ from agentalloy.storage.vector_store import VectorStore, open_or_create
 _DEFAULT_PORT = 47950
 
 
+@pytest.fixture(autouse=True)
+def _isolated_xdg_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point XDG state dirs at a per-test tmp dir for the whole suite.
+
+    install_state and config resolve XDG_CONFIG_HOME / XDG_DATA_HOME
+    per-call, so redirecting the env isolates every test from the
+    developer's real ~/.config/agentalloy and ~/.local/share/agentalloy —
+    and matches CI, which has no real install. (A previous fixture in
+    tests/install/conftest.py rmtree'd the real dirs instead; running the
+    test suite destroyed any local AgentAlloy install.)
+    """
+    config_dir = tmp_path / "xdg-config"
+    data_dir = tmp_path / "xdg-data"
+    config_dir.mkdir()
+    data_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_dir))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _isolated_ambient_tmpdir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Pin TMPDIR to the pytest tmp tree for the whole session.

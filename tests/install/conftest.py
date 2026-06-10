@@ -1,44 +1,16 @@
-"""Shared pytest fixtures for install subcommand tests."""
+"""Shared pytest fixtures for install subcommand tests.
+
+XDG isolation (redirecting XDG_CONFIG_HOME / XDG_DATA_HOME to per-test tmp
+dirs) lives in the root conftest and applies to the whole suite.
+"""
 
 from __future__ import annotations
 
 import os
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-
-from agentalloy.install import state as install_state
-
-
-@pytest.fixture(autouse=True)
-def _clean_install_state():
-    """Remove all global install artifacts before and after each test.
-
-    Tests that don't use tmp_state_dir write to global XDG dirs:
-    - ~/.config/agentalloy/ (install-state.json, .env, corpus)
-    - ~/.local/share/agentalloy/ (outputs, corpus)
-
-    Clean both to prevent cross-test pollution.
-    """
-    config_dir = install_state.user_config_dir()
-    data_dir = install_state.user_data_dir()
-
-    existed_config = config_dir.exists()
-    existed_data = data_dir.exists()
-
-    if existed_config:
-        shutil.rmtree(config_dir, ignore_errors=True)
-    if existed_data:
-        shutil.rmtree(data_dir, ignore_errors=True)
-
-    yield
-
-    if config_dir.exists():
-        shutil.rmtree(config_dir, ignore_errors=True)
-    if data_dir.exists():
-        shutil.rmtree(data_dir, ignore_errors=True)
 
 
 @pytest.fixture
