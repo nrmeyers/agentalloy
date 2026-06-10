@@ -38,7 +38,11 @@ import yaml as _yaml
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.ladybug import (
+    LOCK_HELD_REMEDIATION,
+    LadybugStore,
+    is_lock_held_error,
+)
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -905,7 +909,19 @@ def _render_human(result: dict[str, Any]) -> None:
     if skills_deprecated:
         print_rich(f"  Skills skipped (deprecated): {skills_deprecated}")
     if failures:
-        print_rich(f"  Failures: {failures}")
+        first_fail = next(
+            (r for r in result.get("ingest_results") or [] if r.get("outcome") == "failed"),
+            None,
+        )
+        detail = ""
+        if first_fail:
+            tail = str(first_fail.get("stderr_tail") or "").strip()
+            if len(tail) > 120:
+                tail = tail[:117] + "..."
+            detail = f" (first: {first_fail.get('yaml')}" + (f" — {tail})" if tail else ")")
+        print_rich(f"  Failures: {failures}{detail}")
+        if first_fail and is_lock_held_error(str(first_fail.get("stderr_tail") or "")):
+            print_rich(f"  Remediation: {LOCK_HELD_REMEDIATION}")
 
     print_rich()
 

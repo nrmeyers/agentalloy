@@ -116,6 +116,27 @@ class TestUnderMinimumSkillCount:
         assert result["action"] == "missing_files"
         assert result["skill_count"] == 10
 
+    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    def test_remediation_includes_migrate_step(
+        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+    ) -> None:
+        """Issue #84: a schema-less corpus reports skill_count 0; the
+        remediation must mention `python -m agentalloy.migrate` because
+        `agentalloy install-packs` alone cannot create the graph schema."""
+        (user_corpus / "skills.duck").write_bytes(b"fake")
+        (user_corpus / "ladybug").mkdir()
+        mock_duck.return_value = {
+            "skill_count": 0,
+            "fragment_count": 0,
+            "embedding_model": None,
+            "embedding_dim": None,
+        }
+        result = check_corpus(repo_root)
+        assert result["action"] == "missing_files"
+        remediation = result["remediation"]
+        assert "python -m agentalloy.migrate" in remediation
+        assert "install-packs" in remediation
+
 
 class TestNoNetworkCalls:
     @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")

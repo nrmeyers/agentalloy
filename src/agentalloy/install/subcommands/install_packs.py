@@ -203,6 +203,55 @@ def add_parser(
     p.set_defaults(func=_run)
 
 
+def _ensure_ladybug_schema() -> None:
+    """Create the LadybugDB graph schema if it's missing. Best-effort.
+
+    A ``setup --force`` re-run can leave corpus files on disk without the
+    graph schema (issue #84); every subsequent ingest then fails with
+    "Table Skill does not exist" and the pack rolls back. ``migrate()`` is
+    idempotent, so running it up front is safe. Failures (e.g. the DB
+    lock is held by a running service) are non-fatal — the per-skill
+    ingest errors will surface them.
+    """
+    from agentalloy.config import get_settings
+    from agentalloy.storage.ladybug import (
+        LOCK_HELD_REMEDIATION,
+        LadybugStore,
+        is_lock_held_error,
+    )
+
+    try:
+        settings = get_settings()
+        with LadybugStore(settings.ladybug_db_path) as store:
+            store.migrate()
+    except Exception as exc:  # noqa: BLE001 — best-effort guard, ingest surfaces real failures
+        print(f"WARN: could not verify/create corpus graph schema: {exc}", file=sys.stderr)
+        if is_lock_held_error(str(exc)):
+            print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
+
+
+def _summarize_install_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip bulky per-skill ingest detail from a pack result, keeping failures.
+
+    Successful ``ingest_results`` entries are noise in install-packs.json,
+    but failed ones carry the only per-skill diagnostics (``stderr_tail``)
+    — dropping them left users staring at "Failures: N" (issue #84).
+    """
+    out = {k: v for k, v in result.items() if k != "ingest_results"}
+    failed = [
+        {
+            "yaml": r.get("yaml"),
+            "exit_code": r.get("exit_code"),
+            "stderr_tail": r.get("stderr_tail"),
+        }
+        for r in result.get("ingest_results") or []
+        if r.get("outcome") == "failed"
+    ]
+    if failed:
+        out["failed_ingest_results"] = failed[:10]
+    return out
+
+
 def _packs_dir() -> Path:
     """Return the directory containing pack manifests.
 
@@ -304,9 +353,7 @@ def _run(args: argparse.Namespace) -> int:
         "action": "packs_installed" if not failed else "packs_partial",
         "selected": selected,
         "failed_packs": failed,
-        "install_results": [
-            {k: v for k, v in r.items() if k != "ingest_results"} for r in install_results
-        ],
+        "install_results": [_summarize_install_result(r) for r in install_results],
         "reembed_exit_code": reembed_rc,
         "duration_ms": duration_ms,
     }
@@ -322,6 +369,19 @@ def _run(args: argparse.Namespace) -> int:
             "unembedded fragments until then.",
             file=sys.stderr,
         )
+
+    # Lock-held detection: if any per-skill ingest failure looks like
+    # LadybugDB's single-writer lock error, tell the user to stop the
+    # service instead of leaving them to decode "Failures: N" (issue #84).
+    from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, is_lock_held_error
+
+    if any(
+        is_lock_held_error(str(ir.get("stderr_tail") or ""))
+        for r in install_results
+        for ir in r.get("ingest_results") or []
+        if ir.get("outcome") == "failed"
+    ):
+        print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
 
     # Clear the setup-wizard pack selection once we've acted on it, so a
     # later standalone `agentalloy install-packs` re-prompts the user with
@@ -684,6 +744,11 @@ def _run_container_guard(
                 "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
             )
 
+    # Schema guard (issue #84): a wiped-then-recreated corpus can have DB
+    # files on disk without the graph schema; ingest would fail on every
+    # skill with "Table Skill does not exist". Migrations are idempotent.
+    _ensure_ladybug_schema()
+
     # list[tuple[pack_name, result]] so _run() can build failed list by name, not path
     named_results: list[tuple[str, dict[str, Any]]] = []
     reembed_rc: int = 0
@@ -721,6 +786,10 @@ def _bulk_reembed(no_restart: bool = False) -> int:
         return reembed_main(argv)
     except Exception as exc:  # noqa: BLE001 — surface but don't crash setup
         print(f"install-packs: reembed raised: {exc}", file=sys.stderr)
+        from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, is_lock_held_error
+
+        if is_lock_held_error(str(exc)):
+            print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
         return 2
 
 

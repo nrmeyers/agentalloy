@@ -47,7 +47,11 @@ from agentalloy.lm_client import (
     LMTimeout,
     LMUnavailable,
 )
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.ladybug import (
+    LOCK_HELD_REMEDIATION,
+    LadybugStore,
+    is_lock_held_error,
+)
 from agentalloy.storage.vector_store import (
     FragmentEmbedding,
     VectorStore,
@@ -668,6 +672,16 @@ def main(argv: list[str] | None = None) -> int:
                         exc,
                     )
             return EXIT_OK if stats.failed == 0 else EXIT_LLM
+    except Exception as exc:
+        # LadybugDB enforces a single writer; a running service (including a
+        # manually-launched uvicorn the preflight can't see) holds the lock
+        # and the DB open above fails. Tell the user what to stop (issue #84).
+        if not is_lock_held_error(str(exc)):
+            raise
+        logger.error("database lock is held: %s", exc)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
+        return EXIT_DB
     finally:
         _maybe_restart()
         if is_in_container():

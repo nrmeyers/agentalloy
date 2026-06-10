@@ -8,15 +8,23 @@ install-packs from prompting the user twice for the same pack selection.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands.install_packs import (
+    _bulk_reembed,
     _clear_pending_pack_selection,
+    _ensure_ladybug_schema,
     _installed_pack_names,
     _load_pending_pack_selection,
     _select_packs,
+    _summarize_install_result,
+)
+
+_LOCK_ERR = (
+    "RuntimeError: IO exception: Could not set lock on file ladybug.lock: Lock is held by PID 12345"
 )
 
 
@@ -180,3 +188,136 @@ class TestInstalledPackAnnotation:
         st["installed_packs"] = ["lang/python", 42, None, "tool/git"]
         install_state.save_state(st, repo_root)
         assert _installed_pack_names() == {"lang/python", "tool/git"}
+
+
+class TestEnsureLadybugSchema:
+    """Schema guard for issue #84: a wiped-then-recreated corpus can have DB
+    files on disk without the graph schema; install-packs must migrate
+    (idempotently) before ingesting instead of failing every skill with
+    "Table Skill does not exist"."""
+
+    def test_runs_migrate_on_store(self, tmp_path: Path) -> None:
+        with (
+            patch("agentalloy.config.get_settings") as mock_settings,
+            patch("agentalloy.storage.ladybug.LadybugStore") as mock_store_cls,
+        ):
+            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
+            _ensure_ladybug_schema()
+        mock_store_cls.assert_called_once_with(str(tmp_path / "ladybug"))
+        mock_store_cls.return_value.__enter__.return_value.migrate.assert_called_once()
+
+    def test_failure_is_nonfatal_and_warns(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with (
+            patch("agentalloy.config.get_settings") as mock_settings,
+            patch(
+                "agentalloy.storage.ladybug.LadybugStore",
+                side_effect=RuntimeError("disk on fire"),
+            ),
+        ):
+            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
+            _ensure_ladybug_schema()  # must not raise
+        err = capsys.readouterr().err
+        assert "could not verify/create corpus graph schema" in err
+        assert "disk on fire" in err
+
+    def test_lock_held_failure_prints_remediation(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with (
+            patch("agentalloy.config.get_settings") as mock_settings,
+            patch(
+                "agentalloy.storage.ladybug.LadybugStore",
+                side_effect=RuntimeError(_LOCK_ERR),
+            ),
+        ):
+            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
+            _ensure_ladybug_schema()
+        err = capsys.readouterr().err
+        assert "Another process holds the corpus DB lock" in err
+        assert "agentalloy server-stop" in err
+
+
+class TestSummarizeInstallResult:
+    """install-packs.json must keep per-skill failure detail (issue #84)."""
+
+    def test_drops_successful_ingest_results(self) -> None:
+        result = {
+            "action": "ingested",
+            "pack": "core",
+            "ingest_results": [
+                {"yaml": "a.yaml", "outcome": "ingested", "stderr_tail": ""},
+                {"yaml": "b.yaml", "outcome": "duplicate", "stderr_tail": ""},
+            ],
+        }
+        out = _summarize_install_result(result)
+        assert "ingest_results" not in out
+        assert "failed_ingest_results" not in out
+        assert out["action"] == "ingested"
+
+    def test_keeps_failed_ingest_detail(self) -> None:
+        result = {
+            "action": "ingested_with_errors",
+            "pack": "core",
+            "ingest_results": [
+                {"yaml": "ok.yaml", "outcome": "ingested", "exit_code": 0, "stderr_tail": ""},
+                {
+                    "yaml": "writing-readmes.yaml",
+                    "outcome": "failed",
+                    "exit_code": 1,
+                    "stderr_tail": "RuntimeError: Binder exception: Table Skill does not exist.",
+                },
+            ],
+        }
+        out = _summarize_install_result(result)
+        assert "ingest_results" not in out
+        failed = out["failed_ingest_results"]
+        assert failed == [
+            {
+                "yaml": "writing-readmes.yaml",
+                "exit_code": 1,
+                "stderr_tail": "RuntimeError: Binder exception: Table Skill does not exist.",
+            }
+        ]
+
+    def test_caps_failed_detail_at_ten(self) -> None:
+        result = {
+            "action": "ingested_with_errors",
+            "ingest_results": [
+                {"yaml": f"s{i}.yaml", "outcome": "failed", "exit_code": 1, "stderr_tail": "boom"}
+                for i in range(25)
+            ],
+        }
+        out = _summarize_install_result(result)
+        assert len(out["failed_ingest_results"]) == 10
+
+
+class TestBulkReembedLockHint:
+    def test_lock_held_exception_prints_remediation(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError(_LOCK_ERR)):
+            rc = _bulk_reembed()
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "reembed raised" in err
+        assert "Another process holds the corpus DB lock" in err
+
+    def test_other_exception_has_no_lock_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError("kaboom")):
+            rc = _bulk_reembed()
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "reembed raised" in err
+        assert "corpus DB lock" not in err
+
+
+class TestIsLockHeldError:
+    def test_matches_both_lock_phrases(self) -> None:
+        from agentalloy.storage.ladybug import is_lock_held_error
+
+        assert is_lock_held_error("Could not set lock on file /x/ladybug.lock")
+        assert is_lock_held_error("Lock is held by PID 4242")
+        assert not is_lock_held_error("Binder exception: Table Skill does not exist.")
+        assert not is_lock_held_error("")

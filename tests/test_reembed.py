@@ -701,3 +701,55 @@ def test_container_without_no_restart_calls_stop_and_restart(tmp_path: Path, cap
         captured = capsys.readouterr()
         assert "Stopping agentalloy service (container mode)" in captured.err
         assert "Operation complete, restarting agentalloy service" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Lock-held error recognition (issue #84)
+# ---------------------------------------------------------------------------
+
+
+def test_lock_held_error_returns_exit_db_with_remediation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A LadybugDB single-writer lock failure (e.g. a manually-launched
+    uvicorn the preflight can't see) must exit EXIT_DB with a targeted
+    remediation instead of an unhandled traceback."""
+    from agentalloy.reembed.cli import EXIT_DB
+
+    lock_err = RuntimeError(
+        "IO exception: Could not set lock on file ladybug.lock: Lock is held by PID 12345"
+    )
+    with (
+        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
+        patch("agentalloy.reembed.cli.open_or_create"),
+        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
+        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
+    ):
+        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
+        mock_settings.return_value.runtime_embedding_model = "test-model"
+        mock_store_cls.return_value.__enter__ = MagicMock(side_effect=lock_err)
+        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        code = reembed_main([])
+
+    assert code == EXIT_DB
+    err = capsys.readouterr().err
+    assert "Another process holds the corpus DB lock" in err
+    assert "agentalloy server-stop" in err
+
+
+def test_non_lock_db_error_still_raises(tmp_path: Path) -> None:
+    """Only lock-held errors are translated; other DB failures propagate."""
+    with (
+        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
+        patch("agentalloy.reembed.cli.open_or_create"),
+        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
+        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
+    ):
+        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
+        mock_settings.return_value.runtime_embedding_model = "test-model"
+        mock_store_cls.return_value.__enter__ = MagicMock(side_effect=RuntimeError("corrupt"))
+        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        with pytest.raises(RuntimeError, match="corrupt"):
+            reembed_main([])
