@@ -561,7 +561,12 @@ User-scope state (`~/.config/agentalloy/`, corpus DB) is preserved across the sw
 
 ## Benchmarks
 
-See [BENCHMARKS.md](BENCHMARKS.md) for the composed vs flat comparison experiment and retrieval recall harness.
+Measured on a 4-model × 3-condition matrix (composed / flat / no skills; 10 pre-registered tasks, 3 seeded runs per cell). Two results stand out:
+
+- **A 1.5B-active edge model with composed skills matched a bare 27B dense model — at 12.6× the speed.** LFM2.5-8B-A1B + composed scored 0.850 vs the bare Qwen3.6-27B's 0.855, in 42s vs 534s for the same workload. That quality runs on a laptop or NPU; the 27B doesn't.
+- **Composed injection made the edge model better *and* faster than itself**: +0.05 quality over its own no-skill baseline while finishing 29% faster — focused skill prose cut its output rambling nearly in half. Flat injection of the same skills delivered zero lift on that model.
+
+Full matrix, methodology, and caveats in [BENCHMARKS.md](BENCHMARKS.md).
 
 ---
 
