@@ -3,7 +3,7 @@ skill_id: nextjs-proxy-and-edge-runtime
 canonical_name: Next.js 16 Proxy and Edge Runtime (proxy.ts, Matchers, NextResponse, NextRequest)
 category: engineering
 skill_class: domain
-domain_tags: [proxy-matcher-config, nextresponse-rewrite-redirect, cookie-header-mutation, edge-runtime-constraints, optimistic-permission-check]
+domain_tags: [proxy-matcher-config, nextresponse-rewrite-redirect, cookie-header-mutation, edge-runtime-constraints, optimistic-permission-check, nextjs]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

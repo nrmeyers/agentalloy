@@ -9,6 +9,7 @@ domain_tags:
 - variants
 - interaction
 - hover
+- ui-design
 always_apply: false
 phase_scope:
 - build

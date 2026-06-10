@@ -3,7 +3,7 @@ skill_id: ts-generics-and-conditional-types
 canonical_name: TypeScript Generics and Conditional Types (Type-Level Programming)
 category: engineering
 skill_class: domain
-domain_tags: [generics, conditional-types, infer-clause, mapped-types, variance-modifiers]
+domain_tags: [generics, conditional-types, infer-clause, mapped-types, variance-modifiers, typescript]
 always_apply: false
 phase_scope: [build]
 category_scope: language

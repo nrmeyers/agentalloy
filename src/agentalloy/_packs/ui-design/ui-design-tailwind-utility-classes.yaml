@@ -9,6 +9,7 @@ domain_tags:
   - styling
   - responsive-design
   - inline-styles
+  - ui-design
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

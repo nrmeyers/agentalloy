@@ -9,6 +9,7 @@ domain_tags:
   - match-statement
   - case-statement
   - structural-patterns
+  - python
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

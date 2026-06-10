@@ -3,7 +3,7 @@ skill_id: csharp-async-and-tasks
 canonical_name: C# Async and Tasks (Task, async/await, CancellationToken, Channels)
 category: engineering
 skill_class: domain
-domain_tags: [task-composition, cancellation-token-flow, valuetask-allocation, configureawait-context, channel-bounded]
+domain_tags: [task-composition, cancellation-token-flow, valuetask-allocation, configureawait-context, channel-bounded, csharp-dotnet]
 always_apply: false
 phase_scope: [build]
 category_scope: language

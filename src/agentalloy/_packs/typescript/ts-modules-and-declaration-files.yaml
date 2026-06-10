@@ -3,7 +3,7 @@ skill_id: ts-modules-and-declaration-files
 canonical_name: TypeScript Modules and Declaration Files (Imports, .d.ts, exports map)
 category: engineering
 skill_class: domain
-domain_tags: [esm-modules, declaration-files, exports-map, ambient-module, dual-package-hazard]
+domain_tags: [esm-modules, declaration-files, exports-map, ambient-module, dual-package-hazard, typescript]
 always_apply: false
 phase_scope: [build]
 category_scope: language

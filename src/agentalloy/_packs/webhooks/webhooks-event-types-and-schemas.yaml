@@ -8,6 +8,7 @@ domain_tags:
   - schemas
   - versioning
   - catalogs
+  - webhooks
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

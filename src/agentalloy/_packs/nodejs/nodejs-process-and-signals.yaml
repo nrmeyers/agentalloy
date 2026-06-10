@@ -9,6 +9,7 @@ domain_tags:
   - error-handling
   - lifecycle-events
   - robust-cli-tools
+  - nodejs
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

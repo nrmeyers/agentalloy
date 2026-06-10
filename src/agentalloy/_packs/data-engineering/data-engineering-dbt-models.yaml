@@ -10,6 +10,7 @@ domain_tags:
 - sources
 - incremental models
 - unique_key
+- data-engineering
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

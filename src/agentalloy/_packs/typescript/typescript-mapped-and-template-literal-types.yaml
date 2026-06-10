@@ -9,6 +9,7 @@ domain_tags:
   - template literal types
   - type transformation
   - object manipulation
+  - typescript
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

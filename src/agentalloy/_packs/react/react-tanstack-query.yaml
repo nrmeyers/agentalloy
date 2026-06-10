@@ -9,6 +9,7 @@ domain_tags:
   - server-state
   - data-fetching
   - mutations
+  - react
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

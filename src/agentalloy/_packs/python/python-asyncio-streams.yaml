@@ -9,6 +9,7 @@ domain_tags:
   - network
   - tcp
   - unix
+  - python
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

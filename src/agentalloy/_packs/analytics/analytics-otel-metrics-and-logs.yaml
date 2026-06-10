@@ -8,6 +8,7 @@ domain_tags:
   - metrics
   - logs
   - observability
+  - analytics
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

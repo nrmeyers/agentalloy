@@ -9,6 +9,7 @@ domain_tags:
   - type narrowing
   - union types
   - type guards
+  - typescript
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

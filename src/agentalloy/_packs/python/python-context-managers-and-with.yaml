@@ -3,7 +3,7 @@ skill_id: python-context-managers-and-with
 canonical_name: Python Context Managers and the with Statement
 category: engineering
 skill_class: domain
-domain_tags: [with-statement, contextmanager-decorator, exitstack, async-with, resource-cleanup]
+domain_tags: [with-statement, contextmanager-decorator, exitstack, async-with, resource-cleanup, python]
 always_apply: false
 phase_scope: [build]
 category_scope: language

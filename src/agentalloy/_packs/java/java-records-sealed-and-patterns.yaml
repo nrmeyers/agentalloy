@@ -3,7 +3,7 @@ skill_id: java-records-sealed-and-patterns
 canonical_name: Java Records, Sealed Types, and Pattern Matching for switch (JEP 441)
 category: engineering
 skill_class: domain
-domain_tags: [record-component, sealed-permits, switch-pattern-matching, deconstruction-patterns, algebraic-data-types]
+domain_tags: [record-component, sealed-permits, switch-pattern-matching, deconstruction-patterns, algebraic-data-types, java]
 always_apply: false
 phase_scope: [build]
 category_scope: language

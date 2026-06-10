@@ -9,6 +9,7 @@ domain_tags:
   - dependency-cache-per-request
   - annotated-injection
   - router-level-dependencies
+  - fastapi
 always_apply: false
 phase_scope: [build]
 category_scope: framework

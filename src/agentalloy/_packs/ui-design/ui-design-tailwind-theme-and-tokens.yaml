@@ -9,6 +9,7 @@ domain_tags:
   - design-token
   - css
   - utility-classes
+  - ui-design
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

@@ -3,7 +3,7 @@ skill_id: python-typing-and-generics
 canonical_name: Python Typing and Generics (Type Hints, Protocols, PEP 695)
 category: engineering
 skill_class: domain
-domain_tags: [type-hints, protocol-class, typevar, pep-695-syntax, gradual-typing]
+domain_tags: [type-hints, protocol-class, typevar, pep-695-syntax, gradual-typing, python]
 always_apply: false
 phase_scope: [build]
 category_scope: language

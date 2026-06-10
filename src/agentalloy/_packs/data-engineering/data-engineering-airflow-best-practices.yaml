@@ -9,6 +9,7 @@ domain_tags:
   - timetables
   - dag
   - scheduling
+  - data-engineering
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

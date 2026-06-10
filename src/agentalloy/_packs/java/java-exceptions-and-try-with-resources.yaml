@@ -3,7 +3,7 @@ skill_id: java-exceptions-and-try-with-resources
 canonical_name: Java Exceptions and try-with-resources (Checked vs Unchecked, Suppressed Exceptions, AutoCloseable)
 category: engineering
 skill_class: domain
-domain_tags: [checked-exception-policy, try-with-resources-closing, suppressed-exceptions-stack, throwable-cause-chaining, multi-catch-disjunction]
+domain_tags: [checked-exception-policy, try-with-resources-closing, suppressed-exceptions-stack, throwable-cause-chaining, multi-catch-disjunction, java]
 always_apply: false
 phase_scope: [build]
 category_scope: language

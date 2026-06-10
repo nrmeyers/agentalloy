@@ -3,7 +3,7 @@ skill_id: go-testing-idioms
 canonical_name: Go Testing Idioms (Table-Driven Tests, Subtests, Benchmarks, Fuzzing)
 category: quality
 skill_class: domain
-domain_tags: [table-driven-tests, subtest-isolation, testing-helper, benchmark-loops, fuzz-corpus]
+domain_tags: [table-driven-tests, subtest-isolation, testing-helper, benchmark-loops, fuzz-corpus, go]
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

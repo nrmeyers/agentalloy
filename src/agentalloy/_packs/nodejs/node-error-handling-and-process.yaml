@@ -3,7 +3,7 @@ skill_id: node-error-handling-and-process
 canonical_name: Node.js Error Handling and Process (codes, uncaughtException, exit)
 category: engineering
 skill_class: domain
-domain_tags: [error-codes, uncaught-exception, unhandled-rejection, abort-controller, signal-handling]
+domain_tags: [error-codes, uncaught-exception, unhandled-rejection, abort-controller, signal-handling, nodejs]
 always_apply: false
 phase_scope: [build]
 category_scope: language

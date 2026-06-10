@@ -3,7 +3,7 @@ skill_id: csharp-nullable-and-pattern-matching
 canonical_name: C# Nullable Reference Types, Generics, and Pattern Matching
 category: engineering
 skill_class: domain
-domain_tags: [nullable-annotations, null-forgiving-operator, generic-constraints, relational-patterns, pattern-combinators]
+domain_tags: [nullable-annotations, null-forgiving-operator, generic-constraints, relational-patterns, pattern-combinators, csharp-dotnet]
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -8,6 +8,7 @@ domain_tags:
   - generics
   - type-inference
   - type-transforms
+  - typescript
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

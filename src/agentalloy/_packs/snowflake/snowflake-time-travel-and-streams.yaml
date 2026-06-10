@@ -9,6 +9,7 @@ domain_tags:
   - cdc
   - audit-trails
   - data-recovery
+  - snowflake
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

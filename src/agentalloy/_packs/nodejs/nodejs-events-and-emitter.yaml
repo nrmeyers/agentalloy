@@ -9,6 +9,7 @@ domain_tags:
   - async iteration
   - error handling
   - once method
+  - nodejs
 phase_scope: [build]
 category_scope: [language]
 author: navistone

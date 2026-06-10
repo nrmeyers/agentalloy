@@ -9,6 +9,7 @@ domain_tags:
 - backward compatibility
 - API guidelines
 - Azure
+- rest
 always_apply: false
 phase_scope:
 - build

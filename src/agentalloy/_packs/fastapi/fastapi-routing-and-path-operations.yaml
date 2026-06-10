@@ -9,6 +9,7 @@ domain_tags:
   - apirouter-prefix
   - status-code-response
   - openapi-tags-summary
+  - fastapi
 always_apply: false
 phase_scope: [build]
 category_scope: framework

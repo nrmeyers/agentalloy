@@ -3,7 +3,7 @@ skill_id: node-event-loop-and-async
 canonical_name: Node.js Event Loop and Async (Phases, Microtasks, AsyncLocalStorage)
 category: engineering
 skill_class: domain
-domain_tags: [event-loop-phases, microtask-queue, async-local-storage, worker-threads, single-threaded-runtime]
+domain_tags: [event-loop-phases, microtask-queue, async-local-storage, worker-threads, single-threaded-runtime, nodejs]
 always_apply: false
 phase_scope: [build]
 category_scope: language
