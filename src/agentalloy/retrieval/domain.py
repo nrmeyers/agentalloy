@@ -116,7 +116,13 @@ _PHASE_TO_CATEGORIES: dict[Phase, list[str]] = {
     "spec": ["spec", "design", "tooling", "governance", "meta"],
     "design": ["design", "engineering", "tooling", "governance", "meta"],
     "qa": ["qa", "quality", "review", "engineering", "tooling", "governance", "meta"],
-    "build": ["build", "engineering", "tooling", "ops", "governance", "meta"],
+    # "design" is included for build: domain packs author API/protocol
+    # convention skills (webhooks, REST, ...) as category=design with
+    # phase_scope=[build] — excluding the category made 494 fragments
+    # unreachable during the most common agent phase (measured via the
+    # domain benchmark: gold-skill retrieval missed on every build-phase
+    # webhook task, hit on every design-phase one).
+    "build": ["build", "design", "engineering", "tooling", "ops", "governance", "meta"],
     "ops": ["ops", "engineering", "tooling", "governance", "meta"],
     "meta": ["meta", "tooling", "governance"],
     "governance": ["governance", "review", "quality", "meta"],
@@ -417,6 +423,21 @@ def retrieve_domain_candidates(
             continue
         ranked.append(frag)
         scores_by_id[fid] = dense_score_by_id.get(fid, 0.0)
+
+    # domain_tags is a post-retrieval filter per the API contract: it narrows
+    # the fused candidate set and may legitimately empty it. It cannot recruit
+    # tag-matching skills the search itself missed — when that happens the
+    # response is empty even though matching skills exist in the corpus, so
+    # make it loud for operators.
+    if domain_tags and not ranked and fused_ids:
+        logger.warning(
+            "domain_tags %s filtered out all %d fused candidates for task=%s "
+            "phase=%s — tag-matching skills may exist but were not retrieved",
+            domain_tags,
+            len(fused_ids),
+            task[:80],
+            phase,
+        )
 
     eligible_count = len(ranked)
 

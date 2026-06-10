@@ -96,6 +96,7 @@ def test_phase_to_categories_locked_mapping() -> None:
     ]
     assert phase_to_categories("build") == [
         "build",
+        "design",
         "engineering",
         "tooling",
         "ops",
@@ -149,7 +150,7 @@ def test_category_filter_narrows_to_phase(
         embedding_model="stub-embed",
     )
     for f in result.candidates:
-        assert f.category in {"build", "ops", "governance", "meta"}
+        assert f.category in {"build", "design", "ops", "governance", "meta"}
 
 
 def test_domain_tags_narrow_further(
