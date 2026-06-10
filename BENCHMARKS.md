@@ -45,6 +45,24 @@ request at a time. Conditions: **composed** (skills assembled per-task by
 | Gemma 4 12B IT | dense | 0.85 | 0.84 | **0.88** | −12% tokens, −2% wall |
 | LFM2.5-8B-A1B (coder) | hybrid sparse (1.5B active) | 0.80 | **0.85** | 0.80 | −21% tokens, −21% wall |
 
+### Two findings worth singling out
+
+**A 1.5B-active edge model with composed skills matches a bare 27B dense
+model — at 12.6× the speed.** LFM2.5-8B-A1B + composed injection scored
+0.850 vs the bare Qwen3.6-27B's 0.855 (a noise-level gap), completing the
+full 30-call leg in 42.2s vs 533.6s. The LFM runs comfortably on consumer
+hardware — laptops, mini-PCs, NPUs — where a 27B dense model doesn't. For
+on-device agents, composed injection buys mid-size-model quality at edge
+cost.
+
+**Composed injection made the edge model both better *and* faster than
+itself.** LFM2.5 with composed skills beat its own no-skill baseline on
+quality (+0.05) while finishing 29% faster — the focused skill prose cut
+its output rambling nearly in half (12.4K vs 19.0K output tokens). Flat
+injection of the same skills' full prose delivered zero quality lift on
+this model. Targeted context doesn't just inform a small model; it
+disciplines it.
+
 Findings, stated as measured:
 
 - **Composed prompts are 17–20% smaller** than flat (gold-skills-only)
