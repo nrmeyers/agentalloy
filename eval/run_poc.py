@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -107,34 +108,57 @@ def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, in
     )
 
 
+_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+# Transient network failures (Tailscale blips, server restarts) shouldn't
+# kill an overnight run. Retry connect-class errors only — a read timeout
+# means the model is genuinely stuck and retrying would double the damage.
+_RETRYABLE = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_S = 10.0
+
+
 def call_agent(
     client: httpx.Client, system: str, user: str, *, seed: int
 ) -> tuple[str, int | None, int | None, int]:
     """Returns (content, prompt_tokens, completion_tokens, latency_ms)."""
     start_ns = time.perf_counter_ns()
-    resp = client.post(
-        f"{LM_STUDIO_URL}/v1/chat/completions",
-        json={
-            "model": AGENT_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": 0.2,
-            "max_tokens": 4096,
-            "seed": seed,
-            "stream": False,
-            # Disables Qwen3.6-A3B's chain-of-thought loop. Silently ignored
-            # by non-reasoning models, so safe to leave on for any agent.
-            "reasoning_effort": "none",
-        },
-        timeout=httpx.Timeout(connect=5.0, read=900.0, write=10.0, pool=5.0),
-    )
+    resp = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            resp = client.post(
+                f"{LM_STUDIO_URL}/v1/chat/completions",
+                json={
+                    "model": AGENT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 4096,
+                    "seed": seed,
+                    "stream": False,
+                    # Disables Qwen3.6-A3B's chain-of-thought loop. Silently ignored
+                    # by non-reasoning models, so safe to leave on for any agent.
+                    "reasoning_effort": "none",
+                },
+                timeout=httpx.Timeout(connect=5.0, read=900.0, write=10.0, pool=5.0),
+            )
+            break
+        except _RETRYABLE as exc:
+            if attempt == _MAX_ATTEMPTS:
+                raise
+            logger.warning("agent call attempt %d failed (%s), retrying", attempt, exc)
+            time.sleep(_RETRY_BACKOFF_S * attempt)
+    assert resp is not None
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
     if resp.status_code != 200:
         raise RuntimeError(f"agent call returned {resp.status_code}: {resp.text[:300]}")
     data = resp.json()
     msg = data["choices"][0]["message"]["content"] or ""
+    # Reasoning models that inline CoT (rather than using a separate
+    # reasoning_content field) would otherwise leak it into the graders.
+    msg = _THINK_BLOCK.sub("", msg)
     usage = data.get("usage", {})
     return (msg, usage.get("prompt_tokens"), usage.get("completion_tokens"), elapsed_ms)
 

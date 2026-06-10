@@ -24,23 +24,29 @@ from eval.tasks import GRADERS, TASKS
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 
-# Pre-defined model lineup: small, medium, large
-# Each is an OpenAI-compatible endpoint + model name
+# Pre-defined model lineup. Each is an OpenAI-compatible endpoint + model
+# name, all env-overridable. The four slots span architecture x scale:
+# tiny hybrid-sparse, small dense, medium dense, medium MoE.
 DEFAULT_MODELS = [
+    {
+        "name": "tiny",
+        "url": os.environ.get("MODEL_TINY_URL", "http://localhost:1234"),
+        "model": os.environ.get("MODEL_TINY_NAME", "lfm2.5-8b-a1b"),
+    },
     {
         "name": "small",
         "url": os.environ.get("MODEL_SMALL_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_SMALL_NAME", "qwen/qwen3.5-0.8b"),
+        "model": os.environ.get("MODEL_SMALL_NAME", "gemma-4-12b"),
     },
     {
         "name": "medium",
         "url": os.environ.get("MODEL_MEDIUM_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_MEDIUM_NAME", "qwen/qwen3-coder-30b-a3b"),
+        "model": os.environ.get("MODEL_MEDIUM_NAME", "qwen3.6-27b"),
     },
     {
         "name": "large",
         "url": os.environ.get("MODEL_LARGE_URL", "http://localhost:1234"),
-        "model": os.environ.get("MODEL_LARGE_NAME", "qwen/qwen3.6-35b-a3b"),
+        "model": os.environ.get("MODEL_LARGE_NAME", "qwen3.6-35B-A3B"),
     },
 ]
 
