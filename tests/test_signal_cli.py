@@ -191,7 +191,7 @@ def test_evaluate_system_emits_matching_skill_bodies(
         db_file.write_text("")
 
         with (
-            patch("agentalloy.profiles.domain_datastore_path", return_value=db_file),
+            patch("agentalloy.profiles.profile_datastore_path", return_value=db_file),
             patch("agentalloy.profiles.detect_profile", return_value=None),
         ):
             args = argparse.Namespace(tool="git commit")
