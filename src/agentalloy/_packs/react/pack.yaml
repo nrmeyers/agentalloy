@@ -28,7 +28,7 @@ skills:
   fragment_count: 13
 - skill_id: react-rendering-keys-and-memoization
   file: react-rendering-keys-and-memoization.yaml
-  fragment_count: 9
+  fragment_count: 10
 - skill_id: react-error-boundaries
   file: react-error-boundaries.yaml
   fragment_count: 9
