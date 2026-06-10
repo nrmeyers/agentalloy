@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -170,6 +171,7 @@ def run_one(
     run_index: int,
     out_dir: Path,
     k: int,
+    graders: dict[str, Callable[[str], dict[str, bool]]] | None = None,
 ) -> RunResult:
     seed = int(
         hashlib.sha256(f"{task.task_id}:{condition}:{run_index}".encode()).hexdigest(), 16
@@ -195,7 +197,8 @@ def run_one(
 
     output, in_tok, out_tok, agent_ms = call_agent(client, system_prompt, task.spec, seed=seed)
 
-    grader = GRADERS[task.task_id]
+    active_graders = graders if graders is not None else GRADERS
+    grader = active_graders[task.task_id]
     grades = grader(output)
     score = sum(1 for v in grades.values() if v) / len(grades) if grades else 0.0
 
@@ -335,19 +338,36 @@ def main(argv: list[str] | None = None) -> int:
         default=["composed", "flat"],
         choices=["composed", "flat", "none"],
     )
+    parser.add_argument(
+        "--task-set",
+        dest="task_set",
+        default="generic",
+        choices=["generic", "domain"],
+        help="which task set to run: 'generic' (default) or 'domain' (domain_tasks.py)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    if args.task_set == "domain":
+        from eval.domain_tasks import DOMAIN_GRADERS, DOMAIN_TASKS
+
+        task_pool = DOMAIN_TASKS
+        active_graders: dict[str, Callable[[str], dict[str, bool]]] = DOMAIN_GRADERS  # type: ignore[assignment]
+    else:
+        task_pool = TASKS
+        active_graders = GRADERS
 
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
     dir_name = f"{timestamp}__{args.label}" if args.label else timestamp
     out_dir = RUNS_ROOT / dir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    selected_tasks = [t for t in TASKS if args.task is None or t.task_id == args.task]
+    selected_tasks = [t for t in task_pool if args.task is None or t.task_id == args.task]
     manifest = {
         "started_at": timestamp,
         "label": args.label,
+        "task_set": args.task_set,
         "k": args.k,
         "agent_model": AGENT_MODEL,
         "agentalloy_url": AGENTALLOY_URL,
@@ -365,7 +385,9 @@ def main(argv: list[str] | None = None) -> int:
             for cond in args.conditions:
                 for i in range(args.n):
                     try:
-                        results.append(run_one(client, task, cond, i, out_dir, args.k))
+                        results.append(
+                            run_one(client, task, cond, i, out_dir, args.k, active_graders)
+                        )
                     except Exception:
                         logger.exception("run failed: %s/%s/run-%d", task.task_id, cond, i)
 
