@@ -3,7 +3,7 @@ skill_id: rust-ownership-and-borrowing
 canonical_name: Rust Ownership and Borrowing (Move Semantics, References, Lifetimes)
 category: engineering
 skill_class: domain
-domain_tags: [move-semantics, borrow-checker, lifetime-elision, interior-mutability, rc-arc]
+domain_tags: [move-semantics, borrow-checker, lifetime-elision, interior-mutability, rc-arc, rust]
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -9,6 +9,7 @@ domain_tags:
   - spans
   - context propagation
   - trace events
+  - analytics
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

@@ -9,6 +9,7 @@ domain_tags:
   - type transformations
   - conditional types
   - mapped types
+  - typescript
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

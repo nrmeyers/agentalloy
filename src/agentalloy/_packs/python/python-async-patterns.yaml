@@ -3,7 +3,7 @@ skill_id: python-async-patterns
 canonical_name: Python Async Patterns (asyncio, TaskGroup, Cancellation)
 category: engineering
 skill_class: domain
-domain_tags: [create-task, gather, timeout, shield, exception-group, event-loop, structured-concurrency, run-in-executor]
+domain_tags: [create-task, gather, timeout, shield, exception-group, event-loop, structured-concurrency, run-in-executor, python]
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

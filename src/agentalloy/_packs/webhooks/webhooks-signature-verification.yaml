@@ -9,6 +9,7 @@ domain_tags:
 - svix-webhooks
 - timestamp-tolerance
 - replay-prevention
+- webhooks
 always_apply: false
 phase_scope: [build, review]
 category_scope: [ops]

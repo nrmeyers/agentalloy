@@ -9,6 +9,7 @@ domain_tags:
   - long-running operations
   - pagination
   - filtering
+  - rest
 always_apply: false
 phase_scope: [build, design]
 category_scope: [framework]

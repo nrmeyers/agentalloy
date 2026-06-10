@@ -9,6 +9,7 @@ domain_tags:
   - snapshots
   - data quality
   - SCD Type 2
+  - data-engineering
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

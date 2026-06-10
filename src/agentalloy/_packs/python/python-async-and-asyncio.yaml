@@ -3,7 +3,7 @@ skill_id: python-async-and-asyncio
 canonical_name: Python Async and asyncio (Coroutines, Tasks, the Event Loop)
 category: engineering
 skill_class: domain
-domain_tags: [asyncio-event-loop, coroutines, async-await, taskgroup, gil-vs-async]
+domain_tags: [asyncio-event-loop, coroutines, async-await, taskgroup, gil-vs-async, python]
 always_apply: false
 phase_scope: [build]
 category_scope: language

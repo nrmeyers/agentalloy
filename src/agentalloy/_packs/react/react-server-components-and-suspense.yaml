@@ -3,7 +3,7 @@ skill_id: react-server-components-and-suspense
 canonical_name: React Server Components and Suspense (RSC, "use client", Streaming, use() for Promises)
 category: engineering
 skill_class: domain
-domain_tags: [server-component-async, use-client-boundary, suspense-fallback, use-promise-hook, streaming-error-fallback, lazy-code-splitting, react-query-suspense-query, route-level-suspense]
+domain_tags: [server-component-async, use-client-boundary, suspense-fallback, use-promise-hook, streaming-error-fallback, lazy-code-splitting, react-query-suspense-query, route-level-suspense, react]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

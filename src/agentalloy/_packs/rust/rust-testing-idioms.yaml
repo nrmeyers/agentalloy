@@ -3,7 +3,7 @@ skill_id: rust-testing-idioms
 canonical_name: Rust Testing Idioms (#[test], #[cfg(test)], Integration Tests, Doc Tests, Property Tests)
 category: quality
 skill_class: domain
-domain_tags: [unit-test-attribute, integration-test-tree, doc-test-runnable, cfg-test-conditional, should-panic-attribute]
+domain_tags: [unit-test-attribute, integration-test-tree, doc-test-runnable, cfg-test-conditional, should-panic-attribute, rust]
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

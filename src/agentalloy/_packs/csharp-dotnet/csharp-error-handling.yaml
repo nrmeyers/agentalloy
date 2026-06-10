@@ -3,7 +3,7 @@ skill_id: csharp-error-handling
 canonical_name: C# Error Handling (Exception Types, when/catch Filters, AggregateException, Throw Helpers)
 category: engineering
 skill_class: domain
-domain_tags: [exception-filters, aggregateexception-flatten, custom-exception-types, argumentnullexception-throw-helper, dispatch-info-rethrow]
+domain_tags: [exception-filters, aggregateexception-flatten, custom-exception-types, argumentnullexception-throw-helper, dispatch-info-rethrow, csharp-dotnet]
 always_apply: false
 phase_scope: [build]
 category_scope: language

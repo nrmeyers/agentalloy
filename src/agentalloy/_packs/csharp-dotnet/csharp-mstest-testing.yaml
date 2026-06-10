@@ -3,7 +3,7 @@ skill_id: csharp-mstest-testing
 canonical_name: C# Testing with MSTest v3 (TestClass, DataRow, Async Tests, TestContext)
 category: quality
 skill_class: domain
-domain_tags: [test-class-attribute, data-row-parameterized, assert-throws-async, test-context-cancellation, assembly-initialize-cleanup]
+domain_tags: [test-class-attribute, data-row-parameterized, assert-throws-async, test-context-cancellation, assembly-initialize-cleanup, csharp-dotnet]
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

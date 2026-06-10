@@ -3,7 +3,7 @@ skill_id: node-esm-and-cjs-interop
 canonical_name: Node.js ESM and CJS Interop (package.json type, exports, dual publishing)
 category: engineering
 skill_class: domain
-domain_tags: [esm-modules, cjs-modules, package-exports-field, dual-publish, node-module-resolution]
+domain_tags: [esm-modules, cjs-modules, package-exports-field, dual-publish, node-module-resolution, nodejs]
 always_apply: false
 phase_scope: [build]
 category_scope: language

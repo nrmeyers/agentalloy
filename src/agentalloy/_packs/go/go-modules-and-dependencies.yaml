@@ -3,7 +3,7 @@ skill_id: go-modules-and-dependencies
 canonical_name: Go Modules and Dependencies (go.mod, go.sum, Versioning, Module Proxy)
 category: tooling
 skill_class: domain
-domain_tags: [module-path, semantic-import-versioning, replace-directive, vendor-mode, module-proxy]
+domain_tags: [module-path, semantic-import-versioning, replace-directive, vendor-mode, module-proxy, go]
 always_apply: false
 phase_scope: [build]
 category_scope: language

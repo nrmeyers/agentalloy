@@ -3,7 +3,7 @@ skill_id: rust-error-handling
 canonical_name: Rust Error Handling (Result, Option, ? Operator, From/Into, thiserror/anyhow)
 category: engineering
 skill_class: domain
-domain_tags: [result-propagation, option-combinators, question-mark-operator, error-conversion-from, error-context-anyhow]
+domain_tags: [result-propagation, option-combinators, question-mark-operator, error-conversion-from, error-context-anyhow, rust]
 always_apply: false
 phase_scope: [build]
 category_scope: language

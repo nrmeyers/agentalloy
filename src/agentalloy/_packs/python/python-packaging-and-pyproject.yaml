@@ -3,7 +3,7 @@ skill_id: python-packaging-and-pyproject
 canonical_name: Python Packaging and pyproject.toml (Modern Build, Deps, Distribution)
 category: engineering
 skill_class: domain
-domain_tags: [pyproject-toml, build-backend, src-layout, lockfile, editable-install]
+domain_tags: [pyproject-toml, build-backend, src-layout, lockfile, editable-install, python]
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -9,6 +9,7 @@ domain_tags:
   - data engineering
   - SQL
   - unique_key
+  - data-engineering
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

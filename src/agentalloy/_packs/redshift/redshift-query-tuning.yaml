@@ -9,6 +9,7 @@ domain_tags:
   - VACUUM
   - ANALYZE
   - best practices
+  - redshift
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -9,6 +9,7 @@ domain_tags:
   - mTLS
   - payload-handling
   - endpoint-security
+  - webhooks
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

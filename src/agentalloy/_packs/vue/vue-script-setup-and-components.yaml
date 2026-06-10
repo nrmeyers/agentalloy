@@ -8,6 +8,7 @@ domain_tags:
   - single-file-components
   - script-setup
   - component-communication
+  - vue
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

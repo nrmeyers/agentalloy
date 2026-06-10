@@ -3,7 +3,7 @@ skill_id: nextjs-metadata-and-og-images
 canonical_name: Next.js Metadata and OG Images (Static metadata, generateMetadata, sitemap, robots, opengraph-image)
 category: engineering
 skill_class: domain
-domain_tags: [static-metadata-export, generatemetadata-async, opengraph-image-imageresponse, sitemap-route, robots-route]
+domain_tags: [static-metadata-export, generatemetadata-async, opengraph-image-imageresponse, sitemap-route, robots-route, nextjs]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

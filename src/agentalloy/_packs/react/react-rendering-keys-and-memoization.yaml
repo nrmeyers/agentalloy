@@ -3,7 +3,7 @@ skill_id: react-rendering-keys-and-memoization
 canonical_name: React Rendering Model (Keys, Reconciliation, React.memo, useMemo, useCallback, React Compiler)
 category: engineering
 skill_class: domain
-domain_tags: [list-keys-stable-id, reconciliation-tree-diff, react-memo-props-equality, key-prop-state-reset, auto-memoization-compiler]
+domain_tags: [list-keys-stable-id, reconciliation-tree-diff, react-memo-props-equality, key-prop-state-reset, auto-memoization-compiler, react]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

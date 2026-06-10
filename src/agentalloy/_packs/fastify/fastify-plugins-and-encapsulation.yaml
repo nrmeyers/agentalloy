@@ -9,6 +9,7 @@ domain_tags:
   - plugins
   - register
   - decorators
+  - fastify
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

@@ -3,7 +3,7 @@ skill_id: python-error-handling
 canonical_name: Python Error Handling (EAFP, Exception Hierarchy, Chaining)
 category: engineering
 skill_class: domain
-domain_tags: [eafp-vs-lbyl, exception-chaining, raise-from, exceptiongroup, narrow-except]
+domain_tags: [eafp-vs-lbyl, exception-chaining, raise-from, exceptiongroup, narrow-except, python]
 always_apply: false
 phase_scope: [build]
 category_scope: language

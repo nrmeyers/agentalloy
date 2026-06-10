@@ -8,6 +8,7 @@ domain_tags:
   - dags
   - tasks
   - operators
+  - data-engineering
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

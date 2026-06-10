@@ -8,6 +8,7 @@ domain_tags:
   - tasks
   - cancellation
   - structured concurrency
+  - python
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

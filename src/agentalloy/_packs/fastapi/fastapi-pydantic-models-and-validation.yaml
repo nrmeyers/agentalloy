@@ -3,7 +3,7 @@ skill_id: fastapi-pydantic-models-and-validation
 canonical_name: FastAPI Request/Response Models with Pydantic v2 (Field, response_model, exclude_unset, Validators)
 category: engineering
 skill_class: domain
-domain_tags: [request-body-model, response-model-shape, field-constraints-validation, model-config-strict, field-validator-decorator]
+domain_tags: [request-body-model, response-model-shape, field-constraints-validation, model-config-strict, field-validator-decorator, fastapi]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

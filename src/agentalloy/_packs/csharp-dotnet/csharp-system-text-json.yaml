@@ -3,7 +3,7 @@ skill_id: csharp-system-text-json
 canonical_name: C# JSON with System.Text.Json (Serializer Options, Source Generation, Polymorphism)
 category: engineering
 skill_class: domain
-domain_tags: [serializer-options, source-generation-jsonserializer, polymorphic-deserialization, property-naming-policy, utf8-byte-pipeline]
+domain_tags: [serializer-options, source-generation-jsonserializer, polymorphic-deserialization, property-naming-policy, utf8-byte-pipeline, csharp-dotnet]
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -3,7 +3,7 @@ skill_id: react-hooks-rules-and-deps
 canonical_name: React Hooks Rules and Deps Array (useState, useEffect, useMemo, useCallback, exhaustive-deps)
 category: engineering
 skill_class: domain
-domain_tags: [rules-of-hooks, exhaustive-deps-lint, usememo-vs-usecallback, useref-mutable-box, usereducer-state-reducer]
+domain_tags: [rules-of-hooks, exhaustive-deps-lint, usememo-vs-usecallback, useref-mutable-box, usereducer-state-reducer, react]
 always_apply: false
 phase_scope: [build]
 category_scope: framework

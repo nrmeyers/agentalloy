@@ -9,6 +9,7 @@ domain_tags:
   - concurrency
   - GIL
   - Process
+  - python
 phase_scope: [build]
 category_scope: [language]
 author: navistone

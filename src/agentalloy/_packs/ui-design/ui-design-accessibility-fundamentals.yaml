@@ -9,6 +9,7 @@ domain_tags:
   - wcag
   - web-design
   - user-experience
+  - ui-design
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

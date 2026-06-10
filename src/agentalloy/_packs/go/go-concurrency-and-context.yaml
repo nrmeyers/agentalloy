@@ -3,7 +3,7 @@ skill_id: go-concurrency-and-context
 canonical_name: Go Concurrency and Context (Goroutines, Channels, Select, sync, context)
 category: engineering
 skill_class: domain
-domain_tags: [goroutine-leaks, channel-direction, select-default, sync-primitives, request-cancellation]
+domain_tags: [goroutine-leaks, channel-direction, select-default, sync-primitives, request-cancellation, go]
 always_apply: false
 phase_scope: [build]
 category_scope: language

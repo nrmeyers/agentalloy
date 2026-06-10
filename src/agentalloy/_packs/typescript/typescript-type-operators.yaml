@@ -9,6 +9,7 @@ domain_tags:
   - keyof
   - typeof
   - indexed access operator
+  - typescript
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

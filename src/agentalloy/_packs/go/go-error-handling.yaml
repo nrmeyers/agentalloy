@@ -3,7 +3,7 @@ skill_id: go-error-handling
 canonical_name: Go Error Handling (Wrapping, errors.Is/As, Sentinel Values, Panic/Recover)
 category: engineering
 skill_class: domain
-domain_tags: [error-wrapping, sentinel-values, typed-errors, panic-recover, error-inspection]
+domain_tags: [error-wrapping, sentinel-values, typed-errors, panic-recover, error-inspection, go]
 always_apply: false
 phase_scope: [build]
 category_scope: language

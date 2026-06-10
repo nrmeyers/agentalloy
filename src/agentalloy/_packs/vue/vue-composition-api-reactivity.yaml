@@ -9,6 +9,7 @@ domain_tags:
   - reactivity
   - ref
   - reactive
+  - vue
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

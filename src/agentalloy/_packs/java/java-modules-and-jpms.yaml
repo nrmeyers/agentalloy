@@ -3,7 +3,7 @@ skill_id: java-modules-and-jpms
 canonical_name: Java Modules with JPMS (module-info.java, exports, requires, services)
 category: tooling
 skill_class: domain
-domain_tags: [module-info-descriptor, exports-package, requires-transitive, services-uses-provides, jlink-runtime-image]
+domain_tags: [module-info-descriptor, exports-package, requires-transitive, services-uses-provides, jlink-runtime-image, java]
 always_apply: false
 phase_scope: [build]
 category_scope: language

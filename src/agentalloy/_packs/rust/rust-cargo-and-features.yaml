@@ -3,7 +3,7 @@ skill_id: rust-cargo-and-features
 canonical_name: Rust Cargo and Features (Cargo.toml, Feature Flags, Workspaces, crates.io)
 category: tooling
 skill_class: domain
-domain_tags: [cargo-manifest, feature-unification, workspace-members, dev-dependencies, lockfile-policy]
+domain_tags: [cargo-manifest, feature-unification, workspace-members, dev-dependencies, lockfile-policy, rust]
 always_apply: false
 phase_scope: [build]
 category_scope: language

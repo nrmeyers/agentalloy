@@ -11,6 +11,7 @@ domain_tags:
   - loading-ts
   - route-level-loading
   - selective-hydration
+  - nextjs
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]
