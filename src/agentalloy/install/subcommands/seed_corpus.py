@@ -161,8 +161,9 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
     # fresh-install case. Their remediation message points at install-pack
     # (which can repopulate from a known-good source).
     remediation = (
-        "Corpus integrity check failed. Run `agentalloy install-packs` "
-        "to repopulate from packs, or remove "
+        "Corpus integrity check failed. Run `python -m agentalloy.migrate` to "
+        "ensure the graph schema exists (idempotent), then `agentalloy "
+        "install-packs` to repopulate from packs, or remove "
         "${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/ to start fresh."
     )
 

@@ -130,3 +130,80 @@ class TestSizeCaps:
                 Path(repo_root) / "out",
                 max_bytes=ip._MAX_MANIFEST_BYTES,  # pyright: ignore[reportPrivateUsage]
             )
+
+
+class TestRenderHumanFailureDetail:
+    """Issue #84: "Failures: N" alone gave zero diagnostic signal — the
+    human renderer must surface the first failing skill's yaml + stderr."""
+
+    @staticmethod
+    def _result(ingest_results: list[dict[str, object]], failures: int) -> dict[str, object]:
+        return {
+            "action": "ingested_with_errors",
+            "pack": "core",
+            "skills_ingested": 0,
+            "ingest_failures": failures,
+            "ingest_results": ingest_results,
+        }
+
+    def test_first_failure_yaml_and_stderr_shown(self, capsys: pytest.CaptureFixture[str]) -> None:
+        result = self._result(
+            [
+                {"yaml": "ok.yaml", "outcome": "ingested", "stderr_tail": ""},
+                {
+                    "yaml": "writing-readmes.yaml",
+                    "outcome": "failed",
+                    "stderr_tail": "RuntimeError: Binder exception: Table Skill does not exist.",
+                },
+                {"yaml": "later.yaml", "outcome": "failed", "stderr_tail": "boom"},
+            ],
+            failures=4,
+        )
+        ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
+        out = capsys.readouterr().out
+        assert "Failures: 4" in out
+        assert "writing-readmes.yaml" in out
+        assert "Table Skill does not exist" in out
+        # Only the FIRST failure is surfaced inline.
+        assert "later.yaml" not in out
+
+    def test_long_stderr_tail_is_truncated(self, capsys: pytest.CaptureFixture[str]) -> None:
+        result = self._result(
+            [{"yaml": "big.yaml", "outcome": "failed", "stderr_tail": "E" * 500}],
+            failures=1,
+        )
+        ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
+        out = capsys.readouterr().out
+        assert "big.yaml" in out
+        assert "E" * 117 + "..." in out
+        assert "E" * 200 not in out
+
+    def test_missing_ingest_results_still_prints_count(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # install-packs strips ingest_results from some payloads; the
+        # renderer must not crash and must keep the bare count.
+        result = self._result([], failures=3)
+        del result["ingest_results"]
+        ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
+        out = capsys.readouterr().out
+        assert "Failures: 3" in out
+
+    def test_lock_held_failure_prints_remediation(self, capsys: pytest.CaptureFixture[str]) -> None:
+        result = self._result(
+            [
+                {
+                    "yaml": "first.yaml",
+                    "outcome": "failed",
+                    "stderr_tail": (
+                        "RuntimeError: IO exception: Could not set lock on file "
+                        "ladybug.lock: Lock is held by PID 12345"
+                    ),
+                }
+            ],
+            failures=1,
+        )
+        ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
+        out = capsys.readouterr().out
+        assert "Another process holds the corpus DB lock" in out
+        assert "agentalloy server-stop" in out

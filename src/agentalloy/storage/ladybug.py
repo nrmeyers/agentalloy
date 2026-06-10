@@ -22,6 +22,20 @@ from agentalloy.storage.schema_cypher import ALTER_TABLES, NODE_TABLES, REL_TABL
 
 logger = logging.getLogger(__name__)
 
+# Remediation for LadybugDB's single-writer lock failure. Surfaced by
+# install-packs / reembed when an ingest or DB open trips the lock
+# (issue #84: the raw error never told users to stop the service).
+LOCK_HELD_REMEDIATION = (
+    "Another process holds the corpus DB lock (often the running agentalloy "
+    "service). Stop it (`agentalloy server-stop` or kill the uvicorn process) "
+    "and retry."
+)
+
+
+def is_lock_held_error(text: str) -> bool:
+    """True if ``text`` looks like LadybugDB's single-writer lock failure."""
+    return "Could not set lock on file" in text or "Lock is held by PID" in text
+
 
 class LadybugStore:
     """Thin wrapper around ``ladybug.Database`` + ``ladybug.Connection``.
