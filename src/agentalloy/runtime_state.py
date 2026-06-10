@@ -85,6 +85,7 @@ class RuntimeCache:
         *,
         skill_class: SkillClass | tuple[str, ...] | None = None,
         categories: list[str] | None = None,
+        phases: list[str] | None = None,
         domain_tags: list[str] | None = None,
     ) -> list[ActiveFragment]:
         result: list[ActiveFragment] = list(self._fragments)
@@ -93,9 +94,24 @@ class RuntimeCache:
                 result = [f for f in result if f.skill_class in skill_class]
             else:
                 result = [f for f in result if f.skill_class == skill_class]
-        if categories is not None:
+        if categories is not None and phases:
+            # Union eligibility: category map OR authored phase_scope.
+            cat_set = set(categories)
+            phase_set = set(phases)
+            result = [
+                f
+                for f in result
+                if f.category in cat_set
+                or (f.phase_scope and any(p in phase_set for p in f.phase_scope))
+            ]
+        elif categories is not None:
             cat_set = set(categories)
             result = [f for f in result if f.category in cat_set]
+        elif phases:
+            phase_set = set(phases)
+            result = [
+                f for f in result if f.phase_scope and any(p in phase_set for p in f.phase_scope)
+            ]
         if domain_tags is not None:
             tag_set = set(domain_tags)
             result = [f for f in result if any(t in tag_set for t in f.domain_tags)]
@@ -124,9 +140,12 @@ class RuntimeCache:
         domain_tags: list[str] | None = None,
     ) -> list[ActiveFragment]:
         """Convenience: fragments eligible for a compose/retrieve phase."""
+        from agentalloy.retrieval.domain import phase_to_scope_terms
+
         return self.get_active_fragments(
             skill_class=("domain", "workflow"),
             categories=phase_to_categories(phase),
+            phases=phase_to_scope_terms(phase) or None,
             domain_tags=domain_tags,
         )
 

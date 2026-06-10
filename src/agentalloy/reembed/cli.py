@@ -655,6 +655,19 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("no fragments to embed; running --rebuild-fts only")
                 stats = ReembedStats()
 
+            # Keep authored phase eligibility in sync with the graph on every
+            # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall
+            # back to the phase->category map at query time.
+            try:
+                from agentalloy.migrate import phase_scope_by_skill
+
+                scope_by_skill = phase_scope_by_skill(store)
+                if scope_by_skill:
+                    updated = vs.backfill_phase_scope(scope_by_skill)
+                    logger.info("phase_scope synced on %d fragment row(s)", updated)
+            except Exception as exc:  # noqa: BLE001 — sync is best-effort; migrate also does it
+                logger.warning("phase_scope sync skipped: %s", exc)
+
             if stats.embedded > 0 or args.rebuild_fts:
                 if stats.embedded > 0:
                     logger.info(

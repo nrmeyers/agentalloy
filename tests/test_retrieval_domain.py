@@ -441,3 +441,15 @@ def test_degradable_embedding_error_with_empty_bm25(
     assert result.bm25_only is True
     assert result.candidates == []
     assert result.retrieval_ms >= 0
+
+
+# -------- phase_to_scope_terms --------
+
+
+def test_phase_to_scope_terms_mapping() -> None:
+    from agentalloy.retrieval.domain import phase_to_scope_terms
+
+    assert phase_to_scope_terms("build") == ["build"]
+    assert phase_to_scope_terms("qa") == ["qa", "review"]  # authored vocab uses 'review'
+    assert phase_to_scope_terms("governance") == ["governance", "review"]
+    assert phase_to_scope_terms("meta") == []  # category map only
