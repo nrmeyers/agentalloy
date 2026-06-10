@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -62,8 +63,33 @@ def _isolated_ambient_tmpdir(tmp_path_factory: pytest.TempPathFactory) -> Iterat
     tempfile.tempdir = None
 
 
+# Processes that predate the pytest session are not ours to kill — a
+# developer's real agentalloy service on the default port must survive a
+# test run. Leaked test servers necessarily start after this timestamp.
+_SESSION_START_EPOCH = time.time()
+
+
+def _proc_start_epoch(pid: int) -> float | None:
+    """Best-effort process start time (epoch seconds) via /proc. None if unknown."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        # Field 22 (starttime, clock ticks since boot); fields 1-2 are
+        # "pid (comm)" where comm may contain spaces — split after ')'.
+        ticks = float(stat.rsplit(")", 1)[1].split()[19])
+        with open("/proc/stat") as f:
+            btime = next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
+        return btime + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+
+
 def _kill_port(port: int) -> None:
-    """Kill any process listening on *port* (best-effort, no-op if free)."""
+    """Kill processes leaked onto *port* by this test session (best-effort).
+
+    Only processes that started after the session began are killed; a
+    pre-existing service (e.g. the developer's real agentalloy instance)
+    is left alone.
+    """
     try:
         out = subprocess.check_output(
             ["ss", "-tlnp"],
@@ -78,6 +104,9 @@ def _kill_port(port: int) -> None:
                     continue
                 end = line.index(",", start)
                 pid = int(line[start + 4 : end])
+                started = _proc_start_epoch(pid)
+                if started is None or started < _SESSION_START_EPOCH:
+                    continue
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     os.kill(pid, signal.SIGTERM)
     except (subprocess.CalledProcessError, FileNotFoundError):
