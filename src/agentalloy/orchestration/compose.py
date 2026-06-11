@@ -146,6 +146,7 @@ class ComposeOrchestrator:
         workflow_skill_ids = list(
             dict.fromkeys(f.skill_id for f in retrieval.candidates if f.skill_class == "workflow")
         )
+        reranked = isinstance(retrieval, RetrievalResult) and retrieval.reranked
         self._telemetry.write(
             TelemetryRecord(
                 composition_id=str(uuid.uuid4()),
@@ -162,6 +163,7 @@ class ComposeOrchestrator:
                 latency_total_ms=elapsed_ms,
                 error_payload=retrieval_error_code,
                 workflow_skill_ids=workflow_skill_ids,
+                reranked=reranked,
             )
         )
         return ComposedResult(

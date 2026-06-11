@@ -584,3 +584,185 @@ def test_phase_to_scope_terms_mapping() -> None:
     assert phase_to_scope_terms("qa") == ["qa", "review"]  # authored vocab uses 'review'
     assert phase_to_scope_terms("governance") == ["governance", "review"]
     assert phase_to_scope_terms("meta") == []  # category map only
+
+
+# -------- Stage A: cross-encoder rerank --------
+
+
+class _FakeReranker:
+    """Reranker protocol stub; records calls so bypass paths can be asserted."""
+
+    def __init__(self, scores: list[float]) -> None:
+        self._scores = scores
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def score(self, query: str, passages: list[str]) -> list[float]:
+        self.calls.append((query, list(passages)))
+        return list(self._scores[: len(passages)])
+
+
+class _RaisingReranker:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def score(self, query: str, passages: list[str]) -> list[float]:  # noqa: ARG002
+        self.call_count += 1
+        raise RuntimeError("boom")
+
+
+def _content_skill(frag_id: str, content: str, skill_id: str) -> ActiveFragment:
+    f = _fake_skill(frag_id, "execution", skill_id)
+    return ActiveFragment(
+        fragment_id=f.fragment_id,
+        fragment_type=f.fragment_type,
+        sequence=f.sequence,
+        content=content,
+        skill_id=f.skill_id,
+        version_id=f.version_id,
+        skill_class=f.skill_class,
+        category=f.category,
+        domain_tags=f.domain_tags,
+    )
+
+
+def _patch_reranker(monkeypatch: pytest.MonkeyPatch, reranker: object | None) -> None:
+    monkeypatch.setattr(domain_module, "build_reranker_from_env", lambda: reranker)
+
+
+def test_maybe_rerank_reorders_skills_by_score(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentalloy.retrieval.domain import _maybe_rerank  # pyright: ignore[reportPrivateUsage]
+
+    # Skills A, B, C in rank order; fake scores make C best, A middle, B worst.
+    ranked = [
+        _content_skill("A1", "alpha one", "skill-A"),
+        _content_skill("A2", "alpha two", "skill-A"),
+        _content_skill("B1", "beta one", "skill-B"),
+        _content_skill("C1", "gamma one", "skill-C"),
+    ]
+    fake = _FakeReranker([0.5, 0.1, 0.9])  # A=0.5, B=0.1, C=0.9
+    _patch_reranker(monkeypatch, fake)
+
+    rebuilt, reranked = _maybe_rerank(ranked, "my task")
+
+    assert reranked is True
+    assert [f.fragment_id for f in rebuilt] == ["C1", "A1", "A2", "B1"]
+    # Passage = skill identity prefix + best fragment; within-skill order preserved.
+    assert fake.calls == [
+        ("my task", ["skill A: alpha one", "skill B: beta one", "skill C: gamma one"])
+    ]
+
+
+def test_maybe_rerank_respects_max_pairs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentalloy.retrieval.domain import _maybe_rerank  # pyright: ignore[reportPrivateUsage]
+
+    monkeypatch.setenv("RUNTIME_RERANK_MAX_PAIRS", "2")
+    ranked = [
+        _content_skill("A1", "a", "skill-A"),
+        _content_skill("B1", "b", "skill-B"),
+        _content_skill("C1", "c", "skill-C"),
+    ]
+    # Only first 2 skills are scored; B beats A. C is beyond the cap → keeps trailing.
+    fake = _FakeReranker([0.1, 0.9])
+    _patch_reranker(monkeypatch, fake)
+
+    rebuilt, reranked = _maybe_rerank(ranked, "task")
+
+    assert reranked is True
+    assert [f.fragment_id for f in rebuilt] == ["B1", "A1", "C1"]
+    assert fake.calls[0][1] == ["skill A: a", "skill B: b"]  # only the top 2 skills scored
+
+
+def test_maybe_rerank_disabled_returns_original(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentalloy.retrieval.domain import _maybe_rerank  # pyright: ignore[reportPrivateUsage]
+
+    _patch_reranker(monkeypatch, None)
+    ranked = [_content_skill("A1", "a", "skill-A"), _content_skill("B1", "b", "skill-B")]
+    rebuilt, reranked = _maybe_rerank(ranked, "task")
+    assert reranked is False
+    assert rebuilt is ranked
+
+
+def test_maybe_rerank_scorer_failure_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentalloy.retrieval.domain import _maybe_rerank  # pyright: ignore[reportPrivateUsage]
+
+    raising = _RaisingReranker()
+    _patch_reranker(monkeypatch, raising)
+    ranked = [_content_skill("A1", "a", "skill-A"), _content_skill("B1", "b", "skill-B")]
+    rebuilt, reranked = _maybe_rerank(ranked, "task")
+    assert reranked is False
+    assert [f.fragment_id for f in rebuilt] == ["A1", "B1"]
+
+
+def test_retrieve_sets_reranked_flag(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A scorer that reverses ranking — any non-trivial pool gets reordered.
+    captured: list[tuple[str, list[str]]] = []
+
+    class _Reverse:
+        def score(self, query: str, passages: list[str]) -> list[float]:
+            captured.append((query, list(passages)))
+            return [float(i) for i in range(len(passages))]
+
+    _patch_reranker(monkeypatch, _Reverse())
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+    assert isinstance(result, domain_module.RetrievalResult)
+    assert result.reranked is True
+    assert captured  # scorer was invoked on the default path
+
+
+def test_raw_scores_bypass_skips_reranker(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeReranker([1.0] * 64)
+    _patch_reranker(monkeypatch, fake)
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+        raw_scores=True,
+    )
+    assert isinstance(result, domain_module.RetrievalResult)
+    assert result.reranked is False
+    assert fake.calls == []  # bypass path must not invoke the scorer
+
+
+def test_diversity_off_bypass_skips_reranker(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeReranker([1.0] * 64)
+    _patch_reranker(monkeypatch, fake)
+    monkeypatch.setenv("RUNTIME_DIVERSITY_SELECTION", "off")
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+    assert isinstance(result, domain_module.RetrievalResult)
+    assert result.reranked is False
+    assert fake.calls == []

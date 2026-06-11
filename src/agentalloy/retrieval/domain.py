@@ -39,6 +39,7 @@ from agentalloy.retrieval.embedding_errors import (
     embedding_breaker,
     safe_embed,
 )
+from agentalloy.retrieval.rerank import build_reranker_from_env, rerank_max_pairs
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
 
 _RRF_K_DEFAULT = 60
@@ -186,6 +187,8 @@ class RetrievalResult:
     bm25_source: str = "rule-extracted"  # "rule-extracted" | "contract" | "union"
     # Skill IDs ordered by rank (first fragment appearance) — observability for Stage B.
     skills_ranked: list[str] = field(default_factory=lambda: [])
+    # True only when a cross-encoder rerank actually reordered the pool (Stage A).
+    reranked: bool = False
 
 
 class StoreFragmentSource:
@@ -498,10 +501,14 @@ def retrieve_domain_candidates(
     # raw_scores=True: return pre-diversity order (for /retrieve observability).
     # RUNTIME_DIVERSITY_SELECTION=off also short-circuits — used by eval harness.
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
+    reranked = False
     if raw_scores or diversity_off:
         selected = ranked[:k]
         skills_ranked: list[str] = []
     else:
+        # Stage A: cross-encoder rerank of the top skills before selection.
+        # Best-effort — a failure or disabled stage leaves ``ranked`` untouched.
+        ranked, reranked = _maybe_rerank(ranked, task)
         selected, skills_ranked = skill_granular_select(ranked, k)
 
     elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
@@ -512,7 +519,64 @@ def retrieve_domain_candidates(
         scores_by_id=scores_by_id,
         bm25_source=_bm25_source,
         skills_ranked=skills_ranked,
+        reranked=reranked,
     )
+
+
+def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveFragment], bool]:
+    """Reorder ``ranked`` by cross-encoder relevance over the top skills.
+
+    Groups fragments by skill (rank order; dict insertion order gives this for
+    free, same trick as ``skill_granular_select``), takes the top
+    ``RUNTIME_RERANK_MAX_PAIRS`` skills, scores each skill's best fragment
+    against ``task``, and reorders those skills by score descending (stable for
+    ties). Skills beyond the cap keep their original relative order after the
+    reranked ones. Within-skill fragment order is preserved throughout.
+
+    Returns ``(ranked, reranked)`` where ``reranked`` is True only when the
+    scorer succeeded and produced a reordering input. Any failure, disabled
+    stage, or trivial pool returns the input list unchanged with False — this
+    function never raises.
+    """
+    reranker = build_reranker_from_env()
+    if reranker is None:
+        return ranked, False
+
+    # Group into per-skill fragment queues in rank order.
+    skill_queues: dict[str, list[ActiveFragment]] = {}
+    for frag in ranked:
+        skill_queues.setdefault(frag.skill_id, []).append(frag)
+    if len(skill_queues) < 2:
+        return ranked, False
+
+    skill_ids = list(skill_queues.keys())
+    cap = rerank_max_pairs()
+    head_ids = skill_ids[:cap]
+    tail_ids = skill_ids[cap:]
+    # Passage = skill identity + best fragment. Fragment prose alone often
+    # omits the skill's name/topic, which is exactly what short queries carry —
+    # measured: reranking over bare content scored below the un-reranked order.
+    passages = [f"{sid.replace('-', ' ')}: {skill_queues[sid][0].content}" for sid in head_ids]
+
+    try:
+        scores = reranker.score(task, passages)
+    except Exception:  # pyright: ignore[reportBroadExceptionCaught]
+        # The latched reranker already swallows scorer errors, but guard the
+        # call site too — reranking must never break retrieval.
+        logger.warning("rerank stage raised unexpectedly; using un-reranked order")
+        return ranked, False
+
+    if len(scores) != len(head_ids):
+        return ranked, False
+
+    # Stable sort by score descending preserves original order for ties.
+    order = sorted(range(len(head_ids)), key=lambda i: scores[i], reverse=True)
+    new_skill_order = [head_ids[i] for i in order] + tail_ids
+
+    rebuilt: list[ActiveFragment] = []
+    for sid in new_skill_order:
+        rebuilt.extend(skill_queues[sid])
+    return rebuilt, True
 
 
 def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]:

@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# In-process cross-encoder rerank stage (RUNTIME_RERANK_MODE=onnx). Kept out
+# of core deps so the bare wheel (pipx-smoke CI) stays lean; the http mode and
+# disabled default need nothing here.
+rerank = [
+    "onnxruntime>=1.18",
+    "tokenizers>=0.20",
+]
 dev = [
     "pyjwt>=2.12.1",
     "pyright>=1.1.408",

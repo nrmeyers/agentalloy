@@ -65,6 +65,7 @@ class TelemetryRecord:
     error_payload: str | None = None
     workflow_skill_ids: list[str] | None = None
     prompt_version: str | None = None
+    reranked: bool = False
 
 
 class TelemetryWriter(Protocol):
@@ -143,6 +144,7 @@ class DuckDBTelemetryWriter:
             response_size_chars=len(record.output) if record.output is not None else None,
             workflow_skill_ids=list(record.workflow_skill_ids or []),
             prompt_version=record.prompt_version,
+            reranked=record.reranked,
         )
 
 

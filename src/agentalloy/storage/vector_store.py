@@ -108,6 +108,8 @@ class CompositionTrace:
     gates_met: list[str] = field(default_factory=lambda: list[str]())
     gates_unmet: list[str] = field(default_factory=lambda: list[str]())
     qwen_calls: int = 0
+    # True when a cross-encoder rerank reordered the candidate pool (Stage A).
+    reranked: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +178,8 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     qwen_calls INTEGER NOT NULL DEFAULT 0,
     contract_path VARCHAR,
     contract_tags VARCHAR[],
-    bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted'
+    bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted',
+    reranked BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -545,8 +548,8 @@ class VectorStore:
                 status, error_code, response_size_chars,
                 prompt_version, workflow_skill_ids,
                 event_type, pre_filter_matched, gates_met, gates_unmet, qwen_calls,
-                contract_path, contract_tags, bm25_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                contract_path, contract_tags, bm25_source, reranked
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -576,6 +579,7 @@ class VectorStore:
                 trace.contract_path,
                 trace.contract_tags,
                 trace.bm25_source,
+                trace.reranked,
             ],
         )
 
@@ -603,7 +607,7 @@ class VectorStore:
                    status, error_code, response_size_chars, prompt_version,
                    workflow_skill_ids, event_type, pre_filter_matched,
                    gates_met, gates_unmet, qwen_calls,
-                   contract_path, contract_tags, bm25_source
+                   contract_path, contract_tags, bm25_source, reranked
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -639,6 +643,7 @@ class VectorStore:
                 contract_path=r[24],
                 contract_tags=list(r[25] or []),
                 bm25_source=r[26] or "rule-extracted",
+                reranked=bool(r[27]),
             )
             for r in rows
         ]
@@ -694,6 +699,7 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("contract_path", "VARCHAR", ""),
     ("contract_tags", "VARCHAR[]", ""),
     ("bm25_source", "VARCHAR", "DEFAULT 'rule-extracted'"),
+    ("reranked", "BOOLEAN", "DEFAULT FALSE"),
 )
 
 
