@@ -857,7 +857,8 @@ class TestProxyWiring:
         assert env_path.exists()
         content = env_path.read_text()
         assert SENTINEL_BEGIN in content
-        assert "ANTHROPIC_BASE_URL=http://localhost:5555/v1" in content
+        assert "ANTHROPIC_BASE_URL=http://localhost:5555" in content
+        assert "5555/v1" not in content  # SDK appends /v1/messages
         assert "ANTHROPIC_API_KEY=agentalloy" in content
 
     def test_manual_proxy_prints_to_stderr(

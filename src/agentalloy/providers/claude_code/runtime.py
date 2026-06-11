@@ -20,6 +20,7 @@ def build_launch_env(port: int) -> dict[str, str]:
         Environment dict with proxy configuration.
     """
     return {
-        "ANTHROPIC_BASE_URL": f"http://localhost:{port}/v1",
+        # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL.
+        "ANTHROPIC_BASE_URL": f"http://localhost:{port}",
         "ANTHROPIC_API_KEY": "agentalloy",
     }

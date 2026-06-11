@@ -126,24 +126,92 @@ class TestContainerUninstall:
         assert len(actions) == 2
 
     def test_compose_down_skipped_native(self):
-        """Native deployment does NOT stop containers."""
+        """Native deployment with no leftover container does nothing.
+
+        The corpse sweep still runs (an interrupted container attempt can
+        precede a native install), but with no matching container it must
+        produce no actions and no subprocess stop/rm calls.
+        """
         state: dict[str, Any] = {
             "deployment": "native",
         }
         warnings: list[str] = []
 
-        with patch("subprocess.run") as mock_run:
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                return_value="podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._list_conflicting_containers",
+                return_value=[],
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
             actions = _stop_container_stack(state, warnings)
 
         mock_run.assert_not_called()
         assert actions == []
 
-    def test_compose_down_skipped_no_deployment(self):
-        """State with no deployment field skips container teardown."""
+    def test_compose_down_skipped_no_deployment_no_runtime(self):
+        """No deployment recorded and no container runtime → clean no-op."""
         state: dict[str, Any] = {}
         warnings: list[str] = []
-        actions = _stop_container_stack(state, warnings)
+        with patch(
+            "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+            return_value=None,
+        ):
+            actions = _stop_container_stack(state, warnings)
         assert actions == []
+        assert warnings == []
+
+    def test_unrecorded_container_corpse_is_removed(self):
+        """An interrupted container install leaves deployment unset in state
+        while its Exited container survives, holding the port reservation.
+        Teardown must find it by name and remove it anyway."""
+        state: dict[str, Any] = {"port": 47950}
+        warnings: list[str] = []
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                return_value="podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._list_conflicting_containers",
+                return_value=[("agentalloy", "Exited (1) 2 days ago")],
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stderr=b"")
+            actions = _stop_container_stack(state, warnings)
+
+        commands = [c.args[0] for c in mock_run.call_args_list]
+        assert ["podman", "stop", "agentalloy"] in commands
+        assert ["podman", "rm", "-f", "agentalloy"] in commands
+        assert any("interrupted install" in w for w in warnings)
+        assert any(a.get("action") == "container_stopped" for a in actions)
+
+    def test_unrecorded_foreign_port_holder_left_with_warning(self):
+        """A container publishing our port but not named ours is NOT removed —
+        warn with a manual remediation instead."""
+        state: dict[str, Any] = {"port": 47950}
+        warnings: list[str] = []
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                return_value="podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._list_conflicting_containers",
+                return_value=[("someone-elses-app", "Up 2 hours")],
+            ),
+            patch("subprocess.run") as mock_run,
+        ):
+            actions = _stop_container_stack(state, warnings)
+
+        mock_run.assert_not_called()
+        assert actions == []
+        assert any("someone-elses-app" in w and "podman rm" in w for w in warnings)
 
     def test_container_stop_missing_runtime_warns(self, tmp_path: Path):
         """OSError on stop and rm adds warnings for both."""

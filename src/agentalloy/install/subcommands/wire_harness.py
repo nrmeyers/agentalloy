@@ -1155,7 +1155,9 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
     sentinel_begin = "# <!-- BEGIN agentalloy install -->"
     sentinel_end = "# <!-- END agentalloy install -->"
 
-    proxy_url = f"http://localhost:{port}/v1"
+    # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL,
+    # so a /v1 here produces /v1/v1/messages (404 against the proxy).
+    proxy_url = f"http://localhost:{port}"
     block_lines = [
         sentinel_begin,
         f"export ANTHROPIC_BASE_URL={proxy_url}",
@@ -1185,7 +1187,10 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
     return [
         {
             "path": str(env_path),
-            "action": "wrote_new_file",
+            # "replaced_file" when the file pre-existed: uninstall's
+            # restore-original branch handles those; "wrote_new_file" is the
+            # delete-on-uninstall signal and must mean the file is ours.
+            "action": "wrote_new_file" if original_content is None else "replaced_file",
             "content_sha256": _sha256(block),
             **({"original_content": original_content} if original_content is not None else {}),
         }
@@ -1431,14 +1436,12 @@ def add_parser(
     .. deprecated::
         This function is deprecated.  The wire-harness subcommand module
         is deprecated; use the provider registry instead.
+
+    Registration itself stays silent: ``__main__`` calls this on EVERY CLI
+    invocation, so warning here printed a DeprecationWarning for unrelated
+    commands like ``agentalloy status``. The warning now fires only when
+    the wire-harness subcommand actually runs (``wire_harness()``).
     """
-    warnings.warn(
-        "wire_harness.add_parser() is deprecated; use "
-        "agentalloy.providers.REGISTRY instead. This module will be "
-        "removed in a future release.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     p: argparse.ArgumentParser = subparsers.add_parser(
         "wire-harness",
         help="Emit harness-specific integration with sentinel markers.",

@@ -32,6 +32,7 @@ from agentalloy.install import server_proc
 from agentalloy.install import state as install_state
 from agentalloy.install.output import print_rich, print_rich_stderr
 from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES, wire_harness
+from agentalloy.providers import REGISTRY
 
 # PID file location (under user data dir)
 PID_FILE_NAME = "wrap.pid"
@@ -251,9 +252,21 @@ def _run(args: argparse.Namespace) -> int:
 
     _out(f"  Spawning child: {' '.join(child_args)}")
 
-    # Build child environment: inherit parent env, but ensure the proxy
-    # port is accessible. The wiring files already point to localhost:port.
+    # Build child environment: inherit parent env, then apply the provider's
+    # env_builder (ANTHROPIC_BASE_URL / OPENAI_BASE_URL / ... → the proxy).
+    # Without this, env-based harnesses (claude-code, codex, openclaw,
+    # opencode) launch pointing at their real upstreams and the proxy never
+    # sees a request — the wiring env files on disk are not sourced by
+    # anything in the spawn path. Explicit user overrides win: a var already
+    # present in the parent env is left untouched.
     child_env = {**os.environ}
+    spec = REGISTRY.get(harness)
+    if spec is not None:
+        for key, value in spec.env_builder(port).items():
+            if key not in os.environ:
+                child_env[key] = value
+            else:
+                _out(f"  [dim]env: keeping caller's {key} (overrides wiring)[/dim]")
 
     # Write PID file for the child so teardown knows what to clean up.
     # We keep the server PID file as well.

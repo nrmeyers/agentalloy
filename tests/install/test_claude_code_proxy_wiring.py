@@ -32,7 +32,9 @@ class TestClaudeCodeProxyWiring:
         env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
         assert env_path.exists()
         content = env_path.read_text()
-        assert "ANTHROPIC_BASE_URL=http://localhost:7070/v1" in content
+        # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL.
+        assert "ANTHROPIC_BASE_URL=http://localhost:7070" in content
+        assert "7070/v1" not in content
         assert "ANTHROPIC_API_KEY=" in content
 
     def test_claude_code_proxy_uses_sentinel_markers(

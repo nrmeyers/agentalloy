@@ -57,7 +57,8 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     env_path = agentalloy_dir / "claude-code-env.sh"
     original_content = _capture_original(env_path)
 
-    proxy_url = f"http://localhost:{port}/v1"
+    # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL.
+    proxy_url = f"http://localhost:{port}"
 
     block_lines = [
         _SENTINEL_BEGIN,

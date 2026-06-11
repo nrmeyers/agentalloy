@@ -464,12 +464,42 @@ def _stop_container_stack(
     """
     actions: list[dict[str, Any]] = []
 
-    if st.get("deployment") != "container":
-        return actions
-
     # v4+: read from runtime_binary (migrated from compose_binary)
     runtime_binary_label = st.get("runtime_binary")
     container_name = st.get("container_name") or "agentalloy"
+
+    if st.get("deployment") != "container":
+        # State says no container deployment — but state records `deployment`
+        # only at the END of the wizard, so a container install that hung or
+        # was interrupted mid-bootstrap leaves deployment unset while its
+        # (often Exited) container survives, holding the rootlessport
+        # reservation and failing every later install with "address already
+        # in use". Detect that corpse by name instead of trusting state.
+        from agentalloy.install.subcommands.container_runtime import (
+            _detect_runtime_binary,
+            _list_conflicting_containers,
+        )
+
+        runtime = _detect_runtime_binary()
+        if runtime is None:
+            return actions
+        port_raw = st.get("port")
+        port = port_raw if isinstance(port_raw, int) else 47950
+        conflicts = _list_conflicting_containers(runtime, container_name, port)
+        named = [(n, s) for n, s in conflicts if n == container_name]
+        if not named:
+            for name, status in conflicts:
+                warnings.append(
+                    f"Container '{name}' ({status}) publishes port {port} but was not "
+                    f"created by this install — leaving it; remove manually with "
+                    f"`{runtime} rm {name}` if it blocks reinstall."
+                )
+            return actions
+        warnings.append(
+            f"State has no container deployment recorded, but container "
+            f"'{container_name}' exists (likely an interrupted install) — removing it."
+        )
+        runtime_binary_label = runtime
 
     if not runtime_binary_label:
         warnings.append(

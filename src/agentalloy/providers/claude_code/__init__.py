@@ -30,7 +30,9 @@ def _env_builder(port: int) -> dict[str, str]:
     API calls through the AgentAlloy proxy.
     """
     return {
-        "ANTHROPIC_BASE_URL": f"http://localhost:{port}/v1",
+        # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL,
+        # so a /v1 here produces /v1/v1/messages (404 against the proxy).
+        "ANTHROPIC_BASE_URL": f"http://localhost:{port}",
         "ANTHROPIC_API_KEY": "agentalloy",
     }
 
