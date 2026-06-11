@@ -64,6 +64,15 @@ single-GPU host. Run the 27B leg overnight.
       multi-KB; the token gap is part of the result.
 - [ ] Report bootstrap CIs per cell and paired per-task deltas
       (composed vs each other arm, same task+seed).
+- [x] LLM-judge harness (`eval/judge.py`): blind, length-controlled rubric
+      (correctness/coverage/precision, 0–5 each), Claude Opus 4.8 via the
+      Batches API with structured outputs. Reports paired deltas with
+      bootstrap CIs, judge–heuristic agreement (Pearson r), and a
+      length-bias diagnostic. Runs offline over persisted `run-N.txt`
+      outputs — judge any time after the legs finish.
+- [ ] Pin all agent-model legs to the RTX 3090 (`CUDA_VISIBLE_DEVICES=1`
+      on the llama-server); 27B/35B quants spill to CPU on the 3060 and
+      corrupt tok/s + wall-clock. Embed model can live on the 3060.
 
 ## Leg commands
 
@@ -78,6 +87,19 @@ AGENT_MODEL=<id> LM_STUDIO_URL=<url> \
   uv run python -m eval.run_poc --n 5 --task-set domain --label domain \
   --conditions none composed flat external
 ```
+
+## Judging (offline, after all legs)
+
+```bash
+export ANTHROPIC_API_KEY=...
+uv run --with anthropic python -m eval.judge submit eval/runs/<leg1> <leg2> ...
+uv run --with anthropic python -m eval.judge collect   # poll + write + report
+uv run python -m eval.judge report eval/runs/<leg> ... # re-aggregate any time
+```
+
+Batch pricing is 50% off; ~2,400 judgments on Opus 4.8 ≈ $27. Trust the
+judge only if judge–heuristic agreement is reasonable and the length-bias
+diagnostic (|r| vs output tokens) stays low.
 
 ## Interpretation guide (write down before seeing numbers)
 
