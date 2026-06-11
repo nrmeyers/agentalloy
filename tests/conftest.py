@@ -23,6 +23,42 @@ from agentalloy.storage.vector_store import VectorStore, open_or_create
 _DEFAULT_PORT = 47950
 
 
+# Paths under the developer's REAL home that harness wiring writes to.
+# XDG redirection does not cover them: providers resolve via Path.home().
+# Three incident classes have hit real user state from tests (#87 XDG dirs,
+# #88/#114 the live service, and hook wiring writing ~/.claude/settings.json
+# + ~/.agentalloy/hooks twice during PR #118 development) — this tripwire
+# fails the offending TEST instead of letting pollution land silently.
+_REAL_HOME_SENTINELS = (
+    Path.home() / ".claude" / "settings.json",
+    Path.home() / ".agentalloy",
+)
+
+
+def _home_fingerprint() -> tuple[tuple[str, float, int], ...]:
+    out: list[tuple[str, float, int]] = []
+    for path in _REAL_HOME_SENTINELS:
+        try:
+            st = path.stat()
+            out.append((str(path), st.st_mtime, st.st_size))
+        except OSError:
+            out.append((str(path), -1.0, -1))
+    return tuple(out)
+
+
+@pytest.fixture(autouse=True)
+def _guard_real_home_wiring() -> Iterator[None]:
+    """Fail any test that mutates real-home wiring artifacts."""
+    before = _home_fingerprint()
+    yield
+    after = _home_fingerprint()
+    assert after == before, (
+        "Test modified REAL home wiring state (~/.claude/settings.json or "
+        f"~/.agentalloy): {before} -> {after}. Patch Path.home() (see "
+        "tests/install/test_claude_code_hook_wiring.py fake_home fixture)."
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolated_xdg_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point XDG state dirs at a per-test tmp dir for the whole suite.

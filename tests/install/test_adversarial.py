@@ -20,6 +20,18 @@ from agentalloy.install import state as install_state
 
 
 @pytest.fixture(autouse=True)
+def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """claude-code wiring (hook default) writes under Path.home() —
+    every test in this module must see a throwaway home, or the suite
+    pollutes the developer's real ~/.claude/settings.json (tripwire:
+    _guard_real_home_wiring in tests/conftest.py)."""
+    home = tmp_path / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
+@pytest.fixture(autouse=True)
 def _clean_global_state(tmp_path: Path):
     """Remove global state file after each test to prevent cross-test pollution."""
     fp = install_state.state_path()

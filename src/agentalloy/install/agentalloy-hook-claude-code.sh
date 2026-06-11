@@ -10,32 +10,54 @@
 #
 # The script expects JSON on stdin with these fields:
 #   {
-#     "event": "UserPromptSubmit" | "PreToolUse" | "PostToolUse",
+#     "hook_event_name": "UserPromptSubmit" | "PreToolUse" | "PostToolUse",
 #     "prompt": "...",               # UserPromptSubmit only
 #     "tool_name": "...",            # PreToolUse / PostToolUse
-#     "tool_path": "...",            # PostToolUse only
+#     "tool_input": {...},           # PreToolUse / PostToolUse (path extracted from it)
 #     "cwd": "..."                   # Optional working directory
 #   }
+# (The legacy field name "event" is also accepted for the event type.)
+#
+# ---------------------------------------------------------------------------
+# FAIL-OPEN CONTRACT (the reason the hook is the DEFAULT claude-code wiring)
+# ---------------------------------------------------------------------------
+# This script ALWAYS exits 0 and NEVER emits anything other than a composed
+# block on success. If the hook endpoint is unreachable, times out, or returns
+# a non-2xx status, the script degrades silently: exit 0, no stdout. A down or
+# missing AgentAlloy service therefore leaves Claude Code behaving exactly like
+# vanilla Claude — it does not break the harness. This is the asymmetry that
+# makes the hook safer than proxy wiring (where a down service breaks every
+# request).
 #
 # Exit codes:
-#   0 — success (even if no block was emitted)
-#   1 — fatal error (could not reach the hook endpoint)
+#   0 — always (success OR silent degradation). The script never exits non-zero.
+#
+# Timeouts (kept well under Claude Code's per-hook budget and aligned with the
+# hook_router stale-while-revalidate window so the call never outlives the
+# server-side cache cycle):
+#   connect: 0.2s   (200ms — fail fast when nothing is listening)
+#   total:   1.0s   (1s — a slow compose run must not stall the turn)
 
-set -euo pipefail
+set -uo pipefail   # NOTE: intentionally NOT -e — every failure path is fail-open.
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Hook endpoint base URL — overridden by $AGENTALLOY_HOOK_URL if set.
+# Hook endpoint base URLs — overridden by env vars baked in at wire time.
 HOOK_URL="${AGENTALLOY_HOOK_URL:-http://localhost:47950/v1/hook/user-prompt-submit}"
 POST_TOOL_URL="${AGENTALLOY_HOOK_URL_POST:-http://localhost:47950/v1/hook/post-tool-use}"
 PRE_TOOL_URL="${AGENTALLOY_HOOK_URL_PRE:-http://localhost:47950/v1/hook/pre-tool-use}"
 
-# Timeout for the HTTP call (seconds).  Must be < Claude Code's 3-second
-# hook timeout.  2.5s matches the SWR window so the hook script never
-# outlives the cache revalidation cycle.
-TIMEOUT=2.5
+# Tight fail-open timeouts. connect=0.2s fails fast when the service is down;
+# total=1.0s caps the whole turn-blocking call.
+CONNECT_TIMEOUT="${AGENTALLOY_HOOK_CONNECT_TIMEOUT:-0.2}"
+MAX_TIME="${AGENTALLOY_HOOK_MAX_TIME:-1.0}"
+
+# A curl that cannot run at all (missing binary) must also fail open.
+if ! command -v curl >/dev/null 2>&1; then
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Read stdin
@@ -47,17 +69,28 @@ INPUT="$(cat)"
 # Dispatch by event type
 # ---------------------------------------------------------------------------
 
-EVENT="$(printf '%s' "$INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('event','UserPromptSubmit'))" 2>/dev/null || echo "UserPromptSubmit")"
+# Accept both the modern "hook_event_name" field and the legacy "event" field.
+EVENT="$(printf '%s' "$INPUT" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('hook_event_name') or d.get('event') or 'UserPromptSubmit')
+except Exception:
+    print('UserPromptSubmit')
+" 2>/dev/null || echo "UserPromptSubmit")"
+
+# Shared curl flags. -sf makes curl exit non-zero (and emit nothing) on a
+# non-2xx status; combined with the `|| echo {}` fallback this is fail-open.
+_CURL=(curl -sf
+    --connect-timeout "$CONNECT_TIMEOUT"
+    --max-time "$MAX_TIME"
+    -H "Content-Type: application/json"
+    -d "$INPUT")
 
 case "$EVENT" in
     UserPromptSubmit)
-        # POST to user-prompt-submit endpoint
-        RESP="$(curl -sf --max-time "$TIMEOUT" \
-            -H "Content-Type: application/json" \
-            -d "$INPUT" \
-            "$HOOK_URL" 2>/dev/null || echo "{}")"
+        RESP="$("${_CURL[@]}" "$HOOK_URL" 2>/dev/null || echo "{}")"
 
-        # Extract the composed block from the response
         BLOCK="$(printf '%s' "$RESP" | python3 -c "
 import sys, json
 try:
@@ -69,20 +102,14 @@ except Exception:
     pass
 " 2>/dev/null || true)"
 
-        # Emit the block to stdout (Claude Code reads this)
         if [ -n "$BLOCK" ]; then
             printf '%s\n' "$BLOCK"
         fi
         ;;
 
     PreToolUse)
-        # POST to pre-tool-use endpoint
-        RESP="$(curl -sf --max-time "$TIMEOUT" \
-            -H "Content-Type: application/json" \
-            -d "$INPUT" \
-            "$PRE_TOOL_URL" 2>/dev/null || echo "{}")"
+        RESP="$("${_CURL[@]}" "$PRE_TOOL_URL" 2>/dev/null || echo "{}")"
 
-        # Extract system skills from the response
         SKILLS="$(printf '%s' "$RESP" | python3 -c "
 import sys, json
 try:
@@ -99,15 +126,11 @@ except Exception:
         ;;
 
     PostToolUse)
-        # POST to post-tool-use endpoint
-        curl -sf --max-time "$TIMEOUT" \
-            -H "Content-Type: application/json" \
-            -d "$INPUT" \
-            "$POST_TOOL_URL" >/dev/null 2>&1 || true
+        "${_CURL[@]}" "$POST_TOOL_URL" >/dev/null 2>&1 || true
         ;;
 
     *)
-        # Unknown event — silently pass through
+        # Unknown event — silently pass through.
         ;;
 esac
 

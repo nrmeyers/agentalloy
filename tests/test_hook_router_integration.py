@@ -534,8 +534,12 @@ class TestLegacyPathIntegration:
         assert result["integration_vector"] == "claude_code_hooks"
         assert len(result["files_written"]) > 0
 
-        hooks_path = fake_home / ".claude" / "claude-code-hooks.json"
-        assert hooks_path.exists()
+        # The legacy claude-code branch now routes through the modern provider
+        # hook_writer: settings.json merge + installed hook script.
+        settings_path = fake_home / ".claude" / "settings.json"
+        assert settings_path.exists()
+        script_path = fake_home / ".agentalloy" / "hooks" / "agentalloy-hook-claude-code.sh"
+        assert script_path.exists()
 
     def test_legacy_wiring_skips_for_non_claude_code(
         self, tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch

@@ -466,19 +466,14 @@ def _wire_legacy(
                 f"agentalloy sentinels (expected at most 1 of each). Refusing to write."
             )
     if harness == "claude-code":
-        from agentalloy.install.subcommands.claude_code import (
-            _wire_claude_code_hooks,
-        )
+        # Route the legacy claude-code branch through the modern provider
+        # hook_writer (installs the hook script + merges ~/.claude/settings.json
+        # in Claude Code's current format) rather than the retired
+        # claude-code-hooks.json writer. Hook is the default claude-code wiring.
+        from agentalloy.providers.claude_code.hooks import hook_writer
 
-        hook_result = _wire_claude_code_hooks(port)
-        files_written.append(
-            {
-                "path": hook_result["path"],
-                "action": hook_result["action"],
-                "script": hook_result["script"],
-                "hook_events": hook_result.get("hook_events", []),
-            }
-        )
+        for rec in hook_writer(port, root):
+            files_written.append(rec.to_dict())
         return _build_result(harness, "claude_code_hooks", files_written, root)
 
     # continue special case (already has proxy, skip)

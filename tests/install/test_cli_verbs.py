@@ -17,6 +17,18 @@ import pytest
 from agentalloy.install import state as install_state
 
 
+@pytest.fixture(autouse=True)
+def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """claude-code wiring (hook default) writes under Path.home() —
+    every test in this module must see a throwaway home, or the suite
+    pollutes the developer's real ~/.claude/settings.json (tripwire:
+    _guard_real_home_wiring in tests/conftest.py)."""
+    home = tmp_path / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
 @pytest.fixture()
 def repo_root(tmp_path: Path) -> Path:
     (tmp_path / "pyproject.toml").write_text("")
@@ -114,11 +126,15 @@ class TestWire:
         args = argparse.Namespace(harness=None, port=None, force=False)
         rc = wire._run(args)
         assert rc == 0
-        # Sentinels written to ~/.agentalloy/claude-code-env.sh
-        env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
-        assert env_path.exists()
-        content = env_path.read_text()
-        assert "agentalloy" in content.lower()
+        # Default claude-code wiring is the per-turn hook: script installed
+        # and hooks merged into settings.json. The proxy env file is NOT
+        # written unless --via proxy is passed.
+        script = fake_home / ".agentalloy" / "hooks" / "agentalloy-hook-claude-code.sh"
+        settings = fake_home / ".claude" / "settings.json"
+        assert script.exists()
+        assert settings.exists()
+        assert "UserPromptSubmit" in settings.read_text()
+        assert not (fake_home / ".agentalloy" / "claude-code-env.sh").exists()
 
     def test_auto_detects_cursor_when_dir_present(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -187,12 +203,10 @@ class TestUnwire:
         rc = unwire._run(argparse.Namespace(force=False))
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
-        # cwd ~/.agentalloy/claude-code-env.sh was either modified or removed
-        cwd_touched = any(
-            "claude-code-env.sh" in f.get("path", "")
-            for f in out["files_modified"] + out["files_removed"]
-        )
-        assert cwd_touched
+        # Hook wiring artifacts (script + settings.json) were modified/removed.
+        touched = [f.get("path", "") for f in out["files_modified"] + out["files_removed"]]
+        assert any("agentalloy-hook-claude-code.sh" in p for p in touched)
+        assert any(p.endswith("settings.json") for p in touched)
         # The other-repo entry should have produced a "different repo" warning, not deletion
         assert any("different repo" in w.lower() for w in out["warnings"])
 

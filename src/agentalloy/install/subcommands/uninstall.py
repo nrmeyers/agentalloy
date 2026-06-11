@@ -1039,6 +1039,8 @@ def uninstall(
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
         "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
         ".cline/settings.json",  # Cline proxy config
+        ".claude/settings.json",  # Claude Code hook wiring (merged hooks)
+        "agentalloy-hook-claude-code.sh",  # ~/.agentalloy/hooks/ hook script
     )
     root_resolved = root.resolve()
     # Iterate over harness entries only when wiring removal is enabled.

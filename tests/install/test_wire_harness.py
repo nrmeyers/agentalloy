@@ -29,6 +29,19 @@ from tests._wire_compat import wire_compat
 # ---------------------------------------------------------------------------
 
 
+
+@pytest.fixture(autouse=True)
+def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """claude-code wiring (hook default) writes under Path.home() —
+    every test in this module must see a throwaway home, or the suite
+    pollutes the developer's real ~/.claude/settings.json (tripwire:
+    _guard_real_home_wiring in tests/conftest.py)."""
+    home = tmp_path / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
 @pytest.fixture()
 def repo_root(tmp_path: Path) -> Path:
     (tmp_path / "pyproject.toml").write_text("")
@@ -132,27 +145,50 @@ class TestSentinelInjection:
 
 
 class TestClaudeCode:
-    """claude-code with legacy=True uses hooks-based wiring, not markdown injection."""
+    """claude-code with legacy=True uses hooks-based wiring, not markdown injection.
+
+    The legacy path now delegates to the modern provider hook_writer, which
+    writes under Path.home() (~/.agentalloy/hooks + ~/.claude/settings.json) —
+    home MUST be patched or these tests pollute the developer's real Claude
+    settings (it happened: see PR #118 history).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fake_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+        return home
 
     def test_creates_hooks_config(self, repo_root: Path) -> None:
         result = wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
         assert result["harness"] == "claude-code"
         assert result["integration_vector"] == "claude_code_hooks"
-        assert len(result["files_written"]) >= 1
-        hook_file = result["files_written"][0]["path"]
-        assert "claude-code-hooks.json" in hook_file
+        # Script install + settings.json merge.
+        paths = [f["path"] for f in result["files_written"]]
+        assert any("agentalloy-hook-claude-code.sh" in p for p in paths)
+        assert any(p.endswith(".claude/settings.json") for p in paths)
+        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
+        assert "UserPromptSubmit" in settings["hooks"]
 
     def test_hooks_idempotent(self, repo_root: Path) -> None:
         wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
         wire_compat("claude-code", port=9090, root=repo_root, legacy=True)
-        st = install_state.load_state(repo_root)
-        # Should not duplicate entries
-        assert len(st["harness_files_written"]) == 1
+        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
+        # Re-wiring must not duplicate our entries per event.
+        for groups in settings["hooks"].values():
+            ours = [
+                g
+                for g in groups
+                if any("agentalloy" in h.get("command", "") for h in g.get("hooks", []))
+            ]
+            assert len(ours) == 1
 
     def test_custom_port_hooks(self, repo_root: Path) -> None:
-        result = wire_compat("claude-code", port=3000, root=repo_root, legacy=True)
-        hook_file = result["files_written"][0]["path"]
-        assert "claude-code-hooks.json" in hook_file
+        wire_compat("claude-code", port=3000, root=repo_root, legacy=True)
+        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
+        blob = json.dumps(settings["hooks"])
+        assert "localhost:3000" in blob
 
 
 # ---------------------------------------------------------------------------
