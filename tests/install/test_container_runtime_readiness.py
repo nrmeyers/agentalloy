@@ -235,6 +235,90 @@ class TestWaitForReadiness:
             "Should have made more than 3 calls (did not short-circuit on errors)"
         )
 
+    def test_exited_container_fails_fast_during_bootstrap(self) -> None:
+        """A container that exited before serving /readiness fails immediately.
+
+        Regression: the old loop never checked container liveness, so an
+        entrypoint crash during bootstrap (e.g. ollama pull network failure
+        under set -e) silently burned the entire timeout.
+        """
+        import time
+        import urllib.error
+
+        start = time.monotonic()
+        with (
+            patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")),
+            patch.object(cr, "_container_state", return_value="exited"),
+            patch.object(cr, "_tail_container_logs", return_value="boom: pull failed\n"),
+        ):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=600,
+                runtime="podman",
+                poll_interval=0.01,
+            )
+        assert ok is False
+        # Must not have waited anywhere near the timeout.
+        assert time.monotonic() - start < 5
+
+    def test_unknown_container_state_keeps_polling(self) -> None:
+        """Inspect failure maps to unknown liveness — keep polling to timeout."""
+        import urllib.error
+
+        calls = [0]
+
+        def fake_urlopen(url, timeout=5):  # type: ignore[no-untyped-def]
+            calls[0] += 1
+            raise urllib.error.URLError("refused")
+
+        with (
+            patch("urllib.request.urlopen", side_effect=fake_urlopen),
+            patch.object(cr, "_container_state", return_value=""),
+            patch.object(cr, "_tail_container_logs", return_value=""),
+        ):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=0.05,
+                runtime="podman",
+                poll_interval=0.01,
+            )
+        assert ok is False
+        assert calls[0] > 1, "unknown state must not abort the poll loop"
+
+    def test_progress_surfaces_before_first_success(self) -> None:
+        """Bootstrap progress (model pull) renders before uvicorn answers.
+
+        Regression: log streaming and on_progress were gated behind the first
+        successful /readiness response, which only exists after bootstrap —
+        so the phases they were built to surface were invisible.
+        """
+        import urllib.error
+
+        seen: list[dict] = []
+        responses = [
+            urllib.error.URLError("refused"),
+            urllib.error.URLError("refused"),
+            _FakeResp({"status": "ready"}),
+        ]
+        progress = {"phase": "model_pull", "model": "qwen3-embedding:0.6b"}
+        with (
+            patch("urllib.request.urlopen", side_effect=responses),
+            patch.object(cr, "_container_state", return_value="running"),
+            patch.object(cr, "_tail_container_logs", return_value=""),
+            patch.object(cr, "_get_bootstrap_progress", return_value=progress),
+        ):
+            ok = _wait_for_readiness(
+                47950,
+                timeout=10,
+                runtime="podman",
+                poll_interval=0.01,
+                on_progress=lambda evt: seen.append(evt),
+            )
+        assert ok is True
+        warming = [e for e in seen if e["status"] == "warming_up"]
+        assert len(warming) >= 2, "pre-success polls must emit progress events"
+        assert warming[0]["extra"] == progress
+
     def test_first_success_model_errors_after_200_count(self) -> None:
         """After first 200, consecutive errors count toward the 3-strike limit.
 

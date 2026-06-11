@@ -625,6 +625,27 @@ def _tail_container_logs(
         return ""
 
 
+def _container_state(runtime: str, container_name: str = "agentalloy") -> str:
+    """Return the container's ``.State.Status`` (lowercase), or ``""`` on any failure.
+
+    Failures (runtime missing, container not found, timeout) intentionally
+    map to ``""`` so callers treat liveness as unknown rather than dead —
+    the readiness timeout remains the backstop.
+    """
+    try:
+        result = subprocess.run(
+            [runtime, "inspect", "-f", "{{.State.Status}}", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip().lower()
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return ""
+
+
 def _wait_for_readiness(
     port: int,
     timeout: int = 1800,
@@ -645,11 +666,15 @@ def _wait_for_readiness(
     * ``error``       — fatal (e.g. ``stale_lock``); return False.
 
     Uses a **first-success** model: connection errors before any successful
-    ``/readiness`` response are silently ignored — they are expected during
-    bootstrap. Only consecutive errors **after** the first successful response
-    (meaning the container is alive but /readiness reports warming_up) are
-    counted toward the 3-strike limit. The timeout is the only hard exit
-    condition during bootstrap.
+    ``/readiness`` response are expected during bootstrap and don't count
+    toward failure. Only consecutive errors **after** the first successful
+    response (meaning the container is alive but /readiness reports
+    warming_up) are counted toward the 3-strike limit. During bootstrap the
+    container's liveness is checked on every failed poll — an ``exited`` or
+    ``dead`` container fails immediately with its log tail rather than
+    burning the timeout — and log streaming + progress callbacks run from
+    the first poll so the model pull and pack ingest are visible before
+    uvicorn is up.
 
     ``timeout`` defaults to 1800 s (30 min) because full pack ingest +
     re-embed runs 15-25 min; callers pass shorter values for limited packs
@@ -687,6 +712,7 @@ def _wait_for_readiness(
 
     while True:
         elapsed = _time.monotonic() - start
+        body: dict[str, Any] | None = None
         try:
             with urllib.request.urlopen(url, timeout=5) as resp:
                 body = _json.loads(resp.read().decode())
@@ -700,13 +726,30 @@ def _wait_for_readiness(
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
                     return False
-            if elapsed >= timeout:
+
+        # A container that exited during bootstrap (e.g. ``ollama pull``
+        # network failure under ``set -e``) will never serve /readiness —
+        # fail fast with its log tail instead of silently burning the whole
+        # timeout. Unknown state (inspect failure) keeps polling; the
+        # timeout remains the backstop.
+        if body is None and runtime is not None:
+            state = _container_state(runtime, container_name)
+            if state in ("exited", "dead"):
+                _print(
+                    f"  [red]Container '{container_name}' {state} during bootstrap — "
+                    "aborting readiness wait.[/red]"
+                )
+                tail = _tail_container_logs(runtime, container_name, tail_lines=15)
+                if tail:
+                    _print("  [dim]Last container log lines:[/dim]")
+                    _print(tail.rstrip())
+                _print(f"  [dim]Full logs: {runtime} logs {container_name}[/dim]")
                 return False
-            _time.sleep(min(poll_interval, 5.0))
-            continue
 
         # Stream container logs (e.g. ``ollama pull`` output) so the user
-        # can see what's happening inside the container during bootstrap.
+        # can see what's happening inside the container during bootstrap —
+        # including before uvicorn is up, when /readiness still refuses
+        # connections but the entrypoint is already logging.
         if stream_logs and runtime is not None:
             new_tail = _tail_container_logs(runtime, container_name)
             if new_tail and new_tail != last_tail:
@@ -716,19 +759,21 @@ def _wait_for_readiness(
                 _print(new_lines.rstrip())
                 last_tail = new_tail
 
-        status = body.get("status")
+        status = body.get("status") if body is not None else None
         if on_progress is not None:
             # Caller wants progress updates. Best-effort enrichment from the
             # in-container progress file via runtime exec, in addition to
-            # whatever /readiness reported.
+            # whatever /readiness reported. During bootstrap (no /readiness
+            # yet) the progress file is the only signal — surface it with a
+            # synthetic warming_up status so heartbeats render.
             extra: dict[str, Any] = {}
             if runtime is not None:
                 extra = _get_bootstrap_progress(runtime, container_name)
             with contextlib.suppress(Exception):
                 on_progress(
                     {
-                        "status": status,
-                        "progress": body.get("progress") or {},
+                        "status": status if status is not None else "warming_up",
+                        "progress": (body.get("progress") or {}) if body is not None else {},
                         "extra": extra,
                         "elapsed": elapsed,
                     }
@@ -741,7 +786,7 @@ def _wait_for_readiness(
 
         if elapsed >= timeout:
             return False
-        _time.sleep(poll_interval)
+        _time.sleep(poll_interval if body is not None else min(poll_interval, 5.0))
 
 
 def _get_bootstrap_progress(runtime: str, container_name: str = "agentalloy") -> dict[str, Any]:
