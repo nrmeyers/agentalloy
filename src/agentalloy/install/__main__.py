@@ -50,6 +50,7 @@ from agentalloy.install.subcommands import (
     unwire,
     update,
     verify,
+    verify_pack,
     wire,
     wire_harness,
     wrap,
@@ -108,6 +109,7 @@ _SUBCOMMANDS = [
     install_pack,
     install_packs,
     reembed,
+    verify_pack,
     telemetry,
 ]
 

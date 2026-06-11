@@ -35,7 +35,9 @@ def _write_skill_yaml(
         {
             "sequence": i + 1,
             "fragment_type": "execution" if i == 0 else "rationale",
-            "content": f"fragment {i + 1} content",
+            "content": (
+                f"This is fragment {i + 1} content with sufficient words to pass validation."
+            ),
         }
         for i in range(fragments)
     ]
