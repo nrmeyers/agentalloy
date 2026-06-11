@@ -94,6 +94,34 @@ def compare(
                 f"(consider bumping '{base_key}')"
             )
 
+    # --- per-phase hit-rate floors (optional baseline key) ---
+    # Added with ops-phase probing: phase-level regressions (e.g. an
+    # eligibility-map change stranding ops) can hide inside healthy overall
+    # probe rates, so each listed phase gets its own floor.
+    phase_floors = baselines.get("phase_hit_rate_floors")
+    if isinstance(phase_floors, dict):
+        by_phase = audit.get("by_phase", {})
+        for phase, floor in phase_floors.items():
+            block = by_phase.get(phase)
+            if not isinstance(block, dict) or "hit_rate" not in block:
+                failures.append(
+                    f"phase '{phase}' has a baseline floor but no audit measurement — "
+                    f"did the audit stop probing it?"
+                )
+                continue
+            measured = float(block["hit_rate"])
+            base = float(floor)
+            if measured < base - tol:
+                failures.append(
+                    f"phase '{phase}' hit_rate REGRESSED: {measured:.4f} < "
+                    f"floor {base:.4f} - tolerance {tol:.4f}"
+                )
+            elif measured > base + tol:
+                notices.append(
+                    f"phase '{phase}' hit_rate IMPROVED: {measured:.4f} > floor {base:.4f} "
+                    f"(consider bumping phase_hit_rate_floors.{phase})"
+                )
+
     # --- stranded skills: fail if count exceeds baseline ---
     stranded = audit.get("stranded_skills")
     if not isinstance(stranded, list):

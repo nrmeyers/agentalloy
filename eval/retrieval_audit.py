@@ -46,6 +46,16 @@ RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 _VALID_PHASES = {"spec", "design", "build", "qa", "ops"}
 
 
+def _ops_categories() -> frozenset[str]:
+    """Categories the runtime admits for the ops phase — from the live map."""
+    from agentalloy.retrieval.domain import phase_to_categories
+
+    return frozenset(phase_to_categories("ops"))
+
+
+_OPS_CATEGORIES = _ops_categories()
+
+
 @dataclass
 class SkillProbe:
     skill_id: str
@@ -107,7 +117,15 @@ def _load_skills(packs_filter: list[str] | None) -> list[SkillProbe]:
             if not isinstance(sid, str):
                 continue
             raw_phases = doc.get("phase_scope") or ["build"]
-            phases = sorted({p if p in _VALID_PHASES else "build" for p in raw_phases})
+            phases = {p if p in _VALID_PHASES else "build" for p in raw_phases}
+            # No skill authors phase_scope: [ops] (vocabulary is
+            # build/design/review), so ops-phase retrieval leans entirely on
+            # the runtime's phase→category map and authored phases alone never
+            # measure it. Probe at ops every skill the map admits there —
+            # the same eligibility the live /compose applies.
+            category = str(doc.get("category") or "?")
+            if category in _OPS_CATEGORIES:
+                phases.add("ops")
             probes = {"name": _name_probe(str(name))}
             topic = _topic_probe(sid, str(name), str(prose))
             if topic:
@@ -116,8 +134,8 @@ def _load_skills(packs_filter: list[str] | None) -> list[SkillProbe]:
                 SkillProbe(
                     skill_id=sid,
                     pack=pack_dir.name,
-                    category=str(doc.get("category") or "?"),
-                    phases=phases,
+                    category=category,
+                    phases=sorted(phases),
                     probes=probes,
                 )
             )

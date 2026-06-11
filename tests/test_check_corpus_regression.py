@@ -176,3 +176,80 @@ def test_run_missing_gold_file_errors(tmp_path: Path) -> None:
 
     with pytest.raises(RegressionError, match="gold-hit-"):
         run(runs, baselines)
+
+
+# ---------------------------------------------------------------------------
+# Per-phase hit-rate floors (added with ops-phase probing)
+# ---------------------------------------------------------------------------
+
+
+def _audit_with_phases(phases: dict[str, float]) -> dict:
+    return {
+        "by_probe_type": {
+            "name": {"hit_rate": 0.95, "n": 100},
+            "topic": {"hit_rate": 0.97, "n": 100},
+        },
+        "by_phase": {p: {"hit_rate": r, "n": 100} for p, r in phases.items()},
+        "stranded_skills": [],
+    }
+
+
+def _baselines_with_floors(floors: dict[str, float]) -> dict:
+    return {
+        "name_probe_hit_rate": 0.95,
+        "topic_probe_hit_rate": 0.97,
+        "stranded_count": 0,
+        "gold_hit": 8,
+        "gold_hit_total": 8,
+        "tolerance": 0.02,
+        "phase_hit_rate_floors": floors,
+    }
+
+
+def test_phase_floor_regression_fails() -> None:
+    failures, _ = compare(
+        _audit_with_phases({"build": 0.96, "ops": 0.85}),
+        {"gold_hit": 8, "gold_hit_total": 8},
+        _baselines_with_floors({"build": 0.96, "ops": 0.96}),
+    )
+    assert any("'ops'" in f and "REGRESSED" in f for f in failures)
+    assert not any("'build'" in f for f in failures)
+
+
+def test_phase_floor_within_tolerance_passes() -> None:
+    failures, _ = compare(
+        _audit_with_phases({"ops": 0.945}),
+        {"gold_hit": 8, "gold_hit_total": 8},
+        _baselines_with_floors({"ops": 0.96}),
+    )
+    assert failures == []
+
+
+def test_phase_floor_missing_measurement_fails() -> None:
+    """A floored phase vanishing from the audit must fail, not pass silently."""
+    failures, _ = compare(
+        _audit_with_phases({"build": 0.96}),
+        {"gold_hit": 8, "gold_hit_total": 8},
+        _baselines_with_floors({"ops": 0.96}),
+    )
+    assert any("'ops'" in f and "no audit measurement" in f for f in failures)
+
+
+def test_phase_floor_improvement_notices() -> None:
+    _, notices = compare(
+        _audit_with_phases({"ops": 0.99}),
+        {"gold_hit": 8, "gold_hit_total": 8},
+        _baselines_with_floors({"ops": 0.96}),
+    )
+    assert any("phase_hit_rate_floors.ops" in n for n in notices)
+
+
+def test_no_floors_key_is_backward_compatible() -> None:
+    baselines = _baselines_with_floors({})
+    del baselines["phase_hit_rate_floors"]
+    failures, _ = compare(
+        _audit_with_phases({"build": 0.5}),
+        {"gold_hit": 8, "gold_hit_total": 8},
+        baselines,
+    )
+    assert failures == []
