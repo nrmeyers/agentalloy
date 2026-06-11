@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="AgentAlloy_cover.png" alt="AgentAlloy — Just-in-Time Instruction Composer" width="720" />
+  <img src="AgentAlloy_cover.webp" alt="AgentAlloy — Just-in-Time Instruction Composer" width="720" />
 </p>
 
 <p align="center">
