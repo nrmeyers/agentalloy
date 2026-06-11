@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentalloy.config import Settings, get_settings
+from agentalloy.dedup_gate import DedupGateResult, run_dedup_gate
 from agentalloy.embed_provider import EmbedClient, get_embed_client
 from agentalloy.install.container_service import (
     is_in_container,
@@ -64,6 +65,7 @@ EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_LLM = 2
 EXIT_DB = 3
+EXIT_DEDUP = 4
 
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
@@ -371,12 +373,19 @@ def reembed_fragments(
     vector_store: VectorStore,
     embedding_model: str,
     progress_tty: bool = False,
+    on_embedded: Callable[[FragmentNeedingEmbedding, list[float]], None] | None = None,
 ) -> ReembedStats:
     """Embed each fragment and insert to DuckDB. Returns run stats.
 
     ``embed_fn`` takes a content string and returns a raw (non-normalized)
     vector. The vector_store normalizes on insert. Injected rather than
     hard-wired to the LM client so tests can pass a fake.
+
+    ``on_embedded`` (optional) is invoked once per successfully inserted
+    fragment with the fragment and its raw vector. The dedup gate uses this
+    instead of wrapping ``embed_fn``: the retry path may call ``embed_fn``
+    more than once per fragment, so call-order correlation mis-attributes
+    vectors.
 
     Transactional: the entire batch is wrapped in a DuckDB transaction.
     If any fragment fails to embed or insert, the whole batch is rolled back
@@ -435,6 +444,8 @@ def reembed_fragments(
                 raise  # Re-raise to trigger top-level rollback
 
             stats.embedded += 1
+            if on_embedded is not None:
+                on_embedded(frag, vec)
             if progress_tty:
                 print(
                     f"\r  embedded {stats.embedded}/{stats.discovered}",
@@ -464,6 +475,52 @@ def reembed_fragments(
         if progress_tty:
             print(file=sys.stderr)  # newline after progress
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Dedup gate reporting
+# ---------------------------------------------------------------------------
+
+
+def _report_dedup(gate_result: DedupGateResult, *, allow_duplicates: bool) -> int:
+    """Print dedup findings and return the appropriate exit code.
+
+    Soft matches → WARNING to stderr, continue (always EXIT_OK from this path).
+    Hard matches → ERROR to stderr; EXIT_DEDUP unless ``allow_duplicates`` is
+    set, in which case downgrade to WARNING and return EXIT_OK.
+
+    Vectors are always written regardless — the gate is a quality check.
+    """
+    for match in gate_result.soft:
+        logger.warning(
+            "SOFT near-duplicate: %s ↔ %s  similarity=%.4f  (fragments %s / %s)",
+            match.incoming_skill_id,
+            match.existing_skill_id,
+            match.similarity,
+            match.fragment_id_incoming,
+            match.fragment_id_existing,
+        )
+
+    if not gate_result.has_hard:
+        return EXIT_OK
+
+    for match in gate_result.hard:
+        msg = (
+            f"HARD duplicate: skill '{match.incoming_skill_id}' is nearly identical to "
+            f"existing skill '{match.existing_skill_id}' "
+            f"(similarity={match.similarity:.4f}, "
+            f"fragments {match.fragment_id_incoming} / {match.fragment_id_existing}). "
+            f"Remediation: differentiate the prose or deprecate one skill; "
+            f"pack edits require a version bump."
+        )
+        if allow_duplicates:
+            logger.warning("(--allow-duplicates) %s", msg)
+        else:
+            print(f"ERROR: {msg}", file=sys.stderr)
+
+    if allow_duplicates:
+        return EXIT_OK
+    return EXIT_DEDUP
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +581,14 @@ def main(argv: list[str] | None = None) -> int:
         "--no-restart",
         action="store_true",
         help="Do not restart the agentalloy service after reembed completes",
+    )
+    parser.add_argument(
+        "--allow-duplicates",
+        action="store_true",
+        help=(
+            "Downgrade hard cross-pack duplicates from errors to warnings. "
+            "Vectors are always written; this flag controls only the exit code."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -632,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_OK
 
             stats: ReembedStats
+            # fragment_id → (skill_id, raw_vector) for the dedup gate.
+            embedded_vecs: dict[str, tuple[str, list[float]]] = {}
             if fragments:
                 embed_client: EmbedClient = get_embed_client(settings)
                 try:
@@ -640,12 +707,16 @@ def main(argv: list[str] | None = None) -> int:
                         vectors = embed_client.embed(model=model_id, texts=[text])
                         return vectors[0]
 
+                    def _record(frag: FragmentNeedingEmbedding, vec: list[float]) -> None:
+                        embedded_vecs[frag.fragment_id] = (frag.skill_id, vec)
+
                     stats = reembed_fragments(
                         fragments,
                         embed_fn=_embed,
                         vector_store=vs,
                         embedding_model=model_id,
                         progress_tty=sys.stderr.isatty(),
+                        on_embedded=_record,
                     )
                     stats.log_summary()
                 finally:
@@ -668,6 +739,19 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # noqa: BLE001 — sync is best-effort; migrate also does it
                 logger.warning("phase_scope sync skipped: %s", exc)
 
+            # Dedup gate — only fires when new fragments were actually embedded.
+            dedup_exit: int = EXIT_OK
+            if embedded_vecs:
+                new_skill_ids = {sid for sid, _ in embedded_vecs.values()}
+                gate_result: DedupGateResult = run_dedup_gate(
+                    new_skill_ids=new_skill_ids,
+                    new_fragment_vecs=embedded_vecs,
+                    vector_store=vs,
+                    hard_similarity=settings.dedup_hard_threshold,
+                    soft_similarity=settings.dedup_soft_threshold,
+                )
+                dedup_exit = _report_dedup(gate_result, allow_duplicates=args.allow_duplicates)
+
             if stats.embedded > 0 or args.rebuild_fts:
                 if stats.embedded > 0:
                     logger.info(
@@ -684,7 +768,9 @@ def main(argv: list[str] | None = None) -> int:
                         "with `agentalloy reembed --rebuild-fts`.",
                         exc,
                     )
-            return EXIT_OK if stats.failed == 0 else EXIT_LLM
+            if stats.failed > 0:
+                return EXIT_LLM
+            return dedup_exit
     except Exception as exc:
         # LadybugDB enforces a single writer; a running service (including a
         # manually-launched uvicorn the preflight can't see) holds the lock

@@ -31,6 +31,8 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from agentalloy.dedup_gate import classify_hit as classify_hit  # re-export
+from agentalloy.dedup_gate import dedup_fragment as _dedup_fragment_impl
 from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
 
@@ -76,25 +78,8 @@ class DedupResult:
 # Core functions
 # ---------------------------------------------------------------------------
 
-
-def classify_hit(
-    hit: SimilarityHit,
-    *,
-    hard_similarity: float,
-    soft_similarity: float,
-) -> str:
-    """Return one of ``"hard"``, ``"soft"``, ``"ignore"`` for a single hit.
-
-    Useful for unit testing the threshold logic in isolation. Convention:
-    cosine distance 0 = identical, so similarity = 1 - distance for
-    L2-normalized vectors (which the vector_store enforces at write time).
-    """
-    similarity = 1.0 - hit.distance
-    if similarity >= hard_similarity:
-        return "hard"
-    if similarity >= soft_similarity:
-        return "soft"
-    return "ignore"
+# classify_hit is imported directly from dedup_gate (re-exported above) so
+# callers that import it from this module continue to work unchanged.
 
 
 def dedup_fragment(
@@ -110,29 +95,22 @@ def dedup_fragment(
 ) -> DedupClassification:
     """Search DuckDB for the top-k matches to one fragment, classify them.
 
+    Thin wrapper around :func:`agentalloy.dedup_gate.dedup_fragment` that
+    returns the authoring-layer :class:`DedupClassification` DTO.
+
     ``k`` caps how many neighbors we inspect per fragment; 20 is plenty for
     dedup decisions at the current corpus scale.
     """
-    hits = vector_store.search_similar(
-        query_vec,
+    hard_match, soft_matches = _dedup_fragment_impl(
+        label=label,
+        query_vec=query_vec,
+        vector_store=vector_store,
+        hard_similarity=hard_similarity,
+        soft_similarity=soft_similarity,
         k=k,
         categories=categories,
         fragment_types=fragment_types,
     )
-    hard_match: SimilarityHit | None = None
-    soft_matches: list[SimilarityHit] = []
-    for hit in hits:
-        verdict = classify_hit(
-            hit,
-            hard_similarity=hard_similarity,
-            soft_similarity=soft_similarity,
-        )
-        if verdict == "hard":
-            # Keep only the hardest (smallest distance = highest similarity).
-            if hard_match is None or hit.distance < hard_match.distance:
-                hard_match = hit
-        elif verdict == "soft":
-            soft_matches.append(hit)
     return DedupClassification(label=label, hard=hard_match, soft=soft_matches)
 
 
