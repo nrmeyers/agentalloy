@@ -10,6 +10,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -123,6 +124,41 @@ def _free_default_port():
     _kill_port(_DEFAULT_PORT)
     yield
     _kill_port(_DEFAULT_PORT)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _guard_server_proc_stop() -> Iterator[None]:
+    """Refuse to SIGTERM a pre-session process via ``server_proc.stop``.
+
+    The #88 ``_free_default_port`` guard only constrains this conftest's own
+    ``_kill_port`` helper. It does NOT cover production code paths a test may
+    reach unmocked — ``uninstall`` (stop_services), ``server-stop``,
+    ``server-restart``, and ``wrap`` all call ``server_proc.stop(pid)`` on
+    whatever is listening on the configured port. ``uninstall`` even confirms
+    the listener is agentalloy via ``/proc/<pid>/cmdline``, so a developer's
+    real ``uvicorn agentalloy.app:app`` instance matches and gets killed.
+
+    This session-scoped guard wraps ``server_proc.stop`` at its single seam
+    and turns any attempt to stop a process that predates the pytest session
+    into a no-op (mirroring the start-time check in ``_kill_port``). Leaked
+    test servers necessarily start after ``_SESSION_START_EPOCH`` and are
+    still stoppable, so legitimate lifecycle tests are unaffected. This
+    catches ANY current or future test that reaches a real ``stop`` unmocked.
+    """
+    from agentalloy.install import server_proc
+
+    real_stop = server_proc.stop
+
+    def _guarded_stop(pid: int, timeout_s: float = 10.0) -> str:
+        started = _proc_start_epoch(pid)
+        if started is not None and started < _SESSION_START_EPOCH:
+            # Pre-session process — not ours to kill. Report success so
+            # callers treating "stopped" as a post-condition don't fail.
+            return "term"
+        return real_stop(pid, timeout_s=timeout_s)
+
+    with patch.object(server_proc, "stop", _guarded_stop):
+        yield
 
 
 @pytest.fixture(autouse=True)
