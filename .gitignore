@@ -113,3 +113,5 @@ docs/archive/
 containers-user-1000/
 tmp*.sh
 tmp*/
+# Un-stubbed Path mocks in tests can materialize a MagicMock/ dir
+MagicMock/
