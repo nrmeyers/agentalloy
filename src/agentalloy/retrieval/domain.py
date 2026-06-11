@@ -3,8 +3,8 @@
 Given a task + phase + optional filters, embed the task via the inference
 runtime, query DuckDB ``fragment_embeddings`` for top-k by cosine, fuse with
 a BM25 lexical leg via Reciprocal Rank Fusion (RRF), hydrate
-ActiveFragment metadata from LadybugDB, then reshuffle for structural
-diversity (setup/execution/verification preferred).
+ActiveFragment metadata from LadybugDB, then apply skill-granular selection
+to prevent sibling skills from crowding out unrelated relevant skills.
 
 Per v5.3, vector storage is DuckDB; cosine ranking happens in DuckDB via
 ``array_cosine_distance`` over L2-normalized vectors.
@@ -12,6 +12,11 @@ Per v5.3, vector storage is DuckDB; cosine ranking happens in DuckDB via
 Improvements (v5.4+):
 - Rule-based keyword extraction boosts BM25 lexical recall.
 - Phase-specific RRF weighting allows biasing dense vs. lexical legs.
+
+Improvements (v5.5 — Stage B):
+- Skill-granular selection: round-robin over top-k skills prevents sibling
+  skills (near-duplicate fragments) from flooding the selected set and
+  crowding out a third relevant skill.
 """
 
 from __future__ import annotations
@@ -179,6 +184,8 @@ class RetrievalResult:
     # cosine similarity per fragment_id (in [0, 1]); 1 = identical direction.
     scores_by_id: dict[str, float] = field(default_factory=lambda: {})
     bm25_source: str = "rule-extracted"  # "rule-extracted" | "contract" | "union"
+    # Skill IDs ordered by rank (first fragment appearance) — observability for Stage B.
+    skills_ranked: list[str] = field(default_factory=lambda: [])
 
 
 class StoreFragmentSource:
@@ -288,7 +295,10 @@ def _bm25_fallback_result(
 
     eligible_count = len(ranked)
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
-    selected = ranked[:k] if raw_scores or diversity_off else diversity_select(ranked, k)
+    if raw_scores or diversity_off:
+        selected = ranked[:k]
+    else:
+        selected, _ = skill_granular_select(ranked, k)
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
     return EmbeddingErrorResult(
         error=error,
@@ -330,8 +340,9 @@ def retrieve_domain_candidates(
     5. Reciprocal Rank Fusion of both legs (with phase-specific weighting)
     6. hydrate ActiveFragment metadata from ``source`` and apply optional
        domain_tags filter
-    7. greedy diversity reshuffle — prefer fragment_types from the
-       setup/execution/verification priority set when not already in the
+    7. skill-granular selection — round-robin over top-k skills so sibling
+       skills cannot flood the selected set; within each skill, diversity
+       preference (setup/execution/verification) applies across the global
        selected set (skipped when ``raw_scores=True``)
 
     Returns:
@@ -487,7 +498,11 @@ def retrieve_domain_candidates(
     # raw_scores=True: return pre-diversity order (for /retrieve observability).
     # RUNTIME_DIVERSITY_SELECTION=off also short-circuits — used by eval harness.
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
-    selected = ranked[:k] if raw_scores or diversity_off else diversity_select(ranked, k)
+    if raw_scores or diversity_off:
+        selected = ranked[:k]
+        skills_ranked: list[str] = []
+    else:
+        selected, skills_ranked = skill_granular_select(ranked, k)
 
     elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
     return RetrievalResult(
@@ -496,6 +511,7 @@ def retrieve_domain_candidates(
         retrieval_ms=int(elapsed_ms),
         scores_by_id=scores_by_id,
         bm25_source=_bm25_source,
+        skills_ranked=skills_ranked,
     )
 
 
@@ -532,3 +548,80 @@ def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]
         selected_types.add(frag.fragment_type)
 
     return selected
+
+
+def skill_granular_select(
+    ranked: list[ActiveFragment], k: int
+) -> tuple[list[ActiveFragment], list[str]]:
+    """Round-robin selection across skills to prevent sibling-skill cannibalization.
+
+    Groups fragments by skill_id in rank order (dict insertion order gives this
+    for free — each skill's rank = its first fragment's position in ``ranked``).
+    Then issues k tokens via round-robin: pass 1 gives one fragment to each
+    top skill, pass 2 gives a second, until k fragments are selected or all
+    queues are empty.
+
+    Within each skill's queue, prefer a ``fragment_type`` from
+    ``_DIVERSITY_PRIORITY`` not yet represented in the globally selected set
+    (same logic as ``diversity_select``); otherwise take the skill's next
+    highest-ranked fragment.
+
+    Returns:
+        (selected, skills_ranked) where ``skills_ranked`` is the ordered list
+        of all distinct skill_ids in rank order (not just the winning ones).
+
+    Degenerate cases:
+    - Empty input → ([], []).
+    - Fewer distinct skills than k → later passes fill remaining slots from
+      whichever skills still have fragments.
+    """
+    if not ranked:
+        return [], []
+
+    # Group fragments by skill_id, preserving fragment rank order within each group.
+    skill_queues: dict[str, list[ActiveFragment]] = {}
+    for frag in ranked:
+        if frag.skill_id not in skill_queues:
+            skill_queues[frag.skill_id] = []
+        skill_queues[frag.skill_id].append(frag)
+
+    # skills_ranked = insertion order = rank order of first fragment per skill.
+    skills_ranked: list[str] = list(skill_queues.keys())
+    # Working queues — mutated during selection; list copy so original is unchanged.
+    queues: dict[str, list[ActiveFragment]] = {
+        sid: list(frags) for sid, frags in skill_queues.items()
+    }
+
+    selected: list[ActiveFragment] = []
+    selected_types: set[str] = set()
+
+    while len(selected) < k:
+        made_progress = False
+        for sid in skills_ranked:
+            if len(selected) >= k:
+                break
+            queue = queues[sid]
+            if not queue:
+                continue
+            # Prefer a priority type not yet in the globally selected set.
+            chosen_index: int | None = None
+            for ptype in _DIVERSITY_PRIORITY:
+                if ptype in selected_types:
+                    continue
+                for i, frag in enumerate(queue):
+                    if frag.fragment_type == ptype:
+                        chosen_index = i
+                        break
+                if chosen_index is not None:
+                    break
+            if chosen_index is None:
+                chosen_index = 0
+            frag = queue.pop(chosen_index)
+            selected.append(frag)
+            selected_types.add(frag.fragment_type)
+            made_progress = True
+        # All queues exhausted before k fragments were gathered.
+        if not made_progress:
+            break
+
+    return selected, skills_ranked
