@@ -29,7 +29,6 @@ from tests._wire_compat import wire_compat
 # ---------------------------------------------------------------------------
 
 
-
 @pytest.fixture(autouse=True)
 def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """claude-code wiring (hook default) writes under Path.home() —
