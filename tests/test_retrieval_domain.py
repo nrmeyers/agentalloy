@@ -17,6 +17,7 @@ from agentalloy.retrieval.domain import (
     diversity_select,
     phase_to_categories,
     retrieve_domain_candidates,
+    skill_granular_select,
 )
 from agentalloy.retrieval.embedding_errors import (
     EmbeddingError,
@@ -230,6 +231,136 @@ def test_diversity_does_not_duplicate() -> None:
     selected = diversity_select(pool, k=5)  # k > pool size
     assert len(selected) == 2
     assert len({f.fragment_id for f in selected}) == 2
+
+
+# -------- AC-5: skill-granular selection --------
+
+
+def _fake_skill(frag_id: str, ftype: str, skill_id: str) -> ActiveFragment:
+    return ActiveFragment(
+        fragment_id=frag_id,
+        fragment_type=ftype,
+        sequence=1,
+        content="",
+        skill_id=skill_id,
+        version_id=f"{skill_id}-v1",
+        skill_class="domain",
+        category="design",
+        domain_tags=[],
+    )
+
+
+def test_skill_granular_sibling_cannibalization_regression() -> None:
+    # Regression: old fragment-level diversity_select with k=4 would select only A and B
+    # (ranks 1–4 are all A/B), crowding out C. skill_granular_select must include all three.
+    #
+    # Pool (rank order):
+    #   rank 1 — skill typescript-narrowing-basic    frag A1 execution
+    #   rank 2 — skill typescript-narrowing-basic    frag A2 setup
+    #   rank 3 — skill typescript-narrowing-advanced frag B1 execution
+    #   rank 4 — skill typescript-narrowing-advanced frag B2 setup
+    #   rank 5 — skill testing-tdd-cycle             frag C1 verification
+    pool = [
+        _fake_skill("A1", "execution", "typescript-narrowing-basic"),
+        _fake_skill("A2", "setup", "typescript-narrowing-basic"),
+        _fake_skill("B1", "execution", "typescript-narrowing-advanced"),
+        _fake_skill("B2", "setup", "typescript-narrowing-advanced"),
+        _fake_skill("C1", "verification", "testing-tdd-cycle"),
+    ]
+    selected, skills_ranked = skill_granular_select(pool, k=4)
+
+    selected_skill_ids = {f.skill_id for f in selected}
+    # All three skills must be represented in the selected set.
+    assert selected_skill_ids == {
+        "typescript-narrowing-basic",
+        "typescript-narrowing-advanced",
+        "testing-tdd-cycle",
+    }
+    assert skills_ranked[:3] == [
+        "typescript-narrowing-basic",
+        "typescript-narrowing-advanced",
+        "testing-tdd-cycle",
+    ]
+    assert len(selected) == 4
+
+
+def test_skill_granular_round_robin_allocation() -> None:
+    # 2 skills × 3 fragments each, k=4 → each skill contributes exactly 2 fragments.
+    pool = [
+        _fake_skill("S1-e", "execution", "skill-one"),
+        _fake_skill("S2-e", "execution", "skill-two"),
+        _fake_skill("S1-s", "setup", "skill-one"),
+        _fake_skill("S2-s", "setup", "skill-two"),
+        _fake_skill("S1-v", "verification", "skill-one"),
+        _fake_skill("S2-v", "verification", "skill-two"),
+    ]
+    selected, skills_ranked = skill_granular_select(pool, k=4)
+
+    assert len(selected) == 4
+    from collections import Counter
+
+    counts = Counter(f.skill_id for f in selected)
+    assert counts["skill-one"] == 2
+    assert counts["skill-two"] == 2
+    assert set(skills_ranked) == {"skill-one", "skill-two"}
+
+
+def test_skill_granular_fewer_skills_than_k() -> None:
+    # 1 skill × 5 fragments, k=3 → all 3 come from that skill (matches old behavior).
+    pool = [_fake_skill(f"s1-f{i}", "execution", "only-skill") for i in range(5)]
+    selected, skills_ranked = skill_granular_select(pool, k=3)
+
+    assert len(selected) == 3
+    assert all(f.skill_id == "only-skill" for f in selected)
+    assert skills_ranked == ["only-skill"]
+
+
+def test_skill_granular_diversity_preference_across_skills() -> None:
+    # When a setup/execution/verification type is not yet globally selected,
+    # prefer it even if it is not the skill's top-ranked fragment.
+    # Pool: skill-a has execution first, skill-b has execution first.
+    # Round 1 should pick execution from skill-a, then prefer setup from skill-b
+    # (setup not yet globally covered) rather than execution from skill-b.
+    pool = [
+        _fake_skill("A1", "execution", "skill-a"),
+        _fake_skill("A2", "setup", "skill-a"),
+        _fake_skill("B1", "execution", "skill-b"),
+        _fake_skill("B2", "setup", "skill-b"),
+        _fake_skill("B3", "verification", "skill-b"),
+    ]
+    selected, _ = skill_granular_select(pool, k=4)
+
+    types = [f.fragment_type for f in selected]
+    # setup and verification must appear — diversity applies globally.
+    assert "setup" in types
+    assert "verification" in types
+
+
+def test_skill_granular_empty_input() -> None:
+    selected, skills_ranked = skill_granular_select([], k=5)
+    assert selected == []
+    assert skills_ranked == []
+
+
+def test_skill_granular_skills_ranked_populated_on_retrieval(
+    populated: LadybugStore, populated_vectors: VectorStore
+) -> None:
+    # RetrievalResult.skills_ranked must be populated on a real retrieval.
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=5,
+        embedding_model="stub-embed",
+    )
+    assert isinstance(result, domain_module.RetrievalResult)
+    # skills_ranked must contain at least the skill ids present in candidates.
+    candidate_skill_ids = {f.skill_id for f in result.candidates}
+    ranked_set = set(result.skills_ranked)
+    assert candidate_skill_ids <= ranked_set
 
 
 # -------- AC-4: empty handling --------
