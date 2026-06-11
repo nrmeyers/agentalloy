@@ -556,6 +556,31 @@ def _run_container(
         subprocess.run(cmd, check=True, timeout=300)
         return 0
     except subprocess.CalledProcessError as exc:
+        # Surface a port-reservation hint when the runtime reports a bind
+        # failure — the most common cause is an Exited container from a prior
+        # crashed install that still holds the rootlessport reservation even
+        # though nothing actually listens on the host. stderr is NOT captured
+        # by this subprocess.run (it streams to the user's terminal), so
+        # exc.stderr is normally None — rely on the exit code: rootlessport
+        # bind failures exit 126 (observed 2026-06-10). Keep the stderr check
+        # for callers/tests that do capture it.
+        stderr_text = ""
+        if exc.stderr is not None:
+            stderr_text = (
+                exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr
+            )
+        bind_failure = (
+            exc.returncode == 126
+            or "address already in use" in stderr_text
+            or "bind" in stderr_text
+        )
+        if bind_failure:
+            _print(
+                f"  [red]Port bind failed — another container may be publishing "
+                f"port 47950.[/red]\n"
+                f"  [dim]Run `{runtime} ps -a` and remove conflicting containers, "
+                f"then re-run setup.[/dim]"
+            )
         return exc.returncode
     except subprocess.TimeoutExpired:
         _print("  [red]Container run timed out after 300s[/red]")
@@ -565,6 +590,93 @@ def _run_container(
 # ---------------------------------------------------------------------------
 # Readiness polling (fast-start + bootstrap state)
 # ---------------------------------------------------------------------------
+
+
+def _list_conflicting_containers(
+    runtime: str,
+    container_name: str = "agentalloy",
+    port: int = 47950,
+) -> list[tuple[str, str]]:
+    """Return [(name, status), ...] for containers that would block a fresh start.
+
+    Merges three detection strategies, deduped by container name:
+      1. Name-exact match — any container (running or exited) named *container_name*.
+      2. Port match — any container publishing *port* on the host side.
+
+    All subprocess failures collapse to an empty contribution so the wizard
+    proceeds without crashing if the runtime is unavailable.
+
+    Parameters
+    ----------
+    runtime : str
+        Container runtime binary path (e.g. ``"podman"`` or ``"docker"``).
+    container_name : str
+        Exact container name to search for. Default ``"agentalloy"``.
+    port : int
+        Host-side port to search for. Default ``47950``.
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _record(name: str, status: str) -> None:
+        name = name.strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append((name, status.strip() or "unknown"))
+
+    # Strategy 1: name-exact match (catches single-container GHCR installs
+    # that carry no compose label — the bug scenario).
+    try:
+        result = subprocess.run(  # noqa: S603 — fixed argv, runtime from caller
+            [
+                runtime,
+                "ps",
+                "-a",
+                "--filter",
+                f"name=^{container_name}$",
+                "--format",
+                "{{.Names}}\t{{.Status}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "\t" not in line:
+                    continue
+                name, _, status = line.partition("\t")
+                _record(name, status)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
+        pass
+
+    # Strategy 2: port match — catches containers with a different name that
+    # still hold the host-port reservation (e.g. a renamed install).
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                runtime,
+                "ps",
+                "-a",
+                "--filter",
+                f"publish={port}",
+                "--format",
+                "{{.Names}}\t{{.Status}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                if "\t" not in line:
+                    continue
+                name, _, status = line.partition("\t")
+                _record(name, status)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
+        pass
+
+    return out
 
 
 def _check_container_running(

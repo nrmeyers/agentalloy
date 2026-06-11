@@ -314,4 +314,167 @@ class TestEntrypoint:
         content = result.read_text()
         assert "rust" in content
         assert "python" in content
-        result.unlink()  # clean up
+
+
+# ---------------------------------------------------------------------------
+# _run_container bind-failure hint
+# ---------------------------------------------------------------------------
+
+
+class TestRunContainerBindHint:
+    """The port-reservation hint must fire on the failure shape reality produces.
+
+    _run_container's subprocess.run does NOT capture stderr (it streams to the
+    user's terminal), so CalledProcessError.stderr is None — the hint keys off
+    exit code 126 (observed rootlessport bind failure, 2026-06-10).
+    """
+
+    def test_rc_126_without_stderr_prints_hint(self, tmp_path: Path):
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        err = subprocess.CalledProcessError(126, ["podman", "run"])  # stderr=None
+        printed: list[str] = []
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime.subprocess.run",
+                side_effect=err,
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._print",
+                side_effect=lambda msg: printed.append(str(msg)),
+            ),
+        ):
+            rc = container_runtime._run_container("podman", entrypoint, "")
+        assert rc == 126
+        assert any("port" in p.lower() and "ps -a" in p for p in printed)
+
+    def test_other_failure_rc_does_not_print_hint(self, tmp_path: Path):
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        err = subprocess.CalledProcessError(1, ["podman", "run"])  # stderr=None
+        printed: list[str] = []
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime.subprocess.run",
+                side_effect=err,
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._print",
+                side_effect=lambda msg: printed.append(str(msg)),
+            ),
+        ):
+            rc = container_runtime._run_container("podman", entrypoint, "")
+        assert rc == 1
+        assert not any("ps -a" in p for p in printed)
+
+
+# ---------------------------------------------------------------------------
+# UT-6: _list_conflicting_containers()
+# ---------------------------------------------------------------------------
+
+
+class TestListConflictingContainers:
+    """UT-6: _list_conflicting_containers() merges name-match and port-match results."""
+
+    def _make_proc(self, stdout: str, returncode: int = 0) -> MagicMock:
+        m = MagicMock()
+        m.returncode = returncode
+        m.stdout = stdout
+        return m
+
+    def test_name_match_only_returns_container(self):
+        """A container matching by name (no label, no port) is returned."""
+        # name filter returns a hit; port filter returns nothing.
+        responses = [
+            self._make_proc("agentalloy\tExited (1) 2 minutes ago"),  # name filter
+            self._make_proc(""),  # port filter
+        ]
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=responses,
+        ):
+            result = container_runtime._list_conflicting_containers("podman")
+        assert result == [("agentalloy", "Exited (1) 2 minutes ago")]
+
+    def test_port_match_only_returns_container(self):
+        """A container matching by port only (different name) is returned."""
+        responses = [
+            self._make_proc(""),  # name filter — no match
+            self._make_proc("some-other-container\tUp 5 seconds"),  # port filter
+        ]
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=responses,
+        ):
+            result = container_runtime._list_conflicting_containers("podman")
+        assert result == [("some-other-container", "Up 5 seconds")]
+
+    def test_dedup_when_container_matches_both_name_and_port(self):
+        """A container returned by both strategies appears only once."""
+        same_line = "agentalloy\tExited (1) 1 minute ago"
+        responses = [
+            self._make_proc(same_line),  # name filter
+            self._make_proc(same_line),  # port filter — same container
+        ]
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=responses,
+        ):
+            result = container_runtime._list_conflicting_containers("podman")
+        assert len(result) == 1
+        assert result[0][0] == "agentalloy"
+
+    def test_all_podman_failures_return_empty_list(self):
+        """When every subprocess call fails, returns [] (setup proceeds)."""
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["podman"], timeout=10),
+        ):
+            result = container_runtime._list_conflicting_containers("podman")
+        assert result == []
+
+    def test_partial_failure_returns_successful_results(self):
+        """If name filter times out but port filter succeeds, port results are returned."""
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+        ) as mock_run:
+            mock_run.side_effect = [
+                subprocess.TimeoutExpired(cmd=["podman"], timeout=10),  # name filter
+                self._make_proc("agentalloy\tExited (137) 3 hours ago"),  # port filter
+            ]
+            result = container_runtime._list_conflicting_containers("podman")
+        assert result == [("agentalloy", "Exited (137) 3 hours ago")]
+
+    def test_lines_without_tab_delimiter_are_ignored(self):
+        """Lines not containing a tab are not parsed (guards against test mock leakage)."""
+        responses = [
+            self._make_proc("agentalloy"),  # no tab — ignored
+            self._make_proc(""),
+        ]
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=responses,
+        ):
+            result = container_runtime._list_conflicting_containers("podman")
+        assert result == []
+
+    def test_custom_container_name_and_port(self):
+        """Custom container_name and port are passed through to subprocess filters."""
+        calls: list[list[str]] = []
+
+        def capture(cmd: list[str], **kwargs: object) -> MagicMock:
+            calls.append(cmd)
+            return self._make_proc("")
+
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=capture,
+        ):
+            container_runtime._list_conflicting_containers(
+                "podman", container_name="myapp", port=9999
+            )
+
+        # First call: name filter with custom name
+        assert any("name=^myapp$" in arg for arg in calls[0])
+        # Second call: port filter with custom port
+        assert any("publish=9999" in arg for arg in calls[1])

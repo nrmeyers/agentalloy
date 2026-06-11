@@ -58,6 +58,7 @@ from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415,
     _ensure_ollama_dir,  # noqa: F401
     _ensure_volume,  # noqa: F401
     _generate_entrypoint,  # noqa: F401
+    _list_conflicting_containers,  # noqa: F401
     _pull_image,  # noqa: F401
     _run_container,  # noqa: F401
     _tail_container_logs,  # noqa: F401  # pyright: ignore[reportUnusedImport]
@@ -1227,21 +1228,30 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             return 1
     _print()
 
-    # 6.5. Check for stale containers from a prior project run. podman-compose
-    # papers over "name already in use" errors by silently `podman start`ing
-    # the existing container — which "succeeds" but the container immediately
-    # re-exits with its old exit code, and the wizard then bails with a
-    # confusing "init exited 1" message. Surface this up front and let the
-    # user remove them. We filter by the project label so we don't touch
-    # other agentalloy:local containers (e.g. from a parallel checkout).
-    existing = _list_project_containers(binary_path)
+    # 6.5. Check for stale containers from a prior project run.
+    # Two sweeps are merged:
+    #   a) _list_project_containers: label-based + fixed compose names (old compose installs).
+    #   b) _list_conflicting_containers: name-exact + port-match (single-container GHCR
+    #      installs — no compose label). An Exited container from a crashed bootstrap
+    #      holds podman's rootlessport reservation for port 47950 even though nothing
+    #      listens, causing `podman run` to fail with "address already in use".
+    _label_containers = _list_project_containers(binary_path)
+    _conflict_containers = _list_conflicting_containers(
+        binary_path,
+        container_name=cfg.container_name or "agentalloy",
+        port=cfg.port,
+    )
+    # Dedup: _conflict_containers may overlap with _label_containers.
+    _seen_names = {n for n, _ in _label_containers}
+    existing = _label_containers + [(n, s) for n, s in _conflict_containers if n not in _seen_names]
     if existing:
         _print("[bold]Existing AgentAlloy containers detected:[/bold]")
         for name, status in existing:
             _print(f"  - {name}  [dim]({status})[/dim]")
         _print(
             f"  [dim]{cfg.runtime_binary} will misbehave if these stay around "
-            "(name collisions, stale exit codes, dangling dependency graphs).[/dim]"
+            "(name collisions, stale exit codes, port-reservation conflicts — "
+            f"an Exited container can still hold port {cfg.port}).[/dim]"
         )
         if cfg.non_interactive:
             _print("  [dim]non-interactive: removing automatically[/dim]")
