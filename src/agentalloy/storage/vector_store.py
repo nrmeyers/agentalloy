@@ -110,6 +110,11 @@ class CompositionTrace:
     qwen_calls: int = 0
     # True when a cross-encoder rerank reordered the candidate pool (Stage A).
     reranked: bool = False
+    # Token-savings telemetry: estimated tokens in the composed output and in
+    # the flat-injection counterfactual (all source-skill raw_prose concatenated).
+    # Both use the len(text) // 4 heuristic (no tokenizer dependency).
+    tokens_returned: int = 0
+    tokens_flat_equivalent: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +184,9 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     contract_path VARCHAR,
     contract_tags VARCHAR[],
     bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted',
-    reranked BOOLEAN NOT NULL DEFAULT FALSE
+    reranked BOOLEAN NOT NULL DEFAULT FALSE,
+    tokens_returned INTEGER NOT NULL DEFAULT 0,
+    tokens_flat_equivalent INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -548,8 +555,9 @@ class VectorStore:
                 status, error_code, response_size_chars,
                 prompt_version, workflow_skill_ids,
                 event_type, pre_filter_matched, gates_met, gates_unmet, qwen_calls,
-                contract_path, contract_tags, bm25_source, reranked
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                contract_path, contract_tags, bm25_source, reranked,
+                tokens_returned, tokens_flat_equivalent
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -580,6 +588,8 @@ class VectorStore:
                 trace.contract_tags,
                 trace.bm25_source,
                 trace.reranked,
+                trace.tokens_returned,
+                trace.tokens_flat_equivalent,
             ],
         )
 
@@ -607,7 +617,8 @@ class VectorStore:
                    status, error_code, response_size_chars, prompt_version,
                    workflow_skill_ids, event_type, pre_filter_matched,
                    gates_met, gates_unmet, qwen_calls,
-                   contract_path, contract_tags, bm25_source, reranked
+                   contract_path, contract_tags, bm25_source, reranked,
+                   tokens_returned, tokens_flat_equivalent
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -644,6 +655,8 @@ class VectorStore:
                 contract_tags=list(r[25] or []),
                 bm25_source=r[26] or "rule-extracted",
                 reranked=bool(r[27]),
+                tokens_returned=int(r[28]) if r[28] is not None else 0,
+                tokens_flat_equivalent=int(r[29]) if r[29] is not None else 0,
             )
             for r in rows
         ]
@@ -661,6 +674,68 @@ class VectorStore:
             f"SELECT COUNT(*) FROM composition_traces {where}", params
         ).fetchone()
         return int(row[0]) if row else 0
+
+    def aggregate_savings(self) -> dict[str, object]:
+        """Aggregate token-savings telemetry across all compose traces.
+
+        Returns a dict with overall totals and a per-phase breakdown.
+        Rows with tokens_flat_equivalent == 0 are excluded from the savings %
+        calculation to avoid division-by-zero on legacy/empty rows.
+        """
+        overall = self._conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total_composes,
+                COALESCE(SUM(tokens_returned), 0) AS sum_returned,
+                COALESCE(SUM(tokens_flat_equivalent), 0) AS sum_flat
+            FROM composition_traces
+            WHERE status = 'compose'
+            """
+        ).fetchone()
+        total_composes = int(overall[0]) if overall else 0
+        sum_returned = int(overall[1]) if overall else 0
+        sum_flat = int(overall[2]) if overall else 0
+        tokens_saved = max(0, sum_flat - sum_returned)
+        savings_pct = round(tokens_saved / sum_flat * 100, 1) if sum_flat > 0 else 0.0
+
+        phase_rows = self._conn.execute(
+            """
+            SELECT
+                phase,
+                COUNT(*) AS composes,
+                COALESCE(SUM(tokens_returned), 0) AS returned,
+                COALESCE(SUM(tokens_flat_equivalent), 0) AS flat
+            FROM composition_traces
+            WHERE status = 'compose'
+            GROUP BY phase
+            ORDER BY composes DESC
+            """
+        ).fetchall()
+        per_phase: list[dict[str, object]] = []
+        for row in phase_rows:
+            ph_flat = int(row[3])
+            ph_returned = int(row[2])
+            ph_saved = max(0, ph_flat - ph_returned)
+            ph_pct = round(ph_saved / ph_flat * 100, 1) if ph_flat > 0 else 0.0
+            per_phase.append(
+                {
+                    "phase": str(row[0]),
+                    "composes": int(row[1]),
+                    "tokens_returned": ph_returned,
+                    "tokens_flat_equivalent": ph_flat,
+                    "tokens_saved": ph_saved,
+                    "savings_pct": ph_pct,
+                }
+            )
+
+        return {
+            "total_composes": total_composes,
+            "tokens_returned": sum_returned,
+            "tokens_flat_equivalent": sum_flat,
+            "tokens_saved": tokens_saved,
+            "savings_pct": savings_pct,
+            "per_phase": per_phase,
+        }
 
     def clear_telemetry(self) -> dict[str, int]:
         """Delete all rows from composition_traces and prompt_loads.
@@ -700,6 +775,8 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("contract_tags", "VARCHAR[]", ""),
     ("bm25_source", "VARCHAR", "DEFAULT 'rule-extracted'"),
     ("reranked", "BOOLEAN", "DEFAULT FALSE"),
+    ("tokens_returned", "INTEGER", "DEFAULT 0"),
+    ("tokens_flat_equivalent", "INTEGER", "DEFAULT 0"),
 )
 
 

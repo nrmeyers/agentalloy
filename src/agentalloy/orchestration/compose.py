@@ -147,6 +147,27 @@ class ComposeOrchestrator:
             dict.fromkeys(f.skill_id for f in retrieval.candidates if f.skill_class == "workflow")
         )
         reranked = isinstance(retrieval, RetrievalResult) and retrieval.reranked
+
+        # Token-savings telemetry.  Heuristic: len(text) // 4 (chars-to-tokens
+        # approximation; no tokenizer dependency, same granularity as the
+        # benchmark's token ratio metrics in eval/run_poc.py).
+        tokens_returned = len(output) // 4
+        # Flat-injection counterfactual: sum of raw_prose for every source skill.
+        # Only available when the source is a RuntimeCache (version detail is in
+        # memory).  With a bare LadybugStore we skip the counterfactual (0) to
+        # avoid a per-request DB query.
+        tokens_flat_equivalent = 0
+        # ``_source`` may not be set on test doubles that bypass __init__.
+        # Bind to a typed local so pyright can narrow through isinstance.
+        _src = getattr(self, "_source", None)
+        if isinstance(_src, RuntimeCache):
+            for skill_id in source_skills:
+                skill = _src.get_active_skill_by_id(skill_id)
+                if skill is not None:
+                    detail = _src.get_version_detail(skill.active_version_id)
+                    if detail is not None:
+                        tokens_flat_equivalent += len(detail.raw_prose) // 4
+
         self._telemetry.write(
             TelemetryRecord(
                 composition_id=str(uuid.uuid4()),
@@ -164,6 +185,8 @@ class ComposeOrchestrator:
                 error_payload=retrieval_error_code,
                 workflow_skill_ids=workflow_skill_ids,
                 reranked=reranked,
+                tokens_returned=tokens_returned,
+                tokens_flat_equivalent=tokens_flat_equivalent,
             )
         )
         return ComposedResult(

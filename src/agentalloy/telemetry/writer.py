@@ -66,6 +66,8 @@ class TelemetryRecord:
     workflow_skill_ids: list[str] | None = None
     prompt_version: str | None = None
     reranked: bool = False
+    tokens_returned: int = 0
+    tokens_flat_equivalent: int = 0
 
 
 class TelemetryWriter(Protocol):
@@ -145,6 +147,8 @@ class DuckDBTelemetryWriter:
             workflow_skill_ids=list(record.workflow_skill_ids or []),
             prompt_version=record.prompt_version,
             reranked=record.reranked,
+            tokens_returned=record.tokens_returned,
+            tokens_flat_equivalent=record.tokens_flat_equivalent,
         )
 
 
