@@ -1,0 +1,129 @@
+name: Corpus Nightly Regression
+
+# Builds the skill corpus from scratch every night, runs the retrieval
+# self-audit + domain gold-hit probe against the live service, and fails on
+# regression vs the committed baselines in eval/corpus_baselines.json.
+#
+# NOTE: ollama / GitHub Actions cannot be exercised in the dev sandbox, so a
+# few flag choices below are the most standard form and are flagged with a
+# one-line comment; shake them out on the first manual dispatch.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC nightly
+  workflow_dispatch:
+
+concurrency:
+  group: corpus-nightly
+  cancel-in-progress: false
+
+jobs:
+  corpus-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90 # CPU re-embed of ~3K fragments is slow
+    env:
+      # User-scoped AgentAlloy state lives under XDG dirs; point them at the
+      # workspace so nothing touches the runner's home defaults.
+      XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
+      XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
+      AGENTALLOY_URL: http://127.0.0.1:47950
+      OLLAMA_HOST: 127.0.0.1:11434
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Install + start Ollama
+        timeout-minutes: 10
+        run: |
+          set -euxo pipefail
+          # Official install script is acceptable in CI (ephemeral runner).
+          curl -fsSL https://ollama.com/install.sh | sh
+          # Serve in the background; logs to ollama.log for the artifact trail.
+          ollama serve > ollama.log 2>&1 &
+          # Wait for the daemon to accept connections before pulling.
+          for i in $(seq 1 30); do
+            if curl -fsS "http://${OLLAMA_HOST}/api/version" >/dev/null 2>&1; then
+              echo "ollama up after ${i}s"; break
+            fi
+            sleep 1
+          done
+          ollama pull qwen3-embedding:0.6b
+
+      - name: Write .env (cpu preset → user XDG config)
+        timeout-minutes: 2
+        run: |
+          set -euxo pipefail
+          mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
+          # cpu preset points the embed server at ollama's default :11434.
+          uv run agentalloy write-env --preset cpu --port 47950 --force
+          echo "--- generated .env ---"
+          cat "${XDG_CONFIG_HOME}/agentalloy/.env"
+
+      - name: Build corpus from scratch (ingest + re-embed all packs)
+        timeout-minutes: 70
+        run: |
+          set -euxo pipefail
+          # seed-corpus VERIFIES the in-repo seed corpus is present and valid
+          # (preflight only — schema init happens inside install-packs via
+          # _ensure_ladybug_schema). Non-fatal: a verification quirk on a
+          # fresh runner must not mask the real ingest step below.
+          uv run agentalloy seed-corpus || echo "seed-corpus verification non-fatal (fresh runner)"
+          # Ingest every pack into LadybugDB and re-embed into DuckDB. This is
+          # the real install pipeline; --non-interactive avoids the TTY picker.
+          uv run agentalloy install-packs --packs all --non-interactive --no-restart
+
+      - name: Start AgentAlloy service
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          # Settings reads config from the process env, not a cwd .env, so
+          # source the user-scoped .env that write-env produced.
+          set -a
+          # shellcheck disable=SC1091
+          . "${XDG_CONFIG_HOME}/agentalloy/.env"
+          set +a
+          uv run uvicorn agentalloy.app:app --host 127.0.0.1 --port 47950 \
+            > service.log 2>&1 &
+          # Wait for readiness before probing.
+          for i in $(seq 1 60); do
+            if curl -fsS "${AGENTALLOY_URL}/health" >/dev/null 2>&1; then
+              echo "service healthy after ${i}s"; break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "service did not become healthy"; cat service.log; exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Retrieval self-audit
+        timeout-minutes: 15
+        run: uv run python -m eval.retrieval_audit
+
+      - name: Domain gold-hit probe
+        timeout-minutes: 5
+        run: uv run python -m eval.gold_hit
+
+      - name: Check corpus regression vs baselines
+        timeout-minutes: 2
+        run: uv run python eval/check_corpus_regression.py
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-nightly-runs
+          path: |
+            eval/runs/*.json
+            ollama.log
+            service.log
+          retention-days: 14
