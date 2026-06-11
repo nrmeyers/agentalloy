@@ -511,8 +511,13 @@ def test_system_skill_with_tags_warns_system_empty(tmp_path: Path) -> None:
     )
 
 
-def test_domain_skill_tags_redundant_with_title_warns_r2(tmp_path: Path) -> None:
-    """Tags whose stems fully overlap the title stems should trigger R2."""
+def test_domain_skill_title_overlapping_tags_do_not_warn(tmp_path: Path) -> None:
+    """Title-overlapping tags are the skill's natural filter keys — no warning.
+
+    Inverted from the retired R2 rule: domain_tags is an exact-match filter,
+    so 'prisma' on "Prisma Schema Design" is required for
+    domain_tags=["prisma"] queries, not redundant.
+    """
     yaml_content = textwrap.dedent("""\
         skill_type: domain
         skill_id: prisma-schema-design
@@ -546,7 +551,7 @@ def test_domain_skill_tags_redundant_with_title_warns_r2(tmp_path: Path) -> None
     f.write_text(yaml_content)
     record = _load_yaml(f)
     warns = _lint(record, yaml_path=f)
-    assert any("redundant_with_title" in w for w in warns), f"Expected R2 warning, got: {warns}"
+    assert not any("redundant_with_title" in w for w in warns), f"R2 is retired, got: {warns}"
 
 
 def test_workflow_skill_without_position_marker_warns_w1(tmp_path: Path) -> None:

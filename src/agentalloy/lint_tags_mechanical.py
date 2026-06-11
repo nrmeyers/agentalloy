@@ -1,7 +1,15 @@
 """Mechanical (deterministic) tag linting for skill corpus quality checks.
 
-Implements Rules R2, R3-stem, W1, tier-ceiling, and system-empty checks.
+Implements Rules R3-stem, W1, tier-ceiling, and system-empty checks.
 No LLM calls — all logic is rule-based and testable in isolation.
+
+R2 ("tag redundant with title") was removed 2026-06-11: its premise —
+"already retrievable from title" — is ranking logic, but ``domain_tags``
+is a hard post-retrieval filter matched by EXACT string membership
+(titles never participate). A skill titled "Analytics — Cohorts" MUST
+carry the ``analytics`` tag for ``domain_tags=["analytics"]`` queries to
+find it; R2 flagged exactly those tags as deletable (635 of the 840
+corpus warnings were R2 false positives).
 """
 
 from __future__ import annotations
@@ -22,9 +30,12 @@ class TagVerdict:
 
 
 def _stems(text: str) -> set[str]:
+    # Short tokens are kept: the only consumer is the R3 full-set EQUALITY
+    # check, where 'pr' is what distinguishes 'pr-review' from 'review'.
+    # (The old len>2 filter served the retired any-overlap heuristics.)
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     suffixes = re.compile(r"(ing|tion|tions|ation|ations|ed|ment|ments|ness|ity|ies|es|s)$")
-    return {suffixes.sub("", t) for t in tokens if len(t) > 2}
+    return {suffixes.sub("", t) or t for t in tokens}
 
 
 def lint_tags_mechanical(
@@ -50,33 +61,27 @@ def lint_tags_mechanical(
 
     # --- Shared checks for domain and workflow ---
 
-    # Rule 2: tag stems overlap title stems → redundant
-    title_stems = _stems(canonical_name)
-    for tag in tags:
-        tag_stems = _stems(tag)
-        if tag_stems and tag_stems <= title_stems:
-            verdicts.append(
-                TagVerdict(
-                    tag=tag,
-                    rule="R2",
-                    verdict="redundant_with_title",
-                    detail=f"tag '{tag}' stem-overlaps title — already retrievable from title",
-                )
-            )
-
-    # Rule 3-stem: pairwise stem overlap between tags
+    # Rule 3-stem: morphological duplicates between tags. Equality of full
+    # stem sets only ('webhook' vs 'webhooks') — any-intersection flagged
+    # distinct concepts that share one stem ('clean-code' vs
+    # 'code-simplification') and produced ~75% false positives. Note tags are
+    # exact-match filter keys, so even true synonyms aren't interchangeable;
+    # the verdict asks for a corpus-canonical form, not silent deletion.
     for i, t1 in enumerate(tags):
         for t2 in tags[i + 1 :]:
             if t1 == t2:
                 continue
-            shared = _stems(t1) & _stems(t2)
-            if shared:
+            s1, s2 = _stems(t1), _stems(t2)
+            if s1 and s1 == s2:
                 verdicts.append(
                     TagVerdict(
                         tag=t2,
                         rule="R3-stem",
                         verdict=f"synonym_of:{t1}",
-                        detail=f"'{t2}' shares stems with '{t1}' — deduplicate",
+                        detail=(
+                            f"'{t2}' and '{t1}' are morphological duplicates — pick the "
+                            "corpus-canonical form (filters match tags exactly)"
+                        ),
                     )
                 )
 
