@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -39,6 +41,12 @@ jobs:
 
       - name: Test (excludes integration)
         run: uv run pytest -m "not integration"
+
+      - name: Pack version bump guard (pull_request only)
+        if: github.event_name == 'pull_request'
+        env:
+          PACK_GUARD_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: uv run pytest tests/test_pack_version_bump_guard.py::test_pack_version_bump_guard -q
 
   pipx-smoke:
     runs-on: ubuntu-latest
