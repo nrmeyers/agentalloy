@@ -38,6 +38,12 @@ request at a time. Conditions: **composed** (skills assembled per-task by
 `/compose`), **flat** (the task's gold skills' full prose), **none**
 (bare system prompt, no skills).
 
+Corpus provenance: the skill content in `src/agentalloy/_packs/` —
+especially the domain packs — is distilled from vendor `llms.txt`/`llms.md`
+documentation (Temporal, dbt, GitHub, etc.), not authored against these
+eval tasks. The tasks and graders are in-house; the skill prose the
+retrieval pipeline selects from is not.
+
 | Model | Architecture | None | Composed | Flat | Composed vs flat |
 |-------|--------------|------|----------|------|------------------|
 | Qwen3.6-35B-A3B | MoE (~3B active) | 0.92 | **0.93** | 0.91 | −19% tokens, −18% wall |

@@ -7,7 +7,11 @@ default http://localhost:47950), then call the agent model with /compose's
 Flat arm: concatenate the gold skills' ``raw_prose`` from the pack corpus
 (``src/agentalloy/_packs/``) as the system prompt + task spec as user prompt.
 
-Both arms hit an OpenAI-compatible local server ($LM_STUDIO_URL, default
+External arm: third-party skill prose (``eval/external_skills.py`` registry,
+files under ``eval/external/``) injected verbatim — the incumbent practice
+of wiring an off-the-shelf pack into the system prompt.
+
+All arms hit an OpenAI-compatible local server ($LM_STUDIO_URL, default
 LM Studio on :1234) with $AGENT_MODEL for the agent call.
 """
 
@@ -31,6 +35,7 @@ from typing import Any
 import httpx
 import yaml
 
+from eval import external_skills
 from eval.tasks import GRADERS, TASKS, Task
 
 logger = logging.getLogger("eval.run_poc")
@@ -179,6 +184,7 @@ def run_one(
     out_dir: Path,
     k: int,
     graders: dict[str, Callable[[str], dict[str, bool]]] | None = None,
+    task_set: str = "generic",
 ) -> RunResult:
     seed = int(
         hashlib.sha256(f"{task.task_id}:{condition}:{run_index}".encode()).hexdigest(), 16
@@ -195,6 +201,11 @@ def run_one(
         )
     elif condition == "flat":
         system_prompt = load_flat_prompt(task)
+    elif condition == "external":
+        # Third-party skill prose injected verbatim. Same framing as flat;
+        # content differs (changes both content and format vs composed —
+        # this arm measures "composed vs installing a popular pack").
+        system_prompt = external_skills.load_external_prompt(task.task_id, task_set)
     elif condition == "none":
         # Control arm: no skill injection at all — measures whether either
         # injection method beats the bare model.
@@ -261,7 +272,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
     summary: dict[str, Any] = {"by_task": {}, "totals": {}}
     totals: dict[str, dict[str, float]] = {
         cond: {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0}
-        for cond in ("composed", "flat", "none")
+        for cond in ("composed", "flat", "external", "none")
     }
 
     for task_id, by_cond in by_task.items():
@@ -315,7 +326,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
             )
         summary["by_task"][task_id] = task_summary
 
-    for cond in ("composed", "flat", "none"):
+    for cond in ("composed", "flat", "external", "none"):
         if totals[cond]["n"]:
             n = totals[cond]["n"]
             summary["totals"][cond] = {
@@ -343,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         "--conditions",
         nargs="+",
         default=["composed", "flat"],
-        choices=["composed", "flat", "none"],
+        choices=["composed", "flat", "external", "none"],
     )
     parser.add_argument(
         "--task-set",
@@ -371,6 +382,25 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     selected_tasks = [t for t in task_pool if args.task is None or t.task_id == args.task]
+
+    # Tasks with no genuine third-party skill stay unmapped by design; the
+    # external arm skips them (recorded in the manifest) rather than blocking
+    # the leg. Broken mappings (missing files/registry entries) still block.
+    external_skipped: set[str] = set()
+    if "external" in args.conditions:
+        if args.task_set != "generic":
+            external_skipped = {
+                t.task_id for t in selected_tasks if t.task_id not in external_skills.TASK_MAPPING
+            }
+            for task_id in sorted(external_skipped):
+                logger.warning("external arm: no third-party skill mapped, skipping %s", task_id)
+        external_task_ids = [t.task_id for t in selected_tasks if t.task_id not in external_skipped]
+        problems = external_skills.validate(external_task_ids, args.task_set)
+        if problems:
+            for p in problems:
+                print(f"external arm blocked: {p}", file=sys.stderr)
+            return 1
+
     manifest = {
         "started_at": timestamp,
         "label": args.label,
@@ -384,16 +414,34 @@ def main(argv: list[str] | None = None) -> int:
         "conditions": args.conditions,
         "runs_per_cell": args.n,
     }
+    if "external" in args.conditions:
+        # Freeze the task→skill mapping + provenance so the arm is auditable.
+        manifest["external_skills"] = external_skills.manifest_entry(
+            [t.task_id for t in selected_tasks if t.task_id not in external_skipped],
+            args.task_set,
+        )
+        manifest["external_skipped_tasks"] = sorted(external_skipped)
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     results: list[RunResult] = []
     with httpx.Client() as client:
         for task in selected_tasks:
             for cond in args.conditions:
+                if cond == "external" and task.task_id in external_skipped:
+                    continue
                 for i in range(args.n):
                     try:
                         results.append(
-                            run_one(client, task, cond, i, out_dir, args.k, active_graders)
+                            run_one(
+                                client,
+                                task,
+                                cond,
+                                i,
+                                out_dir,
+                                args.k,
+                                active_graders,
+                                task_set=args.task_set,
+                            )
                         )
                     except Exception:
                         logger.exception("run failed: %s/%s/run-%d", task.task_id, cond, i)
@@ -409,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     print("        tps = total_tok / wall_seconds (effective throughput).")
     for task_id, task_summary in summary["by_task"].items():
         print(f"\n{task_id}")
-        for cond in ("composed", "flat", "none"):
+        for cond in ("composed", "flat", "external", "none"):
             if cond in task_summary:
                 ts = task_summary[cond]
                 print(
