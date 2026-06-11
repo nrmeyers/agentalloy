@@ -20,7 +20,11 @@ concurrency:
 jobs:
   corpus-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 90 # CPU re-embed of ~3K fragments is slow
+    # Measured on first dispatch (run 27337187852): the 2-core runner embeds
+    # ~29 fragments/min → ~102 min for the 2966-fragment corpus, plus ingest
+    # and ollama setup. Sequential one-call-per-fragment embedding is the
+    # bottleneck; batching would be the real speedup (future work).
+    timeout-minutes: 150
     env:
       # User-scoped AgentAlloy state lives under XDG dirs; point them at the
       # workspace so nothing touches the runner's home defaults.
@@ -70,7 +74,7 @@ jobs:
           cat "${XDG_CONFIG_HOME}/agentalloy/.env"
 
       - name: Build corpus from scratch (ingest + re-embed all packs)
-        timeout-minutes: 70
+        timeout-minutes: 130
         run: |
           set -euxo pipefail
           # seed-corpus VERIFIES the in-repo seed corpus is present and valid
