@@ -38,6 +38,13 @@ import yaml as _yaml
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.pack_validation import (
+    PackValidationResult,
+    VersionGateResult,
+    check_version_gate,
+    content_hash,
+    validate_pack_skills,
+)
 from agentalloy.storage.ladybug import (
     LOCK_HELD_REMEDIATION,
     LadybugStore,
@@ -419,6 +426,68 @@ def install_local_pack(
         }
 
     skills_entries = manifest.get("skills") or []
+
+    # --- Gate 1: Schema + vocabulary validation ---
+    schema_result: PackValidationResult = validate_pack_skills(pack_dir, skills_entries)
+    if not schema_result.ok:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "schema_invalid",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "errors": [
+                {
+                    "skill_id": e.skill_id,
+                    "file": e.file,
+                    "errors": e.errors,
+                }
+                for e in schema_result.errors
+            ],
+            "remediation": (
+                "Fix the skill YAML errors listed above and re-run "
+                "`agentalloy install-pack <path>`.\n" + schema_result.format_errors()
+            ),
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
+    # --- Gate 2: Version gate ---
+    state_for_version = install_state.load_state(root)
+    installed_packs_list: list[dict[str, Any]] = state_for_version.get("installed_packs") or []
+    version_result: VersionGateResult = check_version_gate(
+        pack_name=name,
+        pack_version=str(manifest.get("version", "")),
+        pack_dir=pack_dir,
+        skills_entries=skills_entries,
+        installed_packs=installed_packs_list,
+    )
+    if version_result.skip:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "already_installed",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "version": manifest.get("version"),
+            "skill_count": len(skills_entries),
+            "skills_ingested": 0,
+            "skills_already_present": len(skills_entries),
+            "skills_deprecated": 0,
+            "ingest_results": [],
+            "ingest_failures": 0,
+            "remediation": None,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+    if not version_result.ok:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "version_unchanged",
+            "pack": name,
+            "pack_dir": str(pack_dir),
+            "version": manifest.get("version"),
+            "error": version_result.error,
+            "remediation": version_result.error,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+        }
+
     ingest_results: list[dict[str, Any]] = []
     for entry in skills_entries:
         yaml_path = pack_dir / str(entry["file"])
@@ -519,6 +588,7 @@ def install_local_pack(
             "name": name,
             "source": f"local:{pack_dir}",
             "version": str(manifest.get("version", "")),
+            "content_hash": content_hash(pack_dir, skills_entries),
             "embed_model": str(manifest.get("embed_model", "")),
             "embedding_dim": int(manifest.get("embedding_dim", 0)),
             "yaml_files": [str(e["file"]) for e in skills_entries],
