@@ -118,10 +118,12 @@ REGISTRY: dict[str, ExternalSkill] = {
     ),
     # domain_7_dbt_incremental: Official dbt analytics engineering skill from
     #   dbt-labs/dbt-agent-skills (Apache 2.0, dbt Labs).
-    #   Plausible substitute: broad analytics engineering skill; mentions incremental
-    #   builds but does not explicitly teach is_incremental()/unique_key/first-run
-    #   behavior — partial match. No dedicated dbt-incremental SKILL.md exists in
-    #   any searched public repo.
+    #   Plausible substitute, weak coverage: broad analytics engineering skill with
+    #   ZERO mentions of incremental materialization (verified 2026-06-11 — grep
+    #   for "incremental" returns nothing); it does not teach is_incremental()/
+    #   unique_key/first-run behavior. Still the best genuine public dbt skill —
+    #   no dedicated dbt-incremental SKILL.md exists in any searched public repo.
+    #   Expect external ≈ none on this task; that is a finding, not a bug.
     "dbt-analytics-engineering": ExternalSkill(
         name="dbt-analytics-engineering",
         source_url="https://github.com/dbt-labs/dbt-agent-skills/blob/2e412857db5099d668c303e589b38edd733da3be/skills/dbt/skills/using-dbt-for-analytics-engineering/SKILL.md",

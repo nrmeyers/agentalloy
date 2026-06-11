@@ -133,6 +133,168 @@ DOMAIN_TASKS: list[Task] = [
         phase="design",
         gold_skills=("data-engineering-slowly-changing-dimensions",),
     ),
+    # ------------------------------------------------------------------ #
+    # 9. Temporal activity timeouts — start_to_close + heartbeat           #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_9_temporal_activity_timeouts",
+        spec=(
+            "You are writing a Temporal activity in Python that calls a slow "
+            "third-party API which can take up to two minutes and occasionally "
+            "hangs forever — and the only available client library is blocking "
+            "(synchronous). Describe the timeout configuration you would set on "
+            "the activity, how the workflow can tell that a long-running "
+            "activity is still making progress, and how you would implement "
+            "the activity given that the client library blocks."
+        ),
+        phase="build",
+        gold_skills=("temporal-activity-basics",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 10. GH Actions concurrency — group keys + cancel-in-progress         #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_10_gha_concurrency",
+        spec=(
+            "Your CI workflow runs on every push to a PR branch, and your "
+            "deploy workflow pushes to production. Rapid successive pushes "
+            "waste compute on stale CI runs, and two deploys must never run "
+            "at the same time. Show how you would configure this in GitHub "
+            "Actions workflow YAML, and explain why the two workflows need "
+            "different settings."
+        ),
+        phase="build",
+        gold_skills=("github-actions-concurrency",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 11. GH Actions caching — hashFiles key + restore-keys                #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_11_gha_caching",
+        spec=(
+            "A Node.js CI workflow reinstalls all dependencies from scratch on "
+            "every run. Explain how to add dependency caching with GitHub "
+            "Actions: how the cache key should be constructed so the cache is "
+            "invalidated when the lockfile changes, what fallback you would "
+            "configure to still get partial reuse, and what happens on a cache "
+            "miss."
+        ),
+        phase="build",
+        gold_skills=("github-actions-caching-and-artifacts",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 12. Redis streams — consumer groups + PEL + reclaim                  #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_12_redis_streams_workers",
+        spec=(
+            "You need a durable work queue on Redis where multiple workers "
+            "consume events in parallel, no event is lost if a worker crashes "
+            "mid-processing, and stuck events eventually get reassigned to a "
+            "healthy worker. Which Redis data structure and commands would you "
+            "use? Walk through the lifecycle: producing an event, a worker "
+            "claiming and finishing it, and recovering from a crashed worker."
+        ),
+        phase="build",
+        gold_skills=("redis-streams",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 13. Redis WATCH — optimistic locking around MULTI/EXEC               #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_13_redis_optimistic_lock",
+        spec=(
+            "Implement a safe read-modify-write of an account balance stored "
+            "in Redis, without using Lua scripts. Two clients may race on the "
+            "same key. Describe the transaction mechanism you would use, how a "
+            "racing write is detected, and what the losing client should do."
+        ),
+        phase="build",
+        gold_skills=("redis-transactions-multi-exec",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 14. Snowflake time travel — AT|BEFORE, UNDROP, retention, streams    #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_14_snowflake_time_travel",
+        spec=(
+            "An analyst ran a bad UPDATE that corrupted a Snowflake table an "
+            "hour ago, and a staging table was accidentally dropped yesterday. "
+            "Explain how to query the table's state from before the bad "
+            "UPDATE, how to recover the dropped table, and what setting bounds "
+            "how far back these operations can reach. Separately: how would "
+            "you set up incremental downstream processing that consumes only "
+            "the rows that changed in this table?"
+        ),
+        phase="build",
+        gold_skills=("snowflake-time-travel-and-streams",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 15. Snowflake warehouses — auto-suspend, multi-cluster, billing      #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_15_snowflake_warehouse_cost",
+        spec=(
+            "Your Snowflake bill is dominated by a warehouse that sits idle "
+            "between hourly batch loads, and on Monday mornings BI dashboard "
+            "queries queue up behind each other on the same warehouse. "
+            "Describe the warehouse configuration changes you would make to "
+            "cut the idle cost and absorb the concurrency spike, and explain "
+            "how compute billing works while a warehouse is running versus "
+            "idle."
+        ),
+        phase="design",
+        gold_skills=("snowflake-warehouses-and-cost",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 16. OTel tracing — trace/parent IDs, propagation, sampling           #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_16_otel_trace_propagation",
+        spec=(
+            "Service A calls service B over HTTP and you want a single "
+            "distributed trace covering both services. Explain how spans "
+            "created in service B end up in the same trace as service A's "
+            "spans: what identifies the trace, how a span declares its "
+            "parent, how that context crosses the HTTP boundary, and how you "
+            "can tell which span is the root of the trace. Finally, how do "
+            "you keep tracing costs bounded in high-traffic systems?"
+        ),
+        phase="build",
+        gold_skills=("analytics-otel-traces",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 17. Airflow best practices — lean XComs, Connections, idempotency    #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_17_airflow_task_hygiene",
+        spec=(
+            "An Airflow DAG has three problems: one task produces a 2 GB "
+            "dataframe that the next task needs; several tasks embed database "
+            "passwords directly in the code; and re-running a task after a "
+            "failure double-inserts rows into the target table. Describe the "
+            "best-practice fix for each problem."
+        ),
+        phase="build",
+        gold_skills=("data-engineering-airflow-best-practices",),
+    ),
+    # ------------------------------------------------------------------ #
+    # 18. Redshift table design — DISTKEY collocation, ALL, SORTKEY        #
+    # ------------------------------------------------------------------ #
+    Task(
+        task_id="domain_18_redshift_table_design",
+        spec=(
+            "You are designing a star schema in Amazon Redshift: a 2-billion-"
+            "row fact table joined to a large customer dimension, several "
+            "small lookup dimensions, and queries that almost always filter "
+            "on a date range. Explain your distribution strategy for the fact "
+            "table, the large dimension, and the small lookups, your sort "
+            "strategy, and the storage mechanism that makes range filters on "
+            "the sort column fast."
+        ),
+        phase="design",
+        gold_skills=("redshift-table-design",),
+    ),
 ]
 
 
@@ -149,22 +311,60 @@ def grade_domain_1_webhook_signature(output: str) -> dict[str, bool]:
         or "hmac-sha256" in lower
         or "hmac_sha256" in lower,
         # webhooks-signature-verification: signed content = svix-id.svix-timestamp.body
+        # (synonym audit 2026-06: external clerk skill writes `signed_content`;
+        # also accept dot-join phrasing)
         "mentions_signed_content_tuple": (
             ("timestamp" in lower and "body" in lower)
-            and any(w in lower for w in ["tuple", "concatenat", "signed content", "sign the"])
+            and any(
+                w in lower
+                for w in [
+                    "tuple",
+                    "concatenat",
+                    "signed content",
+                    "signed_content",
+                    "sign the",
+                    "joined",
+                ]
+            )
         ),
         # webhooks-signature-verification: svix-signature / svix-timestamp / svix-id headers
         "mentions_svix_headers": any(
             h in lower for h in ["svix-signature", "svix-timestamp", "svix-id", "svix_signature"]
         ),
         # webhooks-signature-verification: ±5-minute tolerance window for timestamp check
+        # (synonym audit 2026-06: accept any bounded-freshness phrasing, not just
+        # our pack's "5 minute tolerance" wording)
         "mentions_tolerance_window": any(
-            w in lower for w in ["5 minute", "5-minute", "five minute", "tolerance", "±5", "+/-5"]
+            w in lower
+            for w in [
+                "5 minute",
+                "5-minute",
+                "five minute",
+                "tolerance",
+                "±5",
+                "+/-5",
+                "300 second",
+                "clock skew",
+                "too old",
+                "replay window",
+                "freshness",
+            ]
         ),
         # webhooks-signature-verification: constant-time comparison to prevent timing attacks
+        # (synonym audit 2026-06: accept timing-safe / secure-compare phrasings)
         "mentions_constant_time_comparison": any(
             w in lower
-            for w in ["constant-time", "constant time", "timing attack", "hmac.compare_digest"]
+            for w in [
+                "constant-time",
+                "constant time",
+                "constant_time",
+                "timing attack",
+                "timing-safe",
+                "timing safe",
+                "timingsafeequal",
+                "secure compar",
+                "hmac.compare_digest",
+            ]
         ),
     }
 
@@ -176,11 +376,42 @@ def grade_domain_2_webhook_deduplication(output: str) -> dict[str, bool]:
         "identifies_webhook_id_header": any(
             h in lower for h in ["webhook-id", "webhook_id", "`webhook-id`"]
         ),
-        # webhooks-idempotency: store the ID in redis with a 24 hr expiry
-        "mentions_redis_for_deduplication": "redis" in lower,
-        # webhooks-idempotency: 24-hour expiry / TTL on the dedup store
-        "mentions_24h_ttl": any(
-            w in lower for w in ["24h", "24 h", "24-hour", "24 hour", "one day", "1 day"]
+        # webhooks-idempotency: store the ID in redis with a 24 hr expiry.
+        # (synonym audit 2026-06: redis is OUR pack's convention — any concrete
+        # dedup store is a correct answer; requiring "redis" rigs the arm
+        # comparison toward composed/flat)
+        "mentions_dedup_store": any(
+            w in lower
+            for w in [
+                "redis",
+                "memcached",
+                "key-value",
+                "key/value",
+                "dynamodb",
+                "cache",
+                "database",
+                "idempotency store",
+                "processed events table",
+                "unique constraint",
+            ]
+        ),
+        # webhooks-idempotency: bounded retention (our pack: 24 h TTL).
+        # (synonym audit 2026-06: accept any TTL/expiry phrasing, not just 24h)
+        "mentions_bounded_ttl": any(
+            w in lower
+            for w in [
+                "24h",
+                "24 h",
+                "24-hour",
+                "24 hour",
+                "one day",
+                "1 day",
+                "ttl",
+                "expir",
+                "retention",
+                "time-to-live",
+                "time to live",
+            ]
         ),
         # webhooks-idempotency: at-least-once delivery from the platform side
         "acknowledges_at_least_once_delivery": any(
@@ -294,7 +525,9 @@ def grade_domain_5_temporal_workflow_determinism(output: str) -> dict[str, bool]
                 "system clock",
             ]
         ),
-        # temporal-workflow-basics: workflow.now() or workflow.unsafe is the correct fix
+        # temporal-workflow-basics: workflow.now() or workflow.unsafe is the correct fix.
+        # (synonym audit 2026-06: Temporal's own docs/skill teach "move side
+        # effects into an activity" as the fix — equally correct, accept it)
         "suggests_workflow_now_fix": any(
             w in lower
             for w in [
@@ -303,6 +536,10 @@ def grade_domain_5_temporal_workflow_determinism(output: str) -> dict[str, bool]
                 "temporal time",
                 "workflow time",
                 "workflow clock",
+                "side effect",
+                "sideeffect",
+                "an activity",
+                "into activities",
             ]
         ),
         # temporal-workflow-basics: random/uuid must come from activity or workflow.uuid4()
@@ -459,6 +696,276 @@ def grade_domain_8_scd_type2(output: str) -> dict[str, bool]:
     }
 
 
+def grade_domain_9_temporal_activity_timeouts(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # temporal-activity-basics: start_to_close_timeout is the per-attempt timeout
+        "names_start_to_close_timeout": any(
+            w in lower for w in ["start_to_close", "start-to-close", "start to close"]
+        ),
+        # temporal-activity-basics: heartbeat is how long activities prove liveness
+        "mentions_heartbeat": "heartbeat" in lower,
+        # temporal-activity-basics: schedule_to_close bounds total time incl. retries
+        "mentions_schedule_to_close_or_total_bound": any(
+            w in lower
+            for w in [
+                "schedule_to_close",
+                "schedule-to-close",
+                "schedule to close",
+                "total time",
+                "including retries",
+                "across retries",
+            ]
+        ),
+        # temporal-activity-basics: blocking calls must not run in an async activity —
+        # use a synchronous activity (ThreadPoolExecutor) or an async-safe library,
+        # never block the asyncio event loop
+        "avoids_blocking_event_loop": any(
+            w in lower
+            for w in [
+                "threadpoolexecutor",
+                "thread pool",
+                "synchronous activity",
+                "sync activity",
+                "event loop",
+                "asyncio loop",
+                "run_in_executor",
+                "to_thread",
+            ]
+        ),
+    }
+
+
+def grade_domain_10_gha_concurrency(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # github-actions-concurrency: the concurrency keyword / group
+        "uses_concurrency_group": "concurrency" in lower and "group" in lower,
+        # github-actions-concurrency: group key built from workflow + ref/PR context
+        "group_key_uses_ref_or_pr": any(
+            w in lower
+            for w in [
+                "github.ref",
+                "github.workflow",
+                "pull_request.number",
+                "per branch",
+                "per-branch",
+                "per pr",
+            ]
+        ),
+        # github-actions-concurrency: CI cancels stale runs
+        "ci_cancels_in_progress": any(
+            w in lower for w in ["cancel-in-progress: true", "cancel-in-progress:true"]
+        )
+        or ("cancel-in-progress" in lower and "true" in lower),
+        # github-actions-concurrency: deploys serialize, never cancel mid-deploy
+        "deploy_never_cancels": ("cancel-in-progress" in lower and "false" in lower)
+        or any(
+            w in lower
+            for w in ["never cancel", "don't cancel", "do not cancel", "queue", "serializ"]
+        ),
+    }
+
+
+def grade_domain_11_gha_caching(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # github-actions-caching-and-artifacts: actions/cache is the primitive
+        "uses_actions_cache": "actions/cache" in lower or "cache action" in lower,
+        # github-actions-caching-and-artifacts: key includes a lockfile hash
+        "key_hashes_lockfile": ("hashfiles" in lower)
+        or (
+            any(w in lower for w in ["lock file", "lockfile", "package-lock", "pnpm-lock"])
+            and "hash" in lower
+        ),
+        # github-actions-caching-and-artifacts: restore-keys prefix fallback
+        "configures_restore_keys": any(
+            w in lower for w in ["restore-keys", "restore keys", "fallback key", "prefix match"]
+        ),
+        # github-actions-caching-and-artifacts: miss -> new cache saved on job success
+        "explains_cache_miss_save": "miss" in lower
+        and any(w in lower for w in ["saved", "save", "created", "uploaded", "new cache"]),
+    }
+
+
+def grade_domain_12_redis_streams_workers(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # redis-streams: streams + XADD are the right structure for durable queues
+        "uses_streams_xadd": "stream" in lower and "xadd" in lower,
+        # redis-streams: consumer groups partition delivery across workers
+        "uses_consumer_groups": any(w in lower for w in ["consumer group", "xgroup", "xreadgroup"]),
+        # redis-streams: XACK confirms processing
+        "acks_with_xack": "xack" in lower or "acknowledg" in lower,
+        # redis-streams: pending-entries list holds unacked deliveries
+        "mentions_pending_entries": any(
+            w in lower for w in ["pending entries", "pending-entries", "pel", "xpending"]
+        ),
+        # redis-streams: XCLAIM / XAUTOCLAIM reassigns stuck entries
+        "reclaims_stuck_entries": any(
+            w in lower for w in ["xclaim", "xautoclaim", "reassign", "re-assign", "claim"]
+        ),
+    }
+
+
+def grade_domain_13_redis_optimistic_lock(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # redis-transactions-multi-exec: MULTI/EXEC atomic block
+        "uses_multi_exec": "multi" in lower and "exec" in lower,
+        # redis-transactions-multi-exec: WATCH detects the race
+        "uses_watch": "watch" in lower,
+        # redis-transactions-multi-exec: this is optimistic concurrency control
+        "names_optimistic_locking": any(
+            w in lower for w in ["optimistic lock", "optimistic concurrency", "optimistic"]
+        ),
+        # redis-transactions-multi-exec: on conflict EXEC returns nil -> retry loop
+        "retries_on_conflict": any(w in lower for w in ["retry", "retries", "try again", "loop"])
+        and any(w in lower for w in ["nil", "null", "abort", "fail", "none"]),
+    }
+
+
+def grade_domain_14_snowflake_time_travel(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # snowflake-time-travel-and-streams: AT | BEFORE clause with timestamp/offset
+        "uses_at_before_clause": any(
+            w in lower
+            for w in ["at(", "before(", "at |", "at | before", "at/before", "time travel"]
+        ),
+        # snowflake-time-travel-and-streams: UNDROP restores dropped objects
+        "uses_undrop": "undrop" in lower,
+        # snowflake-time-travel-and-streams: retention period setting bounds the window
+        "mentions_retention_period": any(
+            w in lower
+            for w in [
+                "data_retention_time_in_days",
+                "retention period",
+                "retention",
+                "90 day",
+                "1 day",
+            ]
+        ),
+        # snowflake-time-travel-and-streams: streams are the CDC primitive
+        "uses_streams_for_cdc": "stream" in lower
+        and any(w in lower for w in ["cdc", "change", "insert", "delta"]),
+    }
+
+
+def grade_domain_15_snowflake_warehouse_cost(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # snowflake-warehouses-and-cost: auto-suspend kills idle burn
+        "configures_auto_suspend": any(
+            w in lower
+            for w in ["auto_suspend", "auto-suspend", "auto suspend", "suspend automatically"]
+        ),
+        # snowflake-warehouses-and-cost: multi-cluster absorbs concurrency spikes
+        "uses_multi_cluster_for_concurrency": any(
+            w in lower for w in ["multi-cluster", "multi cluster", "multicluster"]
+        ),
+        # snowflake-warehouses-and-cost: billed in credits only while running
+        "explains_credit_billing_while_running": "credit" in lower
+        and any(
+            w in lower
+            for w in [
+                "while running",
+                "when running",
+                "per second",
+                "per-second",
+                "only when",
+                "suspended",
+                "idle",
+            ]
+        ),
+        # snowflake-warehouses-and-cost: sizing (X-Small…) is a cost lever
+        "discusses_warehouse_sizing": any(
+            w in lower
+            for w in ["x-small", "xsmall", "warehouse size", "resize", "downsize", "right-siz"]
+        ),
+    }
+
+
+def grade_domain_16_otel_trace_propagation(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # analytics-otel-traces: trace_id is shared by every span in the trace
+        "explains_trace_id": any(w in lower for w in ["trace_id", "trace id", "traceid"]),
+        # analytics-otel-traces: spans declare parent via parent span id
+        "explains_parent_id": any(
+            w in lower for w in ["parent_id", "parent id", "parent span", "parent-id"]
+        ),
+        # analytics-otel-traces: context propagation carries trace context across HTTP
+        "explains_context_propagation": any(
+            w in lower for w in ["propagat", "traceparent", "context across", "inject", "extract"]
+        ),
+        # analytics-otel-traces: root span has no parent
+        "identifies_root_span": "root span" in lower
+        or (
+            "root" in lower
+            and any(w in lower for w in ["no parent", "null parent", "without a parent"])
+        ),
+        # analytics-otel-traces: sampling bounds tracing cost
+        "mentions_sampling": "sampl" in lower,
+    }
+
+
+def grade_domain_17_airflow_task_hygiene(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # airflow-best-practices: XComs are for small messages only
+        "keeps_xcom_lean": "xcom" in lower
+        and any(w in lower for w in ["small", "lean", "metadata", "not for large", "too large"]),
+        # airflow-best-practices: large data goes to remote storage, pass the path
+        "passes_storage_path_not_data": any(
+            w in lower for w in ["s3", "gcs", "hdfs", "object stor", "remote stor", "blob"]
+        )
+        and any(w in lower for w in ["path", "uri", "reference", "pointer", "key"]),
+        # airflow-best-practices: credentials live in Connections, not code
+        "uses_connections_for_credentials": any(
+            w in lower for w in ["connection", "secrets backend", "secret backend"]
+        ),
+        # airflow-best-practices: tasks must be idempotent (upsert/delete-insert/overwrite)
+        "makes_tasks_idempotent": "idempoten" in lower
+        or any(w in lower for w in ["upsert", "merge", "delete then insert", "overwrite"]),
+    }
+
+
+def grade_domain_18_redshift_table_design(output: str) -> dict[str, bool]:
+    lower = output.lower()
+    return {
+        # redshift-table-design: DISTKEY on the join column of fact + dimension
+        "distkey_collocates_join": any(
+            w in lower for w in ["distkey", "dist key", "distribution key", "diststyle key"]
+        )
+        and any(w in lower for w in ["join", "colloc", "co-loc", "same node", "same slice"]),
+        # redshift-table-design: small dimensions get ALL distribution
+        "all_distribution_for_small_dims": any(
+            w in lower
+            for w in ["diststyle all", "all distribution", "distribution style all", "dist all"]
+        )
+        or ("all" in lower and "every node" in lower),
+        # redshift-table-design: SORTKEY on the date/timestamp filter column
+        "sortkey_on_date": any(w in lower for w in ["sortkey", "sort key"])
+        and any(w in lower for w in ["date", "timestamp", "time"]),
+        # redshift-table-design: zone maps / min-max block skipping make range scans fast
+        "explains_zone_map_pruning": any(
+            w in lower
+            for w in [
+                "zone map",
+                "zone-map",
+                "skip block",
+                "skips block",
+                "skip entire block",
+                "min and max",
+                "min/max",
+                "block skipping",
+                "prune",
+            ]
+        ),
+    }
+
+
 DOMAIN_GRADERS: dict[str, object] = {
     "domain_1_webhook_signature": grade_domain_1_webhook_signature,
     "domain_2_webhook_deduplication": grade_domain_2_webhook_deduplication,
@@ -468,4 +975,14 @@ DOMAIN_GRADERS: dict[str, object] = {
     "domain_6_github_actions_oidc": grade_domain_6_github_actions_oidc,
     "domain_7_dbt_incremental": grade_domain_7_dbt_incremental,
     "domain_8_scd_type2": grade_domain_8_scd_type2,
+    "domain_9_temporal_activity_timeouts": grade_domain_9_temporal_activity_timeouts,
+    "domain_10_gha_concurrency": grade_domain_10_gha_concurrency,
+    "domain_11_gha_caching": grade_domain_11_gha_caching,
+    "domain_12_redis_streams_workers": grade_domain_12_redis_streams_workers,
+    "domain_13_redis_optimistic_lock": grade_domain_13_redis_optimistic_lock,
+    "domain_14_snowflake_time_travel": grade_domain_14_snowflake_time_travel,
+    "domain_15_snowflake_warehouse_cost": grade_domain_15_snowflake_warehouse_cost,
+    "domain_16_otel_trace_propagation": grade_domain_16_otel_trace_propagation,
+    "domain_17_airflow_task_hygiene": grade_domain_17_airflow_task_hygiene,
+    "domain_18_redshift_table_design": grade_domain_18_redshift_table_design,
 }
