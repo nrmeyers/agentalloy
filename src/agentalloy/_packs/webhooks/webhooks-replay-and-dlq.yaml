@@ -13,17 +13,19 @@ always_apply: false
 phase_scope: [build]
 category_scope: [ops]
 author: navistone
-change_summary: hand-authored Opus expansion
+change_summary: 'hand-authored Opus expansion; 2026-06-11 lead prose differentiated toward replay/DLQ/poison-message/redelivery vocabulary to resolve ranking-stranding against generic webhook siblings'
 raw_prose: |
   # Webhooks — Replay and Dead-Letter Queues
 
   ## Overview
 
-  Webhooks fail. Networks blip, consumers go down, bugs cause exceptions. The reliability patterns: producers retry with exponential backoff, consumers persist before processing, dead-letter queues isolate poison messages, and replay endpoints let operators recover from outages.
+  This skill is specifically about webhook **replay** and **dead-letter queues (DLQ)** — the recovery half of webhook reliability, distinct from initial delivery, signature verification, or first-pass idempotency. When a consumer endpoint is down for an hour, natural producer retries are too slow and may give up entirely; a **replay endpoint** re-sends every webhook for an endpoint over a chosen time window so operators can recover from an outage on demand. When a delivery fails repeatedly, a **dead-letter queue** isolates the poison message instead of silently dropping it, preserving the original payload, error trace, and attempt count for human triage and **bulk redelivery** after a fix.
+
+  The building blocks covered here: time-window replay APIs, DLQ routing after exhausted retry attempts, DLQ triage workflows (list / replay-one / bulk-replay / discard poison messages), idempotent redelivery so a replay never double-processes, exponential backoff with jitter to avoid retry storms on reconnect, and producer-side endpoint health auto-disable. Reach for this skill when you need outage recovery, poison-message isolation, or operator-driven redelivery of past webhook deliveries — not basic webhook receiving.
 
   ---
 
-  ## Producer-Side Retries
+  ## Producer-Side Retries (the path that feeds the DLQ)
 
   Producers should retry on 5xx and timeouts, not on 4xx (client error — won't change). A typical schedule:
 
@@ -182,7 +184,9 @@ fragments:
 - fragment_type: execution
   sequence: 1
   content: |-
-    ## Producer-Side Retries
+    ## Replay and Dead-Letter Queues: producer retries are the entry point
+
+    This skill covers webhook **replay** and **dead-letter queue (DLQ)** recovery: re-sending past deliveries over a time window after an outage, and isolating poison messages that exhaust their retries so they can be triaged and redelivered rather than silently lost. Producer-side retries are the first stage of that pipeline — a delivery only reaches the DLQ, and only becomes a replay candidate, after its retries are exhausted.
 
     Producers should retry on 5xx and timeouts, not on 4xx (client error — won't change). A typical schedule:
 

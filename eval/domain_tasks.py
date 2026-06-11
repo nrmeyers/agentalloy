@@ -112,7 +112,11 @@ DOMAIN_TASKS: list[Task] = [
             "updated, and what happens on the very first run?"
         ),
         phase="build",
-        gold_skills=("data-engineering-dbt-incremental",),
+        # data-engineering-dbt-incremental was deprecated (superseded_by
+        # data-engineering-dbt-models); the survivor absorbed the incremental
+        # materialization / is_incremental() / unique_key coverage this task
+        # grades. Point gold at the active survivor so the benchmark is winnable.
+        gold_skills=("data-engineering-dbt-models",),
     ),
     # ------------------------------------------------------------------ #
     # 8. Slowly Changing Dimensions Type 2 — surrogate key + is_current    #

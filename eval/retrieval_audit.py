@@ -95,6 +95,12 @@ def _load_skills(packs_filter: list[str] | None) -> list[SkillProbe]:
             doc: Any = yaml.safe_load(f.read_text())
             if not isinstance(doc, dict) or doc.get("skill_type") not in ("domain", None):
                 continue  # system/workflow skills are signal-layer, not retrieval
+            if doc.get("deprecated") is True:
+                # Mirror production retrieval: deprecated skills are excluded
+                # from every retrieval path, so probing them only manufactures
+                # permanently-stranded entries (measured: 17 of the 18
+                # "stranded" skills on 2026-06-11 were deprecated tombstones).
+                continue
             sid = doc.get("skill_id")
             name = doc.get("canonical_name") or sid
             prose = doc.get("raw_prose") or ""

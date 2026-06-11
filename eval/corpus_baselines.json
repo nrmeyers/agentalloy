@@ -1,8 +1,8 @@
 {
-  "name_probe_hit_rate": 0.901,
-  "topic_probe_hit_rate": 0.921,
-  "stranded_count": 18,
-  "gold_hit": 7,
+  "name_probe_hit_rate": 0.95,
+  "topic_probe_hit_rate": 0.973,
+  "stranded_count": 0,
+  "gold_hit": 8,
   "gold_hit_total": 8,
   "tolerance": 0.02
 }
