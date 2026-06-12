@@ -305,6 +305,57 @@ def test_skill_granular_round_robin_allocation() -> None:
     assert set(skills_ranked) == {"skill-one", "skill-two"}
 
 
+def test_skill_granular_top_skill_depth_guarantee() -> None:
+    # 4 skills × 3 fragments each, k=4 → the top-ranked skill gets k//2 = 2
+    # slots (depth guarantee); the next two skills get 1 each (breadth);
+    # the 4th skill is squeezed out. Strict 1-per-skill round-robin starved
+    # the gold skill of its convention-bearing fragments.
+    pool = []
+    for sid in ["gold", "sib-a", "sib-b", "sib-c"]:
+        for i, ftype in enumerate(["execution", "setup", "verification"]):
+            pool.append(_fake_skill(f"{sid}-f{i}", ftype, sid))
+    # interleave so first fragment of each skill appears in rank order
+    interleaved = [pool[j * 3 + i] for i in range(3) for j in range(4)]
+    selected, skills_ranked = skill_granular_select(interleaved, k=4)
+
+    from collections import Counter
+
+    counts = Counter(f.skill_id for f in selected)
+    assert counts["gold"] == 2
+    assert counts["sib-a"] == 1
+    assert counts["sib-b"] == 1
+    assert "sib-c" not in counts
+    assert skills_ranked[0] == "gold"
+
+
+def test_skill_granular_depth_noop_for_k1() -> None:
+    # k=1 → k//2 == 0 depth slots; pure breadth, top skill still wins slot 1.
+    pool = [
+        _fake_skill("g-0", "execution", "gold"),
+        _fake_skill("s-0", "execution", "sib"),
+    ]
+    selected, _ = skill_granular_select(pool, k=1)
+    assert [f.skill_id for f in selected] == ["gold"]
+
+
+def test_skill_granular_top_skill_drains_when_others_exhausted() -> None:
+    # 2 skills, k=5: gold depth 2, sib contributes its 1 fragment, remaining
+    # budget returns to gold (stage 3 drain).
+    pool = [
+        _fake_skill("g-0", "execution", "gold"),
+        _fake_skill("s-0", "setup", "sib"),
+        _fake_skill("g-1", "setup", "gold"),
+        _fake_skill("g-2", "verification", "gold"),
+        _fake_skill("g-3", "rationale", "gold"),
+    ]
+    selected, _ = skill_granular_select(pool, k=5)
+    from collections import Counter
+
+    counts = Counter(f.skill_id for f in selected)
+    assert counts["gold"] == 4
+    assert counts["sib"] == 1
+
+
 def test_skill_granular_fewer_skills_than_k() -> None:
     # 1 skill × 5 fragments, k=3 → all 3 come from that skill (matches old behavior).
     pool = [_fake_skill(f"s1-f{i}", "execution", "only-skill") for i in range(5)]

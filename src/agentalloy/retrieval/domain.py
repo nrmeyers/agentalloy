@@ -617,13 +617,23 @@ def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]
 def skill_granular_select(
     ranked: list[ActiveFragment], k: int
 ) -> tuple[list[ActiveFragment], list[str]]:
-    """Round-robin selection across skills to prevent sibling-skill cannibalization.
+    """Depth-guaranteed round-robin selection across skills.
 
     Groups fragments by skill_id in rank order (dict insertion order gives this
     for free — each skill's rank = its first fragment's position in ``ranked``).
-    Then issues k tokens via round-robin: pass 1 gives one fragment to each
-    top skill, pass 2 gives a second, until k fragments are selected or all
-    queues are empty.
+
+    Stage 1 — top-skill depth guarantee: the top-ranked skill is granted up to
+    ``k // 2`` slots before any other skill is considered. Strict 1-per-skill
+    round-robin starved the best-matching skill of its convention-bearing
+    fragments: with k=4 the gold skill contributed a single (often overview)
+    fragment while three sibling skills filled the rest, so the specific
+    headers/durations/API names the skill exists to teach never reached the
+    prompt (measured: 2026-06 campaign, composed-vs-oracle gap concentrated in
+    exactly those criteria).
+
+    Stage 2 — round-robin over all skills (including the top skill, if it has
+    fragments left) fills the remaining slots, preventing sibling-skill
+    cannibalization exactly as before.
 
     Within each skill's queue, prefer a ``fragment_type`` from
     ``_DIVERSITY_PRIORITY`` not yet represented in the globally selected set
@@ -636,6 +646,7 @@ def skill_granular_select(
 
     Degenerate cases:
     - Empty input → ([], []).
+    - k <= 1 → depth stage is a no-op (k // 2 == 0); pure round-robin.
     - Fewer distinct skills than k → later passes fill remaining slots from
       whichever skills still have fragments.
     """
@@ -659,33 +670,63 @@ def skill_granular_select(
     selected: list[ActiveFragment] = []
     selected_types: set[str] = set()
 
+    # Stage 1: depth guarantee for the top-ranked skill (type-diverse within it).
+    depth = k // 2
+    top_queue = queues[skills_ranked[0]]
+    for _ in range(depth):
+        if not top_queue:
+            break
+        chosen_index = _pick_diverse_index(top_queue, selected_types)
+        frag = top_queue.pop(chosen_index)
+        selected.append(frag)
+        selected_types.add(frag.fragment_type)
+
+    # Stage 2: round-robin the remaining slots over the OTHER skills — the
+    # top skill already holds its depth slots, so the rest of the budget
+    # buys breadth. The top skill re-enters only in stage 3, when every
+    # other queue is exhausted. When no depth slot was taken (k <= 1) the
+    # top skill keeps its place at the head of the rotation.
+    rotation = skills_ranked[1:] if depth and len(skills_ranked) > 1 else skills_ranked
     while len(selected) < k:
         made_progress = False
-        for sid in skills_ranked:
+        for sid in rotation:
             if len(selected) >= k:
                 break
             queue = queues[sid]
             if not queue:
                 continue
-            # Prefer a priority type not yet in the globally selected set.
-            chosen_index: int | None = None
-            for ptype in _DIVERSITY_PRIORITY:
-                if ptype in selected_types:
-                    continue
-                for i, frag in enumerate(queue):
-                    if frag.fragment_type == ptype:
-                        chosen_index = i
-                        break
-                if chosen_index is not None:
-                    break
-            if chosen_index is None:
-                chosen_index = 0
+            chosen_index = _pick_diverse_index(queue, selected_types)
             frag = queue.pop(chosen_index)
             selected.append(frag)
             selected_types.add(frag.fragment_type)
             made_progress = True
-        # All queues exhausted before k fragments were gathered.
+        # Other queues exhausted before k fragments were gathered.
         if not made_progress:
             break
 
+    # Stage 3: every other skill is drained — spend any remaining budget on
+    # the top skill's leftover fragments.
+    top_queue = queues[skills_ranked[0]]
+    while len(selected) < k and top_queue:
+        chosen_index = _pick_diverse_index(top_queue, selected_types)
+        frag = top_queue.pop(chosen_index)
+        selected.append(frag)
+        selected_types.add(frag.fragment_type)
+
     return selected, skills_ranked
+
+
+def _pick_diverse_index(queue: list[ActiveFragment], selected_types: set[str]) -> int:
+    """Index of the queue's best fragment under the diversity preference.
+
+    Prefer the highest-ranked fragment whose ``fragment_type`` is a
+    ``_DIVERSITY_PRIORITY`` type not yet present in the globally selected set;
+    fall back to the queue head.
+    """
+    for ptype in _DIVERSITY_PRIORITY:
+        if ptype in selected_types:
+            continue
+        for i, frag in enumerate(queue):
+            if frag.fragment_type == ptype:
+                return i
+    return 0

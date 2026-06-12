@@ -136,7 +136,7 @@ def call_agent(
             {"role": "user", "content": user},
         ],
         "temperature": 0.2,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "seed": seed,
         "stream": False,
     }
