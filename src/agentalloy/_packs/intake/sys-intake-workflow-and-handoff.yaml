@@ -4,11 +4,13 @@ canonical_name: Intake Workflow and Handoff
 category: tooling
 skill_class: system
 domain_tags: []
+deprecated: true
+superseded_by: intake-verification-and-workflow-execution
 always_apply: true
 phase_scope: null
 category_scope: null
 author: navistone
-change_summary: initial authoring draft
+change_summary: "fix: stop ambient injection — these are internal spec docs, not agent guidance (composed-below-baseline regression, 2026-06 campaign)"
 raw_prose: |
   # Intake Workflow and Handoff
 
