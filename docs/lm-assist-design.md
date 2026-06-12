@@ -1,10 +1,12 @@
 # LM-assist: a sub-1B intent layer riding alongside the embedder
 
-Status: design sketch for review — 2026-06-12. Not scheduled.
+Status: design sketch for review — 2026-06-12. Revised same day after the
+authored-external-skills experiment (see "What the experiment changed").
+Stage 0 approved for implementation.
 
 ## Why now
 
-The 2026-06 campaign diagnostics surfaced three failures that are the same
+The 2026-06 campaign diagnostics surfaced four failures that are the same
 failure: retrieval gets no help understanding *intent*.
 
 1. **Rank-1 sensitivity.** The fragment-selection depth guarantee
@@ -23,19 +25,51 @@ failure: retrieval gets no help understanding *intent*.
    predicates plus cosine-similarity intents — the most threshold-tuned,
    least explainable code in the repo. Classification is what small
    instruct models are for.
+4. **Within-skill fragment selection.** `domain_1` (webhook signature):
+   the gold skill ranks #1 and receives both depth slots, yet composed
+   scores 0.60 where flat-oracle (whole skill) scores 1.00. The depth
+   picker selects the intro fragments (f1/f5) because they share the
+   task's surface vocabulary; the fragments the grader needs —
+   `signed_content` construction and timing-safe compare (f9/f10) — use
+   words the task never says. Skill-level ranking cannot fix this; only
+   fragment-level relevance can.
+
+## What the 2026-06-12 experiment changed
+
+To split "content vs ranking" we authored the third-party Clerk/OpenAI
+webhook skills through the authoring pipeline, ingested them, and reran
+composed on domain_1/2/4 (n=5, 27B + LFM). Results were **bit-identical
+to v2** (same input tokens, same scores): the new skills ranked 5th–6th
+and won zero k=4 slots. Tracing domain_1 produced failure #4 above.
+
+Consequences for this design:
+
+- **Stage B must arbitrate fragments, not skills.** A skill-level
+  arbiter would have looked at domain_1's top-5, agreed with rank-1, and
+  changed nothing. One fragment-level mechanism covers domain_4 (demote
+  the wrong skill's fragments), domain_1 (promote f10 over f1), and the
+  12B-redshift case (pick nothing).
+- **"No LLM in the runtime path" is no longer a product constraint**
+  (decision 2026-06-12): the measured ceiling of deterministic fusion —
+  composed captures ~45% of oracle lift, with the remainder concentrated
+  in judgment calls — isn't worth the marketing line. Determinism remains
+  the *fail-open floor*, not the headline. Target shape:
+  `vector + BM25 + LFM-tiny = compose`.
 
 The deprecated `sys-intake-*` spec docs (§6.3, "Routing via Qwen,"
 confidence thresholds 0.6/0.4) already describe this architecture. This
 doc narrows it to the smallest testable slice.
 
-## Non-negotiable constraint
+## Constraint (revised 2026-06-12)
 
-**"No LLM in the runtime path" stays true by default.** The deterministic
-pipeline remains the product; LM-assist is an *optional, fail-open
-enhancement stage*. On any LM timeout, error, or disabled flag, compose
-behaves byte-for-byte as today. Layer-4 idempotency is asserted against
-the default path; the LM path gets its own reproducibility story
-(temp 0, fixed seed, pinned model tag) but no contractual guarantee.
+**Determinism is the fail-open floor, not the headline.** The LM stage
+may run in the default path once it earns its keep (ship gate below), but
+on any LM timeout, error, or disabled flag, compose degrades to today's
+deterministic composition byte-for-byte. Layer-4 idempotency is asserted
+against the fail-open path; the LM path gets its own reproducibility
+story (temp 0, fixed seed, pinned model tag) but no contractual
+guarantee. The claim becomes "deterministic baseline, LM-refined when
+available."
 
 ## Stage 0 — index the skill card (deterministic, do FIRST)
 
@@ -86,18 +120,28 @@ One prompt, structured output, ~50 output tokens:
 `domain_tags` (boost, not filter — wrong guesses must not exclude gold
 skills). The raw task still drives the dense leg unchanged.
 
-### Stage B — top-k arbitration (post-retrieval, pre-depth)
+### Stage B — fragment re-rank (post-retrieval, pre-assembly)
 
-The score-conditional-depth problem, solved with a question instead of a
-threshold: show the LM the task plus the top-5 skill names/summaries from
-fusion; it answers `{"best": "<skill_id>", "confidence": 0..1}`.
+Revised 2026-06-12 from skill-level arbitration to fragment-level
+re-ranking — the domain_1 trace showed a skill-level arbiter would agree
+with rank-1 and change nothing.
 
-- `best` agrees with fusion rank-1 → grant depth (current behavior).
-- `best` disagrees with high confidence → promote it to rank-1, then depth.
-- low confidence → fall back to pure breadth round-robin (pre-fix behavior).
+Show the LM the task plus the top ~12 fragments from fusion (skill name +
+fragment type + first lines each); it answers
+`{"keep": ["<frag_id>", ...], "confidence": 0..1}` selecting up to k.
 
-This directly addresses domain_4 and bounds the blast radius of every
-future rank-1 error.
+- High confidence → assemble exactly the kept fragments, in fusion order.
+- Low confidence, timeout, or unparseable → today's deterministic
+  depth+round-robin selection (fail-open floor).
+- `keep: []` with high confidence is **valid and means inject nothing** —
+  the 12B-redshift case showed even oracle content hurts a model that
+  already knows the domain.
+
+One mechanism covers all three measured failures: domain_4 (wrong skill's
+fragments demoted), domain_1 (f10 promoted over f1), redshift (empty
+keep). It also subsumes the planned score-conditional-depth heuristic —
+the deterministic selection remains as the fail-open behavior, answering
+open question 4.
 
 ### Explicitly out of scope (v1)
 
@@ -127,9 +171,10 @@ The harness from this campaign is the proof apparatus:
 1. New run_poc condition **`composed-lm`** (same path as composed,
    `LM_ASSIST=full` service). Paired per-task deltas vs `composed`,
    same seeds.
-2. **domain_4 is the canary** for Stage B: composed-lm must recover it
-   toward its 0.96 oracle without regressing the 7 tasks the depth fix
-   improved.
+2. **domain_4 and domain_1 are the canaries** for Stage B: composed-lm
+   must recover domain_4 toward its 0.96 oracle and domain_1 toward its
+   1.00 flat-oracle (27B: composed 0.60 → the f9/f10 fragments must win
+   slots) without regressing the 7 tasks the depth fix improved.
 3. New Layer-1 probe task: framework-ambiguous web request ("build a blog
    website") with gold = {nextjs-or-vue pack skills}; Stage A must lift
    recall on it from 0/k.
@@ -159,11 +204,12 @@ The harness from this campaign is the proof apparatus:
    toward skill identity, changes all embeddings) vs synthetic card
    fragment (additive, but cards compete with content fragments for
    k slots) vs both?
-1. Stage B prompt shape: skill names only, or names + one-line summaries?
-   (Summaries cost tokens/latency, likely buy accuracy.)
+1. Stage B prompt shape: how much of each candidate fragment does the
+   re-ranker see? (First lines are cheap; full content for 12 fragments
+   may blow the 350M's useful context.)
 2. Should `phase_hint` ever override the caller's phase? (Proposal: no —
    advisory telemetry only, until the signal-layer rework.)
 3. Is 0.8B the right size, or do we benchmark 350M–1B variants the same
    way we benchmark agent models? (The harness makes this nearly free.)
-4. Does Stage B subsume the planned score-conditional-depth heuristic, or
-   do we want the deterministic heuristic as the fail-open behavior?
+4. ~~Does Stage B subsume score-conditional-depth?~~ Answered 2026-06-12:
+   yes — deterministic selection is the fail-open behavior.
