@@ -37,7 +37,31 @@ behaves byte-for-byte as today. Layer-4 idempotency is asserted against
 the default path; the LM path gets its own reproducibility story
 (temp 0, fixed seed, pinned model tag) but no contractual guarantee.
 
-## Architecture
+## Stage 0 — index the skill card (deterministic, do FIRST)
+
+Verified 2026-06-12: both retrieval legs index only fragment body text
+(`frag.content` is what gets embedded and what BM25 searches). A skill's
+`canonical_name`, `domain_tags`, and Overview paragraph — its
+self-description — never enter the index. The corpus knows React is "for
+websites"; retrieval is never told.
+
+Fix is classic document expansion, no LM required:
+
+- Prepend a one-line skill header to each fragment's indexed text
+  (`skill: React — tags: websites, frontend, ...`), and/or
+- add one synthetic "card" document per skill (name + tags + overview)
+  to both legs.
+
+Cost: one idempotent re-embed pass (minutes on the 3060). Zero runtime
+latency, zero new failure modes, fully deterministic.
+
+This plausibly closes part of both diagnosed gaps on its own
+(domain_4's gold skill *name* contains the answer; the blog query can
+hit framework cards). **Measure Stage 0 alone before building any LM
+stage** — the LM stages below must justify themselves against the
+post-Stage-0 baseline, not against today's.
+
+## LM architecture
 
 Two insertion points, independently flaggable:
 
@@ -128,6 +152,10 @@ The harness from this campaign is the proof apparatus:
 
 ## Open questions for review
 
+0. Stage 0 shape: per-fragment header prefix (biases every fragment
+   toward skill identity, changes all embeddings) vs synthetic card
+   fragment (additive, but cards compete with content fragments for
+   k slots) vs both?
 1. Stage B prompt shape: skill names only, or names + one-line summaries?
    (Summaries cost tokens/latency, likely buy accuracy.)
 2. Should `phase_hint` ever override the caller's phase? (Proposal: no —
