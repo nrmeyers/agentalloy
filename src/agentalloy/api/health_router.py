@@ -274,10 +274,11 @@ class ReadinessChecker:
 
 @router.get(
     "/readiness",
-    response_model=ReadinessResponse,
     summary="Container bootstrap readiness (ready / warming_up / error)",
 )
 async def readiness(request: Request) -> ReadinessResponse:
+    from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
+
     checker: ReadinessChecker | None = getattr(request.app.state, "readiness_checker", None)
     if checker is None:
         # No checker wired (e.g. native deployment) — service is ready by
@@ -285,4 +286,25 @@ async def readiness(request: Request) -> ReadinessResponse:
         return ReadinessResponse(status="ready")
     # Filesystem stat is cheap, but run off the event loop to keep the
     # endpoint non-blocking under load.
-    return await asyncio.to_thread(checker.check)
+    result = await asyncio.to_thread(checker.check)
+
+    # Degraded mode: bootstrap completed but the runtime cache failed to load
+    # (e.g. "Table Skill does not exist" — corpus unusable). Report 503 with
+    # the reason so the installer polling loop surfaces it to the user instead
+    # of silently reporting the container as ready when the corpus is broken.
+    if result.status == "ready":
+        runtime_load_error: str | None = getattr(request.app.state, "runtime_load_error", None)
+        if runtime_load_error is not None:
+            body = ReadinessResponse(
+                status="error",
+                progress={
+                    "error": "corpus_unavailable",
+                    "detail": runtime_load_error,
+                },
+            )
+            return _JSONResponse(  # type: ignore[return-value]
+                status_code=503,
+                content=body.model_dump(),
+            )
+
+    return result

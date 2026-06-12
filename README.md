@@ -189,7 +189,9 @@ Volume mounts:
 
 ### Entrypoint bootstrap sequence
 
-The entrypoint script (`/app/entrypoint.sh`) runs on every container start:
+The bootstrap entrypoint (`/app/entrypoint.sh`) is **baked into the image** (`container/entrypoint.sh` in the repo, copied by the Containerfile). A bare `podman run ghcr.io/nrmeyers/agentalloy:latest` bootstraps correctly without any bind-mount or setup wizard. The setup wizard bind-mounts a generated script on top when the user specifies explicit packs.
+
+The entrypoint script runs on every container start:
 
 1. **Bootstrap check** — If `$APP_DIR/.bootstrap-complete` exists, skip all bootstrap steps and go straight to uvicorn.
 2. **Prebuilt corpus seed** — Published images (`ghcr.io/nrmeyers/agentalloy`) carry a fully ingested + embedded corpus under `/app/corpus-seed`; if the data volume has no corpus yet it is copied in (seconds) and step 8 is skipped. Locally built images have no seed and fall through to the full build. The seed's `corpus-stamp.json` (embed model, dim, packs hash, git sha) is copied alongside for auditability.
@@ -198,9 +200,9 @@ The entrypoint script (`/app/entrypoint.sh`) runs on every container start:
 5. **Wait for ready** — Poll `http://127.0.0.1:11434` for up to 30 seconds.
 6. **Pull model** — If `qwen3-embedding:0.6b` is not cached, pull it from the Ollama library.
 7. **Run migrations** — Execute `python -m agentalloy.migrate` to initialize database schemas.
-8. **Install packs** — Skipped when the corpus was seeded in step 2. Otherwise: if `AGENTIALLOY_PACKS` is set, run `install-packs --packs <packs>` (this is the slow path — ~3,000 fragments embedded on CPU).
+8. **Install packs** — Skipped when the corpus was seeded in step 2. Otherwise: reads `$AGENTIALLOY_PACKS` env var (comma-separated pack names) and installs each one, or falls back to always-on packs if the var is empty (this is the slow path — ~3,000 fragments embedded on CPU).
 9. **Flag complete** — Touch `$APP_DIR/.bootstrap-complete`.
-10. **Start service** — `exec uvicorn agentalloy.api:create_app --host 0.0.0.0 --port 47950`.
+10. **Start service** — `uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950`.
 
 Steps 2–8 are skipped on subsequent starts (idempotent bootstrap). First-run wall clock: published image ≈ model download only (~5–10 min on a typical connection); locally built image adds the corpus build (20+ min on CPU).
 

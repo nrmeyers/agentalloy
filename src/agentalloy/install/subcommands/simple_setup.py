@@ -1174,13 +1174,14 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     cfg.mode = "manual"
     cfg.deployment = "container"
 
-    # 5b. Skill pack selection. Mirrors the native flow at step 6
-    # (simple_setup.py:1696). Done here — after all preflight, before
-    # any compose work — so a Ctrl-C costs nothing and the chosen packs
-    # show up in the review summary below. Selection is threaded into
-    # the one-shot install-packs container at step 8b via --packs.
-    if not cfg.non_interactive and not cfg.packs:
-        cfg.packs = _prompt_for_packs()
+    # 5b. Skill pack selection. The published GHCR image ships a prebuilt
+    # all-packs corpus (seeded at first run), so the pack picker is dead
+    # weight on the container path — skip it and tell the user. Native
+    # installs still get the interactive picker (handled further below).
+    if cfg.packs:
+        pass  # caller pre-set packs (e.g. --packs flag)
+    else:
+        _print("  [dim]Published image ships all packs preloaded — selection skipped.[/dim]")
     # Expand 'all' keyword to the full pack list before validation.
     # Without this, 'all' is treated as an unknown pack name and silently
     # stripped — the user gets "always-on only" instead of all packs.

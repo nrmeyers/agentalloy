@@ -18,10 +18,20 @@ from typing import Any
 # Helpers
 # ---------------------------------------------------------------------------
 
+try:
+    from rich.console import Console as _Console  # type: ignore[import-untyped]
+
+    _console: _Console | None = _Console(force_terminal=True, soft_wrap=True)  # type: ignore[assignment]
+except ImportError:
+    _console = None  # type: ignore[assignment]
+
 
 def _print(*args: Any, **kwargs: Any) -> None:
-    """Print to stdout with optional rich markup (same as simple_setup)."""
-    print(*args, **kwargs)
+    """Print with Rich markup if available, plain stdout otherwise."""
+    if _console is not None:
+        _console.print(*args, **kwargs)  # type: ignore[union-attr, arg-type]
+    else:
+        print(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +381,6 @@ def _build_entrypoint_script(packs: str) -> str:
         '    cp "$SEED_DIR/skills.duck" "$APP_DIR/data/skills.duck"',
         '    cp "$SEED_DIR/corpus-stamp.json" "$APP_DIR/data/corpus-stamp.json"',
         "    CORPUS_SEEDED=true",
-        '    cat "$APP_DIR/data/corpus-stamp.json"',
         "    # Surface the seed to host-side readiness polling (same atomic",
         "    # tmp+mv pattern as the model_pull phase).",
         '    cat > "$PROGRESS_TMP" <<JSON',
@@ -454,14 +463,43 @@ def _build_entrypoint_script(packs: str) -> str:
             ]
         )
     else:
-        # No explicit packs — install always-on packs (core, documentation,
-        # engineering, performance) so the container is functional.
+        # No explicit packs baked in — check the AGENTIALLOY_PACKS env var
+        # first (set this when running a locally built image without a corpus
+        # seed). If the env var is non-empty, install those packs one-by-one
+        # (same checkpointed loop as the has_packs path). If the env var is
+        # also empty, fall back to always-on packs (core, documentation,
+        # engineering, performance).
         # `install-packs` with no --packs arg installs always-on packs in
         # non-TTY mode (see install_packs.py:400-401).
         lines.extend(
             [
-                '    echo ">> No explicit packs specified — installing always-on packs"',
-                "    uv run agentalloy install-packs --no-restart",
+                '    if [ -n "${AGENTIALLOY_PACKS:-}" ]; then',
+                '        IFS="," read -ra PACK_LIST <<< "$AGENTIALLOY_PACKS"',
+                "        TOTAL=${#PACK_LIST[@]}",
+                "        INGESTED=0",
+                '        if [ -f "$CHECKPOINTS" ]; then',
+                '            INGESTED=$(grep -c "pack_ingested" "$CHECKPOINTS" 2>/dev/null || echo 0)',
+                "        fi",
+                '        for pack in "${PACK_LIST[@]}"; do',
+                "            pack=$(echo \"$pack\" | tr -d ' ')",
+                '            [ -z "$pack" ] && continue',
+                '            if pack_already_done "$pack"; then',
+                '                echo ">> Pack $pack already ingested - skipping"',
+                "                continue",
+                "            fi",
+                '            write_progress "$pack" "$INGESTED" "$TOTAL"',
+                '            echo ">> Installing pack: $pack"',
+                '            touch "$INSTALL_LOCK"',
+                '            uv run agentalloy install-packs --packs "$pack" --no-restart',
+                '            rm -f "$INSTALL_LOCK"',
+                '            printf \'{"step": "pack_ingested", "pack": "%s", "at": "%s"}\\n\' "$pack" "$(date -Iseconds)" >> "$CHECKPOINTS"',
+                "            INGESTED=$((INGESTED + 1))",
+                "        done",
+                '        write_progress "" "$INGESTED" "$TOTAL"',
+                "    else",
+                '        echo ">> No explicit packs — installing always-on packs"',
+                "        uv run agentalloy install-packs --no-restart",
+                "    fi",
             ]
         )
 
@@ -867,6 +905,22 @@ def _wait_for_readiness(
             # First successful connection — container is alive.
             first_success = True
             consecutive_errors = 0
+        except urllib.error.HTTPError as http_err:
+            # A 503 from /readiness means the service is up but the corpus is
+            # unusable (degraded mode). Parse the body so the caller can surface
+            # the reason rather than silently counting it as a transient error.
+            if http_err.code == 503:
+                first_success = True
+                consecutive_errors = 0
+                try:
+                    body = _json.loads(http_err.read().decode())
+                except (_json.JSONDecodeError, OSError):
+                    body = {"status": "error", "progress": {"error": "corpus_unavailable"}}
+            else:
+                if first_success:
+                    consecutive_errors += 1
+                    if consecutive_errors >= 3:
+                        return False
         except (urllib.error.URLError, OSError, _json.JSONDecodeError):
             # Only count errors after we've seen the container alive at least once.
             # Before first success, connection errors are expected during bootstrap.
