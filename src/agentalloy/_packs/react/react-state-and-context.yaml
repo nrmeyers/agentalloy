@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-state-and-context
 canonical_name: React State Management (useState vs useReducer, Context, External Stores)
+description: "Manage data in React apps by choosing the right tool: use useState for simple values, useReducer for complex logic, Context to share data across components, and external stores for global state, keeping things simple and local whenever possible."
 category: engineering
 skill_class: domain
 domain_tags: [usestate-functional-update, usereducer-action-types, context-provider-value, lifting-state-up, external-store-decision, react]

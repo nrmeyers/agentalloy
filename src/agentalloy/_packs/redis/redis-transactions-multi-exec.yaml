@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: redis-transactions-multi-exec
 canonical_name: Redis Transactions — MULTI / EXEC
+description: "Run multiple Redis commands as a single atomic unit to ensure data consistency: queue operations with MULTI and execute them together with EXEC, using WATCH for optimistic locking to prevent race conditions in read-modify-write workflows."
 category: engineering
 skill_class: domain
 domain_tags:

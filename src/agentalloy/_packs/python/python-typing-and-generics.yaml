@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: python-typing-and-generics
 canonical_name: Python Typing and Generics (Type Hints, Protocols, PEP 695)
+description: "Add type hints to Python functions and classes to catch errors early and improve code clarity: use type annotations for function signatures, define flexible interfaces with Protocol, and leverage PEP 695 generics for reusable, type-safe code."
 category: engineering
 skill_class: domain
 domain_tags: [type-hints, protocol-class, typevar, pep-695-syntax, gradual-typing, python]

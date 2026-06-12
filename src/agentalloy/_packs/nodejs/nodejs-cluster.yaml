@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: nodejs-cluster
 canonical_name: Node.js Cluster Module
+description: "Scale Node.js apps to use all CPU cores: fork worker processes that share a server port, let the main process balance incoming connections, and manage the lifecycle of workers for high-throughput web servers."
 category: engineering
 skill_class: domain
 domain_tags:

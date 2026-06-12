@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: python-async-and-asyncio
 canonical_name: Python Async and asyncio (Coroutines, Tasks, the Event Loop)
+description: "Speed up Python apps that wait on databases, APIs, or files: run many IO-bound tasks concurrently with async/await and asyncio, manage them with TaskGroup, and avoid blocking the event loop with synchronous code."
 category: engineering
 skill_class: domain
 domain_tags: [asyncio-event-loop, coroutines, async-await, taskgroup, gil-vs-async, python]

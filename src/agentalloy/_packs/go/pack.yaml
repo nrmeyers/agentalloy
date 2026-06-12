@@ -1,5 +1,5 @@
 name: go
-version: 1.0.1
+version: 1.0.2
 tier: language
 description: Go language patterns — goroutines+channels+context, error wrapping with errors.Is/As, generics with type parameters, modules and semantic import versioning, table-driven tests and fuzzing. Precision-favored language tier; sourced from go.dev Go 1.23 docs per R1 tiered sourcing (fixtures/upstream/curated/go.yaml).
 author: navistone

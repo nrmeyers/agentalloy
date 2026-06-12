@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-react-router
 canonical_name: React Router — Modern Patterns
+description: "Build single-page apps with React Router: define nested routes, share layouts, load data before rendering, and lazy-load components for faster initial loads."
 category: engineering
 skill_class: domain
 domain_tags:

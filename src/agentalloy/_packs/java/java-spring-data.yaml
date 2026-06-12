@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-spring-data
 canonical_name: Spring Data — Repositories and Queries
+description: "Query and manage database records in Java Spring apps without writing SQL: define repository interfaces that auto-generate CRUD operations and derive complex queries from method names like findByEmail or findByCountryAndPlan."
 category: engineering
 skill_class: domain
 domain_tags:

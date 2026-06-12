@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ts-strict-mode-and-tsconfig
 canonical_name: TypeScript Strict Mode and tsconfig (Catch Bugs at Compile Time)
+description: "Catch bugs before they reach users by configuring TypeScript's tsconfig.json: enable strict mode, disallow unchecked array access, and align module resolution with your bundler to ensure the type checker actively validates your code."
 category: engineering
 skill_class: domain
 domain_tags: [strict-mode, no-unchecked-indexed-access, target-es-version, module-resolution-bundler, project-references, typescript]

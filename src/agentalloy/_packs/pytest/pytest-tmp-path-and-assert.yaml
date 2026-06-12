@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: pytest-tmp-path-and-assert
 canonical_name: Pytest tmp_path and Assertion Introspection
+description: "Write Python tests that create isolated temp files for each run and get detailed failure messages when assertions fail, using pytest’s tmp_path fixture and its built-in assertion introspection."
 category: tooling
 skill_class: domain
 domain_tags:

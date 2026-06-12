@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: webhooks-event-types-and-schemas
 canonical_name: Webhooks — Event Types and Schemas
+description: "Design and document webhook event types for services like Svix or Stripe: define clear verb_noun identifiers, publish JSON schemas, and plan versioning so consumers know exactly what data to expect for each event."
 category: design
 skill_class: domain
 domain_tags:

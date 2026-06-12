@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: writing-changelogs
 canonical_name: Writing Changelogs (Keep a Changelog and Semver Linkage)
+description: "Communicate product updates to users by writing clear, dated changelogs that group changes by type (added, fixed, deprecated) and link to semantic versioning, ensuring customers understand what’s new in each release."
 category: design
 skill_class: domain
 domain_tags: [keep-a-changelog, version-bump-mapping, breaking-changes, unreleased-section, audience-is-the-user]

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ui-design-responsive-and-dark-mode
 canonical_name: Tailwind Responsive Design and Dark Mode
+description: "Build responsive websites and apps that look great on mobile, tablet, and desktop: use Tailwind's breakpoint prefixes to adjust layouts and enable dark mode for a seamless user experience across all devices and themes."
 category: design
 skill_class: domain
 domain_tags:

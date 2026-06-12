@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-declaration-files
 canonical_name: TypeScript Declaration Files (.d.ts)
+description: "Add type safety to JavaScript libraries or fix missing types in third-party packages: create .d.ts files to declare module signatures, augment existing interfaces, and enable autocomplete without changing runtime code."
 category: engineering
 skill_class: domain
 domain_tags:

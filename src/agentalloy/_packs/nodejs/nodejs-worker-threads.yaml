@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: nodejs-worker-threads
 canonical_name: Node.js Worker Threads
+description: "Speed up CPU-heavy tasks like image processing, data transformation, or complex calculations in Node.js: run JavaScript in parallel using worker threads to avoid blocking the main event loop, communicating via messages or shared memory."
 category: engineering
 skill_class: domain
 domain_tags:

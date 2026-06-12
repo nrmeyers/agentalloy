@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-spring-boot-config
 canonical_name: Spring Boot Configuration and Properties
+description: "Configure Java microservices with Spring Boot: set database URLs, server ports, and feature flags via application.yml or application.properties, use environment variables for secrets, and switch settings between dev, test, and prod profiles."
 category: engineering
 skill_class: domain
 domain_tags:

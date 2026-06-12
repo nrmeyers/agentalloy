@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: rest-versioning-and-compatibility
 canonical_name: REST — Versioning and Backward Compatibility
+description: "Design REST APIs that evolve without breaking existing clients: choose a versioning strategy like URL or header, manage backward compatibility, and plan deprecation and sunset windows for smooth transitions."
 category: design
 skill_class: domain
 domain_tags:

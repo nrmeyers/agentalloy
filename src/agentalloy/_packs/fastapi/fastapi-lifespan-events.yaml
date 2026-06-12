@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastapi-lifespan-events
 canonical_name: FastAPI Lifespan Events
+description: "Run setup and cleanup code when your FastAPI app starts or stops: use lifespan context managers to initialize databases, load configs, or close connections exactly once before handling requests and after shutdown."
 category: engineering
 skill_class: domain
 domain_tags:

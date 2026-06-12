@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: linting-monorepo-strategies
 canonical_name: Linting in Monorepos
+description: "Enforce consistent code quality and style across multiple packages in a monorepo: share a single linting configuration via a workspace package or root config so every app and library follows the same rules without duplication."
 category: tooling
 skill_class: domain
 domain_tags:

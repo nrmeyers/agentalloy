@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastify-validation-and-serialization
 canonical_name: Fastify Validation and Serialization
+description: "Validate incoming request data and format outgoing responses in Fastify APIs using JSON Schema: define rules for inputs like query params and body, then serialize return values into efficient JSON, ensuring type safety and performance."
 category: engineering
 skill_class: domain
 domain_tags:

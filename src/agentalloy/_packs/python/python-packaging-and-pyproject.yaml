@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: python-packaging-and-pyproject
 canonical_name: Python Packaging and pyproject.toml (Modern Build, Deps, Distribution)
+description: "Package Python libraries and apps for distribution: define metadata, dependencies, and build settings in pyproject.toml, choose a backend like hatchling or setuptools, use the src layout, and pin versions with a lockfile to avoid drift."
 category: engineering
 skill_class: domain
 domain_tags: [pyproject-toml, build-backend, src-layout, lockfile, editable-install, python]

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastify-routes-and-handlers
 canonical_name: Fastify Routes and Handlers
+description: "Define HTTP endpoints for APIs and services with Fastify: create GET, POST, and other routes using shorthand methods or full options, handle requests and replies, and add validation schemas, hooks, and versioning."
 category: engineering
 skill_class: domain
 domain_tags:

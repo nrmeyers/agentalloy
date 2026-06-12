@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-build-tooling
 canonical_name: TypeScript Build Tooling — tsc, esbuild, swc, tsx
+description: "Speed up TypeScript builds and CI pipelines: use fast tools like esbuild or swc for bundling and tsx for running scripts, while reserving tsc for type checking only to keep development fast and production reliable."
 category: engineering
 skill_class: domain
 domain_tags:

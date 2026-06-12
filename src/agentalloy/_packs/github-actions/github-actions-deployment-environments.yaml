@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: github-actions-deployment-environments
 canonical_name: GitHub Actions — Deployment Environments
+description: "Deploy code to staging or production with GitHub Actions: create named environments to scope secrets, require manual approval from reviewers, enforce wait timers, and restrict which branches can deploy to protect your live site."
 category: ops
 skill_class: domain
 domain_tags:

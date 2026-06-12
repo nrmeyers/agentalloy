@@ -1,5 +1,5 @@
 name: rest
-version: 1.0.1
+version: 1.0.2
 tier: protocol
 description: |
   REST API design patterns — HTTP and resource design fundamentals (URLs as nouns, method semantics, status codes, JSON conventions), common API patterns (pagination, long-running operations, conditional requests, partial updates), and versioning + backward-compatibility discipline. Precision-favored protocol tier; sourced from microsoft/api-guidelines (Azure REST API Guidelines + Considerations + Versioning) per R1 tier-3 procedure.

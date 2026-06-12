@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: sdd-spec-and-scoping
 canonical_name: "SDD \u2014 Spec and Scoping (sdd-spec)"
+description: "Turn a fuzzy product idea into a clear, actionable plan before writing code: define scope, success criteria, and non-goals to prevent wasted effort and ensure the final build matches your intent."
 category: review
 skill_class: workflow
 domain_tags:

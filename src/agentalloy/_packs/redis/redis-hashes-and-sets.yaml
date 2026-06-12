@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: redis-hashes-and-sets
 canonical_name: Redis Hashes and Sets
+description: "Store object-like records like users, orders, or configs in Redis: use hashes to group fields under one key for atomic updates and less memory overhead, and sets for unique, unordered collections like tags or followers."
 category: engineering
 skill_class: domain
 domain_tags:

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: data-engineering-airflow-best-practices
 canonical_name: Airflow — Best Practices and Timetables
+description: "Schedule and automate data pipelines, ETL jobs, and recurring tasks with Apache Airflow: write robust DAGs, test them locally, and configure schedules and dependencies to ensure reliable, predictable execution without unexpected failures."
 category: engineering
 skill_class: domain
 domain_tags:

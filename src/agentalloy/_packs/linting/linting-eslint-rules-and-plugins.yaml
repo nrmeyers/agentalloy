@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: linting-eslint-rules-and-plugins
 canonical_name: ESLint Rules and Plugins
+description: "Enforce coding standards and catch bugs in JavaScript or TypeScript projects: configure ESLint rules with error or warning severity and add plugins for custom checks, ensuring consistent code quality across your team."
 category: tooling
 skill_class: domain
 domain_tags:

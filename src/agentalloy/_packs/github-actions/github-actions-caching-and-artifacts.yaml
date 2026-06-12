@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: github-actions-caching-and-artifacts
 canonical_name: GitHub Actions Caching and Artifacts
+description: "Speed up CI builds and share files between jobs in GitHub Actions: cache dependencies like node_modules to skip installs, and upload/download artifacts to pass test results or build outputs across workflow steps."
 category: ops
 skill_class: domain
 domain_tags:

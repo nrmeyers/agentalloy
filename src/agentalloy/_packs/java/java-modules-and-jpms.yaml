@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-modules-and-jpms
 canonical_name: Java Modules with JPMS (module-info.java, exports, requires, services)
+description: "Structure large Java applications with clear boundaries and dependencies: define modules in module-info.java to control which packages are exported, require other modules, and provide or use services for loose coupling."
 category: tooling
 skill_class: domain
 domain_tags: [module-info-descriptor, exports-package, requires-transitive, services-uses-provides, jlink-runtime-image, java]

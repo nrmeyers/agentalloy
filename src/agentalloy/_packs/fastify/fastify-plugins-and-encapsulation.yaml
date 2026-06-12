@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastify-plugins-and-encapsulation
 canonical_name: Fastify Plugins and Encapsulation
+description: "Build scalable Node.js APIs with Fastify by organizing code into reusable plugins: register routes, hooks, and decorators while controlling visibility through encapsulation or shared scope with fastify-plugin."
 category: engineering
 skill_class: domain
 domain_tags:

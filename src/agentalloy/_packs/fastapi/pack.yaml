@@ -1,5 +1,5 @@
 name: fastapi
-version: 1.0.1
+version: 1.0.2
 tier: framework
 description: |
   FastAPI 0.115+ patterns — path operations and APIRouter, Pydantic v2 request/response models with field/model validators, dependency injection with yield-based cleanup, async + lifespan + BackgroundTasks, OAuth2/JWT/API-key auth with scopes. Precision-favored framework tier; sourced from fastapi.tiangolo.com per R1 tier-3 fallback_root procedure (registry fallback_root https://fastapi.tiangolo.com/).

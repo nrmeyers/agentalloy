@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: rust-ownership-and-borrowing
 canonical_name: Rust Ownership and Borrowing (Move Semantics, References, Lifetimes)
+description: "Write safe, high-performance systems code in Rust without garbage collection: manage memory by moving ownership, borrowing data with references, and satisfying the borrow checker to prevent data races and dangling pointers at compile time."
 category: engineering
 skill_class: domain
 domain_tags: [move-semantics, borrow-checker, lifetime-elision, interior-mutability, rc-arc, rust]

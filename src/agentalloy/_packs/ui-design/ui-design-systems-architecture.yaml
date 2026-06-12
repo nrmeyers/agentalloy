@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ui-design-systems-architecture
 canonical_name: Design Systems — Architecture and Tokens
+description: "Build consistent UIs across apps by defining design tokens: use primitive values for colors and spacing, semantic tokens for intent like primary or error, and component tokens for specific elements to enable easy theming and maintainable styles."
 category: design
 skill_class: domain
 domain_tags:

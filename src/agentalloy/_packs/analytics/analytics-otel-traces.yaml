@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: analytics-otel-traces
 canonical_name: OpenTelemetry — Distributed Tracing
+description: "Debug slow requests and errors across microservices by tracing a single user action through every service it touches: create spans for each step, propagate context between services, and visualize the full request path to pinpoint bottlenecks."
 category: ops
 skill_class: domain
 domain_tags:

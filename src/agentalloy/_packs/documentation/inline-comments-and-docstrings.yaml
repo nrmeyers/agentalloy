@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: inline-comments-and-docstrings
 canonical_name: Inline Comments and Docstrings (Document Why, Not What)
+description: "Write code comments and docstrings that explain the reasoning behind complex logic rather than restating what the code does, ensuring public APIs are documented for other developers while avoiding clutter that becomes outdated."
 category: design
 skill_class: domain
 domain_tags: [explain-rationale, docstring-discipline, comment-as-code-smell, todo-with-tracker, public-api-surface]

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-error-boundaries
 canonical_name: React Error Boundaries
+description: "Prevent your entire React app from crashing when a component fails: wrap UI sections in error boundaries to catch rendering errors, show a fallback message, and log the issue without affecting the rest of the page."
 category: engineering
 skill_class: domain
 domain_tags:

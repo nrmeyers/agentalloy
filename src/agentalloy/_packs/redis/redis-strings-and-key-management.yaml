@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: redis-strings-and-key-management
 canonical_name: Redis Strings and Key Management
+description: "Store and manage simple data like user sessions, counters, and feature flags in Redis: set and get string values, increment or decrement numbers atomically, enforce expiration times, and handle key eviction policies."
 category: engineering
 skill_class: domain
 domain_tags:

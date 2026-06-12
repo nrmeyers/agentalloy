@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: testing-fixture-libraries
 canonical_name: Test Fixture Libraries — Factories and Builders
+description: "Create realistic test data for users, orders, and products without hardcoding values: use factory and builder patterns to generate consistent, varied records with defaults and overrides for unit and integration tests."
 category: quality
 skill_class: domain
 domain_tags:

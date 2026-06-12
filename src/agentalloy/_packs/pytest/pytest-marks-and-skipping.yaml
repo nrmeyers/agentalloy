@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: pytest-marks-and-skipping
 canonical_name: Pytest Marks, Skipping, and xfail
+description: "Organize and control test runs in Python with pytest: tag tests with custom markers, skip flaky or environment-specific cases, and mark expected failures so you can filter runs by category and keep your suite focused and reliable."
 category: tooling
 skill_class: domain
 domain_tags:

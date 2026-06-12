@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: debugging-systematic
 canonical_name: Systematic Debugging (Hypothesis, Bisection, Reproduce)
+description: "Fix mysterious bugs faster by reproducing the issue reliably, forming a hypothesis about the cause, and testing it with targeted checks or git bisect to pinpoint the exact change that broke your code."
 category: engineering
 skill_class: domain
 domain_tags: [reproduce-the-bug, hypothesis-driven, git-bisect, log-analysis, root-cause]

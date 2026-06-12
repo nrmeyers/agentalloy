@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastify-schema-typebox
 canonical_name: Fastify Schemas with TypeBox
+description: "Define and validate API request and response data for Fastify routes using TypeBox schemas: enforce strict types for user profiles, addresses, and other payloads while automatically generating OpenAPI documentation from your code."
 category: engineering
 skill_class: domain
 domain_tags:

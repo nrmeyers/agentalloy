@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: linting-performance-optimization
 canonical_name: Linting Performance — Speed Beyond 100K LOC
+description: "Keep code quality checks fast so developers stay in flow: speed up linting for large codebases using caching, incremental analysis, and profiling to ensure sub-second feedback on edits and fast full-repo scans."
 category: tooling
 skill_class: domain
 domain_tags:

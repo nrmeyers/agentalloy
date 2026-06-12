@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-rendering-keys-and-memoization
 canonical_name: React Rendering Model (Keys, Reconciliation, React.memo, useMemo, useCallback, React Compiler)
+description: "Build fast React apps by understanding how React updates the UI: use stable keys for lists, memoize components and values to skip unnecessary re-renders, and keep side effects out of render to avoid bugs and performance issues."
 category: engineering
 skill_class: domain
 domain_tags: [list-keys-stable-id, reconciliation-tree-diff, react-memo-props-equality, key-prop-state-reset, auto-memoization-compiler, react]

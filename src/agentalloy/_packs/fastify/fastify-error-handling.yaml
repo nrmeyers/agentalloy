@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastify-error-handling
 canonical_name: Fastify Error Handling
+description: "Handle errors in Fastify APIs: catch thrown or rejected errors with setErrorHandler, use onError hooks, and format schema validation errors so your endpoints return consistent, safe HTTP responses instead of crashing."
 category: tooling
 skill_class: domain
 domain_tags:

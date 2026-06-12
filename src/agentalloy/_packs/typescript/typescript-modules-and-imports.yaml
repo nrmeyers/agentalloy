@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-modules-and-imports
 canonical_name: TypeScript Modules and Imports
+description: "Organize code into reusable modules for apps, libraries, and tools: import and export values, use type-only imports to avoid runtime overhead, and handle both ES modules and CommonJS formats in TypeScript projects."
 category: engineering
 skill_class: domain
 domain_tags:

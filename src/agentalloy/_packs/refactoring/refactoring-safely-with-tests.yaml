@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: refactoring-safely-with-tests
 canonical_name: Refactoring Safely with Tests (Characterization Tests and the Green Bar)
+description: "Refactor legacy code or complex logic without breaking existing features: write characterization tests to capture current behavior, keep the test suite green after each small change, and use the tests as a safety net to catch regressions immediately."
 category: design
 skill_class: domain
 domain_tags: [characterization-tests, green-bar, golden-master, small-steps, bisect-on-failure]

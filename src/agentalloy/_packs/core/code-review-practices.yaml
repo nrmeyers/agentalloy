@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: code-review-practices
 canonical_name: Code Review Practices (Reviewer + Author Discipline)
+description: "Improve code quality and team velocity by mastering pull request reviews: reviewers catch bugs and logic errors while authors submit small, focused changes, ensuring feedback is constructive and merges happen quickly."
 category: review
 skill_class: domain
 domain_tags: [pr-review, blocking-vs-nit, review-comment-tone, change-list-size, reviewer-fatigue]

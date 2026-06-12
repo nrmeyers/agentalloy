@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ui-design-empty-states
 canonical_name: Empty States
+description: "Design friendly screens for empty data, search results, or cleared lists: show helpful illustrations and clear next steps for first-time users, explain why no results matched a search, and confirm deletions without confusing onboarding messages."
 category: design
 skill_class: domain
 domain_tags:

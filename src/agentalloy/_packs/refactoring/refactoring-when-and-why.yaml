@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: refactoring-when-and-why
 canonical_name: Refactoring (When It Is Justified, When It Is Premature)
+description: "Improve code structure without breaking functionality: refactor only when the next change is hard, not for aesthetics, to avoid regressions from speculative or premature abstractions."
 category: design
 skill_class: domain
 domain_tags: [behavior-preserving, rule-of-three, just-in-time-refactor, opportunistic-refactor, premature-abstraction]

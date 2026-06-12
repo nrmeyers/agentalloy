@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: finding-the-bottleneck
 canonical_name: Finding the Bottleneck (Amdahl's Law and Hot-Path Identification)
+description: "Fix slow code by finding the real bottleneck before optimizing: use Amdahl's law to see why speeding up one part won't help if another resource like CPU, IO, or database queries is still blocking performance."
 category: design
 skill_class: domain
 domain_tags: [amdahls-law, use-method, latency-breakdown, n-plus-one, lock-contention]

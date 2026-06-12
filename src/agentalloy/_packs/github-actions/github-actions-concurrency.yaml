@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: github-actions-concurrency
 canonical_name: GitHub Actions — Concurrency Control
+description: "Prevent wasted compute and race conditions in CI/CD pipelines by limiting concurrent workflow runs: group jobs by branch or workflow name and cancel in-progress runs when new code is pushed, ensuring only the latest build or deploy executes."
 category: ops
 skill_class: domain
 domain_tags:

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ui-design-color-systems
 canonical_name: Color Systems and Contrast
+description: "Design accessible UIs with consistent brightness and contrast: use OKLCH for perceptually uniform colors, generate palettes from a base hue, and ensure text meets WCAG standards for color-blind users."
 category: design
 skill_class: domain
 domain_tags:

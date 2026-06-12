@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-narrowing-patterns
 canonical_name: TypeScript Narrowing Patterns
+description: "Write safer TypeScript code by narrowing union types to specific values using typeof, instanceof, or custom type guards, ensuring the compiler knows exactly what data you are working with in each branch."
 category: engineering
 skill_class: domain
 domain_tags:

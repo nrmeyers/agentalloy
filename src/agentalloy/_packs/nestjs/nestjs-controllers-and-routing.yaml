@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: nestjs-controllers-and-routing
 canonical_name: NestJS Controllers and Routing
+description: "Build REST APIs and microservices with NestJS: define HTTP endpoints using controllers, map GET, POST, and other methods to handler functions, and extract route params, query strings, and request bodies for processing."
 category: engineering
 skill_class: domain
 domain_tags:

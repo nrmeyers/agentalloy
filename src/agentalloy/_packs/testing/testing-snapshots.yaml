@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: testing-snapshots
 canonical_name: Snapshot Testing
+description: "Catch UI regressions and data shape changes by saving expected output snapshots and comparing them on every run: use Vitest to verify rendered components or complex objects, while avoiding the trap of blindly accepting every change as correct."
 category: quality
 skill_class: domain
 domain_tags:

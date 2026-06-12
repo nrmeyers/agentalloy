@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: testing-snapshot-strategies
 canonical_name: Snapshot Testing Strategies
+description: "Catch visual regressions in React, Vue, or Svelte components and verify complex API responses or generated code by comparing current output against stored snapshots, while redacting dynamic data to keep tests stable and meaningful."
 category: quality
 skill_class: domain
 domain_tags:

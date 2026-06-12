@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: python-multiprocessing
 canonical_name: Python multiprocessing
+description: "Speed up CPU-bound Python tasks like image processing or data analysis by running code in parallel processes to bypass the GIL: spawn workers, share data via queues, and manage pools for efficient multi-core execution."
 category: engineering
 skill_class: domain
 domain_tags:

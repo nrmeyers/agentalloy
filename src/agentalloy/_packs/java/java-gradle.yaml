@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-gradle
 canonical_name: Gradle Build Tool
+description: "Build, test, and package Java or Kotlin applications with Gradle: configure dependencies, plugins, and tasks in build.gradle.kts to automate compilation, run unit tests, and produce deployable artifacts."
 category: engineering
 skill_class: domain
 domain_tags:

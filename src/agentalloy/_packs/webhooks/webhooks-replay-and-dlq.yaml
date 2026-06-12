@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: webhooks-replay-and-dlq
 canonical_name: Webhooks — Replay and Dead-Letter Queues
+description: "Handle failed webhook deliveries by retrying on server errors and timeouts, then move unprocessable messages to a dead-letter queue for manual review and replay missed events after outages to ensure no payment or subscription updates are lost."
 category: design
 skill_class: domain
 domain_tags:

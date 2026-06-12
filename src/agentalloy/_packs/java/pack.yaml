@@ -1,5 +1,5 @@
 name: java
-version: 1.0.1
+version: 1.0.2
 tier: language
 description: Java 21 LTS patterns — virtual threads + structured concurrency, exception design with try-with-resources, records + sealed types + pattern matching for switch (JEP 441), the Java Platform Module System (JPMS), and NIO.2 file IO. Precision-favored language tier; sourced from docs.oracle.com Java 21 docs per R1 tiered sourcing (fixtures/upstream/curated/java.yaml).
 author: navistone

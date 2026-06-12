@@ -1,5 +1,5 @@
 name: code-review
-version: 1.0.0
+version: 1.0.1
 tier: workflow
 description: |
   Code review craft — defect-spotting patterns (race conditions, off-by-one, error swallowing, async pitfalls, security smells). code-review-craft-and-feedback was auto-rejected for hard duplication with sdd-verify-and-review (review process content overlaps); code-simplification routed to needs-human after 4 bounces. The shipped skill focuses specifically on defect-spotting which is additive to the SDD verify pack.

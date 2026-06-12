@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-junit5-mockito
 canonical_name: JUnit 5 + Mockito + Testcontainers
+description: "Write and run Java unit and integration tests for Spring Boot apps: use JUnit 5 for assertions and parameterized tests, Mockito to stub dependencies, and Testcontainers to spin up real databases or services for reliable, isolated test execution."
 category: engineering
 skill_class: domain
 domain_tags:

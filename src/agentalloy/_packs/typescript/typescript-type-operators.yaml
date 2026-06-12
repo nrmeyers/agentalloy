@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-type-operators
 canonical_name: TypeScript Type Operators — keyof, typeof, Indexed Access
+description: "Write safer TypeScript code by deriving types from existing objects or values: use keyof to get property names, typeof to infer types from variables, and indexed access to pick specific nested fields without manual duplication."
 category: engineering
 skill_class: domain
 domain_tags:

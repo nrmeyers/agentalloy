@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: redis-replication
 canonical_name: Redis Replication
+description: "Keep your Redis data safe and available by setting up master-replica replication: configure a primary server to automatically sync data to backup replicas, ensuring your app stays online and data persists even if the main server fails or restarts."
 category: engineering
 skill_class: domain
 domain_tags:

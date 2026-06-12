@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastapi-testing
 canonical_name: FastAPI Testing — TestClient and AsyncClient
+description: "Test FastAPI endpoints without starting a server: use TestClient for synchronous routes and AsyncClient for async ones to send HTTP requests, check status codes, and validate JSON responses in unit tests."
 category: engineering
 skill_class: domain
 domain_tags:

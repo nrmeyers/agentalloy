@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: rest-common-patterns
 canonical_name: REST — Common API Patterns
+description: "Design robust APIs that go beyond basic CRUD: implement pagination for large datasets, handle long-running operations, support filtering and partial updates, and manage concurrency with conditional requests."
 category: design
 skill_class: domain
 domain_tags:

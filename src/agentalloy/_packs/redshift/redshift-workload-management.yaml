@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: redshift-workload-management
 canonical_name: Amazon Redshift Workload Management
+description: "Tune Amazon Redshift performance for analytics and reporting: configure Workload Management to prioritize queries, allocate memory, and handle concurrent loads using automatic or manual queues, plus enable concurrency scaling for bursty read traffic."
 category: engineering
 skill_class: domain
 domain_tags:

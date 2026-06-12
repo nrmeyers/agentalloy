@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: github-actions-reusable-workflows
 canonical_name: GitHub Actions Reusable Workflows and Composite Actions
+description: "Automate CI/CD pipelines and avoid copy-pasting steps in GitHub Actions: create reusable workflows to share logic across repos or composite actions to bundle steps, choosing the right pattern for your automation needs."
 category: ops
 skill_class: domain
 domain_tags:

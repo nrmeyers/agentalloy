@@ -1,5 +1,5 @@
 name: performance
-version: 1.0.0
+version: 1.0.1
 tier: foundation
 description: Performance practices that span stacks — measure first, profile correctly, optimize the bottleneck, know when to stop. Always installed.
 author: navistone

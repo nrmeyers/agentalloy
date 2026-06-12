@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: ts-types-vs-interfaces
 canonical_name: TypeScript Types vs Interfaces (Aliases, Interfaces, Declaration Merging)
+description: "Define data shapes and object structures in TypeScript: choose between type aliases and interfaces to decide whether to allow declaration merging for extensible APIs or enforce strict, immutable definitions for internal logic."
 category: engineering
 skill_class: domain
 domain_tags: [type-alias, interface, declaration-merging, structural-typing, readonly-modifier, typescript]

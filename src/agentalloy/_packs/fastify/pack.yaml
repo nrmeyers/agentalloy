@@ -1,5 +1,5 @@
 name: fastify
-version: 1.0.1
+version: 1.0.2
 tier: framework
 description: |
   Fastify 5+ patterns — route declarations and handlers, plugin system with encapsulation model, request lifecycle hooks (onRequest → preHandler → preSerialization → onSend → onResponse), and JSON-Schema-based validation + serialization (Ajv + fast-json-stringify). Precision-favored framework tier; sourced from fastify.dev/llms-full.txt per R1 tier-1 procedure. Error-handling skill deferred (currently in skill-source/needs-human/) — covers core surface; error-handling is a planned future addition.

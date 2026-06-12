@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-tanstack-query
 canonical_name: React with TanStack Query
+description: "Fetch, cache, and update server data in React apps: use TanStack Query to handle loading states, background refetching, retries, and optimistic updates for lists, user profiles, and forms without manual state management."
 category: engineering
 skill_class: domain
 domain_tags:

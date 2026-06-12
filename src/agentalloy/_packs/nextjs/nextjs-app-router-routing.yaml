@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: nextjs-app-router-routing
 canonical_name: Next.js 16 App Router Routing (File Conventions, Layouts, Dynamic Segments, Route Handlers)
+description: "Build websites, blogs, dashboards, and e-commerce apps with React and Next.js: define pages and URLs through the app/ folder, share layouts, handle dynamic routes like /blog/[slug], add loading and error screens, and expose API endpoints."
 category: engineering
 skill_class: domain
 domain_tags: [file-system-segments, dynamic-route-params, nested-layouts, loading-error-boundaries, route-groups-parens, nextjs]

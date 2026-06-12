@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: react-optimistic-updates
 canonical_name: React Optimistic Updates with useOptimistic
+description: "Make your React app feel instant by showing changes immediately while background tasks run: use useOptimistic to update the UI before the server responds, then automatically sync when the real data arrives."
 category: engineering
 skill_class: domain
 domain_tags:

@@ -1,6 +1,7 @@
 skill_type: system
 skill_id: sys-intake-router-and-confidence
 canonical_name: Intake Router and Confidence Thresholds
+description: "Route user inputs to the correct workflow using an AI router like Qwen: set confidence thresholds to propose actions, offer alternatives, or ask clarifying questions based on signal strength."
 category: tooling
 skill_class: system
 domain_tags: ['routing', 'confidence', 'Qwen']

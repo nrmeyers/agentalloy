@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: analytics-event-tracking
 canonical_name: Analytics — Event Tracking and Identity
+description: "Track user actions like signups, purchases, and feature usage to build funnels and retention reports: define clear event names, link them to a unique user ID, and attach properties so you can analyze behavior accurately."
 category: ops
 skill_class: domain
 domain_tags:

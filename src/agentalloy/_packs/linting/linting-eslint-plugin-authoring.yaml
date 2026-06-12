@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: linting-eslint-plugin-authoring
 canonical_name: ESLint Plugin Authoring — Custom Rules
+description: "Enforce custom coding standards and catch specific bugs in your JavaScript or TypeScript projects: write ESLint plugins that define new rules, parse the AST to detect violations, and integrate them into your team's linting workflow."
 category: tooling
 skill_class: domain
 domain_tags:

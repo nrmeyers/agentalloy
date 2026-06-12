@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: snowflake-tasks-and-automation
 canonical_name: Snowflake Tasks and Scheduled Automation
+description: "Automate data pipelines and scheduled SQL jobs in Snowflake: create tasks that run on a cron schedule or after other tasks finish, build dependency chains with DAGs, and manage compute resources for reliable background processing."
 category: engineering
 skill_class: domain
 domain_tags:

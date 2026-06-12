@@ -1,5 +1,5 @@
 name: nodejs
-version: 1.0.1
+version: 1.0.2
 tier: language
 description: Node.js runtime patterns — event loop, streams, fs/promises, ESM/CJS interop, node:test runner, error handling. Precision-favored language tier; sourced from nodejs.org Node 22 LTS docs per R1 tiered sourcing (fixtures/upstream/curated/nodejs.yaml).
 author: navistone

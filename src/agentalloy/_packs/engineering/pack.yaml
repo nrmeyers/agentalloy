@@ -1,5 +1,5 @@
 name: engineering
-version: 2.0.0
+version: 2.0.1
 tier: foundation
 description: Engineering practices that span stacks — error handling, naming, ADRs, technical-debt management, reading code. Always installed. Re-authored 2026-05-04 against R1 tiered sourcing; pre-POC v1 archived to archive/pre-poc-packs-2026-05-04/.
 author: navistone

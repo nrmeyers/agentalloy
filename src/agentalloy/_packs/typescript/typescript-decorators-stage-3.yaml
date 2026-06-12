@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-decorators-stage-3
 canonical_name: TypeScript Decorators (Stage 3)
+description: "Add metadata or behavior to classes, methods, and properties in TypeScript 5+ using Stage 3 decorators: wrap or replace targets with context-aware functions for logging, validation, or dependency injection without legacy flags."
 category: engineering
 skill_class: domain
 domain_tags: [typescript, decorators, class, method, accessor]

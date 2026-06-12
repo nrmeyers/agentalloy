@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: nodejs-child-process
 canonical_name: Node.js Child Process
+description: "Run external commands, scripts, or other Node processes from your server: use exec for simple shell tasks, spawn for streaming large outputs, or fork for inter-process communication, with support for cancellation via AbortController."
 category: engineering
 skill_class: domain
 domain_tags:

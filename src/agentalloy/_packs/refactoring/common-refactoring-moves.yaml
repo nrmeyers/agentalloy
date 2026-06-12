@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: common-refactoring-moves
 canonical_name: Common Refactoring Moves (Extract, Inline, Rename, Replace)
+description: "Clean up messy code by extracting functions, renaming variables, inlining logic, or replacing complex conditionals: apply these safe, test-backed refactoring moves to improve readability and maintainability without changing behavior."
 category: design
 skill_class: domain
 domain_tags: [extract-function, inline-function, rename-symbol, replace-conditional, parameter-object]

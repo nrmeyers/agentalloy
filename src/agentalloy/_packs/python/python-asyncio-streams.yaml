@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: python-asyncio-streams
 canonical_name: Python asyncio — Streams and Network I/O
+description: "Build async network clients and servers in Python: connect to TCP or Unix sockets, read and write data streams, and handle connections with asyncio’s high-level reader/writer interface for efficient I/O."
 category: engineering
 skill_class: domain
 domain_tags:

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: go-error-handling
 canonical_name: Go Error Handling (Wrapping, errors.Is/As, Sentinel Values, Panic/Recover)
+description: "Handle failures in Go services by returning error values, wrapping them with context, and inspecting them with errors.Is or errors.As to decide whether to retry, log, or propagate, while reserving panic for truly unrecoverable bugs."
 category: engineering
 skill_class: domain
 domain_tags: [error-wrapping, sentinel-values, typed-errors, panic-recover, error-inspection, go]

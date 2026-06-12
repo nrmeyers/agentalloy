@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: typescript-jsx-types
 canonical_name: TypeScript JSX Types — React and Beyond
+description: "Build React apps with TypeScript: type component props explicitly for better autocomplete and error checking, avoid the legacy React.FC pattern, and ensure your JSX elements and hooks work correctly with strict type safety."
 category: engineering
 skill_class: domain
 domain_tags:

@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: java-nio2-and-io
 canonical_name: Java NIO.2 File I/O (Path, Files, Streams, Channels)
+description: "Read, write, and manage files in Java applications: use Path and Files for simple operations, FileChannel for high-performance I/O, and WatchService to react to filesystem changes like new uploads or config updates."
 category: engineering
 skill_class: domain
 domain_tags: [path-resolution, files-readstring-writestring, directorystream-walk, filechannel-bytebuffer, watchservice-events, java]

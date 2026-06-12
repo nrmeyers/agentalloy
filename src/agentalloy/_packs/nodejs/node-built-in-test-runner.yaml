@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: node-built-in-test-runner
 canonical_name: Node.js Built-in Test Runner (node:test, assert, mocking)
+description: "Test Node.js code without installing Jest or Vitest: write unit and integration tests using the built-in node:test runner, organize with describe blocks, assert results, and mock dependencies for reliable, dependency-free verification."
 category: engineering
 skill_class: domain
 domain_tags: [node-test, node-assert, mock-fn, subtest, lifecycle-hooks, nodejs, testing, native, describe/it, test-hooks]

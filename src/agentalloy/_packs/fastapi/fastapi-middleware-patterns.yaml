@@ -1,6 +1,7 @@
 skill_type: domain
 skill_id: fastapi-middleware-patterns
 canonical_name: FastAPI Middleware and Dependency Patterns
+description: "Secure and manage API requests in FastAPI: use middleware for global concerns like CORS, trusted hosts, and request IDs, and dependency injection for per-route logic such as authentication, role checks, and rate limiting."
 category: engineering
 skill_class: domain
 domain_tags: [starlette, asgi, cors, trusted-host, exception-handler, depends, lifespan, raw-body, fastapi, middleware, request-pipeline, cross-cutting]
