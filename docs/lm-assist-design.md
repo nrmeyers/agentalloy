@@ -107,7 +107,10 @@ their latency.
 
 ## Runtime & ops
 
-- Model: `qwen3.5:0.8b` (already the authoring model; already pulled).
+- Model candidate (user-selected): **LFM2.5-350M** — ~350 MB quantized,
+  built for fast structured extraction. Comparator: `qwen3.5:0.8b` (already
+  pulled, the authoring model). Bake-off via the harness (open question 3);
+  the 350M earns the slot iff it parses reliably into the Stage A/B JSON.
   Served by the same Ollama now pinned to the RTX 3060 — zero contention
   with benchmark/agent models on the 3090.
 - Budget: hard 300 ms timeout per stage, then fail-open. Both stages
