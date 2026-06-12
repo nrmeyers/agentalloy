@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Rapid merges to main otherwise race the corpus job before the first run
+# saves its cache, duplicating the ~100-min embed. Newest push wins; the
+# superseded build is cancelled (only its image would have been stale anyway).
+concurrency:
+  group: container-build
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
