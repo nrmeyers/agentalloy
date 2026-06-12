@@ -87,7 +87,7 @@ agentalloy setup
 # select options 2
 ```
 
-Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Port 47950 is the only external surface. Container inference is **CPU-only** on every host; for GPU acceleration (NVIDIA / AMD / Metal) pick the native install instead.
+Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Published images ship a **prebuilt skill corpus** — first run is ready in minutes (model download only), no CPU ingest/embed wait. Port 47950 is the only external surface. Container inference is **CPU-only** on every host; for GPU acceleration (NVIDIA / AMD / Metal) pick the native install instead.
 
 > **Container install pulls a pre-built image from GHCR.** Setup pulls `ghcr.io/nrmeyers/agentalloy:latest` directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
@@ -159,11 +159,12 @@ The setup wizard:
 │                                             │
 │  /app/entrypoint.sh (bash)                  │
 │  ├── Check .bootstrap-complete (skip if done)│
+│  ├── Seed prebuilt corpus (published images) │
 │  ├── Install Ollama (if missing)             │
 │  ├── Start ollama serve --host 127.0.0.1    │
 │  ├── Pull qwen3-embedding:0.6b (if missing)  │
 │  ├── Run migrations                          │
-│  ├── install-packs --packs <packs>           │
+│  ├── install-packs (skipped when seeded)     │
 │  ├── Touch .bootstrap-complete               │
 │  ├── exec uvicorn (main service)             │
 │                                             │
@@ -191,16 +192,17 @@ Volume mounts:
 The entrypoint script (`/app/entrypoint.sh`) runs on every container start:
 
 1. **Bootstrap check** — If `$APP_DIR/.bootstrap-complete` exists, skip all bootstrap steps and go straight to uvicorn.
-2. **Ollama install** — If `ollama` binary is missing, download and run the official install script.
-3. **Start Ollama** — Launch `ollama serve --host 127.0.0.1:11434` in the background.
-4. **Wait for ready** — Poll `http://127.0.0.1:11434` for up to 30 seconds.
-5. **Pull model** — If `qwen3-embedding:0.6b` is not cached, pull it from the Ollama library.
-6. **Run migrations** — Execute `python -m agentalloy.migrate` to initialize database schemas.
-7. **Install packs** — If `AGENTIALLOY_PACKS` is set, run `install-packs --packs <packs>`.
-8. **Flag complete** — Touch `$APP_DIR/.bootstrap-complete`.
-9. **Start service** — `exec uvicorn agentalloy.api:create_app --host 0.0.0.0 --port 47950`.
+2. **Prebuilt corpus seed** — Published images (`ghcr.io/nrmeyers/agentalloy`) carry a fully ingested + embedded corpus under `/app/corpus-seed`; if the data volume has no corpus yet it is copied in (seconds) and step 8 is skipped. Locally built images have no seed and fall through to the full build. The seed's `corpus-stamp.json` (embed model, dim, packs hash, git sha) is copied alongside for auditability.
+3. **Ollama install** — If `ollama` binary is missing, download and run the official install script.
+4. **Start Ollama** — Launch `ollama serve --host 127.0.0.1:11434` in the background. (Required even with a seeded corpus — query embedding happens at compose time.)
+5. **Wait for ready** — Poll `http://127.0.0.1:11434` for up to 30 seconds.
+6. **Pull model** — If `qwen3-embedding:0.6b` is not cached, pull it from the Ollama library.
+7. **Run migrations** — Execute `python -m agentalloy.migrate` to initialize database schemas.
+8. **Install packs** — Skipped when the corpus was seeded in step 2. Otherwise: if `AGENTIALLOY_PACKS` is set, run `install-packs --packs <packs>` (this is the slow path — ~3,000 fragments embedded on CPU).
+9. **Flag complete** — Touch `$APP_DIR/.bootstrap-complete`.
+10. **Start service** — `exec uvicorn agentalloy.api:create_app --host 0.0.0.0 --port 47950`.
 
-Steps 2–7 are skipped on subsequent starts (idempotent bootstrap).
+Steps 2–8 are skipped on subsequent starts (idempotent bootstrap). First-run wall clock: published image ≈ model download only (~5–10 min on a typical connection); locally built image adds the corpus build (20+ min on CPU).
 
 ### Operational commands
 

@@ -1486,3 +1486,14 @@ class TestEntrypointPrebuiltCorpusSeed:
 
         script = _build_entrypoint_script("")
         assert script.index("ollama serve") < script.index('[ "$CORPUS_SEEDED" = "false" ]')
+
+    def test_seed_emits_progress_phase(self):
+        """The seed path writes a corpus_seeded progress snapshot so the
+        host-side readiness streamer can tell the user ingest was skipped."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("core")
+        assert '"phase": "corpus_seeded"' in script
+        # atomic write pattern: staged to tmp, then mv onto the target
+        seed_idx = script.index('"phase": "corpus_seeded"')
+        assert 'mv "$PROGRESS_TMP" "$PROGRESS"' in script[seed_idx:]

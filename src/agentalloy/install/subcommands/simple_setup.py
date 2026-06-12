@@ -1316,7 +1316,9 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     if is_first_run:
         _print(
             "  [dim]-> Starting agentalloy container "
-            "(may take 10-20 min on first run — downloading models)...[/dim]"
+            "(first run: ~5-10 min to download the embedding model; published "
+            "images ship a prebuilt skill corpus, locally built images also "
+            "build the corpus, adding 20+ min on CPU)...[/dim]"
         )
     else:
         _print("  [dim]-> Starting agentalloy container (30-60s)...[/dim]")
@@ -1391,6 +1393,16 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             elif elapsed and (elapsed - _last_heartbeat) >= _HEARTBEAT_INTERVAL:
                 _last_heartbeat = elapsed
                 _print(f"     [dim]bootstrap: downloading {model}  elapsed={elapsed}s[/dim]")
+            return
+
+        # Prebuilt-corpus seed — published images skip pack ingest entirely;
+        # tell the user instead of leaving silence where ingest updates were.
+        if phase == "corpus_seeded" and last_pack != "__corpus_seeded__":
+            last_pack = "__corpus_seeded__"
+            _print(
+                "     [dim]bootstrap: prebuilt corpus seeded from image — "
+                f"skipping skill ingest  elapsed={elapsed}s[/dim]"
+            )
             return
 
         # Pack ingestion phase — only print on change (pack rolled over) or
