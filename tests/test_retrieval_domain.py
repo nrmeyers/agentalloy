@@ -817,3 +817,96 @@ def test_diversity_off_bypass_skips_reranker(
     assert isinstance(result, domain_module.RetrievalResult)
     assert result.reranked is False
     assert fake.calls == []
+
+
+# -------- Stage B: LM fragment re-rank (fail-open parity) --------
+
+
+def _retrieve_design(
+    populated: LadybugStore, populated_vectors: VectorStore
+) -> domain_module.RetrievalResult:
+    result = retrieve_domain_candidates(
+        populated,
+        StubLMClient(),
+        populated_vectors,
+        task="fastapi endpoint design",
+        phase="design",
+        domain_tags=None,
+        k=4,
+        embedding_model="stub-embed",
+    )
+    assert isinstance(result, domain_module.RetrievalResult)
+    return result
+
+
+def test_lm_assist_off_is_byte_identical_baseline(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LM_ASSIST off → scorer factory returns None → deterministic selection.
+
+    This is the baseline the fail-open guarantee is measured against (same
+    spirit as test_card_index off-mode identity).
+    """
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: None)
+    result = _retrieve_design(populated, populated_vectors)
+    assert result.lm_assist_outcome == "disabled"
+    assert result.candidates  # the corpus has fastapi-design fragments
+
+
+def test_lm_assist_unreachable_matches_off(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scorer whose every call fails (unreachable server) must yield the SAME
+    selected fragments as LM_ASSIST off — byte-identical fail-open floor."""
+    # Baseline: stage disabled.
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: None)
+    baseline = _retrieve_design(populated, populated_vectors)
+
+    # Now a scorer that always errors (e.g. connection refused).
+    from agentalloy.retrieval.lm_assist import LMAssistOutcome, ScoreResult
+
+    class _DeadScorer:
+        def score(self, task: str, documents: list[str]) -> ScoreResult:  # noqa: ARG002
+            return ScoreResult(LMAssistOutcome.ERROR, [])
+
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: _DeadScorer())
+    degraded = _retrieve_design(populated, populated_vectors)
+
+    assert degraded.lm_assist_outcome == "error"
+    assert [f.fragment_id for f in degraded.candidates] == [
+        f.fragment_id for f in baseline.candidates
+    ]
+
+
+def test_lm_assist_hit_filters_to_kept_fragments(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A HIT replaces deterministic selection with exactly the kept fragments."""
+    from agentalloy.retrieval.lm_assist import (
+        LMAssistConfig,
+        LMAssistMode,
+        LMAssistOutcome,
+        ScoreResult,
+    )
+
+    class _KeepFirstTwo:
+        def score(self, task: str, documents: list[str]) -> ScoreResult:  # noqa: ARG002
+            # First two clear threshold, rest are noise.
+            scores = [0.9, 0.9] + [0.0] * (len(documents) - 2)
+            return ScoreResult(LMAssistOutcome.HIT, scores[: len(documents)])
+
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: _KeepFirstTwo())
+    monkeypatch.setattr(
+        domain_module,
+        "load_config",
+        lambda: LMAssistConfig(LMAssistMode.ARBITRATE, "http://x", 300, 0.05, "m"),
+    )
+    result = _retrieve_design(populated, populated_vectors)
+    assert result.lm_assist_outcome == "hit"
+    assert len(result.candidates) == 2

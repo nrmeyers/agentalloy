@@ -68,6 +68,8 @@ class TelemetryRecord:
     reranked: bool = False
     tokens_returned: int = 0
     tokens_flat_equivalent: int = 0
+    lm_assist_outcome: str = "disabled"
+    lm_assist_model: str | None = None
 
 
 class TelemetryWriter(Protocol):
@@ -149,6 +151,8 @@ class DuckDBTelemetryWriter:
             reranked=record.reranked,
             tokens_returned=record.tokens_returned,
             tokens_flat_equivalent=record.tokens_flat_equivalent,
+            lm_assist_outcome=record.lm_assist_outcome,
+            lm_assist_model=record.lm_assist_model,
         )
 
 

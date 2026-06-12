@@ -117,6 +117,10 @@ class CompositionTrace:
     # Both use the len(text) // 4 heuristic (no tokenizer dependency).
     tokens_returned: int = 0
     tokens_flat_equivalent: int = 0
+    # Stage B (LM fragment re-rank) outcome: "disabled" | "hit" | "timeout" | "error".
+    lm_assist_outcome: str = "disabled"
+    # The LM_ASSIST_MODEL tag in effect for this composition (telemetry only).
+    lm_assist_model: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +192,9 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted',
     reranked BOOLEAN NOT NULL DEFAULT FALSE,
     tokens_returned INTEGER NOT NULL DEFAULT 0,
-    tokens_flat_equivalent INTEGER NOT NULL DEFAULT 0
+    tokens_flat_equivalent INTEGER NOT NULL DEFAULT 0,
+    lm_assist_outcome VARCHAR NOT NULL DEFAULT 'disabled',
+    lm_assist_model VARCHAR
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -627,8 +633,9 @@ class VectorStore:
                 prompt_version, workflow_skill_ids,
                 event_type, pre_filter_matched, gates_met, gates_unmet, qwen_calls,
                 contract_path, contract_tags, bm25_source, reranked,
-                tokens_returned, tokens_flat_equivalent
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tokens_returned, tokens_flat_equivalent,
+                lm_assist_outcome, lm_assist_model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -661,6 +668,8 @@ class VectorStore:
                 trace.reranked,
                 trace.tokens_returned,
                 trace.tokens_flat_equivalent,
+                trace.lm_assist_outcome,
+                trace.lm_assist_model,
             ],
         )
 
@@ -689,7 +698,8 @@ class VectorStore:
                    workflow_skill_ids, event_type, pre_filter_matched,
                    gates_met, gates_unmet, qwen_calls,
                    contract_path, contract_tags, bm25_source, reranked,
-                   tokens_returned, tokens_flat_equivalent
+                   tokens_returned, tokens_flat_equivalent,
+                   lm_assist_outcome, lm_assist_model
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -728,6 +738,8 @@ class VectorStore:
                 reranked=bool(r[27]),
                 tokens_returned=int(r[28]) if r[28] is not None else 0,
                 tokens_flat_equivalent=int(r[29]) if r[29] is not None else 0,
+                lm_assist_outcome=str(r[30]) if r[30] is not None else "disabled",
+                lm_assist_model=r[31],
             )
             for r in rows
         ]
@@ -848,6 +860,8 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("reranked", "BOOLEAN", "DEFAULT FALSE"),
     ("tokens_returned", "INTEGER", "DEFAULT 0"),
     ("tokens_flat_equivalent", "INTEGER", "DEFAULT 0"),
+    ("lm_assist_outcome", "VARCHAR", "DEFAULT 'disabled'"),
+    ("lm_assist_model", "VARCHAR", ""),
 )
 
 

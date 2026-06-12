@@ -106,6 +106,16 @@ class ComposeOrchestrator:
         system_applied = bool(system.candidates)
         retrieval_error_code: str | None = None
 
+        # Stage B (LM fragment re-rank) outcome — present only on a successful
+        # RetrievalResult; the BM25-only/error fallback never runs Stage B.
+        lm_assist_outcome = (
+            retrieval.lm_assist_outcome if isinstance(retrieval, RetrievalResult) else "disabled"
+        )
+        from agentalloy.retrieval.lm_assist import load_config as _lm_config
+
+        _lm_cfg = _lm_config()
+        lm_assist_model = _lm_cfg.model if _lm_cfg.enabled else None
+
         if isinstance(retrieval, EmbeddingErrorResult):
             retrieval_error_code = retrieval.error.code.value
             logger.warning(
@@ -129,6 +139,8 @@ class ComposeOrchestrator:
                     latency_retrieval_ms=retrieval.retrieval_ms,
                     latency_total_ms=elapsed_ms,
                     error_payload=retrieval_error_code,
+                    lm_assist_outcome=lm_assist_outcome,
+                    lm_assist_model=lm_assist_model,
                 )
             )
             return EmptyResult(
@@ -187,6 +199,8 @@ class ComposeOrchestrator:
                 reranked=reranked,
                 tokens_returned=tokens_returned,
                 tokens_flat_equivalent=tokens_flat_equivalent,
+                lm_assist_outcome=lm_assist_outcome,
+                lm_assist_model=lm_assist_model,
             )
         )
         return ComposedResult(

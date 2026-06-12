@@ -39,6 +39,12 @@ from agentalloy.retrieval.embedding_errors import (
     embedding_breaker,
     safe_embed,
 )
+from agentalloy.retrieval.lm_assist import (
+    LMAssistOutcome,
+    build_scorer_from_env,
+    load_config,
+    max_candidates,
+)
 from agentalloy.retrieval.rerank import build_reranker_from_env, rerank_max_pairs
 from agentalloy.storage.card_index import is_card_id, skill_id_from_card_id
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
@@ -190,6 +196,9 @@ class RetrievalResult:
     skills_ranked: list[str] = field(default_factory=lambda: [])
     # True only when a cross-encoder rerank actually reordered the pool (Stage A).
     reranked: bool = False
+    # Stage B (LM fragment re-rank) outcome for this composition. "disabled"
+    # whenever LM_ASSIST=off or the stage never ran; otherwise hit/timeout/error.
+    lm_assist_outcome: str = "disabled"
 
 
 class StoreFragmentSource:
@@ -546,6 +555,7 @@ def retrieve_domain_candidates(
     # RUNTIME_DIVERSITY_SELECTION=off also short-circuits — used by eval harness.
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
     reranked = False
+    lm_outcome = LMAssistOutcome.DISABLED
     if raw_scores or diversity_off:
         selected = ranked[:k]
         skills_ranked: list[str] = []
@@ -553,7 +563,19 @@ def retrieve_domain_candidates(
         # Stage A: cross-encoder rerank of the top skills before selection.
         # Best-effort — a failure or disabled stage leaves ``ranked`` untouched.
         ranked, reranked = _maybe_rerank(ranked, task)
-        selected, skills_ranked = skill_granular_select(ranked, k)
+
+        # Stage B: LM fragment re-rank. When enabled and it returns a HIT, it
+        # *replaces* deterministic selection — it has already chosen exactly
+        # which fragments to keep (above threshold, capped at k, in fusion
+        # order). On disabled/timeout/error it returns (None, outcome) and the
+        # deterministic path below runs byte-for-byte as if Stage B did not
+        # exist. The deterministic path never sees the reranker.
+        lm_selected, lm_outcome = _maybe_lm_arbitrate(ranked, task, k)
+        if lm_selected is not None:
+            selected = lm_selected
+            skills_ranked = list(dict.fromkeys(f.skill_id for f in ranked))
+        else:
+            selected, skills_ranked = skill_granular_select(ranked, k)
 
     elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
     return RetrievalResult(
@@ -564,6 +586,7 @@ def retrieve_domain_candidates(
         bm25_source=_bm25_source,
         skills_ranked=skills_ranked,
         reranked=reranked,
+        lm_assist_outcome=lm_outcome.value,
     )
 
 
@@ -621,6 +644,59 @@ def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveF
     for sid in new_skill_order:
         rebuilt.extend(skill_queues[sid])
     return rebuilt, True
+
+
+def _maybe_lm_arbitrate(
+    ranked: list[ActiveFragment], task: str, k: int
+) -> tuple[list[ActiveFragment] | None, LMAssistOutcome]:
+    """Stage B — LM fragment re-rank over the top fused fragments.
+
+    Scores up to ``max_candidates()`` top fused fragments against ``task``,
+    keeps those whose yes-probability clears the configured threshold (in
+    fusion-score order, capped at ``k``), and returns them as the final
+    selection. An empty keep is a *valid* high-confidence result meaning
+    "inject nothing" — the 12B-redshift case — and is returned as ``[]`` (not
+    None), so compose returns no domain fragments.
+
+    Returns ``(selection, outcome)``:
+
+    * ``(list, HIT)`` — Stage B ran and chose the selection (possibly empty).
+    * ``(None, DISABLED|TIMEOUT|ERROR)`` — Stage B did not produce a result;
+      the caller must fall through to deterministic selection. This is the
+      contractual fail-open floor: ANY failure routes here and the
+      deterministic path runs as if Stage B never existed.
+
+    Never raises — the scorer swallows its own errors and this function guards
+    the call site too.
+    """
+    scorer = build_scorer_from_env()
+    if scorer is None:
+        return None, LMAssistOutcome.DISABLED
+    if not ranked:
+        # Nothing to arbitrate; let the (also-empty) deterministic path run.
+        return None, LMAssistOutcome.DISABLED
+
+    head = ranked[: max_candidates()]
+    # Document = skill identity + fragment body, same framing as Stage A: bare
+    # fragment prose often omits the skill's topic, which short tasks carry.
+    documents = [f"{f.skill_id.replace('-', ' ')}: {f.content}" for f in head]
+
+    try:
+        result = scorer.score(task, documents)
+    except Exception:  # pyright: ignore[reportBroadExceptionCaught]
+        logger.warning("lm-assist Stage B raised at call site; using deterministic selection")
+        return None, LMAssistOutcome.ERROR
+
+    if result.outcome is not LMAssistOutcome.HIT or len(result.scores) != len(head):
+        # Disabled/timeout/error, or a length mismatch — fail open.
+        outcome = (
+            result.outcome if result.outcome is not LMAssistOutcome.HIT else LMAssistOutcome.ERROR
+        )
+        return None, outcome
+
+    threshold = load_config().keep_threshold
+    kept = [frag for frag, score in zip(head, result.scores, strict=True) if score >= threshold]
+    return kept[:k], LMAssistOutcome.HIT
 
 
 def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]:

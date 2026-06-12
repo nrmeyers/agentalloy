@@ -114,6 +114,35 @@ def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, in
     )
 
 
+def preflight_lm_assist(client: httpx.Client) -> dict[str, Any]:
+    """Verify the service has Stage B enabled for the ``composed-lm`` arm.
+
+    The service owns LM_ASSIST config; this arm does NOT toggle it. We query
+    /health (which reports the effective config) and FAIL FAST if the mode is
+    not ``arbitrate`` — running the arm against a service with Stage B off would
+    silently produce data identical to ``composed`` and mislabel it.
+
+    Returns the lm_assist config dict for the run manifest.
+    """
+    resp = client.get(f"{AGENTALLOY_URL}/health", timeout=httpx.Timeout(10.0))
+    if resp.status_code != 200:
+        raise RuntimeError(f"/health returned {resp.status_code} during composed-lm preflight")
+    cfg = resp.json().get("lm_assist")
+    if not isinstance(cfg, dict):
+        raise RuntimeError(
+            "composed-lm arm requested but /health does not report lm_assist config — "
+            "service too old or Stage B not wired"
+        )
+    mode = cfg.get("mode")
+    if mode != "arbitrate":
+        raise RuntimeError(
+            f"composed-lm arm requires the service to run with LM_ASSIST=arbitrate, "
+            f"but /health reports mode={mode!r}. The service owns this config; set it "
+            f"and restart the service, then rerun."
+        )
+    return cfg
+
+
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 # Transient network failures (Tailscale blips, server restarts) shouldn't
@@ -191,7 +220,11 @@ def run_one(
     ) % (2**31)
     compose_result_type: str | None = None
     compose_latency_ms: int | None = None
-    if condition == "composed":
+    if condition in ("composed", "composed-lm"):
+        # composed-lm is byte-identical to composed at the harness level — it
+        # calls the same /compose. The difference is server-side (LM_ASSIST=
+        # arbitrate); this arm only records that config in the manifest and
+        # preflights it (see main()). The harness never toggles the env.
         assembled, compose_result_type, compose_latency_ms, _ = call_compose(client, task, k)
         if not assembled.strip():
             assembled = "(compose returned empty result — no domain fragments matched)"
@@ -272,7 +305,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
     summary: dict[str, Any] = {"by_task": {}, "totals": {}}
     totals: dict[str, dict[str, float]] = {
         cond: {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0}
-        for cond in ("composed", "flat", "external", "none")
+        for cond in ("composed", "composed-lm", "flat", "external", "none")
     }
 
     for task_id, by_cond in by_task.items():
@@ -285,7 +318,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
             mean_agent_ms = sum(r.agent_latency_ms for r in runs) / len(runs)
             mean_compose_ms = (
                 sum((r.compose_latency_ms or 0) for r in runs) / len(runs)
-                if cond == "composed"
+                if cond in ("composed", "composed-lm")
                 else 0.0
             )
             mean_wall_ms = mean_agent_ms + mean_compose_ms
@@ -326,7 +359,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
             )
         summary["by_task"][task_id] = task_summary
 
-    for cond in ("composed", "flat", "external", "none"):
+    for cond in ("composed", "composed-lm", "flat", "external", "none"):
         if totals[cond]["n"]:
             n = totals[cond]["n"]
             summary["totals"][cond] = {
@@ -354,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         "--conditions",
         nargs="+",
         default=["composed", "flat"],
-        choices=["composed", "flat", "external", "none"],
+        choices=["composed", "composed-lm", "flat", "external", "none"],
     )
     parser.add_argument(
         "--task-set",
@@ -401,6 +434,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"external arm blocked: {p}", file=sys.stderr)
             return 1
 
+    # composed-lm preflight: the service owns LM_ASSIST config; fail fast if it
+    # isn't arbitrate rather than silently recording composed data as composed-lm.
+    lm_assist_cfg: dict[str, Any] | None = None
+    if "composed-lm" in args.conditions:
+        with httpx.Client() as preflight_client:
+            try:
+                lm_assist_cfg = preflight_lm_assist(preflight_client)
+            except Exception as exc:
+                print(f"composed-lm arm blocked: {exc}", file=sys.stderr)
+                return 1
+
     manifest = {
         "started_at": timestamp,
         "label": args.label,
@@ -414,6 +458,8 @@ def main(argv: list[str] | None = None) -> int:
         "conditions": args.conditions,
         "runs_per_cell": args.n,
     }
+    if lm_assist_cfg is not None:
+        manifest["lm_assist"] = lm_assist_cfg
     if "external" in args.conditions:
         # Freeze the task→skill mapping + provenance so the arm is auditable.
         manifest["external_skills"] = external_skills.manifest_entry(
@@ -457,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
     print("        tps = total_tok / wall_seconds (effective throughput).")
     for task_id, task_summary in summary["by_task"].items():
         print(f"\n{task_id}")
-        for cond in ("composed", "flat", "external", "none"):
+        for cond in ("composed", "composed-lm", "flat", "external", "none"):
             if cond in task_summary:
                 ts = task_summary[cond]
                 print(

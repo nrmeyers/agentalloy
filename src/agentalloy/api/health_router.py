@@ -39,9 +39,22 @@ class DependencyStatus(BaseModel):
     detail: str | None = None
 
 
+class LMAssistConfigView(BaseModel):
+    """Effective Stage B (LM fragment re-rank) config, for benchmark preflight.
+
+    The service owns this config (env-driven); the ``composed-lm`` benchmark arm
+    reads it to fail fast when ``LM_ASSIST`` is not ``arbitrate``."""
+
+    mode: str
+    model: str
+    keep_threshold: float
+    timeout_ms: int
+
+
 class HealthResponse(BaseModel):
     status: OverallStatus
     dependencies: dict[str, DependencyStatus] | None = None
+    lm_assist: LMAssistConfigView | None = None
 
 
 class HealthChecker:
@@ -106,7 +119,17 @@ class HealthChecker:
         else:
             overall = "healthy"
 
-        return HealthResponse(status=overall, dependencies=deps)
+        from agentalloy.retrieval.lm_assist import load_config as _lm_config
+
+        cfg = _lm_config()
+        lm_view = LMAssistConfigView(
+            mode=cfg.mode.value,
+            model=cfg.model,
+            keep_threshold=cfg.keep_threshold,
+            timeout_ms=cfg.timeout_ms,
+        )
+
+        return HealthResponse(status=overall, dependencies=deps, lm_assist=lm_view)
 
     def _probe_runtime_store(self) -> str | None:
         try:
