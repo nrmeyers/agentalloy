@@ -133,6 +133,9 @@ class ReviewRecord:
     tier: str | None = None
     deprecated: bool = False
     superseded_by: str = ""
+    # Stage 0 (skill-card indexing): optional one-line self-description.
+    # Absent in the legacy corpus — tolerated everywhere ("" → NULL on insert).
+    description: str = ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -573,6 +576,7 @@ def _load_yaml(path: Path) -> ReviewRecord:
         fragments=fragments,
         deprecated=_bool("deprecated"),
         superseded_by=_str("superseded_by"),
+        description=_str("description"),
     )
 
 
@@ -852,7 +856,8 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> None:
             always_apply: $always_apply,
             phase_scope: $phase_scope,
             category_scope: $category_scope,
-            tier: $tier
+            tier: $tier,
+            description: $description
         })
         """,
         {
@@ -867,6 +872,8 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> None:
             "phase_scope": record.phase_scope,
             "category_scope": record.category_scope,
             "tier": record.tier,
+            # "" → NULL keeps the column absent-tolerant for blank-description skills.
+            "description": record.description or None,
         },
     )
 

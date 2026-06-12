@@ -48,6 +48,14 @@ from agentalloy.lm_client import (
     LMTimeout,
     LMUnavailable,
 )
+from agentalloy.storage.card_index import (
+    CARD_FRAGMENT_TYPE,
+    META_KEY_CARD_INDEX,
+    CardIndexMode,
+    apply_prefix,
+    build_card_text,
+    card_fragment_id,
+)
 from agentalloy.storage.ladybug import (
     LOCK_HELD_REMEDIATION,
     LadybugStore,
@@ -243,6 +251,11 @@ class FragmentNeedingEmbedding:
     The denormalized columns (``skill_id``, ``category``, ``fragment_type``)
     carry through to the DuckDB row so compose-time filtered search doesn't
     need a cross-engine join.
+
+    ``canonical_name`` / ``domain_tags`` / ``description`` carry the parent
+    skill's identity so Stage 0 card indexing can build a header without a
+    second graph read. They default empty so older call sites and corpora
+    missing the ``description`` column stay tolerant.
     """
 
     fragment_id: str
@@ -250,6 +263,9 @@ class FragmentNeedingEmbedding:
     fragment_type: str
     skill_id: str
     category: str
+    canonical_name: str = ""
+    domain_tags: tuple[str, ...] = ()
+    description: str | None = None
 
 
 @dataclass
@@ -280,7 +296,8 @@ class ReembedStats:
 _DISCOVERY_CYPHER_ALL = """
 MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion)-[:DECOMPOSES_TO]->(f:Fragment)
 WHERE v.status = 'active' AND s.deprecated = false
-RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category
+RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
+       s.canonical_name, s.domain_tags, s.description
 ORDER BY s.skill_id, f.sequence
 """
 
@@ -288,7 +305,8 @@ _DISCOVERY_CYPHER_SKILL = """
 MATCH (s:Skill {skill_id: $skill_id})-[:CURRENT_VERSION]->(v:SkillVersion)
     -[:DECOMPOSES_TO]->(f:Fragment)
 WHERE v.status = 'active' AND s.deprecated = false
-RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category
+RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
+       s.canonical_name, s.domain_tags, s.description
 ORDER BY f.sequence
 """
 
@@ -319,6 +337,11 @@ def discover_unembedded_fragments(
             fragment_type=str(row[2]),
             skill_id=str(row[3]),
             category=str(row[4]),
+            canonical_name=str(row[5]) if len(row) > 5 and row[5] is not None else "",
+            domain_tags=tuple(row[6]) if len(row) > 6 and row[6] else (),
+            description=(
+                str(row[7]).strip() or None if len(row) > 7 and row[7] is not None else None
+            ),
         )
         for row in rows
     ]
@@ -366,6 +389,21 @@ def _embed_with_retry(
 # ---------------------------------------------------------------------------
 
 
+def _indexed_text(frag: FragmentNeedingEmbedding, mode: CardIndexMode) -> str:
+    """Return the text to embed/index for ``frag`` under ``mode``.
+
+    ``prefix``/``both`` prepend a one-line skill-card header; ``off``/``cards``
+    leave the fragment body untouched. CRITICAL: this only affects the indexed
+    representation (the embedded vector and the BM25 ``prose`` column). The
+    stored fragment ``content`` returned by ``/compose`` is never derived from
+    this — ``off`` therefore reproduces today's index byte-for-byte.
+    """
+    if not mode.with_prefix:
+        return frag.content
+    header = build_card_text(frag.canonical_name, frag.domain_tags, frag.description)
+    return apply_prefix(header, frag.content)
+
+
 def reembed_fragments(
     fragments: list[FragmentNeedingEmbedding],
     *,
@@ -374,6 +412,7 @@ def reembed_fragments(
     embedding_model: str,
     progress_tty: bool = False,
     on_embedded: Callable[[FragmentNeedingEmbedding, list[float]], None] | None = None,
+    card_index: CardIndexMode = CardIndexMode.OFF,
 ) -> ReembedStats:
     """Embed each fragment and insert to DuckDB. Returns run stats.
 
@@ -386,6 +425,13 @@ def reembed_fragments(
     instead of wrapping ``embed_fn``: the retry path may call ``embed_fn``
     more than once per fragment, so call-order correlation mis-attributes
     vectors.
+
+    ``card_index`` (Stage 0): when ``prefix``/``both``, each fragment's
+    *indexed* text (the embedded vector and the BM25 ``prose`` column) is
+    prefixed with a one-line skill-card header. The returned ``content`` is
+    untouched. ``cards``/``both`` additionally inserts synthetic card documents
+    — done by the caller after this batch (see ``_insert_cards``). ``off`` is a
+    byte-for-byte no-op vs the pre-Stage-0 index.
 
     Transactional: the entire batch is wrapped in a DuckDB transaction.
     If any fragment fails to embed or insert, the whole batch is rolled back
@@ -400,8 +446,9 @@ def reembed_fragments(
     vector_store.begin_transaction()
     try:
         for frag in fragments:
+            indexed = _indexed_text(frag, card_index)
             try:
-                vec = _embed_with_retry(embed_fn, frag.content)
+                vec = _embed_with_retry(embed_fn, indexed)
             except LMClientError as exc:
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, str(exc)))
@@ -430,7 +477,7 @@ def reembed_fragments(
                             fragment_type=frag.fragment_type,
                             embedded_at=now,
                             embedding_model=embedding_model,
-                            prose=frag.content,
+                            prose=indexed,
                         )
                     ]
                 )
@@ -475,6 +522,72 @@ def reembed_fragments(
         if progress_tty:
             print(file=sys.stderr)  # newline after progress
     return stats
+
+
+def _distinct_skill_cards(
+    fragments: list[FragmentNeedingEmbedding],
+) -> list[FragmentNeedingEmbedding]:
+    """One representative fragment per skill (first in rank order).
+
+    The representative carries the skill identity (``canonical_name`` /
+    ``domain_tags`` / ``description``) needed to build that skill's card.
+    """
+    seen: dict[str, FragmentNeedingEmbedding] = {}
+    for frag in fragments:
+        seen.setdefault(frag.skill_id, frag)
+    return list(seen.values())
+
+
+def insert_cards(
+    fragments: list[FragmentNeedingEmbedding],
+    *,
+    embed_fn: Callable[[str], list[float]],
+    vector_store: VectorStore,
+    embedding_model: str,
+) -> int:
+    """Embed and insert one synthetic card document per distinct skill.
+
+    Cards carry ``fragment_type='card'`` and a ``card::<skill_id>`` id so they
+    are trivially identifiable in both DuckDB and the fused candidate list.
+    They participate in dense + BM25 retrieval (boosting their skill's rank)
+    but are excluded from ``/compose`` assembly — no LadybugDB Fragment node
+    hydrates them, and ``retrieval.domain`` drops card ids before selection.
+
+    Caller is responsible for clearing pre-existing cards (``delete_cards``)
+    when re-running, mirroring the ``--force`` fragment path. Returns the count
+    of cards inserted. Wrapped in its own transaction for atomicity.
+    """
+    cards = _distinct_skill_cards(fragments)
+    if not cards:
+        return 0
+    now = int(time.time())
+    inserted = 0
+    vector_store.begin_transaction()
+    try:
+        for rep in cards:
+            text = build_card_text(rep.canonical_name, rep.domain_tags, rep.description)
+            vec = _embed_with_retry(embed_fn, text)
+            vector_store.insert_embeddings(
+                [
+                    FragmentEmbedding(
+                        fragment_id=card_fragment_id(rep.skill_id),
+                        embedding=vec,
+                        skill_id=rep.skill_id,
+                        category=rep.category,
+                        fragment_type=CARD_FRAGMENT_TYPE,
+                        embedded_at=now,
+                        embedding_model=embedding_model,
+                        prose=text,
+                    )
+                ]
+            )
+            inserted += 1
+        vector_store.commit_transaction()
+    except Exception:
+        with contextlib.suppress(Exception):
+            vector_store.rollback_transaction()
+        raise
+    return inserted
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +663,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Only embed fragments for this skill_id (default: all skills)",
     )
     parser.add_argument(
+        "--card-index",
+        choices=[m.value for m in CardIndexMode],
+        default=CardIndexMode.OFF.value,
+        help=(
+            "Stage 0 skill-card indexing (deterministic document expansion). "
+            "'off' (default) reproduces today's index byte-for-byte. 'prefix' "
+            "prepends a one-line 'skill: <name> — tags: ... — <description>' "
+            "header to each fragment's INDEXED text (embedding + BM25 only; the "
+            "prose returned by /compose is unchanged). 'cards' adds one "
+            "synthetic card document per skill that boosts skill ranking but is "
+            "never emitted as a fragment. 'both' does both. The chosen mode is "
+            "recorded in corpus_meta for auditability."
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         help="Cap the number of fragments processed (after skip-filtering)",
@@ -591,6 +719,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    card_mode = CardIndexMode(args.card_index)
 
     # Stop service in container mode before DB operations
     container_was_stopped = False
@@ -717,14 +846,57 @@ def main(argv: list[str] | None = None) -> int:
                         embedding_model=model_id,
                         progress_tty=sys.stderr.isatty(),
                         on_embedded=_record,
+                        card_index=card_mode,
                     )
                     stats.log_summary()
+
+                    # Stage 0 'cards'/'both': rebuild the synthetic card layer.
+                    # Reps are derived at the pass's scope (all skills, or the
+                    # single ``--skill-id``). Drop stale cards at the SAME scope
+                    # first so re-runs stay idempotent — a skill-scoped pass must
+                    # only replace its own card, never wipe every other skill's.
+                    if card_mode.with_cards:
+                        all_frags = discover_unembedded_fragments(
+                            store, vs, skill_id=args.skill_id, force=True
+                        )
+                        removed = vs.delete_cards(skill_id=args.skill_id)
+                        n_cards = insert_cards(
+                            all_frags,
+                            embed_fn=_embed,
+                            vector_store=vs,
+                            embedding_model=model_id,
+                        )
+                        logger.info(
+                            "card index: replaced %d card(s) with %d (mode=%s)",
+                            removed,
+                            n_cards,
+                            card_mode.value,
+                        )
                 finally:
                     embed_client.close()
             else:
                 # --rebuild-fts with no fragments to embed
                 logger.info("no fragments to embed; running --rebuild-fts only")
                 stats = ReembedStats()
+
+            # When cards are NOT requested, ensure none linger from a prior
+            # 'cards'/'both' build — keeps 'off'/'prefix' free of card rows so
+            # 'off' matches the pre-Stage-0 index. Scoped to match the pass: a
+            # full-scope pass drops every stale card; a skill-scoped pass drops
+            # only that skill's card, leaving other skills' cards untouched.
+            if not card_mode.with_cards:
+                dropped = vs.delete_cards(skill_id=args.skill_id)
+                if dropped:
+                    logger.info(
+                        "card index: removed %d stale card(s) (mode=%s)", dropped, card_mode.value
+                    )
+
+            # Record the indexed-representation mode for auditability. Soft-fail:
+            # a metadata write must never fail the embed pass.
+            try:
+                vs.set_meta(META_KEY_CARD_INDEX, card_mode.value)
+            except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+                logger.warning("could not record card_index meta: %s", exc)
 
             # Keep authored phase eligibility in sync with the graph on every
             # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall

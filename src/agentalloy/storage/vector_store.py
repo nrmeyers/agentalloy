@@ -32,6 +32,8 @@ from pathlib import Path
 
 import duckdb
 
+from agentalloy.storage.card_index import CARD_FRAGMENT_TYPE
+
 EMBEDDING_DIM = 1024
 """Vector dimensionality. Tied to ``qwen3-embedding:0.6b`` (1024-dim default).
 Changing the model requires a schema migration and full corpus reindex —
@@ -200,6 +202,15 @@ CREATE TABLE IF NOT EXISTS prompt_loads (
     trace_id VARCHAR
 );
 CREATE INDEX IF NOT EXISTS idx_prompt_loads_ts ON prompt_loads(ts);
+
+-- Stage 0: auditable key/value record of how the corpus index was built.
+-- The re-embed pass writes ``card_index`` here so the indexed representation
+-- (plain / prefix / cards / both) is recoverable from the corpus alone.
+CREATE TABLE IF NOT EXISTS corpus_meta (
+    key VARCHAR PRIMARY KEY,
+    value VARCHAR NOT NULL,
+    updated_at BIGINT NOT NULL
+);
 """
 
 _FTS_SETUP_SQL = """
@@ -509,6 +520,66 @@ class VectorStore:
     def count_embeddings(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) FROM fragment_embeddings").fetchone()
         return int(row[0]) if row else 0
+
+    # -- corpus metadata -----------------------------------------------------
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Upsert a corpus_meta key/value pair (with an updated_at stamp).
+
+        Used to record the Stage 0 ``card_index`` mode so the corpus's indexed
+        representation is auditable without re-deriving it from the rows.
+        """
+        import time as _time
+
+        self._conn.execute(
+            """
+            INSERT INTO corpus_meta (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value,
+                                            updated_at = excluded.updated_at
+            """,
+            [key, value, int(_time.time())],
+        )
+
+    def get_meta(self, key: str) -> str | None:
+        """Return the corpus_meta value for ``key``, or None if unset/absent.
+
+        Soft-fails to None when the table is missing (corpus predates Stage 0).
+        """
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM corpus_meta WHERE key = ?", [key]
+            ).fetchone()
+        except Exception:  # noqa: BLE001 — table absent on pre-Stage-0 corpora
+            return None
+        return str(row[0]) if row else None
+
+    def count_cards(self) -> int:
+        """Number of synthetic card documents currently in the index."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM fragment_embeddings WHERE fragment_type = ?",
+            [CARD_FRAGMENT_TYPE],
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def delete_cards(self, skill_id: str | None = None) -> int:
+        """Remove synthetic card documents. Returns rows deleted.
+
+        ``skill_id=None`` drops every card (full-scope rebuild). Passing a
+        ``skill_id`` scopes the delete to that one skill's card — required when
+        re-embedding a single skill (``--skill-id``), so other skills' cards
+        survive a scoped pass instead of being wiped and never reinserted.
+        """
+        before = self.count_embeddings()
+        if skill_id is None:
+            self._conn.execute(
+                "DELETE FROM fragment_embeddings WHERE fragment_type = ?", [CARD_FRAGMENT_TYPE]
+            )
+        else:
+            self._conn.execute(
+                "DELETE FROM fragment_embeddings WHERE fragment_type = ? AND skill_id = ?",
+                [CARD_FRAGMENT_TYPE, skill_id],
+            )
+        return before - self.count_embeddings()
 
     def embedding_dim(self) -> int | None:
         """Return the dimension of stored embeddings, or None if the corpus is empty.

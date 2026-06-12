@@ -24,6 +24,7 @@ NODE_TABLES: tuple[str, ...] = (
         phase_scope STRING[],
         category_scope STRING[],
         tier STRING,
+        description STRING,
         PRIMARY KEY(skill_id)
     )
     """,
@@ -65,4 +66,8 @@ REL_TABLES: tuple[str, ...] = (
 ALTER_TABLES: tuple[str, ...] = (
     "ALTER NODE TABLE Skill ADD COLUMN deprecated BOOLEAN DEFAULT false",
     "ALTER NODE TABLE Skill ADD COLUMN superseded_by STRING",
+    # Stage 0 (skill-card indexing): the skill's one-line self-description,
+    # used to build card headers / card documents at re-embed time. Optional —
+    # corpora built before this column read it back as NULL.
+    "ALTER NODE TABLE Skill ADD COLUMN description STRING",
 )

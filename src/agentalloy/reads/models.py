@@ -24,6 +24,9 @@ class ActiveSkill:
     category_scope: list[str] | None
     active_version_id: str
     tier: str | None
+    # Stage 0: the skill's one-line self-description. None when the corpus
+    # predates the column or the author left it blank — read-tolerant.
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,3 +43,5 @@ class ActiveFragment:
     # Authored Skill.phase_scope (e.g. ("build", "review")); None when the
     # skill declares no scope. Eligibility unions this with the category map.
     phase_scope: tuple[str, ...] | None = None
+    # Stage 0: the parent skill's one-line self-description (None-tolerant).
+    description: str | None = None

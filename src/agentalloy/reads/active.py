@@ -49,7 +49,7 @@ def get_active_skills(
     {filters}
     RETURN s.skill_id, s.canonical_name, s.category, s.skill_class,
            s.domain_tags, s.always_apply, s.phase_scope, s.category_scope,
-           v.version_id, s.tier
+           v.version_id, s.tier, s.description
     ORDER BY s.skill_id
     """
     return [_row_to_active_skill(row) for row in store.execute(cypher, params)]
@@ -76,7 +76,7 @@ def get_active_skill_by_id(store: LadybugStore, skill_id: str) -> ActiveSkill | 
     WHERE v.status = 'active' AND s.deprecated = false
     RETURN s.skill_id, s.canonical_name, s.category, s.skill_class,
            s.domain_tags, s.always_apply, s.phase_scope, s.category_scope,
-           v.version_id, s.tier
+           v.version_id, s.tier, s.description
     """
     rows = store.execute(cypher, {"skill_id": skill_id})
     if not rows:
@@ -134,7 +134,7 @@ def get_active_fragments(
     {where_clause}
     RETURN f.fragment_id, f.fragment_type, f.sequence, f.content,
            s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags,
-           s.phase_scope
+           s.phase_scope, s.description
     ORDER BY s.skill_id, f.sequence
     """
     return [_row_to_active_fragment(row) for row in store.execute(cypher, params)]
@@ -150,7 +150,7 @@ def get_active_fragments_for_skill(store: LadybugStore, skill_id: str) -> list[A
     WHERE v.status = 'active' AND s.deprecated = false
     RETURN f.fragment_id, f.fragment_type, f.sequence, f.content,
            s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags,
-           s.phase_scope
+           s.phase_scope, s.description
     ORDER BY f.sequence
     """
     return [_row_to_active_fragment(row) for row in store.execute(cypher, {"skill_id": skill_id})]
@@ -291,6 +291,7 @@ def _row_to_active_skill(row: list[Any]) -> ActiveSkill:
         category_scope=_optional_list(row[7]),
         active_version_id=cast("str", row[8]),
         tier=cast("str | None", row[9]) if len(row) > 9 else None,
+        description=_optional_str(row[10]) if len(row) > 10 else None,
     )
 
 
@@ -307,7 +308,21 @@ def _row_to_active_fragment(row: list[Any]) -> ActiveFragment:
         category=cast("str", row[7]),
         domain_tags=list(cast("list[str]", row[8])),
         phase_scope=tuple(cast("list[str]", raw_scope)) if raw_scope else None,
+        description=_optional_str(row[10]) if len(row) > 10 else None,
     )
+
+
+def _optional_str(value: Any) -> str | None:
+    """Normalize a Kuzu STRING column to ``str | None``.
+
+    Corpora built before the ``description`` column read it back as NULL;
+    authors may also leave it blank. Both collapse to None so downstream
+    "no description" checks are uniform.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
 
 
 def _optional_list(value: Any) -> list[str] | None:

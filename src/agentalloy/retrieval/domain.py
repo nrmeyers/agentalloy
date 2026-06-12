@@ -40,6 +40,7 @@ from agentalloy.retrieval.embedding_errors import (
     safe_embed,
 )
 from agentalloy.retrieval.rerank import build_reranker_from_env, rerank_max_pairs
+from agentalloy.storage.card_index import is_card_id, skill_id_from_card_id
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
 
 _RRF_K_DEFAULT = 60
@@ -250,6 +251,44 @@ def _rrf_fuse(
         scores[fid] = dense_score + bm25_score
 
     return sorted(all_ids, key=lambda fid: scores[fid], reverse=True)
+
+
+def _apply_card_boost(fused_ids: list[str], skill_of: dict[str, str]) -> list[str]:
+    """Resolve Stage 0 card hits into skill ranking, then drop the cards.
+
+    Card documents (``card::<skill_id>``) ride the same fused list as real
+    fragments. A card must NEVER be assembled into ``/compose`` output, but a
+    high-ranking card *should* lift its skill — Stage 0's whole point. Because
+    ``skill_granular_select`` ranks skills by the position of their first
+    fragment, we promote each skill's fragments to its card's position when the
+    card ranks higher, then strip every card id.
+
+    ``skill_of`` maps real fragment_id → skill_id (from the hydrated metadata),
+    so the boost is keyed on exact skill identity — never a fragment-id prefix
+    guess. No cards in the list (the default ``off``/``prefix`` corpus) →
+    returned unchanged: a no-op on a card-free index, preserving today's order.
+    """
+    if not any(is_card_id(fid) for fid in fused_ids):
+        return fused_ids
+
+    # Best (lowest) fused position at which each skill's card appeared.
+    card_pos: dict[str, int] = {}
+    for pos, fid in enumerate(fused_ids):
+        if is_card_id(fid):
+            sid = skill_id_from_card_id(fid)
+            card_pos.setdefault(sid, pos)
+
+    real = [fid for fid in fused_ids if not is_card_id(fid)]
+
+    # Stable re-sort: a fragment's effective rank is the better of its own
+    # fused position and its skill's card position. Ties keep fused order.
+    def effective_key(item: tuple[int, str]) -> tuple[int, int]:
+        idx, fid = item
+        sid = skill_of.get(fid)
+        cpos = card_pos.get(sid, idx) if sid is not None else idx
+        return (min(idx, cpos), idx)
+
+    return [fid for _, fid in sorted(enumerate(real), key=effective_key)]
 
 
 def _bm25_fallback_result(
@@ -468,6 +507,11 @@ def retrieve_domain_candidates(
         domain_tags=domain_tags,
     )
     by_id = {f.fragment_id: f for f in metadata}
+
+    # Stage 0 card exclusion + boost: a card hit lifts its skill's rank, then
+    # every card id is stripped so cards can never be assembled. No-op on a
+    # card-free (off/prefix) index — preserves today's order exactly.
+    fused_ids = _apply_card_boost(fused_ids, {fid: f.skill_id for fid, f in by_id.items()})
 
     # Build dense score lookup for observability.
     dense_score_by_id = {h.fragment_id: 1.0 - h.distance for h in dense_hits}

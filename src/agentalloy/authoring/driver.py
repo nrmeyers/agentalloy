@@ -120,6 +120,12 @@ def author_one(
         )
 
     skill_id = str(data_dict["skill_id"]).strip()
+
+    # Stage 0 (skill-card indexing): pass through the source SKILL.md
+    # frontmatter ``description:`` when the author didn't emit one of its own.
+    # The description feeds card-header / card-document indexing at re-embed.
+    yaml_text = _passthrough_description(yaml_text, data_dict, source_text)
+
     out_path = paths.pending_qa / f"{skill_id}.yaml"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml_text, encoding="utf-8")
@@ -315,6 +321,52 @@ def _build_user_prompt(source: Path, source_text: str) -> str:
         f"---SOURCE---\n{source_text}\n---END SOURCE---\n\n"
         f"/no_think"
     )
+
+
+_FRONTMATTER_RE = re.compile(r"^\s*---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _source_frontmatter_description(source_text: str) -> str | None:
+    """Extract ``description:`` from a SKILL.md YAML frontmatter block.
+
+    Returns the trimmed value, or None when there is no frontmatter, no
+    ``description`` key, or it parses to something non-scalar. Never raises —
+    a malformed source must not abort authoring.
+    """
+    m = _FRONTMATTER_RE.match(source_text)
+    if not m:
+        return None
+    try:
+        fm: Any = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(fm, dict):
+        return None
+    value: Any = cast(dict[str, Any], fm).get("description")
+    if value is None or isinstance(value, (dict, list)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _passthrough_description(yaml_text: str, data_dict: dict[str, Any], source_text: str) -> str:
+    """Append the source frontmatter ``description:`` when the draft omits it.
+
+    No-op when the author already emitted a non-empty ``description`` or the
+    source carries none — so authored descriptions always win and existing
+    drafts are byte-unchanged. The value is YAML-dumped (not string-spliced)
+    so colons/quotes in the description can't corrupt the document.
+    """
+    existing: Any = data_dict.get("description")
+    if existing is not None and str(existing).strip():
+        return yaml_text
+    desc = _source_frontmatter_description(source_text)
+    if desc is None:
+        return yaml_text
+    line = yaml.safe_dump(
+        {"description": desc}, default_flow_style=False, allow_unicode=True
+    ).strip()
+    return f"{yaml_text.rstrip()}\n{line}\n"
 
 
 _FENCE_RE = re.compile(r"^\s*```(?:ya?ml)?\s*\n(.*?)\n```\s*$", re.DOTALL)
