@@ -39,12 +39,14 @@ COPY README.md ./
 COPY src/ ./src/
 
 # Create an empty data dir so the image is runnable without a bind mount.
-# The corpus (LadybugDB + DuckDB) is not shipped in the repo — it's
-# generated locally on first install via `agentalloy install-packs` and
-# `agentalloy.migrate`. The entrypoint script (generated at runtime by
-# `agentalloy setup --deployment container`) bind-mounts a host volume
-# onto /app/data so user data persists across container restarts.
+# The corpus (LadybugDB + DuckDB) is not committed to the repo — CI bakes a
+# prebuilt corpus into published images under /app/corpus-seed (see
+# .github/workflows/container-build.yml); the entrypoint copies it into the
+# data volume on first run so users skip the ~30-min CPU ingest+embed. For
+# local builds corpus-seed/ holds only .keep and the entrypoint falls back
+# to building the corpus via `agentalloy install-packs` as before.
 RUN mkdir -p data
+COPY corpus-seed/ /app/corpus-seed/
 
 RUN uv sync --frozen --no-dev
 

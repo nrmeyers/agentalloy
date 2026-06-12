@@ -115,3 +115,8 @@ tmp*.sh
 tmp*/
 # Un-stubbed Path mocks in tests can materialize a MagicMock/ dir
 MagicMock/
+
+# Prebuilt corpus staging for container builds — CI populates this;
+# only the .keep marker is tracked.
+corpus-seed/*
+!corpus-seed/.keep

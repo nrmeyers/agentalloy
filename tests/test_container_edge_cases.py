@@ -1434,3 +1434,55 @@ class TestCancelDuringReview:
         )
         rc = _run_container_flow(cfg, 0.0)
         assert rc in (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# EC-13: Entrypoint — prebuilt corpus seed (skip ingest when image carries one)
+# ---------------------------------------------------------------------------
+
+
+class TestEntrypointPrebuiltCorpusSeed:
+    """CI-built images bake a corpus under /app/corpus-seed; the entrypoint
+    copies it into the data volume and skips per-pack ingest entirely."""
+
+    def test_seed_branch_present(self):
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("core,webhooks")
+        assert 'SEED_DIR="${SEED_DIR:-/app/corpus-seed}"' in script
+        assert "corpus-stamp.json" in script
+        assert "CORPUS_SEEDED=true" in script
+
+    def test_seed_checks_volume_has_no_corpus(self):
+        """Seeding must never clobber an existing corpus in the data volume."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert '[ ! -f "$APP_DIR/data/skills.duck" ]' in script
+
+    def test_pack_ingest_gated_on_not_seeded(self):
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("core")
+        assert '[ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]' in script
+        # seed branch is decided before the ingest gate consumes it
+        assert script.index("CORPUS_SEEDED=false") < script.index('[ "$CORPUS_SEEDED" = "false" ]')
+
+    def test_bootstrap_complete_marker_set_on_seeded_path(self):
+        """The completion marker block is gated on BOOTSTRAP_NEEDED alone, so a
+        seeded run still writes .bootstrap-complete (host readiness polling)."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("core")
+        ingest_gate = script.index('[ "$CORPUS_SEEDED" = "false" ]')
+        complete_block = script.rindex('if [ "$BOOTSTRAP_NEEDED" = "true" ]; then')
+        assert complete_block > ingest_gate
+        assert 'touch "$COMPLETE"' in script[complete_block:]
+
+    def test_ollama_setup_not_gated_on_seed(self):
+        """Query embedding needs Ollama at runtime — its setup must run on the
+        seeded path too (it precedes the seed-aware ingest gate)."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert script.index("ollama serve") < script.index('[ "$CORPUS_SEEDED" = "false" ]')

@@ -287,6 +287,11 @@ def _build_entrypoint_script(packs: str) -> str:
     5. Starts ``uvicorn`` **after** pack ingestion completes, avoiding the
        Kuzu file-lock conflict that occurred when uvicorn opened Ladybug
        before pack ingestion finished.
+    6. Prebuilt-corpus seed: if the image carries ``/app/corpus-seed``
+       (CI bakes a fully ingested + embedded corpus plus
+       ``corpus-stamp.json``) and the data volume has no corpus yet, the
+       seed is copied in and the per-pack ingest loop is skipped entirely.
+       Ollama setup still runs — query embedding needs it at runtime.
     """
     pack_list = [p for p in (packs or "").split(",") if p.strip()]
     has_packs = len(pack_list) > 0
@@ -348,6 +353,27 @@ def _build_entrypoint_script(packs: str) -> str:
         '    echo ">> Bootstrap already complete - skipping to uvicorn"',
         "fi",
         "",
+        "# --- Prebuilt corpus seed ------------------------------------------",
+        "# CI-built images carry a fully ingested + embedded corpus under",
+        "# /app/corpus-seed (.github/workflows/container-build.yml). When it",
+        "# is present and the data volume has no corpus yet, copy it in and",
+        "# skip per-pack ingest + re-embed — first run drops from ~30 min of",
+        "# CPU embedding to seconds. Ollama setup stays unconditional: query",
+        "# embedding at compose time still needs the model at runtime.",
+        'SEED_DIR="${SEED_DIR:-/app/corpus-seed}"',
+        "CORPUS_SEEDED=false",
+        'if [ "$BOOTSTRAP_NEEDED" = "true" ] \\',
+        '   && [ -f "$SEED_DIR/corpus-stamp.json" ] \\',
+        '   && [ ! -f "$APP_DIR/data/skills.duck" ]; then',
+        '    echo ">> Seeding prebuilt corpus from image (skipping pack ingest + re-embed)"',
+        '    mkdir -p "$APP_DIR/data"',
+        '    cp -a "$SEED_DIR/ladybug" "$APP_DIR/data/ladybug"',
+        '    cp "$SEED_DIR/skills.duck" "$APP_DIR/data/skills.duck"',
+        '    cp "$SEED_DIR/corpus-stamp.json" "$APP_DIR/data/corpus-stamp.json"',
+        "    CORPUS_SEEDED=true",
+        '    cat "$APP_DIR/data/corpus-stamp.json"',
+        "fi",
+        "",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
         "    # Record bootstrap start. Content is the canonical timestamp;",
         "    # mtime is the fallback for stale-lock detection.",
@@ -389,7 +415,8 @@ def _build_entrypoint_script(packs: str) -> str:
         "# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------",
         "trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM",
         "",
-        'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
+        "# Pack ingest runs only when the corpus was not seeded from the image.",
+        'if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]; then',
     ]
 
     if has_packs:
@@ -434,8 +461,11 @@ def _build_entrypoint_script(packs: str) -> str:
 
     lines.extend(
         [
+            "fi",
             "",
-            "    # Mark bootstrap complete and clear the lock.",
+            "# Mark bootstrap complete and clear the lock (covers both the",
+            "# pack-ingest path and the seeded-corpus path).",
+            'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
             '    rm -f "$LOCK"',
             '    touch "$COMPLETE"',
             '    echo ">> Bootstrap complete"',
