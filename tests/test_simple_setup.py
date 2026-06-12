@@ -1323,9 +1323,10 @@ class TestContainerFlow:
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
             patch.object(setup_mod, "__file__", str(fake_module_file)),
-            # Prompt sequence: CPU-only continue → clone path → packs (blank
-            # = always-on) → final confirm.
-            patch("builtins.input", side_effect=["y", str(clone), "", "y"]),
+            # Prompt sequence: CPU-only continue → final confirm. (The pack
+            # picker was removed from the container flow — published images
+            # ship an all-packs corpus seed — and GHCR pull needs no path.)
+            patch("builtins.input", side_effect=["y", "y"]),
         ):
             mock_result = MagicMock()
             mock_result.returncode = 0
@@ -1372,9 +1373,10 @@ class TestContainerFlow:
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
             patch.object(setup_mod, "__file__", str(fake_module_file)),
-            # Prompt sequence: CPU-only continue → compose path → packs
-            # (blank = always-on) → final confirm.
-            patch("builtins.input", side_effect=["y", str(compose_file), "", "y"]),
+            # Prompt sequence: CPU-only continue → final confirm. (The pack
+            # picker was removed from the container flow — published images
+            # ship an all-packs corpus seed — and GHCR pull needs no path.)
+            patch("builtins.input", side_effect=["y", "y"]),
         ):
             mock_result = MagicMock()
             mock_result.returncode = 0
