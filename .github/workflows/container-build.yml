@@ -3,13 +3,16 @@ name: Container Build & Publish
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 # Rapid merges to main otherwise race the corpus job before the first run
 # saves its cache, duplicating the ~100-min embed. Newest push wins; the
 # superseded build is cancelled (only its image would have been stale anyway).
+# Ref-scoped so a release-tag build and a main build don't cancel each other —
+# they produce different tags from (usually) the same commit.
 concurrency:
-  group: container-build
+  group: container-build-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -141,6 +144,8 @@ jobs:
           tags: |
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
+            # Release pinning: pushing tag vX.Y.Z publishes ghcr.io/...:X.Y.Z
+            type=semver,pattern={{version}}
 
       - name: Build and push (latest — lightweight, no model)
         uses: docker/build-push-action@v5
@@ -190,6 +195,8 @@ jobs:
           tags: |
             type=sha,suffix=-full
             type=raw,value=full,enable={{is_default_branch}}
+            # Release pinning: pushing tag vX.Y.Z publishes ghcr.io/...:X.Y.Z-full
+            type=semver,pattern={{version}},suffix=-full
 
       - name: Build and push (full — model pre-pulled)
         uses: docker/build-push-action@v5
