@@ -1,0 +1,358 @@
+# Labeled intent-classifier benchmark for AgentAlloy's signal layer.
+#
+# Three transition intents the signal layer cares about:
+#   completion  — user signals the current artifact/step is done; ready to advance.
+#   approval    — user is approving recent work/output (transition-grade approval).
+#   redirection — user wants to change direction / abandon the current approach.
+#   none        — ordinary task prompts, questions, bug reports; no transition signal.
+#
+# Fields per item:
+#   text        — the user utterance (paraphrases a real user would type; typos kept).
+#   label       — gold: completion | approval | redirection | none
+#   difficulty  — clear | paraphrase | negation | scoped
+#
+# Positives are deliberately NOT copied from classifier._INTENT_REFERENCES.
+# Hard negatives: negations (label flips to none) and scoped praise (praise that
+# is NOT a transition-grade approval — label none).
+
+items:
+  # ===================== COMPLETION =====================
+  - text: "yeah I think we've nailed the requirements, what's next"
+    label: completion
+    difficulty: paraphrase
+  - text: "ok the spec captures everything I wanted, let's proceed"
+    label: completion
+    difficulty: paraphrase
+  - text: "I'm satisfied with where the design landed, time to build"
+    label: completion
+    difficulty: paraphrase
+  - text: "no further changes needed on this, let's keep going"
+    label: completion
+    difficulty: paraphrase
+  - text: "that's the whole picture I think, we can stop here"
+    label: completion
+    difficulty: paraphrase
+  - text: "this is feature-complete as far as I'm concerned"
+    label: completion
+    difficulty: clear
+  - text: "everything I needed is in there now"
+    label: completion
+    difficulty: paraphrase
+  - text: "great, I have no more requirements to add"
+    label: completion
+    difficulty: paraphrase
+  - text: "the doc is exhaustive enough, next phase please"
+    label: completion
+    difficulty: paraphrase
+  - text: "alright we covered all the edge cases, what comes after"
+    label: completion
+    difficulty: paraphrase
+  - text: "I think that's a wrap on the requirements gathering"
+    label: completion
+    difficulty: paraphrase
+  - text: "consider the spec final, nothing else from me"
+    label: completion
+    difficulty: clear
+  - text: "we can close out this step, it's all there"
+    label: completion
+    difficulty: paraphrase
+  - text: "yep, requirements look locked, advance us"
+    label: completion
+    difficulty: paraphrase
+  - text: "I've got nothing else to add, mark it done"
+    label: completion
+    difficulty: paraphrase
+  - text: "that ties up all the loose ends, onward"
+    label: completion
+    difficulty: paraphrase
+  - text: "this is NOT done yet, there are gaps in the spec"
+    label: none
+    difficulty: negation
+  - text: "we are far from finished here, lots missing"
+    label: none
+    difficulty: negation
+  - text: "I wouldn't call this complete, keep adding to it"
+    label: none
+    difficulty: negation
+  - text: "almost done but not quite, hold on"
+    label: none
+    difficulty: negation
+  - text: "is the spec complete or are we still missing pieces?"
+    label: none
+    difficulty: negation
+  - text: "the auth section is finished, now write the billing section"
+    label: none
+    difficulty: scoped
+  - text: "part one is done, part two still needs a lot of work"
+    label: none
+    difficulty: scoped
+  - text: "the intro reads complete, the rest is a stub"
+    label: none
+    difficulty: scoped
+
+  # ===================== APPROVAL =====================
+  - text: "this matches what I had in mind, proceed"
+    label: approval
+    difficulty: paraphrase
+  - text: "yep that's exactly the output I wanted, go for it"
+    label: approval
+    difficulty: paraphrase
+  - text: "nice work, you can commit that"
+    label: approval
+    difficulty: paraphrase
+  - text: "I'm happy with this, push it through"
+    label: approval
+    difficulty: paraphrase
+  - text: "great, that's approved on my end"
+    label: approval
+    difficulty: clear
+  - text: "sold, let's land this change"
+    label: approval
+    difficulty: paraphrase
+  - text: "the implementation is solid, sign off from me"
+    label: approval
+    difficulty: paraphrase
+  - text: "yeah do it, that's the right call"
+    label: approval
+    difficulty: paraphrase
+  - text: "thumbs up, send it"
+    label: approval
+    difficulty: clear
+  - text: "no notes, this is good to merge"
+    label: approval
+    difficulty: paraphrase
+  - text: "I co-sign this approach, carry on"
+    label: approval
+    difficulty: paraphrase
+  - text: "all good on my side, you have the green light"
+    label: approval
+    difficulty: paraphrase
+  - text: "yes please apply that, looks right"
+    label: approval
+    difficulty: paraphrase
+  - text: "that's the one, lock it in"
+    label: approval
+    difficulty: paraphrase
+  - text: "perfect, you nailed it, ship that version"
+    label: approval
+    difficulty: paraphrase
+  - text: "great stuff, I approve the whole change"
+    label: approval
+    difficulty: paraphrase
+  - text: "don't approve this yet, I have concerns"
+    label: none
+    difficulty: negation
+  - text: "I'm NOT approving this in its current state"
+    label: none
+    difficulty: negation
+  - text: "hold off on merging, something feels off"
+    label: none
+    difficulty: negation
+  - text: "I can't sign off on this until the tests pass"
+    label: none
+    difficulty: negation
+  - text: "perfect, now fix the second one"
+    label: none
+    difficulty: scoped
+  - text: "great explanation, but the code still has a bug"
+    label: none
+    difficulty: scoped
+  - text: "nice, that part works; the rest is broken though"
+    label: none
+    difficulty: scoped
+  - text: "looks good aesthetically but the logic is wrong"
+    label: none
+    difficulty: scoped
+
+  # ===================== REDIRECTION =====================
+  - text: "let's scrap this and take a completely different tack"
+    label: redirection
+    difficulty: paraphrase
+  - text: "I want to rethink the whole approach from scratch"
+    label: redirection
+    difficulty: paraphrase
+  - text: "this direction isn't panning out, let's pivot"
+    label: redirection
+    difficulty: paraphrase
+  - text: "forget what we did, start fresh with a new plan"
+    label: redirection
+    difficulty: paraphrase
+  - text: "we're going down the wrong path, back up and reconsider"
+    label: redirection
+    difficulty: paraphrase
+  - text: "can we try a totally different strategy here"
+    label: redirection
+    difficulty: paraphrase
+  - text: "nah this design is a dead end, let's redo it"
+    label: redirection
+    difficulty: paraphrase
+  - text: "I changed my mind, let's go another way entirely"
+    label: redirection
+    difficulty: paraphrase
+  - text: "throw this out, we need a fresh approach"
+    label: redirection
+    difficulty: clear
+  - text: "stop, this whole plan needs rethinking"
+    label: redirection
+    difficulty: paraphrase
+  - text: "let's abandon the microservice idea and do a monolith"
+    label: redirection
+    difficulty: paraphrase
+  - text: "scrap the current implementation, different architecture please"
+    label: redirection
+    difficulty: clear
+  - text: "this approach has too many problems, pivot to plan B"
+    label: redirection
+    difficulty: paraphrase
+  - text: "let's ditch this design and brainstorm a new one"
+    label: redirection
+    difficulty: paraphrase
+  - text: "wrong track, let's reset and try again differently"
+    label: redirection
+    difficulty: paraphrase
+  - text: "I'd rather we scrap this and rethink from the ground up"
+    label: redirection
+    difficulty: paraphrase
+  - text: "I almost said scratch that but let's keep going"
+    label: none
+    difficulty: negation
+  - text: "no need to change direction, this is working fine"
+    label: none
+    difficulty: negation
+  - text: "don't start over, just tweak the edge case"
+    label: none
+    difficulty: negation
+  - text: "I was going to switch approaches but actually never mind"
+    label: none
+    difficulty: negation
+  - text: "let's change the variable name from x to count"
+    label: none
+    difficulty: scoped
+  - text: "redirect stdout to a file in this script"
+    label: none
+    difficulty: scoped
+  - text: "change the button color to blue"
+    label: none
+    difficulty: scoped
+  - text: "we should change the timeout from 30s to 60s"
+    label: none
+    difficulty: scoped
+
+  # ===================== NONE (ordinary prompts) =====================
+  - text: "how do I configure a postgres connection pool in SQLAlchemy?"
+    label: none
+    difficulty: clear
+  - text: "write a function that parses ISO 8601 timestamps"
+    label: none
+    difficulty: clear
+  - text: "the login page throws a 500 when email is empty, can you fix it"
+    label: none
+    difficulty: clear
+  - text: "what's the difference between a thread and a process"
+    label: none
+    difficulty: clear
+  - text: "add pagination to the users API endpoint"
+    label: none
+    difficulty: clear
+  - text: "why is my docker build so slow"
+    label: none
+    difficulty: clear
+  - text: "refactor this class to use dependency injection"
+    label: none
+    difficulty: clear
+  - text: "explain what a reciprocal rank fusion is"
+    label: none
+    difficulty: clear
+  - text: "set up a github actions workflow for the test suite"
+    label: none
+    difficulty: clear
+  - text: "the cache keeps returning stale data, help me debug"
+    label: none
+    difficulty: clear
+  - text: "generate a regex that matches semantic version strings"
+    label: none
+    difficulty: clear
+  - text: "can you add type hints to this module"
+    label: none
+    difficulty: clear
+  - text: "what's the best way to store secrets in a kubernetes cluster"
+    label: none
+    difficulty: clear
+  - text: "implement binary search on a sorted list of dicts by key"
+    label: none
+    difficulty: clear
+  - text: "my test is flaky, it passes locally but fails in ci"
+    label: none
+    difficulty: clear
+  - text: "convert this callback-based code to async/await"
+    label: none
+    difficulty: clear
+  - text: "draft a README for this CLI tool"
+    label: none
+    difficulty: clear
+  - text: "how do i mock an httpx client in pytest"
+    label: none
+    difficulty: clear
+  - text: "the memory usage climbs over time, looks like a leak"
+    label: none
+    difficulty: clear
+  - text: "add a --verbose flag to the argparse parser"
+    label: none
+    difficulty: clear
+  - text: "what does the GIL actually prevent"
+    label: none
+    difficulty: clear
+  - text: "set up pre-commit hooks for ruff and black"
+    label: none
+    difficulty: clear
+  - text: "i need to dedupe a list while preserving order"
+    label: none
+    difficulty: clear
+  - text: "the websocket disconnects after 60 seconds, why"
+    label: none
+    difficulty: clear
+  - text: "write a migration to add a nullable created_at column"
+    label: none
+    difficulty: clear
+  - text: "whats teh fastest way to read a big csv in pandas"
+    label: none
+    difficulty: clear
+  - text: "should I use a queue or a stack for this traversal"
+    label: none
+    difficulty: clear
+  - text: "parse this log file and count errors by severity"
+    label: none
+    difficulty: clear
+  - text: "what timezone does datetime.now() use by default"
+    label: none
+    difficulty: clear
+  - text: "add retry with exponential backoff to this request"
+    label: none
+    difficulty: clear
+  - text: "the unit tests pass but coverage dropped, where"
+    label: none
+    difficulty: clear
+  - text: "rename this endpoint from /v1/user to /v1/users"
+    label: none
+    difficulty: scoped
+  - text: "good catch on the typo, now also handle the null case"
+    label: none
+    difficulty: scoped
+  - text: "the first query is done running, kick off the second"
+    label: none
+    difficulty: scoped
+  - text: "swap the approach in this one helper to use a set"
+    label: none
+    difficulty: scoped
+  - text: "how do I profile cpu usage of a python script"
+    label: none
+    difficulty: clear
+  - text: "write a dockerfile for a fastapi app with uvicorn"
+    label: none
+    difficulty: clear
+  - text: "explain how RRF combines BM25 and dense rankings"
+    label: none
+    difficulty: clear
+  - text: "the json parser chokes on trailing commas, fix it"
+    label: none
+    difficulty: clear
