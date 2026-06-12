@@ -5,6 +5,10 @@ description: "Handle errors in Rust without exceptions: use Result and Option fo
 category: engineering
 skill_class: domain
 domain_tags: [result-propagation, option-combinators, question-mark-operator, error-conversion-from, error-context-anyhow, rust]
+related:
+- error-handling-patterns
+- rust-async-and-concurrency
+- rust-ownership-and-borrowing
 always_apply: false
 phase_scope: [build]
 category_scope: language

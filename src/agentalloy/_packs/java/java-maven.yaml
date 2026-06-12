@@ -10,6 +10,10 @@ domain_tags:
 - build
 - pom
 - dependency-management
+related:
+- dependency-upgrade
+- java-gradle
+- java-spring-di
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

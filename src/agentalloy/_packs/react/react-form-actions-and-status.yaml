@@ -10,6 +10,12 @@ domain_tags:
 - useActionState
 - useFormStatus
 - server-actions
+requires:
+- react-server-actions
+related:
+- nextjs-server-actions-and-mutations
+- react-hooks-rules-and-deps
+- react-optimistic-updates
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

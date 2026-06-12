@@ -9,6 +9,13 @@ domain_tags:
   - pipes
   - guards
   - interceptors
+requires:
+- nestjs-controllers-and-routing
+- nestjs-modules-and-providers
+related:
+- nestjs-caching
+- nestjs-exception-filters
+- nestjs-middleware
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

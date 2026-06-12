@@ -5,6 +5,10 @@ description: "Test Node.js code without installing Jest or Vitest: write unit an
 category: engineering
 skill_class: domain
 domain_tags: [node-test, node-assert, mock-fn, subtest, lifecycle-hooks, nodejs, testing, native, describe/it, test-hooks]
+related:
+- node-event-loop-and-async
+- testing-mocks-and-spies
+- testing-runner-fundamentals
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

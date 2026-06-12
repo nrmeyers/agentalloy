@@ -5,6 +5,12 @@ description: "Automate CI/CD pipelines, tests, and deployments on GitHub: config
 category: ops
 skill_class: domain
 domain_tags: [github-actions, events, triggers, workflows]
+requires:
+- github-actions-workflow-syntax
+related:
+- github-actions-expressions-and-contexts
+- github-actions-reusable-workflows
+- github-actions-secrets
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

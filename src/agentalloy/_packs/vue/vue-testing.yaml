@@ -10,6 +10,13 @@ domain_tags:
 - vue-test-utils
 - component-testing
 - testing-library
+requires:
+- testing-runner-fundamentals
+- vue-composition-api-reactivity
+related:
+- react-react-testing-library
+- testing-snapshots
+- vue-script-setup-and-components
 always_apply: false
 phase_scope: [build, review]
 category_scope: [framework]

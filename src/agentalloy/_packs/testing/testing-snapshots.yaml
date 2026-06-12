@@ -10,6 +10,10 @@ domain_tags:
   - ui-testing
   - complex-objects
   - inline-snapshots
+related:
+- testing-runner-fundamentals
+- testing-snapshot-strategies
+- vue-testing
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

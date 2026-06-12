@@ -10,6 +10,10 @@ domain_tags:
 - react-testing-library
 - user-event
 - vitest
+related:
+- testing-runner-fundamentals
+- testing-snapshots
+- vue-testing
 always_apply: false
 phase_scope: [build, review]
 category_scope: [framework]

@@ -10,6 +10,10 @@ domain_tags:
 - file-io
 - async
 - filesystem
+related:
+- node-event-loop-and-async
+- node-streams-and-fs
+- nodejs-events-and-emitter
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

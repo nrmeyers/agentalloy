@@ -9,6 +9,10 @@ domain_tags:
   - redirects
   - rewrites
   - configuration
+related:
+- nextjs-app-router-routing
+- nextjs-metadata-and-og-images
+- nextjs-proxy-and-edge-runtime
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

@@ -10,6 +10,12 @@ domain_tags:
   - auto-generated methods
   - value-object
   - immutability
+requires:
+- python-typing-and-generics
+related:
+- python-enum
+- python-typing-protocol
+- testing-test-data-builders
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

@@ -10,6 +10,10 @@ domain_tags:
 - star-schema
 - fact-tables
 - kimball
+related:
+- data-engineering-iceberg-lakehouse
+- data-engineering-slowly-changing-dimensions
+- snowflake-dynamic-tables
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

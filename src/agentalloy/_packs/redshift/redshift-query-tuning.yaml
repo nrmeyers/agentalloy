@@ -11,6 +11,10 @@ domain_tags:
   - ANALYZE
   - best practices
   - redshift
+related:
+- redshift-spectrum-and-iceberg
+- redshift-table-design
+- redshift-workload-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -10,6 +10,10 @@ domain_tags:
   - plugins
   - configuration
   - severity
+related:
+- linting-eslint-plugin-authoring
+- linting-prettier-and-formatting
+- linting-shareable-configs
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

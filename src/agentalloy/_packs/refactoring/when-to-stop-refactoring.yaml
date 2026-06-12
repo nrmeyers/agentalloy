@@ -5,6 +5,10 @@ description: "Stop refactoring code when the next change is easy, not when it is
 category: design
 skill_class: domain
 domain_tags: [diminishing-returns, perfect-is-the-enemy, scope-creep, revert-as-option, time-boxing]
+related:
+- common-refactoring-moves
+- refactoring-safely-with-tests
+- refactoring-when-and-why
 always_apply: false
 phase_scope: [build, review]
 category_scope: [process]

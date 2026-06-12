@@ -11,6 +11,10 @@ domain_tags:
   - audit-trails
   - data-recovery
   - snowflake
+related:
+- snowflake-data-loading
+- snowflake-dynamic-tables
+- snowflake-snowpipe-auto-ingest
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -10,6 +10,10 @@ domain_tags:
 - json
 - documents
 - jsonpath
+related:
+- redis-hashes-and-sets
+- redis-lua-functions
+- redis-strings-and-key-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

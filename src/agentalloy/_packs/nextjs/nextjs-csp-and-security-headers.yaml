@@ -10,6 +10,10 @@ domain_tags:
 - security-headers
 - nonces
 - dynamic-rendering
+related:
+- nextjs-data-security-patterns
+- nextjs-production-checklist
+- nextjs-proxy-and-edge-runtime
 always_apply: false
 phase_scope:
 - build

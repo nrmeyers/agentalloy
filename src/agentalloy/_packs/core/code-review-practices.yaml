@@ -5,6 +5,12 @@ description: "Improve code quality and team velocity by mastering pull request r
 category: review
 skill_class: domain
 domain_tags: [pr-review, blocking-vs-nit, review-comment-tone, change-list-size, reviewer-fatigue]
+requires:
+- git-workflow
+related:
+- code-review-debugging-and-defects
+- inline-comments-and-docstrings
+- sdd-verify-and-review
 always_apply: false
 phase_scope: [build, review]
 category_scope: [process]

@@ -5,6 +5,10 @@ description: "Define API request and response shapes with Pydantic v2 in FastAPI
 category: engineering
 skill_class: domain
 domain_tags: [request-body-model, response-model-shape, field-constraints-validation, model-config-strict, field-validator-decorator, fastapi]
+related:
+- fastapi-dependency-injection
+- fastapi-routing-and-path-operations
+- fastapi-testing
 always_apply: false
 phase_scope: [build]
 category_scope: framework

@@ -10,6 +10,10 @@ domain_tags:
   - error-recovery
   - defect-spotting
   - triage-checklist
+related:
+- code-review-practices
+- debugging-systematic
+- error-handling-patterns
 always_apply: false
 phase_scope: [review]
 category_scope: [process]

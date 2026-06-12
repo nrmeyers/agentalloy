@@ -10,6 +10,10 @@ domain_tags:
   - mutation testing
   - code quality
   - software development
+related:
+- code-review-debugging-and-defects
+- refactoring-safely-with-tests
+- testing-property-based
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

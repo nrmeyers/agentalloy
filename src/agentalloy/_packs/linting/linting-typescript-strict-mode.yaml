@@ -10,6 +10,10 @@ domain_tags:
 - strict-mode
 - migration
 - tsconfig
+related:
+- linting-eslint-flat-config
+- linting-typescript-eslint
+- ts-strict-mode-and-tsconfig
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

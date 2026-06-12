@@ -5,6 +5,10 @@ description: "Manage data in React apps by choosing the right tool: use useState
 category: engineering
 skill_class: domain
 domain_tags: [usestate-functional-update, usereducer-action-types, context-provider-value, lifting-state-up, external-store-decision, react]
+related:
+- react-context-patterns
+- react-hooks-rules-and-deps
+- react-rendering-keys-and-memoization
 always_apply: false
 phase_scope: [build]
 category_scope: framework

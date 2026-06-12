@@ -1,5 +1,5 @@
 name: python
-version: 1.0.2
+version: 1.0.3
 tier: language
 description: Python language patterns — typing, async, error handling, packaging, idioms. Precision-favored language tier; sourced from python.org docs and PEPs per R1 tiered sourcing (fixtures/upstream/curated/python.yaml, version_anchor 3.13).
 author: navistone

@@ -10,6 +10,10 @@ domain_tags:
 - ai
 - ml
 - llm-functions
+related:
+- snowflake-snowpipe-auto-ingest
+- snowflake-tasks-and-automation
+- snowflake-warehouses-and-cost
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

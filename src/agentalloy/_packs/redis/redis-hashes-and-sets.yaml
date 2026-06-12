@@ -10,6 +10,10 @@ domain_tags:
 - sets
 - data-types
 - key-value
+related:
+- redis-json-module
+- redis-lists-and-sorted-sets
+- redis-strings-and-key-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

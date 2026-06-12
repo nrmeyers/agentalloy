@@ -10,6 +10,10 @@ domain_tags:
 - useRef
 - forwardRef
 - useImperativeHandle
+related:
+- react-forms-and-controlled-inputs
+- react-hooks-rules-and-deps
+- react-state-and-context
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

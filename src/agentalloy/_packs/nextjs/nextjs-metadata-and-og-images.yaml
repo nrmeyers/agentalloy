@@ -5,6 +5,12 @@ description: "Improve SEO and social sharing for your Next.js app: set page titl
 category: engineering
 skill_class: domain
 domain_tags: [static-metadata-export, generatemetadata-async, opengraph-image-imageresponse, sitemap-route, robots-route, nextjs]
+requires:
+- nextjs-app-router-routing
+related:
+- nextjs-csp-and-security-headers
+- nextjs-data-fetching-and-caching
+- nextjs-ppr-cache-components
 always_apply: false
 phase_scope: [build]
 category_scope: framework

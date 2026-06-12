@@ -10,6 +10,10 @@ domain_tags:
 - fuzzing
 - hypothesis
 - fast-check
+related:
+- debugging-systematic
+- go-testing-idioms
+- refactoring-safely-with-tests
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

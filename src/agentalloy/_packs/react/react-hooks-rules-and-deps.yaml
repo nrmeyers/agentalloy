@@ -5,6 +5,10 @@ description: "Build React apps with hooks like useState and useEffect: follow th
 category: engineering
 skill_class: domain
 domain_tags: [rules-of-hooks, exhaustive-deps-lint, usememo-vs-usecallback, useref-mutable-box, usereducer-state-reducer, react]
+related:
+- react-effects-and-cleanup
+- react-rendering-keys-and-memoization
+- react-state-and-context
 always_apply: false
 phase_scope: [build]
 category_scope: framework

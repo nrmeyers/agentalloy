@@ -10,6 +10,10 @@ domain_tags:
 - spies
 - stubs
 - vitest
+related:
+- node-built-in-test-runner
+- pytest-monkeypatch
+- testing-runner-fundamentals
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

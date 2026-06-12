@@ -10,6 +10,12 @@ domain_tags:
 - eslint-config
 - monorepo
 - config-package
+requires:
+- linting-eslint-rules-and-plugins
+related:
+- linting-monorepo-strategies
+- linting-prettier-and-formatting
+- linting-typescript-eslint
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

@@ -10,6 +10,10 @@ domain_tags:
   - asynchronous programming
   - test isolation
   - time-dependent assertions
+related:
+- debugging-systematic
+- refactoring-safely-with-tests
+- testing-property-based
 phase_scope: [build, review]
 category_scope: [tooling]
 author: authoring-agent

@@ -5,6 +5,10 @@ description: "Handle errors in Java apps by catching specific exceptions, chaini
 category: engineering
 skill_class: domain
 domain_tags: [checked-exception-policy, try-with-resources-closing, suppressed-exceptions-stack, throwable-cause-chaining, multi-catch-disjunction, java]
+related:
+- error-handling-patterns
+- python-context-managers-and-with
+- python-error-handling
 always_apply: false
 phase_scope: [build]
 category_scope: language

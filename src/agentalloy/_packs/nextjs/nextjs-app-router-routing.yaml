@@ -5,6 +5,10 @@ description: "Build websites, blogs, dashboards, and e-commerce apps with React 
 category: engineering
 skill_class: domain
 domain_tags: [file-system-segments, dynamic-route-params, nested-layouts, loading-error-boundaries, route-groups-parens, nextjs]
+related:
+- nextjs-data-fetching-and-caching
+- nextjs-ppr-cache-components
+- react-react-router
 always_apply: false
 phase_scope: [build]
 category_scope: framework

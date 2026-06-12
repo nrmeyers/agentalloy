@@ -10,6 +10,10 @@ domain_tags:
   - versioning
   - catalogs
   - webhooks
+related:
+- webhooks-documentation
+- webhooks-signature-verification
+- webhooks-versioning-and-evolution
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

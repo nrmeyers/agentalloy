@@ -5,6 +5,12 @@ description: "Run background jobs, web servers, and data pipelines in Python wit
 category: engineering
 skill_class: domain
 domain_tags: [create-task, gather, timeout, shield, exception-group, event-loop, structured-concurrency, run-in-executor, python]
+requires:
+- python-async-and-asyncio
+related:
+- fastapi-async-and-background-tasks
+- python-asyncio-streams
+- python-asyncio-tasks
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

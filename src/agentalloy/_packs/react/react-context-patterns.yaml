@@ -10,6 +10,10 @@ domain_tags:
 - state-management
 - providers
 - performance
+related:
+- react-performance-and-profiling
+- react-rendering-keys-and-memoization
+- react-state-and-context
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

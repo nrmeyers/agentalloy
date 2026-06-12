@@ -5,6 +5,12 @@ description: "Fix slow code or improve performance by measuring before and after
 category: design
 skill_class: domain
 domain_tags: [premature-optimization, baseline-measurement, before-and-after, profiling-vs-guessing, micro-benchmark]
+requires:
+- profiling-correctly
+related:
+- finding-the-bottleneck
+- performance-budgets
+- react-performance-and-profiling
 always_apply: false
 phase_scope: [build, review]
 category_scope: [ops]

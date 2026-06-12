@@ -5,6 +5,10 @@ description: "Speed up Java apps that wait on databases, APIs, or files: spawn l
 category: engineering
 skill_class: domain
 domain_tags: [jdk-tracepinnedthreads, structured-task-scope, pinning-and-yielding, completablefuture-composition, executors-newvirtualthreadpertaskexecutor, java]
+related:
+- csharp-async-and-tasks
+- java-exceptions-and-try-with-resources
+- java-spring-webflux
 always_apply: false
 phase_scope: [build]
 category_scope: language

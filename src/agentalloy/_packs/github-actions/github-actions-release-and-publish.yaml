@@ -10,6 +10,12 @@ domain_tags:
   - publishing
   - semantic-versioning
   - marketplace
+requires:
+- github-actions-workflow-syntax
+related:
+- github-actions-events-and-triggers
+- github-actions-immutable-releases
+- github-actions-reusable-workflows
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

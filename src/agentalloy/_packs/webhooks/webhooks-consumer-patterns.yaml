@@ -11,6 +11,10 @@ domain_tags:
   - payload-handling
   - endpoint-security
   - webhooks
+related:
+- webhooks-documentation
+- webhooks-event-types-and-schemas
+- webhooks-signature-verification
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

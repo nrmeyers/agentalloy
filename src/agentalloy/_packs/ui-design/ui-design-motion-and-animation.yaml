@@ -10,6 +10,10 @@ domain_tags:
 - animation
 - transitions
 - framer-motion
+related:
+- ui-design-component-patterns
+- ui-design-systems-architecture
+- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

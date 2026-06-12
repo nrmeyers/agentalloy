@@ -5,6 +5,10 @@ description: "Write responsive C# apps that handle I/O, APIs, and background job
 category: engineering
 skill_class: domain
 domain_tags: [task-composition, cancellation-token-flow, valuetask-allocation, configureawait-context, channel-bounded, csharp-dotnet]
+related:
+- csharp-mstest-testing
+- python-async-patterns
+- python-asyncio-tasks
 always_apply: false
 phase_scope: [build]
 category_scope: language

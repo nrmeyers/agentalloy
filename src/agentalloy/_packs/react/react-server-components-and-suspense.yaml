@@ -5,6 +5,10 @@ description: "Build fast React apps that fetch data on the server and stream HTM
 category: engineering
 skill_class: domain
 domain_tags: [server-component-async, use-client-boundary, suspense-fallback, use-promise-hook, streaming-error-fallback, lazy-code-splitting, react-query-suspense-query, route-level-suspense, react]
+related:
+- nextjs-data-fetching-and-caching
+- nextjs-ppr-cache-components
+- react-server-actions
 always_apply: false
 phase_scope: [build]
 category_scope: framework

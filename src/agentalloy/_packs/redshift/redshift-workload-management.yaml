@@ -10,6 +10,10 @@ domain_tags:
   - wlm
   - concurrency scaling
   - query prioritization
+related:
+- redshift-query-tuning
+- redshift-table-design
+- snowflake-warehouses-and-cost
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

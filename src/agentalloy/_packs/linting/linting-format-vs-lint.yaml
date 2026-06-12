@@ -9,6 +9,12 @@ domain_tags:
 - formatting
 - prettier
 - tooling-philosophy
+requires:
+- linting-prettier-and-formatting
+related:
+- linting-eslint-rules-and-plugins
+- linting-ruff-python
+- linting-stylelint
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

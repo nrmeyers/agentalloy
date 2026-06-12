@@ -5,6 +5,12 @@ description: "Write fast, safe Rust code for servers and tools: use threads for 
 category: engineering
 skill_class: domain
 domain_tags: [send-sync-bounds, future-poll-model, mpsc-channel, runtime-selection, cancellation-safety, rust]
+requires:
+- rust-ownership-and-borrowing
+related:
+- python-async-patterns
+- rust-cargo-and-features
+- rust-error-handling
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -5,6 +5,10 @@ description: "Add metadata or behavior to classes, methods, and properties in Ty
 category: engineering
 skill_class: domain
 domain_tags: [typescript, decorators, class, method, accessor]
+related:
+- nestjs-pipes-guards-interceptors
+- typescript-conditional-types
+- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

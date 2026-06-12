@@ -5,6 +5,10 @@ description: "Secure and manage API requests in FastAPI: use middleware for glob
 category: engineering
 skill_class: domain
 domain_tags: [starlette, asgi, cors, trusted-host, exception-handler, depends, lifespan, raw-body, fastapi, middleware, request-pipeline, cross-cutting]
+related:
+- fastapi-async-and-background-tasks
+- fastapi-cors
+- fastapi-dependency-injection
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

@@ -10,6 +10,10 @@ domain_tags:
 - rollback-plan
 - monitoring
 - feature-flag
+related:
+- sdd-design-and-planning
+- sdd-spec-and-scoping
+- sys-sdd-build
 always_apply: false
 phase_scope: [design]
 category_scope: [process]

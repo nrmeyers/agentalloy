@@ -10,6 +10,10 @@ domain_tags:
   - rdb
   - aof
   - durability
+related:
+- redis-replication
+- redis-sentinel
+- redis-strings-and-key-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

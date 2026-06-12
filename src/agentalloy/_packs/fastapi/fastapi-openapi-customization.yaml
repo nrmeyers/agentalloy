@@ -10,6 +10,12 @@ domain_tags:
   - customization
   - schema
   - webhooks
+requires:
+- fastapi-routing-and-path-operations
+related:
+- fastapi-auth-and-security
+- fastapi-pydantic-models-and-validation
+- writing-api-docs
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

@@ -9,6 +9,10 @@ domain_tags:
   - python
   - linting
   - formatting
+related:
+- inline-comments-and-docstrings
+- linting-format-vs-lint
+- linting-prettier-and-formatting
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

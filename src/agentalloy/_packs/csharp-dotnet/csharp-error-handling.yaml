@@ -5,6 +5,10 @@ description: "Handle errors in C# apps by throwing specific exceptions, catching
 category: engineering
 skill_class: domain
 domain_tags: [exception-filters, aggregateexception-flatten, custom-exception-types, argumentnullexception-throw-helper, dispatch-info-rethrow, csharp-dotnet]
+related:
+- csharp-nullable-and-pattern-matching
+- error-handling-patterns
+- python-error-handling
 always_apply: false
 phase_scope: [build]
 category_scope: language

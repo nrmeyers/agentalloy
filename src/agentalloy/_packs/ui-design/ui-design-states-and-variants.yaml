@@ -11,6 +11,12 @@ domain_tags:
 - interaction
 - hover
 - ui-design
+requires:
+- ui-design-tailwind-utility-classes
+related:
+- ui-design-component-patterns
+- ui-design-responsive-and-dark-mode
+- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope:
 - build

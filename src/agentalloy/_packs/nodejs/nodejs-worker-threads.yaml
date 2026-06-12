@@ -10,6 +10,10 @@ domain_tags:
   - parallelism
   - shared-memory
   - message-passing
+related:
+- node-event-loop-and-async
+- nodejs-cluster
+- python-multiprocessing
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

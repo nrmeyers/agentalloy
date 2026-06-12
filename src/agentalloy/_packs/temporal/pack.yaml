@@ -1,5 +1,5 @@
 name: temporal
-version: 1.0.1
+version: 1.0.2
 tier: store
 description: |
   Temporal Python SDK patterns — workflow definitions with @workflow.defn, activity definitions with @activity.defn, worker process setup, message passing (signals/queries/updates), and time primitives (schedules, timers, timeouts). Precision-favored store tier (durable execution platform); sourced from the temporalio/documentation GitHub repo per R1 tier-1 procedure (registry llms_full_url https://docs.temporal.io/llms-full.txt).

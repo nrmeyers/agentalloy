@@ -5,6 +5,13 @@ description: "Build high-performance APIs with FastAPI: choose async def for non
 category: engineering
 skill_class: domain
 domain_tags: [async-def-handler, threadpool-sync-handler, backgroundtasks-after-response, lifespan-context-manager, concurrency-limit-uvicorn, fastapi, background-tasks, post-response, async-work, celery-comparison]
+requires:
+- fastapi-lifespan-events
+- python-async-and-asyncio
+related:
+- fastapi-dependency-injection
+- fastapi-testing
+- python-async-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: framework

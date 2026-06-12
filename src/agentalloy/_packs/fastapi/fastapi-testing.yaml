@@ -10,6 +10,12 @@ domain_tags:
 - testclient
 - asyncclient
 - dependency-override
+requires:
+- fastapi-routing-and-path-operations
+related:
+- fastapi-auth-and-security
+- fastapi-dependency-injection
+- fastapi-pydantic-models-and-validation
 always_apply: false
 phase_scope: [build, review]
 category_scope: [framework]

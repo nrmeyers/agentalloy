@@ -11,6 +11,10 @@ domain_tags:
 - contrast
 - accessibility
 - color-blindness
+related:
+- ui-design-accessibility-fundamentals
+- ui-design-systems-architecture
+- ui-design-typography-scales
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

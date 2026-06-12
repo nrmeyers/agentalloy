@@ -10,6 +10,13 @@ domain_tags:
 - json-schema
 - fast-json-stringify
 - logging
+requires:
+- fastify-routes-and-handlers
+- fastify-validation-and-serialization
+related:
+- fastify-error-handling-deep
+- fastify-schema-typebox
+- fastify-typescript-integration
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

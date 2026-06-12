@@ -5,6 +5,10 @@ description: "Write reliable Go tests using table-driven cases for multiple inpu
 category: quality
 skill_class: domain
 domain_tags: [table-driven-tests, subtest-isolation, testing-helper, benchmark-loops, fuzz-corpus, go]
+related:
+- linting-golangci-lint
+- testing-flaky-tests
+- testing-property-based
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

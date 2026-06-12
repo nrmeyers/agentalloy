@@ -10,6 +10,10 @@ domain_tags:
 - authentication
 - authorization
 - oauth2
+related:
+- fastapi-auth-and-security
+- java-spring-boot-config
+- java-spring-di
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

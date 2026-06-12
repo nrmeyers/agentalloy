@@ -5,6 +5,9 @@ description: "Structure large Java applications with clear boundaries and depend
 category: tooling
 skill_class: domain
 domain_tags: [module-info-descriptor, exports-package, requires-transitive, services-uses-provides, jlink-runtime-image, java]
+related:
+- java-maven
+- nestjs-modules-and-providers
 always_apply: false
 phase_scope: [build]
 category_scope: language

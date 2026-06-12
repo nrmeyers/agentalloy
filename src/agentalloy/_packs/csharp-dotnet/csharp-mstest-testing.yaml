@@ -5,6 +5,12 @@ description: "Write unit and integration tests for C# .NET code using MSTest v3:
 category: quality
 skill_class: domain
 domain_tags: [test-class-attribute, data-row-parameterized, assert-throws-async, test-context-cancellation, assembly-initialize-cleanup, csharp-dotnet]
+requires:
+- csharp-async-and-tasks
+related:
+- csharp-error-handling
+- testing-flaky-tests
+- testing-property-based
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

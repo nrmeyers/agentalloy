@@ -5,6 +5,10 @@ description: "Handle errors in Python scripts and apps by catching specific exce
 category: engineering
 skill_class: domain
 domain_tags: [eafp-vs-lbyl, exception-chaining, raise-from, exceptiongroup, narrow-except, python]
+related:
+- error-handling-patterns
+- python-async-and-asyncio
+- python-context-managers-and-with
 always_apply: false
 phase_scope: [build]
 category_scope: language

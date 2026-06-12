@@ -10,6 +10,10 @@ domain_tags:
   - transition
   - keep-alive
   - teleport
+related:
+- vue-composition-api-reactivity
+- vue-script-setup-and-components
+- vue-template-directives
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

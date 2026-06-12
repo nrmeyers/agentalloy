@@ -10,6 +10,10 @@ domain_tags:
 - routing
 - data-loading
 - lazy-routes
+related:
+- nextjs-app-router-routing
+- react-tanstack-query
+- ui-design-loading-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

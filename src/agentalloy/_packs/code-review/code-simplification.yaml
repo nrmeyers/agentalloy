@@ -10,6 +10,10 @@ domain_tags:
 - clean-code
 - complexity-reduction
 - naming
+related:
+- common-refactoring-moves
+- refactoring-when-and-why
+- when-to-stop-refactoring
 always_apply: false
 phase_scope: [review]
 category_scope: [process]

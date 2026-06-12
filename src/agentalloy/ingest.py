@@ -136,6 +136,14 @@ class ReviewRecord:
     # Stage 0 (skill-card indexing): optional one-line self-description.
     # Absent in the legacy corpus — tolerated everywhere ("" → NULL on insert).
     description: str = ""
+    # Skill-graph edges (optional, fully backward compatible — absent = no edges).
+    # ``requires`` → REQUIRES_COMPOSITIONAL (hard dependency: this skill assumes
+    # the target's setup). ``related`` → REFERENCES_CONCEPTUAL (conceptual
+    # neighbor). Targets are skill_ids; cross-pack forward refs are tolerated
+    # (a target absent at insert time becomes a deferred-edge warning, not an
+    # error). Edges are replaced on re-ingest so version bumps stay idempotent.
+    requires: list[str] = field(default_factory=lambda: cast(list[str], []))
+    related: list[str] = field(default_factory=lambda: cast(list[str], []))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -308,7 +316,17 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
                 return EXIT_VALIDATION
 
         try:
-            _insert(store, record, force=force)
+            deferred = _insert(store, record, force=force)
+            # Single-file ingest: the target either already exists in the corpus
+            # or it doesn't — no later file will supply it, so retry once and warn.
+            still_missing = _resolve_deferred_edges(store, deferred)
+            for edge in still_missing:
+                print(
+                    f"warning: {edge.field_name} edge '{edge.source_id}' -> "
+                    f"'{edge.target_id}' skipped — target skill not in corpus "
+                    f"(cross-pack forward ref; ingest the target first to wire it)",
+                    file=sys.stderr,
+                )
         except Exception as exc:
             print(f"error: DB insert failed: {exc}", file=sys.stderr)
             return EXIT_DB
@@ -455,12 +473,13 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
     failed = 0
     inserted_skill_ids: list[str] = []
     error_details: list[str] = []
+    deferred_edges: list[DeferredEdge] = []
     try:
         for f, record in to_load:
             try:
                 tier, _src = resolve_skill_tier(f)
                 record.tier = tier
-                _insert(store, record, force=force)
+                deferred_edges.extend(_insert(store, record, force=force))
                 print(f"ok: {record.skill_id} ({record.canonical_name})")
                 loaded += 1
                 inserted_skill_ids.append(record.skill_id)
@@ -482,6 +501,18 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
                     store.rollback_batch(inserted_skill_ids)
                     inserted_skill_ids.clear()
                 break  # Abort the batch on first failure
+
+        # Forward-ref retry pass: cross-pack edges whose target appeared later
+        # in this same batch are now resolvable. Only run if the batch survived.
+        if failed == 0 and deferred_edges:
+            still_missing = _resolve_deferred_edges(store, deferred_edges)
+            for edge in still_missing:
+                print(
+                    f"warning: {edge.field_name} edge '{edge.source_id}' -> "
+                    f"'{edge.target_id}' skipped — target skill not in corpus or "
+                    f"batch (cross-pack forward ref)",
+                    file=sys.stderr,
+                )
 
     except Exception as exc:
         # Top-level error — roll back everything
@@ -577,6 +608,8 @@ def _load_yaml(path: Path) -> ReviewRecord:
         deprecated=_bool("deprecated"),
         superseded_by=_str("superseded_by"),
         description=_str("description"),
+        requires=_strlist("requires"),
+        related=_strlist("related"),
     )
 
 
@@ -601,6 +634,16 @@ def _validate(record: ReviewRecord) -> list[str]:
 
     if record.superseded_by and not re.match(r"^[a-z0-9-]+$", record.superseded_by):
         errors.append(f"superseded_by '{record.superseded_by}' must be kebab-case, lowercase ASCII")
+
+    # --- skill-graph edge validation (requires / related) ---
+    for field_name, targets in (("requires", record.requires), ("related", record.related)):
+        for target in targets:
+            if target == record.skill_id:
+                errors.append(f"{field_name} contains a self-edge to '{target}' — not allowed")
+            elif not re.match(r"^[a-z0-9-]+$", target):
+                errors.append(
+                    f"{field_name} target '{target}' must be a kebab-case, lowercase ASCII skill_id"
+                )
 
     if record.skill_type == "system":
         if not record.skill_id.startswith("sys-"):
@@ -828,7 +871,11 @@ def _print_summary(record: ReviewRecord, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> None:
+def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[DeferredEdge]:
+    """Insert a skill (node, version, fragments) and (re)write its graph edges.
+
+    Returns the list of deferred edges (targets not yet in the graph) for the
+    caller's batch-end retry pass. Single-file callers resolve them inline."""
     version_id = f"{record.skill_id}-v1"
     now = datetime.now(tz=UTC)
 
@@ -957,6 +1004,93 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> None:
                 """,
                 {"version_id": version_id, "fragment_id": fragment_id},
             )
+
+    return _write_edges(store, record)
+
+
+_EDGE_REL_BY_FIELD: dict[str, str] = {
+    "requires": "REQUIRES_COMPOSITIONAL",
+    "related": "REFERENCES_CONCEPTUAL",
+}
+
+
+@dataclass
+class DeferredEdge:
+    """An edge whose target skill did not exist in the graph at insert time.
+
+    Cross-pack forward references are legitimate (pack B requires a skill from
+    pack A which is ingested later in the same batch). These are retried at the
+    end of a batch; any still-missing target is then warned about — never an
+    error."""
+
+    source_id: str
+    target_id: str
+    rel: str
+    field_name: str
+
+
+def _write_edges(store: LadybugStore, record: ReviewRecord) -> list[DeferredEdge]:
+    """(Re)write a skill's outgoing graph edges. Returns deferred (forward-ref) edges.
+
+    Idempotent across re-ingest: the skill's existing REQUIRES_COMPOSITIONAL and
+    REFERENCES_CONCEPTUAL out-edges are deleted first, so a version bump replaces
+    rather than duplicates them. Targets that do not yet exist in the graph are
+    returned as ``DeferredEdge``s for a batch-end retry pass instead of failing.
+    """
+    # Delete this skill's existing outgoing edges so re-ingest is idempotent.
+    for rel in _EDGE_REL_BY_FIELD.values():
+        store.execute(
+            f"MATCH (s:Skill {{skill_id: $id}})-[r:{rel}]->() DELETE r",
+            {"id": record.skill_id},
+        )
+
+    deferred: list[DeferredEdge] = []
+    for field_name, rel in _EDGE_REL_BY_FIELD.items():
+        targets = record.requires if field_name == "requires" else record.related
+        # De-dup within a field while preserving order.
+        for target in dict.fromkeys(targets):
+            if _create_edge_if_target_exists(store, record.skill_id, target, rel):
+                continue
+            deferred.append(DeferredEdge(record.skill_id, target, rel, field_name))
+    return deferred
+
+
+def _create_edge_if_target_exists(
+    store: LadybugStore, source_id: str, target_id: str, rel: str
+) -> bool:
+    """Create one ``(source)-[rel]->(target)`` edge if the target Skill exists.
+
+    Returns True if the edge was created, False if the target is missing (caller
+    defers it). Assumes the source node already exists (just inserted)."""
+    exists = store.scalar(
+        "MATCH (t:Skill {skill_id: $tid}) RETURN t.skill_id",
+        {"tid": target_id},
+    )
+    if exists is None:
+        return False
+    store.execute(
+        f"""
+        MATCH (s:Skill {{skill_id: $sid}}), (t:Skill {{skill_id: $tid}})
+        CREATE (s)-[:{rel}]->(t)
+        """,
+        {"sid": source_id, "tid": target_id},
+    )
+    return True
+
+
+def _resolve_deferred_edges(
+    store: LadybugStore, deferred: list[DeferredEdge]
+) -> list[DeferredEdge]:
+    """Retry deferred (forward-ref) edges after a full batch insert.
+
+    Returns the edges that are *still* missing their target — the caller warns
+    about these (they reference a skill_id not present in any pack of the batch
+    or the existing corpus)."""
+    still_missing: list[DeferredEdge] = []
+    for edge in deferred:
+        if not _create_edge_if_target_exists(store, edge.source_id, edge.target_id, edge.rel):
+            still_missing.append(edge)
+    return still_missing
 
 
 if __name__ == "__main__":

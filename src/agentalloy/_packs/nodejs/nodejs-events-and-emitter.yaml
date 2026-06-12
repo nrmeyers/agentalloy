@@ -11,6 +11,10 @@ domain_tags:
   - error handling
   - once method
   - nodejs
+related:
+- node-error-handling-and-process
+- node-event-loop-and-async
+- node-streams-and-fs
 phase_scope: [build]
 category_scope: [language]
 author: navistone

@@ -10,6 +10,10 @@ domain_tags:
 - dimensional-modeling
 - history-tracking
 - type-2
+related:
+- data-engineering-dbt-tests-and-snapshots
+- data-engineering-dimensional-modeling
+- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

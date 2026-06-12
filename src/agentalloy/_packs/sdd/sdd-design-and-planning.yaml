@@ -10,6 +10,13 @@ domain_tags:
 - planning
 - task-breakdown
 - architecture
+requires:
+- sdd-spec-and-scoping
+- sys-sdd-build
+related:
+- brainstorming
+- planning-and-task-breakdown
+- sdd-deliver-and-ship
 always_apply: false
 phase_scope: [design]
 category_scope: [process]

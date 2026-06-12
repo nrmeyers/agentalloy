@@ -10,6 +10,10 @@ domain_tags:
 - golangci-lint
 - static-analysis
 - gofmt
+related:
+- go-modules-and-dependencies
+- go-testing-idioms
+- linting-shareable-configs
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

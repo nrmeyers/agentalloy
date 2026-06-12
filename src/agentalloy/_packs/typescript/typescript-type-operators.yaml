@@ -11,6 +11,10 @@ domain_tags:
   - typeof
   - indexed access operator
   - typescript
+related:
+- ts-generics-and-conditional-types
+- typescript-mapped-and-template-literal-types
+- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

@@ -10,6 +10,12 @@ domain_tags:
 - event-types
 - schemas
 - developer-experience
+requires:
+- webhooks-event-types-and-schemas
+related:
+- webhooks-consumer-patterns
+- webhooks-signature-verification
+- webhooks-versioning-and-evolution
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

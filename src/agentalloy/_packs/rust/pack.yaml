@@ -1,5 +1,5 @@
 name: rust
-version: 1.0.2
+version: 1.0.3
 tier: language
 description: Rust language patterns — ownership and borrowing, Result/Option error handling, async/await + Send/Sync concurrency with tokio, Cargo manifests and feature flags, #[test] / integration / doc tests. Precision-favored language tier; sourced from doc.rust-lang.org Rust stable 1.83+ docs per R1 tiered sourcing (fixtures/upstream/curated/rust.yaml).
 author: navistone

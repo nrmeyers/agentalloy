@@ -10,6 +10,10 @@ domain_tags:
 - factories
 - builders
 - test-data
+related:
+- pytest-fixtures
+- testing-mocks-and-spies
+- testing-test-data-builders
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

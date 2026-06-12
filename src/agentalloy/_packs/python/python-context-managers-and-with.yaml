@@ -5,6 +5,10 @@ description: "Open files, lock threads, or manage database connections in Python
 category: engineering
 skill_class: domain
 domain_tags: [with-statement, contextmanager-decorator, exitstack, async-with, resource-cleanup, python]
+related:
+- fastapi-lifespan-events
+- python-async-and-asyncio
+- python-async-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: language

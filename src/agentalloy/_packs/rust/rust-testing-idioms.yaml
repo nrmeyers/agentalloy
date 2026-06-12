@@ -5,6 +5,10 @@ description: "Write unit, integration, and doc tests in Rust without external fr
 category: quality
 skill_class: domain
 domain_tags: [unit-test-attribute, integration-test-tree, doc-test-runnable, cfg-test-conditional, should-panic-attribute, rust]
+related:
+- rust-cargo-and-features
+- rust-ownership-and-borrowing
+- verification-before-completion
 always_apply: false
 phase_scope: [build, review]
 category_scope: language

@@ -5,6 +5,10 @@ description: "Write concurrent Go services that handle many requests at once wit
 category: engineering
 skill_class: domain
 domain_tags: [goroutine-leaks, channel-direction, select-default, sync-primitives, request-cancellation, go]
+related:
+- csharp-async-and-tasks
+- go-error-handling
+- go-testing-idioms
 always_apply: false
 phase_scope: [build]
 category_scope: language

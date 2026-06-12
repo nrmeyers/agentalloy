@@ -5,6 +5,10 @@ description: "Handle live outages by stopping the bleeding first: triage severit
 category: design
 skill_class: domain
 domain_tags: [incident-commander, mitigate-before-diagnose, severity-triage, status-comms, rollback-first]
+related:
+- handling-technical-debt
+- performance-budgets
+- postmortem
 always_apply: false
 phase_scope: [build, review]
 category_scope: [process]

@@ -11,6 +11,10 @@ domain_tags:
 - timestamp-tolerance
 - replay-prevention
 - webhooks
+related:
+- webhooks-consumer-patterns
+- webhooks-event-types-and-schemas
+- webhooks-idempotency
 always_apply: false
 phase_scope: [build, review]
 category_scope: [ops]

@@ -5,6 +5,12 @@ description: "Fetch and cache data in Next.js 16 apps: opt into caching with 'us
 category: engineering
 skill_class: domain
 domain_tags: [cache-components-config, use-cache-directive, cachelife-profiles, cachetag-revalidation, streaming-suspense-fallback, nextjs, isr, revalidation, static-site-generation, on-demand-rendering]
+requires:
+- react-server-components-and-suspense
+related:
+- nextjs-app-router-routing
+- nextjs-ppr-cache-components
+- nextjs-server-actions-and-mutations
 always_apply: false
 phase_scope: [build]
 category_scope: framework

@@ -10,6 +10,10 @@ domain_tags:
 - distinct-id
 - identify
 - posthog
+related:
+- analytics-cohorts-and-sessions
+- analytics-observability-primer
+- webhooks-event-types-and-schemas
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

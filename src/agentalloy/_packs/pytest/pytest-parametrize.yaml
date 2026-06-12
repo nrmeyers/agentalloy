@@ -10,6 +10,10 @@ domain_tags:
   - test functions
   - fixtures
   - stacking
+related:
+- pytest-fixtures
+- pytest-marks-and-skipping
+- pytest-monkeypatch
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

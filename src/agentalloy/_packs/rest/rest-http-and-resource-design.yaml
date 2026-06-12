@@ -11,6 +11,10 @@ domain_tags:
   - resource design
   - API guidelines
   - rest
+related:
+- rest-common-patterns
+- rest-versioning-and-compatibility
+- writing-api-docs
 always_apply: false
 phase_scope: [build, design]
 category_scope: [framework]

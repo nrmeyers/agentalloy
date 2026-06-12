@@ -54,11 +54,16 @@ class RuntimeCache:
         fragments: list[ActiveFragment],
         version_details: dict[str, VersionDetail],
         deprecated_skill_ids: list[str] | None = None,
+        requires_edges: dict[str, list[str]] | None = None,
     ) -> None:
         self._skills: dict[str, ActiveSkill] = skills
         self._fragments: list[ActiveFragment] = fragments
         self._version_details: dict[str, VersionDetail] = version_details
         self._deprecated_skill_ids: list[str] = list(deprecated_skill_ids or [])
+        # REQUIRES_COMPOSITIONAL out-edges: {skill_id: [required_skill_id, ...]}.
+        # Loaded at startup so graph expansion (RETRIEVAL_GRAPH_EXPAND) needs no
+        # per-request DB hop. Empty on a corpus with no declared edges.
+        self._requires_edges: dict[str, list[str]] = dict(requires_edges or {})
         self.skill_count: int = len(skills)
         self.fragment_count: int = len(fragments)
 
@@ -116,6 +121,13 @@ class RuntimeCache:
             tag_set = set(domain_tags)
             result = [f for f in result if any(t in tag_set for t in f.domain_tags)]
         return result
+
+    def get_required_skill_ids(self, skill_id: str) -> list[str]:
+        """REQUIRES_COMPOSITIONAL targets of ``skill_id`` (one hop, requires only).
+
+        Used by graph-expansion retrieval (RETRIEVAL_GRAPH_EXPAND). Returns []
+        for unknown skills or a corpus with no declared edges."""
+        return list(self._requires_edges.get(skill_id, []))
 
     def get_deprecated_skill_ids(self) -> list[str]:
         """Return skill_ids of all skills flagged ``deprecated = true``.
@@ -229,11 +241,21 @@ def load_runtime_cache(store: LadybugStore) -> RuntimeCache:
 
     deprecated_ids = _get_deprecated_ids(store)
 
+    # REQUIRES_COMPOSITIONAL edges for graph-expansion retrieval. Empty on a
+    # corpus that declares none. One query; grouped into {source: [target,...]}.
+    requires_edges: dict[str, list[str]] = {}
+    edge_rows = store.execute(
+        "MATCH (s:Skill)-[:REQUIRES_COMPOSITIONAL]->(t:Skill) RETURN s.skill_id, t.skill_id"
+    )
+    for row in edge_rows:
+        requires_edges.setdefault(str(row[0]), []).append(str(row[1]))
+
     cache = RuntimeCache(
         skills=skills_by_id,
         fragments=fragments,
         version_details=version_details,
         deprecated_skill_ids=deprecated_ids,
+        requires_edges=requires_edges,
     )
     logger.info(
         "Runtime cache loaded: %d skills, %d fragments, %d deprecated",

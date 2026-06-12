@@ -10,6 +10,10 @@ domain_tags:
   - test-setup
   - dependency-injection
   - reusable-tests
+related:
+- pytest-marks-and-skipping
+- pytest-monkeypatch
+- pytest-parametrize
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

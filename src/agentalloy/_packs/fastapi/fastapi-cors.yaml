@@ -10,6 +10,10 @@ domain_tags:
   - middleware
   - configuration
   - security
+related:
+- fastapi-auth-and-security
+- fastapi-middleware-patterns
+- fastapi-routing-and-path-operations
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

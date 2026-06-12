@@ -5,6 +5,10 @@ description: "Fix module errors like require of ES module not supported or canno
 category: engineering
 skill_class: domain
 domain_tags: [esm-modules, cjs-modules, package-exports-field, dual-publish, node-module-resolution, nodejs]
+related:
+- ts-modules-and-declaration-files
+- typescript-build-tooling
+- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: language

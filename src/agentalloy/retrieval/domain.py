@@ -105,6 +105,28 @@ def _resolve_bm25_query(task: str, contract_tags: list[str] | None) -> tuple[str
     return _extract_bm25_keywords(task), "rule-extracted"
 
 
+# Graph-expansion tuning. Off by default — flip RETRIEVAL_GRAPH_EXPAND=on to
+# append REQUIRES_COMPOSITIONAL neighbors' fragments as trailing candidates.
+_GRAPH_EXPAND_TOP_SKILLS = 3  # expand the top-N ranked skills
+_GRAPH_EXPAND_MAX_FRAGMENTS = 2  # hard cap on appended fragments per request
+
+
+def _graph_expand_enabled() -> bool:
+    return _os.environ.get("RETRIEVAL_GRAPH_EXPAND", "off").lower() == "on"
+
+
+@runtime_checkable
+class RequiresEdgeSource(Protocol):
+    """Anything that can resolve a skill's REQUIRES_COMPOSITIONAL out-edges.
+
+    Satisfied by ``RuntimeCache`` (edges loaded at startup). A bare
+    ``LadybugStore`` does not implement this, so graph expansion is a no-op on
+    the store-backed path — the production pipeline always holds a RuntimeCache.
+    """
+
+    def get_required_skill_ids(self, skill_id: str) -> list[str]: ...
+
+
 @runtime_checkable
 class FragmentSource(Protocol):
     """Structural protocol satisfied by ``RuntimeCache`` and ``StoreFragmentSource``."""
@@ -564,6 +586,19 @@ def retrieve_domain_candidates(
         # Best-effort — a failure or disabled stage leaves ``ranked`` untouched.
         ranked, reranked = _maybe_rerank(ranked, task)
 
+        # Graph expansion (RETRIEVAL_GRAPH_EXPAND=on) runs *before* Stage B so
+        # the reranker scores graph-expanded candidates too. Required-skill
+        # neighbors of the top ranked skills are spliced into ``ranked`` ahead
+        # of arbitration; the same expansion is re-applied to the final
+        # selection below to guarantee those fragments survive the k-cap as
+        # additive trailing candidates (idempotent — the present-skill guard
+        # makes the second pass a no-op for anything Stage B already kept). Off
+        # by default and a strict no-op when off.
+        graph_expand = _graph_expand_enabled() and isinstance(source, RequiresEdgeSource)
+        if graph_expand and isinstance(source, RequiresEdgeSource):
+            ranked_skill_order = list(dict.fromkeys(f.skill_id for f in ranked))
+            ranked = _graph_expand(ranked, ranked_skill_order, by_id, source)
+
         # Stage B: LM fragment re-rank. When enabled and it returns a HIT, it
         # *replaces* deterministic selection — it has already chosen exactly
         # which fragments to keep (above threshold, capped at k, in fusion
@@ -577,6 +612,11 @@ def retrieve_domain_candidates(
         else:
             selected, skills_ranked = skill_granular_select(ranked, k)
 
+        # Additive tail: re-append graph neighbors dropped by the k-cap so they
+        # surface as trailing candidates without displacing the selection.
+        if graph_expand and isinstance(source, RequiresEdgeSource):
+            selected = _graph_expand(selected, skills_ranked, by_id, source)
+
     elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
     return RetrievalResult(
         candidates=selected,
@@ -588,6 +628,60 @@ def retrieve_domain_candidates(
         reranked=reranked,
         lm_assist_outcome=lm_outcome.value,
     )
+
+
+def _graph_expand(
+    selected: list[ActiveFragment],
+    skills_ranked: list[str],
+    pool_by_id: dict[str, ActiveFragment],
+    edge_source: RequiresEdgeSource,
+) -> list[ActiveFragment]:
+    """Append REQUIRES_COMPOSITIONAL neighbors' top fragments as trailing candidates.
+
+    For each of the top ``_GRAPH_EXPAND_TOP_SKILLS`` ranked skills, pull its
+    one-hop ``requires`` targets and append each target's best-ranked fragment
+    (from the already-fused metadata pool) to the tail — but only if that skill
+    is not already represented in ``selected``. Existing candidates are never
+    reordered or dropped; at most ``_GRAPH_EXPAND_MAX_FRAGMENTS`` are added.
+
+    ``related`` edges are deliberately ignored in v1 (too noisy). A skill whose
+    target has no fragment in the pool, or that is already present, is a no-op.
+    """
+    if not selected or not skills_ranked:
+        return selected
+
+    present_skills = {f.skill_id for f in selected}
+    present_frag_ids = {f.fragment_id for f in selected}
+
+    # Best fragment per skill in the fused pool = first occurrence (pool_by_id is
+    # built from the fused order, so dict iteration preserves rank).
+    best_frag_by_skill: dict[str, ActiveFragment] = {}
+    for frag in pool_by_id.values():
+        best_frag_by_skill.setdefault(frag.skill_id, frag)
+
+    appended: list[ActiveFragment] = []
+    for source_skill in skills_ranked[:_GRAPH_EXPAND_TOP_SKILLS]:
+        if len(appended) >= _GRAPH_EXPAND_MAX_FRAGMENTS:
+            break
+        for target_id in edge_source.get_required_skill_ids(source_skill):
+            if len(appended) >= _GRAPH_EXPAND_MAX_FRAGMENTS:
+                break
+            if target_id in present_skills:
+                continue  # never duplicate a skill already in the result
+            frag = best_frag_by_skill.get(target_id)
+            if frag is None or frag.fragment_id in present_frag_ids:
+                continue
+            appended.append(frag)
+            present_skills.add(target_id)
+            present_frag_ids.add(frag.fragment_id)
+
+    if appended:
+        logger.debug(
+            "graph expansion appended %d required-skill fragment(s): %s",
+            len(appended),
+            [f.fragment_id for f in appended],
+        )
+    return selected + appended
 
 
 def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveFragment], bool]:

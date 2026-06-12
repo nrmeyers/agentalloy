@@ -10,6 +10,10 @@ domain_tags:
   - hyrum-law
   - deprecation-planning
   - one-version-rule
+related:
+- rest-versioning-and-compatibility
+- webhooks-versioning-and-evolution
+- writing-api-docs
 always_apply: false
 phase_scope: [design, review]
 category_scope: [process]

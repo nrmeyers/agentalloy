@@ -12,6 +12,10 @@ domain_tags:
 - incremental models
 - unique_key
 - data-engineering
+related:
+- data-engineering-data-quality
+- data-engineering-dbt-tests-and-snapshots
+- data-engineering-dimensional-modeling
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

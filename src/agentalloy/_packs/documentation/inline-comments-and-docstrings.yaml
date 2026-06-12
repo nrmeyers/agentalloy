@@ -5,6 +5,10 @@ description: "Write code comments and docstrings that explain the reasoning behi
 category: design
 skill_class: domain
 domain_tags: [explain-rationale, docstring-discipline, comment-as-code-smell, todo-with-tracker, public-api-surface]
+related:
+- code-review-practices
+- common-refactoring-moves
+- writing-api-docs
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

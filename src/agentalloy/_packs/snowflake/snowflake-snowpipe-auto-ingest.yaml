@@ -10,6 +10,12 @@ domain_tags:
 - auto-ingest
 - streaming
 - s3-events
+requires:
+- snowflake-data-loading
+related:
+- snowflake-dynamic-tables
+- snowflake-tasks-and-automation
+- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

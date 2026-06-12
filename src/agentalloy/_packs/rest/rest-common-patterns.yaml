@@ -11,6 +11,12 @@ domain_tags:
   - pagination
   - filtering
   - rest
+requires:
+- rest-http-and-resource-design
+related:
+- fastapi-routing-and-path-operations
+- rest-versioning-and-compatibility
+- writing-api-docs
 always_apply: false
 phase_scope: [build, design]
 category_scope: [framework]

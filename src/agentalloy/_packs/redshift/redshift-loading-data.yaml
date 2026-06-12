@@ -11,6 +11,10 @@ domain_tags:
   - s3
   - emr
   - dynamodb
+related:
+- redshift-spectrum-and-iceberg
+- redshift-table-design
+- snowflake-data-loading
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

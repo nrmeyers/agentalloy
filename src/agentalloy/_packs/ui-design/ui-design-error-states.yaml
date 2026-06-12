@@ -10,6 +10,10 @@ domain_tags:
 - error-messages
 - recovery
 - ux-writing
+related:
+- error-handling-patterns
+- ui-design-empty-states
+- ui-design-loading-patterns
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

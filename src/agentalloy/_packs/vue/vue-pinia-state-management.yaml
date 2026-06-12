@@ -10,6 +10,12 @@ domain_tags:
 - state-management
 - stores
 - composition-api
+requires:
+- vue-composition-api-reactivity
+related:
+- react-state-and-context
+- vue-router-deep
+- vue-script-setup-and-components
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

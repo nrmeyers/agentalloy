@@ -10,6 +10,10 @@ domain_tags:
 - speed
 - incremental
 - profiling
+related:
+- linting-ci-integration
+- measure-before-optimizing
+- profiling-correctly
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

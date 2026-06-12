@@ -10,6 +10,10 @@ domain_tags:
   - clustering
   - permanent
   - transient
+related:
+- snowflake-data-loading
+- snowflake-dynamic-tables
+- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

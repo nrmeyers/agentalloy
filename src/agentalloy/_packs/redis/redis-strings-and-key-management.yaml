@@ -9,6 +9,10 @@ domain_tags:
   - strings
   - key-eviction
   - counters
+related:
+- redis-hashes-and-sets
+- redis-lists-and-sorted-sets
+- redis-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

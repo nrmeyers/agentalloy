@@ -10,6 +10,10 @@ domain_tags:
   - stress-tests
   - latency-assertions
   - k6
+related:
+- finding-the-bottleneck
+- performance-budgets
+- testing-flaky-tests
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

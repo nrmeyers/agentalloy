@@ -10,6 +10,10 @@ domain_tags:
   - startup
   - shutdown
   - asynccontextmanager
+related:
+- fastapi-async-and-background-tasks
+- fastapi-dependency-injection
+- fastapi-middleware-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

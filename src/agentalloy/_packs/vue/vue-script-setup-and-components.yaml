@@ -10,6 +10,12 @@ domain_tags:
   - script-setup
   - component-communication
   - vue
+requires:
+- vue-composition-api-reactivity
+related:
+- vue-lifecycle-and-async-components
+- vue-pinia-state-management
+- vue-testing
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

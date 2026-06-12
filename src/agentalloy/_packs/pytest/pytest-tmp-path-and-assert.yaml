@@ -9,6 +9,10 @@ domain_tags:
   - temporary directories
   - assertions
   - introspection
+related:
+- pytest-fixtures
+- pytest-monkeypatch
+- pytest-parametrize
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

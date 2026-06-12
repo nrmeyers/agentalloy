@@ -5,6 +5,12 @@ description: "Organize TypeScript code into reusable modules and share types wit
 category: engineering
 skill_class: domain
 domain_tags: [esm-modules, declaration-files, exports-map, ambient-module, dual-package-hazard, typescript]
+requires:
+- typescript-declaration-files
+related:
+- node-esm-and-cjs-interop
+- ts-strict-mode-and-tsconfig
+- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: language

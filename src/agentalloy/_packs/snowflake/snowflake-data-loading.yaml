@@ -10,6 +10,10 @@ domain_tags:
   - copy into
   - stages
   - file formats
+related:
+- redshift-loading-data
+- snowflake-snowpipe-auto-ingest
+- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

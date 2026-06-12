@@ -10,6 +10,10 @@ domain_tags:
   - high-availability
   - failover
   - configuration
+related:
+- redis-cluster
+- redis-persistence
+- redis-sentinel
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -5,6 +5,10 @@ description: "Write safer C# code that avoids null reference errors and handles 
 category: engineering
 skill_class: domain
 domain_tags: [nullable-annotations, null-forgiving-operator, generic-constraints, relational-patterns, pattern-combinators, csharp-dotnet]
+related:
+- csharp-error-handling
+- typescript-generics-deep
+- typescript-narrowing-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: language

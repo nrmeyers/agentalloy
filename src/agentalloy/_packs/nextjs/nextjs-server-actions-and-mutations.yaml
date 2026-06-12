@@ -5,6 +5,13 @@ description: "Handle form submissions and data mutations in Next.js apps without
 category: engineering
 skill_class: domain
 domain_tags: [use-server-directive, form-action-prop, useactionstate-pending, revalidatepath-tag, csrf-authorization, nextjs, forms, server-actions, progressive-enhancement, validation]
+requires:
+- react-form-actions-and-status
+- react-server-actions
+related:
+- nextjs-app-router-routing
+- nextjs-data-fetching-and-caching
+- nextjs-redirects-and-rewrites
 always_apply: false
 phase_scope: [build]
 category_scope: framework

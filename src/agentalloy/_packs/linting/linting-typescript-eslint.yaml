@@ -10,6 +10,13 @@ domain_tags:
 - linting
 - type-aware
 - configuration
+requires:
+- linting-eslint-flat-config
+- ts-strict-mode-and-tsconfig
+related:
+- linting-eslint-rules-and-plugins
+- linting-prettier-and-formatting
+- linting-shareable-configs
 always_apply: false
 phase_scope:
 - build

@@ -5,6 +5,10 @@ description: "Set performance targets for latency, throughput, or bundle size to
 category: design
 skill_class: domain
 domain_tags: [slo, error-budget, p99, drift-detection, when-to-stop-optimizing]
+related:
+- analytics-otel-metrics-and-logs
+- measure-before-optimizing
+- testing-performance
 always_apply: false
 phase_scope: [build, review]
 category_scope: [ops]

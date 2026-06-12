@@ -9,6 +9,13 @@ domain_tags:
   - implementation
   - coding
   - build
+requires:
+- sdd-design-and-planning
+- sdd-spec-and-scoping
+related:
+- incremental-implementation
+- sdd-deliver-and-ship
+- sdd-verify-and-review
 always_apply: false
 applies_to_phases:
   - build

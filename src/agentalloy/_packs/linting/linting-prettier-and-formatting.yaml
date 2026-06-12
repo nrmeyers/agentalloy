@@ -10,6 +10,10 @@ domain_tags:
   - configuration
   - editor integration
   - eslint
+related:
+- linting-eslint-flat-config
+- linting-eslint-rules-and-plugins
+- linting-format-vs-lint
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

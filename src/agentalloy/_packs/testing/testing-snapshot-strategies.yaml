@@ -10,6 +10,10 @@ domain_tags:
   - approval-testing
   - redacting-content
   - test-maintenance
+related:
+- refactoring-safely-with-tests
+- testing-runner-fundamentals
+- testing-snapshots
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

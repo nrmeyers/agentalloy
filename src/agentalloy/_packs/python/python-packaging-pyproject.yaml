@@ -15,6 +15,10 @@ domain_tags:
 - src-layout
 - lockfile
 - editable-install
+related:
+- dependency-upgrade
+- python-uv-package-management
+- rust-cargo-and-features
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

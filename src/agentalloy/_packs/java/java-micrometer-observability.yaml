@@ -10,6 +10,10 @@ domain_tags:
 - observability
 - metrics
 - tracing
+related:
+- analytics-observability-primer
+- analytics-otel-metrics-and-logs
+- analytics-otel-traces
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

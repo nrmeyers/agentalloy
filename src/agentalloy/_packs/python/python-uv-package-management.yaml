@@ -10,6 +10,10 @@ domain_tags:
   - uv
   - dependency resolution
   - virtual environments
+related:
+- dependency-upgrade
+- github-actions-caching-and-artifacts
+- python-packaging-pyproject
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

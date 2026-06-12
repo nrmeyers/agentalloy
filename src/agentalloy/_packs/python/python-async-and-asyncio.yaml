@@ -5,6 +5,13 @@ description: "Speed up Python apps that wait on databases, APIs, or files: run m
 category: engineering
 skill_class: domain
 domain_tags: [asyncio-event-loop, coroutines, async-await, taskgroup, gil-vs-async, python]
+requires:
+- fastapi-async-and-background-tasks
+- python-asyncio-tasks
+related:
+- python-async-patterns
+- python-asyncio-streams
+- python-multiprocessing
 always_apply: false
 phase_scope: [build]
 category_scope: language

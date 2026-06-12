@@ -10,6 +10,10 @@ domain_tags:
 - composition
 - headless-ui
 - compound-components
+related:
+- ui-design-responsive-and-dark-mode
+- ui-design-systems-architecture
+- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

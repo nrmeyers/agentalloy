@@ -10,6 +10,10 @@ domain_tags:
 - husky
 - lint-staged
 - pre-commit-framework
+related:
+- git-workflow
+- linting-eslint-rules-and-plugins
+- linting-prettier-and-formatting
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

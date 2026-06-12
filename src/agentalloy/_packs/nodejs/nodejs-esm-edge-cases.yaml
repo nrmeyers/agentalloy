@@ -10,6 +10,10 @@ domain_tags:
 - commonjs
 - module-system
 - interop
+related:
+- ts-modules-and-declaration-files
+- typescript-build-tooling
+- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

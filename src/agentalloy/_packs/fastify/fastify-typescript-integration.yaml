@@ -10,6 +10,13 @@ domain_tags:
 - type-providers
 - typebox
 - schemas
+requires:
+- fastify-schema-typebox
+- fastify-validation-and-serialization
+related:
+- fastify-error-handling-deep
+- fastify-performance-tuning
+- fastify-plugins-and-encapsulation
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

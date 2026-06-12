@@ -13,6 +13,12 @@ domain_tags:
   - cli-actions
   - custom-actions
   - action-authoring
+requires:
+- github-actions-workflow-syntax
+related:
+- github-actions-caching-and-artifacts
+- github-actions-events-and-triggers
+- github-actions-expressions-and-contexts
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

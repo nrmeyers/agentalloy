@@ -10,6 +10,10 @@ domain_tags:
   - real-time
   - communication
   - asynchronous
+related:
+- fastapi-async-and-background-tasks
+- fastapi-routing-and-path-operations
+- fastapi-streaming-and-sse
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

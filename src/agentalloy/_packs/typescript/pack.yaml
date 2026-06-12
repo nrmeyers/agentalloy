@@ -1,5 +1,5 @@
 name: typescript
-version: 1.0.2
+version: 1.0.3
 tier: language
 description: TypeScript language patterns — strict tsconfig, types vs interfaces, narrowing, generics, modules. Precision-favored language tier; sourced from typescriptlang.org docs per R1 tiered sourcing (fixtures/upstream/curated/typescript.yaml, version_anchor 5.7).
 author: navistone

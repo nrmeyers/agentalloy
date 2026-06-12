@@ -10,6 +10,12 @@ domain_tags:
   - lifecycle-hooks
   - async-components
   - suspense
+requires:
+- vue-composition-api-reactivity
+related:
+- vue-built-in-components
+- vue-pinia-state-management
+- vue-script-setup-and-components
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

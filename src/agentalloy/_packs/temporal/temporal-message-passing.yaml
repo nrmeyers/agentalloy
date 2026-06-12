@@ -10,6 +10,13 @@ domain_tags:
   - message-passing
   - python
   - signals-queries-updates
+requires:
+- temporal-workers
+- temporal-workflow-basics
+related:
+- temporal-activity-basics
+- temporal-schedules-and-timers
+- webhooks-event-types-and-schemas
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

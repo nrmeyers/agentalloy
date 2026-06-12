@@ -9,6 +9,10 @@ domain_tags:
   - project-references
   - incremental-builds
   - tsconfig
+related:
+- ts-strict-mode-and-tsconfig
+- typescript-build-tooling
+- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

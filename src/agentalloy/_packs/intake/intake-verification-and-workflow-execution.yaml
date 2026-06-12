@@ -10,6 +10,9 @@ domain_tags:
   - handoff-confirmations
   - routing-layer
   - v1-scope
+related:
+- planning-and-task-breakdown
+- temporal-workflow-basics
 always_apply: false
 phase_scope: [design, review]
 category_scope: [process]

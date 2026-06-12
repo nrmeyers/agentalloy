@@ -10,6 +10,12 @@ domain_tags:
 - turborepo
 - nx
 - pnpm-workspaces
+requires:
+- linting-shareable-configs
+related:
+- linting-eslint-flat-config
+- linting-eslint-rules-and-plugins
+- linting-prettier-and-formatting
 always_apply: false
 phase_scope: [build, review]
 category_scope: [tooling]

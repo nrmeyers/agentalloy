@@ -10,6 +10,10 @@ domain_tags:
 - metrics
 - tracing
 - logging
+related:
+- analytics-observability-primer
+- webhooks-event-types-and-schemas
+- webhooks-signature-verification
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

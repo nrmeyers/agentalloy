@@ -1,5 +1,5 @@
 name: documentation
-version: 1.0.1
+version: 1.0.2
 tier: foundation
 description: Documentation practices that span stacks — README, API reference, changelogs, inline comments. Always installed for foundation-tier coverage.
 author: navistone

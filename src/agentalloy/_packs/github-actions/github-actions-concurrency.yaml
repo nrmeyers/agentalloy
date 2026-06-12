@@ -10,6 +10,13 @@ domain_tags:
   - workflow
   - ci-cd
   - automation
+requires:
+- github-actions-expressions-and-contexts
+- github-actions-workflow-syntax
+related:
+- github-actions-caching-and-artifacts
+- github-actions-deployment-environments
+- github-actions-reusable-workflows
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

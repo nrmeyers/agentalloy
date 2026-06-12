@@ -5,6 +5,10 @@ description: "Serialize and deserialize JSON in C# and .NET apps: configure nami
 category: engineering
 skill_class: domain
 domain_tags: [serializer-options, source-generation-jsonserializer, polymorphic-deserialization, property-naming-policy, utf8-byte-pipeline, csharp-dotnet]
+related:
+- csharp-async-and-tasks
+- csharp-error-handling
+- csharp-nullable-and-pattern-matching
 always_apply: false
 phase_scope: [build]
 category_scope: language

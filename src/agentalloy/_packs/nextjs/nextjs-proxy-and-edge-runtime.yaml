@@ -5,6 +5,10 @@ description: "Intercept requests before they reach your app to rewrite URLs, red
 category: engineering
 skill_class: domain
 domain_tags: [proxy-matcher-config, nextresponse-rewrite-redirect, cookie-header-mutation, edge-runtime-constraints, optimistic-permission-check, nextjs]
+related:
+- nextjs-app-router-routing
+- nextjs-csp-and-security-headers
+- nextjs-redirects-and-rewrites
 always_apply: false
 phase_scope: [build]
 category_scope: framework

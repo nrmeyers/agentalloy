@@ -11,6 +11,10 @@ domain_tags:
 - metrics
 - traces
 - analytics
+related:
+- analytics-otel-metrics-and-logs
+- analytics-otel-traces
+- nextjs-instrumentation-and-otel
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]
