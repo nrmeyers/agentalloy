@@ -9,7 +9,6 @@ incompatible with restartable FastAPI service lifecycle.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -146,11 +145,20 @@ class LadybugStore:
             self._conn.execute(ddl)
             created_tables.append(_first_identifier_after(ddl, "TABLE"))
         # Apply ALTER TABLE migrations for columns added after initial schema.
-        # Fresh DBs already have these columns from CREATE TABLE, so we catch
-        # the "column already exists" error silently.
+        # Fresh DBs already have these columns from CREATE TABLE — that one
+        # error is expected and skipped. Anything else (parser errors, lock
+        # contention) must surface: a blanket suppress here hid years of
+        # silently-failing ALTERs behind a wrong `ALTER NODE TABLE` spelling.
         for ddl in ALTER_TABLES:
-            with contextlib.suppress(Exception):  # noqa: BLE001 — column already exists on fresh DB
+            try:
                 self._conn.execute(ddl)
+            except RuntimeError as exc:
+                # LadybugDB phrases the benign case "Skill table already has
+                # property <name>."; older builds say "already exists".
+                msg = str(exc).lower()
+                if "already has property" in msg or "already exists" in msg:
+                    continue
+                raise RuntimeError(f"ladybug migration failed: {ddl!r}: {exc}") from exc
         logger.info("ladybug_migrate ok tables=%s", created_tables)
 
 

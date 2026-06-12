@@ -61,13 +61,19 @@ REL_TABLES: tuple[str, ...] = (
 
 # Alter-table migrations for columns added after initial schema.
 # These run after NODE_TABLES and REL_TABLES so existing databases gain
-# new columns idempotently. Kuzu ALTER TABLE does not error if the column
-# already exists, so this is safe to call on fresh and existing DBs alike.
+# new columns idempotently.
+#
+# Syntax note: LadybugDB's parser accepts ``ALTER TABLE <name> ADD
+# <prop> <type>`` — NOT ``ALTER NODE TABLE ... ADD COLUMN ...``. The
+# original spellings parsed as errors and were silently swallowed by
+# migrate()'s blanket suppress; only fresh CREATEs (which carry the
+# columns) masked it. Found 2026-06-12 when the Stage 0 ``description``
+# migration failed against a live corpus.
 ALTER_TABLES: tuple[str, ...] = (
-    "ALTER NODE TABLE Skill ADD COLUMN deprecated BOOLEAN DEFAULT false",
-    "ALTER NODE TABLE Skill ADD COLUMN superseded_by STRING",
+    "ALTER TABLE Skill ADD deprecated BOOLEAN DEFAULT false",
+    "ALTER TABLE Skill ADD superseded_by STRING",
     # Stage 0 (skill-card indexing): the skill's one-line self-description,
     # used to build card headers / card documents at re-embed time. Optional —
     # corpora built before this column read it back as NULL.
-    "ALTER NODE TABLE Skill ADD COLUMN description STRING",
+    "ALTER TABLE Skill ADD description STRING",
 )
