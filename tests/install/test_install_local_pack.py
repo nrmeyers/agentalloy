@@ -332,6 +332,112 @@ class TestInstallLocalPack:
 
 
 # ---------------------------------------------------------------------------
+# Deprecation back-propagation — _propagate_deprecation / _ingest_yaml
+# ---------------------------------------------------------------------------
+
+
+def _seed_skill_node(db_path: str, skill_id: str) -> None:
+    """Migrate a fresh LadybugDB and insert a single live Skill node."""
+    from agentalloy.storage.ladybug import LadybugStore
+
+    with LadybugStore(db_path) as store:
+        store.migrate()
+        store.execute(
+            "CREATE (s:Skill {skill_id: $sid, canonical_name: $sid, "
+            "deprecated: false, always_apply: false})",
+            {"sid": skill_id},
+        )
+
+
+def _read_skill_flags(db_path: str, skill_id: str) -> tuple[Any, Any] | None:
+    from agentalloy.storage.ladybug import LadybugStore
+
+    with LadybugStore(db_path) as store:
+        rows = store.execute(
+            "MATCH (s:Skill {skill_id: $sid}) RETURN s.deprecated, s.superseded_by",
+            {"sid": skill_id},
+        )
+    if not rows:
+        return None
+    return rows[0][0], rows[0][1]
+
+
+class TestDeprecationPropagation:
+    def test_updates_existing_skill_node(self, tmp_path: Path) -> None:
+        """A deprecated YAML whose skill_id is already ingested updates the node."""
+        db_path = str(tmp_path / "ladybug")
+        _seed_skill_node(db_path, "old-skill")
+
+        fake_settings = MagicMock()
+        fake_settings.ladybug_db_path = db_path
+        with patch("agentalloy.config.get_settings", return_value=fake_settings):
+            outcome = ip._propagate_deprecation("old-skill", "new-skill")  # pyright: ignore[reportPrivateUsage]
+
+        assert outcome == "deprecated_updated"
+        flags = _read_skill_flags(db_path, "old-skill")
+        assert flags == (True, "new-skill")
+
+    def test_skips_when_skill_absent(self, tmp_path: Path) -> None:
+        """A deprecated YAML for a skill not in the graph is a plain skip."""
+        db_path = str(tmp_path / "ladybug")
+        _seed_skill_node(db_path, "present-skill")
+
+        fake_settings = MagicMock()
+        fake_settings.ladybug_db_path = db_path
+        with patch("agentalloy.config.get_settings", return_value=fake_settings):
+            outcome = ip._propagate_deprecation("missing-skill", "x")  # pyright: ignore[reportPrivateUsage]
+
+        assert outcome == "deprecated"
+        # The unrelated node is untouched.
+        assert _read_skill_flags(db_path, "present-skill") == (False, None)
+
+    def test_lock_held_does_not_crash(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A lock-held error warns with a FIX hint and degrades to a skip."""
+        fake_settings = MagicMock()
+        fake_settings.ladybug_db_path = str(tmp_path / "ladybug")
+        boom = MagicMock(side_effect=RuntimeError("Could not set lock on file: held by PID 999"))
+        with (
+            patch("agentalloy.config.get_settings", return_value=fake_settings),
+            patch.object(ip, "LadybugStore", boom),
+        ):
+            capsys.readouterr()
+            outcome = ip._propagate_deprecation("old-skill", "new-skill")  # pyright: ignore[reportPrivateUsage]
+            err = capsys.readouterr().err
+
+        assert outcome == "deprecated"
+        assert "WARN" in err
+        assert "FIX" in err
+
+    def test_ingest_yaml_deprecated_branch_propagates(self, tmp_path: Path) -> None:
+        """_ingest_yaml on a deprecated YAML reports deprecated_updated when the node exists."""
+        db_path = str(tmp_path / "ladybug")
+        _seed_skill_node(db_path, "dep-skill")
+
+        yaml_path = tmp_path / "dep.yaml"
+        yaml_path.write_text(
+            yaml.safe_dump(
+                {
+                    "skill_id": "dep-skill",
+                    "deprecated": True,
+                    "superseded_by": "fresh-skill",
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+        fake_settings = MagicMock()
+        fake_settings.ladybug_db_path = db_path
+        with patch("agentalloy.config.get_settings", return_value=fake_settings):
+            result = ip._ingest_yaml(yaml_path, tmp_path)  # pyright: ignore[reportPrivateUsage]
+
+        assert result["outcome"] == "deprecated_updated"
+        assert _read_skill_flags(db_path, "dep-skill") == (True, "fresh-skill")
+
+
+# ---------------------------------------------------------------------------
 # install_pack(name_or_path) — auto-routes path → local-pack
 # ---------------------------------------------------------------------------
 

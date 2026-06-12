@@ -171,6 +171,57 @@ def _is_deprecated(yaml_path: Path) -> tuple[bool, str, str]:
     return deprecated, skill_id, superseded_by
 
 
+def _propagate_deprecation(skill_id: str, superseded_by: str) -> str:
+    """Back-propagate a deprecation to an already-ingested Skill node.
+
+    When a skill YAML is marked ``deprecated: true`` but its ``skill_id`` was
+    ingested into LadybugDB by a prior install, the existing Skill node still
+    carries ``deprecated = false`` and keeps being served by retrieval / ambient
+    injection (active reads filter ``s.deprecated = false``). Setting the flag is
+    the only thing needed to retire it.
+
+    Returns one of:
+      - "deprecated_updated" — node existed and was updated (deprecated=true,
+        superseded_by set).
+      - "deprecated" — node was not in the graph; nothing to update (skip).
+      - "deprecated" — the DB lock was held (warned to stderr, install continues).
+
+    A lock failure must NOT crash the install; we warn with the FIX hint and
+    treat it as a plain skip, mirroring ``_ensure_ladybug_schema()``.
+    """
+    if not skill_id:
+        return "deprecated"
+    from agentalloy.config import get_settings
+
+    try:
+        settings = get_settings()
+        with LadybugStore(settings.ladybug_db_path) as store:
+            exists = store.scalar(
+                "MATCH (s:Skill {skill_id: $sid}) RETURN count(s)",
+                {"sid": skill_id},
+            )
+            if not exists:
+                return "deprecated"
+            store.execute(
+                "MATCH (s:Skill {skill_id: $sid}) SET s.deprecated = true, s.superseded_by = $sup",
+                {"sid": skill_id, "sup": superseded_by},
+            )
+            logger.info(
+                "deprecation propagated: skill %s marked deprecated (superseded_by=%r)",
+                skill_id,
+                superseded_by,
+            )
+            return "deprecated_updated"
+    except Exception as exc:  # noqa: BLE001 — best-effort; lock-held must not crash install
+        print(
+            f"WARN: could not propagate deprecation for skill '{skill_id}': {exc}",
+            file=sys.stderr,
+        )
+        if is_lock_held_error(str(exc)):
+            print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
+        return "deprecated"
+
+
 def _ingest_yaml(
     yaml_path: Path,
     repo_root: Path,
@@ -183,7 +234,12 @@ def _ingest_yaml(
       - exit_code 0           → ingested fresh
       - exit_code 4 (DUPLICATE) → skill_id or canonical_name already in corpus;
                                  treated as a benign skip, not a failure.
-      - outcome "deprecated"  → skill is marked deprecated; skipped with warning.
+      - outcome "deprecated"  → skill is marked deprecated and was NOT previously
+                                 ingested; skipped (nothing in the graph to retire).
+      - outcome "deprecated_updated" → skill is marked deprecated AND its node
+                                 already existed in LadybugDB; the node was updated
+                                 (deprecated=true, superseded_by set) so retrieval /
+                                 ambient injection stops serving it.
       - other non-zero        → real failure (parse, validation, DB error).
 
     ``no_restart`` is passed as ``--no-restart`` to the ingest subprocess when
@@ -195,11 +251,17 @@ def _ingest_yaml(
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
+        outcome = _propagate_deprecation(skill_id, superseded_by)
+        stdout_tail = (
+            f"marked existing skill '{skill_id}' deprecated"
+            if outcome == "deprecated_updated"
+            else f"skipped deprecated skill '{skill_id}'"
+        )
         return {
             "yaml": yaml_path.name,
             "exit_code": 0,
-            "outcome": "deprecated",
-            "stdout_tail": f"skipped deprecated skill '{skill_id}'",
+            "outcome": outcome,
+            "stdout_tail": stdout_tail,
             "stderr_tail": f"superseded by '{superseded_by}'",
         }
 
@@ -471,6 +533,7 @@ def install_local_pack(
             "skills_ingested": 0,
             "skills_already_present": len(skills_entries),
             "skills_deprecated": 0,
+            "skills_deprecated_updated": 0,
             "ingest_results": [],
             "ingest_failures": 0,
             "remediation": None,
@@ -497,6 +560,9 @@ def install_local_pack(
     new_count = sum(1 for r in ingest_results if r["outcome"] == "ingested")
     duplicate_count = sum(1 for r in ingest_results if r["outcome"] == "duplicate")
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
+    deprecated_updated_count = sum(
+        1 for r in ingest_results if r["outcome"] == "deprecated_updated"
+    )
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
     if failed:
@@ -548,6 +614,7 @@ def install_local_pack(
             "skills_ingested": 0,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
+            "skills_deprecated_updated": deprecated_updated_count,
             "ingest_results": ingest_results,
             "ingest_failures": len(failed),
             "remediation": (
@@ -596,6 +663,7 @@ def install_local_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
+            "skills_deprecated_updated": deprecated_updated_count,
             "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
@@ -619,6 +687,7 @@ def install_local_pack(
         "skills_ingested": new_count,
         "skills_already_present": duplicate_count,
         "skills_deprecated": deprecated_count,
+        "skills_deprecated_updated": deprecated_updated_count,
         "ingest_results": ingest_results,
         "ingest_failures": len(failed),
         "remediation": (
@@ -800,6 +869,9 @@ def install_pack(
     new_count = sum(1 for r in ingest_results if r["outcome"] == "ingested")
     duplicate_count = sum(1 for r in ingest_results if r["outcome"] == "duplicate")
     deprecated_count = sum(1 for r in ingest_results if r["outcome"] == "deprecated")
+    deprecated_updated_count = sum(
+        1 for r in ingest_results if r["outcome"] == "deprecated_updated"
+    )
     failed = [r for r in ingest_results if r["outcome"] == "failed"]
 
     if failed:
@@ -854,6 +926,7 @@ def install_pack(
             "skills_ingested": 0,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
+            "skills_deprecated_updated": deprecated_updated_count,
             "ingest_results": ingest_results,
             "ingest_failures": len(failed),
             "remediation": (
@@ -898,6 +971,7 @@ def install_pack(
             "skills_ingested": new_count,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
+            "skills_deprecated_updated": deprecated_updated_count,
             "ingest_failures": 0,
             "installed_at": int(time.time()),
         }
@@ -922,6 +996,7 @@ def install_pack(
         "skills_ingested": new_count,
         "skills_already_present": duplicate_count,
         "skills_deprecated": deprecated_count,
+        "skills_deprecated_updated": deprecated_updated_count,
         "ingest_results": ingest_results,
         "ingest_failures": len(failed),
         "remediation": (
@@ -970,6 +1045,7 @@ def _render_human(result: dict[str, Any]) -> None:
     pack_name = result.get("pack", "unknown")
     skills_ingested = result.get("skills_ingested", 0)
     skills_deprecated = result.get("skills_deprecated", 0)
+    skills_deprecated_updated = result.get("skills_deprecated_updated", 0)
     failures = result.get("ingest_failures", 0)
 
     print_rich("\n  [bold]Install Pack[/bold]\n")
@@ -978,6 +1054,8 @@ def _render_human(result: dict[str, Any]) -> None:
     print_rich(f"  Skills ingested: {skills_ingested}")
     if skills_deprecated:
         print_rich(f"  Skills skipped (deprecated): {skills_deprecated}")
+    if skills_deprecated_updated:
+        print_rich(f"  Skills retired (deprecation propagated): {skills_deprecated_updated}")
     if failures:
         first_fail = next(
             (r for r in result.get("ingest_results") or [] if r.get("outcome") == "failed"),
