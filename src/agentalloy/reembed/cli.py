@@ -647,10 +647,8 @@ def _duckdb_path(settings: Settings) -> Path:
     return ladybug_path.parent / "skills.duck"
 
 
-def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    # Silence httpx per-request INFO logs during the embedding phase
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+def build_parser() -> argparse.ArgumentParser:
+    """The reembed CLI parser. Exposed so tests can assert real defaults."""
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.reembed",
         description=(
@@ -665,16 +663,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--card-index",
         choices=[m.value for m in CardIndexMode],
-        default=CardIndexMode.OFF.value,
+        # 'both' measured +0.067 mean domain score (oracle-lift capture
+        # 45% → 74%) on the 2026-06-12 LFM leg with the regression gate
+        # green — so card indexing is the build default. 'off' remains the
+        # explicit opt-out and reproduces the pre-Stage-0 index
+        # byte-for-byte (the library-level default is still OFF; only the
+        # CLI — and therefore install-packs' bulk pass — opts in).
+        default=CardIndexMode.BOTH.value,
         help=(
             "Stage 0 skill-card indexing (deterministic document expansion). "
-            "'off' (default) reproduces today's index byte-for-byte. 'prefix' "
-            "prepends a one-line 'skill: <name> — tags: ... — <description>' "
-            "header to each fragment's INDEXED text (embedding + BM25 only; the "
-            "prose returned by /compose is unchanged). 'cards' adds one "
-            "synthetic card document per skill that boosts skill ranking but is "
-            "never emitted as a fragment. 'both' does both. The chosen mode is "
-            "recorded in corpus_meta for auditability."
+            "'both' (default) prepends a one-line 'skill: <name> — tags: ... — "
+            "<description>' header to each fragment's INDEXED text (embedding + "
+            "BM25 only; the prose returned by /compose is unchanged) AND adds "
+            "one synthetic card document per skill that boosts skill ranking "
+            "but is never emitted as a fragment. 'prefix'/'cards' apply just "
+            "one of the two. 'off' reproduces the pre-Stage-0 index "
+            "byte-for-byte. The chosen mode is recorded in corpus_meta for "
+            "auditability."
         ),
     )
     parser.add_argument(
@@ -718,7 +723,14 @@ def main(argv: list[str] | None = None) -> int:
             "Vectors are always written; this flag controls only the exit code."
         ),
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Silence httpx per-request INFO logs during the embedding phase
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    args = build_parser().parse_args(argv)
     card_mode = CardIndexMode(args.card_index)
 
     # Stop service in container mode before DB operations

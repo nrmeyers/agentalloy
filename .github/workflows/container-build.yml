@@ -38,7 +38,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: corpus-seed
-          key: corpus-seed-${{ hashFiles('src/agentalloy/_packs/**', 'uv.lock') }}
+          # The v2 prefix is a corpus-format version: bump it whenever the
+          # indexed representation changes without a pack-content change
+          # (v2 = Stage 0 card indexing default-on), else the cache serves
+          # stale-format corpora forever.
+          key: corpus-seed-v2-${{ hashFiles('src/agentalloy/_packs/**', 'uv.lock') }}
 
       - name: Install uv
         if: steps.corpus-cache.outputs.cache-hit != 'true'

@@ -238,6 +238,18 @@ def test_off_mode_matches_default(tmp_path: Path) -> None:
     assert _prose_of(vs_default, "f1") == _prose_of(vs_off, "f1") == frag.content
 
 
+def test_cli_default_is_both() -> None:
+    """The reembed CLI defaults to 'both' (measured +0.067 mean domain on the
+    2026-06-12 LFM leg), so install-packs' bulk pass builds card-indexed
+    corpora. The library function default stays OFF — only the CLI opts in."""
+    from agentalloy.reembed.cli import build_parser
+
+    args = build_parser().parse_args([])
+    assert args.card_index == CardIndexMode.BOTH.value
+    # The opt-out must remain available and parse cleanly.
+    assert build_parser().parse_args(["--card-index", "off"]).card_index == "off"
+
+
 # --------------------------------------------------------------------------
 # (b) _apply_card_boost — cards rank, never assemble
 # --------------------------------------------------------------------------
