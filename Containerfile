@@ -9,10 +9,12 @@
 #   podman build --build-arg PULL_MODEL=true -t agentalloy:full -f Containerfile .
 #
 # Run:    agentalloy setup --deployment container  (recommended — single-container with entrypoint)
-#         or manually: podman run --replace -d --name agentalloy -p 47950:47950 \
-#                      -v agentalloy-data:/app/data -v ~/.ollama:/root/.ollama \
-#                      -e AGENTIALLOY_PACKS= -e ENTRYPOINT=/app/entrypoint.sh \
-#                      agentalloy:latest /app/entrypoint.sh
+#         or manually (bare run — bootstrap runs automatically):
+#         podman run --replace -d --name agentalloy -p 47950:47950 \
+#                    -v agentalloy-data:/app/data -v ~/.ollama:/root/.ollama \
+#                    ghcr.io/nrmeyers/agentalloy:latest
+#         Pass -e AGENTIALLOY_PACKS=core,webhooks to install specific packs on a locally
+#         built image that has no prebuilt corpus seed (GHCR images seed all packs automatically).
 
 FROM python:3.12-slim AS base
 
@@ -48,6 +50,14 @@ COPY src/ ./src/
 RUN mkdir -p data
 COPY corpus-seed/ /app/corpus-seed/
 
+# Bake the bootstrap entrypoint into the image so bare ``podman run``
+# bootstraps correctly without requiring the setup wizard to bind-mount a
+# generated script. container/entrypoint.sh is generated from
+# _build_entrypoint_script("") — a test in tests/test_container_edge_cases.py
+# asserts the two are identical so they can't drift.
+COPY container/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 RUN uv sync --frozen --no-dev
 
 ENV LADYBUG_DB_PATH=/app/data/ladybug \
@@ -74,8 +84,13 @@ RUN if [ "$PULL_MODEL" = "true" ]; then \
     fi
 
 # Note: HEALTHCHECK is intentionally omitted — the container runtime module
-# uses _wait_for_health() to poll /health with exponential backoff rather
+# uses _wait_for_readiness() to poll /readiness with exponential backoff rather
 # than relying on the OCI HEALTHCHECK directive (which Podman doesn't always
 # honor in its default OCI image format).
 
-CMD ["uv", "run", "uvicorn", "agentalloy.app:app", "--host", "0.0.0.0", "--port", "47950"]
+# Default ENTRYPOINT/CMD: bare ``podman run ghcr.io/nrmeyers/agentalloy:latest``
+# runs the baked bootstrap entrypoint, which seeds the prebuilt corpus (GHCR
+# images), starts Ollama, pulls the embedding model if needed, then starts
+# uvicorn. The setup wizard bind-mounts a generated script on top of this
+# default when packs are specified explicitly.
+ENTRYPOINT ["/app/entrypoint.sh"]

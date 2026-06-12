@@ -1497,3 +1497,134 @@ class TestEntrypointPrebuiltCorpusSeed:
         # atomic write pattern: staged to tmp, then mv onto the target
         seed_idx = script.index('"phase": "corpus_seeded"')
         assert 'mv "$PROGRESS_TMP" "$PROGRESS"' in script[seed_idx:]
+
+    def test_corpus_stamp_not_cat_to_stdout(self):
+        """corpus-stamp.json must not be cat'd to stdout — would appear twice
+        in host-side log streaming when the tail window shifts between polls."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert 'cat "$APP_DIR/data/corpus-stamp.json"' not in script
+        assert 'cat "$SEED_DIR/corpus-stamp.json"' not in script
+
+
+# ---------------------------------------------------------------------------
+# Fix-1: Baked entrypoint — container/entrypoint.sh matches generated script
+# ---------------------------------------------------------------------------
+
+
+class TestBakedEntrypoint:
+    """container/entrypoint.sh (baked into the image) must match the output of
+    _build_entrypoint_script('') so the baked and wizard-generated scripts can
+    never silently diverge."""
+
+    def test_baked_entrypoint_matches_generated(self):
+        """container/entrypoint.sh content must equal _build_entrypoint_script('').
+
+        If this test fails, regenerate the file:
+            uv run python -c "
+            from src.agentalloy.install.subcommands.container_runtime \\
+                import _build_entrypoint_script
+            open('container/entrypoint.sh', 'w').write(_build_entrypoint_script(''))
+            "
+        """
+        from pathlib import Path
+
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        baked_path = Path(__file__).resolve().parent.parent / "container" / "entrypoint.sh"
+        assert baked_path.exists(), (
+            f"container/entrypoint.sh not found at {baked_path}; "
+            "run the regeneration command in the docstring."
+        )
+        baked = baked_path.read_text()
+        generated = _build_entrypoint_script("")
+        assert baked == generated, (
+            "container/entrypoint.sh is out of sync with _build_entrypoint_script('').\n"
+            "Regenerate it:\n"
+            '  uv run python -c "\n'
+            "  from src.agentalloy.install.subcommands.container_runtime "
+            "import _build_entrypoint_script\n"
+            "  open('container/entrypoint.sh', 'w').write(_build_entrypoint_script(''))\n"
+            '  "'
+        )
+
+    def test_baked_entrypoint_is_executable(self):
+        """container/entrypoint.sh must be marked executable in the repo."""
+        import os
+        from pathlib import Path
+
+        baked_path = Path(__file__).resolve().parent.parent / "container" / "entrypoint.sh"
+        assert baked_path.exists()
+        assert os.access(str(baked_path), os.X_OK), (
+            "container/entrypoint.sh is not executable; run: chmod +x container/entrypoint.sh"
+        )
+
+    def test_baked_entrypoint_reads_packs_from_env(self):
+        """Baked entrypoint must honour AGENTIALLOY_PACKS env var so locally
+        built images (no corpus seed) can install specific packs at run time."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert "AGENTIALLOY_PACKS" in script, (
+            "Baked entrypoint must read AGENTIALLOY_PACKS from env"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fix-2: /readiness returns 503 when corpus is unusable (degraded mode)
+# ---------------------------------------------------------------------------
+
+
+class TestReadinessDegradedMode:
+    """When the runtime cache fails to load, /readiness must return 503."""
+
+    def test_readiness_returns_503_when_corpus_unavailable(self, tmp_path: Path):
+        """ReadinessChecker returns ready (bootstrap done), but app startup recorded
+        a runtime_load_error — /readiness must return 503 with reason."""
+
+        # Build a minimal FastAPI app with the health router
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from agentalloy.api.health_router import ReadinessChecker, router
+
+        app = FastAPI()
+        app.include_router(router)
+
+        # Bootstrap is complete (marker file present)
+        complete = tmp_path / ".bootstrap-complete"
+        complete.touch()
+        app.state.readiness_checker = ReadinessChecker(app_dir=tmp_path)
+        # Simulate corpus load error (degraded mode)
+        app.state.runtime_load_error = "Table Skill does not exist"
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/readiness")
+        assert response.status_code == 503, (
+            f"Expected 503 for degraded corpus, got {response.status_code}"
+        )
+        body = response.json()
+        assert body["status"] == "error"
+        assert body["progress"]["error"] == "corpus_unavailable"
+        assert "Table Skill does not exist" in body["progress"]["detail"]
+
+    def test_readiness_200_when_corpus_ok(self, tmp_path: Path):
+        """When bootstrap is done AND no runtime error, /readiness returns 200 ready."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from agentalloy.api.health_router import ReadinessChecker, router
+
+        app = FastAPI()
+        app.include_router(router)
+
+        complete = tmp_path / ".bootstrap-complete"
+        complete.touch()
+        app.state.readiness_checker = ReadinessChecker(app_dir=tmp_path)
+        app.state.runtime_load_error = None  # no error
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/readiness")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready"
