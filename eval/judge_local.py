@@ -517,6 +517,13 @@ def main() -> int:
     )
     p_report.set_defaults(func=cmd_report)
 
+    # Pairwise A/B comparison judging lives in a sibling module for cohesion; it
+    # registers its own `pairwise` / `pairwise-report` subcommands here so the
+    # whole local judge presents a single CLI entry point.
+    from eval.judge_pairwise import add_subcommands as _add_pairwise
+
+    _add_pairwise(sub)
+
     args = parser.parse_args()
     return args.func(args)
 
