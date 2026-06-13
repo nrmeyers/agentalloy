@@ -2,13 +2,18 @@
 
 No model downloads, no live network: the FragmentScorer is driven through a
 faked httpx transport (fixed yes/no logprobs → known score). The headline
-guarantees mirror the cosine path:
+guarantees:
 
-* **default parity** — with ``SIGNAL_INTENT_BACKEND`` unset the reranker scorer
-  is never built and the named-intent predicates use cosine byte-for-byte.
-* **fail-open floor** — a None / failing scorer, or an intent with no task
-  description, falls through to cosine.
+* **default-on** — with ``SIGNAL_INTENT_BACKEND`` unset the reranker scorer is
+  built (the shipped default); ``SIGNAL_INTENT_BACKEND=cosine`` opts out.
+* **fail-open floor** — a None / failing scorer, an unreachable server, an
+  unknown backend value, or an intent with no task description all fall through
+  to cosine byte-for-byte.
 * **negation guard** — negated cue words are vetoed to NOT_MET before scoring.
+
+The suite-wide conftest pins ``SIGNAL_INTENT_BACKEND=cosine`` for hermeticity;
+the autouse ``_clean_rerank_env`` fixture below deletes that pin so these tests
+see the true default.
 """
 
 from __future__ import annotations
@@ -198,7 +203,19 @@ def test_intent_rerank_scorer_failure_falls_back() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_backend_default_off_returns_none() -> None:
+def test_backend_default_on_builds_scorer() -> None:
+    """Env unset → the reranker backend is the default, so the scorer is built."""
+    scorer = build_intent_scorer_from_env()
+    try:
+        assert scorer is not None
+        assert isinstance(scorer, FragmentScorer)
+    finally:
+        reset_intent_scorer_cache()
+
+
+def test_backend_cosine_optout_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit SIGNAL_INTENT_BACKEND=cosine opts out — no scorer built."""
+    monkeypatch.setenv("SIGNAL_INTENT_BACKEND", "cosine")
     assert build_intent_scorer_from_env() is None
 
 
@@ -213,6 +230,7 @@ def test_backend_reranker_builds_scorer(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_backend_unknown_value_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown backend value fails safe to cosine (None), not to reranker."""
     monkeypatch.setenv("SIGNAL_INTENT_BACKEND", "magic")
     assert build_intent_scorer_from_env() is None
 
@@ -222,8 +240,9 @@ def test_backend_unknown_value_returns_none(monkeypatch: pytest.MonkeyPatch) -> 
 # --------------------------------------------------------------------------
 
 
-def test_classify_intent_default_uses_cosine(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With the backend off, _classify_intent must call cosine, not the reranker."""
+def test_classify_intent_cosine_optout_uses_cosine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With SIGNAL_INTENT_BACKEND=cosine, _classify_intent calls cosine, not the reranker."""
+    monkeypatch.setenv("SIGNAL_INTENT_BACKEND", "cosine")
     sentinel = PredicateResult.MET
     cosine_called: list[tuple[str, str]] = []
 

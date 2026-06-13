@@ -83,6 +83,18 @@ Findings, stated as measured:
   bare 27B" equivalence was a generic-task artifact that did not replicate at
   v3 — see the generic set below.)
 
+**Why the optional LM stages are off in this campaign.** The composed arm above
+runs the deterministic Stage-0 config on purpose: the two optional composition
+levers were measured on the LFM domain leg and neither beat it. The **fragment
+re-ranker** (`LM_ASSIST=arbitrate`) scored 0.827 in its as-shipped config —
+exactly tying the deterministic baseline (0.827) — and trailed slightly
+(0.809–0.817) once the candidate pool was widened; its canary task `domain_1`
+did not recover (0.76, dropping to 0.48 in the top-12 variant). **Graph
+expansion** (`RETRIEVAL_GRAPH_EXPAND=on`) also tied (0.827). Both stay off by
+default on that evidence. The signals-layer intent backend, which *did* win its
+benchmark, is the one model-backed stage shipped on (see
+[Intent Classification](#intent-classification-signals-layer)).
+
 #### Judge-validated fidelity (27B LLM-judge, 2026-06-13)
 
 To confirm the composed lift is real answer quality and not an artifact of the
@@ -176,7 +188,8 @@ approval / redirection). This benchmark measures that classifier, not retrieval.
 uv run python -m eval.intent_bench          # needs Ollama :11434 + reranker :60001
 ```
 
-Two backends, selected by `SIGNAL_INTENT_BACKEND` (**default `cosine`**):
+Two backends, selected by `SIGNAL_INTENT_BACKEND` (**default `reranker`**, on the
+result below; `cosine` opts out and remains the fail-open floor):
 
 - **cosine** — embeds the utterance and takes max cosine vs per-intent reference
   phrases (operating threshold 0.75).
@@ -219,9 +232,40 @@ re-embeds the query on every gate (`_intent_similarity` calls
 `embed([query] + refs)` each time — a full Ollama round-trip per gate), so the
 reranker's per-gate advantage holds and in fact widens in production.
 
-**Status.** Measured win on a small labeled set, gated behind
-`SIGNAL_INTENT_BACKEND=reranker` with cosine as the fail-open floor. Not yet
-field-validated.
+### CPU latency and how often it fires (2026-06-13)
+
+The reranker default has to hold on the **CPU-only container path**, where there
+is no GPU. Measured on a Xeon W-2225 (4-core/8-thread @ 4.1 GHz), CPU-only
+(`-ngl 0`), under concurrent load, scoring one intent gate via the production
+`_intent_rerank` path (a single `/v1/completions` call):
+
+| gate utterance | p50 | p95 | vs 300 ms budget |
+|---|---|---|---|
+| short (a typical phase signal) | 211 ms | 241 ms | 100% within budget |
+| long (~1600-char paragraph, cold) | ~1.8 s | ~1.8 s | exceeds → times out → cosine |
+
+Latency scales ~linearly with utterance length (~250 tok/s prefill on this CPU).
+Short phase-transition signals — "looks good", "this is done", "let's change
+direction" — land well inside the 300 ms fail-open budget; a long rambling prompt
+exceeds it and falls open to cosine, which is the right outcome (long prose is not
+a crisp phase signal).
+
+Crucially, the gate does **not** fire every turn. A deterministic pre-filter
+(`signals/prefilter.py`, <5 ms) runs first and skips the reranker entirely unless
+the prompt carries a phase signal keyword (or a gate-relevant file / tool event);
+on a hit, the exit-gate tree short-circuits, so the reranker is reached only for
+the one or two named-intent gates the active phase actually evaluates. The CPU
+cost is therefore rare and bounded, with cosine as the deterministic floor. So
+the reranker ships as the default on CPU as well, with the 300 ms budget
+unchanged. Weaker hosts (e.g. 2-core cloud VMs) scale latency up proportionally
+and fall open to cosine more often — safe, but the lift weakens on weak CPUs.
+
+**Status.** Measured win on a small labeled set → shipped as **the default**
+backend (`SIGNAL_INTENT_BACKEND=reranker`), with cosine as the opt-out and
+fail-open floor. The reranker needs a `qwen3-reranker-0.6b` server (default
+`:60001`); where none is running, the gates fall open to cosine byte-for-byte, so
+the default is safe but the lift is latent until the server is provisioned. Not
+yet field-validated.
 
 ## Full Benchmark Suite
 

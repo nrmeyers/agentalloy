@@ -60,6 +60,27 @@ def _guard_real_home_wiring() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the signals-layer intent backend to the deterministic cosine floor.
+
+    The shipped default is ``reranker`` (a measured win — see BENCHMARKS.md), but
+    that backend pair-scores against a qwen3-reranker server (default :60001).
+    Left unpinned, any test that drives intent classification would attempt a
+    live call to that port — failing open to cosine on CI (a wasted syscall) but
+    silently using the *real* reranker on a dev box where :60001 is served,
+    making verdicts environment-dependent. Pin cosine so the unit suite is
+    hermetic, and reset the process-wide scorer cache so each test re-reads the
+    backend from its env. The reranker backend is covered explicitly in
+    tests/test_classifier_reranker.py, which deletes this pin to exercise the
+    default-on path against a faked transport.
+    """
+    from agentalloy.signals.classifier import reset_intent_scorer_cache
+
+    monkeypatch.setenv("SIGNAL_INTENT_BACKEND", "cosine")
+    reset_intent_scorer_cache()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_xdg_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point XDG state dirs at a per-test tmp dir for the whole suite.
 

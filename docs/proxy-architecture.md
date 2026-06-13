@@ -9,7 +9,7 @@ AgentAlloy's FastAPI service acts as an OpenAI- and Anthropic-compatible proxy �
 - **What it is:** an OpenAI-compatible `/v1/chat/completions` and Anthropic-compatible `/v1/messages` endpoint that reads the request, evaluates the signal layer (phase, pre-filter, gates), composes skills if warranted, injects them into the system prompt, and forwards to the upstream LLM (response passed back unchanged).
 - **What it is not:** middleware that parses responses or intercepts tool calls. It enhances the system prompt before the call and passes everything else through.
 
-AgentAlloy's composition path is deterministic by default. Two optional LM-assist stages exist — a fragment re-ranker (`LM_ASSIST=arbitrate`) and a signals-layer intent backend (`SIGNAL_INTENT_BACKEND=reranker`) — both off by default, and both fail open to the deterministic path when the local model is unavailable.
+AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST=arbitrate`, default `off` — measured no lift over deterministic selection on the domain benchmark, so it stays off). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
 
 ## Architecture
 

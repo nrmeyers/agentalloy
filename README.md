@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — two optional LM-assist stages (a fragment re-ranker and a signals-layer intent backend) ship off by default and fail open to the deterministic path if their small local model is unavailable. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one 0.6B embed model plus embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
+Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier defaults to a small local reranker — a measured win over cosine — and fails open to cosine when no reranker server is running. Everything runs on local models; nothing leaves your machine. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one 0.6B embed model (plus a 0.6B reranker for the intent gates) and embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -45,51 +45,59 @@ Things your agent gets composed-and-injected without you pasting them into the p
 
 ## Quick Install
 
-Choose your path:
-
-| I want... | Run this |
-|---|---|
-| Full control, GPU acceleration, IDE integration | Native install (default) |
-| Zero host dependencies, air-gapped / offline | Container deployment |
-| Just try it out | [Run the demo](#demo) |
-
-### Native install
+Install once, then pick a deployment in the setup wizard:
 
 ```bash
-# Step 1: install uv (Linux / macOS)
+# 1. install uv (Linux / macOS)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Step 2: install agentalloy
+# 2. install the agentalloy CLI
 uv tool install git+https://github.com/nrmeyers/agentalloy.git
 
-# Step 3: configure and wire
+# 3. run the wizard and choose a deployment (see below)
 agentalloy setup
-# select option 1
 ```
 
-The setup wizard walks you through everything: hardware detection, runner selection (`ollama`, `lm-studio`, or `llama-server`), model and port, service mode, **skill pack selection** (with tier-grouped listing), IDE harness wiring, and hardware target. It then executes all install steps and validates the result. **3–5 minutes** on a warm machine.
+Both deployments run the same wizard — they differ only in the option you pick at the deployment prompt. Choose by what you're optimizing for:
+
+### Option 1 — Native install (recommended)
+
+**Best performance.** Runs the `qwen3-embedding:0.6b` embed model directly on your host with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
+
+The wizard handles the rest: hardware detection, runner selection (`ollama`, `lm-studio`, or `llama-server`), model and port, service mode, **skill pack selection** (tier-grouped listing), IDE harness wiring, and hardware target. It executes every install step and validates the result — **3–5 minutes** on a warm machine.
 
 > **Note:** If your Ollama instance requires SSH key authentication (e.g., when
 > `OLLAMA_HOST` points to a remote instance), you'll need an ed25519 key at
 > `~/.ollama/id_ed25519` before running setup. See [docs/troubleshooting.md](docs/troubleshooting.md)
 > for details.
 
-Non-interactive / scripted installs: pass flags directly:
+### Option 2 — Container install
+
+**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
+
+> **Pulls a pre-built image from GHCR** (`ghcr.io/nrmeyers/agentalloy:latest`) — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
+
+### Runtime toggles (set by what they measured)
+
+Independent of deployment, composition is **deterministic by default**. Three runtime levers — env vars in `~/.config/agentalloy/.env`, not wizard prompts — tune how much optional assistance is in the loop. Each default is the one the benchmarks earned (see [BENCHMARKS.md](BENCHMARKS.md)); the two model-backed ones fail open to the deterministic path when their model is unavailable:
+
+- **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** The signals-layer phase-gate classifier. The `qwen3-reranker-0.6b` backend is the default because it measurably beats cosine on intent classification (per-intent macro-F1 0.24 → 0.69). It needs a reranker server (default `:60001`); set `SIGNAL_INTENT_BACKEND=cosine`, or simply leave that server unprovisioned, and the gates fall open to cosine byte-for-byte.
+- **`LM_ASSIST` — default `off`.** The composition fragment re-ranker (`=arbitrate` to enable). Off by default because it measured **no lift** over deterministic selection on the domain benchmark (it tied, and trailed slightly with a wider candidate pool).
+- **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off for the same reason: **no measured lift**.
+
+> The reranker default only delivers its win where a `qwen3-reranker-0.6b` server is reachable. The setup wizard does not yet provision one, so a fresh install fails open to cosine until you run it — safe, but the lift is latent until the server is up.
+
+See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [docs/operator.md](docs/operator.md) for the config reference.
+
+### Scripted / non-interactive
+
+Skip the wizard entirely by passing flags:
 
 ```bash
 agentalloy setup -n --runner ollama --hardware nvidia --packs all --harness cursor
 ```
 
-### Container install
-
-```bash
-agentalloy setup 
-# select options 2
-```
-
-Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start. Published images ship a **prebuilt skill corpus** — first run is ready in minutes (model download only), no CPU ingest/embed wait. Port 47950 is the only external surface. Container inference is **CPU-only** on every host; for GPU acceleration (NVIDIA / AMD / Metal) pick the native install instead.
-
-> **Container install pulls a pre-built image from GHCR.** Setup pulls `ghcr.io/nrmeyers/agentalloy:latest` directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
+Just want to see it work first? [Run the demo](#demo).
 
 ---
 
@@ -155,7 +163,7 @@ The setup wizard:
 
 ```
 ┌─────────────────────────────────────────────┐
-│  agentalloy:local  (podman run --replace)   │
+│  agentalloy:latest (podman run --replace)   │
 │                                             │
 │  /app/entrypoint.sh (bash)                  │
 │  ├── Check .bootstrap-complete (skip if done)│
@@ -208,7 +216,7 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 - **Three instruction sets, fused.** Governance, workflow, and domain skills are composed together into one persona — not three files the agent has to reconcile on its own.
 - **Phase-aware.** Build-phase skills weight differently than QA-phase or review-phase skills. The same task gets a different composition at different points in the lifecycle.
 - **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 1024-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
-- **No model variance by default.** Embeddings + lexical match + deterministic fusion mean the same task → same composition, regardless of which agent model you swap in tomorrow. (The optional LM-assist re-ranker stages are the only non-deterministic element — off by default, and they fail open to this path.)
+- **No model variance by default.** Embeddings + lexical match + deterministic fusion mean the same task → same composition, regardless of which agent model you swap in tomorrow. (The optional composition fragment re-ranker is the only non-deterministic element in this path — off by default, fail-open.)
 - **Versioned & validated.** Every skill is sourced from authoritative upstream docs and validated against the R1–R8 quality contract (`src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`).
 
 ---
@@ -283,7 +291,7 @@ phase transition          system skill fires
                               etc.)
 ```
 
-The default path between the agent and the embed model is deterministic Python — the optional intent re-ranker backend (off by default) fails open to it. Zero paid-LLM tokens spent on "where am I?", "what should I be doing?", or "should I call AgentAlloy now?"
+Phase-gate evaluation is deterministic predicates plus a named-intent classifier; that classifier defaults to a small local reranker (measured better than cosine) and fails open to deterministic cosine scoring when no reranker server is running. Zero paid-LLM tokens spent on "where am I?", "what should I be doing?", or "should I call AgentAlloy now?"
 
 </details>
 
@@ -428,7 +436,7 @@ AgentAlloy is a three-layer system:
 2. **Composition engine** — hybrid BM25 + dense retrieval over LadybugDB (skill graph) and DuckDB (vector index), fused via phase-tuned Reciprocal Rank Fusion.
 3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 
-The runtime path is deterministic by default; the optional LM-assist stages (fragment re-ranker, intent backend) are off by default and fail open to it. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
+The composition runtime path is deterministic by default — the optional fragment re-ranker (`LM_ASSIST=arbitrate`) is off, having measured no lift. The signals-layer intent backend defaults to a small local reranker (a measured win) and fails open to cosine. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
 
 ---
 

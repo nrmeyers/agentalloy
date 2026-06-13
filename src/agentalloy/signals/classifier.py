@@ -9,15 +9,18 @@ adds ~50 tokens of noise that dilutes cosine similarity for short text-to-text
 classification), expanded reference phrase sets (12+ per intent), recalibrated
 similarity threshold.
 
-Reranker backend (flag-gated, default-off): when ``SIGNAL_INTENT_BACKEND=reranker``
-the named-intent predicates score the utterance against each intent's task
+Reranker backend (default-on; ``SIGNAL_INTENT_BACKEND=cosine`` opts out): the
+named-intent predicates score the utterance against each intent's task
 description with the qwen3-reranker cross-encoder (the Stage-B ``FragmentScorer``,
 reused via a custom instruct) instead of cosine similarity. On the labeled
-intent benchmark this lifts per-intent macro-F1 from ~0.24 (cosine @ 0.75) to
-~0.72. The cross-encoder over-fires on negated cue words ("not done",
-"don't approve"), so a deterministic negation guard vetoes those before scoring.
-Cosine remains the fail-open floor: a disabled / unreachable / failed reranker,
-or an intent with no task description, falls through to cosine byte-for-byte.
+intent benchmark this lifts per-intent macro-F1 from 0.242 (cosine @ 0.75) to
+0.687, which is why it ships as the default. The cross-encoder over-fires on
+negated cue words ("not done", "don't approve"), so a deterministic negation
+guard vetoes those before scoring. Cosine remains the fail-open floor: an
+unreachable / failed reranker (e.g. no qwen3-reranker server at the configured
+URL), an explicit ``SIGNAL_INTENT_BACKEND=cosine``, or an intent with no task
+description all fall through to cosine byte-for-byte — so the default is safe
+even where the reranker server is not running.
 
 Four semantic predicates:
   user_intent_matches      — prompt similarity against named intent references
@@ -109,7 +112,7 @@ _SIMILARITY_THRESHOLD = 0.75
 _MAX_INPUT_CHARS = 2000
 
 # ---------------------------------------------------------------------------
-# Reranker backend (flag-gated, default-off). See module docstring.
+# Reranker backend (default-on; SIGNAL_INTENT_BACKEND=cosine opts out). See module docstring.
 # ---------------------------------------------------------------------------
 
 # Intent-framed instruct for the cross-encoder. The Stage-B default instruct is
@@ -157,8 +160,8 @@ def _has_negation(text: str) -> bool:
 
 
 def _intent_backend() -> str:
-    """Selected named-intent backend: ``"reranker"`` or ``"cosine"`` (default)."""
-    return os.environ.get("SIGNAL_INTENT_BACKEND", "cosine").strip().lower() or "cosine"
+    """Selected named-intent backend: ``"reranker"`` (default) or ``"cosine"``."""
+    return os.environ.get("SIGNAL_INTENT_BACKEND", "reranker").strip().lower() or "reranker"
 
 
 def _rerank_threshold() -> float:
