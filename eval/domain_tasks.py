@@ -313,6 +313,14 @@ def grade_domain_1_webhook_signature(output: str) -> dict[str, bool]:
         # webhooks-signature-verification: signed content = svix-id.svix-timestamp.body
         # (synonym audit 2026-06: external clerk skill writes `signed_content`;
         # also accept dot-join phrasing)
+        # (robustness audit 2026-06-13: strong models routinely describe the
+        # signed payload as the "signing string" / "signing input" / "string to
+        # sign" — e.g. `signing_input = timestamp + "." + body` — which IS this
+        # composed-content construction under a different name. Added those
+        # join-verbs. The timestamp+body AND-gate is kept, so a vague "HMAC of
+        # the payload" that never combines the timestamp still fails; only
+        # answers that explicitly construct the composed signing input newly
+        # pass.)
         "mentions_signed_content_tuple": (
             ("timestamp" in lower and "body" in lower)
             and any(
@@ -324,6 +332,15 @@ def grade_domain_1_webhook_signature(output: str) -> dict[str, bool]:
                     "signed_content",
                     "sign the",
                     "joined",
+                    "signing string",
+                    "signing input",
+                    "signing_input",
+                    "string to sign",
+                    "string that was signed",
+                    "string that is signed",
+                    "base string",
+                    "signed string",
+                    "signature base",
                 ]
             )
         ),
@@ -468,9 +485,42 @@ def grade_domain_4_webhook_versioning(output: str) -> dict[str, bool]:
     lower = output.lower()
     return {
         # webhooks-versioning-and-evolution: X-API-Version header on every payload
+        # (robustness audit 2026-06-13: the gold convention is carrying the
+        # version in an HTTP *header*. The narrow list missed the many equally
+        # valid header names models emit — `webhook-schema-version`,
+        # `x-webhook-schema-version`, `schema-version`, `api_version` header,
+        # "version ... in the header", "versioning via headers". Generalized to:
+        # an explicit known header name, OR co-occurrence of a version token
+        # with a header token in the same answer. The header token is REQUIRED,
+        # so an answer that only adds a `schema_version` *field to the payload
+        # body* and never mentions a header still fails — that is a different
+        # (also-valid) strategy this specific criterion does not credit.)
         "mentions_version_header": any(
             w in lower
-            for w in ["x-api-version", "version header", "x_api_version", "webhook-version"]
+            for w in [
+                "x-api-version",
+                "x_api_version",
+                "webhook-version",
+                "webhook-schema-version",
+                "x-webhook-schema-version",
+                "schema-version header",
+                "api_version header",
+            ]
+        )
+        or (
+            "header" in lower
+            and any(
+                w in lower
+                for w in [
+                    "version header",
+                    "version in the header",
+                    "version in a header",
+                    "version identifier in",
+                    "versioning via header",
+                    "versioning in header",
+                    "version selection",
+                ]
+            )
         ),
         # webhooks-versioning-and-evolution: additive/rename distinction — rename requires new ver
         "explains_rename_requires_new_version": any(
@@ -706,6 +756,17 @@ def grade_domain_9_temporal_activity_timeouts(output: str) -> dict[str, bool]:
         # temporal-activity-basics: heartbeat is how long activities prove liveness
         "mentions_heartbeat": "heartbeat" in lower,
         # temporal-activity-basics: schedule_to_close bounds total time incl. retries
+        # (robustness audit 2026-06-13: this criterion rewards understanding the
+        # *total* bound across all retry attempts, distinct from the per-attempt
+        # start_to_close. Models express that ceiling many ways — "total
+        # execution time", "overall timeout", "total duration", "across all
+        # attempts", "entire activity including retries". Added those equivalent
+        # phrasings. Deliberately did NOT add bare "retries"/"retry policy":
+        # naming a retry policy without bounding total time is the per-attempt
+        # concept, not this one, so an answer that only sets start_to_close +
+        # a retry policy still fails. The token "total time" already here does
+        # not match "total execution time", which is why the explicit variants
+        # are needed.)
         "mentions_schedule_to_close_or_total_bound": any(
             w in lower
             for w in [
@@ -715,6 +776,18 @@ def grade_domain_9_temporal_activity_timeouts(output: str) -> dict[str, bool]:
                 "total time",
                 "including retries",
                 "across retries",
+                "total execution time",
+                "total duration",
+                "total elapsed",
+                "overall timeout",
+                "overall time limit",
+                "across all attempts",
+                "across all retries",
+                "including all retries",
+                "entire activity including",
+                "whole activity including",
+                "sum of all attempts",
+                "cumulative timeout",
             ]
         ),
         # temporal-activity-basics: blocking calls must not run in an async activity —
@@ -892,8 +965,23 @@ def grade_domain_16_otel_trace_propagation(output: str) -> dict[str, bool]:
         # analytics-otel-traces: trace_id is shared by every span in the trace
         "explains_trace_id": any(w in lower for w in ["trace_id", "trace id", "traceid"]),
         # analytics-otel-traces: spans declare parent via parent span id
+        # (robustness audit 2026-06-13: the canonical OpenTelemetry field is
+        # `parent_span_id` — which contains neither the substring "parent_id"
+        # (the "span" breaks it) nor "parent span" (underscores). Every strong
+        # model used `parent_span_id`/`parentSpanId` verbatim and failed this
+        # check — a pure false-negative on the most precise possible answer.
+        # Added the underscore/camelCase forms.)
         "explains_parent_id": any(
-            w in lower for w in ["parent_id", "parent id", "parent span", "parent-id"]
+            w in lower
+            for w in [
+                "parent_id",
+                "parent id",
+                "parent span",
+                "parent-id",
+                "parent_span_id",
+                "parent-span-id",
+                "parentspanid",
+            ]
         ),
         # analytics-otel-traces: context propagation carries trace context across HTTP
         "explains_context_propagation": any(
