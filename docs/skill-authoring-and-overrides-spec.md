@@ -16,6 +16,8 @@ Domain skills are not exposed to the customize CLI. Attempting to `customize` a 
 
 ## Skill Authoring Pipeline
 
+> **STATUS — target design, not the current shipped tool.** The authoring/QA pipeline (author-critic loop, R1-R8 staged validation) is under redesign. This section describes the intended design; it does not document a stable, shipped command surface. The authoritative R1-R8 contract lives at `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`. The override system documented below (`agentalloy customize ...`) **is** shipped and current.
+
 Skills are produced via an **author-critic pipeline** that validates each skill against the R1-R8 quality contract before it ships in a pack.
 
 ### Pipeline stages
@@ -45,7 +47,7 @@ The eight rules are defined in `src/agentalloy/_packs/meta/sys-skill-authoring-r
 - **R7** — Fabricated examples must be flagged or replaced
 - **R8** — Rationale fragments need lexical anchors for the obvious query
 
-Review history is stored under `docs/skill-review-history/` and cited by the authoring rules. See the README there for expected filenames and report structure.
+In the target design, review history is stored under `docs/skill-review-history/` and cited by the authoring rules. That directory is currently a placeholder — see its README; the report-generation flow ships with the redesigned pipeline.
 
 ### Pack structure
 
@@ -157,7 +159,7 @@ The first layer with a matching file wins. Shipped defaults are immutable — yo
 
 ### What can be overridden
 
-Any field in the skill YAML can be overridden:
+Most fields in the skill YAML can be overridden (except `skill_class`, which must match the original — see [What cannot be overridden](#what-cannot-be-overridden)):
 
 - **`raw_prose`** — modify the instruction text
 - **`applies_when`** (system) — change which tools/files trigger the skill

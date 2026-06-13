@@ -1,22 +1,15 @@
 # Proxy Architecture
 
-AgentAlloy's FastAPI service acts as an OpenAI-compatible proxy — a gateway that sits between the harness and the LLM, evaluating each call through the deterministic signal layer and injecting composed skill context before forwarding to the upstream LLM.
+AgentAlloy's FastAPI service acts as an OpenAI- and Anthropic-compatible proxy — a gateway that sits between the harness and the LLM, evaluating each call through the signal layer and injecting composed skill context before forwarding to the upstream LLM. The composition path is deterministic by default (optional off-by-default LM-assist).
 
 ## Overview
 
-**Problem solved:** Previous architecture required three different wiring mechanisms (per-turn hooks, per-session injection, sidecar file watcher) depending on harness capabilities. The tier model existed because some harnesses had hooks and others didn't.
+**Problem solved:** The previous tier model required three wiring mechanisms (per-turn hooks, per-session injection, sidecar file watcher) keyed to harness capabilities. The proxy is a single universal mechanism — any harness that supports a custom API base URL points at it and gets the full AgentAlloy experience.
 
-**Solution:** The proxy is a single universal mechanism. Any harness that supports custom API endpoints points to the proxy, and gets the full AgentAlloy experience automatically. No hooks needed. No sidecar. No per-harness wiring logic.
+- **What it is:** an OpenAI-compatible `/v1/chat/completions` and Anthropic-compatible `/v1/messages` endpoint that reads the request, evaluates the signal layer (phase, pre-filter, gates), composes skills if warranted, injects them into the system prompt, and forwards to the upstream LLM (response passed back unchanged).
+- **What it is not:** middleware that parses responses or intercepts tool calls. It enhances the system prompt before the call and passes everything else through.
 
-**What it is:** An OpenAI-compatible `/v1/chat/completions` endpoint that:
-1. Reads the incoming request (system prompt, messages, model)
-2. Evaluates the signal layer (phase, pre-filter, gates)
-3. Composes relevant skills if warranted
-4. Injects composed skills into the system message
-5. Forwards the modified request to the upstream LLM
-6. Passes the response back unchanged
-
-**What it is not:** A full middleware that parses LLM responses or intercepts tool calls. It enhances the system prompt before the call and passes everything else through.
+AgentAlloy's composition path is deterministic by default. Two optional LM-assist stages exist — a fragment re-ranker (`LM_ASSIST=arbitrate`) and a signals-layer intent backend (`SIGNAL_INTENT_BACKEND=reranker`) — both off by default, and both fail open to the deterministic path when the local model is unavailable.
 
 ## Architecture
 
@@ -55,6 +48,10 @@ AgentAlloy's FastAPI service acts as an OpenAI-compatible proxy — a gateway th
 │  │   fragment)  │  │              │                         │
 │  └──────────────┘  └──────────────┘                         │
 └────────────────────────────┬─────────────────────────────────┘
+                             │
+   (Compose Engine is deterministic by default; an optional
+    flag-gated LM re-ranker stage may run post-fusion —
+    `LM_ASSIST=arbitrate`, off by default, fail-open.)
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
@@ -104,6 +101,7 @@ Same as existing: resolved per-repo via git remote URL, path prefix, or explicit
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| `POST` | `/v1/messages` | Anthropic Messages proxy — intercepts, composes, forwards. The primary Claude Code path (wired via `ANTHROPIC_BASE_URL`). |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible proxy — intercepts, composes, forwards |
 | `POST` | `/v1/embeddings` | Forward to embed server (passthrough) |
 
@@ -155,10 +153,11 @@ When the signal layer finds no match, the proxy forwards the request unchanged t
 
 ### Composition
 
-Uses the existing compose engine:
+Uses the existing compose engine (deterministic by default):
 - Hybrid BM25 + dense retrieval from LadybugDB/DuckDB
 - RRF fusion with phase-tuned leg weighting
 - Applicability filter (deterministic predicates)
+- Optional flag-gated LM fragment re-rank post-fusion (`LM_ASSIST=arbitrate`, off by default, fail-open)
 - Diversity selection (top-k with diversity constraint)
 - Assembly into prose output
 
@@ -206,30 +205,20 @@ This replaces the previous per-harness wiring logic. The command:
 For harnesses that support MCP tools but not custom API endpoints:
 
 ```bash
-agentalloy wire --mcp-fallback
+agentalloy wire-harness --harness <name> --mcp-fallback
 ```
 
 This installs an MCP server entry that exposes `get_skill_for(task, phase)` — effectively a manual compose call. The harness invokes it, gets skill context back, and uses it. No proxy involved.
 
-Supported harnesses: claude-code, cursor, continue-closed, continue-local.
+MCP-fallback-compatible harnesses: claude-code, cursor, continue-closed, continue-local.
 
-## Migration from Tier Model
+For the full proxy-wired and sidecar harness sets, see [Harness Classification](harness-classification.md) (the source of truth).
 
-The three-tier model (hooks, session injection, sidecar) is replaced by the proxy. Existing components affected:
+## History
 
-| Component | Status |
-|-----------|--------|
-| Hook scripts (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`) | Deprecated — removed in proxy redesign |
-| Sidecar / file watcher | Kept — still the only option for non-interceptable harnesses (cursor, windsurf, github-copilot, gemini-cli). Marked with deprecation warning but functional. |
-| Per-harness wiring (`wire_harness.py`) | Kept — proxy wiring for interceptable harnesses; legacy wiring + sidecar for the rest |
-| Tier classification | Deprecated — replaced by binary proxy-wired vs sidecar classification |
-| `/compose` endpoint | Kept — standalone manual composition |
-| MCP fallback | Kept — for harnesses without custom API support |
-| Embedding model | Kept — still `qwen3-embedding:0.6b` |
-| LadybugDB / DuckDB | Kept — unchanged |
-| Signal layer | Kept — runs inside proxy instead of hooks |
-| Phase file (`.agentalloy/phase`) | Kept — proxy reads it |
-| Contracts (`.agentalloy/contracts/`) | Kept — proxy reads them |
+The old three-tier model (hooks / per-session injection / sidecar) collapsed to a binary proxy-wired vs sidecar classification (see [Harness Classification](harness-classification.md)). The proxy is now the universal mechanism for interceptable harnesses; the file-watching sidecar remains for non-interceptable ones (cursor, windsurf, github-copilot, gemini-cli).
+
+The hook routes are **kept and live** — Claude Code's default wiring is the hook path (`/v1/hook/user-prompt-submit`, `/v1/hook/pre-tool-use`, `/v1/hook/post-tool-use` in `api/hook_router.py`), which degrades gracefully if the service is down; `agentalloy wire --via proxy` switches it to base-URL proxy wiring. The embedding model (`qwen3-embedding:0.6b`), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
 
 ## Telemetry
 

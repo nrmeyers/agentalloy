@@ -13,7 +13,7 @@
   &nbsp;
   <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="uv" /></a>
   &nbsp;
-  <img src="https://img.shields.io/badge/runtime-no--LLM-success" alt="no LLM in runtime" />
+  <img src="https://img.shields.io/badge/runtime-deterministic--by--default-success" alt="deterministic by default" />
   &nbsp;
   <img src="https://img.shields.io/badge/packs-35+-orange" alt="35+ packs" />
   &nbsp;
@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, and zero paid-LLM tokens spent on routing. No generative LLM in the hot path. No remote calls. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one 0.6B embed model plus embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
+Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — two optional LM-assist stages (a fragment re-ranker and a signals-layer intent backend) ship off by default and fail open to the deterministic path if their small local model is unavailable. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one 0.6B embed model plus embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -133,13 +133,13 @@ $ curl -s -X POST http://localhost:47950/compose \
 }
 ```
 
-Your agent calls `/compose`, gets back the relevant raw skill prose, and assembles it inside its own prompt. No LLM-in-the-loop, no token tax, no API key roulette. Sub-50ms p95 on a warm cache.
+Your agent calls `/compose`, gets back the relevant raw skill prose, and assembles it inside its own prompt. No paid LLM in the loop, no token tax, no API key roulette. Sub-50ms p95 on a warm cache.
 
 ---
 
 ## Container deployment
 
-AgentAlloy can run as a single container (`agentalloy:local`, setup option #2) that bundles the service and its embedding model (Ollama) in one process. This is the recommended deployment for users who want zero host-side inference dependencies.
+AgentAlloy can run as a single container (setup option #2) that bundles the service and its embedding model (Ollama) in one process — the recommended deployment when you want zero host-side inference dependencies. The image is pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`); the full container runbook lives in [INSTALL.md](INSTALL.md).
 
 The setup wizard:
 
@@ -180,76 +180,15 @@ Volume mounts:
   ~/.ollama       → /root/.ollama (Ollama models)
 ```
 
-### Volume layout
+### Volume layout & bootstrap
 
-| Volume / Path | Purpose | Persists across restarts? |
-|---|---|---|
-| `agentalloy-data:/app/data` | LadybugDB index, DuckDB skills database | Yes (named volume) |
-| `~/.ollama:/root/.ollama` | Ollama model cache (`qwen3-embedding:0.6b`) | Yes (host bind mount) |
-
-### Entrypoint bootstrap sequence
-
-The bootstrap entrypoint (`/app/entrypoint.sh`) is **baked into the image** (`container/entrypoint.sh` in the repo, copied by the Containerfile). A bare `podman run ghcr.io/nrmeyers/agentalloy:latest` bootstraps correctly without any bind-mount or setup wizard. The setup wizard bind-mounts a generated script on top when the user specifies explicit packs.
-
-The entrypoint script runs on every container start:
-
-1. **Bootstrap check** — If `$APP_DIR/.bootstrap-complete` exists, skip all bootstrap steps and go straight to uvicorn.
-2. **Prebuilt corpus seed** — Published images (`ghcr.io/nrmeyers/agentalloy`) carry a fully ingested + embedded corpus under `/app/corpus-seed`; if the data volume has no corpus yet it is copied in (seconds) and step 8 is skipped. Locally built images have no seed and fall through to the full build. The seed's `corpus-stamp.json` (embed model, dim, packs hash, git sha) is copied alongside for auditability.
-3. **Ollama install** — If `ollama` binary is missing, download and run the official install script.
-4. **Start Ollama** — Launch `ollama serve --host 127.0.0.1:11434` in the background. (Required even with a seeded corpus — query embedding happens at compose time.)
-5. **Wait for ready** — Poll `http://127.0.0.1:11434` for up to 30 seconds.
-6. **Pull model** — If `qwen3-embedding:0.6b` is not cached, pull it from the Ollama library.
-7. **Run migrations** — Execute `python -m agentalloy.migrate` to initialize database schemas.
-8. **Install packs** — Skipped when the corpus was seeded in step 2. Otherwise: reads `$AGENTIALLOY_PACKS` env var (comma-separated pack names) and installs each one, or falls back to always-on packs if the var is empty (this is the slow path — ~3,000 fragments embedded on CPU).
-9. **Flag complete** — Touch `$APP_DIR/.bootstrap-complete`.
-10. **Start service** — `uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950`.
-
-Steps 2–8 are skipped on subsequent starts (idempotent bootstrap). First-run wall clock: published image ≈ model download only (~5–10 min on a typical connection); locally built image adds the corpus build (20+ min on CPU).
-
-### Operational commands
-
-<details><summary>Click to expand — full operational command reference</summary>
-
-```bash
-# Start the container (first-time setup)
-agentalloy setup --deployment container
-
-# View logs
-podman logs agentalloy
-podman logs -f agentalloy          # follow
-podman logs --tail 100 agentalloy  # last 100 lines
-
-# Check health
-curl http://localhost:47950/health
-
-# Inspect container
-podman inspect agentalloy
-podman ps --filter name=agentalloy
-
-# Exec into the container
-podman exec -it agentalloy sh
-
-# Restart the container
-podman restart agentalloy
-
-# Stop and remove
-podman stop agentalloy
-podman rm -f agentalloy
-
-# Inspect volumes
-podman volume inspect agentalloy-data
-
-# Re-embed corpus in the container
-podman exec agentalloy uv run agentalloy reembed
-
-# Install skill packs in the container
-podman exec agentalloy uv run agentalloy install-packs --packs all
-
-# Suppress restart after pack install
-podman exec agentalloy uv run agentalloy install-packs --packs all --no-restart
-```
-
-</details>
+The entrypoint (`/app/entrypoint.sh`, baked into the image) seeds the prebuilt
+corpus, starts Ollama, pulls `qwen3-embedding:0.6b`, runs migrations, and execs
+uvicorn — idempotent across restarts via a `.bootstrap-complete` marker. Two
+volumes persist: `agentalloy-data:/app/data` (corpus + databases) and
+`~/.ollama:/root/.ollama` (model cache). The full bootstrap sequence and
+operational command reference live in [INSTALL.md](INSTALL.md) and
+[docs/operator.md](docs/operator.md).
 
 ### Hardware requirements
 
@@ -269,8 +208,8 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 - **Three instruction sets, fused.** Governance, workflow, and domain skills are composed together into one persona — not three files the agent has to reconcile on its own.
 - **Phase-aware.** Build-phase skills weight differently than QA-phase or review-phase skills. The same task gets a different composition at different points in the lifecycle.
 - **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 1024-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
-- **No model variance.** Embeddings + lexical match + deterministic fusion. Same task → same composition, regardless of which agent model you swap in tomorrow.
-- **Versioned & validated.** Every skill is sourced from authoritative upstream docs and validated against the R1–R8 quality contract; reviewable history under `docs/skill-review-history/`.
+- **No model variance by default.** Embeddings + lexical match + deterministic fusion mean the same task → same composition, regardless of which agent model you swap in tomorrow. (The optional LM-assist re-ranker stages are the only non-deterministic element — off by default, and they fail open to this path.)
+- **Versioned & validated.** Every skill is sourced from authoritative upstream docs and validated against the R1–R8 quality contract (`src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`).
 
 ---
 
@@ -344,7 +283,7 @@ phase transition          system skill fires
                               etc.)
 ```
 
-Everything between the agent and the embed model is deterministic Python. Zero paid-LLM tokens spent on "where am I?", "what should I be doing?", or "should I call AgentAlloy now?"
+The default path between the agent and the embed model is deterministic Python — the optional intent re-ranker backend (off by default) fails open to it. Zero paid-LLM tokens spent on "where am I?", "what should I be doing?", or "should I call AgentAlloy now?"
 
 </details>
 
@@ -475,9 +414,9 @@ The corpus is **packs** — opt-in groups of related skills. `main` ships **35+ 
 <tr><td><b>store</b></td><td><code>redis</code> · <code>redshift</code> · <code>snowflake</code> · <code>temporal</code></td></tr>
 </table>
 
-Every skill is sourced from authoritative upstream docs and validated against the **R1–R8 quality contract** in `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`. Each pack ships with `.qa.md` reports under `docs/skill-review-history/` documenting independent Critic verdicts.
+Every skill is sourced from authoritative upstream docs and validated against the **R1–R8 quality contract** in `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`. (The authoring/QA pipeline that emits per-pack Critic reports is being redesigned.)
 
-Pack authoring lives in a separate repo and tooling — see [agentalloy-authoring](../agentalloy-authoring). It uses a local-first author-critic pipeline that produces validated YAML packs; nothing about authoring is required to *use* AgentAlloy at runtime.
+Pack authoring uses a local-first author-critic pipeline (currently being redesigned) that produces validated YAML packs; nothing about authoring is required to *use* AgentAlloy at runtime.
 
 ---
 
@@ -489,7 +428,7 @@ AgentAlloy is a three-layer system:
 2. **Composition engine** — hybrid BM25 + dense retrieval over LadybugDB (skill graph) and DuckDB (vector index), fused via phase-tuned Reciprocal Rank Fusion.
 3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 
-Zero generative LLM in the runtime path. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
+The runtime path is deterministic by default; the optional LM-assist stages (fragment re-ranker, intent backend) are off by default and fail open to it. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
 
 ---
 
@@ -565,12 +504,12 @@ User-scope state (`~/.config/agentalloy/`, corpus DB) is preserved across the sw
 
 ## Benchmarks
 
-Measured on a 4-model × 3-condition matrix (composed / flat / no skills; 10 generic + 8 domain pre-registered tasks, 3 seeded runs per cell). Results that stand out:
+Measured on a 4-model × 3-condition matrix (composed / flat-oracle / no skills) over 18 pre-registered domain tasks (5 seeded runs per cell), with an independent 27B LLM-judge cross-check. Results that stand out:
 
-- **On domain tasks, composed injection lifted every model (+0.07 to +0.19) and landed within 0.01–0.03 of a hand-picked oracle injection** — automatic skill selection is doing the job a human curator would.
-- **A 12B dense model with composed skills tied a 27B dense model on domain tasks (0.975 vs 0.971) at 2.5× the speed.** Bare, the 12B scored 0.906 — composition moved it up a weight class, on hardware a 27B doesn't fit.
-- **A 1.5B-active edge model with composed skills matched a bare 27B dense model on generic tasks — at 12.6× the speed.** LFM2.5-8B-A1B + composed scored 0.850 vs the bare Qwen3.6-27B's 0.855, in 42s vs 534s for the same workload. That quality runs on a laptop or NPU; the 27B doesn't.
-- **Composed injection made the edge model better *and* faster than itself**: +0.05 quality over its own no-skill baseline while finishing 29% faster — focused skill prose cut its output rambling nearly in half. Flat injection of the same skills delivered zero lift on that model.
+- **On domain tasks, composed injection beat the bare model on every architecture (+0.02 to +0.17)**, capturing 51–71% of a hand-picked oracle's lift at 21–32% fewer tokens — automatic selection doing the job a human curator would.
+- **The lift is biggest where it matters most: the LFM2.5 edge model gains +0.172**, and an independent 27B LLM-judge confirms it (+0.154, 95% CI excludes zero) — real answer quality, not a grader artifact.
+- **Composed injection disciplines a small model.** On domain tasks the unguided baseline runs ~24% longer (2604 vs 1988 output tokens) and scores lower — focused skill prose makes the edge model both more correct *and* more concise.
+- **Strong models sit near their ceiling** (35B +0.039, 27B +0.022): composition is the difference-maker for small models and a no-harm tie for large ones.
 
 Full matrix, methodology, and caveats in [BENCHMARKS.md](BENCHMARKS.md).
 

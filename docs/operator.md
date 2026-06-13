@@ -76,13 +76,18 @@ Fragments are the smallest retrievable unit of skill content. Each fragment has:
 
 ### Phases
 
-Phases track where the agent is in the software development lifecycle. Valid phases (from `ingest.py`): `design`, `build`, `review`.
+Phases track where the agent is in the software development lifecycle. The **authoritative SDD runtime lifecycle** is a linear graph (from `signals/gates.py`):
 
-The SDD (Spec-Driven Development) pipeline uses additional phase markers: `spec`, `design`, `plan`, `testgen`, `build`, `verify`, `deliver`.
+```
+spec → design → build → qa → ship
+```
 
-The phase file lives at `.agentalloy/phase` in each project. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase.
+The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
 
-**Workflow position markers** (from `ingest.py`): `sdd`, `phase:spec`, `phase:design`, `phase:plan`, `phase:testgen`, `phase:build`, `phase:verify`, `phase:deliver`, `code-review`, `release`, `incident`, `rfc`.
+Two separate vocabularies exist for **skill authoring/ingest** and should not be confused with the runtime lifecycle above:
+
+- **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `design`, `build`, `review` — the values a skill may scope itself to at ingest time.
+- **Workflow position markers** (`ingest.py` `WORKFLOW_POSITION_MARKERS`): `sdd`, `phase:spec`, `phase:design`, `phase:plan`, `phase:testgen`, `phase:build`, `phase:verify`, `phase:deliver`, `code-review`, `release`, `incident`, `rfc` — tags describing where in a process a skill applies.
 
 ### Contracts
 
@@ -98,10 +103,10 @@ When present, `domain_tags` from contracts drive BM25 retrieval — surgical and
 
 ### Signal Layer
 
-The signal layer is a deterministic Python module that evaluates conditions and triggers actions. Three event types:
+The signal layer is a Python module (deterministic by default) that evaluates conditions and triggers actions. Three event types:
 
 1. **Pre-filter** — cheap keyword matching + file-event scope checks. Decides if a signal evaluation is warranted.
-2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus cosine-similarity gates against reference phrase sets.
+2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus cosine-similarity gates against reference phrase sets. **Optional flag-gated step:** with `SIGNAL_INTENT_BACKEND=reranker` (default `cosine`), the named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder instead of cosine similarity. Off by default; a disabled or unreachable reranker falls open to cosine byte-for-byte.
 3. **Action** — write phase file atomically, emit workflow skill prose, or fire system skills.
 
 The signal layer runs per-request through the proxy for proxy-wired harnesses. For sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI), the proxy path is not available and the signal layer is replaced by a file-watching sidecar. See [Sidecar Experience](sidecar-experience.md).
@@ -140,7 +145,7 @@ See [Profiles and Overrides](profiles-and-overrides.md) for full details.
 Skill overrides follow a three-layer resolution (from `customize.py`):
 
 1. **Layer 1 (highest)** — Project-level: `.agentalloy/skills/<class>/<name>.yaml`
-2. **Layer 2** — Profile-level: `~/.agentalloy/profiles/<name>/skills/<class>/<name>.yaml`
+2. **Layer 2** — Profile-level: `~/.local/share/agentalloy/profiles/<name>/skills/<class>/<name>.yaml`
 3. **Layer 3 (lowest)** — Shipped defaults: bundled in `_packs/`
 
 Shipped defaults are immutable; operators override via project or profile layers. See [Profiles and Overrides](profiles-and-overrides.md) for CLI details.
@@ -181,6 +186,11 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 6. **Diversity selection** — top-k with diversity constraint (default: on)
 7. **Assembly** — selected fragments assembled into composed prose output
 
+**Optional flag-gated steps** (all off by default, all fail open to the deterministic path above when the local model or graph is unavailable):
+
+- **Graph expansion** (`RETRIEVAL_GRAPH_EXPAND=on`, default off): splices `requires`-edge neighbors of the top ranked skills into the candidate set before selection.
+- **Stage B LM fragment re-rank** (`LM_ASSIST=arbitrate`, default `off`): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top ~12 fragments (pairwise yes/no logprobs over `/v1/completions`); on a HIT it replaces deterministic selection with the fragments scoring above `LM_ASSIST_KEEP_THRESHOLD`. On disabled/timeout/error, deterministic selection runs unchanged.
+
 ### Embedding Model
 
 Single model for all embedding needs: `qwen3-embedding:0.6b` at 1024 dimensions. Used for:
@@ -200,7 +210,7 @@ Signal-layer traces additionally capture: `event_type`, `pre_filter_matched`, `g
 
 ### Config File
 
-User-scope configuration lives at `~/.agentalloy/config.yaml` (from `agentalloy.config`). Key settings:
+User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced into the service process; honors `XDG_CONFIG_HOME`). Runtime data — corpus, per-profile datastores, profiles registry — lives under `~/.local/share/agentalloy/` (honors `XDG_DATA_HOME`). Key settings:
 
 - `embed_server.url` — embedding backend URL
 - `embed_server.model` — embedding model name
@@ -211,7 +221,7 @@ User-scope configuration lives at `~/.agentalloy/config.yaml` (from `agentalloy.
 
 ### Profiles Config
 
-`~/.agentalloy/profiles.yaml` — profile resolution rules:
+`~/.local/share/agentalloy/profiles.yaml` — profile resolution rules:
 
 ```yaml
 default_profile: default
@@ -225,7 +235,7 @@ profiles:
 
 ### Watcher Config (sidecar harnesses)
 
-`~/.agentalloy/watch/<profile_name>.yaml` — sidecar configuration per profile. PID file: `~/.agentalloy/watch/<profile_name>.pid`. Log file: `~/.agentalloy/watch/<profile_name>.log`.
+`~/.agentalloy/watch/<profile_name>.yaml` — sidecar configuration per profile. PID file: `~/.agentalloy/watch/<profile_name>.pid`. Log file: `~/.agentalloy/watch/<profile_name>.log`. (Note: the watcher directory is hardcoded at `~/.agentalloy/watch/` — it does **not** follow the XDG data root used elsewhere.)
 
 ### Environment Variables
 
@@ -247,17 +257,7 @@ Skills are authored via the author-critic pipeline:
 3. **QA** — Skill QA Agent reviews against R1-R8 quality contract
 4. **Ingest** — validated YAML loaded into LadybugDB via `python -m agentalloy.ingest`
 
-Quality contract (R1-R8):
-- R1: Trigger conditions clearly stated
-- R2: Steps are numbered and actionable
-- R3: Pitfalls section present and specific
-- R4: Verification steps included
-- R5: Commands are copy-paste ready
-- R6: No aspirational content (all claims verified)
-- R7: Cross-references to related skills are accurate
-- R8: Output fits within context window constraints
-
-See [Skill Authoring and Overrides Spec](skill-authoring-and-overrides-spec.md).
+QA reviews against the R1-R8 quality contract (clear triggers, actionable steps, specific pitfalls, verification, copy-paste-ready commands, no aspirational content, accurate cross-references, context-window fit). See [Skill Authoring and Overrides Spec](skill-authoring-and-overrides-spec.md) for the full definitions.
 
 ### Skill Override CLI
 
@@ -307,4 +307,3 @@ A skill about "how to write tests" in category `ops` is a category-fit failure. 
 - [Harness Classification](harness-classification.md) — proxy-wired vs sidecar classification spec
 - [Harness Catalog](install/harness-catalog.md) — per-harness integration details, auto-detection, MCP fallback
 - [Skill Authoring and Overrides Spec](skill-authoring-and-overrides-spec.md) — skill authoring pipeline, override YAML schema
-- [POC: Composed vs Flat](experiments/poc-composed-vs-flat.md) — empirical comparison of injection methods

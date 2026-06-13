@@ -64,7 +64,7 @@ agentalloy watch start --harness <cursor|windsurf|github-copilot|gemini-cli>
 
 The watcher runs in the foreground. Press Ctrl+C to stop.
 
-**Auto-detection:** If you omit `--harness`, the watcher reads `state.json` and auto-detects the active sidecar harness from `harness_files_written`.
+**Auto-detection:** If you omit `--harness`, the watcher reads `install-state.json` and auto-detects the active sidecar harness from `harness_files_written`.
 
 ### 3. Run persistently
 
@@ -190,13 +190,7 @@ This is a fallback for sidecar harnesses. When the watcher is running, phase cha
 
 ## Relationship to Profiles
 
-The watcher is profile-aware. Config, PID file, and log file are all keyed by `profile_name`:
-
-- Config: `~/.agentalloy/watch/<profile_name>.yaml`
-- PID: `~/.agentalloy/watch/<profile_name>.pid`
-- Log: `~/.agentalloy/watch/<profile_name>.log`
-
-The `profile_name` comes from the active profile (resolved via `profiles.py`). If no profile is active, it defaults to `"default"`. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution details.
+The watcher is profile-aware: its config, PID, and log files are all keyed by `profile_name` (see [Configuration](#configuration) above), resolved via `profiles.py` and defaulting to `"default"`. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution details.
 
 ## MCP Fallback
 
@@ -240,7 +234,7 @@ Returns: `{"profile": "default", "running": true/false, "pid": <int|null>, "last
 
 1. Verify the `.agentalloy/` directory exists in your project root
 2. Check the log file: `~/.agentalloy/watch/<profile_name>.log`
-3. Ensure the harness name matches what was wired: compare `--harness` with `state.json`
+3. Ensure the harness name matches what was wired: compare `--harness` with `install-state.json`
 
 ### Stale PID file
 

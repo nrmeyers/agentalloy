@@ -1,6 +1,6 @@
 # Harness Classification
 
-Source of truth for how coding-agent harnesses are classified. All documentation (README, operator.md, harness-catalog.md) must align with this spec.
+Source of truth for how coding-agent harnesses are classified. All documentation (README, operator.md, [install/harness-catalog.md](install/harness-catalog.md)) must align with this spec.
 
 ## Purpose
 

@@ -13,8 +13,8 @@
 A local **AgentAlloy** service that gives your coding agent (this LLM, or another) access to a curated corpus of engineering skills — testing patterns, error handling, deployment recipes, observability, security, etc. — composed dynamically per task.
 
 The runtime is a small FastAPI service backed by:
-- An embedding model (`qwen3-embedding:0.6b`, 1024-dim) — runs on any hardware via Ollama or LM Studio
-- A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `nodejs`, `typescript`, `nestjs`, `react`, `vue`, `agents`, `auth`, `observability`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (LadybugDB + DuckDB) is generated locally on first install.
+- An embedding model (`qwen3-embedding:0.6b`, 1024-dim) — runs on any hardware via Ollama, LM Studio, or llama-server
+- A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `python`, `typescript`, `nodejs`, `fastapi`, `react`, `go`, `rust`, `data-engineering`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (LadybugDB + DuckDB) is generated locally on first install.
 - Your handoff harness (Claude Code / Cursor / Continue.dev / etc.) — wired so it can query the API
 
 **AgentAlloy is user-scoped, not per-repo.** You install once; every project the user opens can wire to the same service. State lives at `${XDG_CONFIG_HOME:-~/.config}/agentalloy/`; corpus at `${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`. Repos contain only sentinel-bounded blocks injected into agent config files (`CLAUDE.md`, `.cursor/rules/agentalloy.mdc`, etc.).
@@ -251,11 +251,11 @@ This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/shar
 
 This brings the embedding backend online before pack ingestion. What happens depends on the runner chosen in Step 4:
 
-- **llama-server**: spawns `llama-server --embeddings --port 11436 --ubatch-size 2048` in the background and waits up to 120 seconds for the server to accept connections. The log is written to `~/.local/share/agentalloy/logs/embed-server.log`.
-- **ollama**: fires `ollama serve` (idempotent — safe if already running) and polls port 11436.
-- **lm-studio / other**: prints instructions for you to start the server manually. Start it before proceeding to Step 8.
+- **llama-server**: spawns `llama-server --embeddings --port 11434 --ubatch-size 2048` in the background and waits up to 120 seconds for the server to accept connections. The log is written to `~/.local/share/agentalloy/logs/embed-server.log`.
+- **ollama**: fires `ollama serve` (idempotent — safe if already running) and polls port 11434 (Ollama's default).
+- **lm-studio / other**: prints instructions for you to start the server manually (LM Studio defaults to port 1234). Start it before proceeding to Step 8.
 
-The step is idempotent: if port 11436 is already listening it exits 0 immediately.
+Both the managed llama-server and Ollama listen on **11434** — that's the port the runtime's `RUNTIME_EMBED_BASE_URL` points at, written into `.env` by `write-env`. The step is idempotent: if the embed port is already listening it exits 0 immediately.
 
 > CONFIRM
 >
@@ -356,10 +356,10 @@ Record the harness choice. The CLI uses one of: `claude-code`, `gemini-cli`, `cu
 
 > RUN
 > ```bash
-> cd <user's repo> && agentalloy wire-harness --harness <chosen-harness>
+> cd <user's repo> && agentalloy wire --harness <chosen-harness>
 > ```
 
-(Substitute the harness key from step 10.) The shorter form is `agentalloy wire --harness <chosen>` — the verb auto-detects the harness from the cwd if you omit the flag.
+(Substitute the harness key from step 10.) `agentalloy wire` auto-detects the harness from the cwd if you omit `--harness`. `wire` is the convenience wrapper over the explicit `agentalloy wire-harness` command (an accepted alias); user-facing flows should prefer `wire`.
 
 **Auto-detection priority** (used when `--harness` is omitted; first match wins):
 1. `.cursor/` or `.cursorrules` → `cursor`
@@ -429,7 +429,7 @@ Then based on the answer:
 > agentalloy enable-service --mode manual
 > ```
 
-The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments pull a pre-built image from GHCR — the CI pipeline publishes two image variants on every merge to `main`: `ghcr.io/nrmeyers/agentalloy:latest` (~300 MB, lightweight) and `ghcr.io/nrmeyers/agentalloy:full` (~975 MB, with model pre-pulled for air-gapped environments). No repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`). On success, the mode is recorded in `install-state.json`.
+The subcommand detects the available service manager (systemd/launchd) or container runtime (podman preferred, docker fallback), writes the appropriate unit/plist/startup invocation, starts the service, and polls `/health` for up to 30s to confirm startup. Container deployments pull a pre-built image from GHCR — no repo checkout, no build context, and no `git` required (see the variant table below). On success, the mode is recorded in `install-state.json`.
 
 > **Container deployments pull a pre-built image from GHCR.** The CI pipeline builds and publishes two image variants on every merge to `main`:
 >
@@ -518,19 +518,14 @@ For container deployments (`--deployment container`), use these commands to mana
 
 | Command | What it does |
 |---|---|
-| `podman logs agentalloy` | View container logs (add `-f` to follow) |
-| `podman logs --tail 100 agentalloy` | Last 100 lines of container logs |
-| `podman inspect agentalloy` | Inspect container metadata and configuration |
+| `podman logs -f agentalloy` | Follow container logs (`--tail 100` for the last 100 lines) |
 | `podman ps --filter name=agentalloy` | Check if the container is running |
 | `podman exec -it agentalloy sh` | Open an interactive shell inside the container |
-| `podman restart agentalloy` | Restart the container |
-| `podman stop agentalloy` | Stop the container (graceful shutdown) |
+| `podman restart agentalloy` / `podman stop agentalloy` | Restart / gracefully stop the container |
 | `podman rm -f agentalloy` | Force-remove the container |
-| `podman volume inspect agentalloy-data` | Inspect the persistent data volume |
 | `curl http://localhost:47950/health` | Check the service health endpoint |
 | `podman exec agentalloy uv run agentalloy reembed` | Re-embed corpus inside the container |
-| `podman exec agentalloy uv run agentalloy install-packs --packs all` | Install skill packs inside the container |
-| `podman exec agentalloy uv run agentalloy install-packs --packs all --no-restart` | Install packs without restarting the service |
+| `podman exec agentalloy uv run agentalloy install-packs --packs all` | Install skill packs inside the container (add `--no-restart` to skip the service bounce) |
 
 ### Volume layout
 
@@ -550,13 +545,9 @@ For container deployments (`--deployment container`), use these commands to mana
 | (health API)      |  -p      | (FastAPI service)         |
 |                   |          |                           |
 +-------------------+          +---------------------------+
+```
 
-Volume table:
-
-| Volume / Path | Purpose | Persists across restarts? |
-|---|---|---|
-| `agentalloy-data:/app/data` | LadybugDB index, DuckDB skills database | Yes (named volume) |
-| `~/.ollama:/root/.ollama` | Ollama model cache (`qwen3-embedding:0.6b`) and SSH keys | Yes (host bind mount) |
+Both mounts persist across restarts: `agentalloy-data:/app/data` (LadybugDB + DuckDB, a named volume) and `~/.ollama:/root/.ollama` (Ollama model cache + SSH keys, a host bind mount).
 
 ### Health check
 
@@ -576,40 +567,41 @@ The container uses a runtime-generated entrypoint script (`/app/entrypoint.sh`) 
 
 ### Uninstall — what it removes
 
-`agentalloy uninstall` is the one-shot teardown. The default preset is **full uninstall** — it removes everything:
+`agentalloy uninstall` is the one-shot teardown. Run interactively it shows a preset menu (`keep-data` / `full` / `custom`); pass `--preset` or `--yes` to skip it.
+
+**Always removed** (every preset, default behavior):
 
 - **Sentinel-bounded harness blocks** in *every* repo recorded in install-state.json (CLAUDE.md, GEMINI.md, .clinerules, .cursorrules, .cursor/rules/agentalloy.mdc, .opencode/system-prompt.md, .aider.conf.yml, etc.). The cross-repo walk happens before the CLI is removed; pass `--no-all-repos` to limit to cwd. Tampered blocks (sha256 mismatch — the user edited inside the sentinels) are skipped without `--force`.
 - **MCP entries** for `agentalloy` from `~/.claude/mcp_servers.json`, the cwd repo's `.cursor/mcp.json`, and `.continuerc.json`. The files are deleted if `agentalloy` was their only entry.
 - **Native service unit + companion ollama unit** on Linux (`~/.config/systemd/user/agentalloy.service`, `~/.config/systemd/user/ollama.service`, sanitized `agentalloy.env`). On macOS the launchd plist at `~/Library/LaunchAgents/ai.agentalloy.plist`.
 - **Manual-mode agentalloy server** if it's still listening on the configured port (SIGTERM, escalating to SIGKILL after 10s).
-- **User-scope state**: `${XDG_CONFIG_HOME}/agentalloy/.env`, `install-state.json`, the entire state directory.
+- **User-scope state**: `${XDG_CONFIG_HOME}/agentalloy/.env`, `install-state.json`, the state directory.
 - **Derivable artifacts**: `${XDG_DATA_HOME}/agentalloy/outputs/` (per-step JSON dumps including preflight) and `server.log`.
 - **CLI uninstall**: removes the `agentalloy` CLI from `~/.local/bin` (via `uv tool uninstall` or `pipx uninstall` depending on how it was installed).
 
-**Preserved by default**: nothing — the full uninstall preset removes everything, including the corpus DB and pulled models. To keep the corpus and models, choose the **keep-data** preset (`--preset keep-data`), which only removes harness wiring and `.env`.
+**Preserved by default** — the corpus DB (`${XDG_DATA_HOME}/agentalloy/corpus/`) and pulled Ollama models survive a plain `agentalloy uninstall`. Pass `--remove-data` (or pick the `full` preset) to wipe the entire `${XDG_DATA_HOME}/agentalloy/` directory, the model cache (`~/.ollama`), the download cache (`~/.cache/agentalloy`), and any container named volumes.
 
 **Flags**:
-- `--remove-data` — explicit no-op (the default full preset already removes data). Kept for backward compatibility.
+- `--remove-data` — also remove the corpus DB, model cache, and container volumes (default: preserve).
+- `--keep-data` — explicit opt-in for the default preserve behavior (no-op; documents intent in scripts).
 - `--force` — remove sentinel blocks even when the inner content has been edited.
 - `--no-all-repos` — only clean sentinels in cwd (legacy behavior; useful for partial cleanup).
-- `--preset keep-data` — keep corpus, models, and services; only remove wiring and `.env`.
+- `--preset {keep-data|full|custom}` — skip the menu: `keep-data` removes wiring + `.env` only; `full` removes everything (services, models, datastore, wiring, state); `custom` drills into a per-item prompt.
 
 **Full wipe one-liner** (for testers ready to reinstall from scratch):
 ```bash
-agentalloy uninstall --remove-data
+agentalloy uninstall --preset full --yes
 ```
-This used to require a manual `rm -rf ~/.local/share/agentalloy` afterwards — no longer.
 
 ### Uninstalling the container model
 
 For container deployments (`--deployment container`), `agentalloy uninstall` also handles teardown:
 
-- Stops and removes the `agentalloy` container (`podman rm -f agentalloy` or `docker rm -f agentalloy`)
-- Removes the `agentalloy-data` volume (`podman volume rm agentalloy-data` or `docker volume rm agentalloy-data`)
-- Removes the `~/.ollama` symlink created during setup
-- Cleans up harness wiring and state files (same as native model)
+- Stops and removes the `agentalloy` container and its local image (always).
+- Removes the `agentalloy-data` named volume and the `~/.ollama` model cache **only with `--remove-data` / the `full` preset** — a plain uninstall preserves them.
+- Cleans up harness wiring and state files (same as the native model).
 
-If the user wants to keep their corpus and model cache, use `--preset keep-data` — this preserves the volume and Ollama models while removing wiring and `.env`.
+To keep the corpus and model cache, use the default uninstall (or `--preset keep-data`) — both preserve the named volume and Ollama models while removing wiring and `.env`.
 
 ---
 
@@ -622,19 +614,6 @@ Common stuck-states:
 - The CLI exits 3 (schema mismatch). The user has a state file from a different version. Tell them to back it up and re-run install with a fresh state.
 - The CLI exits 4 (already-completed). That step ran successfully before. Read the user-scope state file to see what's done; skip ahead. (`agentalloy status` shows this concisely.)
 - A required external tool (Ollama, LM Studio) is missing. Tell the user the tool's install URL and wait for them to install it manually. Do NOT auto-execute install scripts.
-- A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `wire-harness` so the harness config gets the new URL.
-- **Ollama SSH key missing:** You see the error
-  `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory` when
-  pulling models. This means your Ollama instance requires SSH key authentication but
-  the key file doesn't exist at `~/.ollama/id_ed25519`.
-  **Fix:** Generate the key with `ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`,
-  then register the public key (`~/.ollama/id_ed25519.pub`) on your Ollama server.
-  See the prerequisites section for full details.
-- **Container model pull fails with SSH key error (container only):** The container
-  starts but the model pull fails inside the container with an SSH key error, even
-  though the key exists on the host at `~/.ollama/id_ed25519`. This can happen if the
-  `~/.ollama` directory doesn't exist or isn't readable by the container runtime.
-  **Fix:** Create the directory and key on the host first:
-  `mkdir -p ~/.ollama && ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`,
-  then restart the container (`podman restart agentalloy` or `docker restart agentalloy`).
-  The container re-reads the mounted `~/.ollama` directory on each start.
+- A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy wire` so the harness config gets the new URL.
+- **Ollama SSH key missing:** You see `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory` when pulling models. Your Ollama instance requires SSH key authentication and the key is absent. **Fix:** follow the SSH-key steps in the prerequisites section (generate at `~/.ollama/id_ed25519`, register the `.pub` on the server).
+- **Container model pull fails with the same SSH key error (container only):** the key exists on the host but the container can't read the mounted `~/.ollama`. **Fix:** ensure the host directory exists (`mkdir -p ~/.ollama && ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`), then `podman restart agentalloy` (the container re-reads the mount on each start).

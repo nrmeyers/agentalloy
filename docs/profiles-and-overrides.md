@@ -23,7 +23,7 @@ When AgentAlloy runs, it detects the active profile for the current working dire
 
 4. **Fallback** — the `default_profile` from `profiles.yaml` (defaults to `"default"`).
 
-Resolution is fast (<10ms) and runs on every skill retrieval and hook fire. Stale project markers (referencing profiles that no longer exist in config) fall through to detection rules rather than erroring.
+Resolution is fast and runs on every skill retrieval and hook fire. Stale project markers (referencing profiles that no longer exist in config) fall through to detection rules rather than erroring.
 
 ## Config file
 
@@ -90,63 +90,17 @@ agentalloy profile delete <name> [--yes]
 
 `agentalloy profile delete` refuses to delete the built-in default profile or the current `default_profile`. Use `agentalloy profile set-default` first to change the fallback.
 
-## Three-layer skill overrides
+## Skill overrides
 
-Skill overrides work on a three-layer priority system. When resolving a skill, AgentAlloy checks layers from highest to lowest and uses the first match:
+Skill overrides resolve in three layers — project > profile > shipped default — with the first matching file winning:
 
-| Layer | Priority | Path | Scope |
-|-------|----------|------|-------|
-| 1. Project | Highest | `<project>/.agentalloy/skills/{system,workflow}/<name>.yaml` | Single repository |
-| 2. Profile | Medium | `~/.local/share/agentalloy/profiles/<profile>/skills/{system,workflow}/<name>.yaml` | All repos using this profile |
-| 3. Shipped default | Lowest | Bundled in `src/agentalloy/_packs/` | Always present |
+| Layer | Priority | Path |
+|-------|----------|------|
+| 1. Project | Highest | `<project>/.agentalloy/skills/{system,workflow}/<name>.yaml` |
+| 2. Profile | Medium | `~/.local/share/agentalloy/profiles/<profile>/skills/{system,workflow}/<name>.yaml` |
+| 3. Shipped default | Lowest | Bundled in `src/agentalloy/_packs/` (immutable) |
 
-**Layer 1 (Project)** — Highest priority. Overrides live inside the project's `.agentalloy/` directory. Use this for project-specific skill customizations that should not affect other repos.
-
-**Layer 2 (Profile)** — Medium priority. Overrides live in the active profile's skills directory. Use this for personal or organizational customizations that apply across multiple projects sharing the same profile.
-
-**Layer 3 (Shipped default)** — Lowest priority. These are the authoritative skills bundled with AgentAlloy. Shipped defaults are immutable; you cannot edit them directly. Instead, you create an override at a higher layer.
-
-### What can be overridden
-
-- **Prose** (`raw_prose`) — the main skill instruction text
-- **Gates** (`exit_gates`) — exit gate definitions for workflow skills
-- **Applicability** (`applies_when`, `applies_to_phases`) — when and where the skill applies
-
-Override YAML files use the same schema as shipped defaults. Run `agentalloy customize validate <name>` after editing to check your override.
-
-### What cannot be overridden
-
-- **Domain skills** — domain-class skills are centrally curated and not exposed to the customize CLI. Attempting to customize a domain skill returns an error pointing to `docs/skill-authoring-and-overrides-spec.md`.
-- **Shipped default files** — the `_packs/` directory is part of the installed package and should not be edited directly.
-
-## CLI: customize
-
-```bash
-# List all customizable skills and their active layer
-agentalloy customize list [--profile <name>]
-
-# Edit a skill override in $EDITOR (copies from lower layer if needed)
-agentalloy customize edit <name> [--profile <name>] [--project]
-
-# Validate an override
-agentalloy customize validate <name> [--profile <name>] [--project]
-
-# Validate and ingest into the profile datastore
-agentalloy customize update <name> [--profile <name>] [--project]
-agentalloy customize update --all [--profile <name>]   # re-ingest all overrides
-
-# Show diff vs next-higher layer
-agentalloy customize diff <name> [--profile <name>]
-
-# Delete an override (revert to lower layer)
-agentalloy customize reset <name> [--profile <name>] [--project] [--yes]
-```
-
-`--profile <name>` targets a specific profile. `--project` targets the project-level override directory. Without either flag, it defaults to the active profile for the current directory.
-
-When you run `customize update`, the override is validated and then ingested into the profile's DuckDB `profile_skills` table. Running `update --all` re-ingests all override files for a profile, useful after bulk edits.
-
-When an override's `raw_prose` is identical to the inherited default, `update` automatically detects this and deletes the override (reverting to the lower layer).
+Profile-layer overrides apply across every repo that resolves to the active profile. For the full override reference — what can/cannot be overridden and the complete `agentalloy customize` CLI — see [skill-authoring-and-overrides-spec.md § Override System](skill-authoring-and-overrides-spec.md#override-system).
 
 ## Profiles and the sidecar watcher
 
@@ -156,13 +110,13 @@ The sidecar watcher (used for harnesses that can't be proxy-wired) is profile-aw
 - **PID file:** `~/.agentalloy/watch/<profile_name>.pid`
 - **Log file:** `~/.agentalloy/watch/<profile_name>.log`
 
-The watcher uses `profile_name` from its config to load the correct workflow skill prose for phase transitions. When wiring a harness, the watcher config is created with `profile_name: "default"` (see `agentalloy wire-harness`).
+The watcher uses `profile_name` from its config to load the correct workflow skill prose for phase transitions. The watcher config is auto-generated with `profile_name: "default"` by `agentalloy watch start`.
 
 See `docs/sidecar-experience.md` for full watcher documentation.
 
 ## Profiles and wiring
 
-Wiring is per-repo: `agentalloy wire` injects sentinels into each project's harness config files (e.g., `.cursor/rules/agentalloy-context.mdc`). However, the datastores and skills used by a wired project are determined by the active profile, not by the wiring itself.
+Wiring is per-repo: `agentalloy wire` injects sentinels into each project's harness config files (e.g., `.cursor/rules/agentalloy.mdc`). However, the datastores and skills used by a wired project are determined by the active profile, not by the wiring itself.
 
 This means you can wire the same harness in multiple repos and have them use different skill overrides based on which profile resolves for each repo's directory.
 

@@ -30,126 +30,124 @@ intent — is benchmarked separately; see
 
 ## Composed vs Flat (Layer 2)
 
-The POC compares AgentAlloy's just-in-time composed injection against flat
-skill injection and a no-injection baseline. The pre-registered tasks and
-binary graders live in `eval/tasks.py`; the harness is `eval/run_poc.py`.
+AgentAlloy's just-in-time composed injection is compared against flat skill
+injection and a no-injection baseline. The pre-registered tasks and
+deterministic binary graders live in `eval/tasks.py` (generic) and
+`eval/domain_tasks.py` (domain); the harness is `eval/run_poc.py`.
 
-### Measured results (2026-06-10)
+The durable result lives in the **domain** set — convention-heavy tasks the
+corpus actually carries knowledge for. The **generic** set is a near-ceiling
+regression check (strong models need no help on general software tasks) and is
+reported second, read accordingly.
 
-Setup: 10 pre-registered tasks × 3 seeded runs per condition, `k=4`,
-graders are deterministic binary criteria (`eval/tasks.py`). Agent models
-served by llama.cpp (GGUF quants) on a dedicated single-GPU host, one
-request at a time. Conditions: **composed** (skills assembled per-task by
-`/compose`), **flat** (the task's gold skills' full prose), **none**
-(bare system prompt, no skills).
+Corpus provenance: the skill content in `src/agentalloy/_packs/` — especially
+the domain packs — is distilled from vendor `llms.txt`/`llms.md` documentation
+(Temporal, dbt, GitHub, etc.), not authored against these eval tasks. The tasks
+and graders are in-house; the skill prose the retrieval pipeline selects from is
+not.
 
-Corpus provenance: the skill content in `src/agentalloy/_packs/` —
-especially the domain packs — is distilled from vendor `llms.txt`/`llms.md`
-documentation (Temporal, dbt, GitHub, etc.), not authored against these
-eval tasks. The tasks and graders are in-house; the skill prose the
-retrieval pipeline selects from is not.
+### Domain tasks (v3 campaign, 2026-06-12/13)
 
-| Model | Architecture | None | Composed | Flat | Composed vs flat |
-|-------|--------------|------|----------|------|------------------|
-| Qwen3.6-35B-A3B | MoE (~3B active) | 0.92 | **0.93** | 0.91 | −19% tokens, −18% wall |
-| Qwen3.6-27B | dense | 0.86 | 0.90 | **0.96** | −16% tokens, −13% wall |
-| Gemma 4 12B IT | dense | 0.85 | 0.84 | **0.88** | −12% tokens, −2% wall |
-| LFM2.5-8B-A1B (coder) | hybrid sparse (1.5B active) | 0.80 | **0.85** | 0.80 | −21% tokens, −21% wall |
+The pre-registered domain set (`eval/domain_tasks.py`, 18 tasks × 5 seeded runs
+per condition) targets pack conventions — webhook signature/dedup/DLQ handling,
+Temporal determinism, GitHub Actions OIDC, dbt incremental models, SCD Type 2,
+Redis streams/locks, Snowflake/Redshift, OTel trace propagation. Conditions:
+**composed** (skills assembled per task by `/compose`), **flat** (an *oracle*
+arm — hand-injects exactly the task's gold skills, the ceiling automatic
+retrieval chases), **none** (bare system prompt). Graders are deterministic
+binary criteria, de-brittled in #141 to credit synonyms/paraphrase. Composition
+runs the shipped deterministic Stage-0 config (card-indexed corpus,
+`LM_ASSIST=off`, `RETRIEVAL_GRAPH_EXPAND=off`).
 
-### Two findings worth singling out
-
-**A 1.5B-active edge model with composed skills matches a bare 27B dense
-model — at 12.6× the speed.** LFM2.5-8B-A1B + composed injection scored
-0.850 vs the bare Qwen3.6-27B's 0.855 (a noise-level gap), completing the
-full 30-call leg in 42.2s vs 533.6s. The LFM runs comfortably on consumer
-hardware — laptops, mini-PCs, NPUs — where a 27B dense model doesn't. For
-on-device agents, composed injection buys mid-size-model quality at edge
-cost.
-
-**Composed injection made the edge model both better *and* faster than
-itself.** LFM2.5 with composed skills beat its own no-skill baseline on
-quality (+0.05) while finishing 29% faster — the focused skill prose cut
-its output rambling nearly in half (12.4K vs 19.0K output tokens). Flat
-injection of the same skills' full prose delivered zero quality lift on
-this model. Targeted context doesn't just inform a small model; it
-disciplines it.
+| Model | None | Composed | Flat (oracle) | Composed lift | % of oracle | Tokens vs flat |
+|-------|------|----------|---------------|---------------|-------------|----------------|
+| Qwen3.6-35B-A3B | 0.937 | **0.976** | 0.992 | +0.039 | 71% | −21% |
+| Qwen3.6-27B | 0.958 | **0.980** | 0.989 | +0.022 | 71% | −21% |
+| Gemma 4 12B IT | 0.925 | **0.945** | 0.964 | +0.020 | 51% | −32% |
+| LFM2.5-8B-A1B (coder) | 0.657 | **0.829** | 0.902 | +0.172 | 70% | −22% |
 
 Findings, stated as measured:
 
-- **Composed prompts are 17–20% smaller** than flat (gold-skills-only)
-  prompts and runs complete 2–21% faster. Note the flat arm here is
-  *generous* to flat: it injects only the task's 2–3 gold skills. Flat
-  injection of a whole pack or corpus — the practice composed injection
-  replaces — would be far larger.
-- **Sparse architectures favor composed.** On the MoE 35B and the
-  1.5B-active LFM2.5, composed beat both flat and baseline. On LFM2.5,
-  flat injection delivered *zero* lift over no skills at all (0.80 both)
-  while composed delivered +0.05 — small attention budgets get swamped by
-  flat prose.
-- **Mid-size dense models favor flat** on raw score (27B: 0.96 vs 0.90;
-  Gemma: 0.88 vs 0.84), paying 12–16% more tokens for it. The 27B is the
-  only model where skill injection of either kind produced a large lift
-  over baseline (+0.10 flat, +0.04 composed).
-- **Strong models are near ceiling on generic tasks.** The 35B and Gemma
-  baselines sit within ±0.04 of their injected scores. These 10 tasks are
-  general software-engineering tasks; the corpus's domain packs
-  (webhooks, temporal, snowflake conventions, …) target knowledge models
-  don't ship with, which these tasks do not measure.
+- **Composed beat the bare model on every architecture** (+0.020 to +0.172),
+  and the weaker the model, the bigger the lift. The LFM2.5 edge model gains
+  **+0.172** — on conventions a model doesn't ship with, injection is the
+  difference between guessing and knowing.
+- **Automatic retrieval captures ~51–71% of the perfect-knowledge oracle**
+  ((composed−none)/(flat−none)), landing within 0.009–0.073 of the hand-picked
+  flat arm at 21–32% fewer tokens. Selection is not the bottleneck on the strong
+  models; the residual gap is model capacity (widest on LFM, −0.073 below
+  oracle).
+- **Capacity still matters at the low end.** Composed LFM2.5 (0.829) does not
+  reach the bare 27B (0.958) on domain tasks; convention-heavy work rewards
+  parameters as well as context. (An earlier campaign's "edge model matches a
+  bare 27B" equivalence was a generic-task artifact that did not replicate at
+  v3 — see the generic set below.)
 
-**Replication note.** After a retrieval-hardening pass (phase-eligibility
-fixes, corpus-wide tagging), the 35B and 27B composed legs were rerun
-end-to-end: 0.93 → 0.92 and 0.90 → 0.915 respectively — both within
-noise. The generic numbers above are stable across the fix.
+#### Judge-validated fidelity (27B LLM-judge, 2026-06-13)
 
-### Domain tasks (2026-06-10)
+To confirm the composed lift is real answer quality and not an artifact of the
+literal-substring graders, the LFM and 12B domain outputs were independently
+re-graded by a local LLM judge (qwen3.6-27b, scalar rubric) — 540 judgments,
+0 parse errors.
 
-The 10 generic tasks measure general software-engineering competence,
-where strong models are near ceiling without help. A second pre-registered
-set (`eval/domain_tasks.py`, 8 tasks × 3 seeded runs) targets what the
-corpus actually carries: pack conventions — webhook signature/dedup/DLQ
-handling, Temporal determinism, GitHub Actions OIDC, dbt incremental
-models, SCD Type 2. Same conditions; note **flat is an oracle arm** here —
-it hand-injects exactly the task's gold skills, the ceiling automatic
-retrieval is chasing.
+| Model | None | Composed | Flat | Composed−none (judge) | (heuristic) | % of oracle |
+|-------|------|----------|------|------------------------|-------------|-------------|
+| LFM2.5 | 0.651 | 0.805 | 0.838 | **+0.154** | +0.172 | 83% |
+| Gemma 12B | 0.979 | 0.993 | 0.997 | **+0.013** | +0.020 | 75% |
 
-| Model | None | Composed | Flat (oracle) | Composed lift | Composed tok/s |
-|-------|------|----------|---------------|---------------|----------------|
-| Qwen3.6-35B-A3B | 0.86 | **0.99** | 1.00 | +0.13 | 319 |
-| Qwen3.6-27B | 0.88 | **0.97** | 1.00 | +0.10 | 105 |
-| Gemma 4 12B IT | 0.91 | **0.98** | 0.98 | +0.07 | 210 |
-| LFM2.5-8B-A1B (coder) | 0.62 | **0.81** | 0.83 | +0.19 | 779 |
+Pooled composed−none = +0.084, bootstrap 95% CI **[+0.056, +0.114]** (excludes
+zero). The independent judge **confirms** the lift and runs slightly
+*conservative* versus the length-blind heuristic on both models — it does not
+inflate. A length-bias diagnostic (judge score vs output length, Pearson
+−0.685) cuts *in our favor*: `none` is the **longest** condition (2604 tokens
+vs composed 1988 / flat 1851), so the bias would inflate composed−none — yet the
+judge still finds a *smaller* lift than the length-blind heuristic. The lift is
+real quality, not verbosity; `none`'s extra length is itself a tell that
+unguided answers ramble. Judge–heuristic Pearson is 0.542 over the full set —
+moderate at the item level; the load-bearing signal is the convergence on the
+*delta*, not row-by-row agreement.
+
+### Generic tasks (regression check)
+
+The generic set (`eval/tasks.py`) measures general software-engineering
+competence, where strong models sit near ceiling without help. At v3 only the
+LFM and 12B legs were rerun; the 35B/27B rows are the prior (v2) campaign. The
+set has no oracle (flat) arm, so only composed-vs-none is reported.
+
+| Model | None | Composed | Composed−none | Source |
+|-------|------|----------|----------------|--------|
+| Qwen3.6-35B-A3B | 0.961 | 0.955 | −0.006 | v2 |
+| Qwen3.6-27B | 0.939 | 0.940 | +0.001 | v2 |
+| Gemma 4 12B IT | 0.868 | 0.892 | +0.024 | v3 |
+| LFM2.5-8B-A1B (coder) | 0.852 | 0.828 | −0.024 | v3 |
 
 Findings, stated as measured:
 
-- **Composed beat the bare model on every architecture** (+0.07 to +0.19),
-  and the weaker the model, the bigger the lift. On conventions the model
-  doesn't ship with, injection is the difference between guessing and
-  knowing.
-- **Automatic retrieval lands within 0.01–0.03 of the hand-picked
-  oracle** on all four models, at roughly equal token cost (±7%). Skill
-  selection is not the bottleneck; residual gaps are model capacity.
-- **A 12B dense model with composed skills tied a 27B dense model**
-  (0.975 vs 0.971) at 2× the throughput and 2.5× faster wall-clock
-  (210 vs 105 tok/s; 148s vs 364s for the full leg). Bare Gemma scored
-  0.906 — composition closed the gap to the next weight class.
-- **Capacity still matters at the low end.** Composed LFM2.5 (0.81)
-  did not match the bare 27B (0.88) on domain tasks the way it did on
-  generic ones; convention-heavy work rewards parameters as well as
-  context.
+- **Near ceiling, as expected.** The strong models move ±0.006 — composition
+  neither helps nor hurts on general tasks they already handle.
+- **The edge model regresses slightly on generic tasks** (−0.024). The focused
+  skill prose that *disciplines* LFM2.5 on convention-heavy domain work is, on
+  already-simple generic tasks, context it doesn't need — a mild distractor.
+  This is precisely why the headline is the domain set, not this one.
+- **An earlier cross-class equivalence did not replicate.** A prior campaign
+  showed generic LFM2.5+composed (~0.85) ≈ bare 27B (~0.855); at v3 generic
+  LFM2.5 composed is 0.828 and bare 27B is 0.939. We retired the claim rather
+  than reframe it.
 
-Caveats (both task sets): heuristic binary graders measure surface
-criteria, not depth; n=3 per cell; single host; quants differ per model.
-Treat deltas under ~0.05 as noise.
+Caveats (both sets): heuristic binary graders measure surface criteria, not
+depth — the 27B judge pass above is the cross-check; n=5 per cell on domain;
+single host; quants differ per model. Treat deltas under ~0.05 as noise on the
+strong models.
 
 Reproduce a leg:
 
 ```bash
 AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 3                  # composed + flat
+  uv run python -m eval.run_poc --n 5                  # composed + flat
 AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 3 --conditions none --label baseline
+  uv run python -m eval.run_poc --n 5 --conditions none --label baseline
 AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 3 --task-set domain --label domain \
+  uv run python -m eval.run_poc --n 5 --task-set domain --label domain \
   --conditions composed flat none                      # domain set
 ```
 

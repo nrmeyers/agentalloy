@@ -64,14 +64,13 @@ Or if running as a service, check its status:
 Another instance of AgentAlloy is running, or another service is using the default port.
 
 **Fix:** Run `agentalloy write-env --port <n>` with a different port, then re-run
-`agentalloy wire-harness` to update harness configs.
+`agentalloy wire` to update harness configs.
 
 ### `preflight` fails with `cli_on_path`
 
-The `agentalloy` CLI is not on your PATH. This usually means `~/.local/bin` is not
-in your `$PATH`.
-
-**Fix:** Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and reload.
+The `agentalloy` CLI is not on your PATH. See
+[`agentalloy` command not found after install](#agentalloy-command-not-found-after-install)
+under General.
 
 ### `preflight` fails with `python_version`
 
@@ -107,12 +106,18 @@ Or run `agentalloy doctor --repair` to diagnose and fix automatically.
 
 ### Harness config not picking up changes
 
-AgentAlloy uses sentinel-bounded blocks (marked with `<!-- BEGIN agentalloy install -->`
-and `<!-- END agentalloy install -->`). If you edited the content inside these markers,
-the harness may not recognize the block.
+`agentalloy wire` writes its proxy/wiring configuration inside a **install block**
+bounded by `<!-- BEGIN agentalloy install -->` / `<!-- END agentalloy install -->`.
+If you edited the content inside these markers, the harness may not recognize the
+block.
 
 **Fix:** Run `agentalloy unwire` to remove the sentinels, then `agentalloy wire` to
 re-wire cleanly.
+
+> Note: this is distinct from the sidecar watcher's **rules block**, bounded by
+> `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->`, which the
+> watcher regenerates in harness rules files. See
+> [sidecar-experience.md](sidecar-experience.md). Do not confuse the two markers.
 
 ### `agentalloy wire` says harness not found
 

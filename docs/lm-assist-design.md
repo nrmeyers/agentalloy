@@ -1,77 +1,63 @@
 # LM-assist: a sub-1B intent layer riding alongside the embedder
 
-Status: design sketch for review — 2026-06-12. Revised same day after the
-authored-external-skills experiment (see "What the experiment changed").
-Stage 0 approved for implementation.
+Status: **shipped (flag-gated), v1.2.0.** Originally a design sketch
+(2026-06-12); the slices it scoped are now in the codebase, all off by
+default and fail-open to the deterministic path:
 
-## Why now
+- **Stage 0 — skill-card indexing** shipped (the re-embed pass indexes a
+  synthetic card per skill; `agentalloy reembed --card-index` defaults to
+  `both` at the CLI).
+- **Stage B — fragment re-ranker** shipped (#136) as `LM_ASSIST=arbitrate`,
+  using `qwen3-reranker-0.6b`.
+- **Signals-layer intent backend** shipped (#142) as
+  `SIGNAL_INTENT_BACKEND=reranker`, reusing the Stage-B scorer.
+- **Stage A — query enrichment** is **NOT shipped (deferred).** The
+  `LM_ASSIST` enum is `off|arbitrate` only; the `domains/intent/phase_hint`
+  schema below describes no current code path.
 
-The 2026-06 campaign diagnostics surfaced four failures that are the same
-failure: retrieval gets no help understanding *intent*.
+The sections below preserve the original rationale; the runtime/ops and
+"how we'll know it works" sections have been updated to as-built.
 
-1. **Rank-1 sensitivity.** The fragment-selection depth guarantee
-   (`skill_granular_select`) pays large when fusion ranks the right skill
-   first (7 of 18 domain tasks improved ≥0.15) and doubles down when it
-   doesn't (`domain_4`: gold ranked #2 behind `webhooks-documentation`,
-   composed fell 0.56 → 0.36). Fusion score margins are too noisy to
+## Motivation
+
+The 2026-06 campaign diagnostics surfaced one failure wearing four hats:
+retrieval gets no help understanding *intent*.
+
+1. **Rank-1 sensitivity.** Depth selection pays off when fusion ranks the
+   gold skill first and doubles down when it doesn't (`domain_4`: gold
+   ranked #2, composed fell 0.56 → 0.36). Fusion margins are too noisy to
    gate depth on alone.
-2. **The framework-ambiguity gap.** "I want to build a website that is a
-   blog" retrieves `writing-readmes` / `ui-design-accessibility` /
-   `brainstorming` — defensible, useless. The corpus has nextjs/vue/react
-   packs; nothing bridges from *unstated* intent to stack vocabulary.
-   Lexical collisions (web → webhooks) are already handled by the dense
-   leg + RRF; *underspecified* queries are not.
-3. **Signal-layer brittleness.** Phase exit gates are deterministic
-   predicates plus cosine-similarity intents — the most threshold-tuned,
-   least explainable code in the repo. Classification is what small
-   instruct models are for.
+2. **Framework ambiguity.** Underspecified queries ("build a blog
+   website") never bridge to stack vocabulary; the dense leg + RRF handle
+   lexical collisions but not *unstated* intent.
+3. **Signal-layer brittleness.** Phase exit gates are the most
+   threshold-tuned, least explainable code in the repo — classification is
+   what small instruct models are for.
 4. **Within-skill fragment selection.** `domain_1` (webhook signature):
-   the gold skill ranks #1 and receives both depth slots, yet composed
-   scores 0.60 where flat-oracle (whole skill) scores 1.00. The depth
-   picker selects the intro fragments (f1/f5) because they share the
-   task's surface vocabulary; the fragments the grader needs —
-   `signed_content` construction and timing-safe compare (f9/f10) — use
-   words the task never says. Skill-level ranking cannot fix this; only
-   fragment-level relevance can.
+   gold ranks #1 and gets both depth slots, yet composed scores 0.60 vs
+   1.00 flat-oracle — the picker takes the intro fragments, not the
+   `signed_content`/timing-safe-compare fragments the grader needs. Only
+   fragment-level relevance can fix this. (A skill-level arbiter would
+   agree with rank-1 and change nothing; this is why **Stage B arbitrates
+   fragments, not skills.**)
 
-## What the 2026-06-12 experiment changed
+See the eval write-up (`BENCHMARKS.md`, intent-classifier and reranker
+layers) for the full diagnostics.
 
-To split "content vs ranking" we authored the third-party Clerk/OpenAI
-webhook skills through the authoring pipeline, ingested them, and reran
-composed on domain_1/2/4 (n=5, 27B + LFM). Results were **bit-identical
-to v2** (same input tokens, same scores): the new skills ranked 5th–6th
-and won zero k=4 slots. Tracing domain_1 produced failure #4 above.
+## Constraint: determinism is the fail-open floor
 
-Consequences for this design:
+AgentAlloy's composition path is deterministic by default. Two optional
+LM-assist stages exist — a fragment re-ranker (`LM_ASSIST=arbitrate`) and a
+signals-layer intent backend (`SIGNAL_INTENT_BACKEND=reranker`) — both off
+by default, and both fail open to the deterministic path when the local
+model is unavailable. On any LM timeout, error, or disabled flag, compose
+degrades to deterministic composition byte-for-byte. Layer-4 idempotency is
+asserted against the fail-open path; the LM path gets its own reproducibility
+story (temp 0, pinned model tag) but no contractual guarantee. The absolute
+"no LLM in the runtime path" claim was dropped 2026-06-12: deterministic
+fusion captures ~45% of oracle lift, with the rest in judgment calls.
 
-- **Stage B must arbitrate fragments, not skills.** A skill-level
-  arbiter would have looked at domain_1's top-5, agreed with rank-1, and
-  changed nothing. One fragment-level mechanism covers domain_4 (demote
-  the wrong skill's fragments), domain_1 (promote f10 over f1), and the
-  12B-redshift case (pick nothing).
-- **"No LLM in the runtime path" is no longer a product constraint**
-  (decision 2026-06-12): the measured ceiling of deterministic fusion —
-  composed captures ~45% of oracle lift, with the remainder concentrated
-  in judgment calls — isn't worth the marketing line. Determinism remains
-  the *fail-open floor*, not the headline. Target shape:
-  `vector + BM25 + LFM-tiny = compose`.
-
-The deprecated `sys-intake-*` spec docs (§6.3, "Routing via Qwen,"
-confidence thresholds 0.6/0.4) already describe this architecture. This
-doc narrows it to the smallest testable slice.
-
-## Constraint (revised 2026-06-12)
-
-**Determinism is the fail-open floor, not the headline.** The LM stage
-may run in the default path once it earns its keep (ship gate below), but
-on any LM timeout, error, or disabled flag, compose degrades to today's
-deterministic composition byte-for-byte. Layer-4 idempotency is asserted
-against the fail-open path; the LM path gets its own reproducibility
-story (temp 0, fixed seed, pinned model tag) but no contractual
-guarantee. The claim becomes "deterministic baseline, LM-refined when
-available."
-
-## Stage 0 — index the skill card (deterministic, do FIRST)
+## Stage 0 — index the skill card (deterministic) — SHIPPED
 
 Verified 2026-06-12: both retrieval legs index only fragment body text
 (`frag.content` is what gets embedded and what BM25 searches). A skill's
@@ -91,22 +77,17 @@ latency, zero new failure modes, fully deterministic.
 
 This plausibly closes part of both diagnosed gaps on its own
 (domain_4's gold skill *name* contains the answer; the blog query can
-hit framework cards). **Measure Stage 0 alone before building any LM
-stage** — the LM stages below must justify themselves against the
-post-Stage-0 baseline, not against today's.
+hit framework cards).
 
 ## LM architecture
 
-Two insertion points, independently flaggable:
+Two insertion points were scoped; only Stage B shipped.
 
-### Stage A — query enrichment (pre-retrieval)
+### Stage A — query enrichment (pre-retrieval) — DEFERRED, NOT SHIPPED
 
-```
-task ──> [LM: extract signals] ──> enriched query ──> embed + BM25 ──> RRF
-   └──────────────── timeout/error: raw task ────────────────┘
-```
-
-One prompt, structured output, ~50 output tokens:
+Stage A was never built. The `LM_ASSIST` enum is `off|arbitrate` only;
+there is no `enrich` mode and no `domains/intent/phase_hint` extraction in
+the codebase. The sketch is retained for context:
 
 ```json
 {
@@ -116,100 +97,75 @@ One prompt, structured output, ~50 output tokens:
 }
 ```
 
-`domains` terms are appended to the BM25 query and offered as soft
-`domain_tags` (boost, not filter — wrong guesses must not exclude gold
-skills). The raw task still drives the dense leg unchanged.
+The idea was to append `domains` terms to the BM25 query as a soft boost
+(never a filter). Revisit only if it earns its latency.
 
-### Stage B — fragment re-rank (post-retrieval, pre-assembly)
+### Stage B — fragment re-rank (post-retrieval, pre-assembly) — SHIPPED (#136)
 
-Revised 2026-06-12 from skill-level arbitration to fragment-level
-re-ranking — the domain_1 trace showed a skill-level arbiter would agree
-with rank-1 and change nothing.
+`LM_ASSIST=arbitrate`. Shipped as a **pairwise yes/no logprob scorer**
+(`FragmentScorer`, `src/agentalloy/retrieval/lm_assist.py`), not the
+JSON keep-list extractor the sketch proposed.
 
-Show the LM the task plus the top ~12 fragments from fusion (skill name +
-fragment type + first lines each); it answers
-`{"keep": ["<frag_id>", ...], "confidence": 0..1}` selecting up to k.
+Mechanism: for the top ~12 fused fragments, the `qwen3-reranker-0.6b`
+cross-encoder is shown the task plus one fragment at a time via
+`/v1/completions` using the official Qwen3-Reranker chat template, asked
+whether the Document meets the Query's requirements. It emits one token
+with logprobs; `softmax(yes, no)` becomes the relevance score. Fragments
+scoring above `LM_ASSIST_KEEP_THRESHOLD` are kept (capped at k, in fusion
+order) and *replace* deterministic selection; everything else is dropped.
+(llama.cpp's `/v1/rerank` endpoint skips the instruction template for this
+GGUF and is not used.)
 
-- High confidence → assemble exactly the kept fragments, in fusion order.
-- Low confidence, timeout, or unparseable → today's deterministic
-  depth+round-robin selection (fail-open floor).
-- `keep: []` with high confidence is **valid and means inject nothing** —
-  the 12B-redshift case showed even oracle content hurts a model that
-  already knows the domain.
+- HIT → assemble exactly the kept fragments, in fusion order.
+- Disabled / timeout / error / empty-keep → deterministic depth+round-robin
+  selection runs byte-for-byte as if Stage B never ran (fail-open floor).
 
-One mechanism covers all three measured failures: domain_4 (wrong skill's
-fragments demoted), domain_1 (f10 promoted over f1), redshift (empty
-keep). It also subsumes the planned score-conditional-depth heuristic —
-the deterministic selection remains as the fail-open behavior, answering
-open question 4.
+This subsumes the score-conditional-depth heuristic: deterministic
+selection is the fail-open behavior.
 
-### Explicitly out of scope (v1)
+### Signals-layer intent backend — SHIPPED (#142)
 
-Phase-gate replacement (signal layer). Highest disruption, hardest to
-benchmark with the existing harness. Revisit only if Stages A/B earn
-their latency.
+`SIGNAL_INTENT_BACKEND=reranker` (default `cosine`). The same
+`FragmentScorer` is reused with an intent-framed instruct to score phase
+exit-gate utterances against per-intent task descriptions, replacing
+cosine similarity for the named-intent predicates. Cosine remains the
+fail-open floor. (This was "out of scope (v1)" in the original sketch; it
+shipped.)
 
 ## Runtime & ops
 
-- Model candidate (user-selected): **LFM2.5-350M** — ~350 MB quantized,
-  built for fast structured extraction. Comparator: `qwen3.5:0.8b` (already
-  pulled, the authoring model). Bake-off via the harness (open question 3);
-  the 350M earns the slot iff it parses reliably into the Stage A/B JSON.
-  Served by the same Ollama now pinned to the RTX 3060 — zero contention
-  with benchmark/agent models on the 3090.
-- Budget: hard 300 ms timeout per stage, then fail-open. Both stages
-  enabled worst-case adds ~400–600 ms to compose; per-turn hook callers
-  should enable Stage B only (one call, ~150–250 ms).
-- Config: `LM_ASSIST=off|enrich|arbitrate|full` (default `off`),
-  `LM_ASSIST_MODEL`, `LM_ASSIST_TIMEOUT_MS`. Telemetry records the stage
-  outcome (`hit|timeout|error|disabled`) per composition.
+- **Model: `qwen3-reranker-0.6b`** — pair-scored via `/v1/completions`
+  yes/no logprobs. (The earlier LFM2.5-350M vs `qwen3.5:0.8b` bake-off is
+  obsolete; the reranker won.) Default served at `http://127.0.0.1:60001`.
+- Budget: hard 300 ms timeout, then fail-open. Stage B scores up to 12
+  fragments concurrently (~150–250 ms).
+- Config: `LM_ASSIST=off|arbitrate` (default `off`), `LM_ASSIST_MODEL`
+  (default `qwen3-reranker-0.6b`), `LM_ASSIST_RERANK_URL`,
+  `LM_ASSIST_TIMEOUT_MS`, `LM_ASSIST_KEEP_THRESHOLD`. Signals backend:
+  `SIGNAL_INTENT_BACKEND=cosine|reranker`,
+  `SIGNAL_INTENT_RERANK_THRESHOLD`. Telemetry records the stage outcome
+  (`hit|timeout|error|disabled`) per composition.
 
-## How we'll know it works
+## How we know it works
 
-The harness from this campaign is the proof apparatus:
+The eval harness is the proof apparatus (see `BENCHMARKS.md`):
 
-1. New run_poc condition **`composed-lm`** (same path as composed,
-   `LM_ASSIST=full` service). Paired per-task deltas vs `composed`,
-   same seeds.
-2. **domain_4 and domain_1 are the canaries** for Stage B: composed-lm
-   must recover domain_4 toward its 0.96 oracle and domain_1 toward its
-   1.00 flat-oracle (27B: composed 0.60 → the f9/f10 fragments must win
-   slots) without regressing the 7 tasks the depth fix improved.
-3. New Layer-1 probe task: framework-ambiguous web request ("build a blog
-   website") with gold = {nextjs-or-vue pack skills}; Stage A must lift
-   recall on it from 0/k.
-4. Gate: `eval/check_corpus_regression.py` unchanged (LM-assist off) AND
-   a new lm-assist variant run that must beat composed micro recall.
-5. Cost gate: report p50/p95 compose latency both ways. If composed-lm
-   doesn't beat composed by ≥0.05 mean domain score (outside our noise
-   band) it doesn't ship — token savings alone don't justify the moving part.
-6. Cheap iteration loop: one LFM domain leg (~45 min) per design change,
-   exactly as practiced tonight.
+1. Run condition **`composed-lm`** (`LM_ASSIST=arbitrate`), paired
+   per-task deltas vs `composed`, same seeds.
+2. **domain_4 and domain_1 are the Stage B canaries**: composed-lm must
+   recover domain_4 toward its 0.96 oracle and domain_1's f9/f10 fragments
+   must win slots, without regressing the depth-fix wins.
+3. Signals backend: the labeled intent benchmark lifts per-intent macro-F1
+   from ~0.24 (cosine @ 0.75) to ~0.72 (reranker + negation guard).
+4. Gate: `eval/check_corpus_regression.py` unchanged with LM-assist off
+   (the default path stays deterministic).
+5. Cost gate: p50/p95 compose latency reported both ways.
 
 ## Risks
 
-- **Determinism optics.** Mitigated by default-off, fail-open, and
-  benchmarking the default path unchanged. The claim becomes
-  "deterministic core; optional LM assist, measured."
-- **Wrong enrichment poisons retrieval.** Mitigated: boosts not filters;
-  dense leg always sees the raw task.
-- **A second model to version.** Pin the tag, record it in the run
-  manifest and telemetry like the embed model already is.
-- **Latency creep.** Hard timeouts; per-stage flags; Stage B alone is the
-  recommended per-turn-hook configuration.
-
-## Open questions for review
-
-0. Stage 0 shape: per-fragment header prefix (biases every fragment
-   toward skill identity, changes all embeddings) vs synthetic card
-   fragment (additive, but cards compete with content fragments for
-   k slots) vs both?
-1. Stage B prompt shape: how much of each candidate fragment does the
-   re-ranker see? (First lines are cheap; full content for 12 fragments
-   may blow the 350M's useful context.)
-2. Should `phase_hint` ever override the caller's phase? (Proposal: no —
-   advisory telemetry only, until the signal-layer rework.)
-3. Is 0.8B the right size, or do we benchmark 350M–1B variants the same
-   way we benchmark agent models? (The harness makes this nearly free.)
-4. ~~Does Stage B subsume score-conditional-depth?~~ Answered 2026-06-12:
-   yes — deterministic selection is the fail-open behavior.
+- **Determinism optics.** Mitigated by default-off, fail-open, and a
+  deterministic default path. The claim is "deterministic by default;
+  optional off-by-default LM-assist."
+- **A second model to version.** The reranker tag is pinned and recorded
+  in telemetry like the embed model.
+- **Latency creep.** Hard timeouts; per-stage flags.
