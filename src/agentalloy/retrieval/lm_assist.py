@@ -91,6 +91,11 @@ class LMAssistConfig:
     timeout_ms: int
     keep_threshold: float
     model: str
+    # Instruct line shown to the reranker. Defaults to the Stage-B fragment
+    # instruct; the signal-layer intent classifier overrides it (see
+    # ``signals/classifier.py``) so the same FragmentScorer can pair-score
+    # utterances against intent task descriptions.
+    instruct: str = _DEFAULT_INSTRUCT
 
     @property
     def enabled(self) -> bool:
@@ -250,7 +255,7 @@ class FragmentScorer:
     def _score_one(self, task: str, document: str) -> float:
         payload: dict[str, Any] = {
             "model": self._config.model,
-            "prompt": build_prompt(task, document),
+            "prompt": build_prompt(task, document, instruct=self._config.instruct),
             "max_tokens": 1,
             "temperature": 0.0,
             "n_probs": 20,

@@ -21,6 +21,11 @@ uv run python -m eval.benchmark --dry-run     # show what would run
 | 4 | Idempotency | No | Deterministic composition (same task -> same output) |
 | 5 | Session simulation | No | Context-rot argument: flat degrades across phases |
 
+The five layers above measure the **composition** path (task → skills). The
+**signals / phase-gate layer** — which decides SDD phase transitions from user
+intent — is benchmarked separately; see
+[Intent Classification](#intent-classification-signals-layer).
+
 ---
 
 ## Composed vs Flat (Layer 2)
@@ -161,6 +166,64 @@ uv run python -m eval.recall --k 4
 
 Gold skills per task are defined in `eval/tasks.py` against the bundled pack
 corpus (`src/agentalloy/_packs/`).
+
+## Intent Classification (signals layer)
+
+Orthogonal to the composition layers above: the signals layer wakes on prompts
+and decides SDD phase transitions (`spec → design → build → qa → ship`) by
+classifying user utterances against named transition intents (completion /
+approval / redirection). This benchmark measures that classifier, not retrieval.
+
+```bash
+uv run python -m eval.intent_bench          # needs Ollama :11434 + reranker :60001
+```
+
+Two backends, selected by `SIGNAL_INTENT_BACKEND` (**default `cosine`**):
+
+- **cosine** — embeds the utterance and takes max cosine vs per-intent reference
+  phrases (operating threshold 0.75).
+- **reranker** — qwen3-reranker-0.6b scores the utterance-as-query against each
+  intent's task description, with a deterministic negation guard (`_has_negation`)
+  that vetoes negated cues ("not done", "don't approve") before scoring. Cosine
+  remains the **fail-open floor**: a disabled / unreachable / failed reranker, or
+  an intent with no task description, falls through to cosine byte-for-byte.
+
+### Results (2026-06-13, 111 labeled utterances)
+
+Decided in the **per-intent framing** — each runtime gate queries exactly one
+intent, so the decision never sees the other intents' scores (no argmax):
+
+| metric | cosine | reranker (no guard) | reranker (+guard) |
+|---|---|---|---|
+| macro-F1 (per-intent) | 0.242 | 0.653 | **0.687** |
+| negation-slice accuracy | 0.846 | 0.462 | **1.000** |
+| overall accuracy | 0.613 | 0.766 | **0.820** |
+| latency p50 (ms) | 118 | 59 | 59 |
+
+Full report + per-utterance scores: `eval/runs/intent-bench-2026-06-13/`.
+
+**Operating threshold.** The reranker yes-probability is thresholded at **0.45**,
+the center of a flat 0.40–0.55 macro-F1 plateau; env-overridable via
+`SIGNAL_INTENT_RERANK_THRESHOLD`.
+
+**Non-determinism, and what pins the gate.** Raw reranker scores swing
+run-to-run (llama-server continuous batching; the negation slice is small,
+n=13) — the no-guard negation accuracy above is one such sample and is not
+stable. The deterministic `_has_negation` guard is what pins the negation slice
+to 1.0 and makes the phase gate reproducible; it recovers the one category where
+the raw cross-encoder regresses *below* cosine.
+
+**Latency framing (the comparison is conservative).** The bench scores all three
+intents in one batched reranker call (59ms p50), whereas production issues one
+single-doc reranker call per intent-gate via `_intent_rerank`. This understates
+the reranker's production edge rather than inflating it: production cosine
+re-embeds the query on every gate (`_intent_similarity` calls
+`embed([query] + refs)` each time — a full Ollama round-trip per gate), so the
+reranker's per-gate advantage holds and in fact widens in production.
+
+**Status.** Measured win on a small labeled set, gated behind
+`SIGNAL_INTENT_BACKEND=reranker` with cosine as the fail-open floor. Not yet
+field-validated.
 
 ## Full Benchmark Suite
 

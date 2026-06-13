@@ -1,0 +1,334 @@
+backend,text,gold,difficulty,pred,score_completion,score_approval,score_redirection,latency_ms
+cosine,"yeah I think we've nailed the requirements, what's next",completion,paraphrase,none,0.6148,0.5319,0.5363,106.8
+cosine,"ok the spec captures everything I wanted, let's proceed",completion,paraphrase,none,0.7355,0.5194,0.5155,131.7
+cosine,"I'm satisfied with where the design landed, time to build",completion,paraphrase,none,0.5948,0.5565,0.4584,107.5
+cosine,"no further changes needed on this, let's keep going",completion,paraphrase,none,0.7117,0.6056,0.6446,117.6
+cosine,"that's the whole picture I think, we can stop here",completion,paraphrase,none,0.6633,0.4839,0.5026,94.2
+cosine,this is feature-complete as far as I'm concerned,completion,clear,none,0.6937,0.6172,0.6110,136.4
+cosine,everything I needed is in there now,completion,paraphrase,none,0.7110,0.6668,0.6564,91.9
+cosine,"great, I have no more requirements to add",completion,paraphrase,none,0.7058,0.5654,0.5609,103.7
+cosine,"the doc is exhaustive enough, next phase please",completion,paraphrase,none,0.6575,0.6095,0.6065,107.7
+cosine,"alright we covered all the edge cases, what comes after",completion,paraphrase,none,0.6142,0.5150,0.5598,98.0
+cosine,I think that's a wrap on the requirements gathering,completion,paraphrase,none,0.6032,0.4835,0.5000,130.1
+cosine,"consider the spec final, nothing else from me",completion,clear,completion,0.7528,0.5668,0.5710,144.0
+cosine,"we can close out this step, it's all there",completion,paraphrase,none,0.6511,0.5032,0.4772,123.8
+cosine,"yep, requirements look locked, advance us",completion,paraphrase,none,0.6302,0.5906,0.5353,130.4
+cosine,"I've got nothing else to add, mark it done",completion,paraphrase,none,0.6652,0.5959,0.5323,141.2
+cosine,"that ties up all the loose ends, onward",completion,paraphrase,none,0.6842,0.5970,0.5929,101.8
+cosine,"this is NOT done yet, there are gaps in the spec",none,negation,none,0.7017,0.5676,0.5811,111.6
+cosine,"we are far from finished here, lots missing",none,negation,none,0.6796,0.6056,0.5953,114.2
+cosine,"I wouldn't call this complete, keep adding to it",none,negation,none,0.6422,0.5815,0.5837,121.4
+cosine,"almost done but not quite, hold on",none,negation,none,0.7168,0.6602,0.6390,111.5
+cosine,is the spec complete or are we still missing pieces?,none,negation,completion,0.8393,0.5822,0.5950,103.2
+cosine,"the auth section is finished, now write the billing section",none,scoped,none,0.4695,0.3786,0.3910,116.1
+cosine,"part one is done, part two still needs a lot of work",none,scoped,none,0.6970,0.6500,0.6498,120.9
+cosine,"the intro reads complete, the rest is a stub",none,scoped,none,0.5630,0.4975,0.5189,110.3
+cosine,"this matches what I had in mind, proceed",approval,paraphrase,none,0.6088,0.6300,0.6058,147.8
+cosine,"yep that's exactly the output I wanted, go for it",approval,paraphrase,none,0.5232,0.6388,0.5848,114.9
+cosine,"nice work, you can commit that",approval,paraphrase,none,0.5575,0.6151,0.5311,111.4
+cosine,"I'm happy with this, push it through",approval,paraphrase,none,0.6244,0.6212,0.5892,87.6
+cosine,"great, that's approved on my end",approval,clear,approval,0.7003,0.7789,0.6316,103.5
+cosine,"sold, let's land this change",approval,paraphrase,none,0.6260,0.6156,0.6949,125.2
+cosine,"the implementation is solid, sign off from me",approval,paraphrase,none,0.6198,0.6137,0.5902,115.1
+cosine,"yeah do it, that's the right call",approval,paraphrase,approval,0.6280,0.7982,0.6240,102.7
+cosine,"thumbs up, send it",approval,clear,none,0.5316,0.5675,0.5052,96.0
+cosine,"no notes, this is good to merge",approval,paraphrase,none,0.5988,0.7234,0.5636,112.5
+cosine,"I co-sign this approach, carry on",approval,paraphrase,none,0.6221,0.6405,0.7147,128.0
+cosine,"all good on my side, you have the green light",approval,paraphrase,none,0.6765,0.6971,0.5982,109.0
+cosine,"yes please apply that, looks right",approval,paraphrase,approval,0.6367,0.7854,0.6225,101.3
+cosine,"that's the one, lock it in",approval,paraphrase,none,0.5795,0.5719,0.5680,132.3
+cosine,"perfect, you nailed it, ship that version",approval,paraphrase,none,0.5393,0.6050,0.5633,121.8
+cosine,"great stuff, I approve the whole change",approval,paraphrase,none,0.6141,0.6901,0.6460,137.8
+cosine,"don't approve this yet, I have concerns",none,negation,none,0.5688,0.6611,0.6548,158.5
+cosine,I'm NOT approving this in its current state,none,negation,none,0.5998,0.6681,0.7131,101.9
+cosine,"hold off on merging, something feels off",none,negation,none,0.6035,0.7130,0.6549,115.4
+cosine,I can't sign off on this until the tests pass,none,negation,none,0.6008,0.5932,0.5717,126.5
+cosine,"perfect, now fix the second one",none,scoped,none,0.5344,0.6454,0.5703,116.8
+cosine,"great explanation, but the code still has a bug",none,scoped,none,0.4986,0.5127,0.5570,115.9
+cosine,"nice, that part works; the rest is broken though",none,scoped,none,0.5280,0.6334,0.6635,99.4
+cosine,looks good aesthetically but the logic is wrong,none,scoped,none,0.5958,0.7205,0.6373,124.7
+cosine,let's scrap this and take a completely different tack,redirection,paraphrase,redirection,0.5812,0.5428,0.7681,108.0
+cosine,I want to rethink the whole approach from scratch,redirection,paraphrase,none,0.5383,0.5190,0.7381,108.4
+cosine,"this direction isn't panning out, let's pivot",redirection,paraphrase,none,0.5881,0.4772,0.7110,154.6
+cosine,"forget what we did, start fresh with a new plan",redirection,paraphrase,none,0.6330,0.5452,0.6996,119.6
+cosine,"we're going down the wrong path, back up and reconsider",redirection,paraphrase,none,0.6347,0.5752,0.7115,141.6
+cosine,can we try a totally different strategy here,redirection,paraphrase,redirection,0.5734,0.5589,0.8129,128.2
+cosine,"nah this design is a dead end, let's redo it",redirection,paraphrase,none,0.5144,0.4869,0.5876,112.8
+cosine,"I changed my mind, let's go another way entirely",redirection,paraphrase,none,0.5915,0.5223,0.7495,112.7
+cosine,"throw this out, we need a fresh approach",redirection,clear,none,0.5737,0.4993,0.6629,123.6
+cosine,"stop, this whole plan needs rethinking",redirection,paraphrase,redirection,0.6673,0.6156,0.7720,127.5
+cosine,let's abandon the microservice idea and do a monolith,redirection,paraphrase,none,0.4701,0.4676,0.5635,112.2
+cosine,"scrap the current implementation, different architecture please",redirection,clear,none,0.5060,0.4552,0.5884,122.2
+cosine,"this approach has too many problems, pivot to plan B",redirection,paraphrase,none,0.5647,0.5508,0.7160,96.5
+cosine,let's ditch this design and brainstorm a new one,redirection,paraphrase,none,0.5349,0.5098,0.6790,142.4
+cosine,"wrong track, let's reset and try again differently",redirection,paraphrase,none,0.6007,0.5243,0.7211,93.0
+cosine,I'd rather we scrap this and rethink from the ground up,redirection,paraphrase,none,0.5346,0.4987,0.7105,136.6
+cosine,I almost said scratch that but let's keep going,none,negation,none,0.6276,0.5824,0.6391,113.0
+cosine,"no need to change direction, this is working fine",none,negation,redirection,0.6164,0.5448,0.7808,136.8
+cosine,"don't start over, just tweak the edge case",none,negation,none,0.5573,0.5317,0.6102,137.8
+cosine,I was going to switch approaches but actually never mind,none,negation,none,0.5870,0.5441,0.6985,132.3
+cosine,let's change the variable name from x to count,none,scoped,none,0.4628,0.4679,0.5540,117.6
+cosine,redirect stdout to a file in this script,none,scoped,none,0.4239,0.3995,0.4714,116.5
+cosine,change the button color to blue,none,scoped,none,0.4671,0.4687,0.5552,124.6
+cosine,we should change the timeout from 30s to 60s,none,scoped,none,0.4304,0.4064,0.5111,102.6
+cosine,how do I configure a postgres connection pool in SQLAlchemy?,none,clear,none,0.4021,0.3900,0.3987,128.4
+cosine,write a function that parses ISO 8601 timestamps,none,clear,none,0.3425,0.3572,0.3375,130.4
+cosine,"the login page throws a 500 when email is empty, can you fix it",none,clear,none,0.4053,0.3906,0.5106,118.1
+cosine,what's the difference between a thread and a process,none,clear,none,0.4540,0.4457,0.5191,131.6
+cosine,add pagination to the users API endpoint,none,clear,none,0.4416,0.4168,0.4159,102.6
+cosine,why is my docker build so slow,none,clear,none,0.4414,0.4237,0.4424,123.0
+cosine,refactor this class to use dependency injection,none,clear,none,0.3640,0.3545,0.4085,105.2
+cosine,explain what a reciprocal rank fusion is,none,clear,none,0.5097,0.5240,0.5223,123.8
+cosine,set up a github actions workflow for the test suite,none,clear,none,0.4161,0.3658,0.3742,140.3
+cosine,"the cache keeps returning stale data, help me debug",none,clear,none,0.3663,0.3565,0.4425,114.2
+cosine,generate a regex that matches semantic version strings,none,clear,none,0.4259,0.3571,0.3768,90.0
+cosine,can you add type hints to this module,none,clear,none,0.4406,0.4049,0.4366,110.3
+cosine,what's the best way to store secrets in a kubernetes cluster,none,clear,none,0.4211,0.4118,0.4894,86.3
+cosine,implement binary search on a sorted list of dicts by key,none,clear,none,0.3474,0.3529,0.3626,131.7
+cosine,"my test is flaky, it passes locally but fails in ci",none,clear,none,0.4224,0.4219,0.4925,138.4
+cosine,convert this callback-based code to async/await,none,clear,none,0.3769,0.4041,0.4716,137.0
+cosine,draft a README for this CLI tool,none,clear,none,0.4626,0.4198,0.4701,124.3
+cosine,how do i mock an httpx client in pytest,none,clear,none,0.3745,0.3530,0.3789,115.2
+cosine,"the memory usage climbs over time, looks like a leak",none,clear,none,0.4499,0.4294,0.5017,114.7
+cosine,add a --verbose flag to the argparse parser,none,clear,none,0.3268,0.3396,0.2888,123.6
+cosine,what does the GIL actually prevent,none,clear,none,0.5087,0.4879,0.5539,137.3
+cosine,set up pre-commit hooks for ruff and black,none,clear,none,0.3479,0.3831,0.3922,106.1
+cosine,i need to dedupe a list while preserving order,none,clear,none,0.4351,0.4894,0.4599,101.3
+cosine,"the websocket disconnects after 60 seconds, why",none,clear,none,0.4084,0.3791,0.4410,129.7
+cosine,write a migration to add a nullable created_at column,none,clear,none,0.3616,0.3499,0.3872,95.1
+cosine,whats teh fastest way to read a big csv in pandas,none,clear,none,0.3808,0.3497,0.4188,160.2
+cosine,should I use a queue or a stack for this traversal,none,clear,none,0.4277,0.3981,0.4793,125.2
+cosine,parse this log file and count errors by severity,none,clear,none,0.2702,0.2965,0.2890,86.0
+cosine,what timezone does datetime.now() use by default,none,clear,none,0.4315,0.4302,0.4370,123.8
+cosine,add retry with exponential backoff to this request,none,clear,none,0.3691,0.3808,0.5003,140.2
+cosine,"the unit tests pass but coverage dropped, where",none,clear,none,0.5088,0.4132,0.4479,129.2
+cosine,rename this endpoint from /v1/user to /v1/users,none,scoped,none,0.4493,0.4161,0.5212,144.4
+cosine,"good catch on the typo, now also handle the null case",none,scoped,none,0.4652,0.4561,0.4597,150.5
+cosine,"the first query is done running, kick off the second",none,scoped,none,0.4970,0.4387,0.4918,140.1
+cosine,swap the approach in this one helper to use a set,none,scoped,none,0.4417,0.4019,0.5056,107.6
+cosine,how do I profile cpu usage of a python script,none,clear,none,0.3738,0.3541,0.4087,130.9
+cosine,write a dockerfile for a fastapi app with uvicorn,none,clear,none,0.3208,0.3149,0.3266,112.6
+cosine,explain how RRF combines BM25 and dense rankings,none,clear,none,0.4737,0.4690,0.5075,149.5
+cosine,"the json parser chokes on trailing commas, fix it",none,clear,none,0.4235,0.3916,0.4026,90.8
+reranker[no-guard],"yeah I think we've nailed the requirements, what's next",completion,paraphrase,completion,0.8973,0.0188,0.0264,62.6
+reranker[no-guard],"ok the spec captures everything I wanted, let's proceed",completion,paraphrase,completion,0.9142,0.0872,0.0083,56.8
+reranker[no-guard],"I'm satisfied with where the design landed, time to build",completion,paraphrase,completion,0.9762,0.0516,0.0122,79.4
+reranker[no-guard],"no further changes needed on this, let's keep going",completion,paraphrase,completion,0.9905,0.0701,0.0366,57.5
+reranker[no-guard],"that's the whole picture I think, we can stop here",completion,paraphrase,completion,0.9836,0.0516,0.2000,57.7
+reranker[no-guard],this is feature-complete as far as I'm concerned,completion,clear,completion,0.9959,0.0416,0.0026,58.4
+reranker[no-guard],everything I needed is in there now,completion,paraphrase,completion,0.9959,0.0202,0.0124,57.9
+reranker[no-guard],"great, I have no more requirements to add",completion,paraphrase,completion,0.9413,0.0237,0.0164,58.0
+reranker[no-guard],"the doc is exhaustive enough, next phase please",completion,paraphrase,completion,0.4895,0.0375,0.0431,57.6
+reranker[no-guard],"alright we covered all the edge cases, what comes after",completion,paraphrase,completion,0.5522,0.0700,0.0085,58.6
+reranker[no-guard],I think that's a wrap on the requirements gathering,completion,paraphrase,completion,0.9868,0.0331,0.0265,57.9
+reranker[no-guard],"consider the spec final, nothing else from me",completion,clear,completion,0.9777,0.3730,0.0043,56.7
+reranker[no-guard],"we can close out this step, it's all there",completion,paraphrase,completion,0.9906,0.0322,0.0209,60.1
+reranker[no-guard],"yep, requirements look locked, advance us",completion,paraphrase,none,0.1011,0.0295,0.0052,67.1
+reranker[no-guard],"I've got nothing else to add, mark it done",completion,paraphrase,completion,0.9892,0.0631,0.0072,58.2
+reranker[no-guard],"that ties up all the loose ends, onward",completion,paraphrase,completion,0.7786,0.0430,0.0336,59.3
+reranker[no-guard],"this is NOT done yet, there are gaps in the spec",none,negation,none,0.0411,0.0000,0.0000,60.8
+reranker[no-guard],"we are far from finished here, lots missing",none,negation,none,0.1340,0.0215,0.1001,63.2
+reranker[no-guard],"I wouldn't call this complete, keep adding to it",none,negation,completion,0.9458,0.1983,0.0706,64.5
+reranker[no-guard],"almost done but not quite, hold on",none,negation,completion,0.7484,0.0113,0.0419,60.3
+reranker[no-guard],is the spec complete or are we still missing pieces?,none,negation,completion,0.9309,0.0000,0.0000,64.6
+reranker[no-guard],"the auth section is finished, now write the billing section",none,scoped,none,0.0539,0.0035,0.0028,67.7
+reranker[no-guard],"part one is done, part two still needs a lot of work",none,scoped,none,0.4236,0.0213,0.0217,67.9
+reranker[no-guard],"the intro reads complete, the rest is a stub",none,scoped,completion,0.4907,0.2059,0.0066,58.4
+reranker[no-guard],"this matches what I had in mind, proceed",approval,paraphrase,completion,0.7348,0.0721,0.0272,58.9
+reranker[no-guard],"yep that's exactly the output I wanted, go for it",approval,paraphrase,approval,0.3470,0.8019,0.0590,67.1
+reranker[no-guard],"nice work, you can commit that",approval,paraphrase,none,0.2341,0.0771,0.0046,58.3
+reranker[no-guard],"I'm happy with this, push it through",approval,paraphrase,completion,0.9898,0.9052,0.0140,57.8
+reranker[no-guard],"great, that's approved on my end",approval,clear,completion,0.9763,0.7616,0.0000,58.2
+reranker[no-guard],"sold, let's land this change",approval,paraphrase,completion,0.6335,0.0168,0.3193,57.2
+reranker[no-guard],"the implementation is solid, sign off from me",approval,paraphrase,completion,0.8776,0.0447,0.0050,63.4
+reranker[no-guard],"yeah do it, that's the right call",approval,paraphrase,none,0.0279,0.0111,0.0642,72.1
+reranker[no-guard],"thumbs up, send it",approval,clear,none,0.1651,0.3077,0.0000,67.0
+reranker[no-guard],"no notes, this is good to merge",approval,paraphrase,none,0.1884,0.0326,0.0053,72.2
+reranker[no-guard],"I co-sign this approach, carry on",approval,paraphrase,none,0.0278,0.0151,0.0696,69.5
+reranker[no-guard],"all good on my side, you have the green light",approval,paraphrase,none,0.0424,0.0170,0.0021,65.6
+reranker[no-guard],"yes please apply that, looks right",approval,paraphrase,completion,0.4822,0.4499,0.0184,59.1
+reranker[no-guard],"that's the one, lock it in",approval,paraphrase,none,0.3576,0.0229,0.0181,56.2
+reranker[no-guard],"perfect, you nailed it, ship that version",approval,paraphrase,approval,0.4057,0.8563,0.0035,58.0
+reranker[no-guard],"great stuff, I approve the whole change",approval,paraphrase,approval,0.7577,0.8973,0.0039,57.8
+reranker[no-guard],"don't approve this yet, I have concerns",none,negation,none,0.0767,0.0241,0.0058,57.3
+reranker[no-guard],I'm NOT approving this in its current state,none,negation,completion,0.4922,0.3091,0.0126,56.9
+reranker[no-guard],"hold off on merging, something feels off",none,negation,none,0.0136,0.0000,0.0551,69.2
+reranker[no-guard],I can't sign off on this until the tests pass,none,negation,completion,0.7649,0.1139,0.0024,57.2
+reranker[no-guard],"perfect, now fix the second one",none,scoped,none,0.1722,0.0150,0.0038,56.9
+reranker[no-guard],"great explanation, but the code still has a bug",none,scoped,none,0.0068,0.0044,0.0050,53.7
+reranker[no-guard],"nice, that part works; the rest is broken though",none,scoped,none,0.0825,0.0035,0.0000,66.9
+reranker[no-guard],looks good aesthetically but the logic is wrong,none,scoped,none,0.0354,0.0084,0.0140,74.0
+reranker[no-guard],let's scrap this and take a completely different tack,redirection,paraphrase,redirection,0.0855,0.0044,0.8983,58.5
+reranker[no-guard],I want to rethink the whole approach from scratch,redirection,paraphrase,redirection,0.0192,0.0025,0.9576,58.3
+reranker[no-guard],"this direction isn't panning out, let's pivot",redirection,paraphrase,redirection,0.0028,0.0000,0.6978,56.4
+reranker[no-guard],"forget what we did, start fresh with a new plan",redirection,paraphrase,redirection,0.0067,0.0000,0.9068,56.9
+reranker[no-guard],"we're going down the wrong path, back up and reconsider",redirection,paraphrase,redirection,0.0236,0.0033,0.9727,57.1
+reranker[no-guard],can we try a totally different strategy here,redirection,paraphrase,none,0.0135,0.0028,0.1848,62.6
+reranker[no-guard],"nah this design is a dead end, let's redo it",redirection,paraphrase,none,0.0478,0.0035,0.0886,64.5
+reranker[no-guard],"I changed my mind, let's go another way entirely",redirection,paraphrase,redirection,0.0141,0.0047,0.9625,56.9
+reranker[no-guard],"throw this out, we need a fresh approach",redirection,clear,redirection,0.0304,0.0063,0.6040,76.1
+reranker[no-guard],"stop, this whole plan needs rethinking",redirection,paraphrase,redirection,0.0173,0.0000,0.8080,57.9
+reranker[no-guard],let's abandon the microservice idea and do a monolith,redirection,paraphrase,redirection,0.0533,0.0039,0.9972,58.1
+reranker[no-guard],"scrap the current implementation, different architecture please",redirection,clear,none,0.0140,0.0000,0.1252,81.3
+reranker[no-guard],"this approach has too many problems, pivot to plan B",redirection,paraphrase,redirection,0.0186,0.0000,0.9858,58.7
+reranker[no-guard],let's ditch this design and brainstorm a new one,redirection,paraphrase,redirection,0.0634,0.0000,0.7642,59.1
+reranker[no-guard],"wrong track, let's reset and try again differently",redirection,paraphrase,none,0.0136,0.0000,0.0616,57.7
+reranker[no-guard],I'd rather we scrap this and rethink from the ground up,redirection,paraphrase,redirection,0.4202,0.0082,0.9807,75.4
+reranker[no-guard],I almost said scratch that but let's keep going,none,negation,none,0.0250,0.0188,0.3045,57.7
+reranker[no-guard],"no need to change direction, this is working fine",none,negation,redirection,0.0337,0.0000,0.9295,58.6
+reranker[no-guard],"don't start over, just tweak the edge case",none,negation,none,0.0288,0.0069,0.0230,67.4
+reranker[no-guard],I was going to switch approaches but actually never mind,none,negation,redirection,0.0346,0.0027,0.9933,57.6
+reranker[no-guard],let's change the variable name from x to count,none,scoped,none,0.0031,0.0130,0.0000,56.9
+reranker[no-guard],redirect stdout to a file in this script,none,scoped,none,0.0000,0.0000,0.0000,57.2
+reranker[no-guard],change the button color to blue,none,scoped,none,0.0000,0.0000,0.0000,57.3
+reranker[no-guard],we should change the timeout from 30s to 60s,none,scoped,none,0.0087,0.0000,0.0000,58.6
+reranker[no-guard],how do I configure a postgres connection pool in SQLAlchemy?,none,clear,none,0.0000,0.0000,0.0000,60.5
+reranker[no-guard],write a function that parses ISO 8601 timestamps,none,clear,none,0.0000,0.0000,0.0000,57.4
+reranker[no-guard],"the login page throws a 500 when email is empty, can you fix it",none,clear,none,0.0000,0.0000,0.0000,72.0
+reranker[no-guard],what's the difference between a thread and a process,none,clear,none,0.0000,0.0000,0.0000,69.9
+reranker[no-guard],add pagination to the users API endpoint,none,clear,none,0.0000,0.0000,0.0000,59.2
+reranker[no-guard],why is my docker build so slow,none,clear,none,0.0000,0.0000,0.0000,65.3
+reranker[no-guard],refactor this class to use dependency injection,none,clear,none,0.0000,0.0000,0.0025,57.4
+reranker[no-guard],explain what a reciprocal rank fusion is,none,clear,none,0.0056,0.0000,0.0000,57.4
+reranker[no-guard],set up a github actions workflow for the test suite,none,clear,none,0.0097,0.0000,0.0000,72.9
+reranker[no-guard],"the cache keeps returning stale data, help me debug",none,clear,none,0.0035,0.0000,0.0000,65.9
+reranker[no-guard],generate a regex that matches semantic version strings,none,clear,none,0.0052,0.0000,0.0000,60.4
+reranker[no-guard],can you add type hints to this module,none,clear,none,0.0074,0.0070,0.0000,66.1
+reranker[no-guard],what's the best way to store secrets in a kubernetes cluster,none,clear,none,0.0000,0.0000,0.0000,61.5
+reranker[no-guard],implement binary search on a sorted list of dicts by key,none,clear,none,0.0000,0.0000,0.0000,78.8
+reranker[no-guard],"my test is flaky, it passes locally but fails in ci",none,clear,none,0.0564,0.0000,0.0000,58.3
+reranker[no-guard],convert this callback-based code to async/await,none,clear,none,0.0043,0.0044,0.0045,57.5
+reranker[no-guard],draft a README for this CLI tool,none,clear,none,0.0190,0.0138,0.0000,58.0
+reranker[no-guard],how do i mock an httpx client in pytest,none,clear,none,0.0042,0.0000,0.0000,58.2
+reranker[no-guard],"the memory usage climbs over time, looks like a leak",none,clear,none,0.0000,0.0000,0.0000,57.7
+reranker[no-guard],add a --verbose flag to the argparse parser,none,clear,none,0.0000,0.0000,0.0000,56.7
+reranker[no-guard],what does the GIL actually prevent,none,clear,none,0.0036,0.0062,0.0000,71.9
+reranker[no-guard],set up pre-commit hooks for ruff and black,none,clear,none,0.0000,0.0034,0.0000,58.0
+reranker[no-guard],i need to dedupe a list while preserving order,none,clear,none,0.0048,0.0028,0.0000,57.6
+reranker[no-guard],"the websocket disconnects after 60 seconds, why",none,clear,none,0.0000,0.0000,0.0000,61.5
+reranker[no-guard],write a migration to add a nullable created_at column,none,clear,none,0.0000,0.0000,0.0000,71.0
+reranker[no-guard],whats teh fastest way to read a big csv in pandas,none,clear,none,0.0034,0.0000,0.0000,56.3
+reranker[no-guard],should I use a queue or a stack for this traversal,none,clear,none,0.0093,0.0000,0.0046,58.0
+reranker[no-guard],parse this log file and count errors by severity,none,clear,none,0.0021,0.0027,0.0000,58.1
+reranker[no-guard],what timezone does datetime.now() use by default,none,clear,none,0.0000,0.0000,0.0000,71.0
+reranker[no-guard],add retry with exponential backoff to this request,none,clear,none,0.0000,0.0000,0.0000,58.0
+reranker[no-guard],"the unit tests pass but coverage dropped, where",none,clear,none,0.0093,0.0000,0.0000,58.4
+reranker[no-guard],rename this endpoint from /v1/user to /v1/users,none,scoped,none,0.0000,0.0000,0.0000,73.9
+reranker[no-guard],"good catch on the typo, now also handle the null case",none,scoped,none,0.0033,0.0149,0.0000,57.8
+reranker[no-guard],"the first query is done running, kick off the second",none,scoped,none,0.0759,0.0000,0.0000,59.1
+reranker[no-guard],swap the approach in this one helper to use a set,none,scoped,none,0.0032,0.0026,0.0431,58.3
+reranker[no-guard],how do I profile cpu usage of a python script,none,clear,none,0.0000,0.0000,0.0000,83.8
+reranker[no-guard],write a dockerfile for a fastapi app with uvicorn,none,clear,none,0.0047,0.0000,0.0000,60.1
+reranker[no-guard],explain how RRF combines BM25 and dense rankings,none,clear,none,0.0000,0.0000,0.0000,59.5
+reranker[no-guard],"the json parser chokes on trailing commas, fix it",none,clear,none,0.0032,0.0000,0.0000,58.6
+reranker,"yeah I think we've nailed the requirements, what's next",completion,paraphrase,completion,0.8973,0.0188,0.0264,62.6
+reranker,"ok the spec captures everything I wanted, let's proceed",completion,paraphrase,completion,0.9142,0.0872,0.0083,56.8
+reranker,"I'm satisfied with where the design landed, time to build",completion,paraphrase,completion,0.9762,0.0516,0.0122,79.4
+reranker,"no further changes needed on this, let's keep going",completion,paraphrase,completion,0.9905,0.0701,0.0366,57.5
+reranker,"that's the whole picture I think, we can stop here",completion,paraphrase,completion,0.9836,0.0516,0.2000,57.7
+reranker,this is feature-complete as far as I'm concerned,completion,clear,completion,0.9959,0.0416,0.0026,58.4
+reranker,everything I needed is in there now,completion,paraphrase,completion,0.9959,0.0202,0.0124,57.9
+reranker,"great, I have no more requirements to add",completion,paraphrase,completion,0.9413,0.0237,0.0164,58.0
+reranker,"the doc is exhaustive enough, next phase please",completion,paraphrase,completion,0.4895,0.0375,0.0431,57.6
+reranker,"alright we covered all the edge cases, what comes after",completion,paraphrase,completion,0.5522,0.0700,0.0085,58.6
+reranker,I think that's a wrap on the requirements gathering,completion,paraphrase,completion,0.9868,0.0331,0.0265,57.9
+reranker,"consider the spec final, nothing else from me",completion,clear,completion,0.9777,0.3730,0.0043,56.7
+reranker,"we can close out this step, it's all there",completion,paraphrase,completion,0.9906,0.0322,0.0209,60.1
+reranker,"yep, requirements look locked, advance us",completion,paraphrase,none,0.1011,0.0295,0.0052,67.1
+reranker,"I've got nothing else to add, mark it done",completion,paraphrase,completion,0.9892,0.0631,0.0072,58.2
+reranker,"that ties up all the loose ends, onward",completion,paraphrase,completion,0.7786,0.0430,0.0336,59.3
+reranker,"this is NOT done yet, there are gaps in the spec",none,negation,none,0.0000,0.0000,0.0000,60.8
+reranker,"we are far from finished here, lots missing",none,negation,none,0.0000,0.0000,0.0000,63.2
+reranker,"I wouldn't call this complete, keep adding to it",none,negation,none,0.0000,0.0000,0.0000,64.5
+reranker,"almost done but not quite, hold on",none,negation,none,0.0000,0.0000,0.0000,60.3
+reranker,is the spec complete or are we still missing pieces?,none,negation,none,0.0000,0.0000,0.0000,64.6
+reranker,"the auth section is finished, now write the billing section",none,scoped,none,0.0539,0.0035,0.0028,67.7
+reranker,"part one is done, part two still needs a lot of work",none,scoped,none,0.4236,0.0213,0.0217,67.9
+reranker,"the intro reads complete, the rest is a stub",none,scoped,completion,0.4907,0.2059,0.0066,58.4
+reranker,"this matches what I had in mind, proceed",approval,paraphrase,completion,0.7348,0.0721,0.0272,58.9
+reranker,"yep that's exactly the output I wanted, go for it",approval,paraphrase,approval,0.3470,0.8019,0.0590,67.1
+reranker,"nice work, you can commit that",approval,paraphrase,none,0.2341,0.0771,0.0046,58.3
+reranker,"I'm happy with this, push it through",approval,paraphrase,completion,0.9898,0.9052,0.0140,57.8
+reranker,"great, that's approved on my end",approval,clear,completion,0.9763,0.7616,0.0000,58.2
+reranker,"sold, let's land this change",approval,paraphrase,completion,0.6335,0.0168,0.3193,57.2
+reranker,"the implementation is solid, sign off from me",approval,paraphrase,completion,0.8776,0.0447,0.0050,63.4
+reranker,"yeah do it, that's the right call",approval,paraphrase,none,0.0279,0.0111,0.0642,72.1
+reranker,"thumbs up, send it",approval,clear,none,0.1651,0.3077,0.0000,67.0
+reranker,"no notes, this is good to merge",approval,paraphrase,none,0.1884,0.0326,0.0053,72.2
+reranker,"I co-sign this approach, carry on",approval,paraphrase,none,0.0278,0.0151,0.0696,69.5
+reranker,"all good on my side, you have the green light",approval,paraphrase,none,0.0424,0.0170,0.0021,65.6
+reranker,"yes please apply that, looks right",approval,paraphrase,completion,0.4822,0.4499,0.0184,59.1
+reranker,"that's the one, lock it in",approval,paraphrase,none,0.3576,0.0229,0.0181,56.2
+reranker,"perfect, you nailed it, ship that version",approval,paraphrase,approval,0.4057,0.8563,0.0035,58.0
+reranker,"great stuff, I approve the whole change",approval,paraphrase,approval,0.7577,0.8973,0.0039,57.8
+reranker,"don't approve this yet, I have concerns",none,negation,none,0.0000,0.0000,0.0000,57.3
+reranker,I'm NOT approving this in its current state,none,negation,none,0.0000,0.0000,0.0000,56.9
+reranker,"hold off on merging, something feels off",none,negation,none,0.0000,0.0000,0.0000,69.2
+reranker,I can't sign off on this until the tests pass,none,negation,none,0.0000,0.0000,0.0000,57.2
+reranker,"perfect, now fix the second one",none,scoped,none,0.1722,0.0150,0.0038,56.9
+reranker,"great explanation, but the code still has a bug",none,scoped,none,0.0068,0.0044,0.0050,53.7
+reranker,"nice, that part works; the rest is broken though",none,scoped,none,0.0825,0.0035,0.0000,66.9
+reranker,looks good aesthetically but the logic is wrong,none,scoped,none,0.0354,0.0084,0.0140,74.0
+reranker,let's scrap this and take a completely different tack,redirection,paraphrase,redirection,0.0855,0.0044,0.8983,58.5
+reranker,I want to rethink the whole approach from scratch,redirection,paraphrase,redirection,0.0192,0.0025,0.9576,58.3
+reranker,"this direction isn't panning out, let's pivot",redirection,paraphrase,none,0.0000,0.0000,0.0000,56.4
+reranker,"forget what we did, start fresh with a new plan",redirection,paraphrase,redirection,0.0067,0.0000,0.9068,56.9
+reranker,"we're going down the wrong path, back up and reconsider",redirection,paraphrase,redirection,0.0236,0.0033,0.9727,57.1
+reranker,can we try a totally different strategy here,redirection,paraphrase,none,0.0135,0.0028,0.1848,62.6
+reranker,"nah this design is a dead end, let's redo it",redirection,paraphrase,none,0.0478,0.0035,0.0886,64.5
+reranker,"I changed my mind, let's go another way entirely",redirection,paraphrase,redirection,0.0141,0.0047,0.9625,56.9
+reranker,"throw this out, we need a fresh approach",redirection,clear,redirection,0.0304,0.0063,0.6040,76.1
+reranker,"stop, this whole plan needs rethinking",redirection,paraphrase,redirection,0.0173,0.0000,0.8080,57.9
+reranker,let's abandon the microservice idea and do a monolith,redirection,paraphrase,redirection,0.0533,0.0039,0.9972,58.1
+reranker,"scrap the current implementation, different architecture please",redirection,clear,none,0.0140,0.0000,0.1252,81.3
+reranker,"this approach has too many problems, pivot to plan B",redirection,paraphrase,redirection,0.0186,0.0000,0.9858,58.7
+reranker,let's ditch this design and brainstorm a new one,redirection,paraphrase,redirection,0.0634,0.0000,0.7642,59.1
+reranker,"wrong track, let's reset and try again differently",redirection,paraphrase,none,0.0136,0.0000,0.0616,57.7
+reranker,I'd rather we scrap this and rethink from the ground up,redirection,paraphrase,redirection,0.4202,0.0082,0.9807,75.4
+reranker,I almost said scratch that but let's keep going,none,negation,none,0.0250,0.0188,0.3045,57.7
+reranker,"no need to change direction, this is working fine",none,negation,none,0.0000,0.0000,0.0000,58.6
+reranker,"don't start over, just tweak the edge case",none,negation,none,0.0000,0.0000,0.0000,67.4
+reranker,I was going to switch approaches but actually never mind,none,negation,none,0.0000,0.0000,0.0000,57.6
+reranker,let's change the variable name from x to count,none,scoped,none,0.0031,0.0130,0.0000,56.9
+reranker,redirect stdout to a file in this script,none,scoped,none,0.0000,0.0000,0.0000,57.2
+reranker,change the button color to blue,none,scoped,none,0.0000,0.0000,0.0000,57.3
+reranker,we should change the timeout from 30s to 60s,none,scoped,none,0.0087,0.0000,0.0000,58.6
+reranker,how do I configure a postgres connection pool in SQLAlchemy?,none,clear,none,0.0000,0.0000,0.0000,60.5
+reranker,write a function that parses ISO 8601 timestamps,none,clear,none,0.0000,0.0000,0.0000,57.4
+reranker,"the login page throws a 500 when email is empty, can you fix it",none,clear,none,0.0000,0.0000,0.0000,72.0
+reranker,what's the difference between a thread and a process,none,clear,none,0.0000,0.0000,0.0000,69.9
+reranker,add pagination to the users API endpoint,none,clear,none,0.0000,0.0000,0.0000,59.2
+reranker,why is my docker build so slow,none,clear,none,0.0000,0.0000,0.0000,65.3
+reranker,refactor this class to use dependency injection,none,clear,none,0.0000,0.0000,0.0025,57.4
+reranker,explain what a reciprocal rank fusion is,none,clear,none,0.0056,0.0000,0.0000,57.4
+reranker,set up a github actions workflow for the test suite,none,clear,none,0.0097,0.0000,0.0000,72.9
+reranker,"the cache keeps returning stale data, help me debug",none,clear,none,0.0035,0.0000,0.0000,65.9
+reranker,generate a regex that matches semantic version strings,none,clear,none,0.0052,0.0000,0.0000,60.4
+reranker,can you add type hints to this module,none,clear,none,0.0074,0.0070,0.0000,66.1
+reranker,what's the best way to store secrets in a kubernetes cluster,none,clear,none,0.0000,0.0000,0.0000,61.5
+reranker,implement binary search on a sorted list of dicts by key,none,clear,none,0.0000,0.0000,0.0000,78.8
+reranker,"my test is flaky, it passes locally but fails in ci",none,clear,none,0.0564,0.0000,0.0000,58.3
+reranker,convert this callback-based code to async/await,none,clear,none,0.0043,0.0044,0.0045,57.5
+reranker,draft a README for this CLI tool,none,clear,none,0.0190,0.0138,0.0000,58.0
+reranker,how do i mock an httpx client in pytest,none,clear,none,0.0042,0.0000,0.0000,58.2
+reranker,"the memory usage climbs over time, looks like a leak",none,clear,none,0.0000,0.0000,0.0000,57.7
+reranker,add a --verbose flag to the argparse parser,none,clear,none,0.0000,0.0000,0.0000,56.7
+reranker,what does the GIL actually prevent,none,clear,none,0.0036,0.0062,0.0000,71.9
+reranker,set up pre-commit hooks for ruff and black,none,clear,none,0.0000,0.0034,0.0000,58.0
+reranker,i need to dedupe a list while preserving order,none,clear,none,0.0048,0.0028,0.0000,57.6
+reranker,"the websocket disconnects after 60 seconds, why",none,clear,none,0.0000,0.0000,0.0000,61.5
+reranker,write a migration to add a nullable created_at column,none,clear,none,0.0000,0.0000,0.0000,71.0
+reranker,whats teh fastest way to read a big csv in pandas,none,clear,none,0.0034,0.0000,0.0000,56.3
+reranker,should I use a queue or a stack for this traversal,none,clear,none,0.0093,0.0000,0.0046,58.0
+reranker,parse this log file and count errors by severity,none,clear,none,0.0021,0.0027,0.0000,58.1
+reranker,what timezone does datetime.now() use by default,none,clear,none,0.0000,0.0000,0.0000,71.0
+reranker,add retry with exponential backoff to this request,none,clear,none,0.0000,0.0000,0.0000,58.0
+reranker,"the unit tests pass but coverage dropped, where",none,clear,none,0.0093,0.0000,0.0000,58.4
+reranker,rename this endpoint from /v1/user to /v1/users,none,scoped,none,0.0000,0.0000,0.0000,73.9
+reranker,"good catch on the typo, now also handle the null case",none,scoped,none,0.0033,0.0149,0.0000,57.8
+reranker,"the first query is done running, kick off the second",none,scoped,none,0.0759,0.0000,0.0000,59.1
+reranker,swap the approach in this one helper to use a set,none,scoped,none,0.0032,0.0026,0.0431,58.3
+reranker,how do I profile cpu usage of a python script,none,clear,none,0.0000,0.0000,0.0000,83.8
+reranker,write a dockerfile for a fastapi app with uvicorn,none,clear,none,0.0047,0.0000,0.0000,60.1
+reranker,explain how RRF combines BM25 and dense rankings,none,clear,none,0.0000,0.0000,0.0000,59.5
+reranker,"the json parser chokes on trailing commas, fix it",none,clear,none,0.0032,0.0000,0.0000,58.6

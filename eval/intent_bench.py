@@ -11,20 +11,29 @@ Backends
   utterance + each intent's reference phrases via the live Ollama embedder and
   takes max cosine per intent. Operating threshold 0.75 (the production value).
   Reuses ``classifier._INTENT_REFERENCES`` and ``classifier._cosine`` directly.
-* **reranker** — qwen3-reranker-0.6b (Stage B model) yes/no pair-scoring via
-  ``lm_assist.FragmentScorer``. Scores each utterance against each intent's
-  ``classifier._INTENT_TASK_DESCRIPTIONS`` entry. Tries both orientations
-  (utterance-as-query vs utterance-as-document) and reports which separates
-  better. Threshold is swept; best-F1 point + full sweep reported.
+* **reranker** — the *production* signal-layer reranker backend. Builds the same
+  ``lm_assist.FragmentScorer`` the runtime builds (via
+  ``classifier._INTENT_INSTRUCT``), scores each utterance-as-query against each
+  intent's ``classifier._INTENT_TASK_DESCRIPTIONS`` entry, and applies the
+  production negation guard (``classifier._has_negation``) — a negated utterance
+  has all intent scores zeroed so it predicts ``none``. Threshold is swept;
+  best-F1 point + full sweep reported.
 
-Multi-class decision: argmax over the three intent scores; if the winning score
-is below the operating threshold the prediction is ``none``.
+Two decision framings are reported:
+
+* **argmax** — argmax over the three intent scores, ``none`` below threshold.
+  Kept for continuity with the 2026-06-12 report.
+* **per-intent (production)** — each intent decided independently
+  (``score >= threshold``), since every runtime gate queries exactly one intent.
+  This is the number that reflects what ships.
+
+Both the un-guarded and guarded reranker are reported side by side, so the
+guard's contribution is visible without a separate flag.
 
 Usage
 -----
     uv run python -m eval.intent_bench
     uv run python -m eval.intent_bench --limit 20        # quick smoke
-    uv run python -m eval.intent_bench --orientation doc # force one orientation
 
 Requires the live embedder (Ollama :11434) and reranker (llama-server :60001).
 """
@@ -38,7 +47,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Literal
 
 import yaml
 
@@ -47,11 +55,15 @@ from agentalloy.retrieval.lm_assist import (
     FragmentScorer,
     LMAssistConfig,
     LMAssistMode,
+    LMAssistOutcome,
 )
 from agentalloy.signals.classifier import (
+    _DEFAULT_RERANK_THRESHOLD,
+    _INTENT_INSTRUCT,
     _INTENT_REFERENCES,
     _INTENT_TASK_DESCRIPTIONS,
     _cosine,
+    _has_negation,
 )
 
 INTENTS = ["completion", "approval", "redirection"]
@@ -63,14 +75,6 @@ _EMBED_MODEL = "qwen3-embedding:0.6b"
 _RERANK_URL = "http://127.0.0.1:60001"
 _RERANK_MODEL = "qwen3-reranker-0.6b"
 _COSINE_THRESHOLD = 0.75
-
-# Instruct line shown to the reranker. The Stage-B default instruct is about
-# skill-fragment relevance and produces near-zero scores here; this one frames
-# the yes/no question as intent classification.
-_RERANK_INSTRUCT = (
-    "Judge whether the user message expresses the intent described. "
-    "Answer yes only if the message clearly signals that intent."
-)
 
 DATA_PATH = Path(__file__).parent / "intent_bench_data.yaml"
 
@@ -143,69 +147,44 @@ def run_cosine(items: list[Item], threshold: float) -> list[Scored]:
 
 def run_reranker(
     items: list[Item],
-    orientation: Literal["query", "doc"],
     threshold: float,
+    *,
+    guard: bool = True,
 ) -> list[Scored]:
-    """Score utterance against each intent's task description via the reranker.
+    """Score each utterance against the three intent descriptions, production-faithful.
 
-    orientation="query": utterance is the Query, task description is the Document.
-    orientation="doc":   task description is the Query, utterance is the Document.
+    Builds the same ``FragmentScorer`` the runtime builds (intent instruct,
+    utterance-as-query) and scores all three intent descriptions in one batch.
+    When ``guard`` is set, a negated utterance (``classifier._has_negation``)
+    has every intent score zeroed — exactly the runtime veto, which forces a
+    ``none`` prediction at any positive threshold.
     """
     config = LMAssistConfig(
         mode=LMAssistMode.ARBITRATE,
         url=_RERANK_URL,
         timeout_ms=5000,  # generous; benchmark, not the 300ms runtime budget
-        keep_threshold=0.05,
+        keep_threshold=0.0,
         model=_RERANK_MODEL,
+        instruct=_INTENT_INSTRUCT,
     )
     scorer = FragmentScorer(config)
+    descs = [_INTENT_TASK_DESCRIPTIONS[i] for i in INTENTS]
     out: list[Scored] = []
     try:
         for it in items:
             t0 = time.perf_counter()
-            scores: dict[str, float] = {}
-            for intent in INTENTS:
-                desc = _INTENT_TASK_DESCRIPTIONS[intent]
-                if orientation == "query":
-                    task, doc = it.text, desc
-                else:
-                    task, doc = desc, it.text
-                # FragmentScorer.score builds the prompt with the module default
-                # instruct; we want our intent-framed instruct, so call the
-                # internal scorer via a one-doc batch using build_prompt override.
-                res = _score_pair(scorer, task, doc)
-                scores[intent] = res
+            if guard and _has_negation(it.text):
+                scores = {i: 0.0 for i in INTENTS}
+            else:
+                res = scorer.score(it.text, descs)
+                if res.outcome is not LMAssistOutcome.HIT or len(res.scores) != len(INTENTS):
+                    raise RuntimeError(f"reranker non-HIT outcome {res.outcome} for {it.text!r}")
+                scores = dict(zip(INTENTS, res.scores, strict=True))
             dt = (time.perf_counter() - t0) * 1000.0
             out.append(Scored(it, scores, predict_from_scores(scores, threshold), dt))
     finally:
         scorer.close()
     return out
-
-
-def _score_pair(scorer: FragmentScorer, task: str, document: str) -> float:
-    """Score a single (task, document) pair with the intent-framed instruct.
-
-    Reuses FragmentScorer's HTTP client + logprob math but overrides the
-    instruct line. We build the prompt explicitly and post via the scorer's
-    private machinery to avoid duplicating the request/parse code.
-    """
-    from agentalloy.retrieval.lm_assist import (
-        _parse_completion_logprobs,
-        build_prompt,
-        score_from_logprobs,
-    )
-
-    payload = {
-        "model": _RERANK_MODEL,
-        "prompt": build_prompt(task, document, instruct=_RERANK_INSTRUCT),
-        "max_tokens": 1,
-        "temperature": 0.0,
-        "n_probs": 20,
-        "logprobs": 20,
-    }
-    resp = scorer._client.post("/v1/completions", json=payload)  # pyright: ignore[reportPrivateUsage]
-    resp.raise_for_status()
-    return score_from_logprobs(_parse_completion_logprobs(resp.json()))
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +221,58 @@ def per_intent_prf(scored: list[Scored], intent: str) -> PRF:
 
 def macro_f1(scored: list[Scored]) -> float:
     return statistics.mean(per_intent_prf(scored, i).f1 for i in INTENTS)
+
+
+def per_intent_prf_independent(scored: list[Scored], intent: str, threshold: float) -> PRF:
+    """P/R/F1 for one intent decided *independently* (``score >= threshold``).
+
+    This is the production framing: every runtime gate queries exactly one
+    intent, so the decision never sees the other intents' scores (no argmax).
+    """
+    tp = fp = fn = 0
+    for s in scored:
+        gold_pos = s.item.label == intent
+        pred_pos = s.scores[intent] >= threshold
+        if pred_pos and gold_pos:
+            tp += 1
+        elif pred_pos and not gold_pos:
+            fp += 1
+        elif not pred_pos and gold_pos:
+            fn += 1
+    prec = tp / (tp + fp) if (tp + fp) else 0.0
+    rec = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+    return PRF(prec, rec, f1, tp, fp, fn)
+
+
+def macro_f1_independent(scored: list[Scored], threshold: float) -> float:
+    return statistics.mean(per_intent_prf_independent(scored, i, threshold).f1 for i in INTENTS)
+
+
+def sweep_independent(
+    scored: list[Scored], lo: float = 0.0, hi: float = 1.0, step: float = 0.02
+) -> list[tuple[float, float]]:
+    """Return [(threshold, per-intent macro_f1)] across the sweep."""
+    rows: list[tuple[float, float]] = []
+    t = lo
+    while t <= hi + 1e-9:
+        rows.append((round(t, 3), macro_f1_independent(scored, t)))
+        t += step
+    return rows
+
+
+def apply_negation_guard(scored: list[Scored], threshold: float) -> list[Scored]:
+    """Derive guarded predictions from un-guarded scores (no re-query).
+
+    A negated utterance has every intent score zeroed, mirroring the runtime
+    veto. Deterministic, so this reproduces ``run_reranker(guard=True)`` exactly
+    without a second pass over the live reranker.
+    """
+    out: list[Scored] = []
+    for s in scored:
+        scores = {i: 0.0 for i in INTENTS} if _has_negation(s.item.text) else s.scores
+        out.append(Scored(s.item, scores, predict_from_scores(scores, threshold), s.latency_ms))
+    return out
 
 
 def overall_accuracy(scored: list[Scored]) -> float:
@@ -297,6 +328,12 @@ class BackendReport:
     sweep: list[tuple[float, float, float]] | None = field(default=None)
 
 
+def _operating_threshold(name: str) -> float:
+    """The production operating threshold for a backend (used by the per-intent
+    framing): cosine runs at 0.75, the reranker variants at the calibrated default."""
+    return _COSINE_THRESHOLD if name.startswith("cosine") else _DEFAULT_RERANK_THRESHOLD
+
+
 def _fmt_prf_table(scored: list[Scored]) -> list[str]:
     lines = [f"  {'intent':<12} {'P':>6} {'R':>6} {'F1':>6}  (tp/fp/fn)"]
     for i in INTENTS:
@@ -305,6 +342,19 @@ def _fmt_prf_table(scored: list[Scored]) -> list[str]:
             f"  {i:<12} {p.precision:>6.3f} {p.recall:>6.3f} {p.f1:>6.3f}  ({p.tp}/{p.fp}/{p.fn})"
         )
     lines.append(f"  {'macro-F1':<12} {'':>6} {'':>6} {macro_f1(scored):>6.3f}")
+    return lines
+
+
+def _fmt_prf_table_independent(scored: list[Scored], threshold: float) -> list[str]:
+    lines = [f"  {'intent':<12} {'P':>6} {'R':>6} {'F1':>6}  (tp/fp/fn)  [indep @ {threshold:.2f}]"]
+    for i in INTENTS:
+        p = per_intent_prf_independent(scored, i, threshold)
+        lines.append(
+            f"  {i:<12} {p.precision:>6.3f} {p.recall:>6.3f} {p.f1:>6.3f}  ({p.tp}/{p.fp}/{p.fn})"
+        )
+    lines.append(
+        f"  {'macro-F1':<12} {'':>6} {'':>6} {macro_f1_independent(scored, threshold):>6.3f}"
+    )
     return lines
 
 
@@ -350,8 +400,19 @@ def render_report(reports: list[BackendReport], items_n: int) -> str:
         + " |"
     )
     lines.append(overall_row)
-    macro_row = "| macro-F1 | " + " | ".join(f"{macro_f1(r.scored):.3f}" for r in reports) + " |"
+    macro_row = (
+        "| macro-F1 (argmax) | " + " | ".join(f"{macro_f1(r.scored):.3f}" for r in reports) + " |"
+    )
     lines.append(macro_row)
+    indep_row = (
+        "| **macro-F1 (per-intent, prod)** | "
+        + " | ".join(
+            f"**{macro_f1_independent(r.scored, _operating_threshold(r.name)):.3f}**"
+            for r in reports
+        )
+        + " |"
+    )
+    lines.append(indep_row)
     lat_row = (
         "| latency p50 (ms) | "
         + " | ".join(f"{_latency_stats(r.scored)[0]:.0f}" for r in reports)
@@ -363,9 +424,19 @@ def render_report(reports: list[BackendReport], items_n: int) -> str:
     for r in reports:
         lines.append(f"## {r.name} (threshold={r.threshold:.3f})")
         lines.append("")
-        lines.append("### per-intent P/R/F1")
+        lines.append("### per-intent P/R/F1 (argmax)")
         lines.append("```")
         lines.extend(_fmt_prf_table(r.scored))
+        lines.append("```")
+        op_thr = _operating_threshold(r.name)
+        lines.append(f"### per-intent P/R/F1 (production framing, indep @ {op_thr:.2f})")
+        lines.append("```")
+        lines.extend(_fmt_prf_table_independent(r.scored, op_thr))
+        ind_best_thr, ind_best_f1 = max(sweep_independent(r.scored), key=lambda x: x[1])
+        lines.append(
+            f"  (per-intent macro-F1 peaks @ {ind_best_thr:.2f} = {ind_best_f1:.3f}; "
+            f"operating @ {op_thr:.2f})"
+        )
         lines.append("```")
         lines.append("### confusion (gold rows / predicted cols)")
         lines.append("```")
@@ -431,12 +502,6 @@ def write_csv(path: Path, reports: list[BackendReport]) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="cap items (smoke test)")
-    parser.add_argument(
-        "--orientation",
-        choices=["query", "doc", "both"],
-        default="both",
-        help="reranker utterance orientation; 'both' picks the better-separating one",
-    )
     parser.add_argument("--no-write", action="store_true", help="skip writing run artifacts")
     args = parser.parse_args(argv)
 
@@ -449,41 +514,33 @@ def main(argv: list[str] | None = None) -> int:
     print("running cosine backend...")
     cosine_scored = run_cosine(items, _COSINE_THRESHOLD)
     cosine_report = BackendReport("cosine", cosine_scored, _COSINE_THRESHOLD)
-
-    # --- reranker backend: choose orientation ---
-    rerank_orientations: list[Literal["query", "doc"]]
-    rerank_orientations = ["query", "doc"] if args.orientation == "both" else [args.orientation]
-
-    best_orient = None
-    best_rerank_scored: list[Scored] | None = None
-    best_sep = -1.0
-    for orient in rerank_orientations:
-        print(f"running reranker backend (orientation={orient})...")
-        # Score once at a neutral threshold (predictions re-derived in the sweep).
-        rs = run_reranker(items, orient, threshold=0.5)
-        # Separation metric: mean(gold-intent score) - mean(off-intent score)
-        # over positive items — higher = cleaner separation.
-        pos = [s for s in rs if s.item.label in INTENTS]
-        sep = statistics.mean(
-            s.scores[s.item.label]
-            - statistics.mean(s.scores[i] for i in INTENTS if i != s.item.label)
-            for s in pos
-        )
-        print(f"  orientation={orient} separation={sep:.4f}")
-        if sep > best_sep:
-            best_sep, best_orient, best_rerank_scored = sep, orient, rs
-
-    assert best_rerank_scored is not None and best_orient is not None
-    print(f"chosen reranker orientation: {best_orient} (separation={best_sep:.4f})")
-
-    sweep = sweep_thresholds(best_rerank_scored)
-    best_thr = max(sweep, key=lambda x: x[1])[0]
-    rerank_scored = rescore_predictions(best_rerank_scored, best_thr)
-    rerank_report = BackendReport(f"reranker[{best_orient}]", rerank_scored, best_thr, sweep=sweep)
-    # Also include a cosine sweep for completeness.
     cosine_report.sweep = sweep_thresholds(cosine_scored)
 
-    reports = [cosine_report, rerank_report]
+    # --- reranker backend (production) ---
+    # Score once without the guard (one campaign against :60001); the guard is a
+    # deterministic in-process veto, so the guarded variant is derived offline.
+    print("running reranker backend (production: query orientation)...")
+    rerank_noguard = run_reranker(items, threshold=_DEFAULT_RERANK_THRESHOLD, guard=False)
+    rerank_guard = apply_negation_guard(rerank_noguard, _DEFAULT_RERANK_THRESHOLD)
+
+    # Display the argmax tables/confusion at the production operating threshold so
+    # the whole report reads at one operating point; the argmax sweep subsection
+    # still surfaces where argmax peaks (typically much lower) for diagnostics.
+    op_thr = _DEFAULT_RERANK_THRESHOLD
+    noguard_report = BackendReport(
+        "reranker[no-guard]",
+        rescore_predictions(rerank_noguard, op_thr),
+        op_thr,
+        sweep=sweep_thresholds(rerank_noguard),
+    )
+    rerank_report = BackendReport(
+        "reranker",
+        rescore_predictions(rerank_guard, op_thr),
+        op_thr,
+        sweep=sweep_thresholds(rerank_guard),
+    )
+
+    reports = [cosine_report, noguard_report, rerank_report]
     report_md = render_report(reports, len(items))
     print("\n" + report_md)
 
