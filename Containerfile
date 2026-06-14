@@ -105,9 +105,11 @@ ARG PULL_MODEL=false
 RUN if [ "$PULL_MODEL" = "true" ]; then \
         echo "Pre-baking GGUF models into image (this may take several minutes)..." && \
         mkdir -p /app/data/models && \
-        curl -fsSL -o /app/data/models/Qwen3-Embedding-0.6B-Q8_0.gguf \
+        curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 \
+            -o /app/data/models/Qwen3-Embedding-0.6B-Q8_0.gguf \
             "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" && \
-        curl -fsSL -o /app/data/models/Qwen3-Reranker-0.6B-Q8_0.gguf \
+        curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 \
+            -o /app/data/models/Qwen3-Reranker-0.6B-Q8_0.gguf \
             "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf" && \
         echo "GGUF models pre-baked successfully."; \
     else \

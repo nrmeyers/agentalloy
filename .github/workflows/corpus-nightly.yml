@@ -4,9 +4,14 @@ name: Corpus Nightly Regression
 # self-audit + domain gold-hit probe against the live service, and fails on
 # regression vs the committed baselines in eval/corpus_baselines.json.
 #
-# NOTE: ollama / GitHub Actions cannot be exercised in the dev sandbox, so a
-# few flag choices below are the most standard form and are flagged with a
-# one-line comment; shake them out on the first manual dispatch.
+# Inference runs on llama-server (llama.cpp): an embed server on :47951 and a
+# reranker server on :47952 (the cpu preset points at both). pull-models builds
+# llama-server from source on the runner when it's not on PATH and downloads
+# both GGUFs from Hugging Face.
+#
+# NOTE: GitHub Actions cannot be exercised in the dev sandbox, so a few flag
+# choices below are the most standard form and are flagged with a one-line
+# comment; shake them out on the first manual dispatch.
 
 on:
   schedule:
@@ -21,17 +26,17 @@ jobs:
   corpus-regression:
     runs-on: ubuntu-latest
     # Measured on first dispatch (run 27337187852): the 2-core runner embeds
-    # ~29 fragments/min → ~102 min for the 2966-fragment corpus, plus ingest
-    # and ollama setup. Sequential one-call-per-fragment embedding is the
-    # bottleneck; batching would be the real speedup (future work).
-    timeout-minutes: 150
+    # ~29 fragments/min → ~102 min for the 2966-fragment corpus, plus ingest.
+    # Sequential one-call-per-fragment embedding is the bottleneck; batching
+    # would be the real speedup (future work). Bumped from 150 → 180 to cover
+    # the added from-source llama-server build (~5-10 min) + GGUF download.
+    timeout-minutes: 180
     env:
       # User-scoped AgentAlloy state lives under XDG dirs; point them at the
       # workspace so nothing touches the runner's home defaults.
       XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
       XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
       AGENTALLOY_URL: http://127.0.0.1:47950
-      OLLAMA_HOST: 127.0.0.1:11434
     steps:
       - uses: actions/checkout@v4
 
@@ -46,32 +51,60 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Install + start Ollama
-        timeout-minutes: 10
+      - name: Ensure llama.cpp build prerequisites
+        timeout-minutes: 5
         run: |
           set -euxo pipefail
-          # Official install script is acceptable in CI (ephemeral runner).
-          curl -fsSL https://ollama.com/install.sh | sh
-          # Serve in the background; logs to ollama.log for the artifact trail.
-          ollama serve > ollama.log 2>&1 &
-          # Wait for the daemon to accept connections before pulling.
-          for i in $(seq 1 30); do
-            if curl -fsS "http://${OLLAMA_HOST}/api/version" >/dev/null 2>&1; then
-              echo "ollama up after ${i}s"; break
-            fi
-            sleep 1
-          done
-          ollama pull qwen3-embedding:0.6b
+          # ubuntu-latest already ships git, cmake, and g++ (build-essential).
+          # pull-models builds llama-server from source when it's not on PATH,
+          # so just assert the toolchain is present (install only if missing).
+          if ! command -v cmake >/dev/null 2>&1 || ! command -v c++ >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends git cmake build-essential
+          fi
+          cmake --version
+          c++ --version
 
       - name: Write .env (cpu preset → user XDG config)
         timeout-minutes: 2
         run: |
           set -euxo pipefail
           mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
-          # cpu preset points the embed server at ollama's default :11434.
+          # cpu preset points the embed server at :47951 and the reranker at
+          # :47952 (SIGNAL_INTENT_BACKEND=reranker).
           uv run agentalloy write-env --preset cpu --port 47950 --force
           echo "--- generated .env ---"
           cat "${XDG_CONFIG_HOME}/agentalloy/.env"
+
+      - name: Pull models (build llama-server + download both GGUFs)
+        # From-source llama-server build (~5-10 min) plus ~1.2 GB of GGUF
+        # downloads (embed + reranker). Generous ceiling so a slow HF mirror or
+        # a cold build cache can't trip the step.
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          # Minimal recommend-models.json so pull-models / start-*-server can
+          # resolve the embed + reranker models without the interactive picker.
+          cat > recommend-models.json <<'JSON'
+          {"schema_version": 1, "preset": "cpu", "selected_runner": "llama-server",
+           "options": [{"default": true,
+             "embed_model": "Qwen3-Embedding-0.6B-Q8_0.gguf", "embed_runner": "llama-server",
+             "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf", "rerank_runner": "llama-server"}]}
+          JSON
+          uv run agentalloy pull-models --models recommend-models.json --runner llama-server
+
+      - name: Start embed server (llama-server, :47951)
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
+
+      - name: Start reranker server (llama-server, :47952)
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          uv run agentalloy start-rerank-server --models recommend-models.json \
+            --hardware-target cpu --timeout 120
 
       - name: Build corpus from scratch (ingest + re-embed all packs)
         timeout-minutes: 130
@@ -128,6 +161,7 @@ jobs:
           name: corpus-nightly-runs
           path: |
             eval/runs/*.json
-            ollama.log
+            ${{ env.XDG_DATA_HOME }}/agentalloy/logs/embed-server.log
+            ${{ env.XDG_DATA_HOME }}/agentalloy/logs/rerank-server.log
             service.log
           retention-days: 14

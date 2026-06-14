@@ -100,11 +100,13 @@ JSON
         mv "$PROGRESS_TMP" "$PROGRESS"
         if [ ! -f "$EMBED_GGUF" ]; then
             echo ">> Fetching embed model (Qwen3-Embedding-0.6B-Q8_0)..."
-            curl -fsSL -o "$EMBED_GGUF" "$EMBED_URL"
+            curl -fsSL -o "$EMBED_GGUF" "$EMBED_URL" \
+                --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30
         fi
         if [ ! -f "$RERANK_GGUF" ]; then
             echo ">> Fetching reranker model (Qwen3-Reranker-0.6B-Q8_0)..."
-            curl -fsSL -o "$RERANK_GGUF" "$RERANK_URL"
+            curl -fsSL -o "$RERANK_GGUF" "$RERANK_URL" \
+                --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30
         fi
         echo "Model download complete"
     fi

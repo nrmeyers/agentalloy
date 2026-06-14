@@ -476,3 +476,91 @@ class TestGgufUrlMap:
         assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in _GGUF_URL_MAP
         for url in _GGUF_URL_MAP.values():
             assert url.startswith("https://huggingface.co/")
+
+
+# ---------------------------------------------------------------------------
+# GGUF download resilience — transient TLS/network flakes must be retried with
+# backoff (HuggingFace occasionally drops the connection mid-stream).
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadGgufRetry:
+    _MODEL = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+
+    def test_succeeds_first_attempt_no_sleep(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with (
+            patch.object(pm.install_state, "user_data_dir", return_value=tmp_path),
+            patch.object(pm, "_download_gguf_once", return_value=123) as once,
+            patch.object(pm.time, "sleep") as sleep,
+        ):
+            result = pm._download_gguf(self._MODEL)
+        assert result["success"] is True
+        assert result["path"].endswith(self._MODEL)
+        assert once.call_count == 1
+        sleep.assert_not_called()
+
+    def test_retries_then_succeeds(self, tmp_path: Path) -> None:
+        """Two transient failures, then success → 3 attempts, 2 backoff sleeps."""
+        import urllib.error
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        attempts: list[int] = []
+
+        def flaky(url: str, dest_path: Path) -> int:
+            attempts.append(1)
+            if len(attempts) < 3:
+                # Write a partial file so the cleanup path is exercised.
+                dest_path.write_bytes(b"partial")
+                raise urllib.error.URLError("unexpected eof while reading")
+            # Success: write the full file (stands in for the real stream).
+            dest_path.write_bytes(b"complete")
+            return 999
+
+        with (
+            patch.object(pm.install_state, "user_data_dir", return_value=tmp_path),
+            patch.object(pm, "_download_gguf_once", side_effect=flaky),
+            patch.object(pm.time, "sleep") as sleep,
+        ):
+            result = pm._download_gguf(self._MODEL)
+        assert result["success"] is True
+        assert len(attempts) == 3
+        assert sleep.call_count == 2  # backoff between the 3 attempts
+        # The file written on the successful attempt survives (not cleaned up).
+        assert (tmp_path / "models" / self._MODEL).read_bytes() == b"complete"
+
+    def test_exhausts_attempts_then_fails(self, tmp_path: Path) -> None:
+        """All attempts fail → 4 attempts, partial cleaned, error surfaced."""
+        import urllib.error
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        def always_fail(url: str, dest_path: Path) -> int:
+            dest_path.write_bytes(b"partial")
+            raise urllib.error.URLError("TLS connect error")
+
+        with (
+            patch.object(pm.install_state, "user_data_dir", return_value=tmp_path),
+            patch.object(pm, "_download_gguf_once", side_effect=always_fail) as once,
+            patch.object(pm.time, "sleep") as sleep,
+        ):
+            result = pm._download_gguf(self._MODEL)
+        assert result["success"] is False
+        assert once.call_count == pm._DOWNLOAD_MAX_ATTEMPTS
+        assert sleep.call_count == pm._DOWNLOAD_MAX_ATTEMPTS - 1
+        assert "after" in result["error"] and "attempts" in result["error"]
+        # Partial download removed between/after attempts.
+        assert not (tmp_path / "models" / self._MODEL).exists()
+
+    def test_unknown_model_no_retry(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with (
+            patch.object(pm.install_state, "user_data_dir", return_value=tmp_path),
+            patch.object(pm, "_download_gguf_once") as once,
+        ):
+            result = pm._download_gguf("does-not-exist.gguf")
+        assert result["success"] is False
+        once.assert_not_called()

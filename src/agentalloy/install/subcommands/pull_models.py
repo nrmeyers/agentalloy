@@ -20,7 +20,9 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any
 
@@ -236,10 +238,60 @@ def _build_llama_server() -> dict[str, Any]:
         return {"success": False, "binary_path": None, "error": str(exc)}
 
 
+# Network errors worth retrying. HuggingFace occasionally drops the TLS
+# connection mid-handshake or mid-stream ("unexpected eof", "IncompleteRead"),
+# which is transient — a fresh attempt usually succeeds.
+_RETRYABLE_DOWNLOAD_ERRORS = (
+    urllib.error.URLError,  # also the base class of HTTPError
+    IncompleteRead,
+    TimeoutError,
+    OSError,  # covers socket.timeout / ConnectionReset surfaced as OSError
+)
+
+# Number of download attempts and the exponential-ish backoff (seconds) applied
+# *between* attempts (after attempt 1 fails: 2s, then 4s, then 8s).
+_DOWNLOAD_MAX_ATTEMPTS = 4
+_DOWNLOAD_BACKOFFS = (2, 4, 8)
+
+
+def _download_gguf_once(url: str, dest_path: Path) -> int:
+    """Perform a single GGUF download attempt, returning bytes written.
+
+    Streams the response to ``dest_path`` with a byte-counter progress
+    indicator on stderr. Raises on any network/IO error so the caller's retry
+    loop can decide whether to try again.
+    """
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        total = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+        chunk = 1 << 20  # 1 MiB chunks
+        with open(dest_path, "wb") as out_f:
+            while True:
+                buf = resp.read(chunk)
+                if not buf:
+                    break
+                out_f.write(buf)
+                downloaded += len(buf)
+                if total:
+                    pct = downloaded * 100 // total
+                    mb = downloaded / (1 << 20)
+                    total_mb = total / (1 << 20)
+                    print(
+                        f"\r  llama-server: {mb:.1f}/{total_mb:.1f} MiB ({pct}%)",
+                        end="",
+                        file=sys.stderr,
+                    )
+        print("", file=sys.stderr)  # newline after progress
+    return downloaded
+
+
 def _download_gguf(model_name: str) -> dict[str, Any]:
     """Download a GGUF model from Hugging Face into the persistent models dir.
 
-    Shows a simple byte-counter progress indicator on stderr.
+    Shows a simple byte-counter progress indicator on stderr. Transient network
+    failures (TLS resets, ``IncompleteRead``, timeouts) are retried up to
+    ``_DOWNLOAD_MAX_ATTEMPTS`` times with exponential-ish backoff (2/4/8s); the
+    partial file is removed between attempts so each retry starts clean.
     Returns a result dict with keys: success, path, error, duration_ms.
     """
     url = _GGUF_URL_MAP.get(model_name)
@@ -261,37 +313,35 @@ def _download_gguf(model_name: str) -> dict[str, Any]:
         file=sys.stderr,
     )
     t0 = time.monotonic()
-    try:
-        with urllib.request.urlopen(url, timeout=60) as resp:
-            total = int(resp.headers.get("Content-Length", 0))
-            downloaded = 0
-            chunk = 1 << 20  # 1 MiB chunks
-            with open(dest_path, "wb") as out_f:
-                while True:
-                    buf = resp.read(chunk)
-                    if not buf:
-                        break
-                    out_f.write(buf)
-                    downloaded += len(buf)
-                    if total:
-                        pct = downloaded * 100 // total
-                        mb = downloaded / (1 << 20)
-                        total_mb = total / (1 << 20)
-                        print(
-                            f"\r  llama-server: {mb:.1f}/{total_mb:.1f} MiB ({pct}%)",
-                            end="",
-                            file=sys.stderr,
-                        )
-            print("", file=sys.stderr)  # newline after progress
+    last_error = "unknown download error"
+    for attempt in range(1, _DOWNLOAD_MAX_ATTEMPTS + 1):
+        try:
+            _download_gguf_once(url, dest_path)
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            return {
+                "success": True,
+                "path": str(dest_path),
+                "error": None,
+                "duration_ms": duration_ms,
+            }
+        except _RETRYABLE_DOWNLOAD_ERRORS as exc:
+            last_error = str(exc)
+            # Remove a partial download so the next attempt starts clean.
+            with contextlib.suppress(OSError):
+                dest_path.unlink()
+            if attempt < _DOWNLOAD_MAX_ATTEMPTS:
+                backoff = _DOWNLOAD_BACKOFFS[min(attempt - 1, len(_DOWNLOAD_BACKOFFS) - 1)]
+                print(
+                    f"  llama-server: download attempt {attempt}/{_DOWNLOAD_MAX_ATTEMPTS} "
+                    f"failed ({last_error}); retrying in {backoff}s ...",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
 
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        return {"success": True, "path": str(dest_path), "error": None, "duration_ms": duration_ms}
-
-    except Exception as exc:  # noqa: BLE001
-        # Remove a partial download so a retry starts clean.
-        with contextlib.suppress(OSError):
-            dest_path.unlink()
-        return {"success": False, "error": str(exc)}
+    return {
+        "success": False,
+        "error": f"download failed after {_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}",
+    }
 
 
 def _handle_llama_server(
