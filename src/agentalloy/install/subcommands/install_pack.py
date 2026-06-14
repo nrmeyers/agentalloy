@@ -630,9 +630,15 @@ def install_local_pack(
     # Verify corpus files were actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
-    corpus = install_state.corpus_dir()
-    duck_path = corpus / "skills.duck"
-    ladybug_path = corpus / "ladybug"
+    # Verify the same paths the ingest actually wrote to — settings honor the
+    # DUCKDB_PATH / LADYBUG_DB_PATH env overrides (e.g. the container points them
+    # at /app/data). corpus_dir() is the XDG/profile default and diverges from
+    # those overrides, so it must not be used for verification.
+    from agentalloy.config import get_settings
+
+    _settings = get_settings()
+    duck_path = Path(_settings.duckdb_path)
+    ladybug_path = Path(_settings.ladybug_db_path)
     if not duck_path.exists() or not ladybug_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
@@ -939,9 +945,15 @@ def install_pack(
     # 5. Verify corpus files were actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
-    corpus = install_state.corpus_dir()
-    duck_path = corpus / "skills.duck"
-    ladybug_path = corpus / "ladybug"
+    # Verify the same paths the ingest actually wrote to — settings honor the
+    # DUCKDB_PATH / LADYBUG_DB_PATH env overrides (e.g. the container points them
+    # at /app/data). corpus_dir() is the XDG/profile default and diverges from
+    # those overrides, so it must not be used for verification.
+    from agentalloy.config import get_settings
+
+    _settings = get_settings()
+    duck_path = Path(_settings.duckdb_path)
+    ladybug_path = Path(_settings.ladybug_db_path)
     if not duck_path.exists() or not ladybug_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
