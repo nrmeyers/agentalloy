@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 
@@ -434,6 +434,13 @@ class TestInstallLocalPackGatesIntegration:
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
             patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
         ):
             result = ip.install_local_pack(tmp_path, root=tmp_path)
 
