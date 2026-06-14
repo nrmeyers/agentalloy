@@ -6,7 +6,7 @@ Two phases:
   install: Python version, ``uv`` on PATH, the ``agentalloy`` CLI on
   PATH (so the runbook LLM doesn't sail past a missing ``~/.local/bin``
   entry), XDG dirs writable, network reachable, default port free.
-- ``runner``: runner-specific checks (Ollama, llama-server, FastFlowLM). Run after
+- ``runner``: runner-specific checks (llama-server, FastFlowLM). Run after
   ``recommend-models`` so we know which runner was selected.
 
 Exit codes follow the project contract (see
@@ -284,112 +284,6 @@ def _try_brew_install(package: str, *, cask: bool = False) -> tuple[bool, str | 
     except OSError as exc:
         return False, f"brew install failed to spawn: {exc}"
     return True, None
-
-
-def _check_ollama_present() -> dict[str, Any]:
-    t0 = time.monotonic()
-    binary = shutil.which("ollama")
-    if binary:
-        return _check("ollama_present", passed=True, started=t0, detail=f"ollama at {binary}")
-
-    # macOS auto-install via Homebrew cask (ollama-app bundles the CLI on PATH).
-    if sys.platform == "darwin" and shutil.which("brew"):
-        ok, err = _try_brew_install("ollama-app", cask=True)
-        if ok:
-            binary = shutil.which("ollama")
-            if binary:
-                return _check(
-                    "ollama_present",
-                    passed=True,
-                    started=t0,
-                    detail=f"ollama at {binary} (installed via brew)",
-                )
-            error = (
-                "brew install --cask ollama-app succeeded but `ollama` is "
-                "still not on PATH; open the Ollama app once to install the CLI shim"
-            )
-        else:
-            error = f"brew install --cask ollama-app failed: {err or 'unknown error'}"
-        return _check(
-            "ollama_present",
-            passed=False,
-            started=t0,
-            error=error,
-            remediation=(
-                "Install Ollama manually: https://ollama.com/download/mac, then re-run preflight."
-            ),
-        )
-
-    return _check(
-        "ollama_present",
-        passed=False,
-        started=t0,
-        error="ollama not found on PATH",
-        remediation=(
-            "Install Ollama:\n"
-            "  Linux:   curl -fsSL https://ollama.com/install.sh | sh\n"
-            "  macOS:   brew install --cask ollama-app (or https://ollama.com/download/mac)\n"
-            "  Windows: https://ollama.com/download\n"
-            "Do not auto-execute — confirm with the user first."
-        ),
-    )
-
-
-def _check_ollama_reachable() -> dict[str, Any]:
-    t0 = time.monotonic()
-    url = "http://localhost:11434/api/tags"
-    try:
-        req = Request(url, method="GET")
-        with urlopen(req, timeout=2) as resp:
-            _ = resp.read(1)
-    except (URLError, OSError) as exc:
-        return _check(
-            "ollama_reachable",
-            passed=False,
-            started=t0,
-            error=f"GET {url} failed: {exc}",
-            remediation=(
-                "Start the Ollama daemon: `ollama serve` (Linux), or use the "
-                "menubar app (macOS/Windows). Re-run preflight once "
-                "`curl -s http://localhost:11434/api/tags` returns JSON."
-            ),
-        )
-    return _check("ollama_reachable", passed=True, started=t0, detail=f"GET {url} ok")
-
-
-def _try_start_ollama() -> bool:
-    """Attempt to start ollama serve in the background.
-
-    Spawns ``ollama serve &`` with output suppressed to a log file.
-    Polls until reachable or times out after 15 seconds.
-
-    Returns True if ollama became reachable.
-    """
-    if not shutil.which("ollama"):
-        return False
-
-    log_path = install_state.user_data_dir() / "logs" / "ollama.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with log_path.open("ab") as log_fh:
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=log_fh,
-                stderr=log_fh,
-                start_new_session=True,
-            )
-    except OSError:
-        return False
-
-    # Poll until reachable
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", 11434), timeout=1):
-                return True
-        except OSError:
-            time.sleep(1)
-    return False
 
 
 def _check_llama_server_present() -> dict[str, Any]:
@@ -776,20 +670,10 @@ def run_preflight(
                     ),
                     remediation=(
                         "Run `agentalloy recommend-models` first, or pass "
-                        "`--runner <ollama|llama-server|fastflowlm>` explicitly."
+                        "`--runner <llama-server|fastflowlm>` explicitly."
                     ),
                 )
             )
-        elif chosen == "ollama":
-            checks.append(_check_ollama_present())
-            reachable = _check_ollama_reachable()
-            if not reachable["passed"]:
-                # Offer to start ollama automatically
-                started = _try_start_ollama()
-                if started:
-                    # Re-check after starting
-                    reachable = _check_ollama_reachable()
-            checks.append(reachable)
         elif chosen == "llama-server":
             checks.append(_check_llama_server_present())
             # _check_llama_server_reachable omitted: llama-server is started by
