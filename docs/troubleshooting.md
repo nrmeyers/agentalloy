@@ -9,9 +9,18 @@ GGUFs: `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf`.
 
 ### `llama-server: command not found`
 
-The `llama-server` binary is not installed or not on your PATH. Install llama.cpp
-(e.g. `brew install llama.cpp` on macOS, or build/download a release from
-https://github.com/ggml-org/llama.cpp), then verify with `llama-server --version`.
+The `llama-server` binary is not installed or not on your PATH. On a native
+install, `agentalloy pull-models` (run by the setup wizard) auto-downloads a
+prebuilt CPU build from the [ggml-org GitHub releases](https://github.com/ggml-org/llama.cpp/releases)
+into `~/.local/share/agentalloy/runtime/llama.cpp/` and installs a launcher at
+`~/.local/bin/llama-server`. So the usual fix is:
+
+1. Ensure `~/.local/bin` is on your `$PATH`, then re-run `agentalloy pull-models`.
+2. Verify with `llama-server --version`.
+
+If your platform has no prebuilt asset (e.g. s390x), install llama.cpp manually
+(`brew install llama.cpp` on macOS, or build/download a release from
+https://github.com/ggml-org/llama.cpp) and put it on your PATH.
 
 The container image bundles `llama-server` (copied from
 `ghcr.io/ggml-org/llama.cpp:full`), so this only applies to native installs.

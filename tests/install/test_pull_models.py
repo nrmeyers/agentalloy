@@ -15,11 +15,18 @@ import pytest
 
 from agentalloy.install.subcommands.pull_models import (
     _GGUF_URL_MAP,  # pyright: ignore[reportPrivateUsage]
+    _PREBUILT_ASSET_SUFFIX,  # pyright: ignore[reportPrivateUsage]
     _PRESENCE_CHECKS,  # pyright: ignore[reportPrivateUsage]
     STEP_NAME,
     _collect_model_runner_pairs,  # pyright: ignore[reportPrivateUsage]
+    _detect_prebuilt_platform,  # pyright: ignore[reportPrivateUsage]
+    _ensure_llama_server_binary,  # pyright: ignore[reportPrivateUsage]
+    _extract_archive,  # pyright: ignore[reportPrivateUsage]
+    _find_llama_server_binary,  # pyright: ignore[reportPrivateUsage]
     _handle_llama_server,  # pyright: ignore[reportPrivateUsage]
     _is_model_present_llama_server,  # pyright: ignore[reportPrivateUsage]
+    _prebuilt_asset,  # pyright: ignore[reportPrivateUsage]
+    _write_llama_server_wrapper,  # pyright: ignore[reportPrivateUsage]
     pull_models,
 )
 
@@ -190,23 +197,57 @@ class TestHandleLlamaServer:
         assert len(errors) == 1
         assert "404" in errors[0]["error"]
 
-    def test_non_interactive_missing_binary_surfaces_actionable_error(self) -> None:
-        """No binary + non-interactive → build skipped, error with manual hint."""
+    def test_missing_binary_downloads_prebuilt_then_gguf(self) -> None:
+        """No binary → prebuilt download (works headlessly) → then GGUF pull."""
         with (
             patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": True, "binary_path": "/home/u/.local/bin/llama-server"},
+            ) as mock_prebuilt,
+            patch(
+                "agentalloy.install.subcommands.pull_models._is_model_present_llama_server",
+                return_value=False,
+            ),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_gguf",
+                return_value={"success": True, "path": "/data/models/x.gguf", "duration_ms": 7},
+            ),
+        ):
+            pulled, errors = _handle_llama_server("Qwen3-Embedding-0.6B-Q8_0.gguf", False)
+        assert errors == []
+        assert len(pulled) == 1
+        mock_prebuilt.assert_called_once()
+
+    def test_non_interactive_prebuilt_failure_surfaces_error_no_build(self) -> None:
+        """No binary + non-interactive + prebuilt fails → error, NO source build."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={
+                    "success": False,
+                    "binary_path": None,
+                    "error": "no prebuilt asset for this platform (sunos/sparc)",
+                    "hint": "build manually",
+                },
+            ),
             patch("agentalloy.install.subcommands.pull_models._build_llama_server") as mock_build,
         ):
             pulled, errors = _handle_llama_server("Qwen3-Embedding-0.6B-Q8_0.gguf", False)
         assert pulled == []
         assert len(errors) == 1
-        assert "build was skipped" in errors[0]["error"]
-        assert "git clone" in errors[0]["hint"]
+        assert "prebuilt download failed" in errors[0]["error"]
         mock_build.assert_not_called()
 
-    def test_build_failure_surfaces_error(self) -> None:
-        """No binary + interactive 'y' → build attempted; failure surfaces."""
+    def test_interactive_build_fallback_failure_surfaces_error(self) -> None:
+        """No binary + prebuilt fails + interactive 'y' → source build attempted."""
         with (
             patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": False, "binary_path": None, "error": "404", "hint": "h"},
+            ),
             patch("builtins.input", return_value="y"),
             patch(
                 "agentalloy.install.subcommands.pull_models._build_llama_server",
@@ -468,6 +509,269 @@ class TestRunExitCodes:
 # GGUF download map — must include BOTH the embed and reranker GGUFs so a
 # single install pull provisions both llama-server instances.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Binary provisioning — prebuilt download is the default; from-source build is
+# an interactive-only fallback.
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureLlamaServerBinary:
+    def test_uses_binary_on_path(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/llama-server"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server"
+            ) as prebuilt,
+        ):
+            res = _ensure_llama_server_binary(False)
+        assert res["success"] is True
+        assert res["binary_path"] == "/usr/bin/llama-server"
+        prebuilt.assert_not_called()
+
+    def test_downloads_prebuilt_when_absent(self) -> None:
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": True, "binary_path": "/h/.local/bin/llama-server"},
+            ),
+        ):
+            res = _ensure_llama_server_binary(False)
+        assert res["success"] is True
+
+    def test_non_interactive_no_prebuilt_no_build(self) -> None:
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": False, "error": "no asset", "hint": "h"},
+            ),
+            patch("agentalloy.install.subcommands.pull_models._build_llama_server") as build,
+        ):
+            res = _ensure_llama_server_binary(False)
+        assert res["success"] is False
+        assert "prebuilt download failed" in res["error"]
+        build.assert_not_called()
+
+    def test_interactive_declines_build(self) -> None:
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": False, "error": "no asset", "hint": "h"},
+            ),
+            patch("builtins.input", return_value="n"),
+            patch("agentalloy.install.subcommands.pull_models._build_llama_server") as build,
+        ):
+            res = _ensure_llama_server_binary(True)
+        assert res["success"] is False
+        build.assert_not_called()
+
+    def test_interactive_accepts_build(self) -> None:
+        with (
+            patch("shutil.which", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server",
+                return_value={"success": False, "error": "no asset", "hint": "h"},
+            ),
+            patch("builtins.input", return_value="y"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._build_llama_server",
+                return_value={"success": True, "binary_path": "/h/.local/bin/llama-server"},
+            ) as build,
+        ):
+            res = _ensure_llama_server_binary(True)
+        assert res["success"] is True
+        build.assert_called_once()
+
+
+class TestPrebuiltAssetResolution:
+    """The exact-suffix match is load-bearing: it must never select an
+    accelerated (vulkan/rocm/sycl/cuda) asset for a plain-CPU install."""
+
+    _CASES = [
+        ("linux", "x86_64", "linux", "ubuntu-x64.tar.gz"),
+        ("linux", "aarch64", "linux", "ubuntu-arm64.tar.gz"),
+        ("darwin", "arm64", "darwin", "macos-arm64.tar.gz"),
+        ("darwin", "x86_64", "darwin", "macos-x64.tar.gz"),
+        ("win32", "AMD64", "win", "win-cpu-x64.zip"),
+        ("win32", "ARM64", "win", "win-cpu-arm64.zip"),
+    ]
+
+    @pytest.mark.parametrize(("sysplat", "machine", "os_key", "suffix"), _CASES)
+    def test_exact_asset_for_platform(
+        self, sysplat: str, machine: str, os_key: str, suffix: str
+    ) -> None:
+        with (
+            patch("agentalloy.install.subcommands.pull_models.sys.platform", sysplat),
+            patch(
+                "agentalloy.install.subcommands.pull_models.platform.machine",
+                return_value=machine,
+            ),
+        ):
+            resolved = _prebuilt_asset()
+        assert resolved is not None
+        got_os, asset, url = resolved
+        assert got_os == os_key
+        assert asset.endswith(suffix)
+        assert url.endswith(asset)
+        # Never an accelerated variant.
+        for bad in ("vulkan", "rocm", "sycl", "cuda", "hip", "openvino"):
+            assert bad not in asset
+
+    def test_unsupported_os_returns_none(self) -> None:
+        with (
+            patch("agentalloy.install.subcommands.pull_models.sys.platform", "sunos5"),
+            patch(
+                "agentalloy.install.subcommands.pull_models.platform.machine",
+                return_value="x86_64",
+            ),
+        ):
+            assert _detect_prebuilt_platform() is None
+            assert _prebuilt_asset() is None
+
+    def test_unsupported_arch_returns_none(self) -> None:
+        with (
+            patch("agentalloy.install.subcommands.pull_models.sys.platform", "linux"),
+            patch(
+                "agentalloy.install.subcommands.pull_models.platform.machine",
+                return_value="s390x",
+            ),
+        ):
+            assert _detect_prebuilt_platform() is None
+
+    def test_all_mapped_suffixes_are_plain_cpu(self) -> None:
+        for suffix in _PREBUILT_ASSET_SUFFIX.values():
+            for bad in ("vulkan", "rocm", "sycl", "cuda", "hip", "openvino"):
+                assert bad not in suffix
+
+
+def _make_fake_toolchain_tar(dest: Path, top: str = "llama-bTEST") -> Path:
+    """Build a tiny tar.gz mimicking a release: top/llama-server + top/lib*.so."""
+    import io
+    import tarfile as _tarfile
+
+    archive = dest / "llama-bTEST-bin-ubuntu-x64.tar.gz"
+    with _tarfile.open(archive, "w:gz") as tf:
+        for name, data in (
+            (f"{top}/llama-server", b"#!/bin/sh\necho stub\n"),
+            (f"{top}/libggml.so", b"\x00fakelib"),
+        ):
+            info = _tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return archive
+
+
+class TestExtractAndWrapper:
+    def test_extract_and_find_binary(self, tmp_path: Path) -> None:
+        archive = _make_fake_toolchain_tar(tmp_path)
+        out = tmp_path / "out"
+        _extract_archive(archive, out)
+        binary = _find_llama_server_binary(out)
+        assert binary is not None
+        assert binary.name == "llama-server"
+        assert (binary.parent / "libggml.so").exists()
+
+    def test_find_binary_none_when_absent(self, tmp_path: Path) -> None:
+        (tmp_path / "readme.txt").write_text("nothing here")
+        assert _find_llama_server_binary(tmp_path) is None
+
+    def test_posix_wrapper_sets_library_path(self, tmp_path: Path) -> None:
+        runtime = tmp_path / "rt"
+        bin_dir = tmp_path / "bin"
+        runtime.mkdir()
+        bin_dir.mkdir()
+        wrapper = _write_llama_server_wrapper("linux", runtime, bin_dir)
+        assert wrapper.name == "llama-server"
+        text = wrapper.read_text()
+        assert "LD_LIBRARY_PATH" in text
+        assert "DYLD_LIBRARY_PATH" in text
+        assert str(runtime) in text
+        assert text.splitlines()[0] == "#!/bin/sh"
+        assert oct(wrapper.stat().st_mode)[-3:] == "755"
+
+    def test_windows_wrapper_is_cmd(self, tmp_path: Path) -> None:
+        runtime = tmp_path / "rt"
+        bin_dir = tmp_path / "bin"
+        runtime.mkdir()
+        bin_dir.mkdir()
+        wrapper = _write_llama_server_wrapper("win", runtime, bin_dir)
+        assert wrapper.name == "llama-server.cmd"
+        text = wrapper.read_text()
+        assert 'set "PATH=' in text
+        assert "llama-server.exe" in text
+
+
+class TestDownloadPrebuilt:
+    def test_happy_path_installs_toolchain_and_wrapper(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        runtime = tmp_path / "runtime" / "llama.cpp"
+        bin_dir = tmp_path / "bin"
+        fixture = _make_fake_toolchain_tar(tmp_path)
+
+        def fake_dl(url: str, dest_path: Path, *, label: str = "x") -> dict[str, Any]:
+            import shutil as _shutil
+
+            _shutil.copy2(fixture, dest_path)
+            return {"success": True, "error": None, "duration_ms": 1}
+
+        with (
+            patch.object(pm, "_LLAMA_CPP_RUNTIME_DIR", runtime),
+            patch.object(pm, "_LLAMA_SERVER_BIN_DIR", bin_dir),
+            patch.object(
+                pm,
+                "_prebuilt_asset",
+                return_value=("linux", "llama-bTEST-bin-ubuntu-x64.tar.gz", "http://x/a.tar.gz"),
+            ),
+            patch.object(pm, "_download_with_retry", side_effect=fake_dl),
+        ):
+            res = pm._download_prebuilt_llama_server()
+
+        assert res["success"] is True
+        assert (runtime / "llama-server").exists()
+        assert (runtime / "libggml.so").exists()
+        wrapper = bin_dir / "llama-server"
+        assert wrapper.exists()
+        assert str(runtime) in wrapper.read_text()
+        # Archive + staging cleaned up.
+        assert not (runtime.parent / "llama-bTEST-bin-ubuntu-x64.tar.gz").exists()
+        assert not (runtime.parent / "llama-bTEST-bin-ubuntu-x64.tar.gz.extract").exists()
+
+    def test_unsupported_platform_fails_with_hint(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(pm, "_prebuilt_asset", return_value=None):
+            res = pm._download_prebuilt_llama_server()
+        assert res["success"] is False
+        assert "no prebuilt llama-server asset" in res["error"]
+        assert res["hint"]
+
+    def test_download_failure_propagates(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        runtime = tmp_path / "runtime" / "llama.cpp"
+        bin_dir = tmp_path / "bin"
+        with (
+            patch.object(pm, "_LLAMA_CPP_RUNTIME_DIR", runtime),
+            patch.object(pm, "_LLAMA_SERVER_BIN_DIR", bin_dir),
+            patch.object(
+                pm,
+                "_prebuilt_asset",
+                return_value=("linux", "llama-bTEST-bin-ubuntu-x64.tar.gz", "http://x/a.tar.gz"),
+            ),
+            patch.object(
+                pm,
+                "_download_with_retry",
+                return_value={"success": False, "error": "404 Not Found", "duration_ms": 0},
+            ),
+        ):
+            res = pm._download_prebuilt_llama_server()
+        assert res["success"] is False
+        assert "prebuilt download failed" in res["error"]
 
 
 class TestGgufUrlMap:

@@ -58,13 +58,14 @@ You need:
 
 The runbook itself runs `agentalloy preflight` (Step 0 below) to verify these. **Never bypass a failed preflight check** — every later step assumes the prereqs are met, and skipping a fatal failure here is what causes the LLM to hand-roll workarounds (`~/.local/bin/agentalloy install-packs --list` etc.) midstream.
 
-For missing binaries (`uv`, `llama-server`), **stop and ask the user to install them**. Do not auto-execute install scripts — that's a non-reversible action that requires the human in the loop. Install commands:
+For a missing `uv`, **stop and ask the user to install it** — see https://docs.astral.sh/uv/getting-started/installation/. Do not auto-execute third-party install scripts; that's a non-reversible action that requires the human in the loop.
 
-- **uv:** see https://docs.astral.sh/uv/getting-started/installation/
+`llama-server` is different: the wizard's `pull-models` step **downloads a prebuilt CPU build automatically** from the [ggml-org GitHub releases](https://github.com/ggml-org/llama.cpp/releases) and installs a launcher at `~/.local/bin/llama-server`, so on supported platforms (Linux & macOS on x64/arm64, Windows x64/arm64) you do **not** need to install it yourself. You only need a manual install on an unsupported platform (e.g. s390x):
+
 - **llama-server (macOS):** `brew install llama.cpp`
 - **llama-server (Linux / other):** download a release binary or build from source — see https://github.com/ggml-org/llama.cpp
 
-`llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After installing, verify with `llama-server --version`. Step 0's preflight confirms the binary is reachable.
+`llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After setup, verify with `llama-server --version` (and confirm `~/.local/bin` is on your `$PATH`).
 
 > **Migration from an existing Ollama install:** AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 1024-dim vectors, you can point AgentAlloy at it instead of the managed llama-server.
 

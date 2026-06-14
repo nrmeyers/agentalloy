@@ -1,9 +1,11 @@
 """``pull-models`` subcommand.
 
 Idempotent model provisioning for llama-server (llama.cpp), the sole
-inference runner. Builds ``llama-server`` from source when it's not on
-PATH, then downloads the required GGUF weights from Hugging Face into the
-persistent models dir.
+inference runner. When ``llama-server`` is not on PATH it downloads a
+prebuilt CPU binary from the ggml-org GitHub releases (works headlessly;
+falls back to a from-source build only when prompted interactively), then
+downloads the required GGUF weights from Hugging Face into the persistent
+models dir.
 
 Reads the ``recommend-models`` JSON output (either from a file path or
 from ``install-state.json``) to determine which models to provision.
@@ -15,13 +17,16 @@ import argparse
 import contextlib
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any
@@ -73,6 +78,243 @@ _GGUF_URL_MAP: dict[str, str] = {
         "/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"
     ),
 }
+
+
+# --- Prebuilt llama-server provisioning -----------------------------------
+#
+# Downloading a known-good CPU build from the ggml-org GitHub releases is the
+# DEFAULT way to provision llama-server. Unlike the from-source build it works
+# non-interactively (no TTY prompt, no C++ toolchain) and is far faster — which
+# is exactly the gap that broke `agentalloy setup -n` and CI. Pinned to a
+# specific build for reproducibility, the same way the GGUF URLs above pin exact
+# files. Bump deliberately.
+_LLAMA_CPP_PREBUILT_BUILD = "b9631"
+_LLAMA_CPP_RELEASE_BASE = "https://github.com/ggml-org/llama.cpp/releases/download"
+
+# (os_key, arch_key) -> EXACT plain-CPU asset suffix. The exactness is the whole
+# point: the release also ships ubuntu-{vulkan,rocm,sycl,openvino} and
+# win-{cuda,hip,sycl} variants, so a loose "ubuntu + x64" substring match would
+# happily grab a GPU build that needs a runtime we don't have. Match the full
+# suffix or nothing.
+_PREBUILT_ASSET_SUFFIX: dict[tuple[str, str], str] = {
+    ("linux", "x64"): "ubuntu-x64.tar.gz",
+    ("linux", "arm64"): "ubuntu-arm64.tar.gz",
+    ("darwin", "x64"): "macos-x64.tar.gz",
+    ("darwin", "arm64"): "macos-arm64.tar.gz",
+    ("win", "x64"): "win-cpu-x64.zip",
+    ("win", "arm64"): "win-cpu-arm64.zip",
+}
+
+# The extracted toolchain (binary + co-located shared libs) lives here; a thin
+# wrapper placed on PATH points at it with LD_LIBRARY_PATH set. This mirrors the
+# container/CI provisioning: the prebuilt binary is NOT built with an $ORIGIN
+# rpath, so it can't find its sibling .so files without help.
+_LLAMA_CPP_RUNTIME_DIR = install_state.user_data_dir() / "runtime" / "llama.cpp"
+
+_MANUAL_LLAMA_BUILD_HINT = (
+    "Provision llama-server manually, then re-run `pull-models`:\n"
+    "  - Prebuilt: download the CPU build for your platform from\n"
+    "    https://github.com/ggml-org/llama.cpp/releases and put `llama-server`\n"
+    "    (with its co-located shared libraries) on your PATH; or\n"
+    "  - From source:\n"
+    "      git clone https://github.com/ggml-org/llama.cpp\n"
+    "      cd llama.cpp && cmake -B build -DLLAMA_BUILD_SERVER=ON\n"
+    "      cmake --build build --config Release -j\n"
+    "      cp build/bin/llama-server ~/.local/bin/"
+)
+
+
+def _detect_prebuilt_platform() -> tuple[str, str] | None:
+    """Map the running platform to ``(os_key, arch_key)`` keys, or None.
+
+    None means there is no prebuilt asset we can use for this OS/arch (e.g.
+    s390x, freebsd) — the caller falls back to a source build.
+    """
+    if sys.platform.startswith("linux"):
+        os_key = "linux"
+    elif sys.platform == "darwin":
+        os_key = "darwin"
+    elif sys.platform.startswith("win"):
+        os_key = "win"
+    else:
+        return None
+
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64", "x64"):
+        arch_key = "x64"
+    elif machine in ("aarch64", "arm64"):
+        arch_key = "arm64"
+    else:
+        return None
+
+    return (os_key, arch_key)
+
+
+def _prebuilt_asset() -> tuple[str, str, str] | None:
+    """Resolve ``(os_key, asset_filename, download_url)`` for this platform.
+
+    Returns None when no plain-CPU asset is published for the OS/arch.
+    """
+    plat = _detect_prebuilt_platform()
+    if plat is None:
+        return None
+    suffix = _PREBUILT_ASSET_SUFFIX.get(plat)
+    if suffix is None:
+        return None
+    build = _LLAMA_CPP_PREBUILT_BUILD
+    asset = f"llama-{build}-bin-{suffix}"
+    return plat[0], asset, f"{_LLAMA_CPP_RELEASE_BASE}/{build}/{asset}"
+
+
+def _extract_archive(archive_path: Path, dest_dir: Path) -> None:
+    """Extract a ``.tar.gz`` or ``.zip`` archive into ``dest_dir``.
+
+    Uses the tarfile ``data`` filter (Python 3.12+) so a malicious/absolute
+    member path can't escape ``dest_dir``.
+    """
+    if archive_path.name.lower().endswith(".zip"):
+        with zipfile.ZipFile(archive_path) as zf:
+            zf.extractall(dest_dir)
+    else:
+        with tarfile.open(archive_path, "r:gz") as tf:
+            tf.extractall(dest_dir, filter="data")
+
+
+def _find_llama_server_binary(root: Path) -> Path | None:
+    """Locate the ``llama-server`` (or ``.exe``) binary anywhere under ``root``."""
+    for name in ("llama-server", "llama-server.exe"):
+        for candidate in root.rglob(name):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _write_llama_server_wrapper(os_key: str, runtime_dir: Path, bin_dir: Path) -> Path:
+    """Install a thin launcher on PATH that runs the prebuilt with its libs.
+
+    POSIX: an ``sh`` wrapper that puts the toolchain dir on LD_LIBRARY_PATH (and
+    DYLD_LIBRARY_PATH for macOS) before exec. Windows: a ``.cmd`` shim that
+    prepends the dir to PATH (Windows resolves DLLs from there). Returns the
+    wrapper path.
+    """
+    if os_key == "win":
+        wrapper = bin_dir / "llama-server.cmd"
+        wrapper.write_text(
+            "@echo off\r\n"
+            f'set "PATH={runtime_dir};%PATH%"\r\n'
+            f'"{runtime_dir}\\llama-server.exe" %*\r\n'
+        )
+    else:
+        wrapper = bin_dir / "llama-server"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            "# Auto-generated by `agentalloy pull-models`. Runs the prebuilt\n"
+            "# llama-server with its co-located shared libraries on the loader path.\n"
+            f'LLAMA_LIB_DIR="{runtime_dir}"\n'
+            'export LD_LIBRARY_PATH="$LLAMA_LIB_DIR:${LD_LIBRARY_PATH:-}"\n'
+            'export DYLD_LIBRARY_PATH="$LLAMA_LIB_DIR:${DYLD_LIBRARY_PATH:-}"\n'
+            'exec "$LLAMA_LIB_DIR/llama-server" "$@"\n'
+        )
+    wrapper.chmod(0o755)
+    return wrapper
+
+
+def _download_prebuilt_llama_server() -> dict[str, Any]:
+    """Download + install a prebuilt CPU llama-server from ggml-org releases.
+
+    Resolves this platform's exact plain-CPU asset, downloads it with the same
+    retry/backoff as the GGUFs, extracts the toolchain (binary + co-located
+    shared libs) into a permanent runtime dir, and installs a wrapper on PATH.
+
+    Returns ``{success, binary_path, error, hint, duration_ms}``.
+    """
+    resolved = _prebuilt_asset()
+    if resolved is None:
+        return {
+            "success": False,
+            "binary_path": None,
+            "error": (
+                f"no prebuilt llama-server asset for this platform "
+                f"({sys.platform}/{platform.machine()})"
+            ),
+            "hint": _MANUAL_LLAMA_BUILD_HINT,
+        }
+
+    os_key, asset, url = resolved
+    runtime_dir = _LLAMA_CPP_RUNTIME_DIR
+    bin_dir = _LLAMA_SERVER_BIN_DIR
+    runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    t0 = time.monotonic()
+
+    print(f"  llama-server: downloading prebuilt {asset} ...", file=sys.stderr)
+
+    archive_path = runtime_dir.parent / asset
+    staging = runtime_dir.parent / f"{asset}.extract"
+    try:
+        dl = _download_with_retry(url, archive_path, label="llama-server")
+        if not dl["success"]:
+            return {
+                "success": False,
+                "binary_path": None,
+                "error": f"prebuilt download failed: {dl['error']}",
+                "hint": _MANUAL_LLAMA_BUILD_HINT,
+            }
+
+        # Extract into a clean staging dir, then swap the toolchain into place.
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        _extract_archive(archive_path, staging)
+
+        binary = _find_llama_server_binary(staging)
+        if binary is None:
+            return {
+                "success": False,
+                "binary_path": None,
+                "error": f"llama-server binary not found inside {asset}",
+                "hint": _MANUAL_LLAMA_BUILD_HINT,
+            }
+
+        # Replace the runtime dir with the extracted toolchain (binary's dir).
+        src_dir = binary.parent
+        shutil.rmtree(runtime_dir, ignore_errors=True)
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        for item in src_dir.iterdir():
+            dest = runtime_dir / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest)
+            else:
+                shutil.copy2(item, dest)
+        (runtime_dir / binary.name).chmod(0o755)
+
+        wrapper = _write_llama_server_wrapper(os_key, runtime_dir, bin_dir)
+    except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
+        return {
+            "success": False,
+            "binary_path": None,
+            "error": f"failed to install prebuilt llama-server: {exc}",
+            "hint": _MANUAL_LLAMA_BUILD_HINT,
+        }
+    finally:
+        with contextlib.suppress(OSError):
+            archive_path.unlink()
+        shutil.rmtree(staging, ignore_errors=True)
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    print(f"  llama-server: installed prebuilt to {wrapper} ({duration_ms} ms)", file=sys.stderr)
+    if str(bin_dir) not in os.environ.get("PATH", ""):
+        print(
+            f"  WARNING: {bin_dir} is not in your PATH. Add it to your shell "
+            "profile so `llama-server` can be found at runtime.",
+            file=sys.stderr,
+        )
+
+    return {
+        "success": True,
+        "binary_path": str(wrapper),
+        "error": None,
+        "duration_ms": duration_ms,
+    }
 
 
 def _check_build_prereqs() -> list[str]:
@@ -285,14 +527,54 @@ def _download_gguf_once(url: str, dest_path: Path) -> int:
     return downloaded
 
 
+def _download_with_retry(
+    url: str, dest_path: Path, *, label: str = "llama-server"
+) -> dict[str, Any]:
+    """Stream ``url`` to ``dest_path``, retrying transient network failures.
+
+    Shared by the GGUF downloads and the prebuilt-binary download. TLS resets,
+    ``IncompleteRead``, and timeouts are retried up to ``_DOWNLOAD_MAX_ATTEMPTS``
+    times with exponential-ish backoff (2/4/8s); the partial file is removed
+    between attempts so each retry starts clean. Returns ``{success, error,
+    duration_ms}`` — the caller owns ``dest_path`` and any path reporting.
+    """
+    t0 = time.monotonic()
+    last_error = "unknown download error"
+    for attempt in range(1, _DOWNLOAD_MAX_ATTEMPTS + 1):
+        try:
+            _download_gguf_once(url, dest_path)
+            return {
+                "success": True,
+                "error": None,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+            }
+        except _RETRYABLE_DOWNLOAD_ERRORS as exc:
+            last_error = str(exc)
+            # Remove a partial download so the next attempt starts clean.
+            with contextlib.suppress(OSError):
+                dest_path.unlink()
+            if attempt < _DOWNLOAD_MAX_ATTEMPTS:
+                backoff = _DOWNLOAD_BACKOFFS[min(attempt - 1, len(_DOWNLOAD_BACKOFFS) - 1)]
+                print(
+                    f"  {label}: download attempt {attempt}/{_DOWNLOAD_MAX_ATTEMPTS} "
+                    f"failed ({last_error}); retrying in {backoff}s ...",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+
+    return {
+        "success": False,
+        "error": f"download failed after {_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+    }
+
+
 def _download_gguf(model_name: str) -> dict[str, Any]:
     """Download a GGUF model from Hugging Face into the persistent models dir.
 
-    Shows a simple byte-counter progress indicator on stderr. Transient network
-    failures (TLS resets, ``IncompleteRead``, timeouts) are retried up to
-    ``_DOWNLOAD_MAX_ATTEMPTS`` times with exponential-ish backoff (2/4/8s); the
-    partial file is removed between attempts so each retry starts clean.
-    Returns a result dict with keys: success, path, error, duration_ms.
+    Shows a simple byte-counter progress indicator on stderr and retries
+    transient network failures (see ``_download_with_retry``). Returns a result
+    dict with keys: success, path, error, duration_ms.
     """
     url = _GGUF_URL_MAP.get(model_name)
     if not url:
@@ -312,36 +594,63 @@ def _download_gguf(model_name: str) -> dict[str, Any]:
         f"  llama-server: downloading {model_name} from Hugging Face ...",
         file=sys.stderr,
     )
-    t0 = time.monotonic()
-    last_error = "unknown download error"
-    for attempt in range(1, _DOWNLOAD_MAX_ATTEMPTS + 1):
-        try:
-            _download_gguf_once(url, dest_path)
-            duration_ms = int((time.monotonic() - t0) * 1000)
-            return {
-                "success": True,
-                "path": str(dest_path),
-                "error": None,
-                "duration_ms": duration_ms,
-            }
-        except _RETRYABLE_DOWNLOAD_ERRORS as exc:
-            last_error = str(exc)
-            # Remove a partial download so the next attempt starts clean.
-            with contextlib.suppress(OSError):
-                dest_path.unlink()
-            if attempt < _DOWNLOAD_MAX_ATTEMPTS:
-                backoff = _DOWNLOAD_BACKOFFS[min(attempt - 1, len(_DOWNLOAD_BACKOFFS) - 1)]
-                print(
-                    f"  llama-server: download attempt {attempt}/{_DOWNLOAD_MAX_ATTEMPTS} "
-                    f"failed ({last_error}); retrying in {backoff}s ...",
-                    file=sys.stderr,
-                )
-                time.sleep(backoff)
+    result = _download_with_retry(url, dest_path, label="llama-server")
+    if result["success"]:
+        return {
+            "success": True,
+            "path": str(dest_path),
+            "error": None,
+            "duration_ms": result["duration_ms"],
+        }
+    return {"success": False, "error": result["error"]}
 
-    return {
-        "success": False,
-        "error": f"download failed after {_DOWNLOAD_MAX_ATTEMPTS} attempts: {last_error}",
-    }
+
+def _ensure_llama_server_binary(interactive: bool) -> dict[str, Any]:
+    """Make ``llama-server`` available, downloading a prebuilt if it isn't.
+
+    Order of preference (user decision 2026-06-14):
+      1. Already on PATH → use it.
+      2. Download a prebuilt CPU build from ggml-org releases (the default;
+         works headlessly — this is the fix for non-interactive installs/CI).
+      3. From-source build — only when a prebuilt is unavailable AND we're
+         interactive (it needs a TTY prompt + a C++ toolchain). Non-interactive
+         callers get an actionable error instead.
+
+    Returns ``{success, binary_path, error, hint}``.
+    """
+    existing = shutil.which("llama-server")
+    if existing:
+        return {"success": True, "binary_path": existing, "error": None}
+
+    prebuilt = _download_prebuilt_llama_server()
+    if prebuilt["success"]:
+        return prebuilt
+
+    if not interactive:
+        return {
+            "success": False,
+            "binary_path": None,
+            "error": f"llama-server not found and prebuilt download failed: {prebuilt['error']}",
+            "hint": prebuilt.get("hint", _MANUAL_LLAMA_BUILD_HINT),
+        }
+
+    # Interactive fallback: offer the slower from-source build.
+    try:
+        choice = (
+            input("  Prebuilt llama-server unavailable. Build from source instead? [y/N]: ")
+            .strip()
+            .lower()
+        )
+    except (EOFError, KeyboardInterrupt):
+        choice = "n"
+    if choice != "y":
+        return {
+            "success": False,
+            "binary_path": None,
+            "error": "llama-server not provisioned (prebuilt failed, source build declined).",
+            "hint": _MANUAL_LLAMA_BUILD_HINT,
+        }
+    return _build_llama_server()
 
 
 def _handle_llama_server(
@@ -350,7 +659,7 @@ def _handle_llama_server(
     list[dict[str, Any]],  # auto_pulled entries
     list[dict[str, Any]],  # error entries
 ]:
-    """Orchestrate binary build + GGUF download for llama-server.
+    """Orchestrate binary provisioning + GGUF download for llama-server.
 
     Returns (auto_pulled, errors) tuples to be merged into the main lists.
     """
@@ -358,51 +667,18 @@ def _handle_llama_server(
     errors: list[dict[str, Any]] = []
 
     # ---- 1. Binary ----------------------------------------------------------
-    if not shutil.which("llama-server"):
-        if interactive:
-            try:
-                choice = (
-                    input("  llama-server binary not found. Build from source? [y/N]: ")
-                    .strip()
-                    .lower()
-                )
-            except (EOFError, KeyboardInterrupt):
-                choice = "n"
-        else:
-            # Non-interactive: skip the build; surface an actionable error.
-            choice = "n"
-
-        if choice != "y":
-            errors.append(
-                {
-                    "runner": "llama-server",
-                    "model": model,
-                    "success": False,
-                    "error": "llama-server binary not found and build was skipped.",
-                    "hint": (
-                        "To build manually:\n"
-                        "  git clone https://github.com/ggerganov/llama.cpp\n"
-                        "  cd llama.cpp && cmake -B build -DLLAMA_BUILD_SERVER=ON\n"
-                        "  cmake --build build --config Release -j\n"
-                        "  cp build/bin/llama-server ~/.local/bin/\n"
-                        "Then re-run `pull-models`."
-                    ),
-                }
-            )
-            return auto_pulled, errors
-
-        build_result = _build_llama_server()
-        if not build_result["success"]:
-            errors.append(
-                {
-                    "runner": "llama-server",
-                    "model": model,
-                    "success": False,
-                    "error": build_result.get("error", "unknown build error"),
-                    "hint": build_result.get("hint"),
-                }
-            )
-            return auto_pulled, errors
+    bin_result = _ensure_llama_server_binary(interactive)
+    if not bin_result["success"]:
+        errors.append(
+            {
+                "runner": "llama-server",
+                "model": model,
+                "success": False,
+                "error": bin_result.get("error", "unknown error provisioning llama-server"),
+                "hint": bin_result.get("hint"),
+            }
+        )
+        return auto_pulled, errors
 
     # ---- 2. GGUF model file -------------------------------------------------
     if _is_model_present_llama_server(model):
