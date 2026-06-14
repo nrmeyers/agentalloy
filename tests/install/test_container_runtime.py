@@ -268,30 +268,6 @@ class TestEnsureVolume:
 
 
 # ---------------------------------------------------------------------------
-# UT-4: _ensure_ollama_dir()
-# ---------------------------------------------------------------------------
-
-
-class TestEnsureOllamaDir:
-    """UT-4: _ensure_ollama_dir() creates ~/.ollama."""
-
-    def test_creates_ollama_dir(self, tmp_path: Path):
-        """Creates ~/.ollama directory."""
-        fake_home = tmp_path / "home"
-        with patch.object(Path, "home", return_value=fake_home):
-            container_runtime._ensure_ollama_dir()
-            assert (fake_home / ".ollama").is_dir()
-
-    def test_idempotent_when_exists(self, tmp_path: Path):
-        """No error if ~/.ollama already exists."""
-        fake_home = tmp_path / "home"
-        fake_home.mkdir(parents=True)
-        (fake_home / ".ollama").mkdir()
-        with patch.object(Path, "home", return_value=fake_home):
-            container_runtime._ensure_ollama_dir()  # should not raise
-
-
-# ---------------------------------------------------------------------------
 # UT-5: _generate_entrypoint()
 # ---------------------------------------------------------------------------
 

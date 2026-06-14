@@ -2,29 +2,50 @@
 # Compatible with Podman (project preference) and Docker (works as Dockerfile via --file Containerfile).
 #
 # Build variants:
-#   # Lightweight image (~300 MB, no pre-pulled model) — for general users
+#   # Lightweight image (no GGUFs baked) — models download on first boot
 #   podman build -t agentalloy:latest -f Containerfile .
 #
-#   # Full image (~975 MB, model pre-pulled) — for air-gapped/enterprise
+#   # Full image (GGUFs pre-baked into the image) — for air-gapped/enterprise
 #   podman build --build-arg PULL_MODEL=true -t agentalloy:full -f Containerfile .
 #
 # Run:    agentalloy setup --deployment container  (recommended — single-container with entrypoint)
 #         or manually (bare run — bootstrap runs automatically):
 #         podman run --replace -d --name agentalloy -p 47950:47950 \
-#                    -v agentalloy-data:/app/data -v ~/.ollama:/root/.ollama \
+#                    -v agentalloy-data:/app/data \
 #                    ghcr.io/nrmeyers/agentalloy:latest
+#         The GGUF models persist under /app/data/models inside the agentalloy-data
+#         volume, so they download only once across restarts.
 #         Pass -e AGENTIALLOY_PACKS=core,webhooks to install specific packs on a locally
 #         built image that has no prebuilt corpus seed (GHCR images seed all packs automatically).
 
+# ---------------------------------------------------------------------------
+# Stage 0: llama.cpp binaries. The :full image ships llama-server plus its
+# co-located shared libs under /app (libllama*.so, libggml*.so, the per-arch
+# libggml-cpu-*.so loaded at runtime). We copy the whole dir and front it with
+# a wrapper that sets LD_LIBRARY_PATH so the dynamic loader finds the libs.
+# ---------------------------------------------------------------------------
+FROM ghcr.io/ggml-org/llama.cpp:full AS llamacpp
+
 FROM python:3.12-slim AS base
 
-# Install uv (Astral) and minimal runtime deps
+# Install uv (Astral) and minimal runtime deps. libgomp1 is the OpenMP runtime
+# that llama-server links against (the rest of its libs come from the llamacpp
+# stage below).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl zstd \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl zstd libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv is the project's package manager (matches host conventions)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# llama-server + its shared libraries (from the llamacpp stage). The wrapper
+# at /usr/local/bin/llama-server sets LD_LIBRARY_PATH so the loader resolves
+# the co-located .so files.
+COPY --from=llamacpp /app /opt/llama.cpp/
+RUN printf '#!/bin/sh\nexport LD_LIBRARY_PATH=/opt/llama.cpp:${LD_LIBRARY_PATH}\nexec /opt/llama.cpp/llama-server "$@"\n' \
+        > /usr/local/bin/llama-server \
+    && chmod +x /usr/local/bin/llama-server \
+    && llama-server --version
 
 WORKDIR /app
 
@@ -60,27 +81,37 @@ RUN chmod +x /app/entrypoint.sh
 
 RUN uv sync --frozen --no-dev
 
+# Runtime configuration. The two llama-server daemons are addressed here:
+# the embed server on 47951 (RUNTIME_EMBED_BASE_URL) and the reranker server
+# on 47952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
+# the GGUFs the entrypoint downloads into /app/data/models.
 ENV LADYBUG_DB_PATH=/app/data/ladybug \
     DUCKDB_PATH=/app/data/skills.duck \
-    LOG_LEVEL=INFO
+    LOG_LEVEL=INFO \
+    RUNTIME_EMBED_BASE_URL=http://localhost:47951 \
+    RUNTIME_EMBEDDING_MODEL=Qwen3-Embedding-0.6B-Q8_0.gguf \
+    SIGNAL_INTENT_BACKEND=reranker \
+    SIGNAL_INTENT_RERANK_URL=http://127.0.0.1:47952 \
+    SIGNAL_INTENT_RERANK_MODEL=Qwen3-Reranker-0.6B-Q8_0.gguf
 
 EXPOSE 47950
 
-# Conditional model pre-pull for the "full" image variant.
-# When PULL_MODEL=true, this layer pulls the embedding model into the image.
-# This is useful for air-gapped/enterprise deployments where the model
-# should be baked into the image rather than downloaded at runtime.
+# Conditional GGUF pre-bake for the "full" image variant.
+# When PULL_MODEL=true, this layer downloads both GGUFs into the image under
+# /app/data/models so air-gapped/enterprise deployments need no runtime
+# download. The entrypoint skips the download whenever the files already exist,
+# so a pre-baked image boots straight into the llama-servers.
 ARG PULL_MODEL=false
 RUN if [ "$PULL_MODEL" = "true" ]; then \
-        echo "Pre-pulling embedding model into image (this may take several minutes)..." && \
-        curl -fsSL https://ollama.ai/install.sh | sh && \
-        OLLAMA_HOST=127.0.0.1:11434 ollama serve & OLLAMA_PID=$! && \
-        sleep 5 && \
-        ollama pull qwen3-embedding:0.6b && \
-        kill "$OLLAMA_PID" 2>/dev/null || true && \
-        echo "Model pre-pulled successfully."; \
+        echo "Pre-baking GGUF models into image (this may take several minutes)..." && \
+        mkdir -p /app/data/models && \
+        curl -fsSL -o /app/data/models/Qwen3-Embedding-0.6B-Q8_0.gguf \
+            "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf" && \
+        curl -fsSL -o /app/data/models/Qwen3-Reranker-0.6B-Q8_0.gguf \
+            "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf" && \
+        echo "GGUF models pre-baked successfully."; \
     else \
-        echo "Skipping model pre-pull (latest variant)."; \
+        echo "Skipping GGUF pre-bake (latest variant — models download on first boot)."; \
     fi
 
 # Note: HEALTHCHECK is intentionally omitted — the container runtime module
@@ -90,7 +121,7 @@ RUN if [ "$PULL_MODEL" = "true" ]; then \
 
 # Default ENTRYPOINT/CMD: bare ``podman run ghcr.io/nrmeyers/agentalloy:latest``
 # runs the baked bootstrap entrypoint, which seeds the prebuilt corpus (GHCR
-# images), starts Ollama, pulls the embedding model if needed, then starts
-# uvicorn. The setup wizard bind-mounts a generated script on top of this
-# default when packs are specified explicitly.
+# images), downloads the GGUF models if missing, starts both llama-servers,
+# then starts uvicorn. The setup wizard bind-mounts a generated script on top
+# of this default when packs are specified explicitly.
 ENTRYPOINT ["/app/entrypoint.sh"]

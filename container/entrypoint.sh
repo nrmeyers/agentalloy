@@ -53,8 +53,8 @@ fi
 # /app/corpus-seed (.github/workflows/container-build.yml). When it
 # is present and the data volume has no corpus yet, copy it in and
 # skip per-pack ingest + re-embed — first run drops from ~30 min of
-# CPU embedding to seconds. Ollama setup stays unconditional: query
-# embedding at compose time still needs the model at runtime.
+# CPU embedding to seconds. llama-server setup stays unconditional:
+# query embedding at compose time still needs the model at runtime.
 SEED_DIR="${SEED_DIR:-/app/corpus-seed}"
 CORPUS_SEEDED=false
 if [ "$BOOTSTRAP_NEEDED" = "true" ] \
@@ -74,46 +74,74 @@ JSON
     mv "$PROGRESS_TMP" "$PROGRESS"
 fi
 
+# --- llama.cpp model + server config -------------------------------
+# Two llama-server daemons back the runtime: an embed server on 47951
+# (--embeddings, query embedding at compose time) and a reranker server
+# on 47952 (completions mode, /v1/completions with logprobs for the
+# intent classifier). Both GGUFs are downloaded on first boot into the
+# data volume so they persist across restarts.
+MODELS_DIR="$APP_DIR/data/models"
+EMBED_GGUF="$MODELS_DIR/Qwen3-Embedding-0.6B-Q8_0.gguf"
+RERANK_GGUF="$MODELS_DIR/Qwen3-Reranker-0.6B-Q8_0.gguf"
+EMBED_URL="https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
+RERANK_URL="https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"
+
 if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
     # Record bootstrap start. Content is the canonical timestamp;
     # mtime is the fallback for stale-lock detection.
     date -Iseconds > "$LOCK"
 
-    # Ollama installation
-    if ! command -v ollama &> /dev/null; then
-        echo ">> Installing Ollama..."
-        curl -fsSL https://ollama.ai/install.sh | sh
-    fi
-
-    echo ">> Starting Ollama..."
-    OLLAMA_HOST=127.0.0.1:11434 ollama serve &
-    OLLAMA_PID=$!
-
-    for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:11434 > /dev/null 2>&1; then
-            echo ">> Ollama is ready"
-            break
-        fi
-        sleep 1
-    done
-
-    echo ">> Checking embedding model..."
-    if ! ollama list | grep -q qwen3-embedding; then
-        echo ">> Pulling qwen3-embedding:0.6b..."
+    mkdir -p "$MODELS_DIR"
+    if [ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]; then
+        echo ">> Downloading llama.cpp GGUF models..."
         cat > "$PROGRESS_TMP" <<JSON
-{"current_pack": "qwen3-embedding:0.6b", "packs_ingested": 0, "packs_total": 1, "phase": "model_pull", "model": "qwen3-embedding:0.6b", "status": "in_progress", "updated_at": "$(date -Iseconds)"}
+{"current_pack": "gguf-models", "packs_ingested": 0, "packs_total": 1, "phase": "model_download", "status": "in_progress", "updated_at": "$(date -Iseconds)"}
 JSON
         mv "$PROGRESS_TMP" "$PROGRESS"
-        ollama pull qwen3-embedding:0.6b
-        echo "Model pull complete"
+        if [ ! -f "$EMBED_GGUF" ]; then
+            echo ">> Fetching embed model (Qwen3-Embedding-0.6B-Q8_0)..."
+            curl -fsSL -o "$EMBED_GGUF" "$EMBED_URL"
+        fi
+        if [ ! -f "$RERANK_GGUF" ]; then
+            echo ">> Fetching reranker model (Qwen3-Reranker-0.6B-Q8_0)..."
+            curl -fsSL -o "$RERANK_GGUF" "$RERANK_URL"
+        fi
+        echo "Model download complete"
     fi
+fi
 
+# --- Start the llama-server daemons (every boot) -------------------
+# These are long-lived runtime daemons, not bootstrap-only steps: even
+# after .bootstrap-complete, query embedding + intent reranking need
+# them up. Start them before uvicorn so /readiness reflects a usable
+# service.
+echo ">> Starting embed llama-server on 47951..."
+llama-server --embeddings --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &
+EMBED_PID=$!
+echo ">> Starting reranker llama-server on 47952..."
+llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &
+RERANK_PID=$!
+
+echo ">> Waiting for llama-server health (47951 + 47952)..."
+for i in $(seq 1 120); do
+    EMBED_OK=false
+    RERANK_OK=false
+    curl -sf http://127.0.0.1:47951/health > /dev/null 2>&1 && EMBED_OK=true
+    curl -sf http://127.0.0.1:47952/health > /dev/null 2>&1 && RERANK_OK=true
+    if [ "$EMBED_OK" = "true" ] && [ "$RERANK_OK" = "true" ]; then
+        echo ">> llama-server ready (embed + reranker)"
+        break
+    fi
+    sleep 1
+done
+
+if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
     echo ">> Running migrations..."
     uv run python -m agentalloy.migrate
 fi
 
-# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------
-trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM
+# --- SIGTERM/SIGINT trap (covers llama-servers + uvicorn) ----------
+trap 'kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM SIGINT
 
 # Pack ingest runs only when the corpus was not seeded from the image.
 if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]; then

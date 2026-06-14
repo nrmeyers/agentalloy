@@ -145,7 +145,6 @@ def _run_container_flow_all_mocked(
     mock_run_container = MagicMock(return_value=0)
     mock_generate_entrypoint = MagicMock(return_value=Path("/tmp/entry.sh"))
     mock_cleanup_temp_entrypoint = MagicMock()
-    mock_ensure_ollama_dir = MagicMock()
     mock_wait_for_readiness = MagicMock(return_value=True)
     mock_check_container_running = MagicMock(return_value=True)
     mock_tail_container_logs = MagicMock(return_value="")
@@ -187,12 +186,6 @@ def _run_container_flow_all_mocked(
         patch(
             "agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint",
             mock_cleanup_temp_entrypoint,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._ensure_ollama_dir",
-            mock_ensure_ollama_dir,
         )
     )
     # Patch at the simple_setup import location since simple_setup.py does
@@ -307,9 +300,8 @@ class TestFullContainerSetup:
           1. _detect_runtime_binary -> "podman"
           2. _pull_image(runtime)
           3. _ensure_volume(runtime)
-          4. _ensure_ollama_dir()
-          5. _generate_entrypoint(packs)
-          6. _run_container(runtime, entrypoint, packs)
+          4. _generate_entrypoint(packs)
+          5. _run_container(runtime, entrypoint, packs)
 
         Note: _cleanup_temp_entrypoint is only called on failure; on success
         it is skipped, so it does not appear in the call order here.
@@ -349,10 +341,6 @@ class TestFullContainerSetup:
                         side_effect=make_tracker("_ensure_volume"),
                     ),
                     patch(
-                        "agentalloy.install.subcommands.container_runtime._ensure_ollama_dir",
-                        side_effect=make_tracker("_ensure_ollama_dir"),
-                    ),
-                    patch(
                         "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
                         side_effect=lambda packs: (
                             call_order.append("_generate_entrypoint"),
@@ -368,7 +356,6 @@ class TestFullContainerSetup:
                 "_detect_runtime_binary",
                 "_pull_image",
                 "_ensure_volume",
-                "_ensure_ollama_dir",
                 "_generate_entrypoint",
                 "_run_container",
             ], f"Expected container_runtime calls in order, got: {call_order}"
@@ -429,10 +416,10 @@ class TestFullContainerSetup:
 
 @pytest.mark.integration
 class TestModelPullBootstrap:
-    """E2E-2: Container bootstrap pulls qwen3-embedding:0.6b model.
+    """E2E-2: Container bootstrap downloads the GGUF models.
 
     Verifies that the entrypoint script is generated and passed to the
-    container, and that the model pull is handled inside the entrypoint
+    container, and that the GGUF download is handled inside the entrypoint
     (not in the setup flow).
     """
 
@@ -462,12 +449,12 @@ class TestModelPullBootstrap:
             # Entry point is called with the packs string from config
             assert entrypoint_packs[0] == ""
 
-    def test_model_pull_step_is_executed_in_entrypoint(self):
-        """The entrypoint script contains the ollama pull step.
+    def test_model_download_step_is_executed_in_entrypoint(self):
+        """The entrypoint script contains the GGUF download step.
 
-        The model pull is handled inside the entrypoint script, not in
+        The GGUF download is handled inside the entrypoint script, not in
         the setup flow. Verify the generated entrypoint contains the
-        expected ollama pull commands.
+        expected curl download commands for both models.
         """
         from agentalloy.install.subcommands.container_runtime import (
             _build_entrypoint_script,
@@ -475,15 +462,32 @@ class TestModelPullBootstrap:
 
         script = _build_entrypoint_script("")
 
-        # The entrypoint should contain ollama pull for the embedding model
-        assert "ollama pull qwen3-embedding" in script
-        assert "ollama list" in script
-        assert "grep -q qwen3-embedding" in script
+        # The entrypoint should download both GGUFs into the data volume.
+        assert 'curl -fsSL -o "$EMBED_GGUF"' in script
+        assert 'curl -fsSL -o "$RERANK_GGUF"' in script
+        assert '[ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]' in script
 
-    def test_model_pull_confirmed_in_entrypoint_script(self):
-        """The entrypoint script prints 'Embedding model ready' after pull.
+    def test_model_download_confirmed_in_entrypoint_script(self):
+        """The entrypoint script prints a status line after the GGUF download."""
+        from agentalloy.install.subcommands.container_runtime import (
+            _build_entrypoint_script,
+        )
 
-        The entrypoint script handles model pull and prints status messages.
+        script = _build_entrypoint_script("")
+
+        # The entrypoint should contain the download status echo.
+        assert "Downloading llama.cpp GGUF models" in script
+        assert "Model download complete" in script
+
+    def test_model_download_failure_aborts_entrypoint(self):
+        """When the GGUF download fails, the entrypoint aborts under set -e.
+
+        The download is inside an if block that checks file existence first.
+        If a file exists, the curl is skipped. If not, curl is attempted and
+        a failure (curl -f returns non-zero) causes the script to exit under
+        ``set -e`` — the container exits and the host readiness wait surfaces
+        it. The setup flow already considers the container "started" once
+        _run_container returns 0.
         """
         from agentalloy.install.subcommands.container_runtime import (
             _build_entrypoint_script,
@@ -491,32 +495,10 @@ class TestModelPullBootstrap:
 
         script = _build_entrypoint_script("")
 
-        # The entrypoint should contain the model pull echo
-        assert "Pulling qwen3-embedding" in script or "embedding model" in script.lower()
-
-    def test_model_pull_failure_continues_in_entrypoint(self):
-        """When model pull fails, the entrypoint handles it gracefully.
-
-        The entrypoint script uses `set -e` but checks for model existence
-        before pulling. If ollama pull fails, the script would exit, but
-        the setup flow itself continues since the container was started.
-        The container will restart and try again (or the user checks logs).
-        """
-        # The entrypoint script structure: the model pull is inside an
-        # if block that checks for the model first. If the model exists,
-        # pull is skipped. If it doesn't exist, pull is attempted.
-        # A failure in the entrypoint would cause the container to exit,
-        # but the setup flow already considers the container "started"
-        # once _run_container returns 0.
-        from agentalloy.install.subcommands.container_runtime import (
-            _build_entrypoint_script,
-        )
-
-        script = _build_entrypoint_script("")
-
-        # Verify the model check is in place
-        assert "grep -q qwen3-embedding" in script
-        assert "ollama pull" in script
+        # Verify the existence check gates the download, and curl uses -f
+        # (fail on HTTP errors → non-zero exit under set -e).
+        assert '[ ! -f "$EMBED_GGUF" ]' in script
+        assert "curl -fsSL" in script
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +510,8 @@ class TestBootstrapIdempotency:
     """E2E-3: Container bootstrap idempotency - restart skips redundant operations.
 
     Verifies that when .bootstrap-complete already exists, the entrypoint
-    skips Ollama install, model pull, migrations, and pack installation.
+    skips the GGUF download, migrations, and pack installation (the
+    llama-servers still start every boot — they are runtime daemons).
     """
 
     def test_entrypoint_skips_bootstrap_when_complete(self):
@@ -539,19 +522,18 @@ class TestBootstrapIdempotency:
 
         script = _build_entrypoint_script("")
 
-        # .bootstrap-complete check should come before ollama install
+        # .bootstrap-complete check should come before the GGUF download
         bootstrap_check = script.index(".bootstrap-complete")
-        ollama_install = script.index("ollama.ai/install.sh")
-        # The actual script uses "exec uv run uvicorn" not "exec uvicorn"
+        model_download = script.index('curl -fsSL -o "$EMBED_GGUF"')
         uvicorn_start = script.index("uvicorn agentalloy.app:app")
 
-        assert bootstrap_check < ollama_install, (
-            ".bootstrap-complete check should come before ollama install"
+        assert bootstrap_check < model_download, (
+            ".bootstrap-complete check should come before the GGUF download"
         )
-        assert ollama_install < uvicorn_start, "ollama install should come before uvicorn start"
+        assert model_download < uvicorn_start, "GGUF download should come before uvicorn start"
 
     def test_entrypoint_skips_all_steps_when_complete(self):
-        """When .bootstrap-complete exists, only uvicorn runs."""
+        """When .bootstrap-complete exists, only the llama-servers + uvicorn run."""
         from agentalloy.install.subcommands.container_runtime import (
             _build_entrypoint_script,
         )
@@ -565,33 +547,36 @@ class TestBootstrapIdempotency:
         assert 'echo ">> Bootstrap already complete' in script
         assert "skip to uvicorn" in script.lower() or "skipping to uvicorn" in script.lower()
 
-    def test_entrypoint_skips_ollama_install_when_present(self):
-        """When ollama is already installed, the install step is skipped."""
+    def test_entrypoint_starts_llama_servers_every_boot(self):
+        """The llama-server daemons start unconditionally (outside the bootstrap gate)."""
         from agentalloy.install.subcommands.container_runtime import (
             _build_entrypoint_script,
         )
 
         script = _build_entrypoint_script("")
 
-        # Check for ollama presence check before install
-        ollama_check = script.index("command -v ollama")
-        ollama_install = script.index("ollama.ai/install.sh")
+        # The llama-server launches must NOT sit inside the GGUF-download
+        # bootstrap branch — they run on every boot. They appear after the
+        # download branch closes and before migrations.
+        embed_start = script.index("Starting embed llama-server")
+        rerank_start = script.index("Starting reranker llama-server")
+        download = script.index('curl -fsSL -o "$EMBED_GGUF"')
+        assert download < embed_start
+        assert embed_start < rerank_start
 
-        assert ollama_check < ollama_install, "ollama presence check should come before install"
-
-    def test_entrypoint_skips_model_pull_when_cached(self):
-        """When the model is already cached, the pull step is skipped."""
+    def test_entrypoint_skips_download_when_gguf_cached(self):
+        """When the GGUF files exist, the download is skipped (check precedes curl)."""
         from agentalloy.install.subcommands.container_runtime import (
             _build_entrypoint_script,
         )
 
         script = _build_entrypoint_script("")
 
-        # Check for model presence check before pull
-        model_check = script.index("grep -q qwen3-embedding")
-        model_pull = script.index("ollama pull qwen3-embedding")
+        # Check for GGUF presence check before download
+        model_check = script.index('[ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]')
+        model_download = script.index('curl -fsSL -o "$EMBED_GGUF"')
 
-        assert model_check < model_pull, "model cache check should come before pull"
+        assert model_check < model_download, "GGUF cache check should come before download"
 
 
 # ---------------------------------------------------------------------------

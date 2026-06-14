@@ -9,8 +9,8 @@ Covers scenarios the golden-path tests don't exercise:
   EC-4: Auto-clone fails -- clear error message
   EC-5: Entrypoint script write failure -- clear error, no orphaned file
   EC-6: Health check intermittent failures -- retries until success
-  EC-7: Entrypoint -- Ollama already installed (skip install step)
-  EC-8: Entrypoint -- model already cached (skip pull step)
+  EC-7: Entrypoint -- llama-server daemons started (embed + reranker)
+  EC-8: Entrypoint -- GGUF download gated on missing files (skip when present)
   EC-9: Entrypoint -- .bootstrap-complete exists (skip all steps)
   EC-10: Entrypoint -- SIGTERM handling
   EC-11: Apple Silicon Ollama installation (brew install --cask)
@@ -306,62 +306,84 @@ class TestEntrypointWriteFailure:
 
 
 # ---------------------------------------------------------------------------
-# EC-7: Entrypoint -- Ollama already installed (skip install step)
+# EC-7: Entrypoint -- llama-server daemons started (embed + reranker)
 # ---------------------------------------------------------------------------
 
 
-class TestEntrypointOllamaAlreadyInstalled:
-    """EC-7: Entrypoint skips Ollama install step when already installed."""
+class TestEntrypointLlamaServers:
+    """EC-7: Entrypoint starts both llama-server daemons on the right ports."""
 
-    def test_entrypoint_checks_ollama_installed(self):
-        """Generated entrypoint checks if Ollama is already installed."""
+    def test_entrypoint_starts_embed_server(self):
+        """Generated entrypoint starts the embed llama-server on 47951 with --embeddings."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert "command -v ollama" in script
-        assert "ollama &> /dev/null" in script
+        assert 'llama-server --embeddings --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"' in script
+        assert "EMBED_PID=$!" in script
 
-    def test_entrypoint_skips_install_when_ollama_present(self):
-        """The entrypoint script structure: ollama install is conditional."""
+    def test_entrypoint_starts_reranker_server_no_embeddings(self):
+        """The reranker llama-server runs on 47952 in completions mode (NO --embeddings)."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        install_line = script.index("curl -fsSL https://ollama.ai/install.sh")
-        check_line = script.index("if ! command -v ollama")
-        assert check_line < install_line
+        assert 'llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF"' in script
+        assert "RERANK_PID=$!" in script
+        # The reranker launch line must not carry --embeddings.
+        rerank_line = next(
+            line
+            for line in script.splitlines()
+            if "--port 47952" in line and "llama-server" in line
+        )
+        assert "--embeddings" not in rerank_line
+
+    def test_entrypoint_polls_both_health_endpoints(self):
+        """Readiness poll waits on both 47951/health and 47952/health."""
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert "http://127.0.0.1:47951/health" in script
+        assert "http://127.0.0.1:47952/health" in script
 
 
 # ---------------------------------------------------------------------------
-# EC-8: Entrypoint -- model already cached (skip pull step)
+# EC-8: Entrypoint -- GGUF download gated on missing files (skip when present)
 # ---------------------------------------------------------------------------
 
 
-class TestEntrypointModelAlreadyCached:
-    """EC-8: Entrypoint skips model pull when model is already cached."""
+class TestEntrypointModelDownload:
+    """EC-8: Entrypoint downloads GGUFs only when missing from the data volume."""
 
-    def test_entrypoint_checks_model_cached(self):
-        """Generated entrypoint checks if the embedding model is already cached."""
+    def test_entrypoint_checks_gguf_present(self):
+        """Generated entrypoint guards the download on the GGUF files' existence."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert "ollama list" in script
-        assert "grep -q qwen3-embedding" in script
+        assert 'EMBED_GGUF="$MODELS_DIR/Qwen3-Embedding-0.6B-Q8_0.gguf"' in script
+        assert 'RERANK_GGUF="$MODELS_DIR/Qwen3-Reranker-0.6B-Q8_0.gguf"' in script
+        assert '[ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]' in script
 
-    def test_entrypoint_skips_pull_when_model_present(self):
-        """The entrypoint script only pulls the model if it's not already cached."""
+    def test_entrypoint_skips_download_when_present(self):
+        """The download block is guarded by the missing-file check (check precedes curl)."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        pull_line = script.index("ollama pull qwen3-embedding")
-        check_line = script.index("grep -q qwen3-embedding")
-        assert check_line < pull_line
+        check_line = script.index('[ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]')
+        curl_line = script.index('curl -fsSL -o "$EMBED_GGUF"')
+        assert check_line < curl_line
 
-    def test_entrypoint_pulls_when_model_missing(self):
-        """When model is not cached, the entrypoint pulls it."""
+    def test_entrypoint_downloads_from_verified_urls(self):
+        """When missing, the entrypoint fetches both GGUFs from the verified HF URLs."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert "ollama pull qwen3-embedding:0.6b" in script
+        assert (
+            "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/"
+            "Qwen3-Embedding-0.6B-Q8_0.gguf" in script
+        )
+        assert (
+            "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/"
+            "qwen3-reranker-0.6b-q8_0.gguf" in script
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -381,21 +403,21 @@ class TestEntrypointBootstrapComplete:
         assert "APP_DIR" in script
 
     def test_entrypoint_skips_bootstrap_when_flag_exists(self):
-        """The entrypoint skips Ollama/pack ingest when .bootstrap-complete exists.
+        """The entrypoint skips model download/pack ingest when .bootstrap-complete exists.
 
         The fast-start design starts uvicorn in the background (not via
         ``exec``) so /readiness is reachable even before pack ingest. The
-        bootstrap branch (Ollama install + ingest) sits between the
+        bootstrap branch (GGUF download + ingest) sits between the
         ``.bootstrap-complete`` check and the uvicorn launch.
         """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
         bootstrap_check = script.index(".bootstrap-complete")
-        ollama_install = script.index("ollama.ai/install.sh")
+        model_download = script.index('curl -fsSL -o "$EMBED_GGUF"')
         uvicorn_start = script.index("uv run uvicorn agentalloy.app:app")
-        assert bootstrap_check < ollama_install
-        assert ollama_install < uvicorn_start
+        assert bootstrap_check < model_download
+        assert model_download < uvicorn_start
 
 
 # ---------------------------------------------------------------------------
@@ -414,36 +436,37 @@ class TestEntrypointSIGTERM:
         assert "trap" in script
         assert "SIGTERM" in script
 
-    def test_sigterm_traps_ollama_pid(self):
-        """SIGTERM trap kills the Ollama background process.
+    def test_sigterm_traps_llama_server_pids(self):
+        """SIGTERM/SIGINT trap kills both llama-server background processes.
 
-        The fast-start design also covers UVICORN_PID (uvicorn now runs in
-        the background, not via ``exec``), so the trap reaps both. Both
-        PIDs use the ``${VAR:-}`` form so the trap is safe to install
-        before either process has started.
+        The trap also covers UVICORN_PID (uvicorn runs in the background,
+        not via ``exec``), so it reaps all three. Every PID uses the
+        ``${VAR:-}`` form so the trap is safe to install before any process
+        has started.
         """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert "OLLAMA_PID" in script
+        assert "EMBED_PID" in script
+        assert "RERANK_PID" in script
         assert "UVICORN_PID" in script
         assert "trap" in script
         assert "SIGTERM" in script
-        assert "kill ${OLLAMA_PID:-}" in script
+        assert "SIGINT" in script
+        assert "kill ${EMBED_PID:-} ${RERANK_PID:-}" in script
 
     def test_sigterm_trap_set_unconditionally(self):
-        """SIGTERM trap is installed once, covering both possible bg processes.
+        """The trap is installed once, covering all three background processes.
 
-        The legacy design only set the trap when Ollama was started; the
-        fast-start design always runs uvicorn in the background and may also
-        run Ollama, so the trap is installed once and uses ``${VAR:-}`` to
-        no-op the kill for whichever PID is unset.
+        The two llama-servers and uvicorn all run in the background, so the
+        trap is installed once and uses ``${VAR:-}`` to no-op the kill for
+        whichever PID is unset.
         """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        # Both PIDs appear in the trap body.
-        assert "kill ${OLLAMA_PID:-} ${UVICORN_PID:-}" in script
+        # All three PIDs appear in the trap body.
+        assert "kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-}" in script
 
 
 # ---------------------------------------------------------------------------
@@ -668,7 +691,6 @@ class TestNonInteractiveMode:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_ollama_dir")
     @patch(
         "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
         return_value=("test-project", "test-project_default"),
@@ -740,7 +762,6 @@ class TestNonInteractiveMode:
         mock_run_container,
         mock_generate_entrypoint,
         mock_cleanup_entrypoint,
-        mock_ensure_ollama_dir,
     ):
         """In non-interactive mode, _run_container_flow skips all input() calls."""
         from agentalloy.install.subcommands.simple_setup import (
@@ -792,7 +813,6 @@ class TestNonInteractiveMode:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_ollama_dir")
     @patch(
         "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
         return_value=("test-project", "test-project_default"),
@@ -859,7 +879,6 @@ class TestNonInteractiveMode:
         mock_run_container,
         mock_generate_entrypoint,
         mock_cleanup_entrypoint,
-        mock_ensure_ollama_dir,
     ):
         """Non-interactive container mode sets runner=ollama, port=47950, mode=manual, harness=manual."""
         from agentalloy.install.subcommands.simple_setup import (
@@ -1007,7 +1026,6 @@ class TestCancelDuringCPUWarning:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_ollama_dir")
     @patch(
         "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
         return_value=("test-project", "test-project_default"),
@@ -1062,7 +1080,6 @@ class TestCancelDuringCPUWarning:
         mock_run_container,
         mock_generate_entrypoint,
         mock_cleanup_entrypoint,
-        mock_ensure_ollama_dir,
     ):
         """When user accepts the CPU-only warning, setup continues."""
         from agentalloy.install.subcommands.simple_setup import (
@@ -1479,13 +1496,16 @@ class TestEntrypointPrebuiltCorpusSeed:
         assert complete_block > ingest_gate
         assert 'touch "$COMPLETE"' in script[complete_block:]
 
-    def test_ollama_setup_not_gated_on_seed(self):
-        """Query embedding needs Ollama at runtime — its setup must run on the
-        seeded path too (it precedes the seed-aware ingest gate)."""
+    def test_llama_server_setup_not_gated_on_seed(self):
+        """Query embedding + intent reranking need the llama-servers at runtime —
+        their startup must run on the seeded path too (it precedes the
+        seed-aware ingest gate)."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert script.index("ollama serve") < script.index('[ "$CORPUS_SEEDED" = "false" ]')
+        assert script.index("Starting embed llama-server") < script.index(
+            '[ "$CORPUS_SEEDED" = "false" ]'
+        )
 
     def test_seed_emits_progress_phase(self):
         """The seed path writes a corpus_seeded progress snapshot so the

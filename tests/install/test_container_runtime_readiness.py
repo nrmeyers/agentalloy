@@ -239,7 +239,7 @@ class TestWaitForReadiness:
         """A container that exited before serving /readiness fails immediately.
 
         Regression: the old loop never checked container liveness, so an
-        entrypoint crash during bootstrap (e.g. ollama pull network failure
+        entrypoint crash during bootstrap (e.g. a GGUF download network failure
         under set -e) silently burned the entire timeout.
         """
         import time

@@ -57,7 +57,6 @@ from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415,
     _check_container_running,  # noqa: F401  # pyright: ignore[reportUnusedImport]
     _cleanup_temp_entrypoint,  # noqa: F401
     _detect_runtime_binary,  # noqa: F401
-    _ensure_ollama_dir,  # noqa: F401
     _ensure_volume,  # noqa: F401
     _generate_entrypoint,  # noqa: F401
     _list_conflicting_containers,  # noqa: F401
@@ -1276,26 +1275,21 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     if build_rc != 0:
         return 1
 
-    # 7b. Ensure the agentalloy-data volume exists.
+    # 7b. Ensure the agentalloy-data volume exists. The GGUF models persist
+    # under /app/data/models inside this volume across restarts.
     _ensure_volume(binary_path)
 
-    # 7c. Ensure ~/.ollama exists on the host (bind-mounted into the container).
-    _ensure_ollama_dir()
-
-    # 7d. Generate the entrypoint script and start the container.
-    # Dynamic timing message: first-run needs model download time,
-    # re-installs are fast (models persist in ~/.ollama).
-    ollama_models_dir = Path.home() / ".ollama" / "models"
-    is_first_run = not ollama_models_dir.exists()
-    if is_first_run:
-        _print(
-            "  [dim]-> Starting agentalloy container "
-            "(first run: ~5-10 min to download the embedding model; published "
-            "images ship a prebuilt skill corpus, locally built images also "
-            "build the corpus, adding 20+ min on CPU)...[/dim]"
-        )
-    else:
-        _print("  [dim]-> Starting agentalloy container (30-60s)...[/dim]")
+    # 7c. Generate the entrypoint script and start the container.
+    # The GGUF models live in the agentalloy-data volume (not the host home),
+    # so we can't cheaply tell first-run from a restart here — surface the
+    # first-run timing once; restarts skip the download (entrypoint checks the
+    # volume) and reach readiness in 30-60s.
+    _print(
+        "  [dim]-> Starting agentalloy container "
+        "(first run: ~5-10 min to download the embed + reranker GGUF models; "
+        "published images ship a prebuilt skill corpus, locally built images "
+        "also build the corpus, adding 20+ min on CPU; restarts: 30-60s)...[/dim]"
+    )
     entrypoint = _generate_entrypoint(cfg.packs)
     rc = _run_container(binary_path, entrypoint, cfg.packs)
     if rc != 0:
@@ -1320,11 +1314,12 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     if network_msg:
         _print(network_msg)
 
-    # First-run detection: models persist in ~/.ollama (bind-mounted into the
-    # container), so a fresh install needs the full model download time while
-    # a re-install skips it entirely.
-    ollama_models_dir = Path.home() / ".ollama" / "models"
-    is_first_run = not ollama_models_dir.exists()
+    # First-run detection: the GGUF models now live in the agentalloy-data
+    # volume (not the host home), so the host can't cheaply tell a fresh
+    # install from a re-install. Assume first-run and budget the full
+    # model-download time — the conservative choice (a re-install that skips
+    # the download simply reaches readiness well inside the larger window).
+    is_first_run = True
 
     # Count valid pack names (filter out empty strings from splitting).
     pack_count = len([p for p in (cfg.packs or "").split(",") if p.strip()])

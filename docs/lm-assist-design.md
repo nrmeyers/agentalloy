@@ -1,6 +1,6 @@
 # LM-assist: a sub-1B intent layer riding alongside the embedder
 
-Status: **shipped, v1.2.0.** Originally a design sketch (2026-06-12); the slices
+Status: **shipped, v1.3.0.** Originally a design sketch (2026-06-12); the slices
 it scoped are now in the codebase, each fail-open to the deterministic path.
 Their defaults follow what they measured (see "How we know it works"):
 

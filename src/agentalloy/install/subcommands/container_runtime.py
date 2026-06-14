@@ -213,20 +213,6 @@ def _ensure_volume(runtime: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Ollama directory
-# ---------------------------------------------------------------------------
-
-
-def _ensure_ollama_dir() -> None:
-    """Ensure ``~/.ollama`` exists.
-
-    Creates the directory (with ``parents=True``) if it doesn't already
-    exist.  Idempotent — no-op if the directory already exists.
-    """
-    Path.home().joinpath(".ollama").mkdir(parents=True, exist_ok=True)
-
-
-# ---------------------------------------------------------------------------
 # Entrypoint generation
 # ---------------------------------------------------------------------------
 
@@ -237,25 +223,26 @@ def _generate_entrypoint(packs: str) -> Path:
     The entrypoint is a bash script that handles in-container bootstrap:
 
     1. Check if ``$APP_DIR/.bootstrap-complete`` exists — if so, skip to uvicorn.
-    2. Check if Ollama is installed; download and install if needed.
-    3. Start ``ollama serve`` in the background on ``127.0.0.1:11434``.
-    4. Poll ``http://127.0.0.1:11434`` until Ollama is ready (30 s timeout).
-    5. Check if the embedding model (``qwen3-embedding:0.6b``) is cached;
-       pull it if not.
-    6. Run migrations (``uv run python -m agentalloy.migrate``).
-    7. If *packs* is non-empty, run ``uv run agentalloy install-packs --packs <packs>``
+    2. Download both GGUF models (embed + reranker) into ``$APP_DIR/data/models``
+       on first boot if missing (``curl`` from the verified Hugging Face URLs).
+    3. Start the embed ``llama-server --embeddings`` on ``127.0.0.1:47951`` and
+       the reranker ``llama-server`` (completions mode) on ``127.0.0.1:47952``,
+       both in the background.
+    4. Poll ``:47951/health`` and ``:47952/health`` until both are ready.
+    5. Run migrations (``uv run python -m agentalloy.migrate``).
+    6. If *packs* is non-empty, run ``uv run agentalloy install-packs --packs <packs>``
        for each pack. If *packs* is empty, run ``uv run agentalloy install-packs``
        (no --packs) to install always-on packs (core, documentation, engineering,
        performance).
-    8. Create the ``$APP_DIR/.bootstrap-complete`` flag file.
-    9. Writes ``.bootstrap-progress`` with ``phase="model_pull"`` before
-       running ``ollama pull``, so the host-side readiness polling can
-       surface model download progress to the user.
-    10. Prints ``Model pull complete`` to stdout after the model download
-        finishes — the host-side log streamer uses this as a transition
-        marker to switch from log streaming to readiness polling.
-    11. Trap SIGTERM for graceful shutdown (only if Ollama was started).
-    12. Start uvicorn on ``0.0.0.0:47950``.
+    7. Create the ``$APP_DIR/.bootstrap-complete`` flag file.
+    8. Writes ``.bootstrap-progress`` with ``phase="model_download"`` before
+       fetching the GGUFs, so the host-side readiness polling can surface the
+       download progress to the user.
+    9. Prints ``Model download complete`` to stdout after the models finish
+       downloading — the host-side log streamer uses this as a transition
+       marker to switch from log streaming to readiness polling.
+    10. Trap SIGTERM/SIGINT for graceful shutdown (kills both llama-server PIDs).
+    11. Start uvicorn on ``0.0.0.0:47950``.
 
     Parameters
     ----------
@@ -301,7 +288,8 @@ def _build_entrypoint_script(packs: str) -> str:
        (CI bakes a fully ingested + embedded corpus plus
        ``corpus-stamp.json``) and the data volume has no corpus yet, the
        seed is copied in and the per-pack ingest loop is skipped entirely.
-       Ollama setup still runs — query embedding needs it at runtime.
+       The llama-server models still download/start — query embedding and
+       intent reranking need them at runtime.
     """
     pack_list = [p for p in (packs or "").split(",") if p.strip()]
     has_packs = len(pack_list) > 0
@@ -368,8 +356,8 @@ def _build_entrypoint_script(packs: str) -> str:
         "# /app/corpus-seed (.github/workflows/container-build.yml). When it",
         "# is present and the data volume has no corpus yet, copy it in and",
         "# skip per-pack ingest + re-embed — first run drops from ~30 min of",
-        "# CPU embedding to seconds. Ollama setup stays unconditional: query",
-        "# embedding at compose time still needs the model at runtime.",
+        "# CPU embedding to seconds. llama-server setup stays unconditional:",
+        "# query embedding at compose time still needs the model at runtime.",
         'SEED_DIR="${SEED_DIR:-/app/corpus-seed}"',
         "CORPUS_SEEDED=false",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ] \\',
@@ -389,46 +377,77 @@ def _build_entrypoint_script(packs: str) -> str:
         '    mv "$PROGRESS_TMP" "$PROGRESS"',
         "fi",
         "",
+        "# --- llama.cpp model + server config -------------------------------",
+        "# Two llama-server daemons back the runtime: an embed server on 47951",
+        "# (--embeddings, query embedding at compose time) and a reranker server",
+        "# on 47952 (completions mode, /v1/completions with logprobs for the",
+        "# intent classifier). Both GGUFs are downloaded on first boot into the",
+        "# data volume so they persist across restarts.",
+        'MODELS_DIR="$APP_DIR/data/models"',
+        'EMBED_GGUF="$MODELS_DIR/Qwen3-Embedding-0.6B-Q8_0.gguf"',
+        'RERANK_GGUF="$MODELS_DIR/Qwen3-Reranker-0.6B-Q8_0.gguf"',
+        'EMBED_URL="https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"',
+        'RERANK_URL="https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"',
+        "",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
         "    # Record bootstrap start. Content is the canonical timestamp;",
         "    # mtime is the fallback for stale-lock detection.",
         '    date -Iseconds > "$LOCK"',
         "",
-        "    # Ollama installation",
-        "    if ! command -v ollama &> /dev/null; then",
-        '        echo ">> Installing Ollama..."',
-        "        curl -fsSL https://ollama.ai/install.sh | sh",
-        "    fi",
-        "",
-        '    echo ">> Starting Ollama..."',
-        "    OLLAMA_HOST=127.0.0.1:11434 ollama serve &",
-        "    OLLAMA_PID=$!",
-        "",
-        "    for i in $(seq 1 30); do",
-        "        if curl -sf http://127.0.0.1:11434 > /dev/null 2>&1; then",
-        '            echo ">> Ollama is ready"',
-        "            break",
-        "        fi",
-        "        sleep 1",
-        "    done",
-        "",
-        '    echo ">> Checking embedding model..."',
-        "    if ! ollama list | grep -q qwen3-embedding; then",
-        '        echo ">> Pulling qwen3-embedding:0.6b..."',
+        '    mkdir -p "$MODELS_DIR"',
+        '    if [ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]; then',
+        '        echo ">> Downloading llama.cpp GGUF models..."',
         '        cat > "$PROGRESS_TMP" <<JSON',
-        '{"current_pack": "qwen3-embedding:0.6b", "packs_ingested": 0, "packs_total": 1, "phase": "model_pull", "model": "qwen3-embedding:0.6b", "status": "in_progress", "updated_at": "$(date -Iseconds)"}',
+        '{"current_pack": "gguf-models", "packs_ingested": 0, "packs_total": 1, "phase": "model_download", "status": "in_progress", "updated_at": "$(date -Iseconds)"}',
         "JSON",
         '        mv "$PROGRESS_TMP" "$PROGRESS"',
-        "        ollama pull qwen3-embedding:0.6b",
-        '        echo "Model pull complete"',
+        '        if [ ! -f "$EMBED_GGUF" ]; then',
+        '            echo ">> Fetching embed model (Qwen3-Embedding-0.6B-Q8_0)..."',
+        '            curl -fsSL -o "$EMBED_GGUF" "$EMBED_URL"',
+        "        fi",
+        '        if [ ! -f "$RERANK_GGUF" ]; then',
+        '            echo ">> Fetching reranker model (Qwen3-Reranker-0.6B-Q8_0)..."',
+        '            curl -fsSL -o "$RERANK_GGUF" "$RERANK_URL"',
+        "        fi",
+        '        echo "Model download complete"',
         "    fi",
+        "fi",
         "",
+        "# --- Start the llama-server daemons (every boot) -------------------",
+        "# These are long-lived runtime daemons, not bootstrap-only steps: even",
+        "# after .bootstrap-complete, query embedding + intent reranking need",
+        "# them up. Start them before uvicorn so /readiness reflects a usable",
+        "# service.",
+        'echo ">> Starting embed llama-server on 47951..."',
+        'llama-server --embeddings --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &',
+        "EMBED_PID=$!",
+        'echo ">> Starting reranker llama-server on 47952..."',
+        'llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &',
+        "RERANK_PID=$!",
+        "",
+        'echo ">> Waiting for llama-server health (47951 + 47952)..."',
+        "for i in $(seq 1 120); do",
+        "    EMBED_OK=false",
+        "    RERANK_OK=false",
+        "    curl -sf http://127.0.0.1:47951/health > /dev/null 2>&1 && EMBED_OK=true",
+        "    curl -sf http://127.0.0.1:47952/health > /dev/null 2>&1 && RERANK_OK=true",
+        '    if [ "$EMBED_OK" = "true" ] && [ "$RERANK_OK" = "true" ]; then',
+        '        echo ">> llama-server ready (embed + reranker)"',
+        "        break",
+        "    fi",
+        "    sleep 1",
+        "done",
+        "",
+        'if [ "$BOOTSTRAP_NEEDED" = "true" ]; then',
         '    echo ">> Running migrations..."',
         "    uv run python -m agentalloy.migrate",
         "fi",
         "",
-        "# --- SIGTERM trap (covers Ollama + uvicorn) -----------------------",
-        "trap 'kill ${OLLAMA_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM",
+        "# --- SIGTERM/SIGINT trap (covers llama-servers + uvicorn) ----------",
+        (
+            "trap 'kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-} "
+            "2>/dev/null; exit 0' SIGTERM SIGINT"
+        ),
         "",
         "# Pack ingest runs only when the corpus was not seeded from the image.",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]; then',
@@ -558,7 +577,8 @@ def _run_container(
     Runs ``{runtime} run -d --name agentalloy`` with (``--replace`` for Podman only;
     Docker uses a preceding ``docker rm -f agentalloy`` instead) with:
 
-    * Volume mounts: ``agentalloy-data:/app/data`` and ``~/.ollama:/root/.ollama``
+    * Volume mount: ``agentalloy-data:/app/data`` (the GGUF models persist
+      under ``/app/data/models`` in this same volume).
     * Env vars: ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
       ``DUCKDB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
@@ -589,7 +609,6 @@ def _run_container(
     for k, v in env.items():
         env_cmd.extend(["-e", f"{k}={v}"])
 
-    home = Path.home()
     image = image_ref or _DEFAULT_IMAGE
 
     # `--replace` is a Podman extension; Docker does not support it.
@@ -617,8 +636,6 @@ def _run_container(
         "47950:47950",
         "-v",
         "agentalloy-data:/app/data",
-        "-v",
-        f"{home}/.ollama:/root/.ollama",
         "-v",
         f"{entrypoint}:/app/entrypoint.sh:ro",
         *env_cmd,
@@ -882,8 +899,8 @@ def _wait_for_readiness(
         Optional callback invoked once per poll with the parsed readiness
         body (status + progress). Lets the caller render a live spinner.
     stream_logs : bool
-        If True, stream container logs (including ``ollama pull`` output)
-        to the user during the polling loop. Defaults to True.
+        If True, stream container logs (including the GGUF model-download
+        output) to the user during the polling loop. Defaults to True.
     """
     import json as _json
     import time as _time
@@ -929,7 +946,7 @@ def _wait_for_readiness(
                 if consecutive_errors >= 3:
                     return False
 
-        # A container that exited during bootstrap (e.g. ``ollama pull``
+        # A container that exited during bootstrap (e.g. a GGUF download
         # network failure under ``set -e``) will never serve /readiness —
         # fail fast with its log tail instead of silently burning the whole
         # timeout. Unknown state (inspect failure) keeps polling; the
@@ -948,7 +965,7 @@ def _wait_for_readiness(
                 _print(f"  [dim]Full logs: {runtime} logs {container_name}[/dim]")
                 return False
 
-        # Stream container logs (e.g. ``ollama pull`` output) so the user
+        # Stream container logs (e.g. the GGUF download output) so the user
         # can see what's happening inside the container during bootstrap —
         # including before uvicorn is up, when /readiness still refuses
         # connections but the entrypoint is already logging.
