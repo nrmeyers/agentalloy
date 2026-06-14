@@ -106,7 +106,7 @@ When present, `domain_tags` from contracts drive BM25 retrieval — surgical and
 The signal layer is a Python module (deterministic by default) that evaluates conditions and triggers actions. Three event types:
 
 1. **Pre-filter** — cheap keyword matching + file-event scope checks. Decides if a signal evaluation is warranted.
-2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus named-intent gates. The named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder (`SIGNAL_INTENT_BACKEND=reranker`, **the default** — a measured win on the labeled intent benchmark, see BENCHMARKS.md). This backend needs a qwen3-reranker server (default `:60001`); if it is unreachable, or you set `SIGNAL_INTENT_BACKEND=cosine`, the gates fall open to cosine-similarity scoring against reference phrase sets, byte-for-byte. Cosine is the fail-open floor, so the default is safe even where the reranker server is not running — but the lift only materializes where it is.
+2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus named-intent gates. The named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder (`SIGNAL_INTENT_BACKEND=reranker`, **the default** — a measured win on the labeled intent benchmark, see BENCHMARKS.md). This backend needs a reranker server — a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (completions mode), default `127.0.0.1:47952`; if it is unreachable, or you set `SIGNAL_INTENT_BACKEND=cosine`, the gates fall open to cosine-similarity scoring against reference phrase sets, byte-for-byte. Cosine is the fail-open floor, so the default is safe even where the reranker server is not running — but the lift only materializes where it is.
 3. **Action** — write phase file atomically, emit workflow skill prose, or fire system skills.
 
 The signal layer runs per-request through the proxy for proxy-wired harnesses. For sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI), the proxy path is not available and the signal layer is replaced by a file-watching sidecar. See [Sidecar Experience](sidecar-experience.md).
@@ -180,7 +180,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 
 1. **Query extraction** — from contract `domain_tags` (primary) or rule-based extraction from task text (fallback)
 2. **BM25 leg** — lexical match over fragment content
-3. **Dense leg** — cosine similarity against 1024-dim embeddings (qwen3-embedding:0.6b)
+3. **Dense leg** — cosine similarity against 1024-dim embeddings (Qwen3-Embedding-0.6B-Q8_0.gguf)
 4. **RRF fusion** — phase-tuned Reciprocal Rank Fusion combines both legs
 5. **Applicability filter** — deterministic predicates remove inapplicable fragments
 6. **Diversity selection** — top-k with diversity constraint (default: on)
@@ -193,12 +193,12 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 
 ### Embedding Model
 
-Single model for all embedding needs: `qwen3-embedding:0.6b` at 1024 dimensions. Used for:
+Single model for all embedding needs: `Qwen3-Embedding-0.6B-Q8_0.gguf` at 1024 dimensions, served by llama-server on `47951`. Used for:
 - Fragment embeddings (retrieval)
 - Semantic gate scoring (cosine similarity against reference phrase sets)
 - Contract query embeddings
 
-Backend-agnostic via OpenAI-compatible `/v1/embeddings`. Supported backends: Ollama, LM Studio, llama-server.
+Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --embeddings` exposes. The runtime honors `RUNTIME_EMBED_BASE_URL`, so it also accepts any other OpenAI-compatible embed endpoint that returns 1024-dim vectors.
 
 ### Telemetry
 
@@ -242,8 +242,11 @@ profiles:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `AGENTALLOY_URL` | AgentAlloy service URL | `http://localhost:47950` |
-| `LM_STUDIO_URL` | LM Studio URL | `http://localhost:1234` |
-| `AGENT_MODEL` | Agent model name | `qwen/qwen2.5-coder-14b` |
+| `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
+| `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `Qwen3-Embedding-0.6B-Q8_0.gguf` |
+| `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |
+| `SIGNAL_INTENT_RERANK_URL` | Reranker llama-server URL | `http://127.0.0.1:47952` |
+| `SIGNAL_INTENT_RERANK_MODEL` | Reranker model (GGUF) | `Qwen3-Reranker-0.6B-Q8_0.gguf` |
 | `RUNTIME_DIVERSITY_SELECTION` | Diversity mode | `on` |
 
 ## Customization

@@ -35,9 +35,10 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │  Signal      │  │  Compose     │  │  Embedding       │   │
 │  │  Layer       │→ │  Engine      │→ │  Model           │   │
-│  │  (determin-  │  │  (BM25+      │  │  (qwen3-         │   │
-│  │   istic)     │  │   dense+RRF) │  │   embedding      │   │
-│  │              │  │              │  │   :0.6b)         │   │
+│  │  (determin-  │  │  (BM25+      │  │  (Qwen3-         │   │
+│  │   istic)     │  │   dense+RRF) │  │   Embedding-0.6B │   │
+│  │              │  │              │  │   .gguf,         │   │
+│  │              │  │              │  │   llama-server)  │   │
 │  └──────────────┘  └──────────────┘  └──────────────────┘   │
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐                         │
@@ -57,7 +58,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 ┌──────────────────────────────────────────────────────────────┐
 │  Upstream LLM                                                │
 │                                                              │
-│  OpenAI, Anthropic, local runner (Ollama, LM Studio, etc.)   │
+│  OpenAI, Anthropic, or any local LLM (e.g. Ollama)            │
 │  Receives: original request + AgentAlloy system prompt        │
 │  Response: passed back to harness unchanged                   │
 └──────────────────────────────────────────────────────────────┘
@@ -218,7 +219,7 @@ For the full proxy-wired and sidecar harness sets, see [Harness Classification](
 
 The old three-tier model (hooks / per-session injection / sidecar) collapsed to a binary proxy-wired vs sidecar classification (see [Harness Classification](harness-classification.md)). The proxy is now the universal mechanism for interceptable harnesses; the file-watching sidecar remains for non-interceptable ones (cursor, windsurf, github-copilot, gemini-cli).
 
-The hook routes are **kept and live** — Claude Code's default wiring is the hook path (`/v1/hook/user-prompt-submit`, `/v1/hook/pre-tool-use`, `/v1/hook/post-tool-use` in `api/hook_router.py`), which degrades gracefully if the service is down; `agentalloy wire --via proxy` switches it to base-URL proxy wiring. The embedding model (`qwen3-embedding:0.6b`), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
+The hook routes are **kept and live** — Claude Code's default wiring is the hook path (`/v1/hook/user-prompt-submit`, `/v1/hook/pre-tool-use`, `/v1/hook/post-tool-use` in `api/hook_router.py`), which degrades gracefully if the service is down; `agentalloy wire --via proxy` switches it to base-URL proxy wiring. The embedding model (`Qwen3-Embedding-0.6B-Q8_0.gguf`, served by llama-server), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
 
 ## Telemetry
 

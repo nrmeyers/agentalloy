@@ -22,7 +22,7 @@
 
 `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt — and they're already breaking. They load once at session start, then suffer context rot as the conversation drags on and your agent drifts from the script. Reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, the rules your agent must follow and the skills it needs change dozens of times — and static files can't keep up. Leave them out and a smaller model flounders on tasks its training never covered; cram them all in and you pay the token tax on every turn, or pay it again redoing the work it got wrong.
 
-**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`qwen3-embedding:0.6b`) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. When nothing has changed, nothing is injected — your agent keeps working with the context it already has. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt by fusing three instruction sets into the exact agent persona the moment calls for:
+**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`Qwen3-Embedding-0.6B-Q8_0.gguf`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. When nothing has changed, nothing is injected — your agent keeps working with the context it already has. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt by fusing three instruction sets into the exact agent persona the moment calls for:
 
 - **System Governance** — hard boundaries and operational rules (Linear issue naming, PR branch conventions, CI/deployment gates).
 - **Workflow Directives** — process constraints (Spec-Driven Development rules, defining success criteria without solution wording).
@@ -62,18 +62,13 @@ Both deployments run the same wizard — they differ only in the option you pick
 
 ### Option 1 — Native install (recommended)
 
-**Best performance.** Runs the `qwen3-embedding:0.6b` embed model directly on your host with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
+**Best performance.** Runs the `Qwen3-Embedding-0.6B-Q8_0.gguf` embed model directly on your host via llama-server, with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
 
-The wizard handles the rest: hardware detection, runner selection (`ollama`, `lm-studio`, or `llama-server`), model and port, service mode, **skill pack selection** (tier-grouped listing), IDE harness wiring, and hardware target. It executes every install step and validates the result — **3–5 minutes** on a warm machine.
-
-> **Note:** If your Ollama instance requires SSH key authentication (e.g., when
-> `OLLAMA_HOST` points to a remote instance), you'll need an ed25519 key at
-> `~/.ollama/id_ed25519` before running setup. See [docs/troubleshooting.md](docs/troubleshooting.md)
-> for details.
+The wizard handles the rest: hardware detection, GGUF model download, ports, service mode, **skill pack selection** (tier-grouped listing), IDE harness wiring, and hardware target. It executes every install step and validates the result — **3–5 minutes** on a warm machine.
 
 ### Option 2 — Container install
 
-**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + Ollama in a single container with `qwen3-embedding:0.6b` auto-pulled on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
+**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + two bundled `llama-server` instances in a single container, with the `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` GGUFs auto-downloaded on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
 
 > **Pulls a pre-built image from GHCR** (`ghcr.io/nrmeyers/agentalloy:latest`) — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
@@ -81,7 +76,7 @@ The wizard handles the rest: hardware detection, runner selection (`ollama`, `lm
 
 Independent of deployment, composition is **deterministic by default**. Three runtime levers — env vars in `~/.config/agentalloy/.env`, not wizard prompts — tune how much optional assistance is in the loop. Each default is the one the benchmarks earned (see [BENCHMARKS.md](BENCHMARKS.md)); the two model-backed ones fail open to the deterministic path when their model is unavailable:
 
-- **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** The signals-layer phase-gate classifier. The `qwen3-reranker-0.6b` backend is the default because it measurably beats cosine on intent classification (per-intent macro-F1 0.24 → 0.69). It needs a reranker server (default `:60001`); set `SIGNAL_INTENT_BACKEND=cosine`, or simply leave that server unprovisioned, and the gates fall open to cosine byte-for-byte.
+- **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** The signals-layer phase-gate classifier. The `qwen3-reranker-0.6b` backend is the default because it measurably beats cosine on intent classification (per-intent macro-F1 0.24 → 0.69). It needs a reranker server (a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf`, default `127.0.0.1:47952`); set `SIGNAL_INTENT_BACKEND=cosine`, or simply leave that server unprovisioned, and the gates fall open to cosine byte-for-byte.
 - **`LM_ASSIST` — default `off`.** The composition fragment re-ranker (`=arbitrate` to enable). Off by default because it measured **no lift** over deterministic selection on the domain benchmark (it tied, and trailed slightly with a wider candidate pool).
 - **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off for the same reason: **no measured lift**.
 
@@ -94,7 +89,7 @@ See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [doc
 Skip the wizard entirely by passing flags:
 
 ```bash
-agentalloy setup -n --runner ollama --hardware nvidia --packs all --harness cursor
+agentalloy setup -n --hardware nvidia --packs all --harness cursor
 ```
 
 Just want to see it work first? [Run the demo](#demo).
@@ -147,7 +142,7 @@ Your agent calls `/compose`, gets back the relevant raw skill prose, and assembl
 
 ## Container deployment
 
-AgentAlloy can run as a single container (setup option #2) that bundles the service and its embedding model (Ollama) in one process — the recommended deployment when you want zero host-side inference dependencies. The image is pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`); the full container runbook lives in [INSTALL.md](INSTALL.md).
+AgentAlloy can run as a single container (setup option #2) that bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the llama.cpp toolchain copied from `ghcr.io/ggml-org/llama.cpp:full` — the recommended deployment when you want zero host-side inference dependencies. The image is pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`); the full container runbook lives in [INSTALL.md](INSTALL.md).
 
 The setup wizard:
 
@@ -162,45 +157,47 @@ The setup wizard:
 ### Container architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│  agentalloy:latest (podman run --replace)   │
-│                                             │
-│  /app/entrypoint.sh (bash)                  │
-│  ├── Check .bootstrap-complete (skip if done)│
-│  ├── Seed prebuilt corpus (published images) │
-│  ├── Install Ollama (if missing)             │
-│  ├── Start ollama serve --host 127.0.0.1    │
-│  ├── Pull qwen3-embedding:0.6b (if missing)  │
-│  ├── Run migrations                          │
-│  ├── install-packs (skipped when seeded)     │
-│  ├── Touch .bootstrap-complete               │
-│  ├── exec uvicorn (main service)             │
-│                                             │
-│  ENV: AGENTIALLOY_PACKS, LADYBUG_DB_PATH     │
-│      DUCKDB_PATH, LOG_LEVEL                  │
-└───────────┬─────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  agentalloy:latest (podman run --replace)        │
+│                                                  │
+│  /app/entrypoint.sh (bash)                       │
+│  ├── Check .bootstrap-complete (skip if done)    │
+│  ├── Seed prebuilt corpus (published images)     │
+│  ├── Download GGUFs into /app/data/models        │
+│  │     (embed + reranker, if missing)            │
+│  ├── Start embed llama-server (--embeddings :47951)│
+│  ├── Start reranker llama-server (:47952)         │
+│  ├── Run migrations                              │
+│  ├── install-packs (skipped when seeded)         │
+│  ├── Touch .bootstrap-complete                   │
+│  ├── exec uvicorn (main service, :47950)         │
+│                                                  │
+│  ENV: AGENTIALLOY_PACKS, LADYBUG_DB_PATH         │
+│      DUCKDB_PATH, LOG_LEVEL                       │
+└───────────┬──────────────────────────────────────┘
             │ -p 47950:47950
             ▼
    localhost:47950  (external)
 
-Volume mounts:
-  agentalloy-data → /app/data     (corpus, database)
-  ~/.ollama       → /root/.ollama (Ollama models)
+Volume mount:
+  agentalloy-data → /app/data  (corpus, database, GGUFs under /models)
 ```
 
 ### Volume layout & bootstrap
 
 The entrypoint (`/app/entrypoint.sh`, baked into the image) seeds the prebuilt
-corpus, starts Ollama, pulls `qwen3-embedding:0.6b`, runs migrations, and execs
-uvicorn — idempotent across restarts via a `.bootstrap-complete` marker. Two
-volumes persist: `agentalloy-data:/app/data` (corpus + databases) and
-`~/.ollama:/root/.ollama` (model cache). The full bootstrap sequence and
+corpus, downloads both GGUFs (`Qwen3-Embedding-0.6B-Q8_0.gguf` +
+`Qwen3-Reranker-0.6B-Q8_0.gguf`) into `/app/data/models`, starts the two
+`llama-server` daemons (embed on 47951, reranker on 47952), runs migrations, and
+execs uvicorn — idempotent across restarts via a `.bootstrap-complete` marker. A
+single volume persists: `agentalloy-data:/app/data` (corpus + databases + the
+downloaded GGUFs under `/app/data/models`). The full bootstrap sequence and
 operational command reference live in [INSTALL.md](INSTALL.md) and
 [docs/operator.md](docs/operator.md).
 
 ### Hardware requirements
 
-Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled Ollama runs on CPU using `qwen3-embedding:0.6b` — functional for embeddings but slower than GPU.
+Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled `llama-server` instances run on CPU using `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` — functional for embeddings and intent reranking but slower than GPU.
 
 | Requirement | Minimum |
 |---|---|
@@ -452,8 +449,8 @@ Query via `GET /telemetry/traces` or `agentalloy telemetry`. See [docs/operator.
 
 Runtime environment variables are written automatically by `agentalloy write-env` to `~/.config/agentalloy/.env`. Key variables:
 
-- `RUNTIME_EMBED_BASE_URL` — embedding endpoint (default: Ollama at `localhost:11434`)
-- `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `qwen3-embedding:0.6b`)
+- `RUNTIME_EMBED_BASE_URL` — embedding endpoint (default: embed llama-server at `http://localhost:47951`)
+- `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `Qwen3-Embedding-0.6B-Q8_0.gguf`)
 - `PROFILE_ROOT` — per-profile datastores
 - `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — cosine dedup thresholds
 - `BOUNCE_BUDGET` — compose retry budget
@@ -470,7 +467,7 @@ uv run ruff check .              # lint
 uv run ruff format --check .     # format
 uv run pyright                   # types
 uv run pytest                    # unit tests (fast)
-uv run pytest -m integration     # integration — requires Ollama with qwen3-embedding:0.6b
+uv run pytest -m integration     # integration — requires a running embed server (llama-server) with Qwen3-Embedding-0.6B-Q8_0.gguf
 ```
 
 Tests live under `tests/` and cover the install pipeline (`tests/install/`), retrieval, composition, applicability filtering, telemetry, and the harness-wiring catalog.

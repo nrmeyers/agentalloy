@@ -13,7 +13,7 @@
 A local **AgentAlloy** service that gives your coding agent (this LLM, or another) access to a curated corpus of engineering skills — testing patterns, error handling, deployment recipes, observability, security, etc. — composed dynamically per task.
 
 The runtime is a small FastAPI service backed by:
-- An embedding model (`qwen3-embedding:0.6b`, 1024-dim) — runs on any hardware via Ollama, LM Studio, or llama-server
+- An embedding model (`Qwen3-Embedding-0.6B-Q8_0.gguf`, 1024-dim) — served on any hardware by llama-server (llama.cpp)
 - A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `python`, `typescript`, `nodejs`, `fastapi`, `react`, `go`, `rust`, `data-engineering`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (LadybugDB + DuckDB) is generated locally on first install.
 - Your handoff harness (Claude Code / Cursor / Continue.dev / etc.) — wired so it can query the API
 
@@ -58,29 +58,15 @@ You need:
 
 The runbook itself runs `agentalloy preflight` (Step 0 below) to verify these. **Never bypass a failed preflight check** — every later step assumes the prereqs are met, and skipping a fatal failure here is what causes the LLM to hand-roll workarounds (`~/.local/bin/agentalloy install-packs --list` etc.) midstream.
 
-For missing binaries (`uv`, `ollama`), **stop and ask the user to install them**. Do not auto-execute install scripts — that's a non-reversible action that requires the human in the loop. Install commands:
+For missing binaries (`uv`, `llama-server`), **stop and ask the user to install them**. Do not auto-execute install scripts — that's a non-reversible action that requires the human in the loop. Install commands:
 
 - **uv:** see https://docs.astral.sh/uv/getting-started/installation/
-- **Ollama (Linux):** `curl -fsSL https://ollama.com/install.sh | sh`
-- **Ollama (macOS):** `brew install ollama`, or https://ollama.com/download/mac
-- **Ollama (Windows / other):** see https://ollama.com/download
+- **llama-server (macOS):** `brew install llama.cpp`
+- **llama-server (Linux / other):** download a release binary or build from source — see https://github.com/ggml-org/llama.cpp
 
-After installing Ollama, the user must have `ollama serve` running (the official installer sets this up as a service on macOS/Windows; on Linux the install script registers a systemd unit). Step 0's runner-phase preflight confirms reachability.
+`llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After installing, verify with `llama-server --version`. Step 0's preflight confirms the binary is reachable.
 
-> **Ollama SSH key authentication:** If your Ollama instance requires SSH key authentication
-> (common when `OLLAMA_HOST` is set to a remote instance, or when SSH auth is enabled on a
-> local instance), you must have an ed25519 key at `~/.ollama/id_ed25519` before pulling
-> models. Ollama 0.20.3+ looks for the key at this path (not `~/.ssh/id_ed25519`).
->
-> - **Check if auth is required:** Run `ollama list`. If it succeeds without a key, your
->   instance does not require auth. If it fails with
->   `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory`, you need
->   to set up a key.
-> - **Generate a key:** `ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`
-> - **Register the public key:** Copy the contents of `~/.ollama/id_ed25519.pub` to the
->   Ollama server's `~/.ollama/server_user.pub` (or the equivalent auth config for your setup).
-> - **Remote Ollama:** If `OLLAMA_HOST` points to a remote instance, the public key must be
->   registered on that remote server's Ollama configuration.
+> **Migration from an existing Ollama install:** AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 1024-dim vectors, you can point AgentAlloy at it instead of the managed llama-server.
 
 ---
 
@@ -190,44 +176,32 @@ The output lists which host targets are available on this hardware. Exactly one 
 > agentalloy recommend-models --hardware ~/.local/share/agentalloy/outputs/detect.json --host <chosen-target>
 > ```
 
-The output lists `{embed_model, embed_runner}` options valid for the chosen host target, with one flagged `default: true`. The `preset` field tells you which `.env` preset will be used.
+The output lists the `embed_model` valid for the chosen host target, with one flagged `default: true`. The `preset` field tells you which `.env` preset will be used. (The inference runner is always `llama-server` — there is no runner choice.)
 
 > ASK
 >
 > Most users want the default. For example:
-> > "For Apple Silicon + iGPU, I'll use **qwen3-embedding:0.6b** via Ollama. Use this default, or pick a different runner?"
+> > "For Apple Silicon + iGPU, I'll serve **Qwen3-Embedding-0.6B-Q8_0.gguf** via llama-server. Use this default, or pick a different model?"
 >
 > Wait for confirmation.
 
 ---
 
-## Step 5: Pull models
-
-> **Pre-pull check:** If your Ollama instance requires SSH key authentication, verify the
-> key exists before pulling:
->
-> ```bash
-> test -f ~/.ollama/id_ed25519 && echo "Key present" || echo "Key missing — see prerequisites"
-> ```
->
-> If the key is missing, generate it as described in the prerequisites section above.
+## Step 5: Download the GGUF model
 
 > RUN
 > ```bash
 > agentalloy pull-models --models ~/.local/share/agentalloy/outputs/recommend-models.json
 > ```
 
-The output may include `manual_steps_required` if the user picked a runner without auto-pull (LM Studio, MLX, vLLM). If so:
+This downloads `Qwen3-Embedding-0.6B-Q8_0.gguf` (from Hugging Face
+`Qwen/Qwen3-Embedding-0.6B-GGUF`) into the user-scope data directory so llama-server
+can serve it in Step 7. The output may include `manual_steps_required` if a download
+needs a manual step. If so:
 
 > CONFIRM
 >
 > Read the `manual_steps_required` instructions to the user verbatim. Wait for them to confirm they've completed those steps before proceeding.
-
-If `recommend-models` ran non-interactively and defaulted to `ollama` but the user has `llama-server` installed, pass `--runner llama-server` to override:
-
-```bash
-agentalloy pull-models --models ~/.local/share/agentalloy/outputs/recommend-models.json --runner llama-server
-```
 
 ---
 
@@ -249,13 +223,14 @@ This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/shar
 > agentalloy start-embed-server --models ~/.local/share/agentalloy/outputs/recommend-models.json
 > ```
 
-This brings the embedding backend online before pack ingestion. What happens depends on the runner chosen in Step 4:
+This brings the embedding backend online before pack ingestion. It spawns
+`llama-server --embeddings --port 47951 --ubatch-size 2048` in the background and waits
+up to 120 seconds for the server to accept connections. The log is written to
+`~/.local/share/agentalloy/logs/embed-server.log`.
 
-- **llama-server**: spawns `llama-server --embeddings --port 11434 --ubatch-size 2048` in the background and waits up to 120 seconds for the server to accept connections. The log is written to `~/.local/share/agentalloy/logs/embed-server.log`.
-- **ollama**: fires `ollama serve` (idempotent — safe if already running) and polls port 11434 (Ollama's default).
-- **lm-studio / other**: prints instructions for you to start the server manually (LM Studio defaults to port 1234). Start it before proceeding to Step 8.
-
-Both the managed llama-server and Ollama listen on **11434** — that's the port the runtime's `RUNTIME_EMBED_BASE_URL` points at, written into `.env` by `write-env`. The step is idempotent: if the embed port is already listening it exits 0 immediately.
+The embed server listens on **47951** — that's the port the runtime's
+`RUNTIME_EMBED_BASE_URL` points at, written into `.env` by `write-env`. The step is
+idempotent: if the embed port is already listening it exits 0 immediately.
 
 > CONFIRM
 >
@@ -436,7 +411,7 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 > | Variant | Size | Model | Use case |
 > |---|---|---|---|
 > | `ghcr.io/nrmeyers/agentalloy:latest` | ~300 MB | Not included | General users with network access. The model is pulled at first container start. |
-> | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-pulled (`qwen3-embedding:0.6b`) | Air-gapped/enterprise environments that need the model baked into the image. |
+> | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-baked GGUFs (`Qwen3-Embedding-0.6B-Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) | Air-gapped/enterprise environments that need the models baked into the image. |
 >
 > Select the variant with `--image-tag` during setup:
 > ```bash
@@ -449,13 +424,18 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 >
 > Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
 >
-> **SSH key authentication (container):** The container mounts the host's `~/.ollama` directory into `/root/.ollama` inside the container. If your Ollama instance requires SSH key authentication (see the prerequisites section), the same key at `~/.ollama/id_ed25519` on the host is automatically available to the container — no additional configuration needed. If the model pull fails with an SSH key error inside the container, fix the key on the host as described in the prerequisites.
+> **GGUF models (container):** The `latest` image downloads both GGUFs
+> (`Qwen3-Embedding-0.6B-Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) into the
+> `agentalloy-data` volume under `/app/data/models` on first boot, so they persist
+> across restarts and download only once. The `full` image has them pre-baked, so it
+> boots straight into the two llama-servers with no runtime download. No host bind
+> mount is required — the only volume is `agentalloy-data:/app/data`.
 
 ---
 
 ## Step 14: Start the service + first-run demo
 
-Start the service in foreground (recommended — same idiom as `ollama serve`):
+Start the service in foreground (recommended):
 
 > RUN
 > ```bash
@@ -534,12 +514,9 @@ For container deployments (`--deployment container`), use these commands to mana
 | Host              |          | Container (agentalloy)    |
 |-------------------|          |---------------------------|
 |                   |          |                           |
-| ~/.ollama/        | :rw:     | /root/.ollama/            |
-| (Ollama models +  |--------->| (Ollama model cache +     |
-| SSH keys)         |          | SSH keys)                 |
-|                   |          |                           |
 | agentalloy-data/  | :rw:     | /app/data/                |
-| (named volume)    |--------->| (LadybugDB + DuckDB)      |
+| (named volume)    |--------->| (LadybugDB + DuckDB +     |
+|                   |          |  GGUFs under /models)     |
 |                   |          |                           |
 | localhost:47950   | <----->  | :47950                    |
 | (health API)      |  -p      | (FastAPI service)         |
@@ -547,7 +524,7 @@ For container deployments (`--deployment container`), use these commands to mana
 +-------------------+          +---------------------------+
 ```
 
-Both mounts persist across restarts: `agentalloy-data:/app/data` (LadybugDB + DuckDB, a named volume) and `~/.ollama:/root/.ollama` (Ollama model cache + SSH keys, a host bind mount).
+A single volume persists across restarts: `agentalloy-data:/app/data` (LadybugDB + DuckDB, plus the downloaded GGUFs under `/app/data/models`, a named volume). The two `llama-server` instances (embed on 47951, reranker on 47952) run inside the container and are not exposed — only 47950 is published.
 
 ### Health check
 
@@ -563,7 +540,7 @@ Expected response:
 {"status": "healthy", "port": 47950, "corpus_ready": true}
 ```
 
-The container uses a runtime-generated entrypoint script (`/app/entrypoint.sh`) that handles bootstrap: Ollama installation, model pull, migrations, and pack installation. On subsequent starts, the entrypoint skips all bootstrap steps if `.bootstrap-complete` exists.
+The container uses a baked entrypoint script (`/app/entrypoint.sh`) that handles bootstrap: GGUF model download (embed + reranker), starting the two llama-servers, migrations, and pack installation. On subsequent starts, the entrypoint skips the bootstrap-only steps if `.bootstrap-complete` exists (the llama-servers still start every boot — they're long-lived runtime daemons).
 
 ### Uninstall — what it removes
 
@@ -573,13 +550,13 @@ The container uses a runtime-generated entrypoint script (`/app/entrypoint.sh`) 
 
 - **Sentinel-bounded harness blocks** in *every* repo recorded in install-state.json (CLAUDE.md, GEMINI.md, .clinerules, .cursorrules, .cursor/rules/agentalloy.mdc, .opencode/system-prompt.md, .aider.conf.yml, etc.). The cross-repo walk happens before the CLI is removed; pass `--no-all-repos` to limit to cwd. Tampered blocks (sha256 mismatch — the user edited inside the sentinels) are skipped without `--force`.
 - **MCP entries** for `agentalloy` from `~/.claude/mcp_servers.json`, the cwd repo's `.cursor/mcp.json`, and `.continuerc.json`. The files are deleted if `agentalloy` was their only entry.
-- **Native service unit + companion ollama unit** on Linux (`~/.config/systemd/user/agentalloy.service`, `~/.config/systemd/user/ollama.service`, sanitized `agentalloy.env`). On macOS the launchd plist at `~/Library/LaunchAgents/ai.agentalloy.plist`.
+- **Native service units** on Linux: the main `~/.config/systemd/user/agentalloy.service` (sanitized `agentalloy.env`) plus the two llama-server units `agentalloy-embed.service` (47951) and `agentalloy-rerank.service` (47952). On macOS the launchd plists at `~/Library/LaunchAgents/ai.agentalloy.plist`, `ai.agentalloy.embed.plist`, and `ai.agentalloy.rerank.plist`.
 - **Manual-mode agentalloy server** if it's still listening on the configured port (SIGTERM, escalating to SIGKILL after 10s).
 - **User-scope state**: `${XDG_CONFIG_HOME}/agentalloy/.env`, `install-state.json`, the state directory.
 - **Derivable artifacts**: `${XDG_DATA_HOME}/agentalloy/outputs/` (per-step JSON dumps including preflight) and `server.log`.
 - **CLI uninstall**: removes the `agentalloy` CLI from `~/.local/bin` (via `uv tool uninstall` or `pipx uninstall` depending on how it was installed).
 
-**Preserved by default** — the corpus DB (`${XDG_DATA_HOME}/agentalloy/corpus/`) and pulled Ollama models survive a plain `agentalloy uninstall`. Pass `--remove-data` (or pick the `full` preset) to wipe the entire `${XDG_DATA_HOME}/agentalloy/` directory, the model cache (`~/.ollama`), the download cache (`~/.cache/agentalloy`), and any container named volumes.
+**Preserved by default** — the corpus DB (`${XDG_DATA_HOME}/agentalloy/corpus/`) and the downloaded GGUF models (`${XDG_DATA_HOME}/agentalloy/models/`) survive a plain `agentalloy uninstall`. Pass `--remove-data` (or pick the `full` preset) to wipe the entire `${XDG_DATA_HOME}/agentalloy/` directory (corpus + GGUFs), the download cache (`~/.cache/agentalloy`), and any container named volumes.
 
 **Flags**:
 - `--remove-data` — also remove the corpus DB, model cache, and container volumes (default: preserve).
@@ -598,10 +575,10 @@ agentalloy uninstall --preset full --yes
 For container deployments (`--deployment container`), `agentalloy uninstall` also handles teardown:
 
 - Stops and removes the `agentalloy` container and its local image (always).
-- Removes the `agentalloy-data` named volume and the `~/.ollama` model cache **only with `--remove-data` / the `full` preset** — a plain uninstall preserves them.
+- Removes the `agentalloy-data` named volume (which holds the corpus and the downloaded GGUFs under `/app/data/models`) **only with `--remove-data` / the `full` preset** — a plain uninstall preserves it.
 - Cleans up harness wiring and state files (same as the native model).
 
-To keep the corpus and model cache, use the default uninstall (or `--preset keep-data`) — both preserve the named volume and Ollama models while removing wiring and `.env`.
+To keep the corpus and downloaded GGUFs, use the default uninstall (or `--preset keep-data`) — both preserve the named volume while removing wiring and `.env`.
 
 ---
 
@@ -613,7 +590,8 @@ Common stuck-states:
 - The CLI prints a `WARNING: Found legacy per-repo state at <repo>/.agentalloy/install-state.json`. That's a AgentAlloy install from before the v2 user-scope refactor. Either delete the legacy file or `mv` it to the user-scope location (the warning prints the exact command).
 - The CLI exits 3 (schema mismatch). The user has a state file from a different version. Tell them to back it up and re-run install with a fresh state.
 - The CLI exits 4 (already-completed). That step ran successfully before. Read the user-scope state file to see what's done; skip ahead. (`agentalloy status` shows this concisely.)
-- A required external tool (Ollama, LM Studio) is missing. Tell the user the tool's install URL and wait for them to install it manually. Do NOT auto-execute install scripts.
+- A required external tool (`llama-server`) is missing. Tell the user the install URL (https://github.com/ggml-org/llama.cpp, or `brew install llama.cpp` on macOS) and wait for them to install it manually. Do NOT auto-execute install scripts.
 - A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy wire` so the harness config gets the new URL.
-- **Ollama SSH key missing:** You see `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory` when pulling models. Your Ollama instance requires SSH key authentication and the key is absent. **Fix:** follow the SSH-key steps in the prerequisites section (generate at `~/.ollama/id_ed25519`, register the `.pub` on the server).
-- **Container model pull fails with the same SSH key error (container only):** the key exists on the host but the container can't read the mounted `~/.ollama`. **Fix:** ensure the host directory exists (`mkdir -p ~/.ollama && ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`), then `podman restart agentalloy` (the container re-reads the mount on each start).
+- **`llama-server` not on PATH:** Step 5/7 can't find the inference binary. **Fix:** install llama.cpp (`brew install llama.cpp` on macOS, or download/build from https://github.com/ggml-org/llama.cpp), confirm `llama-server --version`, then re-run the step.
+- **GGUF download failed or incomplete:** the embed server won't start because `Qwen3-Embedding-0.6B-Q8_0.gguf` is missing from `${XDG_DATA_HOME}/agentalloy/models/`. **Fix:** re-run `agentalloy pull-models` (downloads resume on retry). For the container, `podman restart agentalloy` so the entrypoint re-fetches any missing GGUF.
+- **Embed/reranker server didn't bind (47951/47952):** the runtime can't reach a llama-server. **Fix:** check `curl -sf http://127.0.0.1:47951/health` and `:47952/health`; inspect `~/.local/share/agentalloy/logs/embed-server.log` (native) or `podman logs -f agentalloy` (container). 47951 down breaks composition; 47952 down only falls the intent gates open to cosine.

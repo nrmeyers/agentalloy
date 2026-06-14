@@ -1,61 +1,52 @@
 # Troubleshooting
 
-## Ollama / Model Issues
+## llama.cpp / Model Issues
 
-### `pull model manifest: open ~/.ollama/id_ed25519: no such file or directory`
+AgentAlloy serves inference with two `llama-server` (llama.cpp) instances: an embed
+server on **47951** (`llama-server --embeddings --port 47951`) and an intent reranker
+server on **47952** (`llama-server --port 47952`, completions mode). The models are
+GGUFs: `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf`.
 
-Your Ollama instance requires SSH key authentication. The agent tried to pull a model
-but couldn't find the SSH key.
+### `llama-server: command not found`
 
-**Fix:**
+The `llama-server` binary is not installed or not on your PATH. Install llama.cpp
+(e.g. `brew install llama.cpp` on macOS, or build/download a release from
+https://github.com/ggml-org/llama.cpp), then verify with `llama-server --version`.
 
-1. Generate a key: `ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""`
-2. Copy the public key to your Ollama server's `~/.ollama/server_user.pub`
-3. Re-run `agentalloy pull-models`
+The container image bundles `llama-server` (copied from
+`ghcr.io/ggml-org/llama.cpp:full`), so this only applies to native installs.
 
-**Local Ollama:** You're setting up the key on the same machine where Ollama runs.
+### GGUF model not downloaded
 
-**Remote Ollama:** If `OLLAMA_HOST` points to a remote instance, the public key
-(`~/.ollama/id_ed25519.pub`) must be registered on that remote server's
-`~/.ollama/server_user.pub`. Contact your Ollama administrator.
+The embed or reranker GGUF is missing from the models directory (native installs
+download it under `~/.local/share/agentalloy/`; the container downloads it into
+`/app/data/models` in the `agentalloy-data` volume on first boot).
 
-### Ollama says "server error: unauthorized"
+**Fix:** Re-run the model download step (`agentalloy pull-models`), or for the
+container, restart it (`podman restart agentalloy`) so the entrypoint re-fetches any
+missing GGUF.
 
-Your SSH public key is registered on the Ollama server but the private key at
-`~/.ollama/id_ed25519` doesn't match. This can happen if you regenerated the key
-or copied the public key from a different machine.
+### Embed/reranker server didn't bind (47951 / 47952)
 
-**Fix:** Generate a new key pair and re-register the public key.
-
-### `ollama: command not found`
-
-Ollama is not installed or not on your PATH. Install it per the prerequisites:
-
-- Linux: `curl -fsSL https://ollama.com/install.sh | sh`
-- macOS: `brew install ollama`
-- Windows: https://ollama.com/download
-
-After installing, verify with `ollama --version`.
-
-### `ollama: could not connect to ollama server`
-
-The Ollama daemon is not running. Start it with:
+The runtime can't reach a `llama-server` instance. Check that the embed server is
+listening on **47951** and the reranker on **47952**:
 
 ```bash
-ollama serve
+curl -sf http://127.0.0.1:47951/health
+curl -sf http://127.0.0.1:47952/health
 ```
 
-Or if running as a service, check its status:
+If 47951 is down, embedding (and therefore composition) fails. If 47952 is down, the
+phase-gate intent classifier simply falls open to cosine — composition still works.
+Check the server log at `~/.local/share/agentalloy/logs/embed-server.log`, or for the
+container, `podman logs -f agentalloy`.
 
-- Linux: `systemctl --user status ollama`
-- macOS: `launchctl list | grep ollama`
-
-### Model pull hangs or takes very long
+### Model download hangs or takes very long
 
 - Check your network connection
-- Use `ollama pull <model>` directly in a terminal to see progress
-- Large models (7B+) can take 10+ minutes on slow connections
-- If truly stuck, press Ctrl+C and retry — Ollama resumes from where it left off
+- The GGUFs download from Hugging Face (`Qwen/Qwen3-Embedding-0.6B-GGUF`,
+  `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF`); a slow connection can take several minutes
+- If truly stuck, cancel and retry — partial downloads resume on re-run
 
 ## Service / API Issues
 
@@ -82,8 +73,10 @@ You need Python 3.12 or later.
 
 ### Embedding server won't start
 
-The embedding server (Ollama, LM Studio, or llama-server) failed to start. Check the
-log at `~/.local/share/agentalloy/logs/embed-server.log`.
+The embed `llama-server` (on 47951) failed to start. Check the
+log at `~/.local/share/agentalloy/logs/embed-server.log`. Common causes: the
+`llama-server` binary is not on PATH, the GGUF was not downloaded, or port 47951 is
+already in use.
 
 ### DuckDB lock conflict
 
