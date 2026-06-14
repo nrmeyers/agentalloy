@@ -408,7 +408,7 @@ def run_doctor() -> dict[str, Any]:
 
     # Resolve embed URL / model from .env (fall back to Settings defaults)
     env = parse_env_file(env_path())
-    base_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:11434")
+    base_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
     model = env.get("RUNTIME_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
 
     checks.append(_check_embed_server(base_url, model))

@@ -12,10 +12,12 @@ native
       - agentalloy-embed.service  — embed llama-server (47951, --embeddings)
       - agentalloy-rerank.service — reranker llama-server (47952, completions)
 
-    macOS: writes a launchd LaunchAgent plist
-    (~/Library/LaunchAgents/ai.agentalloy.plist) and loads it. The
-    embed/reranker llama-server instances are started by setup (launchd
-    registration is a v1.1 follow-up).
+    macOS: writes three launchd LaunchAgent plists and loads them:
+      - ai.agentalloy.plist        — the FastAPI service
+      - ai.agentalloy.embed.plist  — embed llama-server (47951, --embeddings)
+      - ai.agentalloy.rerank.plist — reranker llama-server (47952, completions)
+    All three use RunAtLoad + KeepAlive so they auto-start at login and
+    restart on crash.
 
     Windows: not implemented (v1.1).
 
@@ -375,6 +377,107 @@ def _read_env_file(env_path: Path) -> dict[str, str]:
     return env_vars
 
 
+def _llama_launchd_plist_path(label: str) -> Path:
+    agents_dir = Path.home() / "Library" / "LaunchAgents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    return agents_dir / f"{label}.plist"
+
+
+def _render_llama_launchd_plist(label: str, program_args: list[str]) -> str:
+    """Render a launchd plist for a llama-server instance.
+
+    RunAtLoad + KeepAlive give the embed/reranker servers the same
+    auto-start-and-restart guarantee the systemd units provide on Linux.
+    Logs go to a per-label file under /tmp.
+    """
+    arg_lines = "\n".join(f"    {_xml_str(a)}" for a in program_args)
+    log_path = f"/tmp/{label}.log"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"'
+        ' "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0">\n'
+        "<dict>\n"
+        "  <key>Label</key>\n"
+        f"  {_xml_str(label)}\n"
+        "  <key>ProgramArguments</key>\n"
+        "  <array>\n"
+        f"{arg_lines}\n"
+        "  </array>\n"
+        "  <key>RunAtLoad</key>\n"
+        "  <true/>\n"
+        "  <key>KeepAlive</key>\n"
+        "  <true/>\n"
+        "  <key>StandardOutPath</key>\n"
+        f"  {_xml_str(log_path)}\n"
+        "  <key>StandardErrorPath</key>\n"
+        f"  {_xml_str(log_path)}\n"
+        "</dict>\n"
+        "</plist>\n"
+    )
+
+
+def _write_llama_launchd_agents() -> list[str]:
+    """Write + load LaunchAgent plists for the embed (47951) and reranker (47952)
+    llama-servers — the macOS mirror of ``_write_llama_units``.
+
+    Returns the list of plist paths written (empty if llama-server is absent).
+    Best-effort: skipped gracefully (logged, non-fatal) when llama-server is
+    not on PATH, matching the systemd path.
+    """
+    llama_bin = shutil.which("llama-server")
+    if not llama_bin:
+        logger.warning("llama-server not on PATH; skipping embed/reranker LaunchAgents")
+        return []
+
+    embed_model = _model_path("Qwen3-Embedding-0.6B-Q8_0.gguf")
+    rerank_model = _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")
+
+    written: list[str] = []
+    agents = [
+        # Embed: --embeddings mode on 47951 (matches _render_llama_embed_unit).
+        (
+            "ai.agentalloy.embed",
+            [
+                llama_bin,
+                "--embeddings",
+                "--port",
+                str(_LLAMA_EMBED_PORT),
+                "--ubatch-size",
+                "2048",
+                "-m",
+                str(embed_model),
+            ],
+        ),
+        # Reranker: completions mode on 47952 — NO --embeddings.
+        (
+            "ai.agentalloy.rerank",
+            [llama_bin, "--port", str(_LLAMA_RERANK_PORT), "-m", str(rerank_model)],
+        ),
+    ]
+    for label, program_args in agents:
+        plist_path = _llama_launchd_plist_path(label)
+        content = _render_llama_launchd_plist(label, program_args)
+        install_state._atomic_write(plist_path, content)  # pyright: ignore[reportPrivateUsage]
+        os.chmod(plist_path, 0o600)
+        written.append(str(plist_path))
+        # Unload first for idempotent re-runs, then load.
+        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        result = subprocess.run(
+            ["launchctl", "load", "-w", str(plist_path)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "%s load failed (rc=%d): %s",
+                label,
+                result.returncode,
+                (result.stderr or "").strip(),
+            )
+    return written
+
+
 def _enable_native_macos(
     uv_bin: str,
     repo_root: Path,
@@ -391,18 +494,14 @@ def _enable_native_macos(
     subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
     subprocess.run(["launchctl", "load", "-w", str(plist_path)], check=True)
 
-    # The embed (47951) and reranker (47952) llama-server instances are started
-    # by the setup pipeline; launchd management of them is a v1.1 follow-up.
-    print(
-        "NOTE: On macOS the embed/reranker llama-server instances are started "
-        "by setup but not yet registered with launchd — re-run `agentalloy "
-        "setup` after a reboot, or start them manually.",
-        file=sys.stderr,
-    )
+    # Register the embed (47951) and reranker (47952) llama-servers as
+    # LaunchAgents so they auto-start at login and restart on crash — the
+    # macOS mirror of the systemd units written on Linux.
+    llama_agents = _write_llama_launchd_agents()
 
     return {
         "unit_path": str(plist_path),
-        "llama_units_written": [],
+        "llama_units_written": llama_agents,
         "ollama_unit_written": False,
     }
 

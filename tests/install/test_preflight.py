@@ -10,6 +10,7 @@ import pytest
 
 from agentalloy.install.subcommands.preflight import (
     _check_llama_server_present,  # pyright: ignore[reportPrivateUsage]
+    _check_llama_server_reachable,  # pyright: ignore[reportPrivateUsage]
     _check_ollama_present,  # pyright: ignore[reportPrivateUsage]
     _try_brew_install,  # pyright: ignore[reportPrivateUsage]
 )
@@ -187,6 +188,64 @@ class TestBrewAutoInstall:
             result = _check_llama_server_present()
         assert result["passed"] is False
         assert "succeeded but `llama-server` is still not on PATH" in result["error"]
+
+
+class TestLlamaServerReachable:
+    """``_check_llama_server_reachable`` probes the embed server's /health.
+
+    llama-server has no ``/api/tags`` (that's Ollama) — the readiness check
+    must hit ``/health`` on the configured embed base URL (default 47951).
+    """
+
+    def test_targets_health_on_default_embed_port(self):
+        """No RUNTIME_EMBED_BASE_URL in env → defaults to localhost:47951/health."""
+        captured: dict[str, Any] = {}
+
+        class _Resp:
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *a):  # type: ignore[no-untyped-def]
+                return False
+
+            def read(self, _n=None):  # type: ignore[no-untyped-def]
+                return b"o"
+
+        def fake_urlopen(req, **kwargs):  # type: ignore[no-untyped-def]
+            captured["url"] = req.full_url
+            return _Resp()
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight.install_state.parse_env_file",
+                return_value={},
+            ),
+            patch("agentalloy.install.subcommands.preflight.urlopen", side_effect=fake_urlopen),
+        ):
+            result = _check_llama_server_reachable()
+        assert result["passed"] is True
+        assert captured["url"] == "http://localhost:47951/health"
+
+    def test_honors_runtime_embed_base_url(self):
+        captured: dict[str, Any] = {}
+
+        def fake_urlopen(req, **kwargs):  # type: ignore[no-untyped-def]
+            captured["url"] = req.full_url
+            raise OSError("connection refused")
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight.install_state.parse_env_file",
+                return_value={"RUNTIME_EMBED_BASE_URL": "http://localhost:9999"},
+            ),
+            patch("agentalloy.install.subcommands.preflight.urlopen", side_effect=fake_urlopen),
+        ):
+            result = _check_llama_server_reachable()
+        assert result["passed"] is False
+        assert captured["url"] == "http://localhost:9999/health"
+        # Remediation references llama-server, not Ollama.
+        assert "llama-server" in result["remediation"]
+        assert "api/tags" not in result["remediation"]
 
 
 # ---------------------------------------------------------------------------

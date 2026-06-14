@@ -1,16 +1,12 @@
 """``pull-models`` subcommand.
 
-Idempotent model pulls for the runners selected by ``recommend-models``.
-
-Auto-pull runners (``ollama``, ``fastflowlm``): invokes the CLI pull
-command and reports duration + size.
-
-Manual-pull runners (``lmstudio``, ``vllm``, ``mlx``): emits human-readable
-instructions for the runbook to surface.  No subprocess call.
+Idempotent model provisioning for llama-server (llama.cpp), the sole
+inference runner. Builds ``llama-server`` from source when it's not on
+PATH, then downloads the required GGUF weights from Hugging Face into the
+persistent models dir.
 
 Reads the ``recommend-models`` JSON output (either from a file path or
-from ``install-state.json``) to determine which models and runners to
-pull.
+from ``install-state.json``) to determine which models to provision.
 """
 
 from __future__ import annotations
@@ -29,358 +25,15 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
-from agentalloy.install.output import add_json_flag, print_rich, print_rich_stderr, write_result
+from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 SCHEMA_VERSION = 1
 STEP_NAME = "pull-models"
-
-# Runners that support CLI-driven auto-pull.
-_AUTO_PULL_RUNNERS: dict[str, tuple[str, list[str]]] = {
-    # runner_name -> (binary, [pull, <model> is appended])
-    "ollama": ("ollama", ["pull"]),
-    "fastflowlm": ("flm", ["pull"]),
-}
-
-# Manual-pull runners with instruction templates.
-_MANUAL_INSTRUCTIONS: dict[str, str] = {
-    "lmstudio": ("Open LM Studio, search for '{model}', click Download. Confirm when complete."),
-    "vllm": (
-        "vLLM loads models on `vllm serve`. Ensure '{model}' is "
-        "accessible (Hugging Face login if gated). No explicit pull needed."
-    ),
-    "mlx": (
-        "Run `mlx_lm.convert --hf-path {model}` to convert for MLX, "
-        "or download the MLX-format weights from Hugging Face."
-    ),
-}
-
-
-# Ollama default daemon port for the main API. The embed endpoint lives on
-# a separate port (RUNTIME_EMBED_BASE_URL, typically 11436). For `ollama
-# pull` we only need the main API.
-_OLLAMA_HOST = "127.0.0.1"
-_OLLAMA_PORT = 11434
-
-# SSH key error patterns — matches the Ollama error:
-#   pull model manifest: open /home/user/.ollama/id_ed25519: no such file or directory
-_SSH_KEY_ERROR_PATTERNS = [
-    "id_ed25519",
-    "no such file",
-    "open",
-]
-
-
-def _ollama_requires_auth() -> bool:
-    """Check if Ollama appears to require SSH authentication.
-
-    Heuristic: run ``ollama list`` and check whether the stderr
-    contains auth-related keywords. Returns False if we can't
-    determine (daemon not running, binary missing, etc.).
-    """
-    binary = shutil.which("ollama")
-    if not binary:
-        return False
-    try:
-        result = subprocess.run(
-            [binary, "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.lower()
-            return any(
-                term in stderr
-                for term in [
-                    "id_ed25519",
-                    "ssh",
-                    "auth",
-                    "unauthorized",
-                    "permission denied",
-                ]
-            )
-    except (subprocess.TimeoutExpired, OSError):
-        pass
-    return False
-
-
-def _is_remote_ollama() -> bool:
-    """Return True if OLLAMA_HOST points to a non-localhost address.
-
-    Handles common formats:
-      - bare host: ``127.0.0.1``, ``localhost``, ``192.168.1.100``
-      - with port: ``127.0.0.1:11434``, ``localhost:11434``
-      - with protocol: ``http://127.0.0.1:11434``, ``https://remote.example.com``
-    """
-    host = os.environ.get("OLLAMA_HOST", "")
-    if not host:
-        return False
-    # Strip protocol prefix (http://, https://, etc.)
-    cleaned = host.strip().strip("/")
-    if "://" in cleaned:
-        cleaned = cleaned.split("://", 1)[1]
-    # Remove port suffix for the host check
-    host_only = cleaned.split(":")[0]
-    return host_only not in ("127.0.0.1", "localhost", "0.0.0.0", "")
-
-
-def _ssh_key_error_hint(stderr: str) -> str | None:
-    """Detect the SSH key error and return actionable guidance, or None.
-
-    Requires ALL patterns to match so we don't flag unrelated errors
-    that happen to contain one of the keywords (e.g. a file-not-found
-    error mentioning "open").
-    """
-    if not all(p in stderr.lower() for p in _SSH_KEY_ERROR_PATTERNS):
-        return None
-
-    hint_lines = [
-        "Ollama requires SSH key authentication but the key file "
-        "(~/.ollama/id_ed25519) is missing.",
-        "",
-        "Fix:",
-        '  1. Generate a key: ssh-keygen -t ed25519 -f ~/.ollama/id_ed25519 -N ""',
-        "  2. Register the public key on your Ollama server:",
-        "     cat ~/.ollama/id_ed25519.pub >> ~/.ollama/server_user.pub",
-        "  3. Re-run pull-models.",
-    ]
-
-    if _is_remote_ollama():
-        hint_lines.append("")
-        hint_lines.append(
-            "Remote Ollama: the public key must be registered on the remote "
-            "server's ~/.ollama/server_user.pub. Contact your Ollama administrator."
-        )
-    else:
-        hint_lines.append("")
-        hint_lines.append(
-            "If your Ollama instance does NOT require auth, check that it's "
-            "running correctly (ollama list)."
-        )
-
-    return "\n".join(hint_lines)
-
-
-def _generate_ollama_ssh_key() -> tuple[bool, str | None]:
-    """Generate an Ollama SSH key at ~/.ollama/id_ed25519.
-
-    Returns (ok, error_message). If ok is True, the key was generated
-    and the public key is at ~/.ollama/id_ed25519.pub.
-    """
-    ollama_dir = Path.home() / ".ollama"
-    key_path = ollama_dir / "id_ed25519"
-    pub_path = ollama_dir / "id_ed25519.pub"
-
-    # Idempotent: if key already exists, nothing to do.
-    if key_path.exists() and pub_path.exists():
-        return True, None
-
-    ollama_dir.mkdir(parents=True, exist_ok=True)
-
-    keygen = shutil.which("ssh-keygen")
-    if not keygen:
-        return False, "ssh-keygen not found on PATH — cannot generate SSH key."
-
-    try:
-        result = subprocess.run(
-            [keygen, "-t", "ed25519", "-f", str(key_path), "-N", "", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return (
-                False,
-                result.stderr.strip() or f"ssh-keygen exited with code {result.returncode}",
-            )
-        return True, None
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return False, str(exc)
-
-
-def _register_ollama_ssh_key() -> tuple[bool, str | None]:
-    """Register the Ollama SSH public key with the local Ollama server.
-
-    Appends ~/.ollama/id_ed25519.pub to ~/.ollama/server_user.pub.
-    Returns (ok, error_message).
-
-    Uses atomic temp-write + os.replace to prevent partial writes.
-    """
-    pub_path = Path.home() / ".ollama" / "id_ed25519.pub"
-    server_pub = Path.home() / ".ollama" / "server_user.pub"
-
-    if not pub_path.exists():
-        return False, f"Public key not found at {pub_path}. Generate a key first."
-
-    # Read the public key content once to avoid triple-read TOCTOU.
-    try:
-        pub_content = pub_path.read_text().strip()
-    except OSError as exc:
-        return False, f"Failed to read public key: {exc}"
-
-    if not pub_content:
-        return False, "Public key file is empty."
-
-    try:
-        # Read existing content once.
-        existing = ""
-        if server_pub.exists():
-            try:
-                existing = server_pub.read_text()
-            except OSError:
-                existing = ""
-
-        # Idempotent: skip if already registered.
-        if pub_content in existing:
-            return True, None
-
-        # Write new content atomically via temp file + os.replace.
-        combined = existing.rstrip("\n") + "\n" + pub_content if existing.strip() else pub_content
-        tmp_path = server_pub.with_suffix(".pub.tmp")
-        tmp_path.write_text(combined)
-        os.replace(tmp_path, server_pub)
-        return True, None
-    except OSError as exc:
-        return False, f"Failed to register key: {exc}"
-
-
-def _ollama_daemon_running(timeout: float = 1.0) -> bool:
-    """Return True if the Ollama API is reachable on the default port.
-
-    Cheap probe — opens a TCP socket and closes it. Used before
-    ``ollama pull`` so we can auto-start the daemon when it's down
-    instead of letting the pull fail with the cryptic ``could not
-    connect to ollama server`` message.
-    """
-    import socket as _socket
-
-    try:
-        with _socket.create_connection((_OLLAMA_HOST, _OLLAMA_PORT), timeout=timeout):
-            return True
-    except (OSError, TimeoutError):
-        return False
-
-
-def _ensure_ollama_running() -> tuple[bool, str | None]:
-    """Probe the Ollama daemon; spawn ``ollama serve`` if down.
-
-    Returns ``(ok, error)``. ``ok`` is True when the daemon is reachable
-    after this call (already-running or just-spawned). ``error`` is a
-    human-readable message when ``ok`` is False — e.g. ``ollama`` binary
-    not on PATH, or the daemon didn't come up within the deadline.
-
-    Mirrors ``start_embed_server._start_ollama`` so behavior is
-    consistent across the install pipeline. The status line on spawn
-    is always printed (a single line per install run) — pull_models'
-    ``quiet`` mode applies to the structured JSON output, not transient
-    progress notes.
-    """
-    if _ollama_daemon_running():
-        return True, None
-
-    binary = shutil.which("ollama")
-    if not binary:
-        return False, (
-            "ollama binary not found in PATH. Install Ollama from "
-            "https://ollama.com/download and re-run setup."
-        )
-
-    print("  ollama daemon not running; starting it now ...", file=sys.stderr)
-
-    # Spawn `ollama serve` detached so it survives this process. ollama is
-    # already-running-tolerant — a second `serve` just exits.
-    log_path = install_state.user_data_dir() / "logs" / "ollama.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with log_path.open("ab") as log_fh:
-            proc = subprocess.Popen(  # noqa: S603 — binary path is from shutil.which
-                [binary, "serve"],
-                stdout=log_fh,
-                stderr=log_fh,
-                start_new_session=True,
-            )
-    except OSError as exc:
-        return False, f"failed to spawn `ollama serve`: {exc}"
-
-    # Record the spawned PID so `uninstall` can stop *this* ollama process
-    # (instead of `pkill -f` killing any ollama the user has running for
-    # other apps). Best-effort: a state-write failure must not block install.
-    try:
-        _st = install_state.load_state()
-        _st["spawned_ollama_pid"] = proc.pid
-        install_state.save_state(_st)
-    except Exception:  # noqa: BLE001
-        pass
-
-    # Wait for the daemon to come up. 15s is generous for a local
-    # spawn (ollama typically binds in under a second).
-    deadline = time.monotonic() + 15.0
-    while time.monotonic() < deadline:
-        if _ollama_daemon_running():
-            return True, None
-        time.sleep(0.5)
-
-    return False, (
-        f"ollama daemon did not come up within 15s. "
-        f"Check {log_path} for startup errors, or run `ollama serve` manually."
-    )
 
 
 # ---------------------------------------------------------------------------
 # Runner presence checks
 # ---------------------------------------------------------------------------
-
-
-def _is_model_present_ollama(model: str) -> bool:
-    """Check if a model is already pulled in Ollama."""
-    binary = shutil.which("ollama")
-    if not binary:
-        return False
-    try:
-        result = subprocess.run(
-            [binary, "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return False
-        # ollama list output: NAME  ID  SIZE  MODIFIED
-        # Model names may include tags; match on the name prefix.
-        for line in result.stdout.splitlines()[1:]:  # skip header
-            name = line.split()[0] if line.strip() else ""
-            # Exact match or match without :latest tag
-            if name == model or name == f"{model}:latest":
-                return True
-            # Also match if model has a tag and the listed name matches
-            if ":" in model and name.startswith(model.split(":")[0]):
-                listed_tag = name.split(":")[-1] if ":" in name else "latest"
-                requested_tag = model.split(":")[-1]
-                if listed_tag == requested_tag:
-                    return True
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return False
-
-
-def _is_model_present_fastflowlm(model: str) -> bool:
-    """Check if a model is loaded in FastFlowLM."""
-    binary = shutil.which("flm")
-    if not binary:
-        return False
-    try:
-        result = subprocess.run(
-            [binary, "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return False
-        return model in result.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    return False
 
 
 def _is_model_present_llama_server(model: str) -> bool:
@@ -390,8 +43,6 @@ def _is_model_present_llama_server(model: str) -> bool:
 
 
 _PRESENCE_CHECKS: dict[str, Any] = {
-    "ollama": _is_model_present_ollama,
-    "fastflowlm": _is_model_present_fastflowlm,
     "llama-server": _is_model_present_llama_server,
 }
 
@@ -762,200 +413,10 @@ def _collect_model_runner_pairs(option: dict[str, Any]) -> list[tuple[str, str]]
 
 
 # Strict model-name pattern. Allowed characters cover the canonical
-# `name:tag` form used by ollama/fastflowlm (letters, digits, `_`, `-`,
-# `.`, `:`, `/` for org/repo namespaces). Rejects anything that could
-# look like a CLI option (leading `-`) or carry shell metacharacters
-# even though we run with shell=False — option-injection (e.g. model
-# name `--insecure-tls`) is still effective via argv.
+# `name:tag` form (letters, digits, `_`, `-`, `.`, `:`, `/` for org/repo
+# namespaces). Rejects anything that could look like a CLI option (leading
+# `-`) or carry shell metacharacters.
 _MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/\-]{0,127}$")
-
-
-def _auto_pull(runner: str, model: str) -> dict[str, Any]:
-    """Run the pull command for an auto-pull runner. Returns result dict."""
-    binary_name, pull_args = _AUTO_PULL_RUNNERS[runner]
-    if not _MODEL_NAME_RE.match(model):
-        return {
-            "runner": runner,
-            "model": model,
-            "success": False,
-            "error": f"Refusing to pull model name with disallowed characters: {model!r}",
-            "hint": "Model names must match [A-Za-z0-9][A-Za-z0-9._:/-]{0,127}.",
-        }
-    binary = shutil.which(binary_name)
-    if not binary:
-        hint = f"Install {binary_name} first."
-        if runner == "ollama":
-            hint = (
-                "Install Ollama first (do NOT auto-execute — ask the user). "
-                "Linux: `curl -fsSL https://ollama.com/install.sh | sh`. "
-                "macOS: `brew install ollama` or https://ollama.com/download/mac. "
-                "Other platforms: https://ollama.com/download. "
-                "After install, ensure `ollama serve` is running, then re-run pull-models."
-            )
-        return {
-            "runner": runner,
-            "model": model,
-            "success": False,
-            "error": f"{binary_name} not found in PATH",
-            "hint": hint,
-        }
-
-    # Ollama needs its daemon running for `pull`. If down, start it
-    # automatically — otherwise the pull dies with a cryptic
-    # "could not connect to ollama server" that masks a fixable state.
-    if runner == "ollama":
-        ok, err = _ensure_ollama_running()
-        if not ok:
-            return {
-                "runner": runner,
-                "model": model,
-                "success": False,
-                "error": err or "ollama daemon unavailable",
-                "hint": "Start `ollama serve` manually and re-run pull-models.",
-            }
-
-        # Pre-flight: warn if Ollama appears to require SSH auth.
-        if _ollama_requires_auth():
-            print(
-                "  WARNING: Ollama appears to require SSH key authentication. "
-                "The pull may fail if the key is not configured.",
-                file=sys.stderr,
-            )
-
-    # `--` separator prevents argv option-injection if model name slipped
-    # through the regex (defense in depth) or future regex relaxations
-    # admit a leading-`-` form.
-    cmd = [binary, *pull_args, "--", model]
-    t0 = time.monotonic()
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,  # 10 min for large model downloads
-        )
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        if result.returncode != 0:
-            hint = None
-            stderr = result.stderr or ""
-            if runner == "ollama":
-                hint = _ssh_key_error_hint(stderr)
-                # Auto-fix: generate key, ask to register, retry pull.
-                # Only for local Ollama instances (remote needs admin action).
-                if hint and not _is_remote_ollama() and sys.stdin.isatty():
-                    print_rich_stderr(
-                        "\n  [yellow]SSH key error detected — attempting automatic fix...[/yellow]"
-                    )
-                    key_ok, key_err = _generate_ollama_ssh_key()
-                    if not key_ok:
-                        print_rich_stderr(f"  [red]Key generation failed: {key_err}[/red]")
-                        return {
-                            "runner": runner,
-                            "model": model,
-                            "success": False,
-                            "error": result.stderr.strip() or f"exit code {result.returncode}",
-                            "duration_ms": duration_ms,
-                            "hint": hint,
-                        }
-                    print_rich_stderr("  [green]SSH key generated at ~/.ollama/id_ed25519[/green]")
-
-                    # Ask user for permission to register.
-                    ans = (
-                        input("  Register this key with the Ollama server? [y/N]: ").strip().lower()
-                    )
-                    if ans not in ("y", "yes"):
-                        print_rich_stderr(
-                            "  [dim]Registration skipped. The pull will fail until "
-                            "the key is registered manually.[/dim]"
-                        )
-                        return {
-                            "runner": runner,
-                            "model": model,
-                            "success": False,
-                            "error": result.stderr.strip() or f"exit code {result.returncode}",
-                            "duration_ms": duration_ms,
-                            "hint": hint,
-                        }
-
-                    reg_ok, reg_err = _register_ollama_ssh_key()
-                    if not reg_ok:
-                        print_rich_stderr(f"  [red]Registration failed: {reg_err}[/red]")
-                        return {
-                            "runner": runner,
-                            "model": model,
-                            "success": False,
-                            "error": result.stderr.strip() or f"exit code {result.returncode}",
-                            "duration_ms": duration_ms,
-                            "hint": hint,
-                        }
-                    print_rich_stderr("  [green]Key registered. Retrying pull...[/green]")
-
-                    # Retry the pull.
-                    retry_t0 = time.monotonic()
-                    retry_duration_ms = 0
-                    try:
-                        retry_result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=600,
-                        )
-                        retry_duration_ms = int((time.monotonic() - retry_t0) * 1000)
-                        if retry_result.returncode != 0:
-                            return {
-                                "runner": runner,
-                                "model": model,
-                                "success": False,
-                                "error": retry_result.stderr.strip()
-                                or f"exit code {retry_result.returncode}",
-                                "duration_ms": retry_duration_ms,
-                                "hint": hint,
-                            }
-                        return {
-                            "runner": runner,
-                            "model": model,
-                            "success": True,
-                            "duration_ms": retry_duration_ms,
-                            "ssh_key_auto_fixed": True,
-                        }
-                    except subprocess.TimeoutExpired:
-                        retry_duration_ms = int((time.monotonic() - retry_t0) * 1000)
-                        return {
-                            "runner": runner,
-                            "model": model,
-                            "success": False,
-                            "error": "Pull timed out after key registration",
-                            "duration_ms": retry_duration_ms,
-                            "hint": hint,
-                        }
-            return {
-                "runner": runner,
-                "model": model,
-                "success": False,
-                "error": result.stderr.strip() or f"exit code {result.returncode}",
-                "duration_ms": duration_ms,
-                "hint": hint,
-            }
-        return {
-            "runner": runner,
-            "model": model,
-            "success": True,
-            "duration_ms": duration_ms,
-        }
-    except subprocess.TimeoutExpired:
-        return {
-            "runner": runner,
-            "model": model,
-            "success": False,
-            "error": "Pull timed out after 600 seconds",
-        }
-    except OSError as exc:
-        return {
-            "runner": runner,
-            "model": model,
-            "success": False,
-            "error": str(exc),
-        }
 
 
 def pull_models(
@@ -1039,27 +500,6 @@ def pull_models(
             ls_pulled, ls_errors = _handle_llama_server(model, interactive)
             auto_pulled.extend(ls_pulled)
             errors.extend(ls_errors)
-        elif runner in _AUTO_PULL_RUNNERS:
-            result = _auto_pull(runner, model)
-            if result.get("success"):
-                entry: dict[str, Any] = {
-                    "runner": runner,
-                    "model": model,
-                    "duration_ms": result.get("duration_ms", 0),
-                }
-                if result.get("ssh_key_auto_fixed"):
-                    entry["ssh_key_auto_fixed"] = True
-                auto_pulled.append(entry)
-            else:
-                errors.append(result)
-        elif runner in _MANUAL_INSTRUCTIONS:
-            manual_steps.append(
-                {
-                    "runner": runner,
-                    "model": model,
-                    "instruction": _MANUAL_INSTRUCTIONS[runner].format(model=model),
-                }
-            )
         else:
             print(f"WARNING: Unknown runner '{runner}' for model '{model}'", file=sys.stderr)
             manual_steps.append(
@@ -1126,7 +566,7 @@ def add_parser(
         default=None,
         help=(
             "Override the runner selected by recommend-models "
-            "(e.g. ollama, llama-server). Use when the agent captured "
+            "(e.g. llama-server). Use when the agent captured "
             "the user's choice after recommend-models ran non-interactively."
         ),
     )
@@ -1146,10 +586,7 @@ def _render_human(result: dict[str, Any]) -> None:
     if auto_pulled:
         print_rich("  [green]Pulled:[/green]")
         for p in auto_pulled:
-            line = f"    {p.get('runner', '?')}:{p.get('model', '?')}"
-            if p.get("ssh_key_auto_fixed"):
-                line += " [dim](SSH key auto-generated & registered)[/dim]"
-            print_rich(line)
+            print_rich(f"    {p.get('runner', '?')}:{p.get('model', '?')}")
 
     if skipped:
         print_rich("  [dim]Already present:[/dim]")
