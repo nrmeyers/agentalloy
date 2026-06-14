@@ -369,7 +369,7 @@ def test_evaluate_phase_lm_client_constructed_from_embed_url(
             sys.stderr = sys.__stderr__
 
     assert len(constructed_urls) == 1
-    assert "11434" in constructed_urls[0] or "localhost" in constructed_urls[0]
+    assert "47951" in constructed_urls[0] or "localhost" in constructed_urls[0]
 
 
 # ---------------------------------------------------------------------------

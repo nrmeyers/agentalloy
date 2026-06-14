@@ -69,7 +69,7 @@ class Settings(BaseSettings):
 
     # Runtime serving (retrieve / compose). The runtime path holds zero
     # generative LLM dependency — only an embedding service.
-    runtime_embed_base_url: str = "http://localhost:11434"
+    runtime_embed_base_url: str = "http://localhost:47951"
     runtime_embedding_model: str = "qwen3-embedding:0.6b"
     embedding_provider: str = "openai_compat"
     dedup_hard_threshold: float = 0.92
