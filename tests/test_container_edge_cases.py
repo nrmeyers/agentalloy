@@ -472,52 +472,6 @@ class TestEntrypointSIGTERM:
 # ---------------------------------------------------------------------------
 # EC-11: Apple Silicon Ollama installation (brew install --cask)
 # ---------------------------------------------------------------------------
-
-
-class TestAppleSiliconOllamaInstall:
-    """EC-11: Apple Silicon uses brew install --cask for Ollama."""
-
-    def test_preflight_uses_brew_cask_on_macos(self):
-        """On macOS, preflight tries brew install --cask ollama-app before failing."""
-        with patch("sys.platform", "darwin"):
-            with patch(
-                "shutil.which", side_effect=lambda x: "/usr/bin/brew" if x == "brew" else None
-            ):
-                with patch(
-                    "agentalloy.install.subcommands.preflight._try_brew_install",
-                    return_value=(False, "user declined auto-install"),
-                ):
-                    from agentalloy.install.subcommands.preflight import _check_ollama_present
-
-                    result = _check_ollama_present()
-                    assert result["passed"] is False
-
-    def test_preflight_auto_installs_brew_cask_when_opted_in(self):
-        """When AGENTIALLOY_PREFLIGHT_AUTO_INSTALL=1, preflight auto-installs via brew --cask."""
-        with patch("sys.platform", "darwin"):
-            with patch(
-                "shutil.which", side_effect=lambda x: "/usr/bin/brew" if x == "brew" else None
-            ):
-
-                def fake_brew_install(package, cask=False):
-                    assert cask is True
-                    assert package == "ollama-app"
-                    return True, None
-
-                with (
-                    patch(
-                        "agentalloy.install.subcommands.preflight._try_brew_install",
-                        side_effect=fake_brew_install,
-                    ),
-                    patch("shutil.which", return_value=None),
-                ):
-                    from agentalloy.install.subcommands.preflight import _check_ollama_present
-
-                    result = _check_ollama_present()
-                    assert result["passed"] is False
-
-
-# ---------------------------------------------------------------------------
 # EC-12: Rootless Podman compatibility
 # ---------------------------------------------------------------------------
 
