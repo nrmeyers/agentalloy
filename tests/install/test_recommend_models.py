@@ -121,7 +121,7 @@ class TestRecommendModels:
         assert "ingest_model" not in opt
         assert "ingest_runner" not in opt
 
-    def test_all_presets_use_qwen3_embedding(self) -> None:
+    def test_all_presets_use_qwen3_embedding_gguf(self) -> None:
         for hw_fn, host in [
             (_hw(), "CPU+RAM"),
             (_hw(os_kind="macos", arch="arm64"), "iGPU"),
@@ -136,22 +136,30 @@ class TestRecommendModels:
         ]:
             result = recommend_models(hw_fn, host)
             opt = result["options"][0]
-            assert opt["embed_model"] == "qwen3-embedding:0.6b"
+            # llama-server is the sole runner; the embed GGUF is uniform.
+            assert opt["embed_model"] == "Qwen3-Embedding-0.6B-Q8_0.gguf"
+            assert opt["embed_runner"] == "llama-server"
 
-    def test_radeon_uses_lm_studio_runner(self) -> None:
+    def test_every_option_carries_reranker(self) -> None:
+        result = recommend_models(_hw(), "CPU+RAM")
+        opt = result["options"][0]
+        assert opt["rerank_model"] == "Qwen3-Reranker-0.6B-Q8_0.gguf"
+        assert opt["rerank_runner"] == "llama-server"
+
+    def test_radeon_uses_llama_server_runner(self) -> None:
         hw = _hw(
             cpu_vendor="amd",
             discrete_gpus=[{"vendor": "amd", "model": "RX 7900 XTX", "vram_gb": 24}],
         )
         result = recommend_models(hw, "dGPU")
         assert result["preset"] == "radeon"
-        assert result["options"][0]["embed_runner"] == "lm-studio"
+        assert result["options"][0]["embed_runner"] == "llama-server"
 
-    def test_amd_igpu_resolves_radeon_with_lm_studio(self) -> None:
+    def test_amd_igpu_resolves_radeon_with_llama_server(self) -> None:
         hw = _hw(cpu_vendor="amd")
         result = recommend_models(hw, "iGPU")
         assert result["preset"] == "radeon"
-        assert result["options"][0]["embed_runner"] == "lm-studio"
+        assert result["options"][0]["embed_runner"] == "llama-server"
 
     def test_apple_silicon_preset(self) -> None:
         hw = _hw(os_kind="macos", arch="arm64")

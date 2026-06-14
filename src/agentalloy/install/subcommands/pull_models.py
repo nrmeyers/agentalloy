@@ -404,12 +404,20 @@ _PRESENCE_CHECKS: dict[str, Any] = {
 _LLAMA_CPP_BUILD_ROOT = install_state.user_data_dir() / "build" / "llama.cpp"
 _LLAMA_SERVER_BIN_DIR = Path.home() / ".local" / "bin"
 
-# Hugging Face GGUF download map: model filename → raw download URL.
-# HF repo: https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF
+# Hugging Face GGUF download map: local model filename → raw download URL.
+# The local filename (the dict key) is the canonical name we save to
+# <data>/models/; the remote filename in the URL may differ in case/separators.
+# Embed: Qwen official GGUF. Reranker: ggml-org (the llama.cpp org) Q8_0 build —
+# verified 2026-06-14 (639,153,184 bytes). No Unsloth GGUF exists for the
+# 0.6B reranker.
 _GGUF_URL_MAP: dict[str, str] = {
     "Qwen3-Embedding-0.6B-Q8_0.gguf": (
         "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF"
         "/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
+    ),
+    "Qwen3-Reranker-0.6B-Q8_0.gguf": (
+        "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF"
+        "/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"
     ),
 }
 
@@ -729,12 +737,28 @@ def _handle_llama_server(
 
 
 def _collect_model_runner_pairs(option: dict[str, Any]) -> list[tuple[str, str]]:
-    """Extract the (model, runner) pair from a recommend-models option."""
-    model = option.get("embed_model", "")
-    runner = option.get("embed_runner", "")
-    if model and runner:
-        return [(model, runner)]
-    return []
+    """Extract the (model, runner) pairs from a recommend-models option.
+
+    Always yields the embed pair. When the option also carries a
+    ``rerank_model`` (+ ``rerank_runner``, defaulting to the embed runner),
+    the reranker pair is appended so the install pulls BOTH GGUFs in a single
+    pass. Duplicate pairs are collapsed.
+    """
+    pairs: list[tuple[str, str]] = []
+
+    embed_model = option.get("embed_model", "")
+    embed_runner = option.get("embed_runner", "")
+    if embed_model and embed_runner:
+        pairs.append((embed_model, embed_runner))
+
+    rerank_model = option.get("rerank_model", "")
+    rerank_runner = option.get("rerank_runner") or embed_runner
+    if rerank_model and rerank_runner:
+        pair = (rerank_model, rerank_runner)
+        if pair not in pairs:
+            pairs.append(pair)
+
+    return pairs
 
 
 # Strict model-name pattern. Allowed characters cover the canonical

@@ -4,7 +4,8 @@
     agentalloy setup          # interactive: questions -> execution -> validation
 
 The command:
-1. **Asks questions** -- prompts the user for runner, model, port, service mode, packs, harness
+1. **Asks questions** -- prompts the user for model, port, service mode, packs, harness
+   (llama-server is the sole inference runner, so there is no runner prompt)
 2. **Executes** -- runs all install steps with the gathered config
 3. **Validates** -- confirms embedder is listening, corpus is healthy, harness is wired
 
@@ -36,6 +37,7 @@ from agentalloy.install.subcommands import (
     pull_models,
     seed_corpus,
     start_embed_server,
+    start_rerank_server,
     verify,
     wire_harness,
     write_env,
@@ -222,11 +224,10 @@ class SetupConfig:
     models_output: dict[str, Any] = field(default_factory=dict)  # type: ignore[type-arg]
 
 
-_MODEL_DEFAULTS: dict[str, str] = {
-    "ollama": "qwen3-embedding:0.6b",
-    "lm-studio": "Qwen3-Embedding-0.6B-Q8_0.gguf",
-    "llama-server": "Qwen3-Embedding-0.6B-Q8_0.gguf",
-}
+# llama-server (llama.cpp) is the sole inference runner. The embed GGUF is the
+# only model the wizard prompts for; the reranker GGUF is fixed.
+_DEFAULT_EMBED_MODEL = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+_RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 # Human-readable labels for hardware targets
 _HW_LABELS: dict[str, str] = {
@@ -236,40 +237,24 @@ _HW_LABELS: dict[str, str] = {
     "apple-silicon": "Apple Silicon (Metal)",
 }
 
-
-# Map (runner, hardware_target) -> write_env preset name.
-_PRESET_MAP: dict[tuple[str, str], str] = {
-    ("ollama", "cpu"): "cpu",
-    ("ollama", "apple-silicon"): "apple-silicon",
-    ("ollama", "nvidia"): "nvidia",
-    ("ollama", "radeon"): "radeon",
-    ("lm-studio", "cpu"): "cpu-lm-studio",
-    ("lm-studio", "apple-silicon"): "apple-silicon-lm-studio",
-    ("lm-studio", "nvidia"): "nvidia-lm-studio",
-    ("lm-studio", "radeon"): "radeon-lm-studio",
-    ("llama-server", "cpu"): "cpu-llama-server",
-    ("llama-server", "apple-silicon"): "apple-silicon-llama-server",
-    ("llama-server", "nvidia"): "nvidia-llama-server",
-    ("llama-server", "radeon"): "radeon-llama-server",
-}
+# Preset name == hardware target (presets are named by hardware only; the
+# hardware difference is handled via -ngl at server start, not preset env).
+_VALID_PRESETS = frozenset(_HW_LABELS)
 
 
 def _resolve_preset(cfg: SetupConfig) -> str:
-    """Resolve the write-env preset from runner + hardware target.
+    """Resolve the write-env preset from the hardware target.
 
-    Uses the user's explicit hardware_target if set, otherwise falls back to
-    the auto-detected recommended_host. Falls back to "cpu" if the combination
-    is unknown.
+    Preset names are hardware targets (cpu / nvidia / radeon / apple-silicon).
+    Uses the user's explicit hardware_target if set, otherwise the auto-detected
+    recommended_host. Falls back to "cpu" if the target is unknown.
     """
-    runner = cfg.runner or "ollama"  # runner should be finalized before this is called
     hw = cfg.hardware_target or cfg.recommended_host or "cpu"
-    key = (runner, hw)
-    preset = _PRESET_MAP.get(key)
-    if preset is None:
-        _print(f"  [dim]Warning: no preset for ({runner}, {hw}), falling back to cpu.[/dim]")
-        preset = {"ollama": "cpu", "lm-studio": "cpu-lm-studio"}.get(runner, "cpu-llama-server")
-    cfg.preset = preset
-    return preset
+    if hw not in _VALID_PRESETS:
+        _print(f"  [dim]Warning: unknown hardware target '{hw}', falling back to cpu.[/dim]")
+        hw = "cpu"
+    cfg.preset = hw
+    return hw
 
 
 def _report_verify_failures() -> None:
@@ -378,18 +363,6 @@ def _prompt_numbered(
             if 1 <= idx <= len(options):
                 return options[idx - 1][0]
         _print(f"  [yellow]Please enter a number between 1 and {len(options)}.[/yellow]")
-
-
-def _prompt_runner() -> str:
-    return _prompt_numbered(
-        "Select inference runner:",
-        [
-            ("ollama", "Ollama"),
-            ("lm-studio", "LM Studio"),
-            ("llama-server", "llama-server (llama.cpp)"),
-        ],
-        default_index=1,
-    )
 
 
 def _prompt_mode() -> str:
@@ -1616,17 +1589,14 @@ def run_setup(cfg: SetupConfig) -> int:
 
     _print("\n[bold]agentalloy setup[/bold]\n")
 
-    # 1. Runner
-    if cfg.runner is None and not cfg.non_interactive:
-        cfg.runner = _prompt_runner()
-    elif cfg.runner is None:
-        cfg.runner = "ollama"
-    cfg.runner = cfg.runner.strip().lower()
-    if cfg.runner not in ("ollama", "lm-studio", "llama-server"):
+    # 1. Runner — llama-server (llama.cpp) is the sole inference runner. Any
+    # value passed via --runner is rejected unless it is "llama-server".
+    if cfg.runner is not None and cfg.runner.strip().lower() not in ("", "llama-server"):
         _print(
-            f"  [red]Invalid runner: {cfg.runner}. Choose ollama, lm-studio, or llama-server.[/red]"
+            f"  [red]Invalid runner: {cfg.runner}. llama-server is the only supported runner.[/red]"
         )
         return 1
+    cfg.runner = "llama-server"
     _print(f"  Runner: {cfg.runner}")
 
     # 2. Hardware target
@@ -1644,8 +1614,8 @@ def run_setup(cfg: SetupConfig) -> int:
             cfg.hardware_target = detected
     _print(f"  Hardware: {_HW_LABELS.get(cfg.hardware_target, cfg.hardware_target)}")
 
-    # 3. Model (default varies by runner)
-    default_model = _MODEL_DEFAULTS.get(cfg.runner, "qwen3-embedding:0.6b")
+    # 3. Model (embed GGUF; reranker GGUF is fixed)
+    default_model = _DEFAULT_EMBED_MODEL
     if not cfg.non_interactive:
         chosen = _prompt_context(
             "  Model",
@@ -1845,11 +1815,11 @@ def run_setup(cfg: SetupConfig) -> int:
     _write_upstream_env(cfg)
     _print("  [green]  Done.[/green]")
 
-    # Step d: Pull model
-    _print("  [dim]-> Pulling model[/dim]")
+    # Step d: Pull models (embed + reranker GGUFs)
+    _print("  [dim]-> Pulling models[/dim]")
     # Build a minimal recommend-models.json for pull_models to consume.
     # pull_models.pull_models() reads models_json["options"], where each entry
-    # must have "embed_model" and "embed_runner" keys (not "models"/"name").
+    # carries the embed pair plus the reranker pair so BOTH GGUFs are pulled.
     models_json = {
         "schema_version": 1,
         "preset": preset,
@@ -1859,6 +1829,8 @@ def run_setup(cfg: SetupConfig) -> int:
                 "default": True,
                 "embed_model": cfg.model,
                 "embed_runner": cfg.runner,
+                "rerank_model": _RERANK_MODEL,
+                "rerank_runner": cfg.runner,
             }
         ],
     }
@@ -1880,11 +1852,26 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step f: Start embed server
+    # Step f: Start embed server (llama-server, port 47951)
     _print("  [dim]-> Starting embed server[/dim]")
     rc = start_embed_server.run(_build_namespace(cfg, models=str(models_fp), timeout=120.0))
     if rc not in (0, 4):
         _print(f"  [red]  start-embed-server failed (exit {rc}).[/red]")
+        return rc
+    _print("  [green]  Done.[/green]")
+
+    # Step f2: Start reranker server (second llama-server, port 47952)
+    _print("  [dim]-> Starting reranker server[/dim]")
+    rc = start_rerank_server.run(
+        _build_namespace(
+            cfg,
+            models=str(models_fp),
+            hardware_target=cfg.hardware_target or cfg.recommended_host or "cpu",
+            timeout=120.0,
+        )
+    )
+    if rc not in (0, 4):
+        _print(f"  [red]  start-rerank-server failed (exit {rc}).[/red]")
         return rc
     _print("  [green]  Done.[/green]")
 
@@ -2004,9 +1991,9 @@ def add_parser(
     )
     p.add_argument(
         "--runner",
-        choices=["ollama", "lm-studio", "llama-server"],
+        choices=["llama-server"],
         default=None,
-        help="Embedding runner (default: ollama).",
+        help="Inference runner. llama-server (llama.cpp) is the only choice.",
     )
     p.add_argument(
         "--model",

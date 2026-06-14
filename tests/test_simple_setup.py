@@ -65,6 +65,7 @@ class MockSetup:
             "pull_models",
             "seed_corpus",
             "start_embed_server",
+            "start_rerank_server",
             "install_packs",
             "enable_service",
             "write_env",
@@ -139,30 +140,33 @@ class TestSimpleSetupPrompts:
         rc = run_setup(cfg)
         assert rc == 1
 
-    def test_preset_resolved_from_runner_and_host(self):
-        cfg = SetupConfig(runner="ollama", recommended_host="nvidia")
+    def test_preset_resolved_from_host(self):
+        # Preset name == hardware target; the runner no longer factors in.
+        cfg = SetupConfig(runner="llama-server", recommended_host="nvidia")
         preset = _resolve_preset(cfg)
         assert preset == "nvidia"
         assert cfg.preset == "nvidia"
 
     def test_preset_fallback_unknown_combination(self):
-        cfg = SetupConfig(runner="ollama", recommended_host="unknown-hw")
+        cfg = SetupConfig(runner="llama-server", recommended_host="unknown-hw")
         preset = _resolve_preset(cfg)
         assert preset == "cpu"  # fallback
 
-    def test_preset_llama_server_cpu(self):
+    def test_preset_cpu(self):
         cfg = SetupConfig(runner="llama-server", recommended_host="cpu")
         preset = _resolve_preset(cfg)
-        assert preset == "cpu-llama-server"
+        assert preset == "cpu"
 
     def test_preset_uses_user_hardware_target_over_detected(self):
-        cfg = SetupConfig(runner="ollama", hardware_target="radeon", recommended_host="nvidia")
+        cfg = SetupConfig(
+            runner="llama-server", hardware_target="radeon", recommended_host="nvidia"
+        )
         preset = _resolve_preset(cfg)
         assert preset == "radeon"  # user choice wins over detected
         assert cfg.preset == "radeon"
 
     def test_preset_fallback_when_user_hardware_unknown(self):
-        cfg = SetupConfig(runner="ollama", hardware_target="unknown-gpu")
+        cfg = SetupConfig(runner="llama-server", hardware_target="unknown-gpu")
         preset = _resolve_preset(cfg)
         assert preset == "cpu"  # fallback
 
@@ -298,11 +302,24 @@ class TestSimpleSetupExecution:
         self.mock.mocks["write_env"].assert_not_called()
 
     def test_run_setup_writes_env_with_correct_preset(self, tmp_state_dir: tuple[Path, Path]):
-        """Setup writes .env with preset resolved from runner + hardware."""
+        """Setup writes .env with preset resolved from the hardware target."""
         setup_config, run_setup = self._import_run_setup()
-        rc = run_setup(setup_config(runner="ollama", non_interactive=True))
+        rc = run_setup(setup_config(runner="llama-server", non_interactive=True))
         assert rc == 0
         self.mock.mocks["write_env"].assert_called_once()
+
+    def test_run_setup_rejects_non_llama_server_runner(self, tmp_state_dir: tuple[Path, Path]):
+        """Setup rejects any runner other than llama-server."""
+        setup_config, run_setup = self._import_run_setup()
+        rc = run_setup(setup_config(runner="ollama", non_interactive=True))
+        assert rc == 1
+
+    def test_run_setup_starts_reranker_server(self, tmp_state_dir: tuple[Path, Path]):
+        """Setup starts the second (reranker) llama-server instance."""
+        setup_config, run_setup = self._import_run_setup()
+        rc = run_setup(setup_config(non_interactive=True))
+        assert rc == 0
+        self.mock.mocks["start_rerank_server"].assert_called_once()
 
     def test_run_setup_all_steps_called(self, tmp_state_dir: tuple[Path, Path]):
         """Full setup flow runs all expected steps."""
@@ -672,6 +689,7 @@ class TestPackDiscovery:
                     "pull_models",
                     "seed_corpus",
                     "start_embed_server",
+                    "start_rerank_server",
                     "install_packs",
                     "enable_service",
                     "write_env",
@@ -946,8 +964,8 @@ class TestEmbedEndpoint:
 # ---------------------------------------------------------------------------
 
 
-def test_setup_argparse_accepts_lm_studio_runner():
-    """B1: --runner lm-studio passes argparse."""
+def test_setup_argparse_rejects_non_llama_server_runner():
+    """B1: --runner only accepts llama-server (the sole runner)."""
     from agentalloy.install.subcommands.simple_setup import add_parser
 
     import argparse
@@ -955,12 +973,12 @@ def test_setup_argparse_accepts_lm_studio_runner():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="subcommand")
     add_parser(sub)
-    args = parser.parse_args(["setup", "--runner", "lm-studio", "--non-interactive"])
-    assert args.runner == "lm-studio"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["setup", "--runner", "lm-studio", "--non-interactive"])
 
 
-def test_setup_explicit_runner_ollama_is_preserved():
-    """B3: Explicit --runner ollama is preserved through argparse -> _run_from_args bridging."""
+def test_setup_explicit_runner_llama_server_is_preserved():
+    """B3: Explicit --runner llama-server is preserved through the argparse bridge."""
     import argparse
 
     captured: list[Any] = []
@@ -976,10 +994,10 @@ def test_setup_explicit_runner_ollama_is_preserved():
         from agentalloy.install.subcommands.simple_setup import add_parser  # type: ignore[attr-defined]
 
         add_parser(sub)
-        args = root.parse_args(["setup", "--runner", "ollama", "--non-interactive"])
+        args = root.parse_args(["setup", "--runner", "llama-server", "--non-interactive"])
         args.func(args)
 
-    assert captured[0].runner == "ollama"
+    assert captured[0].runner == "llama-server"
 
 
 def test_hw_labels_cover_all_valid_targets():

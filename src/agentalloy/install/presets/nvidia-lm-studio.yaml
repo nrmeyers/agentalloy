@@ -1,9 +1,0 @@
-preset: nvidia-lm-studio
-description: "NVIDIA GPU (CUDA) inference via LM Studio"
-defaults:
-  RUNTIME_EMBED_BASE_URL: "http://localhost:1234"
-  RUNTIME_EMBEDDING_MODEL: "qwen3-embedding:0.6b"
-  DEDUP_HARD_THRESHOLD: "0.92"
-  DEDUP_SOFT_THRESHOLD: "0.80"
-  BOUNCE_BUDGET: "3"
-  LOG_LEVEL: "INFO"

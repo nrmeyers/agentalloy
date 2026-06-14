@@ -92,6 +92,27 @@ class TestCollectPairs:
         pairs = _collect_model_runner_pairs(option)
         assert len(pairs) == 1
 
+    def test_collects_embed_and_rerank_pairs(self) -> None:
+        option = {
+            "embed_model": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            "embed_runner": "llama-server",
+            "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf",
+            "rerank_runner": "llama-server",
+        }
+        pairs = _collect_model_runner_pairs(option)
+        assert len(pairs) == 2
+        assert ("Qwen3-Embedding-0.6B-Q8_0.gguf", "llama-server") in pairs
+        assert ("Qwen3-Reranker-0.6B-Q8_0.gguf", "llama-server") in pairs
+
+    def test_rerank_runner_defaults_to_embed_runner(self) -> None:
+        option = {
+            "embed_model": "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            "embed_runner": "llama-server",
+            "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf",
+        }
+        pairs = _collect_model_runner_pairs(option)
+        assert ("Qwen3-Reranker-0.6B-Q8_0.gguf", "llama-server") in pairs
+
 
 # ---------------------------------------------------------------------------
 # Ollama presence check
@@ -545,6 +566,24 @@ class TestSshKeyErrorHint:
         assert hint is not None
         assert "does NOT require auth" in hint
         assert "Remote Ollama" not in hint
+
+
+# ---------------------------------------------------------------------------
+# GGUF download map — must include BOTH the embed and reranker GGUFs so a
+# single install pull provisions both llama-server instances.
+# ---------------------------------------------------------------------------
+
+
+class TestGgufUrlMap:
+    def test_embed_and_reranker_ggufs_present(self) -> None:
+        from agentalloy.install.subcommands.pull_models import (
+            _GGUF_URL_MAP,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        assert "Qwen3-Embedding-0.6B-Q8_0.gguf" in _GGUF_URL_MAP
+        assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in _GGUF_URL_MAP
+        for url in _GGUF_URL_MAP.values():
+            assert url.startswith("https://huggingface.co/")
 
     def test_no_ollama_host_defaults_to_local(self) -> None:
         env = os.environ.copy()

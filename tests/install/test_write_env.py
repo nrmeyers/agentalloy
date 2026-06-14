@@ -67,11 +67,19 @@ class TestPortRecording:
         assert result["port"] == 9090
 
     def test_preset_urls_are_fixed(self, repo_root: Path) -> None:
-        """Preset URLs use fixed runner default ports (e.g. 11434 for ollama)."""
+        """Preset URLs bind the embed llama-server to its fixed port (47951)."""
         result = write_env("cpu", root=repo_root)
-        assert result["values_written"]["RUNTIME_EMBED_BASE_URL"] == "http://localhost:11434"
+        assert result["values_written"]["RUNTIME_EMBED_BASE_URL"] == "http://localhost:47951"
         assert "LM_STUDIO_BASE_URL" not in result["values_written"]
         assert "AUTHORING_EMBED_BASE_URL" not in result["values_written"]
+
+    def test_preset_carries_reranker_vars(self, repo_root: Path) -> None:
+        """Presets wire the signal-intent reranker to the second llama-server (47952)."""
+        result = write_env("cpu", root=repo_root)
+        values = result["values_written"]
+        assert values["SIGNAL_INTENT_BACKEND"] == "reranker"
+        assert values["SIGNAL_INTENT_RERANK_URL"] == "http://127.0.0.1:47952"
+        assert values["SIGNAL_INTENT_RERANK_MODEL"] == "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 
 # ---------------------------------------------------------------------------

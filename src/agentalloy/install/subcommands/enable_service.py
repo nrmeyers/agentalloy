@@ -6,11 +6,16 @@ automatically without requiring ``agentalloy serve`` each session.
 Two modes
 ---------
 native
-    Linux: writes a systemd user unit (~/.config/systemd/user/agentalloy.service)
-    and enables + starts it. No root required.
+    Linux: writes three systemd user units and enables + starts them
+    (no root required):
+      - agentalloy.service        — the FastAPI service
+      - agentalloy-embed.service  — embed llama-server (47951, --embeddings)
+      - agentalloy-rerank.service — reranker llama-server (47952, completions)
 
     macOS: writes a launchd LaunchAgent plist
-    (~/Library/LaunchAgents/ai.agentalloy.plist) and loads it.
+    (~/Library/LaunchAgents/ai.agentalloy.plist) and loads it. The
+    embed/reranker llama-server instances are started by setup (launchd
+    registration is a v1.1 follow-up).
 
     Windows: not implemented (v1.1).
 
@@ -163,75 +168,114 @@ def _render_systemd_unit(uv_bin: str, repo_root: Path, port: int, env_path: Path
     )
 
 
-def _ollama_unit_exists() -> bool:
-    for scope in (["--user"], ["--system", "--global"]):
-        try:
-            result = subprocess.run(
-                ["systemctl", *scope, "cat", "ollama.service"],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                return True
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    return False
+# llama-server (llama.cpp) is the sole inference runner. Two dedicated
+# instances back the runtime: the embed server (47951, --embeddings mode) and
+# the reranker server (47952, completions mode for /v1/completions logprobs).
+_LLAMA_EMBED_PORT = 47951
+_LLAMA_RERANK_PORT = 47952
 
 
-def _write_ollama_unit(uv_bin: str) -> Path | None:  # noqa: ARG001
-    """Write a minimal ollama user unit. Returns path or None on failure."""
-    ollama_bin = shutil.which("ollama")
-    if not ollama_bin:
-        return None
+def _llama_unit_path(name: str) -> Path:
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     unit_dir = config_home / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
-    unit_path = unit_dir / "ollama.service"
-    content = (
+    return unit_dir / name
+
+
+def _render_llama_embed_unit(llama_bin: str, model_path: Path) -> str:
+    return (
         "[Unit]\n"
-        "Description=Ollama embedding service\n"
+        "Description=AgentAlloy embedding server (llama-server)\n"
         "After=network.target\n"
         "\n"
         "[Service]\n"
         "Type=simple\n"
-        f"ExecStart={ollama_bin} serve\n"
+        f"ExecStart={llama_bin} --embeddings --port {_LLAMA_EMBED_PORT} "
+        f"--ubatch-size 2048 -m {model_path}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"
         "[Install]\n"
         "WantedBy=default.target\n"
     )
-    install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
-    return unit_path
+
+
+def _render_llama_rerank_unit(llama_bin: str, model_path: Path) -> str:
+    # Completions mode — NO --embeddings — so /v1/completions logprobs are served.
+    return (
+        "[Unit]\n"
+        "Description=AgentAlloy reranker server (llama-server)\n"
+        "After=network.target\n"
+        "\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT} -m {model_path}\n"
+        "Restart=on-failure\n"
+        "RestartSec=5\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
+def _model_path(model_file: str) -> Path:
+    return install_state.user_data_dir() / "models" / model_file
+
+
+def _write_llama_units() -> list[str]:
+    """Write + enable the embed (47951) and reranker (47952) llama-server units.
+
+    Returns the list of unit paths written (empty if llama-server is absent).
+    Best-effort: a single unit's enable failure is logged, not fatal — the
+    agentalloy.service unit is the only hard requirement.
+    """
+    llama_bin = shutil.which("llama-server")
+    if not llama_bin:
+        logger.warning("llama-server not on PATH; skipping embed/reranker units")
+        return []
+
+    written: list[str] = []
+    units = [
+        (
+            "agentalloy-embed.service",
+            _render_llama_embed_unit(llama_bin, _model_path("Qwen3-Embedding-0.6B-Q8_0.gguf")),
+        ),
+        (
+            "agentalloy-rerank.service",
+            _render_llama_rerank_unit(llama_bin, _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")),
+        ),
+    ]
+    for unit_name, content in units:
+        unit_path = _llama_unit_path(unit_name)
+        install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
+        written.append(str(unit_path))
+        result = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", unit_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "%s enable failed (rc=%d): %s",
+                unit_name,
+                result.returncode,
+                (result.stderr or "").strip(),
+            )
+    return written
 
 
 def _enable_native_linux(
-    uv_bin: str, repo_root: Path, port: int, preset: str | None
+    uv_bin: str,
+    repo_root: Path,
+    port: int,
+    preset: str | None,  # noqa: ARG001 — preset retained for signature compat
 ) -> dict[str, Any]:
     env_path = _sanitize_env_for_systemd(install_state.env_path())
     unit_path = _systemd_unit_path()
     content = _render_systemd_unit(uv_bin, repo_root, port, env_path)
     install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
 
-    ollama_unit_written = False
-    ollama_enabled = False
-    if preset != "radeon" and not _ollama_unit_exists():
-        written = _write_ollama_unit(uv_bin)
-        ollama_unit_written = written is not None
-        if ollama_unit_written:
-            result = subprocess.run(
-                ["systemctl", "--user", "enable", "--now", "ollama.service"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                ollama_enabled = True
-            else:
-                logger.warning(
-                    "ollama.service enable failed (rc=%d): %s",
-                    result.returncode,
-                    (result.stderr or "").strip(),
-                )
+    llama_units = _write_llama_units()
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     result = subprocess.run(
@@ -240,32 +284,17 @@ def _enable_native_linux(
         text=True,
     )
     if result.returncode != 0:
-        # Roll back ollama enable if agentalloy enable failed.
-        if ollama_enabled:
-            try:
-                subprocess.run(
-                    ["systemctl", "--user", "disable", "--now", "ollama.service"],
-                    capture_output=True,
-                    text=True,
-                )
-                logger.warning("Rolled back ollama.service enable after agentalloy.service failure")
-            except Exception:
-                pass
         raise RuntimeError(
             f"agentalloy.service enable failed (rc={result.returncode}): "
             f"{(result.stderr or '').strip()}"
         )
 
-    if preset == "radeon":
-        print(
-            "NOTE: LM Studio cannot be managed by systemd. Enable 'Start on Login' "
-            "in LM Studio → Settings so the embedding server starts automatically.",
-            file=sys.stderr,
-        )
-
     return {
         "unit_path": str(unit_path),
-        "ollama_unit_written": ollama_unit_written,
+        "llama_units_written": llama_units,
+        # Retained for output-schema backward compatibility; ollama is no
+        # longer provisioned now that llama-server is the sole runner.
+        "ollama_unit_written": False,
     }
 
 
@@ -347,7 +376,10 @@ def _read_env_file(env_path: Path) -> dict[str, str]:
 
 
 def _enable_native_macos(
-    uv_bin: str, repo_root: Path, port: int, preset: str | None
+    uv_bin: str,
+    repo_root: Path,
+    port: int,
+    preset: str | None,  # noqa: ARG001 — preset retained for signature compat
 ) -> dict[str, Any]:
     env_vars = _read_env_file(install_state.env_path())
     plist_path = _launchd_plist_path()
@@ -359,15 +391,18 @@ def _enable_native_macos(
     subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
     subprocess.run(["launchctl", "load", "-w", str(plist_path)], check=True)
 
-    if preset == "radeon":
-        print(
-            "NOTE: LM Studio cannot be managed by launchd. Enable 'Start on Login' "
-            "in LM Studio → Settings so the embedding server starts automatically.",
-            file=sys.stderr,
-        )
+    # The embed (47951) and reranker (47952) llama-server instances are started
+    # by the setup pipeline; launchd management of them is a v1.1 follow-up.
+    print(
+        "NOTE: On macOS the embed/reranker llama-server instances are started "
+        "by setup but not yet registered with launchd — re-run `agentalloy "
+        "setup` after a reboot, or start them manually.",
+        file=sys.stderr,
+    )
 
     return {
         "unit_path": str(plist_path),
+        "llama_units_written": [],
         "ollama_unit_written": False,
     }
 
@@ -395,6 +430,7 @@ def enable_service(
         "mode": mode,
         "runtime": None,
         "unit_path": None,
+        "llama_units_written": [],
         "ollama_unit_written": False,
         "service_started": False,
     }

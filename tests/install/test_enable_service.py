@@ -13,6 +13,8 @@ from agentalloy.install.subcommands.enable_service import (
     _poll_health,  # pyright: ignore[reportPrivateUsage]
     _read_env_file,  # pyright: ignore[reportPrivateUsage]
     _render_launchd_plist,  # pyright: ignore[reportPrivateUsage]
+    _render_llama_embed_unit,  # pyright: ignore[reportPrivateUsage]
+    _render_llama_rerank_unit,  # pyright: ignore[reportPrivateUsage]
     _render_systemd_unit,  # pyright: ignore[reportPrivateUsage]
     enable_service,
 )
@@ -91,6 +93,29 @@ class TestRenderSystemdUnit:
     def test_has_install_section(self) -> None:
         content = _render_systemd_unit("/usr/bin/uv", Path("/app"), 8000, Path("/env"))
         assert "[Install]" in content
+        assert "WantedBy=default.target" in content
+
+
+class TestRenderLlamaUnits:
+    """The embed (47951) and reranker (47952) llama-server units."""
+
+    def test_embed_unit_uses_embeddings_mode_on_47951(self) -> None:
+        content = _render_llama_embed_unit(
+            "/usr/bin/llama-server", Path("/data/models/Qwen3-Embedding-0.6B-Q8_0.gguf")
+        )
+        assert "--embeddings" in content
+        assert "--port 47951" in content
+        assert "Qwen3-Embedding-0.6B-Q8_0.gguf" in content
+        assert "WantedBy=default.target" in content
+
+    def test_rerank_unit_is_completions_mode_on_47952(self) -> None:
+        content = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/data/models/Qwen3-Reranker-0.6B-Q8_0.gguf")
+        )
+        # Reranker is a completions server — must NOT pass --embeddings.
+        assert "--embeddings" not in content
+        assert "--port 47952" in content
+        assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in content
         assert "WantedBy=default.target" in content
 
 

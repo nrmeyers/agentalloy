@@ -1,9 +1,0 @@
-preset: radeon-llama-server
-description: "AMD Radeon GPU (dGPU or iGPU) with Vulkan/ROCm acceleration via llama-server (llama.cpp)"
-defaults:
-  RUNTIME_EMBED_BASE_URL: "http://localhost:11434"
-  RUNTIME_EMBEDDING_MODEL: "Qwen3-Embedding-0.6B-Q8_0.gguf"
-  DEDUP_HARD_THRESHOLD: "0.92"
-  DEDUP_SOFT_THRESHOLD: "0.80"
-  BOUNCE_BUDGET: "3"
-  LOG_LEVEL: "INFO"

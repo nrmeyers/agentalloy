@@ -3,11 +3,9 @@
 Validate + write ``.env`` from a preset template.
 
 Preset templates live in ``src/agentalloy/install/presets/<name>.yaml``.
-Each preset binds the embedding runner to its default port:
-
-- Ollama: 11434
-- LM Studio: 1234
-- llama-server: 11434 (started by the pipeline)
+Presets are named by hardware target (cpu / nvidia / radeon /
+apple-silicon). llama-server (llama.cpp) is the sole inference runner:
+the embed server listens on 47951 and the reranker server on 47952.
 
 The ``--port`` flag records the agentalloy service port (default 47950)
 for use by ``wire-harness``.
@@ -29,23 +27,15 @@ from agentalloy.install import state as install_state
 SCHEMA_VERSION = 1
 DEFAULT_PORT = 47950
 
+# Presets are named by hardware target only. llama-server (llama.cpp) is the
+# sole inference runner; the hardware difference is handled at server start via
+# ``-ngl``, not by the preset env content.
 VALID_PRESETS = frozenset(
     {
-        # Ollama-backed presets (original)
         "cpu",
         "apple-silicon",
         "nvidia",
         "radeon",
-        # lm-studio backed presets
-        "cpu-lm-studio",
-        "apple-silicon-lm-studio",
-        "nvidia-lm-studio",
-        "radeon-lm-studio",
-        # llama-server (llama.cpp) backed presets
-        "cpu-llama-server",
-        "apple-silicon-llama-server",
-        "nvidia-llama-server",
-        "radeon-llama-server",
     }
 )
 
@@ -56,6 +46,9 @@ _KNOWN_KEYS = frozenset(
         "DUCKDB_PATH",
         "RUNTIME_EMBED_BASE_URL",
         "RUNTIME_EMBEDDING_MODEL",
+        "SIGNAL_INTENT_BACKEND",
+        "SIGNAL_INTENT_RERANK_URL",
+        "SIGNAL_INTENT_RERANK_MODEL",
         "DEDUP_HARD_THRESHOLD",
         "DEDUP_SOFT_THRESHOLD",
         "BOUNCE_BUDGET",

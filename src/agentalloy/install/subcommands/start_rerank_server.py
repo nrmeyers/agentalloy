@@ -1,14 +1,15 @@
-"""``start-embed-server`` subcommand — bring up the embedding backend.
+"""``start-rerank-server`` subcommand — bring up the reranker backend.
 
-Runs between ``pull-models`` and ``install-packs`` in the setup pipeline.
-Reads ``recommend-models.json`` to discover the embed model, then launches
-``llama-server --embeddings --port 47951 --ubatch-size 2048 -m <gguf_path>``
-as a background process and polls ``/health`` until it responds (or times
-out).
+Runs right after ``start-embed-server`` in the setup pipeline. Reads
+``recommend-models.json`` to discover the reranker model, then launches a
+**second** ``llama-server`` instance serving the reranker GGUF at port 47952
+in COMPLETIONS mode (NOT ``--embeddings``) so it exposes ``/v1/completions``
+with logprobs for the signal intent reranker.
 
-llama-server (llama.cpp) is the sole inference runner.
+llama-server (llama.cpp) is the sole inference runner. This is a dedicated
+instance separate from the embed server (47951).
 
-The step is idempotent: if the embed endpoint is already reachable it exits 0
+The step is idempotent: if port 47952 is already reachable it exits 0
 immediately without spawning a second process.
 """
 
@@ -27,15 +28,22 @@ from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 SCHEMA_VERSION = 1
-STEP_NAME = "start-embed-server"
-# The embed llama-server listens on 47951 (RUNTIME_EMBED_BASE_URL in presets).
-LLAMA_EMBED_PORT = 47951
-EMBED_HOST = "127.0.0.1"
-# llama-server batch size — keeps throughput high for pack ingest without
-# requiring a fat context window.
-LLAMA_UBATCH_SIZE = 2048
+STEP_NAME = "start-rerank-server"
+# The reranker llama-server listens on 47952 (SIGNAL_INTENT_RERANK_URL).
+LLAMA_RERANK_PORT = 47952
+RERANK_HOST = "127.0.0.1"
 # Seconds to wait for llama-server /health before giving up.
 LLAMA_START_TIMEOUT = 120
+
+# Per-hardware GPU-offload layer counts. CPU offloads nothing; GPU targets
+# offload all layers. The value is passed to ``-ngl`` at server start.
+_NGL_BY_TARGET: dict[str, int] = {
+    "cpu": 0,
+    "nvidia": 999,
+    "radeon": 999,
+    "apple-silicon": 999,
+}
+_DEFAULT_NGL = 0
 
 
 def add_parser(
@@ -43,12 +51,17 @@ def add_parser(
 ) -> None:
     p: argparse.ArgumentParser = subparsers.add_parser(
         STEP_NAME,
-        help="Start the embedding llama-server (port 47951) before pack install.",
+        help="Start the reranker llama-server (port 47952) after the embed server.",
     )
     p.add_argument(
         "--models",
         required=True,
         help="Path to the recommend-models JSON output file.",
+    )
+    p.add_argument(
+        "--hardware-target",
+        default="cpu",
+        help="Hardware target (cpu/nvidia/radeon/apple-silicon) — selects -ngl.",
     )
     p.add_argument(
         "--timeout",
@@ -58,6 +71,12 @@ def add_parser(
     )
     add_json_flag(p)
     p.set_defaults(func=_run)
+
+
+def _resolve_rerank_model(models_json: dict[str, Any]) -> str:
+    options: list[dict[str, Any]] = models_json.get("options", [])
+    selected = next((o for o in options if o.get("default")), options[0] if options else {})
+    return selected.get("rerank_model", "")
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -72,37 +91,36 @@ def _run(args: argparse.Namespace) -> int:
         print(f"ERROR: Could not read {models_path}: {exc}", file=sys.stderr)
         return 1
 
-    # Resolve the selected option (same logic as pull_models).
-    options: list[dict[str, Any]] = models_json.get("options", [])
-    selected = next((o for o in options if o.get("default")), options[0] if options else {})
-    model: str = selected.get("embed_model", "")
-
+    model = _resolve_rerank_model(models_json)
     if not model:
-        print("ERROR: No embed_model found in recommend-models output.", file=sys.stderr)
+        print("ERROR: No rerank_model found in recommend-models output.", file=sys.stderr)
         return 1
 
+    hardware_target = getattr(args, "hardware_target", "cpu") or "cpu"
+    ngl = _NGL_BY_TARGET.get(hardware_target, _DEFAULT_NGL)
+
     # Idempotency: already listening?
-    if _port_open(EMBED_HOST, LLAMA_EMBED_PORT):
+    if _port_open(RERANK_HOST, LLAMA_RERANK_PORT):
         print(
-            f"start-embed-server: embed endpoint already reachable on port "
-            f"{LLAMA_EMBED_PORT} — skipping.",
+            f"start-rerank-server: reranker endpoint already reachable on port "
+            f"{LLAMA_RERANK_PORT} — skipping.",
             file=sys.stderr,
         )
         result = {
             "schema_version": SCHEMA_VERSION,
             "action": "already_running",
             "runner": "llama-server",
-            "port": LLAMA_EMBED_PORT,
+            "port": LLAMA_RERANK_PORT,
         }
         _save(result)
-        write_result(result, args, human_fn=_render_embed_server)
+        write_result(result, args, human_fn=_render_rerank_server)
         return 0
 
-    return _start_llama_server(model, args.timeout, args)
+    return _start_llama_server(model, ngl, args.timeout, args)
 
 
-def _render_embed_server(result: dict[str, Any]) -> None:
-    """Render embed server result in human-readable format."""
+def _render_rerank_server(result: dict[str, Any]) -> None:
+    """Render rerank server result in human-readable format."""
     action = result.get("action", "unknown")
     runner = result.get("runner", "unknown")
     port = result.get("port", 0)
@@ -114,7 +132,7 @@ def _render_embed_server(result: dict[str, Any]) -> None:
     }
     color = action_colors.get(action, "dim")
 
-    print_rich("\n  [bold]Embed Server[/bold]\n")
+    print_rich("\n  [bold]Reranker Server[/bold]\n")
     print_rich(f"  Status: [{color}]{action}[/{color}]")
     print_rich(f"  Runner: {runner}")
     print_rich(f"  Port: {port}")
@@ -128,7 +146,7 @@ def _render_embed_server(result: dict[str, Any]) -> None:
     print_rich()
 
 
-def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) -> int:
+def _start_llama_server(model: str, ngl: int, timeout: float, args: argparse.Namespace) -> int:
     model_path = install_state.user_data_dir() / "models" / model
     if not model_path.exists():
         print(
@@ -138,22 +156,23 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
         print("FIX:   Re-run `agentalloy install pull-models` to download it.", file=sys.stderr)
         return 1
 
+    # COMPLETIONS mode — NO --embeddings. The reranker scores candidates via
+    # /v1/completions logprobs, so the server must run as a completions server.
     cmd = [
         "llama-server",
-        "--embeddings",
         "--port",
-        str(LLAMA_EMBED_PORT),
-        "--ubatch-size",
-        str(LLAMA_UBATCH_SIZE),
+        str(LLAMA_RERANK_PORT),
+        "-ngl",
+        str(ngl),
         "-m",
         str(model_path),
     ]
-    log_path = install_state.user_data_dir() / "logs" / "embed-server.log"
+    log_path = install_state.user_data_dir() / "logs" / "rerank-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(
-        f"start-embed-server: launching llama-server on port {LLAMA_EMBED_PORT} "
-        f"(ubatch={LLAMA_UBATCH_SIZE}, log={log_path})",
+        f"start-rerank-server: launching llama-server on port {LLAMA_RERANK_PORT} "
+        f"(ngl={ngl}, log={log_path})",
         file=sys.stderr,
     )
     try:
@@ -174,12 +193,12 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
         return 1
 
     print(
-        f"start-embed-server: waiting up to {timeout:.0f}s for /health …",
+        f"start-rerank-server: waiting up to {timeout:.0f}s for /health …",
         file=sys.stderr,
     )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _port_open(EMBED_HOST, LLAMA_EMBED_PORT):
+        if _port_open(RERANK_HOST, LLAMA_RERANK_PORT):
             break
         time.sleep(2)
     else:
@@ -199,19 +218,19 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
             pass
         return 1
 
-    print(f"start-embed-server: llama-server ready on port {LLAMA_EMBED_PORT}", file=sys.stderr)
+    print(f"start-rerank-server: llama-server ready on port {LLAMA_RERANK_PORT}", file=sys.stderr)
     result = {
         "schema_version": SCHEMA_VERSION,
         "action": "started",
         "runner": "llama-server",
         "model": model,
         "model_path": str(model_path),
-        "port": LLAMA_EMBED_PORT,
-        "ubatch_size": LLAMA_UBATCH_SIZE,
+        "port": LLAMA_RERANK_PORT,
+        "ngl": ngl,
         "log_path": str(log_path),
     }
     _save(result)
-    write_result(result, args, human_fn=_render_embed_server)
+    write_result(result, args, human_fn=_render_rerank_server)
     return 0
 
 
