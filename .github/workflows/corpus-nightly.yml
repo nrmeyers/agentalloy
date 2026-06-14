@@ -5,9 +5,10 @@ name: Corpus Nightly Regression
 # regression vs the committed baselines in eval/corpus_baselines.json.
 #
 # Inference runs on llama-server (llama.cpp): an embed server on :47951 and a
-# reranker server on :47952 (the cpu preset points at both). pull-models builds
-# llama-server from source on the runner when it's not on PATH and downloads
-# both GGUFs from Hugging Face.
+# reranker server on :47952 (the cpu preset points at both). pull-models
+# provisions llama-server itself by downloading a prebuilt CPU build from the
+# ggml-org GitHub releases (v1.3.3+) and downloads both GGUFs from Hugging Face —
+# so this workflow no longer pre-provisions the binary; it dogfoods that path.
 #
 # NOTE: GitHub Actions cannot be exercised in the dev sandbox, so a few flag
 # choices below are the most standard form and are flagged with a one-line
@@ -28,8 +29,8 @@ jobs:
     # Measured on first dispatch (run 27337187852): the 2-core runner embeds
     # ~29 fragments/min → ~102 min for the 2966-fragment corpus, plus ingest.
     # Sequential one-call-per-fragment embedding is the bottleneck; batching
-    # would be the real speedup (future work). Bumped from 150 → 180 to cover
-    # the added from-source llama-server build (~5-10 min) + GGUF download.
+    # would be the real speedup (future work). 180 covers the prebuilt
+    # llama-server download (~15 MB, seconds) + GGUF download + full embed.
     timeout-minutes: 180
     env:
       # User-scoped AgentAlloy state lives under XDG dirs; point them at the
@@ -51,32 +52,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Provision llama-server (from the ggml-org llama.cpp image)
-        timeout-minutes: 10
+      - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
+        timeout-minutes: 3
         run: |
           set -euxo pipefail
-          # pull-models only builds llama-server from source in INTERACTIVE mode;
-          # in CI (no TTY) it skips the build and errors. So provision a known-good
-          # binary the way the container image does (verified in v1.3.1): copy the
-          # llama.cpp toolchain (binary + co-located .so libs) out of ggml-org's
-          # image and front it with an LD_LIBRARY_PATH wrapper placed on PATH, so
-          # pull-models / start-*-server find it instead of trying to build.
-          LLAMA_DIR="$HOME/llamacpp"
-          mkdir -p "$LLAMA_DIR" "$HOME/.local/bin"
-          docker create --name lcp ghcr.io/ggml-org/llama.cpp:full
-          docker cp lcp:/app/. "$LLAMA_DIR/"
-          docker rm lcp
-          # libgomp1 (OpenMP runtime) is the one dep not in the copied toolchain.
+          # pull-models (v1.3.3+) downloads a prebuilt llama-server itself, so we
+          # no longer copy the toolchain out of the llama.cpp image here — this
+          # workflow now dogfoods that prebuilt-download path. Two prereqs remain:
+          #   1. libgomp1 — the OpenMP runtime the prebuilt links against; it's the
+          #      one dep not bundled in the release tarball.
+          #   2. ~/.local/bin on PATH — pull-models installs the llama-server
+          #      launcher there, and GITHUB_PATH applies to LATER steps (the
+          #      start-*-server steps need to resolve it).
           sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
-          cat > "$HOME/.local/bin/llama-server" <<WRAPPER
-          #!/bin/sh
-          export LD_LIBRARY_PATH="$LLAMA_DIR:\${LD_LIBRARY_PATH}"
-          exec "$LLAMA_DIR/llama-server" "\$@"
-          WRAPPER
-          chmod +x "$HOME/.local/bin/llama-server"
-          # GITHUB_PATH applies to later steps (pull-models etc.); verify directly here.
+          mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/llama-server" --version
 
       - name: Write .env (cpu preset → user XDG config)
         timeout-minutes: 2
@@ -89,10 +79,10 @@ jobs:
           echo "--- generated .env ---"
           cat "${XDG_CONFIG_HOME}/agentalloy/.env"
 
-      - name: Pull models (build llama-server + download both GGUFs)
-        # From-source llama-server build (~5-10 min) plus ~1.2 GB of GGUF
-        # downloads (embed + reranker). Generous ceiling so a slow HF mirror or
-        # a cold build cache can't trip the step.
+      - name: Pull models (download prebuilt llama-server + both GGUFs)
+        # Prebuilt llama-server download (~15 MB) plus ~1.2 GB of GGUF downloads
+        # (embed + reranker). Generous ceiling so a slow HF/GitHub mirror can't
+        # trip the step. This is the step that exercises the prebuilt path.
         timeout-minutes: 30
         run: |
           set -euxo pipefail
