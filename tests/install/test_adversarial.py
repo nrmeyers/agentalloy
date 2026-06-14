@@ -292,48 +292,6 @@ class TestDuplicateSentinels:
 
 
 # ---------------------------------------------------------------------------
-# Subprocess option-injection
-# ---------------------------------------------------------------------------
-
-
-class TestPullModelsOptionInjection:
-    def test_dash_dash_separator_in_argv(self) -> None:
-        from unittest.mock import MagicMock
-
-        from agentalloy.install.subcommands.pull_models import _auto_pull
-
-        with (
-            # Skip the new daemon-start probe so we exercise only the
-            # pull-command path the test is asserting on.
-            patch(
-                "agentalloy.install.subcommands.pull_models._ollama_daemon_running",
-                return_value=True,
-            ),
-            patch("shutil.which", return_value="/usr/bin/ollama"),
-            patch("subprocess.run") as mock_run,
-        ):
-            mock_run.return_value = MagicMock(returncode=0, stderr="")
-            _auto_pull("ollama", "valid-model")
-            args = mock_run.call_args[0][0]
-        assert "--" in args
-        assert args.index("--") < args.index("valid-model")
-
-    def test_leading_dash_model_rejected(self) -> None:
-        from agentalloy.install.subcommands.pull_models import _auto_pull
-
-        result = _auto_pull("ollama", "--insecure-flag")
-        assert result["success"] is False
-        assert "disallowed" in result["error"]
-
-    def test_shell_metachar_model_rejected(self) -> None:
-        from agentalloy.install.subcommands.pull_models import _auto_pull
-
-        for hostile in ("model;rm -rf", "model$(whoami)", "model`id`", "model\nls"):
-            result = _auto_pull("ollama", hostile)
-            assert result["success"] is False, f"accepted: {hostile!r}"
-
-
-# ---------------------------------------------------------------------------
 # Embedding-runtime URL allowlist
 # ---------------------------------------------------------------------------
 

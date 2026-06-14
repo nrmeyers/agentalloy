@@ -14,8 +14,10 @@ from agentalloy.install.subcommands.enable_service import (
     _read_env_file,  # pyright: ignore[reportPrivateUsage]
     _render_launchd_plist,  # pyright: ignore[reportPrivateUsage]
     _render_llama_embed_unit,  # pyright: ignore[reportPrivateUsage]
+    _render_llama_launchd_plist,  # pyright: ignore[reportPrivateUsage]
     _render_llama_rerank_unit,  # pyright: ignore[reportPrivateUsage]
     _render_systemd_unit,  # pyright: ignore[reportPrivateUsage]
+    _write_llama_launchd_agents,  # pyright: ignore[reportPrivateUsage]
     enable_service,
 )
 
@@ -139,6 +141,88 @@ class TestRenderLaunchdPlist:
         content = _render_launchd_plist("/usr/bin/uv", Path("/app"), 8000, {})
         assert "<key>RunAtLoad</key>" in content
         assert "<true/>" in content
+
+
+class TestRenderLlamaLaunchdPlist:
+    """The macOS LaunchAgent plists for the embed/reranker llama-servers."""
+
+    def test_embed_plist_uses_embeddings_mode_on_47951(self) -> None:
+        content = _render_llama_launchd_plist(
+            "ai.agentalloy.embed",
+            [
+                "/usr/bin/llama-server",
+                "--embeddings",
+                "--port",
+                "47951",
+                "-m",
+                "/data/models/Qwen3-Embedding-0.6B-Q8_0.gguf",
+            ],
+        )
+        assert '<?xml version="1.0"' in content
+        assert "<string>ai.agentalloy.embed</string>" in content
+        assert "<string>--embeddings</string>" in content
+        assert "<string>47951</string>" in content
+        assert "<key>RunAtLoad</key>" in content
+        assert "<key>KeepAlive</key>" in content
+
+    def test_rerank_plist_is_completions_mode_on_47952(self) -> None:
+        content = _render_llama_launchd_plist(
+            "ai.agentalloy.rerank",
+            [
+                "/usr/bin/llama-server",
+                "--port",
+                "47952",
+                "-m",
+                "/data/models/Qwen3-Reranker-0.6B-Q8_0.gguf",
+            ],
+        )
+        # Reranker is a completions server — must NOT pass --embeddings.
+        assert "--embeddings" not in content
+        assert "<string>47952</string>" in content
+        assert "<string>ai.agentalloy.rerank</string>" in content
+
+
+class TestWriteLlamaLaunchdAgents:
+    """``_write_llama_launchd_agents`` — the macOS mirror of ``_write_llama_units``."""
+
+    def test_skips_gracefully_when_llama_server_absent(self) -> None:
+        with patch(
+            "agentalloy.install.subcommands.enable_service.shutil.which",
+            return_value=None,
+        ):
+            written = _write_llama_launchd_agents()
+        assert written == []
+
+    def test_writes_and_loads_both_agents(self, tmp_path: Path) -> None:
+        loaded: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            loaded.append(cmd)
+            return MagicMock(returncode=0, stderr="")
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.enable_service.shutil.which",
+                return_value="/usr/local/bin/llama-server",
+            ),
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch(
+                "agentalloy.install.subcommands.enable_service.subprocess.run",
+                side_effect=fake_run,
+            ),
+            patch("agentalloy.install.subcommands.enable_service.os.chmod"),
+        ):
+            written = _write_llama_launchd_agents()
+
+        agents_dir = tmp_path / "Library" / "LaunchAgents"
+        assert str(agents_dir / "ai.agentalloy.embed.plist") in written
+        assert str(agents_dir / "ai.agentalloy.rerank.plist") in written
+        # Both plists were actually written to disk.
+        assert (agents_dir / "ai.agentalloy.embed.plist").exists()
+        assert (agents_dir / "ai.agentalloy.rerank.plist").exists()
+        # launchctl load was invoked for both labels (plus unload calls).
+        load_cmds = [c for c in loaded if "load" in c]
+        assert len(load_cmds) == 2
 
 
 class TestReadEnvFile:

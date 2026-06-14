@@ -39,7 +39,11 @@ SCHEMA_VERSION = 1
 
 _DEFAULT_PORT = 47950
 _PHASES = ("early", "runner", "container")
-_OLLAMA_PORT = 11434
+
+# llama-server (llama.cpp) is the sole inference runner. The embed server
+# listens on 47951 (--embeddings mode); RUNTIME_EMBED_BASE_URL overrides it.
+_LLAMA_EMBED_PORT = 47951
+_DEFAULT_EMBED_BASE_URL = f"http://localhost:{_LLAMA_EMBED_PORT}"
 
 
 def _check(
@@ -333,7 +337,7 @@ def _check_ollama_present() -> dict[str, Any]:
 
 def _check_ollama_reachable() -> dict[str, Any]:
     t0 = time.monotonic()
-    url = f"http://localhost:{_OLLAMA_PORT}/api/tags"
+    url = "http://localhost:11434/api/tags"
     try:
         req = Request(url, method="GET")
         with urlopen(req, timeout=2) as resp:
@@ -347,7 +351,7 @@ def _check_ollama_reachable() -> dict[str, Any]:
             remediation=(
                 "Start the Ollama daemon: `ollama serve` (Linux), or use the "
                 "menubar app (macOS/Windows). Re-run preflight once "
-                f"`curl -s http://localhost:{_OLLAMA_PORT}/api/tags` returns JSON."
+                "`curl -s http://localhost:11434/api/tags` returns JSON."
             ),
         )
     return _check("ollama_reachable", passed=True, started=t0, detail=f"GET {url} ok")
@@ -381,7 +385,7 @@ def _try_start_ollama() -> bool:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", _OLLAMA_PORT), timeout=1):
+            with socket.create_connection(("127.0.0.1", 11434), timeout=1):
                 return True
         except OSError:
             time.sleep(1)
@@ -439,9 +443,25 @@ def _check_llama_server_present() -> dict[str, Any]:
     )
 
 
+def _embed_base_url() -> str:
+    """Resolve the embed server base URL from .env (fallback to the default).
+
+    Honors ``RUNTIME_EMBED_BASE_URL`` written by ``write-env``; defaults to
+    the llama-server embed port (47951) when no env file is present.
+    """
+    env = install_state.parse_env_file(install_state.env_path())
+    return env.get("RUNTIME_EMBED_BASE_URL", _DEFAULT_EMBED_BASE_URL).rstrip("/")
+
+
 def _check_llama_server_reachable() -> dict[str, Any]:
+    """Probe the embed llama-server's /health endpoint.
+
+    llama-server exposes ``/health`` (returns 200 + ``{"status": "ok"}`` once
+    the model is loaded). Unlike Ollama it has no ``/api/tags``.
+    """
     t0 = time.monotonic()
-    url = "http://localhost:11436/api/tags"
+    base = _embed_base_url()
+    url = f"{base}/health"
     try:
         req = Request(url, method="GET")
         with urlopen(req, timeout=2) as resp:
@@ -453,9 +473,9 @@ def _check_llama_server_reachable() -> dict[str, Any]:
             started=t0,
             error=f"GET {url} failed: {exc}",
             remediation=(
-                "Start the llama-server daemon: `llama-server --embeddings --port 11436` "
-                "or ensure it's running. Re-run preflight once "
-                "`curl -s http://localhost:11436/api/tags` returns JSON."
+                f"Start the embed llama-server: `llama-server --embeddings --port "
+                f"{_LLAMA_EMBED_PORT}`, or ensure it's running. Re-run preflight once "
+                f"`curl -s {url}` returns 200."
             ),
         )
     return _check("llama_server_reachable", passed=True, started=t0, detail=f"GET {url} ok")
