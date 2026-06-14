@@ -304,6 +304,8 @@ class TestInstallLocalPack:
             tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 2}]
         )
         # Create corpus dir + files so the Pattern E corpus verification passes.
+        # Verification checks the ingest paths (settings.duckdb_path /
+        # ladybug_db_path), so point those at the seeded files.
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
         (corpus_dir / "skills.duck").touch()
@@ -325,6 +327,13 @@ class TestInstallLocalPack:
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
             patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
         ):
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         assert result["action"] == "already_installed"
