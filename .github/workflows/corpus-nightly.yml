@@ -51,19 +51,32 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Ensure llama.cpp build prerequisites
-        timeout-minutes: 5
+      - name: Provision llama-server (from the ggml-org llama.cpp image)
+        timeout-minutes: 10
         run: |
           set -euxo pipefail
-          # ubuntu-latest already ships git, cmake, and g++ (build-essential).
-          # pull-models builds llama-server from source when it's not on PATH,
-          # so just assert the toolchain is present (install only if missing).
-          if ! command -v cmake >/dev/null 2>&1 || ! command -v c++ >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends git cmake build-essential
-          fi
-          cmake --version
-          c++ --version
+          # pull-models only builds llama-server from source in INTERACTIVE mode;
+          # in CI (no TTY) it skips the build and errors. So provision a known-good
+          # binary the way the container image does (verified in v1.3.1): copy the
+          # llama.cpp toolchain (binary + co-located .so libs) out of ggml-org's
+          # image and front it with an LD_LIBRARY_PATH wrapper placed on PATH, so
+          # pull-models / start-*-server find it instead of trying to build.
+          LLAMA_DIR="$HOME/llamacpp"
+          mkdir -p "$LLAMA_DIR" "$HOME/.local/bin"
+          docker create --name lcp ghcr.io/ggml-org/llama.cpp:full
+          docker cp lcp:/app/. "$LLAMA_DIR/"
+          docker rm lcp
+          # libgomp1 (OpenMP runtime) is the one dep not in the copied toolchain.
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+          cat > "$HOME/.local/bin/llama-server" <<WRAPPER
+          #!/bin/sh
+          export LD_LIBRARY_PATH="$LLAMA_DIR:\${LD_LIBRARY_PATH}"
+          exec "$LLAMA_DIR/llama-server" "\$@"
+          WRAPPER
+          chmod +x "$HOME/.local/bin/llama-server"
+          # GITHUB_PATH applies to later steps (pull-models etc.); verify directly here.
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/llama-server" --version
 
       - name: Write .env (cpu preset → user XDG config)
         timeout-minutes: 2
