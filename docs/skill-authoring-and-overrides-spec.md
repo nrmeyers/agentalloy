@@ -68,8 +68,8 @@ tier: <foundation|language|framework|tooling|workflow|domain|platform|protocol|s
 description: |
   <multi-line pack description>
 author: <author-name>
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false

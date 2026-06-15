@@ -159,7 +159,7 @@ Two embedded databases:
 | Store | Engine | Role |
 |-------|--------|------|
 | **LadybugDB** | Kuzu (graph DB) | Skill / Version / Fragment / Pack graph — "what skill means and how its pieces relate" |
-| **DuckDB** | DuckDB (columnar) | 1024-dim vector index, BM25 FTS index, composition traces, per-profile datastores (`skills.duck`), shared domain datastore (`domain.duck`) |
+| **DuckDB** | DuckDB (columnar) | 768-dim vector index, BM25 FTS index, composition traces, per-profile datastores (`skills.duck`), shared domain datastore (`domain.duck`) |
 
 Embeddings are stored in DuckDB, not LadybugDB. The Kuzu VECTOR extension is intentionally NOT loaded due to lifecycle incompatibility with FastAPI.
 
@@ -180,7 +180,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 
 1. **Query extraction** — from contract `domain_tags` (primary) or rule-based extraction from task text (fallback)
 2. **BM25 leg** — lexical match over fragment content
-3. **Dense leg** — cosine similarity against 1024-dim embeddings (Qwen3-Embedding-0.6B-Q8_0.gguf)
+3. **Dense leg** — cosine similarity against 768-dim embeddings (nomic-embed-text-v1.5.Q8_0.gguf)
 4. **RRF fusion** — phase-tuned Reciprocal Rank Fusion combines both legs
 5. **Applicability filter** — deterministic predicates remove inapplicable fragments
 6. **Diversity selection** — top-k with diversity constraint (default: on)
@@ -193,12 +193,14 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 
 ### Embedding Model
 
-Single model for all embedding needs: `Qwen3-Embedding-0.6B-Q8_0.gguf` at 1024 dimensions, served by llama-server on `47951`. Used for:
+Single model for all embedding needs: `nomic-embed-text-v1.5.Q8_0.gguf` at 768 dimensions, served by llama-server on `47951`. Used for:
 - Fragment embeddings (retrieval)
 - Semantic gate scoring (cosine similarity against reference phrase sets)
 - Contract query embeddings
 
-Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --embeddings` exposes. The runtime honors `RUNTIME_EMBED_BASE_URL`, so it also accepts any other OpenAI-compatible embed endpoint that returns 1024-dim vectors.
+nomic serves on stock llama.cpp via the nomic-bert architecture. It requires `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048`. nomic also has a prefix footgun: embed **queries** with a literal `search_query: ` prefix and **documents** with `search_document: `.
+
+Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --embeddings` exposes. The runtime honors `RUNTIME_EMBED_BASE_URL`, so it also accepts any other OpenAI-compatible embed endpoint that returns 768-dim vectors. The `EmbeddingDimMismatch` startup guard raises if an existing corpus was built at a different dimension than 768 — switching embed models needs a re-embed, not a config change (`EMBEDDING_DIM = 768` in `src/agentalloy/storage/vector_store.py` is the single source of truth).
 
 ### Telemetry
 
@@ -214,7 +216,7 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 
 - `embed_server.url` — embedding backend URL
 - `embed_server.model` — embedding model name
-- `embed_server.dimensions` — embedding dimensions (1024)
+- `embed_server.dimensions` — embedding dimensions (768)
 - `ladybug_db_path` — LadybugDB location
 - `profile_name` — active profile
 - `profiles_path` — profiles directory
@@ -243,7 +245,7 @@ profiles:
 |----------|---------|---------|
 | `AGENTALLOY_URL` | AgentAlloy service URL | `http://localhost:47950` |
 | `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
-| `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `Qwen3-Embedding-0.6B-Q8_0.gguf` |
+| `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `nomic-embed-text-v1.5.Q8_0.gguf` |
 | `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |
 | `SIGNAL_INTENT_RERANK_URL` | Reranker llama-server URL | `http://127.0.0.1:47952` |
 | `SIGNAL_INTENT_RERANK_MODEL` | Reranker model (GGUF) | `Qwen3-Reranker-0.6B-Q8_0.gguf` |

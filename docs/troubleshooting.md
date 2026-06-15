@@ -3,9 +3,12 @@
 ## llama.cpp / Model Issues
 
 AgentAlloy serves inference with two `llama-server` (llama.cpp) instances: an embed
-server on **47951** (`llama-server --embeddings --port 47951`) and an intent reranker
-server on **47952** (`llama-server --port 47952`, completions mode). The models are
-GGUFs: `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf`.
+server on **47951** (`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951`)
+and an intent reranker server on **47952** (`llama-server --port 47952`, completions mode).
+The models are GGUFs: `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf`.
+The embed model is `nomic-embed-text-v1.5` (768-dim), which serves on stock llama.cpp via
+the `nomic-bert` architecture; queries must be prefixed with `search_query: ` and documents
+with `search_document: `.
 
 ### `llama-server: command not found`
 
@@ -53,7 +56,7 @@ container, `podman logs -f agentalloy`.
 ### Model download hangs or takes very long
 
 - Check your network connection
-- The GGUFs download from Hugging Face (`Qwen/Qwen3-Embedding-0.6B-GGUF`,
+- The GGUFs download from Hugging Face (`nomic-ai/nomic-embed-text-v1.5-GGUF`,
   `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF`); a slow connection can take several minutes
 - If truly stuck, cancel and retry — partial downloads resume on re-run
 

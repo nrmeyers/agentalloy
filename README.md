@@ -22,7 +22,7 @@
 
 `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt — and they're already breaking. They load once at session start, then suffer context rot as the conversation drags on and your agent drifts from the script. Reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, the rules your agent must follow and the skills it needs change dozens of times — and static files can't keep up. Leave them out and a smaller model flounders on tasks its training never covered; cram them all in and you pay the token tax on every turn, or pay it again redoing the work it got wrong.
 
-**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`Qwen3-Embedding-0.6B-Q8_0.gguf`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. When nothing has changed, nothing is injected — your agent keeps working with the context it already has. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt by fusing three instruction sets into the exact agent persona the moment calls for:
+**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. When nothing has changed, nothing is injected — your agent keeps working with the context it already has. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt by fusing three instruction sets into the exact agent persona the moment calls for:
 
 - **System Governance** — hard boundaries and operational rules (Linear issue naming, PR branch conventions, CI/deployment gates).
 - **Workflow Directives** — process constraints (Spec-Driven Development rules, defining success criteria without solution wording).
@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier defaults to a small local reranker — a measured win over cosine — and fails open to cosine when no reranker server is running. Everything runs on local models; nothing leaves your machine. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one 0.6B embed model (plus a 0.6B reranker for the intent gates) and embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
+Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier defaults to a small local reranker — a measured win over cosine — and fails open to cosine when no reranker server is running. Everything runs on local models; nothing leaves your machine. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one small embed model (`nomic-embed-text-v1.5`, plus a 0.6B reranker for the intent gates) and embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -62,13 +62,13 @@ Both deployments run the same wizard — they differ only in the option you pick
 
 ### Option 1 — Native install (recommended)
 
-**Best performance.** Runs the `Qwen3-Embedding-0.6B-Q8_0.gguf` embed model directly on your host via llama-server, with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
+**Best performance.** Runs the `nomic-embed-text-v1.5.Q8_0.gguf` embed model directly on your host via llama-server, with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
 
 The wizard handles the rest: hardware detection, GGUF model download, ports, service mode, **skill pack selection** (tier-grouped listing), IDE harness wiring, and hardware target. It executes every install step and validates the result — **3–5 minutes** on a warm machine.
 
 ### Option 2 — Container install
 
-**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + two bundled `llama-server` instances in a single container, with the `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` GGUFs auto-downloaded on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
+**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + two bundled `llama-server` instances in a single container, with the `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` GGUFs auto-downloaded on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
 
 > **Pulls a pre-built image from GHCR** (`ghcr.io/nrmeyers/agentalloy:latest`) — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
@@ -186,7 +186,7 @@ Volume mount:
 ### Volume layout & bootstrap
 
 The entrypoint (`/app/entrypoint.sh`, baked into the image) seeds the prebuilt
-corpus, downloads both GGUFs (`Qwen3-Embedding-0.6B-Q8_0.gguf` +
+corpus, downloads both GGUFs (`nomic-embed-text-v1.5.Q8_0.gguf` +
 `Qwen3-Reranker-0.6B-Q8_0.gguf`) into `/app/data/models`, starts the two
 `llama-server` daemons (embed on 47951, reranker on 47952), runs migrations, and
 execs uvicorn — idempotent across restarts via a `.bootstrap-complete` marker. A
@@ -197,7 +197,7 @@ operational command reference live in [INSTALL.md](INSTALL.md) and
 
 ### Hardware requirements
 
-Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled `llama-server` instances run on CPU using `Qwen3-Embedding-0.6B-Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` — functional for embeddings and intent reranking but slower than GPU.
+Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled `llama-server` instances run on CPU using `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` — functional for embeddings and intent reranking but slower than GPU.
 
 | Requirement | Minimum |
 |---|---|
@@ -212,7 +212,7 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 - **Composed per task, not loaded every turn.** A skill that's irrelevant to the current task isn't in the prompt at all — RRF + applicability filtering picks the right subset for each request.
 - **Three instruction sets, fused.** Governance, workflow, and domain skills are composed together into one persona — not three files the agent has to reconcile on its own.
 - **Phase-aware.** Build-phase skills weight differently than QA-phase or review-phase skills. The same task gets a different composition at different points in the lifecycle.
-- **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 1024-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
+- **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 768-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
 - **No model variance by default.** Embeddings + lexical match + deterministic fusion mean the same task → same composition, regardless of which agent model you swap in tomorrow. (The optional composition fragment re-ranker is the only non-deterministic element in this path — off by default, fail-open.)
 - **Versioned & validated.** Every skill is sourced from authoritative upstream docs and validated against the R1–R8 quality contract (`src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`).
 
@@ -261,7 +261,7 @@ The agent writes the contract once at task start. From then on, **`domain_tags` 
 
 ### 3. The signal layer
 
-A small Python module that wakes on three kinds of events: a user prompt arrives, a contract file is written, a tool is about to fire. It runs a cheap **pre-filter** (signal keywords, file-event scope checks) to decide if anything needs to happen. If nothing matches, it returns silently — no tokens spent, no injection. If something matches, it evaluates the active phase's **exit gates** (deterministic predicates like `artifact_exists`, `git_state`, `contract_has_tags`, plus a few semantic ones that cosine-similarity-score the prompt against named intents using the same 0.6B embed server). When gates pass, the phase file is updated atomically and the next workflow skill's prose is emitted as pre-prompt context.
+A small Python module that wakes on three kinds of events: a user prompt arrives, a contract file is written, a tool is about to fire. It runs a cheap **pre-filter** (signal keywords, file-event scope checks) to decide if anything needs to happen. If nothing matches, it returns silently — no tokens spent, no injection. If something matches, it evaluates the active phase's **exit gates** (deterministic predicates like `artifact_exists`, `git_state`, `contract_has_tags`, plus a few semantic ones that cosine-similarity-score the prompt against named intents using the same embed server). When gates pass, the phase file is updated atomically and the next workflow skill's prose is emitted as pre-prompt context.
 
 ```
         ┌───────────────────┐
@@ -450,7 +450,7 @@ Query via `GET /telemetry/traces` or `agentalloy telemetry`. See [docs/operator.
 Runtime environment variables are written automatically by `agentalloy write-env` to `~/.config/agentalloy/.env`. Key variables:
 
 - `RUNTIME_EMBED_BASE_URL` — embedding endpoint (default: embed llama-server at `http://localhost:47951`)
-- `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `Qwen3-Embedding-0.6B-Q8_0.gguf`)
+- `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `nomic-embed-text-v1.5.Q8_0.gguf`)
 - `PROFILE_ROOT` — per-profile datastores
 - `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — cosine dedup thresholds
 - `BOUNCE_BUDGET` — compose retry budget
@@ -467,7 +467,7 @@ uv run ruff check .              # lint
 uv run ruff format --check .     # format
 uv run pyright                   # types
 uv run pytest                    # unit tests (fast)
-uv run pytest -m integration     # integration — requires a running embed server (llama-server) with Qwen3-Embedding-0.6B-Q8_0.gguf
+uv run pytest -m integration     # integration — requires a running embed server (llama-server) with nomic-embed-text-v1.5.Q8_0.gguf
 ```
 
 Tests live under `tests/` and cover the install pipeline (`tests/install/`), retrieval, composition, applicability filtering, telemetry, and the harness-wiring catalog.

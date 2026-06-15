@@ -185,7 +185,7 @@ classifying user utterances against named transition intents (completion /
 approval / redirection). This benchmark measures that classifier, not retrieval.
 
 ```bash
-uv run python -m eval.intent_bench          # needs Ollama :11434 + reranker :60001
+uv run python -m eval.intent_bench          # needs llama-server embed :47951 + reranker :60001
 ```
 
 Two backends, selected by `SIGNAL_INTENT_BACKEND` (**default `reranker`**, on the
@@ -229,7 +229,7 @@ intents in one batched reranker call (59ms p50), whereas production issues one
 single-doc reranker call per intent-gate via `_intent_rerank`. This understates
 the reranker's production edge rather than inflating it: production cosine
 re-embeds the query on every gate (`_intent_similarity` calls
-`embed([query] + refs)` each time — a full Ollama round-trip per gate), so the
+`embed([query] + refs)` each time — a full llama-server round-trip per gate), so the
 reranker's per-gate advantage holds and in fact widens in production.
 
 ### CPU latency and how often it fires (2026-06-13)

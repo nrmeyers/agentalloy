@@ -13,7 +13,7 @@
 A local **AgentAlloy** service that gives your coding agent (this LLM, or another) access to a curated corpus of engineering skills — testing patterns, error handling, deployment recipes, observability, security, etc. — composed dynamically per task.
 
 The runtime is a small FastAPI service backed by:
-- An embedding model (`Qwen3-Embedding-0.6B-Q8_0.gguf`, 1024-dim) — served on any hardware by llama-server (llama.cpp)
+- An embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, 768-dim) — served on any hardware by llama-server (llama.cpp)
 - A skill corpus split into **packs** that the user opts into at install time (default: 5 always-on packs — `core`, `engineering`, `documentation`, `performance`, `refactoring`; opt-in: `python`, `typescript`, `nodejs`, `fastapi`, `react`, `go`, `rust`, `data-engineering`, etc.). Pack source YAMLs ship in the wheel; the binary corpus (LadybugDB + DuckDB) is generated locally on first install.
 - Your handoff harness (Claude Code / Cursor / Continue.dev / etc.) — wired so it can query the API
 
@@ -67,7 +67,21 @@ For a missing `uv`, **stop and ask the user to install it** — see https://docs
 
 `llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After setup, verify with `llama-server --version` (and confirm `~/.local/bin` is on your `$PATH`).
 
-> **Migration from an existing Ollama install:** AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 1024-dim vectors, you can point AgentAlloy at it instead of the managed llama-server.
+> **Migration from an existing Ollama install:** Ollama was dropped as a runtime in v1.3.1 — AgentAlloy now serves embeddings via `llama-server` only. AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 768-dim vectors (`nomic-embed-text-v1.5`, mean-pooled, with the `search_query: ` / `search_document: ` prefixes applied), you can point AgentAlloy at it instead of the managed llama-server.
+
+> **Upgrading to v2.0 (breaking, corpus-incompatible):** v2.0 switches the embedder from `qwen3-embedding:0.6b` (1024-dim) to `nomic-embed-text-v1.5` (768-dim). Any corpus built before v2.0 is at the wrong dimension, so a startup `EmbeddingDimMismatch` guard will refuse to load it — switching embed models requires a re-embed, not a config change. Existing 1024-dim corpora must be rebuilt. To migrate, either rebuild the corpus in place:
+>
+> ```bash
+> agentalloy install-packs --packs all
+> agentalloy reembed --force
+> ```
+>
+> or wipe the corpus and re-run the wizard from scratch:
+>
+> ```bash
+> rm -rf ${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/
+> agentalloy setup
+> ```
 
 ---
 
@@ -182,7 +196,7 @@ The output lists the `embed_model` valid for the chosen host target, with one fl
 > ASK
 >
 > Most users want the default. For example:
-> > "For Apple Silicon + iGPU, I'll serve **Qwen3-Embedding-0.6B-Q8_0.gguf** via llama-server. Use this default, or pick a different model?"
+> > "For Apple Silicon + iGPU, I'll serve **nomic-embed-text-v1.5.Q8_0.gguf** via llama-server. Use this default, or pick a different model?"
 >
 > Wait for confirmation.
 
@@ -195,8 +209,8 @@ The output lists the `embed_model` valid for the chosen host target, with one fl
 > agentalloy pull-models --models ~/.local/share/agentalloy/outputs/recommend-models.json
 > ```
 
-This downloads `Qwen3-Embedding-0.6B-Q8_0.gguf` (from Hugging Face
-`Qwen/Qwen3-Embedding-0.6B-GGUF`) into the user-scope data directory so llama-server
+This downloads `nomic-embed-text-v1.5.Q8_0.gguf` (from Hugging Face
+`nomic-ai/nomic-embed-text-v1.5-GGUF`) into the user-scope data directory so llama-server
 can serve it in Step 7. The output may include `manual_steps_required` if a download
 needs a manual step. If so:
 
@@ -225,9 +239,11 @@ This creates the user-scoped corpus directory at `${XDG_DATA_HOME:-~/.local/shar
 > ```
 
 This brings the embedding backend online before pack ingestion. It spawns
-`llama-server --embeddings --port 47951 --ubatch-size 2048` in the background and waits
-up to 120 seconds for the server to accept connections. The log is written to
+`llama-server --embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951` in the background and waits
+up to 120 seconds for the server to accept connections. (`nomic-embed-text-v1.5` requires `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048`; it serves on stock llama.cpp via the `nomic-bert` architecture.) The log is written to
 `~/.local/share/agentalloy/logs/embed-server.log`.
+
+> **nomic prefix footgun:** the runtime must prefix every embed input — queries with a literal `search_query: ` and documents with `search_document: ` — or retrieval quality silently degrades. The managed pipeline applies these automatically; if you point `RUNTIME_EMBED_BASE_URL` at your own endpoint, you must apply them yourself.
 
 The embed server listens on **47951** — that's the port the runtime's
 `RUNTIME_EMBED_BASE_URL` points at, written into `.env` by `write-env`. The step is
@@ -365,7 +381,7 @@ If the user picked `manual`, the output includes copy-pasteable instructions for
 > agentalloy verify
 > ```
 
-This runs 8 enumerated install-time checks (embedding endpoint reachable, returns 1024-dim, DuckDB present at the user-scope corpus dir, LadybugDB present, skill count meets minimum, harness config present, harness config URL matches, runtime port available).
+This runs 8 enumerated install-time checks (embedding endpoint reachable, returns 768-dim, DuckDB present at the user-scope corpus dir, LadybugDB present, skill count meets minimum, harness config present, harness config URL matches, runtime port available).
 
 When the service is running, the corpus checks (`duckdb_present`, `ladybug_present`, `skill_count_meets_minimum`) query `GET /diagnostics/runtime` instead of opening DB files directly — Kùzu's single-writer lock would otherwise make those checks fail spuriously while the service holds the corpus open. `runtime_port_available` accepts `"healthy"` (passes) and `"degraded"` (passes with warning) responses from `/health`.
 
@@ -412,7 +428,7 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 > | Variant | Size | Model | Use case |
 > |---|---|---|---|
 > | `ghcr.io/nrmeyers/agentalloy:latest` | ~300 MB | Not included | General users with network access. The model is pulled at first container start. |
-> | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-baked GGUFs (`Qwen3-Embedding-0.6B-Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) | Air-gapped/enterprise environments that need the models baked into the image. |
+> | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-baked GGUFs (`nomic-embed-text-v1.5.Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) | Air-gapped/enterprise environments that need the models baked into the image. |
 >
 > Select the variant with `--image-tag` during setup:
 > ```bash
@@ -426,7 +442,7 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 > Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).
 >
 > **GGUF models (container):** The `latest` image downloads both GGUFs
-> (`Qwen3-Embedding-0.6B-Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) into the
+> (`nomic-embed-text-v1.5.Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) into the
 > `agentalloy-data` volume under `/app/data/models` on first boot, so they persist
 > across restarts and download only once. The `full` image has them pre-baked, so it
 > boots straight into the two llama-servers with no runtime download. No host bind
@@ -594,5 +610,5 @@ Common stuck-states:
 - A required external tool (`llama-server`) is missing. Tell the user the install URL (https://github.com/ggml-org/llama.cpp, or `brew install llama.cpp` on macOS) and wait for them to install it manually. Do NOT auto-execute install scripts.
 - A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy wire` so the harness config gets the new URL.
 - **`llama-server` not on PATH:** Step 5/7 can't find the inference binary. **Fix:** install llama.cpp (`brew install llama.cpp` on macOS, or download/build from https://github.com/ggml-org/llama.cpp), confirm `llama-server --version`, then re-run the step.
-- **GGUF download failed or incomplete:** the embed server won't start because `Qwen3-Embedding-0.6B-Q8_0.gguf` is missing from `${XDG_DATA_HOME}/agentalloy/models/`. **Fix:** re-run `agentalloy pull-models` (downloads resume on retry). For the container, `podman restart agentalloy` so the entrypoint re-fetches any missing GGUF.
+- **GGUF download failed or incomplete:** the embed server won't start because `nomic-embed-text-v1.5.Q8_0.gguf` is missing from `${XDG_DATA_HOME}/agentalloy/models/`. **Fix:** re-run `agentalloy pull-models` (downloads resume on retry). For the container, `podman restart agentalloy` so the entrypoint re-fetches any missing GGUF.
 - **Embed/reranker server didn't bind (47951/47952):** the runtime can't reach a llama-server. **Fix:** check `curl -sf http://127.0.0.1:47951/health` and `:47952/health`; inspect `~/.local/share/agentalloy/logs/embed-server.log` (native) or `podman logs -f agentalloy` (container). 47951 down breaks composition; 47952 down only falls the intent gates open to cosine.
