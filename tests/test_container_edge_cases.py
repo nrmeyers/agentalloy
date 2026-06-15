@@ -318,7 +318,7 @@ class TestEntrypointLlamaServers:
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert 'llama-server --embeddings --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"' in script
+        assert 'llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"' in script
         assert "EMBED_PID=$!" in script
 
     def test_entrypoint_starts_reranker_server_no_embeddings(self):
@@ -358,7 +358,7 @@ class TestEntrypointModelDownload:
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert 'EMBED_GGUF="$MODELS_DIR/Qwen3-Embedding-0.6B-Q8_0.gguf"' in script
+        assert 'EMBED_GGUF="$MODELS_DIR/nomic-embed-text-v1.5.Q8_0.gguf"' in script
         assert 'RERANK_GGUF="$MODELS_DIR/Qwen3-Reranker-0.6B-Q8_0.gguf"' in script
         assert '[ ! -f "$EMBED_GGUF" ] || [ ! -f "$RERANK_GGUF" ]' in script
 
@@ -377,8 +377,8 @@ class TestEntrypointModelDownload:
 
         script = _build_entrypoint_script("")
         assert (
-            "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/"
-            "Qwen3-Embedding-0.6B-Q8_0.gguf" in script
+            "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/"
+            "nomic-embed-text-v1.5.Q8_0.gguf" in script
         )
         assert (
             "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/"

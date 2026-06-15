@@ -81,9 +81,9 @@ fi
 # intent classifier). Both GGUFs are downloaded on first boot into the
 # data volume so they persist across restarts.
 MODELS_DIR="$APP_DIR/data/models"
-EMBED_GGUF="$MODELS_DIR/Qwen3-Embedding-0.6B-Q8_0.gguf"
+EMBED_GGUF="$MODELS_DIR/nomic-embed-text-v1.5.Q8_0.gguf"
 RERANK_GGUF="$MODELS_DIR/Qwen3-Reranker-0.6B-Q8_0.gguf"
-EMBED_URL="https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
+EMBED_URL="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf"
 RERANK_URL="https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"
 
 if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
@@ -99,7 +99,7 @@ if [ "$BOOTSTRAP_NEEDED" = "true" ]; then
 JSON
         mv "$PROGRESS_TMP" "$PROGRESS"
         if [ ! -f "$EMBED_GGUF" ]; then
-            echo ">> Fetching embed model (Qwen3-Embedding-0.6B-Q8_0)..."
+            echo ">> Fetching embed model (nomic-embed-text-v1.5-Q8_0)..."
             curl -fsSL -o "$EMBED_GGUF" "$EMBED_URL" \
                 --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30
         fi
@@ -118,7 +118,7 @@ fi
 # them up. Start them before uvicorn so /readiness reflects a usable
 # service.
 echo ">> Starting embed llama-server on 47951..."
-llama-server --embeddings --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &
+llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &
 EMBED_PID=$!
 echo ">> Starting reranker llama-server on 47952..."
 llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &
