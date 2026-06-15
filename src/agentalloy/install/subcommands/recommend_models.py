@@ -35,7 +35,7 @@ SCHEMA_VERSION = 1
 RUNNER = "llama-server"
 
 # Shared model set served by every preset (both GGUFs, both via llama-server).
-EMBED_MODEL = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+EMBED_MODEL = "nomic-embed-text-v1.5.Q8_0.gguf"
 RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 # ---- Preset resolution ---------------------------------------------------

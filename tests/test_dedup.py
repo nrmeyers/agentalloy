@@ -57,7 +57,10 @@ class _FakeEmbedder:
     def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
         _ = model
         self.calls.append(texts)
-        return [self._mapping[t] for t in texts]
+        # dedup prefixes document text with the nomic ``search_document: `` tag;
+        # strip it for the content→vector mapping lookup.
+        prefix = "search_document: "
+        return [self._mapping[t.removeprefix(prefix)] for t in texts]
 
 
 @pytest.fixture
@@ -263,7 +266,11 @@ def test_dedup_candidates_batches_embeddings_in_one_call(seeded_store: VectorSto
     )
     # Exactly one HTTP call for all three fragments.
     assert len(embedder.calls) == 1
-    assert embedder.calls[0] == ["content-0", "content-1", "content-2"]
+    assert embedder.calls[0] == [
+        "search_document: content-0",
+        "search_document: content-1",
+        "search_document: content-2",
+    ]
     # Each candidate has a hard match against its corresponding seeded fragment.
     assert len(result.per_fragment) == 3
     assert all(pf.hard is not None for pf in result.per_fragment)

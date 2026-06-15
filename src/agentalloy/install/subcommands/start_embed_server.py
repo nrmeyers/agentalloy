@@ -141,6 +141,8 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
     cmd = [
         "llama-server",
         "--embeddings",
+        "--pooling",
+        "mean",
         "--port",
         str(LLAMA_EMBED_PORT),
         "--ubatch-size",

@@ -849,7 +849,28 @@ def main(argv: list[str] | None = None) -> int:
                 try:
 
                     def _embed(text: str) -> list[float]:
-                        vectors = embed_client.embed(model=model_id, texts=[text])
+                        payload = f"search_document: {text}"
+                        # nomic-embed-text-v1.5 serves at n_ctx_train=2048; inputs
+                        # over that overflow the (u)batch. Truncate long fragments
+                        # to 2040 tokens via llama-server's tokenizer; short ones
+                        # (<1500 chars, <=~1500 tok worst case) skip the round-trip.
+                        if len(payload) > 1500:
+
+                            def _ntok(s: str) -> int:
+                                resp = embed_client._post_json(  # type: ignore[attr-defined]
+                                    "/tokenize", {"content": s}
+                                )
+                                return len(resp.get("tokens", []))
+
+                            try:
+                                for _ in range(6):
+                                    n = _ntok(payload)
+                                    if n <= 2040:
+                                        break
+                                    payload = payload[: int(len(payload) * 2040 / max(n, 1) * 0.95)]
+                            except Exception:
+                                payload = payload[:4000]
+                        vectors = embed_client.embed(model=model_id, texts=[payload])
                         return vectors[0]
 
                     def _record(frag: FragmentNeedingEmbedding, vec: list[float]) -> None:

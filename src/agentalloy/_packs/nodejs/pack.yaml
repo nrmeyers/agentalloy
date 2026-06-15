@@ -1,10 +1,10 @@
 name: nodejs
-version: 1.0.3
+version: 1.0.4
 tier: language
 description: Node.js runtime patterns — event loop, streams, fs/promises, ESM/CJS interop, node:test runner, error handling. Precision-favored language tier; sourced from nodejs.org Node 22 LTS docs per R1 tiered sourcing (fixtures/upstream/curated/nodejs.yaml).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -23,16 +23,16 @@ skills:
   fragment_count: 10
 - skill_id: node-built-in-test-runner
   file: node-built-in-test-runner.yaml
-  fragment_count: 13
+  fragment_count: 14
 - skill_id: node-error-handling-and-process
   file: node-error-handling-and-process.yaml
   fragment_count: 11
 - skill_id: nodejs-child-process
   file: nodejs-child-process.yaml
-  fragment_count: 17
+  fragment_count: 18
 - skill_id: nodejs-cluster
   file: nodejs-cluster.yaml
-  fragment_count: 4
+  fragment_count: 5
 - skill_id: nodejs-esm-edge-cases
   file: nodejs-esm-edge-cases.yaml
   fragment_count: 10
@@ -44,7 +44,7 @@ skills:
   fragment_count: 7
 - skill_id: nodejs-native-test-runner
   file: nodejs-native-test-runner.yaml
-  fragment_count: 7
+  fragment_count: 9
 - skill_id: nodejs-perf-hooks
   file: nodejs-perf-hooks.yaml
   fragment_count: 9
@@ -56,4 +56,4 @@ skills:
   fragment_count: 9
 - skill_id: nodejs-worker-threads
   file: nodejs-worker-threads.yaml
-  fragment_count: 12
+  fragment_count: 15

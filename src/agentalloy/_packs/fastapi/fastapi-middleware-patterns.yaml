@@ -1,17 +1,31 @@
 skill_type: domain
 skill_id: fastapi-middleware-patterns
 canonical_name: FastAPI Middleware and Dependency Patterns
-description: "Secure and manage API requests in FastAPI: use middleware for global concerns like CORS, trusted hosts, and request IDs, and dependency injection for per-route logic such as authentication, role checks, and rate limiting."
+description: 'Secure and manage API requests in FastAPI: use middleware for global concerns like CORS, trusted hosts, and request IDs, and dependency injection for per-route logic such as authentication, role checks, and rate limiting.'
 category: engineering
 skill_class: domain
-domain_tags: [starlette, asgi, cors, trusted-host, exception-handler, depends, lifespan, raw-body, fastapi, middleware, request-pipeline, cross-cutting]
+domain_tags:
+- starlette
+- asgi
+- cors
+- trusted-host
+- exception-handler
+- depends
+- lifespan
+- raw-body
+- fastapi
+- middleware
+- request-pipeline
+- cross-cutting
 related:
 - fastapi-async-and-background-tasks
 - fastapi-cors
 - fastapi-dependency-injection
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-01 for the skill-tax pilot (experiments/skill-tax/skills/). FastAPI 0.115+ flavored, covering the two complementary request-wrapping mechanisms: ASGI middleware (per-app, via `Middleware()` and `@app.middleware("http")`) and dependency injection (per-route, via `Depends()`). Includes the security-baseline middleware stack (CORS, TrustedHost, HTTPS), exception-handler routing, lifespan context, and the `APIRoute` raw-body capture pattern that pairs with `webhook-patterns`. See experiments/skill-tax/skills/AUTHORING_LOG.md for primary sources and pilot context.
@@ -253,266 +267,259 @@ raw_prose: |
   - Never trust the `X-Forwarded-Proto` or `X-Forwarded-For` header without configuring uvicorn's `forwarded_allow_ips` to the upstream proxy's IP. Otherwise any client can claim to be HTTPS or any IP, defeating downstream IP allowlists and HTTPS detection.
   - Never mix `dependencies=[Depends(...)]` on a router with no-op route signatures expecting the same dependency injected. Pick one — the router-level `dependencies` form is for "run this for every route, no parameter access," while the per-route `Depends()` form is for "the route needs this value." Mixing them runs the dependency twice with confusing caching behavior.
   - Never deploy a FastAPI app to production without `TrustedHostMiddleware`. A missing host check leaves the app responding to any Host header, which enables host-header injection attacks and cache poisoning when behind a CDN.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      ## Why this skill exists
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    ## Why this skill exists
 
-      FastAPI gives you two complementary mechanisms for wrapping requests: ASGI middleware (per-application, runs for every request before any route matches) and dependency injection (per-route, runs after route matching with full type-aware parameter resolution). Most production receivers need both — middleware for cross-cutting security baselines (CORS, host pinning, HTTPS, request ID) and dependencies for per-route concerns (authentication, role checks, rate limits scoped to a resource).
+    FastAPI gives you two complementary mechanisms for wrapping requests: ASGI middleware (per-application, runs for every request before any route matches) and dependency injection (per-route, runs after route matching with full type-aware parameter resolution). Most production receivers need both — middleware for cross-cutting security baselines (CORS, host pinning, HTTPS, request ID) and dependencies for per-route concerns (authentication, role checks, rate limits scoped to a resource).
 
-      This skill is FastAPI 0.115+ flavored because Starlette's `Middleware()` lazy-instantiation pattern, the modern `lifespan` context manager (replacing on-event hooks), and the typed `Depends()` resolution all stabilized in that line.
+    This skill is FastAPI 0.115+ flavored because Starlette's `Middleware()` lazy-instantiation pattern, the modern `lifespan` context manager (replacing on-event hooks), and the typed `Depends()` resolution all stabilized in that line.
 
-      Use this skill when bootstrapping a new FastAPI app and choosing what belongs in middleware versus dependencies; reviewing existing code where the two are confused (auth in middleware, CORS in dependencies); composing webhook receivers with `APIRoute.get_route_handler` raw-body capture; or debugging request-flow issues where the order of middleware-vs-dependency execution matters.
+    Use this skill when bootstrapping a new FastAPI app and choosing what belongs in middleware versus dependencies; reviewing existing code where the two are confused (auth in middleware, CORS in dependencies); composing webhook receivers with `APIRoute.get_route_handler` raw-body capture; or debugging request-flow issues where the order of middleware-vs-dependency execution matters.
 
-      The skill covers the request-wrapping primitives. Specific authentication implementations (JWT validation, OAuth2 token introspection) live in dedicated skills; this skill shows where those plug in.
+    The skill covers the request-wrapping primitives. Specific authentication implementations (JWT validation, OAuth2 token introspection) live in dedicated skills; this skill shows where those plug in.
+- fragment_type: setup
+  sequence: 2
+  content: |-
+    ## Setup: imports, app construction, lifespan
 
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## Setup: imports, app construction, lifespan
+    FastAPI imports come from `fastapi`; ASGI middleware machinery from `starlette.middleware`; built-in middleware classes from `starlette.middleware.<name>`. Required installs: `fastapi>=0.115`, optionally `python-multipart` for form data and `uvicorn[standard]` for the dev server.
 
-      FastAPI imports come from `fastapi`; ASGI middleware machinery from `starlette.middleware`; built-in middleware classes from `starlette.middleware.<name>`. Required installs: `fastapi>=0.115`, optionally `python-multipart` for form data and `uvicorn[standard]` for the dev server.
+    ```python
+    import os
+    from contextlib import asynccontextmanager
+    from fastapi import Depends, FastAPI, HTTPException, Request, status
+    from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+    from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+    ```
 
-      ```python
-      import os
-      from contextlib import asynccontextmanager
-      from fastapi import Depends, FastAPI, HTTPException, Request, status
-      from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-      from starlette.middleware import Middleware
-      from starlette.middleware.cors import CORSMiddleware
-      from starlette.middleware.trustedhost import TrustedHostMiddleware
-      from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
-      ```
+    The modern app-construction pattern uses `lifespan` for startup/shutdown context — DB pools, JWKS clients, background-task queues — and the `middleware=[...]` argument to attach the stack at construction time. The `lifespan` context manager replaces the deprecated `@app.on_event("startup"/"shutdown")` hooks (FastAPI docs, `lifespan` section, verified 2026-05-01).
+- fragment_type: setup
+  sequence: 3
+  content: |-
+    ```python
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # startup: pool, clients, etc.
+        app.state.db = await asyncpg.create_pool(os.environ["DATABASE_URL"])
+        yield
+        # shutdown
+        await app.state.db.close()
 
-      The modern app-construction pattern uses `lifespan` for startup/shutdown context — DB pools, JWKS clients, background-task queues — and the `middleware=[...]` argument to attach the stack at construction time. The `lifespan` context manager replaces the deprecated `@app.on_event("startup"/"shutdown")` hooks (FastAPI docs, `lifespan` section, verified 2026-05-01).
+    middleware = [
+        Middleware(TrustedHostMiddleware, allowed_hosts=["api.example.com"]),
+        Middleware(HTTPSRedirectMiddleware),
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["https://app.example.com"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        ),
+    ]
+    app = FastAPI(lifespan=lifespan, middleware=middleware)
+    ```
+- sequence: 4
+  fragment_type: execution
+  content: |
+    ## Middleware basics: the @app.middleware("http") decorator and ordering
 
-      ```python
-      @asynccontextmanager
-      async def lifespan(app: FastAPI):
-          # startup: pool, clients, etc.
-          app.state.db = await asyncpg.create_pool(os.environ["DATABASE_URL"])
-          yield
-          # shutdown
-          await app.state.db.close()
+    The simplest way to add a custom middleware is the `@app.middleware("http")` decorator — a function that receives the request and a `call_next` coroutine, runs anything needed before/after, and returns the response. Use it for one-off cross-cutting concerns (request ID injection, structured access logs, timing) where a full ASGI class is overkill.
 
-      middleware = [
-          Middleware(TrustedHostMiddleware, allowed_hosts=["api.example.com"]),
-          Middleware(HTTPSRedirectMiddleware),
-          Middleware(
-              CORSMiddleware,
-              allow_origins=["https://app.example.com"],
-              allow_credentials=True,
-              allow_methods=["GET", "POST"],
-              allow_headers=["Authorization", "Content-Type"],
-          ),
-      ]
-      app = FastAPI(lifespan=lifespan, middleware=middleware)
-      ```
+    ```python
+    import time
+    import uuid
 
-  - sequence: 3
-    fragment_type: execution
-    content: |
-      ## Middleware basics: the @app.middleware("http") decorator and ordering
+    @app.middleware("http")
+    async def request_id_and_timing(request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        start = time.perf_counter()
+        response = await call_next(request)
+        response.headers["x-request-id"] = request_id
+        response.headers["x-elapsed-ms"] = str(round((time.perf_counter() - start) * 1000, 1))
+        return response
+    ```
 
-      The simplest way to add a custom middleware is the `@app.middleware("http")` decorator — a function that receives the request and a `call_next` coroutine, runs anything needed before/after, and returns the response. Use it for one-off cross-cutting concerns (request ID injection, structured access logs, timing) where a full ASGI class is overkill.
+    Middleware execution order is the source of most surprise. Starlette evaluates middleware top-to-bottom on the request path and bottom-to-top on the response path (Starlette docs, "Using middleware", verified 2026-05-01). Middleware added LAST is OUTERMOST and runs FIRST on requests. The default stack already has `ServerErrorMiddleware` outermost (catches everything) and `ExceptionMiddleware` innermost (translates `HTTPException` into responses). Custom middleware sits between them. If your middleware needs to see the response status code translated from an `HTTPException`, it must be added BEFORE the exception middleware — which in practice means using the `middleware=[...]` argument to `FastAPI()`, not the `@app.middleware` decorator after construction.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    ## Class-based ASGI middleware via Middleware()
 
-      ```python
-      import time
-      import uuid
+    Class-based middleware is the right shape when you need per-instance configuration, lazy resource access, or interoperability with non-FastAPI ASGI apps. Pass it to `FastAPI(middleware=[Middleware(MyClass, **kwargs)])`; the kwargs are stored and applied at instantiation time when the app starts (Starlette docs, "Using middleware", verified 2026-05-01).
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ```python
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
-      @app.middleware("http")
-      async def request_id_and_timing(request: Request, call_next):
-          request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-          start = time.perf_counter()
-          response = await call_next(request)
-          response.headers["x-request-id"] = request_id
-          response.headers["x-elapsed-ms"] = str(round((time.perf_counter() - start) * 1000, 1))
-          return response
-      ```
+    class CorrelationIdMiddleware:
+        def __init__(self, app: ASGIApp, header_name: str = "x-correlation-id") -> None:
+            self.app = app
+            self.header_name = header_name
 
-      Middleware execution order is the source of most surprise. Starlette evaluates middleware top-to-bottom on the request path and bottom-to-top on the response path (Starlette docs, "Using middleware", verified 2026-05-01). Middleware added LAST is OUTERMOST and runs FIRST on requests. The default stack already has `ServerErrorMiddleware` outermost (catches everything) and `ExceptionMiddleware` innermost (translates `HTTPException` into responses). Custom middleware sits between them. If your middleware needs to see the response status code translated from an `HTTPException`, it must be added BEFORE the exception middleware — which in practice means using the `middleware=[...]` argument to `FastAPI()`, not the `@app.middleware` decorator after construction.
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+            # forward as-is; instrument send() to inject the header on the response
+            async def send_wrapper(message):
+                if message["type"] == "http.response.start":
+                    headers = list(message.get("headers", []))
+                    headers.append((self.header_name.encode(), b"x-corr-stub"))
+                    message["headers"] = headers
+                await send(message)
+            await self.app(scope, receive, send_wrapper)
+    ```
+- fragment_type: execution
+  sequence: 7
+  content: 'Built-in classes worth defaulting on: `TrustedHostMiddleware` (rejects requests with a Host header outside an allowlist; cheap defense against host-header injection), `HTTPSRedirectMiddleware` (308-redirects bare http to https; safe behind a TLS-terminating proxy that sets `X-Forwarded-Proto`), `CORSMiddleware` (browser cross-origin policy — see guardrails), and `GZipMiddleware` (response compression for text payloads).'
+- sequence: 8
+  fragment_type: execution
+  content: |
+    ## Dependencies: per-route auth and validation via Depends()
 
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## Class-based ASGI middleware via Middleware()
+    Dependencies are functions that FastAPI calls before your route function, with their parameters resolved the same way route parameters are resolved. They are the right place for authentication, authorization checks, request-scoped resources (a DB connection from the pool), and shared parameter validation. Per FastAPI docs ("Dependencies", verified 2026-05-01), dependencies run AFTER middleware and AFTER route matching but BEFORE the route function body.
 
-      Class-based middleware is the right shape when you need per-instance configuration, lazy resource access, or interoperability with non-FastAPI ASGI apps. Pass it to `FastAPI(middleware=[Middleware(MyClass, **kwargs)])`; the kwargs are stored and applied at instantiation time when the app starts (Starlette docs, "Using middleware", verified 2026-05-01).
+    ```python
+    bearer_scheme = HTTPBearer(auto_error=False)
 
-      ```python
-      from starlette.types import ASGIApp, Receive, Scope, Send
+    async def current_user(
+        request: Request,
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    ) -> dict:
+        if credentials is None or credentials.scheme.lower() != "bearer":
+            raise HTTPException(status_code=401, detail="missing bearer token")
+        # delegate token verification to a dedicated function (or the JWT skill)
+        claims = await verify_token(credentials.credentials)
+        return claims
 
-      class CorrelationIdMiddleware:
-          def __init__(self, app: ASGIApp, header_name: str = "x-correlation-id") -> None:
-              self.app = app
-              self.header_name = header_name
+    @app.get("/me")
+    async def me(user: dict = Depends(current_user)) -> dict:
+        return {"sub": user["sub"]}
+    ```
 
-          async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-              if scope["type"] != "http":
-                  await self.app(scope, receive, send)
-                  return
-              # forward as-is; instrument send() to inject the header on the response
-              async def send_wrapper(message):
-                  if message["type"] == "http.response.start":
-                      headers = list(message.get("headers", []))
-                      headers.append((self.header_name.encode(), b"x-corr-stub"))
-                      message["headers"] = headers
-                  await send(message)
-              await self.app(scope, receive, send_wrapper)
-      ```
+    Two extension points worth knowing: sub-dependencies (a dependency can `Depends()` another, with caching scoped to one request via `use_cache=True` default), and `dependencies=[Depends(...)]` on routers and the app — useful when a check should run for every route in a group without having to add a parameter to each route function. Use the latter for "every route in this router needs an authenticated user" patterns.
 
-      Built-in classes worth defaulting on: `TrustedHostMiddleware` (rejects requests with a Host header outside an allowlist; cheap defense against host-header injection), `HTTPSRedirectMiddleware` (308-redirects bare http to https; safe behind a TLS-terminating proxy that sets `X-Forwarded-Proto`), `CORSMiddleware` (browser cross-origin policy — see guardrails), and `GZipMiddleware` (response compression for text payloads).
+    Use middleware for app-wide cross-cutting concerns (CORS, host pin, HTTPS, request ID, timing). Use dependencies for per-route concerns that need typed parameter resolution (auth, role checks, request-scoped DB connections, query-parameter validation).
+- fragment_type: example
+  sequence: 9
+  content: |-
+    ## End-to-end example: middleware stack + auth dependency, three request paths
 
-  - sequence: 5
-    fragment_type: execution
-    content: |
-      ## Dependencies: per-route auth and validation via Depends()
+    The case-space coverage: a request that passes the middleware stack and the auth dependency (200), a request that fails CORS preflight (403/blocked by browser), and a request with no/invalid bearer token (401). One FastAPI app, all three paths.
+- fragment_type: example
+  sequence: 10
+  content: |-
+    ```python
+    import os
+    from contextlib import asynccontextmanager
+    from fastapi import Depends, FastAPI, HTTPException, Request
+    from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-      Dependencies are functions that FastAPI calls before your route function, with their parameters resolved the same way route parameters are resolved. They are the right place for authentication, authorization checks, request-scoped resources (a DB connection from the pool), and shared parameter validation. Per FastAPI docs ("Dependencies", verified 2026-05-01), dependencies run AFTER middleware and AFTER route matching but BEFORE the route function body.
+    ALLOWED_HOSTS = ["api.example.com"]
+    ALLOWED_ORIGINS = ["https://app.example.com"]
+    bearer_scheme = HTTPBearer(auto_error=False)
 
-      ```python
-      bearer_scheme = HTTPBearer(auto_error=False)
+    async def current_user(
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    ) -> dict:
+        # PATH C: no/invalid bearer → 401 from the dependency, route never runs
+        if credentials is None or credentials.scheme.lower() != "bearer":
+            raise HTTPException(status_code=401, detail="missing bearer token")
+        claims = await verify_token(credentials.credentials)   # raises on bad token
+        return claims
 
-      async def current_user(
-          request: Request,
-          credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-      ) -> dict:
-          if credentials is None or credentials.scheme.lower() != "bearer":
-              raise HTTPException(status_code=401, detail="missing bearer token")
-          # delegate token verification to a dedicated function (or the JWT skill)
-          claims = await verify_token(credentials.credentials)
-          return claims
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # startup: open shared resources here
+        yield
+        # shutdown: close shared resources here
 
-      @app.get("/me")
-      async def me(user: dict = Depends(current_user)) -> dict:
-          return {"sub": user["sub"]}
-      ```
+    middleware = [
+        Middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS),
+        Middleware(
+            CORSMiddleware,
+            allow_origins=ALLOWED_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        ),
+    ]
+    app = FastAPI(lifespan=lifespan, middleware=middleware)
 
-      Two extension points worth knowing: sub-dependencies (a dependency can `Depends()` another, with caching scoped to one request via `use_cache=True` default), and `dependencies=[Depends(...)]` on routers and the app — useful when a check should run for every route in a group without having to add a parameter to each route function. Use the latter for "every route in this router needs an authenticated user" patterns.
+    @app.get("/me")
+    async def me(user: dict = Depends(current_user)) -> dict:
+        # PATH A: valid token → 200 with user payload
+        return {"sub": user["sub"]}
+    ```
+- fragment_type: example
+  sequence: 11
+  content: 'Three paths in one app: PATH A is the happy case where TrustedHost passes, CORS preflight (if any) is permitted, and the bearer token validates; PATH B is a CORS-failing browser request (the CORSMiddleware response signals the browser to block, observable as a CORS error in dev tools); PATH C is the 401 from the auth dependency, never reaching the route function. The `lifespan` context is empty here for clarity but is where DB pools and JWKS clients open at startup and close at shutdown.'
+- sequence: 12
+  fragment_type: execution
+  content: |
+    ## Short-circuiting and response-mutation patterns
 
-      Use middleware for app-wide cross-cutting concerns (CORS, host pin, HTTPS, request ID, timing). Use dependencies for per-route concerns that need typed parameter resolution (auth, role checks, request-scoped DB connections, query-parameter validation).
+    Two patterns worth keeping in muscle memory because they recur in every nontrivial app.
 
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## End-to-end example: middleware stack + auth dependency, three request paths
+    **Short-circuit:** return a Response from middleware without calling `call_next` to bypass downstream middleware and the handler entirely. Common uses: maintenance mode, feature flags, IP allowlists, rate-limit responses.
 
-      The case-space coverage: a request that passes the middleware stack and the auth dependency (200), a request that fails CORS preflight (403/blocked by browser), and a request with no/invalid bearer token (401). One FastAPI app, all three paths.
+    ```python
+    from fastapi.responses import JSONResponse
 
-      ```python
-      import os
-      from contextlib import asynccontextmanager
-      from fastapi import Depends, FastAPI, HTTPException, Request
-      from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-      from starlette.middleware import Middleware
-      from starlette.middleware.cors import CORSMiddleware
-      from starlette.middleware.trustedhost import TrustedHostMiddleware
+    @app.middleware("http")
+    async def feature_flag(request: Request, call_next):
+        if request.url.path.startswith("/disabled-feature"):
+            return JSONResponse({"error": "feature disabled"}, status_code=503)
+        return await call_next(request)
+    ```
 
-      ALLOWED_HOSTS = ["api.example.com"]
-      ALLOWED_ORIGINS = ["https://app.example.com"]
-      bearer_scheme = HTTPBearer(auto_error=False)
+    **Security-header response mutation:** add baseline security headers to every response. This is the canonical "mutate the response after `call_next`" pattern.
 
-      async def current_user(
-          credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-      ) -> dict:
-          # PATH C: no/invalid bearer → 401 from the dependency, route never runs
-          if credentials is None or credentials.scheme.lower() != "bearer":
-              raise HTTPException(status_code=401, detail="missing bearer token")
-          claims = await verify_token(credentials.credentials)   # raises on bad token
-          return claims
+    ```python
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+        return response
+    ```
 
-      @asynccontextmanager
-      async def lifespan(app: FastAPI):
-          # startup: open shared resources here
-          yield
-          # shutdown: close shared resources here
+    For streaming responses you cannot easily modify the body without buffering — keep response-mutation middleware scoped to header manipulation. For request annotation (e.g. attaching a parsed user ID to `request.state`), do it before `call_next` and read it downstream via `request.state.<key>`; never mutate the request body in middleware because once consumed, downstream readers see an empty stream.
+- fragment_type: verification
+  sequence: 13
+  content: |-
+    ## Verification checklist
 
-      middleware = [
-          Middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS),
-          Middleware(
-              CORSMiddleware,
-              allow_origins=ALLOWED_ORIGINS,
-              allow_credentials=True,
-              allow_methods=["GET", "POST"],
-              allow_headers=["Authorization", "Content-Type"],
-          ),
-      ]
-      app = FastAPI(lifespan=lifespan, middleware=middleware)
+    Mechanical checks for any FastAPI app's middleware and dependency stack:
+- fragment_type: verification
+  sequence: 14
+  content: '- [ ] `CORSMiddleware` is configured with an explicit `allow_origins` list, never `["*"]` together with `allow_credentials=True`. `grep -rn ''allow_origins'' src/` returns the configured list; if `["*"]` and `allow_credentials=True` appear in the same `Middleware(CORSMiddleware, ...)` call, that combination is invalid per the CORS spec and Starlette rejects it. - [ ] `TrustedHostMiddleware` (or equivalent host pinning) is present and the allowlist is non-empty. `grep -rn ''TrustedHostMiddleware\|allowed_hosts'' src/` returns the configuration. - [ ] HTTPS is enforced either by `HTTPSRedirectMiddleware` or by the upstream proxy with `forwarded_allow_ips` set on uvicorn. `grep -rn ''HTTPSRedirectMiddleware\|forwarded_allow_ips'' src/` returns at least one hit. - [ ] No raw secrets (API keys, JWT secrets, DB credentials) are read inside route functions or dependencies on every call. They should be read once at lifespan startup or module import. `grep -rnE "os\.environ\[" src/ | grep -E "depends|dependency|route|@app\." returns nothing` (heuristic). - [ ] Authentication is implemented as a dependency, not as middleware. `grep -rn ''@app.middleware'' src/` does not return code that calls JWT decoders, OAuth introspection, or password verification — those belong in `Depends()` chains.'
+- fragment_type: verification
+  sequence: 15
+  content: '- [ ] Long-lived resources (DB pools, HTTP clients, JWKS caches) open in `lifespan` and close in the same context. `grep -rn ''lifespan\|on_event'' src/` — `on_event` is deprecated in FastAPI 0.110+; existing usage should migrate. - [ ] Custom middleware preserves the response on exception paths. Inspect each `@app.middleware` and class-based middleware: `await call_next(request)` must be inside a `try` that re-raises rather than swallows, OR the middleware must construct a fallback response that is itself an ASGI-valid Response. - [ ] `APIRoute` subclasses that capture raw bytes pair with explicit verification (e.g. webhook signature verify) before any JSON parsing dependency runs. Cross-reference with `webhook-patterns` skill for the contract. - [ ] Middleware ordering is documented or obvious from the `middleware=[...]` list. The list ordering is the request-path order top-to-bottom; reviewers must be able to read it that way.'
+- fragment_type: guardrail
+  sequence: 16
+  content: |-
+    ## Guardrails: never do these
 
-      @app.get("/me")
-      async def me(user: dict = Depends(current_user)) -> dict:
-          # PATH A: valid token → 200 with user payload
-          return {"sub": user["sub"]}
-      ```
+    These are the lines you do not cross when wiring FastAPI middleware and dependencies. Each item below has bitten production systems; the execution and example sections show the right shape.
+- fragment_type: guardrail
+  sequence: 17
+  content: '- Never use `allow_origins=["*"]` together with `allow_credentials=True`. The CORS spec forbids the combination — browsers will reject the response — and Starlette refuses to start. Always enumerate origins explicitly. - Never put authentication logic in middleware. Middleware runs before route matching, has no typed access to path/query parameters, and cannot easily express per-route policy. Use a `Depends()` chain so each route declares its auth requirement and FastAPI''s dependency cache deduplicates across sub-dependencies. - Never read secrets from `os.environ` inside a hot-path route or dependency. Read once at lifespan startup, store on `app.state`, and reference from there. Per-request env reads cost syscalls and miss any rotation that requires explicit reload. - Never use `@app.on_event("startup")` / `@app.on_event("shutdown")` in new code. Both are deprecated as of FastAPI 0.110 (verified 2026-05-01); the `lifespan` async context manager is the supported replacement and gives you a single scope for both phases. - Never assume middleware execution order matches the order you added them with `@app.middleware`. The decorator adds to the front of the stack, so the LAST decorator-added middleware is the FIRST to run. For predictable ordering, declare the full stack in `FastAPI(middleware=[...])` at construction time. - Never swallow exceptions in custom middleware.'
+- fragment_type: guardrail
+  sequence: 18
+  content: |-
+    Catch only what you can construct a valid response for; re-raise everything else so `ServerErrorMiddleware` can render a 500 and the exception is logged. Silencing errors in middleware is how you ship "200 OK with empty body" outage modes. - Never call `await request.body()` or `await request.json()` in middleware unless the middleware is the only consumer of the body. Once the body is read, downstream code that expects to read it again gets an empty stream. If the middleware needs the body for inspection, use the `APIRoute` custom request pattern so the body is cached on the request object. - Never trust the `X-Forwarded-Proto` or `X-Forwarded-For` header without configuring uvicorn's `forwarded_allow_ips` to the upstream proxy's IP. Otherwise any client can claim to be HTTPS or any IP, defeating downstream IP allowlists and HTTPS detection. - Never mix `dependencies=[Depends(...)]` on a router with no-op route signatures expecting the same dependency injected. Pick one — the router-level `dependencies` form is for "run this for every route, no parameter access," while the per-route `Depends()` form is for "the route needs this value." Mixing them runs the dependency twice with confusing caching behavior. - Never deploy a FastAPI app to production without `TrustedHostMiddleware`.
 
-      Three paths in one app: PATH A is the happy case where TrustedHost passes, CORS preflight (if any) is permitted, and the bearer token validates; PATH B is a CORS-failing browser request (the CORSMiddleware response signals the browser to block, observable as a CORS error in dev tools); PATH C is the 401 from the auth dependency, never reaching the route function. The `lifespan` context is empty here for clarity but is where DB pools and JWKS clients open at startup and close at shutdown.
-
-  - sequence: 7
-    fragment_type: execution
-    content: |
-      ## Short-circuiting and response-mutation patterns
-
-      Two patterns worth keeping in muscle memory because they recur in every nontrivial app.
-
-      **Short-circuit:** return a Response from middleware without calling `call_next` to bypass downstream middleware and the handler entirely. Common uses: maintenance mode, feature flags, IP allowlists, rate-limit responses.
-
-      ```python
-      from fastapi.responses import JSONResponse
-
-      @app.middleware("http")
-      async def feature_flag(request: Request, call_next):
-          if request.url.path.startswith("/disabled-feature"):
-              return JSONResponse({"error": "feature disabled"}, status_code=503)
-          return await call_next(request)
-      ```
-
-      **Security-header response mutation:** add baseline security headers to every response. This is the canonical "mutate the response after `call_next`" pattern.
-
-      ```python
-      @app.middleware("http")
-      async def security_headers(request: Request, call_next):
-          response = await call_next(request)
-          response.headers["X-Content-Type-Options"] = "nosniff"
-          response.headers["X-Frame-Options"] = "DENY"
-          response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
-          return response
-      ```
-
-      For streaming responses you cannot easily modify the body without buffering — keep response-mutation middleware scoped to header manipulation. For request annotation (e.g. attaching a parsed user ID to `request.state`), do it before `call_next` and read it downstream via `request.state.<key>`; never mutate the request body in middleware because once consumed, downstream readers see an empty stream.
-
-  - sequence: 8
-    fragment_type: verification
-    content: |
-      ## Verification checklist
-
-      Mechanical checks for any FastAPI app's middleware and dependency stack:
-
-      - [ ] `CORSMiddleware` is configured with an explicit `allow_origins` list, never `["*"]` together with `allow_credentials=True`. `grep -rn 'allow_origins' src/` returns the configured list; if `["*"]` and `allow_credentials=True` appear in the same `Middleware(CORSMiddleware, ...)` call, that combination is invalid per the CORS spec and Starlette rejects it.
-      - [ ] `TrustedHostMiddleware` (or equivalent host pinning) is present and the allowlist is non-empty. `grep -rn 'TrustedHostMiddleware\|allowed_hosts' src/` returns the configuration.
-      - [ ] HTTPS is enforced either by `HTTPSRedirectMiddleware` or by the upstream proxy with `forwarded_allow_ips` set on uvicorn. `grep -rn 'HTTPSRedirectMiddleware\|forwarded_allow_ips' src/` returns at least one hit.
-      - [ ] No raw secrets (API keys, JWT secrets, DB credentials) are read inside route functions or dependencies on every call. They should be read once at lifespan startup or module import. `grep -rnE "os\.environ\[" src/ | grep -E "depends|dependency|route|@app\." returns nothing` (heuristic).
-      - [ ] Authentication is implemented as a dependency, not as middleware. `grep -rn '@app.middleware' src/` does not return code that calls JWT decoders, OAuth introspection, or password verification — those belong in `Depends()` chains.
-      - [ ] Long-lived resources (DB pools, HTTP clients, JWKS caches) open in `lifespan` and close in the same context. `grep -rn 'lifespan\|on_event' src/` — `on_event` is deprecated in FastAPI 0.110+; existing usage should migrate.
-      - [ ] Custom middleware preserves the response on exception paths. Inspect each `@app.middleware` and class-based middleware: `await call_next(request)` must be inside a `try` that re-raises rather than swallows, OR the middleware must construct a fallback response that is itself an ASGI-valid Response.
-      - [ ] `APIRoute` subclasses that capture raw bytes pair with explicit verification (e.g. webhook signature verify) before any JSON parsing dependency runs. Cross-reference with `webhook-patterns` skill for the contract.
-      - [ ] Middleware ordering is documented or obvious from the `middleware=[...]` list. The list ordering is the request-path order top-to-bottom; reviewers must be able to read it that way.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Guardrails: never do these
-
-      These are the lines you do not cross when wiring FastAPI middleware and dependencies. Each item below has bitten production systems; the execution and example sections show the right shape.
-
-      - Never use `allow_origins=["*"]` together with `allow_credentials=True`. The CORS spec forbids the combination — browsers will reject the response — and Starlette refuses to start. Always enumerate origins explicitly.
-      - Never put authentication logic in middleware. Middleware runs before route matching, has no typed access to path/query parameters, and cannot easily express per-route policy. Use a `Depends()` chain so each route declares its auth requirement and FastAPI's dependency cache deduplicates across sub-dependencies.
-      - Never read secrets from `os.environ` inside a hot-path route or dependency. Read once at lifespan startup, store on `app.state`, and reference from there. Per-request env reads cost syscalls and miss any rotation that requires explicit reload.
-      - Never use `@app.on_event("startup")` / `@app.on_event("shutdown")` in new code. Both are deprecated as of FastAPI 0.110 (verified 2026-05-01); the `lifespan` async context manager is the supported replacement and gives you a single scope for both phases.
-      - Never assume middleware execution order matches the order you added them with `@app.middleware`. The decorator adds to the front of the stack, so the LAST decorator-added middleware is the FIRST to run. For predictable ordering, declare the full stack in `FastAPI(middleware=[...])` at construction time.
-      - Never swallow exceptions in custom middleware. Catch only what you can construct a valid response for; re-raise everything else so `ServerErrorMiddleware` can render a 500 and the exception is logged. Silencing errors in middleware is how you ship "200 OK with empty body" outage modes.
-      - Never call `await request.body()` or `await request.json()` in middleware unless the middleware is the only consumer of the body. Once the body is read, downstream code that expects to read it again gets an empty stream. If the middleware needs the body for inspection, use the `APIRoute` custom request pattern so the body is cached on the request object.
-      - Never trust the `X-Forwarded-Proto` or `X-Forwarded-For` header without configuring uvicorn's `forwarded_allow_ips` to the upstream proxy's IP. Otherwise any client can claim to be HTTPS or any IP, defeating downstream IP allowlists and HTTPS detection.
-      - Never mix `dependencies=[Depends(...)]` on a router with no-op route signatures expecting the same dependency injected. Pick one — the router-level `dependencies` form is for "run this for every route, no parameter access," while the per-route `Depends()` form is for "the route needs this value." Mixing them runs the dependency twice with confusing caching behavior.
-      - Never deploy a FastAPI app to production without `TrustedHostMiddleware`. A missing host check leaves the app responding to any Host header, which enables host-header injection attacks and cache poisoning when behind a CDN.
+    A missing host check leaves the app responding to any Host header, which enables host-header injection attacks and cache poisoning when behind a CDN.

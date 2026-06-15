@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: nestjs-exception-filters
 canonical_name: NestJS Exception Filters
-description: "Handle errors in NestJS APIs by catching unhandled exceptions and returning clean JSON responses: use built-in HTTP exceptions for standard errors or create custom filters with @Catch to map specific errors to user-friendly messages."
+description: 'Handle errors in NestJS APIs by catching unhandled exceptions and returning clean JSON responses: use built-in HTTP exceptions for standard errors or create custom filters with @Catch to map specific errors to user-friendly messages.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - exception-handling
-  - nestjs
-  - http-exceptions
-  - custom-filters
-  - error-responses
+- exception-handling
+- nestjs
+- http-exceptions
+- custom-filters
+- error-responses
 related:
 - nestjs-controllers-and-routing
 - nestjs-middleware
 - nestjs-pipes-guards-interceptors
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: initial authoring draft
 raw_prose: |
@@ -251,222 +253,225 @@ raw_prose: |
 
   The `@Catch(HttpException)` decorator binds the required metadata to the exception filter, telling Nest that this particular filter is looking for exceptions of type `HttpException` and nothing else. The `@Catch()` decorator may take a single parameter, or a comma-separated list. This lets you set up the filter for several types of exceptions at once.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      NestJS routes uncaught exceptions through a global exceptions layer that produces user-friendly error responses. Built-in `HttpException` and its subclasses cover most HTTP errors; custom `@Catch()` filters handle bespoke mapping. This skill covers exception handling end-to-end.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    NestJS routes uncaught exceptions through a global exceptions layer that produces user-friendly error responses. Built-in `HttpException` and its subclasses cover most HTTP errors; custom `@Catch()` filters handle bespoke mapping. This skill covers exception handling end-to-end.
 
-      Sourced from https://docs.nestjs.com/exception-filters.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      Nest comes with a built-in **exceptions layer** which is responsible for processing all unhandled exceptions across an application. When an exception is not handled by your application code, it is caught by this layer, which then automatically sends an appropriate user-friendly response.
+    Sourced from https://docs.nestjs.com/exception-filters.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    Nest comes with a built-in **exceptions layer** which is responsible for processing all unhandled exceptions across an application. When an exception is not handled by your application code, it is caught by this layer, which then automatically sends an appropriate user-friendly response.
 
-      Out of the box, this action is performed by a built-in **global exception filter**, which handles exceptions of type `HttpException` (and subclasses of it). When an exception is **unrecognized** (is neither `HttpException` nor a class that inherits from `HttpException`), the built-in exception filter generates the following default JSON response:
+    Out of the box, this action is performed by a built-in **global exception filter**, which handles exceptions of type `HttpException` (and subclasses of it). When an exception is **unrecognized** (is neither `HttpException` nor a class that inherits from `HttpException`), the built-in exception filter generates the following default JSON response:
 
-      ```json
-      {
-        "statusCode": 500,
-        "message": "Internal server error"
+    ```json
+    {
+      "statusCode": 500,
+      "message": "Internal server error"
+    }
+    ```
+
+    > The global exception filter partially supports the `http-errors` library. Basically, any thrown exception containing the `statusCode` and `message` properties will be properly populated and sent back as a response (instead of the default `InternalServerErrorException` for unrecognized exceptions).
+- fragment_type: example
+  sequence: 3
+  content: |
+    ```typescript
+    @@filename(cats.controller)
+    @Get()
+    async findAll() {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+    ```
+
+    > We used the `HttpStatus` here. This is a helper enum imported from the `@nestjs/common` package.
+
+    When the client calls this endpoint, the response looks like this:
+
+    ```json
+    {
+      "statusCode": 403,
+      "message": "Forbidden"
+    }
+    ```
+
+    The `HttpException` constructor takes two required arguments which determine the
+    response:
+
+    - The `response` argument defines the JSON response body. It can be a `string`
+      or an `object` as described below.
+    - The `status` argument defines the [HTTP status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status).
+
+    By default, the JSON response body contains two properties:
+
+    - `statusCode`: defaults to the HTTP status code provided in the `status` argument
+    - `message`: a short description of the HTTP error based on the `status`
+
+    To override just the message portion of the JSON response body, supply a string
+    in the `response` argument. To override the entire JSON response body, pass an object in the `response` argument. Nest will serialize the object and return it as the JSON response body.
+
+    The second constructor argument - `status` - should be a valid HTTP status code.
+    Best practice is to use the `HttpStatus` enum imported from `@nestjs/common`.
+
+    There is a **third** constructor argument (optional) - `options` - that can be used to provide an error [cause](https://nodejs.org/en/blog/release/v16.9.0/#error-cause). This `cause` object is not serialized into the response object, but it can be useful for logging purposes, providing valuable information about the inner error that caused the `HttpException` to be thrown.
+- fragment_type: example
+  sequence: 4
+  content: |
+    Here's an example overriding the entire response body and providing an error cause:
+
+    ```typescript
+    @@filename(cats.controller)
+    @Get()
+    async findAll() {
+      try {
+        await this.service.findAll()
+      } catch (error) {
+        throw new HttpException({
+          status: HttpStatus.FORBIDDEN,
+          error: 'This is a custom message',
+        }, HttpStatus.FORBIDDEN, {
+          cause: error
+        });
       }
-      ```
+    }
+    ```
 
-      > The global exception filter partially supports the `http-errors` library. Basically, any thrown exception containing the `statusCode` and `message` properties will be properly populated and sent back as a response (instead of the default `InternalServerErrorException` for unrecognized exceptions).
-  - fragment_type: example
-    sequence: 3
-    content: |
-      ```typescript
-      @@filename(cats.controller)
-      @Get()
-      async findAll() {
-        throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    Using the above, this is how the response would look:
+
+    ```json
+    {
+      "status": 403,
+      "error": "This is a custom message"
+    }
+    ```
+- fragment_type: verification
+  sequence: 5
+  content: |
+    By default, the exception filter does not log built-in exceptions like `HttpException` (and any exceptions that inherit from it). When these exceptions are thrown, they won't appear in the console, as they are treated as part of the normal application flow. The same behavior applies to other built-in exceptions such as `WsException` and `RpcException`.
+
+    These exceptions all inherit from the base `IntrinsicException` class, which is exported from the `@nestjs/common` package. This class helps differentiate between exceptions that are part of normal application operation and those that are not.
+
+    If you want to log these exceptions, you can create a custom exception filter. We'll explain how to do this in the next section.
+- fragment_type: example
+  sequence: 6
+  content: |
+    ```typescript
+    @@filename(forbidden.exception)
+    export class ForbiddenException extends HttpException {
+      constructor() {
+        super('Forbidden', HttpStatus.FORBIDDEN);
       }
-      ```
+    }
+    ```
 
-      > We used the `HttpStatus` here. This is a helper enum imported from the `@nestjs/common` package.
+    Since `ForbiddenException` extends the base `HttpException`, it will work seamlessly with the built-in exception handler, and therefore we can use it inside the `findAll()` method.
 
-      When the client calls this endpoint, the response looks like this:
+    ```typescript
+    @@filename(cats.controller)
+    @Get()
+    async findAll() {
+      throw new ForbiddenException();
+    }
+    ```
+- fragment_type: example
+  sequence: 7
+  content: |
+    Nest provides a set of standard exceptions that inherit from the base `HttpException`. These are exposed from the `@nestjs/common` package, and represent many of the most common HTTP exceptions:
 
-      ```json
-      {
-        "statusCode": 403,
-        "message": "Forbidden"
-      }
-      ```
+    - `BadRequestException`
+    - `UnauthorizedException`
+    - `NotFoundException`
+    - `ForbiddenException`
+    - `NotAcceptableException`
+    - `RequestTimeoutException`
+    - `ConflictException`
+    - `GoneException`
+    - `HttpVersionNotSupportedException`
+    - `PayloadTooLargeException`
+    - `UnsupportedMediaTypeException`
+    - `UnprocessableEntityException`
+    - `InternalServerErrorException`
+    - `NotImplementedException`
+    - `ImATeapotException`
+    - `MethodNotAllowedException`
+    - `BadGatewayException`
+    - `ServiceUnavailableException`
+    - `GatewayTimeoutException`
+    - `PreconditionFailedException`
 
-      The `HttpException` constructor takes two required arguments which determine the
-      response:
+    All the built-in exceptions can also provide both an error `cause` and an error description using the `options` parameter:
 
-      - The `response` argument defines the JSON response body. It can be a `string`
-        or an `object` as described below.
-      - The `status` argument defines the [HTTP status code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status).
+    ```typescript
+    throw new BadRequestException('Something bad happened', {
+      cause: new Error(),
+      description: 'Some error description',
+    });
+    ```
 
-      By default, the JSON response body contains two properties:
+    Using the above, this is how the response would look:
 
-      - `statusCode`: defaults to the HTTP status code provided in the `status` argument
-      - `message`: a short description of the HTTP error based on the `status`
+    ```json
+    {
+      "message": "Something bad happened",
+      "error": "Some error description",
+      "statusCode": 400
+    }
+    ```
+- fragment_type: example
+  sequence: 8
+  content: Let's create an exception filter that is responsible for catching exceptions which are an instance of the `HttpException` class, and implementing custom response logic for them. To do this, we'll need to access the underlying platform `Request` and `Response` objects. We'll access the `Request` object so we can pull out the original `url` and include that in the logging information. We'll use the `Response` object to take direct control of the response that is sent, using the `response.json()` method.
+- fragment_type: example
+  sequence: 9
+  content: |-
+    ```typescript
+    @@filename(http-exception.filter)
+    import { ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
+    import { Request, Response } from 'express';
 
-      To override just the message portion of the JSON response body, supply a string
-      in the `response` argument. To override the entire JSON response body, pass an object in the `response` argument. Nest will serialize the object and return it as the JSON response body.
+    @Catch(HttpException)
+    export class HttpExceptionFilter implements ExceptionFilter {
+      catch(exception: HttpException, host: ArgumentsHost) {
+        const ctx = host.switchToHttp();
+        const response = ctx.getResponse<Response>();
+        const request = ctx.getRequest<Request>();
+        const status = exception.getStatus();
 
-      The second constructor argument - `status` - should be a valid HTTP status code.
-      Best practice is to use the `HttpStatus` enum imported from `@nestjs/common`.
-
-      There is a **third** constructor argument (optional) - `options` - that can be used to provide an error [cause](https://nodejs.org/en/blog/release/v16.9.0/#error-cause). This `cause` object is not serialized into the response object, but it can be useful for logging purposes, providing valuable information about the inner error that caused the `HttpException` to be thrown.
-  - fragment_type: example
-    sequence: 4
-    content: |
-      Here's an example overriding the entire response body and providing an error cause:
-
-      ```typescript
-      @@filename(cats.controller)
-      @Get()
-      async findAll() {
-        try {
-          await this.service.findAll()
-        } catch (error) {
-          throw new HttpException({
-            status: HttpStatus.FORBIDDEN,
-            error: 'This is a custom message',
-          }, HttpStatus.FORBIDDEN, {
-            cause: error
+        response
+          .status(status)
+          .json({
+            statusCode: status,
+            timestamp: new Date().toISOString(),
+            path: request.url,
           });
-        }
       }
-      ```
+    }
+    @@switch
+    import { Catch, HttpException } from '@nestjs/common';
 
-      Using the above, this is how the response would look:
+    @Catch(HttpException)
+    export class HttpExceptionFilter {
+      catch(exception, host) {
+        const ctx = host.switchToHttp();
+        const response = ctx.getResponse();
+        const request = ctx.getRequest();
+        const status = exception.getStatus();
 
-      ```json
-      {
-        "status": 403,
-        "error": "This is a custom message"
+        response
+          .status(status)
+          .json({
+            statusCode: status,
+            timestamp: new Date().toISOString(),
+            path: request.url,
+          });
       }
-      ```
-  - fragment_type: verification
-    sequence: 5
-    content: |
-      By default, the exception filter does not log built-in exceptions like `HttpException` (and any exceptions that inherit from it). When these exceptions are thrown, they won't appear in the console, as they are treated as part of the normal application flow. The same behavior applies to other built-in exceptions such as `WsException` and `RpcException`.
+    }
+    ```
+- fragment_type: example
+  sequence: 10
+  content: |-
+    > All exception filters should implement the generic `ExceptionFilter<T>` interface. This requires you to provide the `catch(exception: T, host: ArgumentsHost)` method with its indicated signature. `T` indicates the type of the exception.
 
-      These exceptions all inherit from the base `IntrinsicException` class, which is exported from the `@nestjs/common` package. This class helps differentiate between exceptions that are part of normal application operation and those that are not.
+    > **Warning** If you are using `@nestjs/platform-fastify` you can use `response.send()` instead of `response.json()`. Don't forget to import the correct types from `fastify`.
 
-      If you want to log these exceptions, you can create a custom exception filter. We'll explain how to do this in the next section.
-  - fragment_type: example
-    sequence: 6
-    content: |
-      ```typescript
-      @@filename(forbidden.exception)
-      export class ForbiddenException extends HttpException {
-        constructor() {
-          super('Forbidden', HttpStatus.FORBIDDEN);
-        }
-      }
-      ```
-
-      Since `ForbiddenException` extends the base `HttpException`, it will work seamlessly with the built-in exception handler, and therefore we can use it inside the `findAll()` method.
-
-      ```typescript
-      @@filename(cats.controller)
-      @Get()
-      async findAll() {
-        throw new ForbiddenException();
-      }
-      ```
-  - fragment_type: example
-    sequence: 7
-    content: |
-      Nest provides a set of standard exceptions that inherit from the base `HttpException`. These are exposed from the `@nestjs/common` package, and represent many of the most common HTTP exceptions:
-
-      - `BadRequestException`
-      - `UnauthorizedException`
-      - `NotFoundException`
-      - `ForbiddenException`
-      - `NotAcceptableException`
-      - `RequestTimeoutException`
-      - `ConflictException`
-      - `GoneException`
-      - `HttpVersionNotSupportedException`
-      - `PayloadTooLargeException`
-      - `UnsupportedMediaTypeException`
-      - `UnprocessableEntityException`
-      - `InternalServerErrorException`
-      - `NotImplementedException`
-      - `ImATeapotException`
-      - `MethodNotAllowedException`
-      - `BadGatewayException`
-      - `ServiceUnavailableException`
-      - `GatewayTimeoutException`
-      - `PreconditionFailedException`
-
-      All the built-in exceptions can also provide both an error `cause` and an error description using the `options` parameter:
-
-      ```typescript
-      throw new BadRequestException('Something bad happened', {
-        cause: new Error(),
-        description: 'Some error description',
-      });
-      ```
-
-      Using the above, this is how the response would look:
-
-      ```json
-      {
-        "message": "Something bad happened",
-        "error": "Some error description",
-        "statusCode": 400
-      }
-      ```
-  - fragment_type: example
-    sequence: 8
-    content: |
-      Let's create an exception filter that is responsible for catching exceptions which are an instance of the `HttpException` class, and implementing custom response logic for them. To do this, we'll need to access the underlying platform `Request` and `Response` objects. We'll access the `Request` object so we can pull out the original `url` and include that in the logging information. We'll use the `Response` object to take direct control of the response that is sent, using the `response.json()` method.
-
-      ```typescript
-      @@filename(http-exception.filter)
-      import { ExceptionFilter, Catch, ArgumentsHost, HttpException } from '@nestjs/common';
-      import { Request, Response } from 'express';
-
-      @Catch(HttpException)
-      export class HttpExceptionFilter implements ExceptionFilter {
-        catch(exception: HttpException, host: ArgumentsHost) {
-          const ctx = host.switchToHttp();
-          const response = ctx.getResponse<Response>();
-          const request = ctx.getRequest<Request>();
-          const status = exception.getStatus();
-
-          response
-            .status(status)
-            .json({
-              statusCode: status,
-              timestamp: new Date().toISOString(),
-              path: request.url,
-            });
-        }
-      }
-      @@switch
-      import { Catch, HttpException } from '@nestjs/common';
-
-      @Catch(HttpException)
-      export class HttpExceptionFilter {
-        catch(exception, host) {
-          const ctx = host.switchToHttp();
-          const response = ctx.getResponse();
-          const request = ctx.getRequest();
-          const status = exception.getStatus();
-
-          response
-            .status(status)
-            .json({
-              statusCode: status,
-              timestamp: new Date().toISOString(),
-              path: request.url,
-            });
-        }
-      }
-      ```
-
-      > All exception filters should implement the generic `ExceptionFilter<T>` interface. This requires you to provide the `catch(exception: T, host: ArgumentsHost)` method with its indicated signature. `T` indicates the type of the exception.
-
-      > **Warning** If you are using `@nestjs/platform-fastify` you can use `response.send()` instead of `response.json()`. Don't forget to import the correct types from `fastify`.
-
-      The `@Catch(HttpException)` decorator binds the required metadata to the exception filter, telling Nest that this particular filter is looking for exceptions of type `HttpException` and nothing else. The `@Catch()` decorator may take a single parameter, or a comma-separated list. This lets you set up the filter for several types of exceptions at once.
+    The `@Catch(HttpException)` decorator binds the required metadata to the exception filter, telling Nest that this particular filter is looking for exceptions of type `HttpException` and nothing else. The `@Catch()` decorator may take a single parameter, or a comma-separated list. This lets you set up the filter for several types of exceptions at once.

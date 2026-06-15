@@ -108,7 +108,8 @@ if set(_INTENT_TASK_DESCRIPTIONS.keys()) != set(_INTENT_REFERENCES.keys()):
     )
 
 # Recalibrated per Phase 7 calibration script.
-_SIMILARITY_THRESHOLD = 0.75
+# nomic-calibrated (in-sample optimum from intent_bench sweep)
+_SIMILARITY_THRESHOLD = 0.56
 _MAX_INPUT_CHARS = 2000
 
 # ---------------------------------------------------------------------------
@@ -310,7 +311,10 @@ def _intent_similarity(
         return PredicateResult.UNKNOWN
     query = text[:_MAX_INPUT_CHARS]
     try:
-        vecs = lm_client.embed(model=model, texts=[query] + refs)
+        vecs = lm_client.embed(
+            model=model,
+            texts=[f"search_query: {query}"] + [f"search_query: {r}" for r in refs],
+        )
     except Exception as exc:
         _log.debug("embed call failed: %s", exc)
         return PredicateResult.UNKNOWN
@@ -331,7 +335,10 @@ def _topic_similarity(
         return PredicateResult.UNKNOWN
     query = text[:_MAX_INPUT_CHARS]
     try:
-        vecs = lm_client.embed(model=model, texts=[query] + topics)
+        vecs = lm_client.embed(
+            model=model,
+            texts=[f"search_query: {query}"] + [f"search_query: {t}" for t in topics],
+        )
     except Exception as exc:
         _log.debug("embed call failed: %s", exc)
         return PredicateResult.UNKNOWN

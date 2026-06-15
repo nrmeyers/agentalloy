@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: temporal-workflow-basics
 canonical_name: Temporal Workflow Basics
-description: "Build resilient background jobs and long-running processes that survive server restarts: define workflows with the Temporal Python SDK to ensure deterministic execution and automatic state recovery for complex business logic."
+description: 'Build resilient background jobs and long-running processes that survive server restarts: define workflows with the Temporal Python SDK to ensure deterministic execution and automatic state recovery for complex business logic.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - temporal
-  - workflow
-  - temporal-python-sdk
-  - development
-  - workflow-definition
+- temporal
+- workflow
+- temporal-python-sdk
+- development
+- workflow-definition
 requires:
 - temporal-activity-basics
 - temporal-workers
@@ -18,8 +18,10 @@ related:
 - temporal-message-passing
 - temporal-schedules-and-timers
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
@@ -229,217 +231,221 @@ raw_prose: |
 
   If your goal is to always take action when something new is happening, check that `workflow.unsafe.is_replaying_history_events()` is false instead. This will be false during read-only operations like queries and update validators.  This is what the SDK's built-in logger and tracing interceptors use internally.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      Temporal workflows are durable functions: their state survives process restarts, and the runtime replays them deterministically against a history of events. Workflows in the Python SDK are classes decorated with `@workflow.defn`; the entry point is a method decorated with `@workflow.run`. This skill covers workflow authoring fundamentals.
+    Temporal workflows are durable functions: their state survives process restarts, and the runtime replays them deterministically against a history of events. Workflows in the Python SDK are classes decorated with `@workflow.defn`; the entry point is a method decorated with `@workflow.run`. This skill covers workflow authoring fundamentals.
 
-      Sourced from https://docs.temporal.io/develop/python/core-application#develop-workflows.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Develop a basic Workflow {#develop-workflows}
+    Sourced from https://docs.temporal.io/develop/python/core-application#develop-workflows.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Develop a basic Workflow {#develop-workflows}
 
-      **How to develop a basic Workflow using the Temporal Python SDK.**
+    **How to develop a basic Workflow using the Temporal Python SDK.**
 
-      Workflows are the fundamental unit of a Temporal Application, and it all starts with the development of a
-      [Workflow Definition](/workflow-definition).
+    Workflows are the fundamental unit of a Temporal Application, and it all starts with the development of a
+    [Workflow Definition](/workflow-definition).
 
-      In the Temporal Python SDK programming model, Workflows are defined as classes.
+    In the Temporal Python SDK programming model, Workflows are defined as classes.
 
-      Specify the `@workflow.defn` decorator on the Workflow class to identify a Workflow.
+    Specify the `@workflow.defn` decorator on the Workflow class to identify a Workflow.
 
-      Use the `@workflow.run` to mark the entry point method to be invoked. This must be set on one asynchronous method
-      defined on the same class as `@workflow.defn`. Run methods have positional parameters.
+    Use the `@workflow.run` to mark the entry point method to be invoked. This must be set on one asynchronous method
+    defined on the same class as `@workflow.defn`. Run methods have positional parameters.
 
-      ```python
-      from temporalio import workflow
-      # ...
-      # ...
-      @workflow.defn(name="YourWorkflow")
-      class YourWorkflow:
-          @workflow.run
-          async def run(self, name: str) -> str:
-              return await workflow.execute_activity(
-                  your_activity,
-                  YourParams("Hello", name),
-                  start_to_close_timeout=timedelta(seconds=10),
-              )
-      ```
-  - fragment_type: setup
-    sequence: 3
-    content: |
-      ### Define Workflow parameters {#workflow-parameters}
+    ```python
+    from temporalio import workflow
+    # ...
+    # ...
+    @workflow.defn(name="YourWorkflow")
+    class YourWorkflow:
+        @workflow.run
+        async def run(self, name: str) -> str:
+            return await workflow.execute_activity(
+                your_activity,
+                YourParams("Hello", name),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+    ```
+- fragment_type: setup
+  sequence: 3
+  content: |
+    ### Define Workflow parameters {#workflow-parameters}
 
-      **How to define Workflow parameters using the Temporal Python SDK.**
+    **How to define Workflow parameters using the Temporal Python SDK.**
 
-      Temporal Workflows may have any number of custom parameters. However, we strongly recommend that objects are used as
-      parameters, so that the object's individual fields may be altered without breaking the signature of the Workflow. All
-      Workflow Definition parameters must be serializable.
+    Temporal Workflows may have any number of custom parameters. However, we strongly recommend that objects are used as
+    parameters, so that the object's individual fields may be altered without breaking the signature of the Workflow. All
+    Workflow Definition parameters must be serializable.
 
-      Workflow parameters are the method parameters of the singular method decorated with `@workflow.run`. These can be any
-      data type Temporal can convert, including [`dataclasses`](https://docs.python.org/3/library/dataclasses.html) when
-      properly type-annotated. Technically this can be multiple parameters, but Temporal strongly encourages a single
-      `dataclass` parameter containing all input fields.
+    Workflow parameters are the method parameters of the singular method decorated with `@workflow.run`. These can be any
+    data type Temporal can convert, including [`dataclasses`](https://docs.python.org/3/library/dataclasses.html) when
+    properly type-annotated. Technically this can be multiple parameters, but Temporal strongly encourages a single
+    `dataclass` parameter containing all input fields.
 
-      ```python
-      from dataclasses import dataclass
-      # ...
-      # ...
-      @dataclass
-      class YourParams:
-          greeting: str
-          name: str
-      ```
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ### Define Workflow return parameters {#workflow-return-values}
+    ```python
+    from dataclasses import dataclass
+    # ...
+    # ...
+    @dataclass
+    class YourParams:
+        greeting: str
+        name: str
+    ```
+- fragment_type: execution
+  sequence: 4
+  content: |
+    ### Define Workflow return parameters {#workflow-return-values}
 
-      **How to define Workflow return parameters using the Temporal Python SDK.**
+    **How to define Workflow return parameters using the Temporal Python SDK.**
 
-      Workflow return values must also be serializable. Returning results, returning errors, or throwing exceptions is fairly
-      idiomatic in each language that is supported. However, Temporal APIs that must be used to get the result of a Workflow
-      Execution will only ever receive one of either the result or the error.
+    Workflow return values must also be serializable. Returning results, returning errors, or throwing exceptions is fairly
+    idiomatic in each language that is supported. However, Temporal APIs that must be used to get the result of a Workflow
+    Execution will only ever receive one of either the result or the error.
 
-      To return a value of the Workflow, use `return` to return an object.
+    To return a value of the Workflow, use `return` to return an object.
 
-      To return the results of a Workflow Execution, use either `start_workflow()` or `execute_workflow()` asynchronous
-      methods.
+    To return the results of a Workflow Execution, use either `start_workflow()` or `execute_workflow()` asynchronous
+    methods.
 
-      For performance and behavior reasons, users should pass through all modules, including Activities, Nexus services, and
-      third-party plugins, whose calls will be deterministic using
-      [`imports_passed_through`](https://python.temporal.io/temporalio.workflow.unsafe.html#imports_passed_through) or at
-      Worker creation time by customizing the runner's restrictions with
-      [`with_passthrough_modules`](https://python.temporal.io/temporalio.worker.workflow_sandbox.SandboxRestrictions.html#with_passthrough_modules).
+    For performance and behavior reasons, users should pass through all modules, including Activities, Nexus services, and
+    third-party plugins, whose calls will be deterministic using
+    [`imports_passed_through`](https://python.temporal.io/temporalio.workflow.unsafe.html#imports_passed_through) or at
+    Worker creation time by customizing the runner's restrictions with
+    [`with_passthrough_modules`](https://python.temporal.io/temporalio.worker.workflow_sandbox.SandboxRestrictions.html#with_passthrough_modules).
 
-      ```python
-      from temporalio import workflow
+    ```python
+    from temporalio import workflow
 
-      with workflow.unsafe.imports_passed_through():
-          from your_activities_dacx import your_activity
-          from your_dataobject_dacx import YourParams
-      # ...
-      @workflow.defn(name="YourWorkflow")
-      class YourWorkflow:
-          @workflow.run
-          async def run(self, name: str) -> str:
-              return await workflow.execute_activity(
-                  your_activity,
-                  YourParams("Hello", name),
-                  start_to_close_timeout=timedelta(seconds=10),
-              )
-      ```
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ### Customize your Workflow Type {#workflow-type}
+    with workflow.unsafe.imports_passed_through():
+        from your_activities_dacx import your_activity
+        from your_dataobject_dacx import YourParams
+    # ...
+    @workflow.defn(name="YourWorkflow")
+    class YourWorkflow:
+        @workflow.run
+        async def run(self, name: str) -> str:
+            return await workflow.execute_activity(
+                your_activity,
+                YourParams("Hello", name),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+    ```
+- fragment_type: execution
+  sequence: 5
+  content: |
+    ### Customize your Workflow Type {#workflow-type}
 
-      **How to customize your Workflow Type using the Temporal Python SDK.**
+    **How to customize your Workflow Type using the Temporal Python SDK.**
 
-      Workflows have a Type that are referred to as the Workflow name.
+    Workflows have a Type that are referred to as the Workflow name.
 
-      The following examples demonstrate how to set a custom name for your Workflow Type.
+    The following examples demonstrate how to set a custom name for your Workflow Type.
 
-      You can customize the Workflow name with a custom name in the decorator argument. For example,
-      `@workflow.defn(name="your-workflow-name")`. If the name parameter is not specified, the Workflow name defaults to the
-      unqualified class name.
+    You can customize the Workflow name with a custom name in the decorator argument. For example,
+    `@workflow.defn(name="your-workflow-name")`. If the name parameter is not specified, the Workflow name defaults to the
+    unqualified class name.
 
-      ```python
-      from temporalio import workflow
+    ```python
+    from temporalio import workflow
 
-      with workflow.unsafe.imports_passed_through():
-          from your_activities_dacx import your_activity
-          from your_dataobject_dacx import YourParams
-      # ...
-      @workflow.defn(name="YourWorkflow")
-      class YourWorkflow:
-          @workflow.run
-          async def run(self, name: str) -> str:
-              return await workflow.execute_activity(
-                  your_activity,
-                  YourParams("Hello", name),
-                  start_to_close_timeout=timedelta(seconds=10),
-              )
-      ```
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ### Develop Workflow logic {#workflow-logic-requirements}
+    with workflow.unsafe.imports_passed_through():
+        from your_activities_dacx import your_activity
+        from your_dataobject_dacx import YourParams
+    # ...
+    @workflow.defn(name="YourWorkflow")
+    class YourWorkflow:
+        @workflow.run
+        async def run(self, name: str) -> str:
+            return await workflow.execute_activity(
+                your_activity,
+                YourParams("Hello", name),
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ### Develop Workflow logic {#workflow-logic-requirements}
 
-      **How to develop Workflow logic using the Temporal Python SDK.**
+    **How to develop Workflow logic using the Temporal Python SDK.**
 
-      Workflow logic is constrained by [deterministic execution requirements](/workflow-definition#deterministic-constraints).
-      Each Temporal SDK provides a
-      set of APIs that can be used inside your Workflow to interact with external (to the Workflow) application code.
+    Workflow logic is constrained by [deterministic execution requirements](/workflow-definition#deterministic-constraints).
+    Each Temporal SDK provides a
+    set of APIs that can be used inside your Workflow to interact with external (to the Workflow) application code.
 
-      Workflow code must be deterministic because the Temporal Server may [replay](/develop/python/best-practices/testing-suite#replay) your Workflow to reconstruct its state. This means:
+    Workflow code must be deterministic because the Temporal Server may [replay](/develop/python/best-practices/testing-suite#replay) your Workflow to reconstruct its state. This means:
 
-      - no threading
-      - no randomness
-      - no external calls to processes
-      - no network I/O
-      - no global state mutation
-      - no system date or time
+    - no threading
+    - no randomness
+    - no external calls to processes
+    - no network I/O
+    - no global state mutation
+    - no system date or time
 
-      All API safe for Workflows used in the [`temporalio.workflow`](https://python.temporal.io/temporalio.workflow.html) must
-      run in the implicit [`asyncio` event loop](https://docs.python.org/3/library/asyncio-eventloop.html) and be
-      _deterministic_.
+    All API safe for Workflows used in the [`temporalio.workflow`](https://python.temporal.io/temporalio.workflow.html) must
+    run in the implicit [`asyncio` event loop](https://docs.python.org/3/library/asyncio-eventloop.html) and be
+    _deterministic_.
 
-      The SDK provides replay-safe alternatives for common needs:
+    The SDK provides replay-safe alternatives for common needs:
 
-      #### Logging
+    #### Logging
 
-      Use [`workflow.logger`](https://python.temporal.io/temporalio.workflow.html#logger) instead of `print()` or the standard `logging` module.
-      The SDK logger automatically suppresses log messages during replay to avoid duplicates:
+    Use [`workflow.logger`](https://python.temporal.io/temporalio.workflow.html#logger) instead of `print()` or the standard `logging` module.
+    The SDK logger automatically suppresses log messages during replay to avoid duplicates:
+- fragment_type: execution
+  sequence: 7
+  content: |-
+    ```python
+    @workflow.defn
+    class MyWorkflow:
+        @workflow.run
+        async def run(self, name: str) -> str:
+            workflow.logger.info("Starting workflow", name)
+            # ...
+    ```
 
-      ```python
-      @workflow.defn
-      class MyWorkflow:
-          @workflow.run
-          async def run(self, name: str) -> str:
-              workflow.logger.info("Starting workflow", name)
-              # ...
-      ```
+    For logger configuration, see [Observability: Log from a Workflow](/develop/python/platform/observability#logging).
 
-      For logger configuration, see [Observability: Log from a Workflow](/develop/python/platform/observability#logging).
+    #### Random numbers and UUIDs
 
-      #### Random numbers and UUIDs
+    Use [`workflow.random()`](https://python.temporal.io/temporalio.workflow.html#random) to get a deterministic `random.Random` instance seeded per Workflow Execution. Never use `random.random()` or other `random` module functions directly.
+    For UUIDs, use [`workflow.uuid4()`](https://python.temporal.io/temporalio.workflow.html#uuid4) instead of `uuid.uuid4()`:
 
-      Use [`workflow.random()`](https://python.temporal.io/temporalio.workflow.html#random) to get a deterministic `random.Random` instance seeded per Workflow Execution. Never use `random.random()` or other `random` module functions directly.
-      For UUIDs, use [`workflow.uuid4()`](https://python.temporal.io/temporalio.workflow.html#uuid4) instead of `uuid.uuid4()`:
+    ```python
+    # Good - deterministic across replays
+    value = workflow.random().randint(1, 100)
+    unique_id = workflow.uuid4()
 
-      ```python
-      # Good - deterministic across replays
-      value = workflow.random().randint(1, 100)
-      unique_id = workflow.uuid4()
+    # Bad - different result on every replay
+    value = random.randint(1, 100)
+    ```
 
-      # Bad - different result on every replay
-      value = random.randint(1, 100)
-      ```
+    #### Current time
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    Use [`workflow.now()`](https://python.temporal.io/temporalio.workflow.html#now) instead of `datetime.now()` or `time.time()`. The SDK returns the time of the last Workflow Task, which is consistent across replays:
 
-      #### Current time
+    ```python
+    current_time = workflow.now()
+    ```
 
-      Use [`workflow.now()`](https://python.temporal.io/temporalio.workflow.html#now) instead of `datetime.now()` or `time.time()`. The SDK returns the time of the last Workflow Task, which is consistent across replays:
+    #### Detecting replay (advanced)
 
-      ```python
-      current_time = workflow.now()
-      ```
+    Use [`workflow.unsafe.is_replaying`](https://python.temporal.io/temporalio.workflow.html#is_replaying) to guard code that should only run on the first execution, such as emitting metrics or sending external notifications from an [Interceptor](/develop/python/workers/interceptors).
+    :::caution
 
-      #### Detecting replay (advanced)
+    Never use this to affect Workflow business logic — branching on replay status breaks determinism.
 
-      Use [`workflow.unsafe.is_replaying`](https://python.temporal.io/temporalio.workflow.html#is_replaying) to guard code that should only run on the first execution, such as emitting metrics or sending external notifications from an [Interceptor](/develop/python/workers/interceptors).
-      :::caution
+    :::
 
-      Never use this to affect Workflow business logic — branching on replay status breaks determinism.
+    ```python
+    if not workflow.unsafe.is_replaying():
+        emit_metric("workflow_started", 1)
+    ```
 
-      :::
-
-      ```python
-      if not workflow.unsafe.is_replaying():
-          emit_metric("workflow_started", 1)
-      ```
-
-      If your goal is to always take action when something new is happening, check that `workflow.unsafe.is_replaying_history_events()` is false instead. This will be false during read-only operations like queries and update validators.  This is what the SDK's built-in logger and tracing interceptors use internally.
+    If your goal is to always take action when something new is happening, check that `workflow.unsafe.is_replaying_history_events()` is false instead. This will be false during read-only operations like queries and update validators.  This is what the SDK's built-in logger and tracing interceptors use internally.

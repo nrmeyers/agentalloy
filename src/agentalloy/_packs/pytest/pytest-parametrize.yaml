@@ -1,22 +1,25 @@
 skill_type: domain
 skill_id: pytest-parametrize
 canonical_name: Pytest Parametrize
-description: "Run the same test against multiple inputs to avoid code duplication: use pytest parametrize to pass different argument sets to a single test function, stacking decorators for combinatorial coverage of edge cases and expected outputs."
+description: 'Run the same test against multiple inputs to avoid code duplication: use pytest parametrize to pass different argument sets to a single test function, stacking decorators for combinatorial coverage of edge cases and expected outputs.'
 category: tooling
 skill_class: domain
 domain_tags:
-  - pytest
-  - parametrize
-  - test functions
-  - fixtures
-  - stacking
+- pytest
+- parametrize
+- test functions
+- fixtures
+- stacking
 related:
 - pytest-fixtures
 - pytest-marks-and-skipping
 - pytest-monkeypatch
 always_apply: false
-phase_scope: [build, review]
-category_scope: [tooling]
+phase_scope:
+- build
+- review
+category_scope:
+- tooling
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -241,133 +244,135 @@ raw_prose: |
 
 
   .. _`pytest_generate_tests`:
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Parametrization runs the same test against multiple inputs without duplicating test code. The `@pytest.mark.parametrize` decorator takes a parameter spec and a list of value tuples. Parametrize stacks multiplicatively when applied multiple times. This skill covers parametrize patterns.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      The builtin `pytest.mark.parametrize ref` decorator enables parametrization of arguments for a test function. Here is a typical example of a test function that implements checking that a certain input leads to an expected output:
-      ```python
-      # content of test_expectation.py
-      import pytest
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Parametrization runs the same test against multiple inputs without duplicating test code. The `@pytest.mark.parametrize` decorator takes a parameter spec and a list of value tuples. Parametrize stacks multiplicatively when applied multiple times. This skill covers parametrize patterns.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    The builtin `pytest.mark.parametrize ref` decorator enables parametrization of arguments for a test function. Here is a typical example of a test function that implements checking that a certain input leads to an expected output:
+    ```python
+    # content of test_expectation.py
+    import pytest
 
-      @pytest.mark.parametrize("test_input,expected", [("3+5", 8), ("2+4", 6), ("6*9", 42)])
-      def test_eval(test_input, expected):
-          assert eval(test_input) == expected
-      ```
-      Here, the ``@parametrize`` decorator defines three different ``(test_input,expected)``
-      tuples so that the ``test_eval`` function will run three times using
-      them in turn:
-      ```pytest
-      $ pytest
-      ============================ test session starts ============================
-      platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
-      rootdir: /home/sweet/project
-      collected 3 items
+    @pytest.mark.parametrize("test_input,expected", [("3+5", 8), ("2+4", 6), ("6*9", 42)])
+    def test_eval(test_input, expected):
+        assert eval(test_input) == expected
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    Here, the ``@parametrize`` decorator defines three different ``(test_input,expected)``
+    tuples so that the ``test_eval`` function will run three times using
+    them in turn:
+    ```pytest
+    $ pytest
+    ============================ test session starts ============================
+    platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
+    rootdir: /home/sweet/project
+    collected 3 items
 
-      test_expectation.py ..F                                              [100%]
+    test_expectation.py ..F                                              [100%]
 
-      ================================= FAILURES =================================
-      ____________________________ test_eval[6*9-42] _____________________________
+    ================================= FAILURES =================================
+    ____________________________ test_eval[6*9-42] _____________________________
 
-      test_input = '6*9', expected = 42
+    test_input = '6*9', expected = 42
 
-          @pytest.mark.parametrize("test_input,expected", [("3+5", 8), ("2+4", 6), ("6*9", 42)])
-          def test_eval(test_input, expected):
-      >       assert eval(test_input) == expected
-      E       AssertionError: assert 54 == 42
-      E        +  where 54 = eval('6*9')
+        @pytest.mark.parametrize("test_input,expected", [("3+5", 8), ("2+4", 6), ("6*9", 42)])
+        def test_eval(test_input, expected):
+    >       assert eval(test_input) == expected
+    E       AssertionError: assert 54 == 42
+    E        +  where 54 = eval('6*9')
 
-      test_expectation.py:6: AssertionError
-      ========================= short test summary info ==========================
-      FAILED test_expectation.py::test_eval[6*9-42] - AssertionError: assert 54...
-      ======================= 1 failed, 2 passed in 0.12s ========================
-      ```
-  - fragment_type: verification
-    sequence: 3
-    content: |
-      As designed in this example, only one pair of input/output values fails
-      the simple test function. And as usual with test function arguments,
-      you can see the ``input`` and ``output`` values in the traceback.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      Note that you could also use the parametrize marker on a class or a module
-      (see `mark`) which would invoke several functions with the argument sets,
-      for instance:
-      ```python
-      import pytest
+    test_expectation.py:6: AssertionError
+    ========================= short test summary info ==========================
+    FAILED test_expectation.py::test_eval[6*9-42] - AssertionError: assert 54...
+    ======================= 1 failed, 2 passed in 0.12s ========================
+    ```
+- fragment_type: verification
+  sequence: 4
+  content: |
+    As designed in this example, only one pair of input/output values fails
+    the simple test function. And as usual with test function arguments,
+    you can see the ``input`` and ``output`` values in the traceback.
+- fragment_type: execution
+  sequence: 5
+  content: |
+    Note that you could also use the parametrize marker on a class or a module
+    (see `mark`) which would invoke several functions with the argument sets,
+    for instance:
+    ```python
+    import pytest
 
-      @pytest.mark.parametrize("n,expected", [(1, 2), (3, 4)])
-      class TestClass:
-          def test_simple_case(self, n, expected):
-              assert n + 1 == expected
+    @pytest.mark.parametrize("n,expected", [(1, 2), (3, 4)])
+    class TestClass:
+        def test_simple_case(self, n, expected):
+            assert n + 1 == expected
 
-          def test_weird_simple_case(self, n, expected):
-              assert (n * 1) + 1 == expected
-      ```
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      To parametrize all tests in a module, you can assign to the `pytestmark` global variable:
-      ```python
-      import pytest
+        def test_weird_simple_case(self, n, expected):
+            assert (n * 1) + 1 == expected
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |
+    To parametrize all tests in a module, you can assign to the `pytestmark` global variable:
+    ```python
+    import pytest
 
-      pytestmark = pytest.mark.parametrize("n,expected", [(1, 2), (3, 4)])
+    pytestmark = pytest.mark.parametrize("n,expected", [(1, 2), (3, 4)])
 
-      class TestClass:
-          def test_simple_case(self, n, expected):
-              assert n + 1 == expected
+    class TestClass:
+        def test_simple_case(self, n, expected):
+            assert n + 1 == expected
 
-          def test_weird_simple_case(self, n, expected):
-              assert (n * 1) + 1 == expected
-      ```
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      It is also possible to mark individual test instances within parametrize,
-      for example with the builtin ``mark.xfail``:
-      ```python
-      # content of test_expectation.py
-      import pytest
+        def test_weird_simple_case(self, n, expected):
+            assert (n * 1) + 1 == expected
+    ```
+- fragment_type: execution
+  sequence: 7
+  content: |
+    It is also possible to mark individual test instances within parametrize,
+    for example with the builtin ``mark.xfail``:
+    ```python
+    # content of test_expectation.py
+    import pytest
 
-      @pytest.mark.parametrize(
-          "test_input,expected",
-          [("3+5", 8), ("2+4", 6), pytest.param("6*9", 42, marks=pytest.mark.xfail)],
-      )
-      def test_eval(test_input, expected):
-          assert eval(test_input) == expected
-      ```
-      Let's run this:
-      ```pytest
-      $ pytest
-      ============================ test session starts ============================
-      platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
-      rootdir: /home/sweet/project
-      collected 3 items
+    @pytest.mark.parametrize(
+        "test_input,expected",
+        [("3+5", 8), ("2+4", 6), pytest.param("6*9", 42, marks=pytest.mark.xfail)],
+    )
+    def test_eval(test_input, expected):
+        assert eval(test_input) == expected
+    ```
+    Let's run this:
+    ```pytest
+    $ pytest
+    ============================ test session starts ============================
+    platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
+    rootdir: /home/sweet/project
+    collected 3 items
 
-      test_expectation.py ..x                                              [100%]
+    test_expectation.py ..x                                              [100%]
 
-      ======================= 2 passed, 1 xfailed in 0.12s ========================
-      ```
-      The one parameter set which caused a failure previously now
-      shows up as an "xfailed" (expected to fail) test.
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      To get all combinations of multiple parametrized arguments you can stack
-      ``parametrize`` decorators:
-      ```python
-      import pytest
+    ======================= 2 passed, 1 xfailed in 0.12s ========================
+    ```
+    The one parameter set which caused a failure previously now
+    shows up as an "xfailed" (expected to fail) test.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    To get all combinations of multiple parametrized arguments you can stack
+    ``parametrize`` decorators:
+    ```python
+    import pytest
 
-      @pytest.mark.parametrize("x", [0, 1])
-      @pytest.mark.parametrize("y", [2, 3])
-      def test_foo(x, y):
-          pass
-      ```
-      This will run the test with the arguments set to ``x=0/y=2``, ``x=1/y=2``,
-      ``x=0/y=3``, and ``x=1/y=3`` exhausting parameters in the order of the decorators.
+    @pytest.mark.parametrize("x", [0, 1])
+    @pytest.mark.parametrize("y", [2, 3])
+    def test_foo(x, y):
+        pass
+    ```
+    This will run the test with the arguments set to ``x=0/y=2``, ``x=1/y=2``,
+    ``x=0/y=3``, and ``x=1/y=3`` exhausting parameters in the order of the decorators.

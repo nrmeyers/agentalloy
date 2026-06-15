@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: python-dataclasses
 canonical_name: Python Dataclasses
-description: "Define data models in Python without writing boilerplate init, repr, or eq methods: use the dataclass decorator to auto-generate these from type annotations, support immutability with frozen, and optimize memory with slots."
+description: 'Define data models in Python without writing boilerplate init, repr, or eq methods: use the dataclass decorator to auto-generate these from type annotations, support immutability with frozen, and optimize memory with slots.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - dataclass
-  - python
-  - auto-generated methods
-  - value-object
-  - immutability
+- dataclass
+- python
+- auto-generated methods
+- value-object
+- immutability
 requires:
 - python-typing-and-generics
 related:
@@ -17,351 +17,125 @@ related:
 - python-typing-protocol
 - testing-test-data-builders
 always_apply: false
-phase_scope: [build]
-category_scope: [language]
+phase_scope:
+- build
+category_scope:
+- language
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: |
-  # Python Dataclasses
-
-  ## Overview
-
-  `@dataclass` reduces the boilerplate of value-object classes. The decorator generates `__init__`, `__repr__`, and `__eq__` from class annotations. Options like `frozen`, `slots`, `kw_only`, and `field()` cover the long tail. This skill covers dataclasses end-to-end.
-
-  Sourced from docs.python.org/3/library/dataclasses.html.
-
-  ---
-
-  # `!dataclasses` --- Data Classes
-
-
-      :synopsis: Generate special methods on user-defined classes.
-
-  **Source code:** `Lib/dataclasses.py`
-
-  --------------
-
-  This module provides a decorator and functions for automatically
-  adding generated `special methods <special method>` such as `~object.__init__` and
-  `~object.__repr__` to user-defined classes.  It was originally described
-  in `557`.
-
-  The member variables to use in these generated methods are defined
-  using `526` type annotations.  For example, this code::
-
-    from dataclasses import dataclass
-
-    @dataclass
-    class InventoryItem:
-        """Class for keeping track of an item in inventory."""
-        name: str
-        unit_price: float
-        quantity_on_hand: int = 0
-
-        def total_cost(self) -> float:
-            return self.unit_price * self.quantity_on_hand
-
-  will add, among other things, a `!__init__` that looks like::
-
-    def __init__(self, name: str, unit_price: float, quantity_on_hand: int = 0):
-        self.name = name
-        self.unit_price = unit_price
-        self.quantity_on_hand = quantity_on_hand
-
-  Note that this method is automatically added to the class: it is not
-  directly specified in the `!InventoryItem` definition shown above.
-
-
-  ## Module contents
-
-
-
-     This function is a `decorator` that is used to add generated
-     `special methods <special method>` to classes, as described below.
-
-     The ``@dataclass`` decorator examines the class to find
-     ``field``\s.  A ``field`` is defined as a class variable that has a
-     `type annotation <variable annotation>`.  With two
-     exceptions described below, nothing in ``@dataclass``
-     examines the type specified in the variable annotation.
-
-     The order of the fields in all of the generated methods is the
-     order in which they appear in the class definition.
-
-     The ``@dataclass`` decorator will add various "dunder" methods to
-     the class, described below.  If any of the added methods already
-     exist in the class, the behavior depends on the parameter, as documented
-     below. The decorator returns the same class that it is called on; no new
-     class is created.
-
-     If ``@dataclass`` is used just as a simple decorator with no parameters,
-     it acts as if it has the default values documented in this
-     signature.  That is, these three uses of ``@dataclass`` are
-     equivalent::
-
-       @dataclass
-       class C:
-           ...
-
-       @dataclass()
-       class C:
-           ...
-
-       @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False,
-                  match_args=True, kw_only=False, slots=False, weakref_slot=False)
-       class C:
-           ...
-
-     The parameters to ``@dataclass`` are:
-
-     - *init*: If true (the default), a `~object.__init__` method will be
-       generated.
-
-       If the class already defines `!__init__`, this parameter is
-       ignored.
-
-     - *repr*: If true (the default), a `~object.__repr__` method will be
-       generated.  The generated repr string will have the class name and
-       the name and repr of each field, in the order they are defined in
-       the class.  Fields that are marked as being excluded from the repr
-       are not included.  For example:
-       ``InventoryItem(name='widget', unit_price=3.0, quantity_on_hand=10)``.
-
-       If the class already defines `!__repr__`, this parameter is
-       ignored.
-
-     - *eq*: If true (the default), an `~object.__eq__` method will be
-       generated.  This method compares the class as if it were a tuple
-       of its fields, in order.  Both instances in the comparison must
-       be of the identical type.
-
-       If the class already defines `!__eq__`, this parameter is
-       ignored.
-
-     - *order*: If true (the default is ``False``), `~object.__lt__`,
-       `~object.__le__`, `~object.__gt__`, and `~object.__ge__` methods will be
-       generated.  These compare the class as if it were a tuple of its
-       fields, in order.  Both instances in the comparison must be of the
-       identical type.  If *order* is true and *eq* is false, a
-       `ValueError` is raised.
-
-       If the class already defines any of `!__lt__`,
-       `!__le__`, `!__gt__`, or `!__ge__`, then
-       `TypeError` is raised.
-
-     - *unsafe_hash*: If true, force ``dataclasses`` to create a
-       `~object.__hash__` method, even though it may not be safe to do so.
-       Otherwise, generate a `~object.__hash__` method according to how
-       *eq* and *frozen* are set.
-       The default value is ``False``.
-
-       `!__hash__` is used by built-in `hash`, and when objects are
-       added to hashed collections such as dictionaries and sets.  Having a
-       `!__hash__` implies that instances of the class are immutable.
-       Mutability is a complicated property that depends on the programmer's
-       intent, the existence and behavior of `!__eq__`, and the values of
-       the *eq* and *frozen* flags in the ``@dataclass`` decorator.
-
-       By default, ``@dataclass`` will not implicitly add a `~object.__hash__`
-       method unless it is safe to do so.  Neither will it add or change an
-       existing explicitly defined `!__hash__` method.  Setting the class
-       attribute ``__hash__ = None`` has a specific meaning to Python, as
-       described in the `!__hash__` documentation.
-
-       If `!__hash__` is not explicitly defined, or if it is set to ``None``,
-       then ``@dataclass`` *may* add an implicit `!__hash__` method.
-       Although not recommended, you can force ``@dataclass`` to create a
-       `!__hash__` method with ``unsafe_hash=True``. This might be the case
-       if your class is logically immutable but can still be mutated.
-       This is a specialized use case and should be considered carefully.
-
-       Here are the rules governing implicit creation of a `!__hash__`
-       method.  Note that you cannot both have an explicit `!__hash__`
-       method in your dataclass and set ``unsafe_hash=True``; this will result
-       in a `TypeError`.
-
-       If *eq* and *frozen* are both true, by default ``@dataclass`` will
-       generate a `!__hash__` method for you.  If *eq* is true and
-       *frozen* is false, `!__hash__` will be set to ``None``, marking it
-       unhashable (which it is, since it is mutable).  If *eq* is false,
-       `!__hash__` will be left untouched meaning the `!__hash__`
-       method of the superclass will be used (if the superclass is
-       `object`, this means it will fall back to id-based hashing).
-
-     - *frozen*: If true (the default is ``False``), assigning to fields will
-       generate an exception.  This emulates read-only frozen instances.
-       See the `discussion <dataclasses-frozen>` below.
-
-       If `~object.__setattr__` or `~object.__delattr__` is defined in the class
-       and *frozen* is true, then `TypeError` is raised.
-
-     - *match_args*: If true (the default is ``True``), the
-       `~object.__match_args__` tuple will be created from the list of
-       non keyword-only parameters to the generated `~object.__init__` method (even if
-       `!__init__` is not generated, see above).  If false, or if
-       `!__match_args__` is already defined in the class, then
-       `!__match_args__` will not be generated.
-
-        
-     - *kw_only*: If true (the default value is ``False``), then all
-       fields will be marked as keyword-only.  If a field is marked as
-       keyword-only, then the only effect is that the `~object.__init__`
-       parameter generated from a keyword-only field must be specified
-       with a keyword when `!__init__` is called. See the `parameter`
-       glossary entry for details.  Also see the
-       `KW_ONLY` section.
-
-       Keyword-only fields are not included in `!__match_args__`.
-
-        
-     - *slots*: If true (the default is ``False``), `~object.__slots__` attribute
-       will be generated and new class will be returned instead of the original one.
-       If `!__slots__` is already defined in the class, then `TypeError`
-       is raised.
-
-             Passing parameters to a base class `~object.__init_subclass__`
-         when using ``slots=True`` will result in a `TypeError`.
-         Either use ``__init_subclass__`` with no parameters
-         or use default values as a workaround.
-         See `91126` for full details.
-
-        
-             If a field name is already included in the `!__slots__`
-         of a base class, it will not be included in the generated `!__slots__`
-         to prevent `overriding them <datamodel-note-slots>`.
-         Therefore, do not use `!__slots__` to retrieve the field names of a
-         dataclass. Use `fields` instead.
-         To be able to determine inherited slots,
-         base class `!__slots__` may be any iterable, but *not* an iterator.
-
-
-     - *weakref_slot*: If true (the default is ``False``), add a slot
-       named "__weakref__", which is required to make an instance
-       `weakref-able <weakref.ref>`.
-       It is an error to specify ``weakref_slot=True``
-       without also specifying ``slots=True``.
-
-        
-     ``field``\s may optionally specify a default value, using normal
-     Python syntax::
-
-       @dataclass
-       class C:
-           a: int       # 'a' has no default value
-           b: int = 0   # assign a default value for 'b'
-
-       In
-
+raw_prose: "# Python Dataclasses\n\n## Overview\n\n`@dataclass` reduces the boilerplate of value-object classes. The decorator generates `__init__`, `__repr__`, and `__eq__` from class annotations. Options like `frozen`, `slots`, `kw_only`, and `field()` cover the long tail. This skill covers dataclasses end-to-end.\n\nSourced from docs.python.org/3/library/dataclasses.html.\n\n---\n\n# `!dataclasses` --- Data Classes\n\n\n    :synopsis: Generate special methods on user-defined classes.\n\n**Source code:** `Lib/dataclasses.py`\n\n--------------\n\nThis module provides a decorator and functions for automatically\nadding generated `special methods <special method>` such as `~object.__init__` and\n`~object.__repr__` to user-defined classes.  It was originally described\nin `557`.\n\nThe member variables to use in these generated methods are defined\nusing `526` type annotations.  For example, this code::\n\n  from dataclasses import dataclass\n\n  @dataclass\n  class InventoryItem:\n      \"\"\"Class for keeping track of an item in inventory.\"\"\"\n      name: str\n      unit_price: float\n      quantity_on_hand: int = 0\n\n      def total_cost(self) -> float:\n          return self.unit_price * self.quantity_on_hand\n\nwill add, among other things, a `!__init__` that looks like::\n\n  def __init__(self, name: str, unit_price: float, quantity_on_hand: int = 0):\n      self.name = name\n      self.unit_price = unit_price\n      self.quantity_on_hand = quantity_on_hand\n\nNote that this method is automatically added to the class: it is not\ndirectly specified in the `!InventoryItem` definition shown above.\n\n\n## Module contents\n\n\n\n   This function is a `decorator` that is used to add generated\n   `special methods <special method>` to classes, as described below.\n\n   The ``@dataclass`` decorator examines the class to find\n   ``field``\\s.  A ``field`` is defined as a class variable that has a\n   `type annotation <variable annotation>`.  With two\n   exceptions described below, nothing in ``@dataclass``\n   examines the type specified in the variable annotation.\n\n   The order of the fields in all of the generated methods is the\n   order in which they appear in the class definition.\n\n   The ``@dataclass`` decorator will add various \"dunder\" methods to\n   the class, described below.  If any of the added methods already\n   exist in the class, the behavior depends on the parameter, as documented\n   below. The decorator returns the same class that it is called on; no new\n   class is created.\n\n   If ``@dataclass`` is used just as a simple decorator with no parameters,\n   it acts as if it has the default values documented in this\n   signature.  That is, these three uses of ``@dataclass`` are\n   equivalent::\n\n     @dataclass\n     class C:\n         ...\n\n     @dataclass()\n     class C:\n         ...\n\n     @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False,\n                match_args=True, kw_only=False, slots=False, weakref_slot=False)\n     class C:\n         ...\n\n   The parameters to ``@dataclass`` are:\n\n   - *init*: If true (the default), a `~object.__init__` method will be\n     generated.\n\n     If the class already defines `!__init__`, this parameter is\n     ignored.\n\n   - *repr*: If true (the default), a `~object.__repr__` method will be\n     generated.  The generated repr string will have the class name and\n     the name and repr of each field, in the order they are defined in\n     the class.  Fields that are marked as being excluded from the repr\n     are not included.  For example:\n     ``InventoryItem(name='widget', unit_price=3.0, quantity_on_hand=10)``.\n\n     If the class already defines `!__repr__`, this parameter is\n     ignored.\n\n   - *eq*: If true (the default), an `~object.__eq__` method will be\n     generated.  This method compares the class as if it were a tuple\n     of its fields, in order.  Both instances in the comparison must\n     be of the identical type.\n\n     If the class already defines `!__eq__`, this parameter is\n     ignored.\n\n   - *order*: If true (the default is ``False``), `~object.__lt__`,\n     `~object.__le__`, `~object.__gt__`, and `~object.__ge__` methods will be\n     generated.  These compare the class as if it were a tuple of its\n     fields, in order.  Both instances in the comparison must be of the\n     identical type.  If *order* is true and *eq* is false, a\n     `ValueError` is raised.\n\n     If the class already defines any of `!__lt__`,\n     `!__le__`, `!__gt__`, or `!__ge__`, then\n     `TypeError` is raised.\n\n   - *unsafe_hash*: If true, force ``dataclasses`` to create a\n     `~object.__hash__` method, even though it may not be safe to do so.\n     Otherwise, generate a `~object.__hash__` method according to how\n     *eq* and *frozen* are set.\n     The default value is ``False``.\n\n     `!__hash__` is used by built-in `hash`, and when objects are\n     added to hashed collections such as dictionaries and sets.  Having a\n     `!__hash__` implies that instances of the class are immutable.\n     Mutability is a complicated property that depends on the programmer's\n     intent, the existence and behavior of `!__eq__`, and the values of\n     the *eq* and *frozen* flags in the ``@dataclass`` decorator.\n\n     By default, ``@dataclass`` will not implicitly add a `~object.__hash__`\n     method unless it is safe to do so.  Neither will it add or change an\n     existing explicitly defined `!__hash__` method.  Setting the class\n     attribute ``__hash__ = None`` has a specific meaning to Python, as\n     described in the `!__hash__` documentation.\n\n     If `!__hash__` is not explicitly defined, or if it is set to ``None``,\n     then ``@dataclass`` *may* add an implicit `!__hash__` method.\n     Although not recommended, you can force ``@dataclass`` to create a\n     `!__hash__` method with ``unsafe_hash=True``. This might be the case\n     if your class is logically immutable but can still be mutated.\n     This is a specialized use case and should be considered carefully.\n\n     Here are the rules governing implicit creation of a `!__hash__`\n     method.  Note that you cannot both have an explicit `!__hash__`\n     method in your dataclass and set ``unsafe_hash=True``; this will result\n     in a `TypeError`.\n\n     If *eq* and *frozen* are both true, by default ``@dataclass`` will\n     generate a `!__hash__` method for you.  If *eq* is true and\n     *frozen* is false, `!__hash__` will be set to ``None``, marking it\n     unhashable (which it is, since it is mutable).  If *eq* is false,\n     `!__hash__` will be left untouched meaning the `!__hash__`\n     method of the superclass will be used (if the superclass is\n     `object`, this means it will fall back to id-based hashing).\n\n   - *frozen*: If true (the default is ``False``), assigning to fields will\n     generate an exception.  This emulates read-only frozen instances.\n     See the `discussion <dataclasses-frozen>` below.\n\n     If `~object.__setattr__` or `~object.__delattr__` is defined in the class\n     and *frozen* is true, then `TypeError` is raised.\n\n   - *match_args*: If true (the default is ``True``), the\n     `~object.__match_args__` tuple will be created from the list of\n     non keyword-only parameters to the generated `~object.__init__` method (even if\n     `!__init__` is not generated, see above).  If false, or if\n     `!__match_args__` is already defined in the class, then\n     `!__match_args__` will not be generated.\n\n      \n   - *kw_only*: If true (the default value is ``False``), then all\n     fields will be marked as keyword-only.  If a field is marked as\n     keyword-only, then the only effect is that the `~object.__init__`\n     parameter generated from a keyword-only field must be specified\n     with a keyword when `!__init__` is called. See the `parameter`\n     glossary entry for details.  Also see the\n     `KW_ONLY` section.\n\n     Keyword-only fields are not included in `!__match_args__`.\n\n      \n   - *slots*: If true (the default is ``False``), `~object.__slots__` attribute\n     will be generated and new class will be returned instead of the original one.\n     If `!__slots__` is already defined in the class, then `TypeError`\n     is raised.\n\n           Passing parameters to a base class `~object.__init_subclass__`\n       when using ``slots=True`` will result in a `TypeError`.\n       Either use ``__init_subclass__`` with no parameters\n       or use default values as a workaround.\n       See `91126` for full details.\n\n      \n           If a field name is already included in the `!__slots__`\n       of a base class, it will not be included in the generated `!__slots__`\n       to prevent `overriding them <datamodel-note-slots>`.\n       Therefore, do not use `!__slots__` to retrieve the field names of a\n       dataclass. Use `fields` instead.\n       To be able to determine inherited slots,\n       base class `!__slots__` may be any iterable, but *not* an iterator.\n\n\n   - *weakref_slot*: If true (the default is ``False``), add a slot\n     named \"__weakref__\", which is required to make an instance\n     `weakref-able <weakref.ref>`.\n     It is an error to specify ``weakref_slot=True``\n     without also specifying ``slots=True``.\n\n      \n   ``field``\\s may optionally specify a default value, using normal\n   Python syntax::\n\n     @dataclass\n     class C:\n         a: int       # 'a' has no default value\n         b: int = 0   # assign a default value for 'b'\n\n     In\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      `@dataclass` reduces the boilerplate of value-object classes. The decorator generates `__init__`, `__repr__`, and `__eq__` from class annotations. Options like `frozen`, `slots`, `kw_only`, and `field()` cover the long tail. This skill covers dataclasses end-to-end.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    `@dataclass` reduces the boilerplate of value-object classes. The decorator generates `__init__`, `__repr__`, and `__eq__` from class annotations. Options like `frozen`, `slots`, `kw_only`, and `field()` cover the long tail. This skill covers dataclasses end-to-end.
 
-      Sourced from docs.python.org/3/library/dataclasses.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      The member variables to use in these generated methods are defined using `526` type annotations. For example, this code:
+    Sourced from docs.python.org/3/library/dataclasses.html.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    The member variables to use in these generated methods are defined using `526` type annotations. For example, this code:
 
-        from dataclasses import dataclass
+      from dataclasses import dataclass
+
+      @dataclass
+      class InventoryItem:
+          """Class for keeping track of an item in inventory."""
+          name: str
+          unit_price: float
+          quantity_on_hand: int = 0
+
+          def total_cost(self) -> float:
+              return self.unit_price * self.quantity_on_hand
+
+    will add, among other things, a `!__init__` that looks like:
+
+      def __init__(self, name: str, unit_price: float, quantity_on_hand: int = 0):
+          self.name = name
+          self.unit_price = unit_price
+          self.quantity_on_hand = quantity_on_hand
+
+    Note that this method is automatically added to the class: it is not directly specified in the `!InventoryItem` definition shown above.
+- fragment_type: verification
+  sequence: 3
+  content: |
+    The ``@dataclass`` decorator examines the class to find ``field``\s. A ``field`` is defined as a class variable that has a `type annotation <variable annotation>`. With two exceptions described below, nothing in ``@dataclass`` examines the type specified in the variable annotation.
+
+    The order of the fields in all of the generated methods is the order in which they appear in the class definition.
+- fragment_type: example
+  sequence: 4
+  content: |
+    This function is a `decorator` that is used to add generated `special methods <special method>` to classes, as described below.
+
+    The ``@dataclass`` decorator examines the class to find ``field``\s. A ``field`` is defined as a class variable that has a `type annotation <variable annotation>`. With two exceptions described below, nothing in ``@dataclass`` examines the type specified in the variable annotation.
+- fragment_type: rationale
+  sequence: 5
+  content: |
+    The parameters to ``@dataclass`` are:
+
+    - *init*: If true (the default), a `~object.__init__` method will be generated.
+
+      If the class already defines `!__init__`, this parameter is ignored.
+
+    - *repr*: If true (the default), a `~object.__repr__` method will be generated. The generated repr string will have the class name and the name and repr of each field, in the order they are defined in the class. Fields that are marked as being excluded from the repr are not included. For example: ``InventoryItem(name='widget', unit_price=3.0, quantity_on_hand=10)``.
+
+      If the class already defines `!__repr__`, this parameter is ignored.
+- fragment_type: rationale
+  sequence: 6
+  content: |
+    - *eq*: If true (the default), an `~object.__eq__` method will be generated. This method compares the class as if it were a tuple of its fields, in order. Both instances in the comparison must be of the identical type.
+
+      If the class already defines `!__eq__`, this parameter is ignored.
+
+    - *order*: If true (the default is ``False``), `~object.__lt__`, `~object.__le__`, `~object.__gt__`, and `~object.__ge__` methods will be generated. These compare the class as if it were a tuple of its fields, in order. Both instances in the comparison must be of the identical type. If *order* is true and *eq* is false, a `ValueError` is raised.
+
+      If the class already defines any of `!__lt__`, `~object.__le__`, `~object.__gt__`, or `~object.__ge__`, then `TypeError` is raised.
+- fragment_type: rationale
+  sequence: 7
+  content: |-
+    - *unsafe_hash*: If true, force ``dataclasses`` to create a `~object.__hash__` method, even though it may not be safe to do so. Otherwise, generate a `~object.__hash__` method according to how *eq* and *frozen* are set. The default value is ``False``.
+
+      `!__hash__` is used by built-in `hash`, and when objects are added to hashed collections such as dictionaries and sets. Having a `!__hash__` implies that instances of the class are immutable. Mutability is a complicated property that depends on the programmer's intent, the existence and behavior of `!__eq__`, and the values of the *eq* and *frozen* flags in the ``@dataclass`` decorator.
+
+      By default, ``@dataclass`` will not implicitly add a `~object.__hash__` method unless it is safe to do so. Neither will it add or change an existing explicitly defined `!__hash__` method. Setting the class attribute ``__hash__ = None`` has a specific meaning to Python, as described in the `!__hash__` documentation.
+- fragment_type: rationale
+  sequence: 8
+  content: |2-
+      If `!__hash__` is not explicitly defined, or if it is set to ``None``, then ``@dataclass`` *may* add an implicit `!__hash__` method. Although not recommended, you can force ``@dataclass`` to create a `!__hash__` method with ``unsafe_hash=True``. This might be the case if your class is logically immutable but can still be mutated. This is a specialized use case and should be considered carefully.
+
+      Here are the rules governing implicit creation of a `!__hash__` method. Note that you cannot both have an explicit `!__hash__` method in your dataclass and set ``unsafe_hash=True``; this will result in a `TypeError`.
+
+      If *eq* and *frozen* are both true, by default ``@dataclass`` will generate a `!__hash__` method for you. If *eq* is true and *frozen* is false, `!__hash__` will be set to ``None``, marking it unhashable (which it is, since it is mutable). If *eq* is false, `!__hash__` will be left untouched meaning the `!__hash__` method of the superclass will be used (if the superclass is `object`, this means it will fall back to id-based hashing).
+- fragment_type: rationale
+  sequence: 9
+  content: |
+    - *frozen*: If true (the default is ``False``), assigning to fields will generate an exception. This emulates read-only frozen instances. See the `discussion <dataclasses-frozen>` below.
+
+      If `~object.__setattr__` or `~object.__delattr__` is defined in the class and *frozen* is true, then `TypeError` is raised.
+
+    - *match_args*: If true (the default is ``True``), the `~object.__match_args__` tuple will be created from the list of non keyword-only parameters to the generated `~object.__init__` method (even if `!__init__` is not generated, see above). If false, or if `!__match_args__` is already defined in the class, then `!__match_args__` will not be generated.
+- fragment_type: rationale
+  sequence: 10
+  content: |
+    - *kw_only*: If true (the default value is ``False``), then all fields will be marked as keyword-only. If a field is marked as keyword-only, then the only effect is that the `~object.__init__` parameter generated from a keyword-only field must be specified with a keyword when `!__init__` is called. See the `parameter` glossary entry for details. Also see the `KW_ONLY` section.
+
+      Keyword-only fields are not included in `!__match_args__`.
+
+    - *slots*: If true (the default is ``False``), `~object.__slots__` attribute will be generated and new class will be returned instead of the original one. If `!__slots__` is already defined in the class, then `TypeError` is raised.
+
+          Passing parameters to a base class `~object.__init_subclass__` when using ``slots=True`` will result in a `TypeError`. Either use ``__init_subclass__`` with no parameters or use default values as a workaround. See `91126` for full details.
+
+          If a field name is already included in the `!__slots__` of a base class, it will not be included in the generated `!__slots__` to prevent `overriding them <datamodel-note-slots>`. Therefore, do not use `!__slots__` to retrieve the field names of a dataclass. Use `fields` instead. To be able to determine inherited slots, base class `!__slots__` may be any iterable, but *not* an iterator.
+- fragment_type: rationale
+  sequence: 11
+  content: |-
+    - *weakref_slot*: If true (the default is ``False``), add a slot named "__weakref__", which is required to make an instance `weakref-able <weakref.ref>`. It is an error to specify ``weakref_slot=True`` without also specifying ``slots=True``.
+
+      ``field``\s may optionally specify a default value, using normal Python syntax:
 
         @dataclass
-        class InventoryItem:
-            """Class for keeping track of an item in inventory."""
-            name: str
-            unit_price: float
-            quantity_on_hand: int = 0
+        class C:
+            a: int       # 'a' has no default value
+            b: int = 0   # assign a default value for 'b'
 
-            def total_cost(self) -> float:
-                return self.unit_price * self.quantity_on_hand
-
-      will add, among other things, a `!__init__` that looks like:
-
-        def __init__(self, name: str, unit_price: float, quantity_on_hand: int = 0):
-            self.name = name
-            self.unit_price = unit_price
-            self.quantity_on_hand = quantity_on_hand
-
-      Note that this method is automatically added to the class: it is not directly specified in the `!InventoryItem` definition shown above.
-  - fragment_type: verification
-    sequence: 3
-    content: |
-      The ``@dataclass`` decorator examines the class to find ``field``\s. A ``field`` is defined as a class variable that has a `type annotation <variable annotation>`. With two exceptions described below, nothing in ``@dataclass`` examines the type specified in the variable annotation.
-
-      The order of the fields in all of the generated methods is the order in which they appear in the class definition.
-  - fragment_type: example
-    sequence: 4
-    content: |
-      This function is a `decorator` that is used to add generated `special methods <special method>` to classes, as described below.
-
-      The ``@dataclass`` decorator examines the class to find ``field``\s. A ``field`` is defined as a class variable that has a `type annotation <variable annotation>`. With two exceptions described below, nothing in ``@dataclass`` examines the type specified in the variable annotation.
-  - fragment_type: rationale
-    sequence: 5
-    content: |
-      The parameters to ``@dataclass`` are:
-
-      - *init*: If true (the default), a `~object.__init__` method will be generated.
-
-        If the class already defines `!__init__`, this parameter is ignored.
-
-      - *repr*: If true (the default), a `~object.__repr__` method will be generated. The generated repr string will have the class name and the name and repr of each field, in the order they are defined in the class. Fields that are marked as being excluded from the repr are not included. For example: ``InventoryItem(name='widget', unit_price=3.0, quantity_on_hand=10)``.
-
-        If the class already defines `!__repr__`, this parameter is ignored.
-  - fragment_type: rationale
-    sequence: 6
-    content: |
-      - *eq*: If true (the default), an `~object.__eq__` method will be generated. This method compares the class as if it were a tuple of its fields, in order. Both instances in the comparison must be of the identical type.
-
-        If the class already defines `!__eq__`, this parameter is ignored.
-
-      - *order*: If true (the default is ``False``), `~object.__lt__`, `~object.__le__`, `~object.__gt__`, and `~object.__ge__` methods will be generated. These compare the class as if it were a tuple of its fields, in order. Both instances in the comparison must be of the identical type. If *order* is true and *eq* is false, a `ValueError` is raised.
-
-        If the class already defines any of `!__lt__`, `~object.__le__`, `~object.__gt__`, or `~object.__ge__`, then `TypeError` is raised.
-  - fragment_type: rationale
-    sequence: 7
-    content: |
-      - *unsafe_hash*: If true, force ``dataclasses`` to create a `~object.__hash__` method, even though it may not be safe to do so. Otherwise, generate a `~object.__hash__` method according to how *eq* and *frozen* are set. The default value is ``False``.
-
-        `!__hash__` is used by built-in `hash`, and when objects are added to hashed collections such as dictionaries and sets. Having a `!__hash__` implies that instances of the class are immutable. Mutability is a complicated property that depends on the programmer's intent, the existence and behavior of `!__eq__`, and the values of the *eq* and *frozen* flags in the ``@dataclass`` decorator.
-
-        By default, ``@dataclass`` will not implicitly add a `~object.__hash__` method unless it is safe to do so. Neither will it add or change an existing explicitly defined `!__hash__` method. Setting the class attribute ``__hash__ = None`` has a specific meaning to Python, as described in the `!__hash__` documentation.
-
-        If `!__hash__` is not explicitly defined, or if it is set to ``None``, then ``@dataclass`` *may* add an implicit `!__hash__` method. Although not recommended, you can force ``@dataclass`` to create a `!__hash__` method with ``unsafe_hash=True``. This might be the case if your class is logically immutable but can still be mutated. This is a specialized use case and should be considered carefully.
-
-        Here are the rules governing implicit creation of a `!__hash__` method. Note that you cannot both have an explicit `!__hash__` method in your dataclass and set ``unsafe_hash=True``; this will result in a `TypeError`.
-
-        If *eq* and *frozen* are both true, by default ``@dataclass`` will generate a `!__hash__` method for you. If *eq* is true and *frozen* is false, `!__hash__` will be set to ``None``, marking it unhashable (which it is, since it is mutable). If *eq* is false, `!__hash__` will be left untouched meaning the `!__hash__` method of the superclass will be used (if the superclass is `object`, this means it will fall back to id-based hashing).
-  - fragment_type: rationale
-    sequence: 8
-    content: |
-      - *frozen*: If true (the default is ``False``), assigning to fields will generate an exception. This emulates read-only frozen instances. See the `discussion <dataclasses-frozen>` below.
-
-        If `~object.__setattr__` or `~object.__delattr__` is defined in the class and *frozen* is true, then `TypeError` is raised.
-
-      - *match_args*: If true (the default is ``True``), the `~object.__match_args__` tuple will be created from the list of non keyword-only parameters to the generated `~object.__init__` method (even if `!__init__` is not generated, see above). If false, or if `!__match_args__` is already defined in the class, then `!__match_args__` will not be generated.
-  - fragment_type: rationale
-    sequence: 9
-    content: |
-      - *kw_only*: If true (the default value is ``False``), then all fields will be marked as keyword-only. If a field is marked as keyword-only, then the only effect is that the `~object.__init__` parameter generated from a keyword-only field must be specified with a keyword when `!__init__` is called. See the `parameter` glossary entry for details. Also see the `KW_ONLY` section.
-
-        Keyword-only fields are not included in `!__match_args__`.
-
-      - *slots*: If true (the default is ``False``), `~object.__slots__` attribute will be generated and new class will be returned instead of the original one. If `!__slots__` is already defined in the class, then `TypeError` is raised.
-
-            Passing parameters to a base class `~object.__init_subclass__` when using ``slots=True`` will result in a `TypeError`. Either use ``__init_subclass__`` with no parameters or use default values as a workaround. See `91126` for full details.
-
-            If a field name is already included in the `!__slots__` of a base class, it will not be included in the generated `!__slots__` to prevent `overriding them <datamodel-note-slots>`. Therefore, do not use `!__slots__` to retrieve the field names of a dataclass. Use `fields` instead. To be able to determine inherited slots, base class `!__slots__` may be any iterable, but *not* an iterator.
-  - fragment_type: rationale
-    sequence: 10
-    content: |
-      - *weakref_slot*: If true (the default is ``False``), add a slot named "__weakref__", which is required to make an instance `weakref-able <weakref.ref>`. It is an error to specify ``weakref_slot=True`` without also specifying ``slots=True``.
-
-        ``field``\s may optionally specify a default value, using normal Python syntax:
-
-          @dataclass
-          class C:
-              a: int       # 'a' has no default value
-              b: int = 0   # assign a default value for 'b'
-
-          In
+        In

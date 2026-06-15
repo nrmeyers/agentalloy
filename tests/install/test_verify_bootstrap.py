@@ -160,7 +160,7 @@ class TestRunChecksRouting:
                 return_value={"name": "embed", "passed": True},
             ),
             patch(
-                "agentalloy.install.subcommands.verify._check_embedding_1024_dim",
+                "agentalloy.install.subcommands.verify._check_embedding_expected_dim",
                 return_value={"name": "dim", "passed": True},
             ),
             patch(

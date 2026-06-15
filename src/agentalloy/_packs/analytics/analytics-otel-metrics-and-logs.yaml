@@ -1,25 +1,26 @@
 skill_type: domain
 skill_id: analytics-otel-metrics-and-logs
 canonical_name: OpenTelemetry — Metrics and Logs
-description: "Monitor app performance and business health by tracking metrics like request latency and error rates, then set up alerts for outages or auto-scale deployments based on real-time data."
+description: Monitor app performance and business health by tracking metrics like request latency and error rates, then set up alerts for outages or auto-scale deployments based on real-time data.
 category: ops
 skill_class: domain
 domain_tags:
-  - opentelemetry
-  - metrics
-  - logs
-  - observability
-  - analytics
+- opentelemetry
+- metrics
+- logs
+- observability
+- analytics
 related:
 - analytics-observability-primer
 - analytics-otel-traces
 - nextjs-instrumentation-and-otel
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: initial authoring draft
-
 raw_prose: |
   # OpenTelemetry — Metrics and Logs
 
@@ -260,259 +261,266 @@ raw_prose: |
   In those cases, parse or extract the parts you need into a normalized record so
   downstream tooling can analyze them consistently. The `filelogreceiver` in the
   [OpenTelemetry Collector](/docs/collector/) provides helpers
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      A **metric** is a **measurement** of a service captured at runtime. The moment
-      of capturing a measurement is known as a **metric event**, which consists not
-      only of the measurement itself, but also the time at which it was captured and
-      associated metadata.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    A **metric** is a **measurement** of a service captured at runtime. The moment
+    of capturing a measurement is known as a **metric event**, which consists not
+    only of the measurement itself, but also the time at which it was captured and
+    associated metadata.
 
-      Application and request metrics are important indicators of availability and
-      performance. Custom metrics can provide insights into how availability
-      indicators impact user experience or the business. Collected data can be used to
-      alert of an outage or trigger scheduling decisions to scale up a deployment
-      automatically upon high demand.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      To understand how metrics in OpenTelemetry works, let's look at a list of
-      components that will play a part in instrumenting our code.
+    Application and request metrics are important indicators of availability and
+    performance. Custom metrics can provide insights into how availability
+    indicators impact user experience or the business. Collected data can be used to
+    alert of an outage or trigger scheduling decisions to scale up a deployment
+    automatically upon high demand.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    To understand how metrics in OpenTelemetry works, let's look at a list of
+    components that will play a part in instrumenting our code.
 
-      ## Meter Provider
+    ## Meter Provider
 
-      A Meter Provider (sometimes called `MeterProvider`) is a factory for `Meter`s.
-      In most applications, a Meter Provider is initialized once and its lifecycle
-      matches the application's lifecycle. Meter Provider initialization also includes
-      Resource and Exporter initialization. It is typically the first step in metering
-      with OpenTelemetry. In some language SDKs, a global Meter Provider is already
-      initialized for you.
+    A Meter Provider (sometimes called `MeterProvider`) is a factory for `Meter`s.
+    In most applications, a Meter Provider is initialized once and its lifecycle
+    matches the application's lifecycle. Meter Provider initialization also includes
+    Resource and Exporter initialization. It is typically the first step in metering
+    with OpenTelemetry. In some language SDKs, a global Meter Provider is already
+    initialized for you.
 
-      ## Meter
+    ## Meter
 
-      A Meter creates [metric instruments](#metric-instruments), capturing
-      measurements about a service at runtime. Meters are created from Meter
-      Providers.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Metric Exporter
+    A Meter creates [metric instruments](#metric-instruments), capturing
+    measurements about a service at runtime. Meters are created from Meter
+    Providers.
+- fragment_type: execution
+  sequence: 3
+  content: |
+    ## Metric Exporter
 
-      Metric Exporters send metric data to a consumer. This consumer can be standard
-      output for debugging during development, the OpenTelemetry Collector, or any
-      open source or vendor backend of your choice.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ## Metric Instruments
+    Metric Exporters send metric data to a consumer. This consumer can be standard
+    output for debugging during development, the OpenTelemetry Collector, or any
+    open source or vendor backend of your choice.
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    ## Metric Instruments
 
-      In OpenTelemetry measurements are captured by **metric instruments**. A metric
-      instrument is defined by:
+    In OpenTelemetry measurements are captured by **metric instruments**. A metric
+    instrument is defined by:
 
-      - Name
-      - Kind
-      - Unit (optional)
-      - Description (optional)
+    - Name
+    - Kind
+    - Unit (optional)
+    - Description (optional)
 
-      The name, unit, and description are chosen by the developer or defined via
-      [semantic conventions](/docs/specs/semconv/general/metrics/) for common ones
-      like request and process metrics.
+    The name, unit, and description are chosen by the developer or defined via
+    [semantic conventions](/docs/specs/semconv/general/metrics/) for common ones
+    like request and process metrics.
 
-      The instrument kind is one of the following:
+    The instrument kind is one of the following:
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    - **Counter**: A value that accumulates over time -- you can think of this like
+      an odometer on a car; it only ever goes up.
+    - **Asynchronous Counter**: Same as the **Counter**, but is collected once for
+      each export. Could be used if you don't have access to the continuous
+      increments, but only to the aggregated value.
+    - **UpDownCounter**: A value that accumulates over time, but can also go down
+      again. An example could be a queue length, it will increase and decrease with
+      the number of work items in the queue.
+    - **Asynchronous UpDownCounter**: Same as the **UpDownCounter**, but is
+      collected once for each export. Could be used if you don't have access to the
+      continuous changes, but only to the aggregated value (e.g., current queue
+      size).
+    - **Gauge**: Measures a current value at the time it is read. An example would
+    be the fuel gauge in a vehicle. Gauges are synchronous.
+    - **Asynchronous Gauge**: Same as the **Gauge**, but is collected once for each
+    export. Could be used if you don't have access to the continuous changes, but
+    only to the aggregated value.
+    - **Histogram**: A client-side aggregation of values, such as request latencies.
+      A histogram is a good choice if you are interested in value statistics. For
+      example: How many requests take fewer than 1s?
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    For more on synchronous and asynchronous instruments, and which kind is best
+    suited for your use case, see
+    [Supplementary Guidelines](/docs/specs/otel/metrics/supplementary-guidelines/).
+- fragment_type: execution
+  sequence: 7
+  content: |
+    ## Aggregation
 
-      - **Counter**: A value that accumulates over time -- you can think of this like
-        an odometer on a car; it only ever goes up.
-      - **Asynchronous Counter**: Same as the **Counter**, but is collected once for
-        each export. Could be used if you don't have access to the continuous
-        increments, but only to the aggregated value.
-      - **UpDownCounter**: A value that accumulates over time, but can also go down
-        again. An example could be a queue length, it will increase and decrease with
-        the number of work items in the queue.
-      - **Asynchronous UpDownCounter**: Same as the **UpDownCounter**, but is
-        collected once for each export. Could be used if you don't have access to the
-        continuous changes, but only to the aggregated value (e.g., current queue
-        size).
-      - **Gauge**: Measures a current value at the time it is read. An example would
-      be the fuel gauge in a vehicle. Gauges are synchronous.
-      - **Asynchronous Gauge**: Same as the **Gauge**, but is collected once for each
-      export. Could be used if you don't have access to the continuous changes, but
-      only to the aggregated value.
-      - **Histogram**: A client-side aggregation of values, such as request latencies.
-        A histogram is a good choice if you are interested in value statistics. For
-        example: How many requests take fewer than 1s?
+    In addition to the metric instruments, the concept of **aggregations** is an
+    important one to understand. An aggregation is a technique whereby a large
+    number of measurements are combined into either exact or estimated statistics
+    about metric events that took place during a time window. The OTLP protocol
+    transports such aggregated metrics. The OpenTelemetry API provides a default
+    aggregation for each instrument which can be overridden using the Views. The
+    OpenTelemetry project aims to provide default aggregations that are supported by
+    visualizers and telemetry backends.
 
-      For more on synchronous and asynchronous instruments, and which kind is best
-      suited for your use case, see
-      [Supplementary Guidelines](/docs/specs/otel/metrics/supplementary-guidelines/).
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## Aggregation
+    Unlike [request tracing](../traces/), which is intended to capture request
+    lifecycles and provide context to the individual pieces of a request, metrics
+    are intended to provide statistical information in aggregate. Some examples of
+    use cases for metrics include:
 
-      In addition to the metric instruments, the concept of **aggregations** is an
-      important one to understand. An aggregation is a technique whereby a large
-      number of measurements are combined into either exact or estimated statistics
-      about metric events that took place during a time window. The OTLP protocol
-      transports such aggregated metrics. The OpenTelemetry API provides a default
-      aggregation for each instrument which can be overridden using the Views. The
-      OpenTelemetry project aims to provide default aggregations that are supported by
-      visualizers and telemetry backends.
+    - Reporting the total number of bytes read by a service, per protocol type.
+    - Reporting the total number of bytes read and the bytes per request.
+    - Reporting the duration of a system call.
+    - Reporting request sizes in order to determine a trend.
+    - Reporting CPU or memory usage of a process.
+    - Reporting average balance values from an account.
+    - Reporting current active requests being handled.
+- fragment_type: execution
+  sequence: 8
+  content: |
+    ## Views
 
-      Unlike [request tracing](../traces/), which is intended to capture request
-      lifecycles and provide context to the individual pieces of a request, metrics
-      are intended to provide statistical information in aggregate. Some examples of
-      use cases for metrics include:
+    A view provides SDK users with the flexibility to customize the metrics output
+    by the SDK. You can customize which metric instruments are to be processed or
+    ignored. You can also customize aggregation and what attributes you want to
+    report on metrics.
+- fragment_type: setup
+  sequence: 9
+  content: |
+    A **log** is a timestamped text record, either structured (recommended) or
+    unstructured, with optional metadata. Of all telemetry signals, logs have the
+    biggest legacy. Most programming languages have built-in logging capabilities or
+    well-known, widely used logging libraries.
+- fragment_type: execution
+  sequence: 10
+  content: |
+    ## OpenTelemetry logs
 
-      - Reporting the total number of bytes read by a service, per protocol type.
-      - Reporting the total number of bytes read and the bytes per request.
-      - Reporting the duration of a system call.
-      - Reporting request sizes in order to determine a trend.
-      - Reporting CPU or memory usage of a process.
-      - Reporting average balance values from an account.
-      - Reporting current active requests being handled.
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ## Views
+    OpenTelemetry provides a Logs API and SDK for producing log records, and
+    language SDKs and logging bridges to integrate with existing logging frameworks.
+    Logs are anything you send through a Logging Provider, and events are a special
+    type of logs. Not all logs are events, but all events are logs. The Logs API is
+    public and can be used directly by application code or indirectly via existing
+    logging libraries and bridges.
 
-      A view provides SDK users with the flexibility to customize the metrics output
-      by the SDK. You can customize which metric instruments are to be processed or
-      ignored. You can also customize aggregation and what attributes you want to
-      report on metrics.
-  - fragment_type: setup
-    sequence: 7
-    content: |
-      A **log** is a timestamped text record, either structured (recommended) or
-      unstructured, with optional metadata. Of all telemetry signals, logs have the
-      biggest legacy. Most programming languages have built-in logging capabilities or
-      well-known, widely used logging libraries.
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      ## OpenTelemetry logs
+    OpenTelemetry is designed to work with the logs you already produce, offering
+    tools to correlate logs with other signals, add contextual attributes, and
+    normalize different sources into a common representation for processing and
+    export.
+- fragment_type: execution
+  sequence: 11
+  content: |
+    ### OpenTelemetry logs in the OpenTelemetry Collector
 
-      OpenTelemetry provides a Logs API and SDK for producing log records, and
-      language SDKs and logging bridges to integrate with existing logging frameworks.
-      Logs are anything you send through a Logging Provider, and events are a special
-      type of logs. Not all logs are events, but all events are logs. The Logs API is
-      public and can be used directly by application code or indirectly via existing
-      logging libraries and bridges.
+    The [OpenTelemetry Collector](/docs/collector/) provides several tools to work
+    with logs:
 
-      OpenTelemetry is designed to work with the logs you already produce, offering
-      tools to correlate logs with other signals, add contextual attributes, and
-      normalize different sources into a common representation for processing and
-      export.
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      ### OpenTelemetry logs in the OpenTelemetry Collector
+    - Several receivers which parse logs from specific, known sources of log data.
+    - The `filelogreceiver`, which reads logs from any file and provides features to
+      parse them from different formats or use a regular expression.
+    - Processors like the `transformprocessor` which lets you parse nested data,
+      flatten nested structures, add/remove/update values, and more.
+    - Exporters that let you emit log data in a non-OpenTelemetry format.
 
-      The [OpenTelemetry Collector](/docs/collector/) provides several tools to work
-      with logs:
+    The first step in adopting OpenTelemetry frequently involves deploying a
+    Collector as a general-purposes logging agent.
+- fragment_type: execution
+  sequence: 12
+  content: |
+    ### OpenTelemetry logs for applications
 
-      - Several receivers which parse logs from specific, known sources of log data.
-      - The `filelogreceiver`, which reads logs from any file and provides features to
-        parse them from different formats or use a regular expression.
-      - Processors like the `transformprocessor` which lets you parse nested data,
-        flatten nested structures, add/remove/update values, and more.
-      - Exporters that let you emit log data in a non-OpenTelemetry format.
+    In applications, OpenTelemetry logs are created with any logging library or
+    built-in logging capabilities. When you add autoinstrumentation or activate an
+    SDK, OpenTelemetry will automatically correlate your existing logs with any
+    active trace and span, wrapping the log body with their IDs. In other words,
+    OpenTelemetry automatically correlates your logs and traces.
+- fragment_type: execution
+  sequence: 13
+  content: |
+    ### Language support
 
-      The first step in adopting OpenTelemetry frequently involves deploying a
-      Collector as a general-purposes logging agent.
-  - fragment_type: execution
-    sequence: 10
-    content: |
-      ### OpenTelemetry logs for applications
+    Logs are a [stable](/docs/specs/otel/versioning-and-stability/#stable) signal in
+    the OpenTelemetry specification. For the individual language specific
+    implementations of the Logs API & SDK, the status is as follows:
 
-      In applications, OpenTelemetry logs are created with any logging library or
-      built-in logging capabilities. When you add autoinstrumentation or activate an
-      SDK, OpenTelemetry will automatically correlate your existing logs with any
-      active trace and span, wrapping the log body with their IDs. In other words,
-      OpenTelemetry automatically correlates your logs and traces.
-  - fragment_type: execution
-    sequence: 11
-    content: |
-      ### Language support
+    {}
+- fragment_type: execution
+  sequence: 14
+  content: |
+    ## Structured, unstructured, and semistructured logs
 
-      Logs are a [stable](/docs/specs/otel/versioning-and-stability/#stable) signal in
-      the OpenTelemetry specification. For the individual language specific
-      implementations of the Logs API & SDK, the status is as follows:
+    OpenTelemetry accepts any log format, but not all formats are equally useful for
+    analysis. The following section explains the differences between structured,
+    semistructured, and unstructured logs. Important: a log encoded as JSON is not
+    automatically "structured" in the sense of having a stable schema —it may be
+    semistructured. Structured logs imply a consistent schema or well-defined typed
+    fields that downstream processing can reliably depend on.
+- fragment_type: example
+  sequence: 15
+  content: |-
+    ### Structured logs
 
-      {}
-  - fragment_type: execution
-    sequence: 12
-    content: |
-      ## Structured, unstructured, and semistructured logs
-
-      OpenTelemetry accepts any log format, but not all formats are equally useful for
-      analysis. The following section explains the differences between structured,
-      semistructured, and unstructured logs. Important: a log encoded as JSON is not
-      automatically "structured" in the sense of having a stable schema —it may be
-      semistructured. Structured logs imply a consistent schema or well-defined typed
-      fields that downstream processing can reliably depend on.
-  - fragment_type: example
-    sequence: 13
-    content: |
-      ### Structured logs
-
-      A structured log is a log with a defined, consistent schema or typed fields that
-      downstream systems can reliably parse and interpret. The textual encoding can be
-      JSON, protobuf, or another format, but what makes a log structured is the
-      presence of a stable schema (field names, types, and semantics), not merely that
-      it is valid JSON. For example, a structured JSON log might look like:
-
-      ```json
-      {
-        "timestamp": "2024-08-04T12:34:56.789Z",
-        "level": "INFO",
-        "service": "user-authentication",
-        "environment": "production",
-        "message": "User login successful",
-        "context": {
-          "userId": "12345",
+    A structured log is a log with a defined, consistent schema or typed fields that
+    downstream systems can reliably parse and interpret. The textual encoding can be
+    JSON, protobuf, or another format, but what makes a log structured is the
+    presence of a stable schema (field names, types, and semantics), not merely that
+    it is valid JSON. For example, a structured JSON log might look like:
+- fragment_type: example
+  sequence: 16
+  content: |-
+    ```json
+    {
+      "timestamp": "2024-08-04T12:34:56.789Z",
+      "level": "INFO",
+      "service": "user-authentication",
+      "environment": "production",
+      "message": "User login successful",
+      "context": {
+        "userId": "12345",
+        "username": "johndoe",
+        "ipAddress": "192.168.1.1",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36"
+      },
+      "transactionId": "abcd-efgh-ijkl-mnop",
+      "duration": 200,
+      "request": {
+        "method": "POST",
+        "url": "/api/v1/login",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        "body": {
           "username": "johndoe",
-          "ipAddress": "192.168.1.1",
-          "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36"
-        },
-        "transactionId": "abcd-efgh-ijkl-mnop",
-        "duration": 200,
-        "request": {
-          "method": "POST",
-          "url": "/api/v1/login",
-          "headers": {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-          },
-          "body": {
-            "username": "johndoe",
-            "password": "******"
-          }
-        },
-        "response": {
-          "statusCode": 200,
-          "body": {
-            "success": true,
-            "token": "jwt-token-here"
-          }
+          "password": "******"
+        }
+      },
+      "response": {
+        "statusCode": 200,
+        "body": {
+          "success": true,
+          "token": "jwt-token-here"
         }
       }
-      ```
+    }
+    ```
 
-      and for infrastructure components, Common Log Format (CLF) is commonly used:
+    and for infrastructure components, Common Log Format (CLF) is commonly used:
+- fragment_type: example
+  sequence: 17
+  content: |-
+    ```text
+    127.0.0.1 - johndoe [04/Aug/2024:12:34:56 -0400] "POST /api/v1/login HTTP/1.1" 200 1234
+    ```
 
-      ```text
-      127.0.0.1 - johndoe [04/Aug/2024:12:34:56 -0400] "POST /api/v1/login HTTP/1.1" 200 1234
-      ```
+    It is also common to encounter hybrid or extended formats (for example, CLF
+    fields combined with a trailing JSON blob).
 
-      It is also common to encounter hybrid or extended formats (for example, CLF
-      fields combined with a trailing JSON blob).
+    ```text
+    192.168.1.1 - johndoe [04/Aug/2024:12:34:56 -0400] "POST /api/v1/login HTTP/1.1" 200 1234 "http://example.com" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36" {"transactionId": "abcd-efgh-ijkl-mnop", "responseTime": 150, "requestBody": {"username": "johndoe"}, "responseHeaders": {"Content-Type": "application/json"}}
+    ```
 
-      ```text
-      192.168.1.1 - johndoe [04/Aug/2024:12:34:56 -0400] "POST /api/v1/login HTTP/1.1" 200 1234 "http://example.com" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36" {"transactionId": "abcd-efgh-ijkl-mnop", "responseTime": 150, "requestBody": {"username": "johndoe"}, "responseHeaders": {"Content-Type": "application/json"}}
-      ```
-
-      In those cases, parse or extract the parts you need into a normalized record so
-      downstream tooling can analyze them consistently. The `filelogreceiver` in the
-      [OpenTelemetry Collector](/docs/collector/) provides helpers
+    In those cases, parse or extract the parts you need into a normalized record so
+    downstream tooling can analyze them consistently. The `filelogreceiver` in the
+    [OpenTelemetry Collector](/docs/collector/) provides helpers

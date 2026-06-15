@@ -1,11 +1,11 @@
 name: temporal
-version: 1.0.2
+version: 1.0.3
 tier: store
 description: |
   Temporal Python SDK patterns — workflow definitions with @workflow.defn, activity definitions with @activity.defn, worker process setup, message passing (signals/queries/updates), and time primitives (schedules, timers, timeouts). Precision-favored store tier (durable execution platform); sourced from the temporalio/documentation GitHub repo per R1 tier-1 procedure (registry llms_full_url https://docs.temporal.io/llms-full.txt).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -19,13 +19,13 @@ skills:
   fragment_count: 11
 - skill_id: temporal-message-passing
   file: temporal-message-passing.yaml
-  fragment_count: 9
+  fragment_count: 10
 - skill_id: temporal-schedules-and-timers
   file: temporal-schedules-and-timers.yaml
-  fragment_count: 5
+  fragment_count: 6
 - skill_id: temporal-workers
   file: temporal-workers.yaml
   fragment_count: 4
 - skill_id: temporal-workflow-basics
   file: temporal-workflow-basics.yaml
-  fragment_count: 6
+  fragment_count: 8

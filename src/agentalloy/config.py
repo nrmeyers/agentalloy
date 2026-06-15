@@ -31,7 +31,7 @@ class AuthoringConfig(BaseSettings):
     lm_base_url: str = "http://localhost:11435"
     lm_studio_base_url: str = "http://localhost:11434"
     embed_base_url: str = "http://localhost:11436"
-    embedding_model: str = "qwen3-embedding:0.6b"
+    embedding_model: str = "nomic-embed-text-v1.5.Q8_0.gguf"
 
 
 def _user_corpus_dir() -> Path:
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     # Runtime serving (retrieve / compose). The runtime path holds zero
     # generative LLM dependency — only an embedding service.
     runtime_embed_base_url: str = "http://localhost:47951"
-    runtime_embedding_model: str = "qwen3-embedding:0.6b"
+    runtime_embedding_model: str = "nomic-embed-text-v1.5.Q8_0.gguf"
     embedding_provider: str = "openai_compat"
     dedup_hard_threshold: float = 0.92
     dedup_soft_threshold: float = 0.80

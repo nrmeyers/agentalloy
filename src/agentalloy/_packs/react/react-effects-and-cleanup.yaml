@@ -1,10 +1,16 @@
 skill_type: domain
 skill_id: react-effects-and-cleanup
 canonical_name: React Effects and Cleanup (useEffect Lifecycle, Race Conditions, AbortController, Strict Mode Double-Invoke)
-description: "Sync React components with external systems like APIs, timers, or browser APIs: set up effects to start connections and return cleanup functions to stop them, preventing memory leaks, race conditions, and stale data updates."
+description: 'Sync React components with external systems like APIs, timers, or browser APIs: set up effects to start connections and return cleanup functions to stop them, preventing memory leaks, race conditions, and stale data updates.'
 category: engineering
 skill_class: domain
-domain_tags: [effect-cleanup-function, race-condition-abort, dev-only-double-render, synchronizing-external-system, derived-state-anti-pattern, react]
+domain_tags:
+- effect-cleanup-function
+- race-condition-abort
+- dev-only-double-render
+- synchronizing-external-system
+- derived-state-anti-pattern
+- react
 requires:
 - react-hooks-rules-and-deps
 related:
@@ -12,12 +18,12 @@ related:
 - react-state-and-context
 - vue-lifecycle-and-async-components
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — react.dev/reference/react/useEffect https://react.dev/reference/react/useEffect, react.dev/learn/synchronizing-with-effects https://react.dev/learn/synchronizing-with-effects, react.dev/learn/lifecycle-of-reactive-effects https://react.dev/learn/lifecycle-of-reactive-effects, react.dev/learn/you-might-not-need-an-effect https://react.dev/learn/you-might-not-need-an-effect, react.dev/reference/react/useRef https://react.dev/reference/react/useRef (all verified 2026-05-06 via tier-2 llms_url procedure). Skill scope: useEffect lifecycle (setup runs after commit, cleanup runs before next setup and on unmount), mandatory cleanup for subscriptions/timers/network/DOM listeners, race-condition handling in async effects via AbortController and the cancelled-flag pattern, why "fetch in useEffect" is now discouraged in favor of Suspense / framework data layers, Strict Mode double-invocation (React 18+, default in dev) as a feature surfacing missing cleanup, the "you might not need an effect" failure modes (deriving state, caching with useMemo, resetting state via key, event-handler logic, effect chains), useEffect vs useLayoutEffect, and the standard anti-patterns (empty deps with stale closures, conditional hooks, setState in cleanup of an unmounted tree). Out of scope: useSyncExternalStore in depth, server components data flow, custom hooks beyond a passing reference, React Native specifics.
-
 raw_prose: |
   # React Effects and Cleanup
 
@@ -180,193 +186,181 @@ raw_prose: |
   - [ ] No `useEffect` whose only job is calling an analytics or POST endpoint that should be event-driven. Audit each Effect against "does this synchronize with an external system, or is it event logic?"
   - [ ] Every Effect that calls `setInterval`, `setTimeout`, `addEventListener`, `subscribe`, or opens a connection returns a cleanup function. `grep -rnE 'setInterval|setTimeout|addEventListener|\.subscribe\(' src/` cross-referenced against the surrounding `useEffect` body for a `return () =>` line.
   - [ ] `useLayoutEffect` is used only where DOM measurement-then-adjust is required. `grep -rn 'useLayoutEffect' src/` matches reviewed; default `useEffect` is preferred.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # React Effects and Cleanup
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # React Effects and Cleanup
 
-      React Effects synchronize a component with an external system — a chat connection, a browser API, a third-party widget, an analytics SDK. The rule is one sentence: an Effect's body says how to *start* synchronizing, the returned cleanup function says how to *stop*, and React runs cleanup before the next setup and on unmount. Most production `useEffect` bugs are one of five things — missing cleanup on subscriptions/timers/fetches, race conditions where a stale response overwrites a fresh one, fighting Strict Mode's double-invocation instead of treating it as a bug-finder, reaching for `useEffect` when the work belongs in render or an event handler, or an empty dependency array that hides a stale closure over props or state.
+    React Effects synchronize a component with an external system — a chat connection, a browser API, a third-party widget, an analytics SDK. The rule is one sentence: an Effect's body says how to *start* synchronizing, the returned cleanup function says how to *stop*, and React runs cleanup before the next setup and on unmount. Most production `useEffect` bugs are one of five things — missing cleanup on subscriptions/timers/fetches, race conditions where a stale response overwrites a fresh one, fighting Strict Mode's double-invocation instead of treating it as a bug-finder, reaching for `useEffect` when the work belongs in render or an event handler, or an empty dependency array that hides a stale closure over props or state.
+- sequence: 2
+  fragment_type: execution
+  content: |
+    ## Effect lifecycle: setup, cleanup, and the dependency array
 
-  - sequence: 2
-    fragment_type: execution
-    content: |
-      ## Effect lifecycle: setup, cleanup, and the dependency array
+    React runs the setup function *after* the component commits to the DOM. If setup returns a function, that function is the cleanup. Cleanup runs in two situations: before the next setup runs (when a dependency changed) and when the component unmounts. The dependency array changing is the *trigger* — React compares each entry with the previous render's value via `Object.is`, and if any differ, it tears down the previous synchronization (cleanup) and starts a new one (setup).
 
-      React runs the setup function *after* the component commits to the DOM. If setup returns a function, that function is the cleanup. Cleanup runs in two situations: before the next setup runs (when a dependency changed) and when the component unmounts. The dependency array changing is the *trigger* — React compares each entry with the previous render's value via `Object.is`, and if any differ, it tears down the previous synchronization (cleanup) and starts a new one (setup).
+    ```jsx
+    import { useEffect, useState } from 'react';
+    import { createConnection } from './chat.js';
 
-      ```jsx
-      import { useEffect, useState } from 'react';
-      import { createConnection } from './chat.js';
+    function ChatRoom({ roomId }) {
+      const [serverUrl, setServerUrl] = useState('https://localhost:1234');
 
-      function ChatRoom({ roomId }) {
-        const [serverUrl, setServerUrl] = useState('https://localhost:1234');
-
-        useEffect(() => {
-          const connection = createConnection(serverUrl, roomId);
-          connection.connect();
-          return () => {
-            connection.disconnect();
-          };
-        }, [serverUrl, roomId]);
-        // ...
-      }
-      ```
-
-      Mental model: the Effect describes a *synchronization* between the component and an external system, parameterized by the dependencies. When the dependencies change, the synchronization is stopped and restarted with the new values. One Effect should handle one synchronization concern. If you find yourself bundling a chat connection and a window-resize listener and an analytics fire into one `useEffect`, split them — they have different dependencies and different cleanup obligations.
-
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Cleanup is not optional
-
-      Every Effect that allocates a resource — a subscription, a timer, an in-flight network request, a manually attached DOM listener — must return a cleanup that releases it. Not cleaning up leaks the resource on every dependency change *and* on unmount, and Strict Mode (see below) will surface the bug in development by mounting twice.
-
-      ```jsx
-      import { useEffect } from 'react';
-
-      function PriceTicker({ symbol }) {
-        useEffect(() => {
-          const id = setInterval(() => fetchTick(symbol), 1000);
-          return () => clearInterval(id);
-        }, [symbol]);
-
-        useEffect(() => {
-          function onResize() { /* ... */ }
-          window.addEventListener('resize', onResize);
-          return () => window.removeEventListener('resize', onResize);
-        }, []);
-      }
-      ```
-
-      Two effects, two cleanups, two intents. Each cleanup precisely undoes its setup. The window-resize Effect's empty dependency array is *correct* here because `onResize` closes over nothing reactive — but be precise about that claim, because empty arrays are the most common source of stale-closure bugs (see anti-patterns).
-
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Race conditions in async effects
-
-      An Effect that kicks off `fetch(...)` and writes the result to state has a race-condition problem the moment its dependencies can change quickly. Render with `userId=1`, the Effect starts request A. Before A resolves, props change to `userId=2`, cleanup runs (but the fetch keeps going), the new Effect starts request B. If B resolves first and A resolves second, A's `setState` overwrites B's — the UI shows user 1's data while the URL says user 2. The fix is to either abort A on cleanup or to ignore A's response on cleanup.
-
-      ```jsx
-      import { useEffect, useState } from 'react';
-
-      function UserProfile({ userId }) {
-        const [user, setUser] = useState(null);
-
-        useEffect(() => {
-          const controller = new AbortController();
-          let cancelled = false;
-
-          (async () => {
-            try {
-              const res = await fetch(`/api/users/${userId}`, { signal: controller.signal });
-              const data = await res.json();
-              if (!cancelled) setUser(data);
-            } catch (err) {
-              if (err.name !== 'AbortError') throw err;
-            }
-          })();
-
-          return () => {
-            cancelled = true;
-            controller.abort();
-          };
-        }, [userId]);
-
-        return user ? <Profile user={user} /> : <Spinner />;
-      }
-      ```
-
-      Walked: rapid prop change from `userId=1` to `userId=2` calls cleanup with `userId=1` still in scope — `controller.abort()` aborts request A, the `fetch` rejects with `AbortError` which is swallowed, and `cancelled = true` is a defensive backstop in case the abort lost the race against an already-resolved response. The new Effect closes over a fresh `controller` and `cancelled` for `userId=2`. Without both lines, you get stale data on the screen.
-
-      Better, when you can: do not fetch in `useEffect` at all. The React team's current guidance (verified 2026-05-06 against react.dev/reference/react/useEffect) is to use a framework's data layer — Suspense + Server Components, TanStack Query, SWR, or a router loader — for any non-trivial fetching. Those layers handle cancellation, deduplication, caching, and race conditions for you. `useEffect` for fetching is correct for simple, isolated cases or when no data layer is available; it is the wrong default for an app.
-
-  - sequence: 5
-    fragment_type: rationale
-    content: |
-      ## Strict Mode double-invocation
-
-      In development, React 18+ Strict Mode (default in `create-react-app`'s replacement, Vite + `<StrictMode>`, and Next.js) intentionally runs every Effect twice on mount: setup → cleanup → setup. This is a feature, not noise. The double-invoke is designed to surface Effects whose cleanup does not fully reverse setup — the exact bug class that leaks subscriptions, double-registers DOM listeners, fires analytics twice, or duplicates database rows.
-
-      If your Effect breaks under double-mount — your chat connection drops, your subscription throws "already subscribed", your analytics counter doubles — your Effect has a bug, and the bug will eventually show up in production when a parent remounts the component (route change, conditional render, hot reload). Fix the cleanup, do not disable Strict Mode. The only exception is one-time-per-app side effects (e.g. a top-level analytics SDK init); move those out of `useEffect` and into module scope or an explicit init handler.
-
-      ```jsx
-      // Fragile under Strict Mode — duplicates the row on every mount.
       useEffect(() => {
-        fetch('/api/page-view', { method: 'POST', body: JSON.stringify({ url }) });
-      }, [url]);
+        const connection = createConnection(serverUrl, roomId);
+        connection.connect();
+        return () => {
+          connection.disconnect();
+        };
+      }, [serverUrl, roomId]);
+      // ...
+    }
+    ```
 
-      // Correct — fire from the event that caused the navigation, not from render.
-      function onNavigate(url) {
-        fetch('/api/page-view', { method: 'POST', body: JSON.stringify({ url }) });
-      }
-      ```
+    Mental model: the Effect describes a *synchronization* between the component and an external system, parameterized by the dependencies. When the dependencies change, the synchronization is stopped and restarted with the new values. One Effect should handle one synchronization concern. If you find yourself bundling a chat connection and a window-resize listener and an analytics fire into one `useEffect`, split them — they have different dependencies and different cleanup obligations.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## Cleanup is not optional
 
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## You might not need an Effect
+    Every Effect that allocates a resource — a subscription, a timer, an in-flight network request, a manually attached DOM listener — must return a cleanup that releases it. Not cleaning up leaks the resource on every dependency change *and* on unmount, and Strict Mode (see below) will surface the bug in development by mounting twice.
 
-      The five most common misuses of `useEffect`, all from react.dev/learn/you-might-not-need-an-effect (verified 2026-05-06):
+    ```jsx
+    import { useEffect } from 'react';
 
-      - **Deriving state from props or other state.** Computing during render is correct; an Effect that calls `setState` to "sync" derived state runs an extra render and risks staleness. `const fullName = firstName + ' ' + lastName;` is right; `useEffect(() => setFullName(firstName + ' ' + lastName), [firstName, lastName])` is wrong.
-      - **Caching expensive computation.** Use `useMemo`. An Effect that writes to state to cache a result causes an extra render. `useMemo` returns synchronously during render.
-      - **Resetting state when a prop changes.** Pass a `key` prop to the component — React reinitializes state when the key changes. Do not `useEffect(() => setX(initial), [propThatShouldReset])`. The `key` reset is render-time and cheaper.
-      - **Handling user events.** Event-driven side effects (POST on click, navigate on submit, fire analytics on button press) belong in event handlers, not in `useEffect`. The Effect form re-fires on every render that satisfies the deps, including ones not caused by the user action.
-      - **Chains of Effects.** An Effect that calls `setState` triggering another Effect that calls `setState` is almost always wrong. Collapse the chain into one event handler that does all the state updates, or one Effect that handles the full synchronization.
+    function PriceTicker({ symbol }) {
+      useEffect(() => {
+        const id = setInterval(() => fetchTick(symbol), 1000);
+        return () => clearInterval(id);
+      }, [symbol]);
 
-      Rule of thumb: ask "is this synchronizing with an external system, or is it just data flowing through React?" If the latter, it goes in render or in an event handler.
+      useEffect(() => {
+        function onResize() { /* ... */ }
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+      }, []);
+    }
+    ```
 
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## `useEffect` vs `useLayoutEffect`
+    Two effects, two cleanups, two intents. Each cleanup precisely undoes its setup. The window-resize Effect's empty dependency array is *correct* here because `onResize` closes over nothing reactive — but be precise about that claim, because empty arrays are the most common source of stale-closure bugs (see anti-patterns).
+- fragment_type: example
+  sequence: 4
+  content: |-
+    ## Race conditions in async effects
 
-      `useLayoutEffect` runs synchronously after DOM mutation and *before* the browser paints. `useEffect` runs after paint. Use `useLayoutEffect` only when you must measure DOM and adjust before the user sees a flicker — typically reading `getBoundingClientRect`, then setting position state used in the same paint. The cost is that you block paint, so a slow `useLayoutEffect` is visible as input lag. Otherwise, `useEffect` is the right default. Both share identical cleanup semantics and Strict Mode double-invocation behavior.
+    An Effect that kicks off `fetch(...)` and writes the result to state has a race-condition problem the moment its dependencies can change quickly. Render with `userId=1`, the Effect starts request A. Before A resolves, props change to `userId=2`, cleanup runs (but the fetch keeps going), the new Effect starts request B. If B resolves first and A resolves second, A's `setState` overwrites B's — the UI shows user 1's data while the URL says user 2. The fix is to either abort A on cleanup or to ignore A's response on cleanup.
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ```jsx
+    import { useEffect, useState } from 'react';
 
-      ```jsx
-      import { useLayoutEffect, useRef, useState } from 'react';
+    function UserProfile({ userId }) {
+      const [user, setUser] = useState(null);
 
-      function Tooltip({ targetRef, children }) {
-        const ref = useRef(null);
-        const [pos, setPos] = useState({ top: 0, left: 0 });
+      useEffect(() => {
+        const controller = new AbortController();
+        let cancelled = false;
 
-        useLayoutEffect(() => {
-          const t = targetRef.current.getBoundingClientRect();
-          const me = ref.current.getBoundingClientRect();
-          setPos({ top: t.top - me.height, left: t.left });
-        }, [targetRef]);
+        (async () => {
+          try {
+            const res = await fetch(`/api/users/${userId}`, { signal: controller.signal });
+            const data = await res.json();
+            if (!cancelled) setUser(data);
+          } catch (err) {
+            if (err.name !== 'AbortError') throw err;
+          }
+        })();
 
-        return <div ref={ref} style={pos}>{children}</div>;
-      }
-      ```
+        return () => {
+          cancelled = true;
+          controller.abort();
+        };
+      }, [userId]);
 
-  - sequence: 8
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
+      return user ? <Profile user={user} /> : <Spinner />;
+    }
+    ```
 
-      - **Empty dependency array `[]` while the body references props or state.** Stale closure — the Effect captures the first-render values forever. The `react-hooks/exhaustive-deps` ESLint rule catches this; do not silence it without a written justification.
-      - **Cleanup that throws.** React swallows the throw but the synchronization is left half-stopped. Cleanup must be defensive: check `if (timerId) clearTimeout(timerId)` rather than letting an undefined-method call blow up.
-      - **`setState` in cleanup on unmount paths.** React 18+ no longer warns, but you still leak: the state update queues against an unmounted tree and is discarded. Use a `cancelled` flag (see race-condition section) so the post-await `setState` is skipped after unmount.
-      - **Conditional `useEffect`.** `if (cond) useEffect(...)` violates the Rules of Hooks. Move the condition *inside* the Effect body and early-return.
-      - **Firing analytics from `useEffect` on every render.** Either gate with deps so it fires once per logical event, or — better — move the call into the event handler that caused the navigation/click.
-      - **Fetching in `useEffect` when a Suspense data layer is available.** TanStack Query, SWR, route loaders, and Server Components all handle cancellation/dedup/caching properly. Roll your own only for trivial cases.
-      - **Bundling unrelated synchronizations into one `useEffect`.** Different concerns have different dependencies and different cleanup obligations. One Effect = one synchronization concern.
+    Walked: rapid prop change from `userId=1` to `userId=2` calls cleanup with `userId=1` still in scope — `controller.abort()` aborts request A, the `fetch` rejects with `AbortError` which is swallowed, and `cancelled = true` is a defensive backstop in case the abort lost the race against an already-resolved response. The new Effect closes over a fresh `controller` and `cancelled` for `userId=2`. Without both lines, you get stale data on the screen.
+- fragment_type: example
+  sequence: 6
+  content: 'Better, when you can: do not fetch in `useEffect` at all. The React team''s current guidance (verified 2026-05-06 against react.dev/reference/react/useEffect) is to use a framework''s data layer — Suspense + Server Components, TanStack Query, SWR, or a router loader — for any non-trivial fetching. Those layers handle cancellation, deduplication, caching, and race conditions for you. `useEffect` for fetching is correct for simple, isolated cases or when no data layer is available; it is the wrong default for an app.'
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## Strict Mode double-invocation
 
-  - sequence: 9
-    fragment_type: verification
-    content: |
-      ## Verification
+    In development, React 18+ Strict Mode (default in `create-react-app`'s replacement, Vite + `<StrictMode>`, and Next.js) intentionally runs every Effect twice on mount: setup → cleanup → setup. This is a feature, not noise. The double-invoke is designed to surface Effects whose cleanup does not fully reverse setup — the exact bug class that leaks subscriptions, double-registers DOM listeners, fires analytics twice, or duplicates database rows.
 
-      - [ ] ESLint rule `react-hooks/exhaustive-deps` is enabled at error level. `npx eslint --rule 'react-hooks/exhaustive-deps: error' --no-eslintrc src/` exits 0 — confirms no Effect omits a referenced reactive value.
-      - [ ] ESLint rule `react-hooks/rules-of-hooks` is enabled at error level. `npx eslint --rule 'react-hooks/rules-of-hooks: error' --no-eslintrc src/` exits 0 — confirms no conditional or looped hook calls.
-      - [ ] `grep -rnE 'useEffect\([^,]+,\s*\[\s*\]\s*\)' src/` matches are reviewed: each empty-deps Effect's body must reference no props, state, or component-scope variables. Annotate confirmed-correct cases with a comment.
-      - [ ] `grep -rn 'fetch(' src/` inside `useEffect` blocks: every match either passes a `signal` from an `AbortController` or sets a `cancelled` flag in cleanup. Inventory with `grep -rn -B2 -A20 'useEffect' src/ | grep -E 'fetch\(|AbortController|cancelled'`.
-      - [ ] `<StrictMode>` wraps the app root in `src/main.tsx` (or equivalent entry). `grep -rn 'StrictMode' src/` returns at least one match at the entry point.
-      - [ ] No `useEffect` whose only job is `setState(derivedFromPropsOrState)`. `grep -rn -A5 'useEffect' src/ | grep -B1 'setState\|set[A-Z]'` flagged matches reviewed — derived values should be computed in render.
-      - [ ] No `useEffect` whose only job is calling an analytics or POST endpoint that should be event-driven. Audit each Effect against "does this synchronize with an external system, or is it event logic?"
-      - [ ] Every Effect that calls `setInterval`, `setTimeout`, `addEventListener`, `subscribe`, or opens a connection returns a cleanup function. `grep -rnE 'setInterval|setTimeout|addEventListener|\.subscribe\(' src/` cross-referenced against the surrounding `useEffect` body for a `return () =>` line.
-      - [ ] `useLayoutEffect` is used only where DOM measurement-then-adjust is required. `grep -rn 'useLayoutEffect' src/` matches reviewed; default `useEffect` is preferred.
+    If your Effect breaks under double-mount — your chat connection drops, your subscription throws "already subscribed", your analytics counter doubles — your Effect has a bug, and the bug will eventually show up in production when a parent remounts the component (route change, conditional render, hot reload). Fix the cleanup, do not disable Strict Mode. The only exception is one-time-per-app side effects (e.g. a top-level analytics SDK init); move those out of `useEffect` and into module scope or an explicit init handler.
+
+    ```jsx
+    // Fragile under Strict Mode — duplicates the row on every mount.
+    useEffect(() => {
+      fetch('/api/page-view', { method: 'POST', body: JSON.stringify({ url }) });
+    }, [url]);
+
+    // Correct — fire from the event that caused the navigation, not from render.
+    function onNavigate(url) {
+      fetch('/api/page-view', { method: 'POST', body: JSON.stringify({ url }) });
+    }
+    ```
+- sequence: 8
+  fragment_type: rationale
+  content: |
+    ## You might not need an Effect
+
+    The five most common misuses of `useEffect`, all from react.dev/learn/you-might-not-need-an-effect (verified 2026-05-06):
+
+    - **Deriving state from props or other state.** Computing during render is correct; an Effect that calls `setState` to "sync" derived state runs an extra render and risks staleness. `const fullName = firstName + ' ' + lastName;` is right; `useEffect(() => setFullName(firstName + ' ' + lastName), [firstName, lastName])` is wrong.
+    - **Caching expensive computation.** Use `useMemo`. An Effect that writes to state to cache a result causes an extra render. `useMemo` returns synchronously during render.
+    - **Resetting state when a prop changes.** Pass a `key` prop to the component — React reinitializes state when the key changes. Do not `useEffect(() => setX(initial), [propThatShouldReset])`. The `key` reset is render-time and cheaper.
+    - **Handling user events.** Event-driven side effects (POST on click, navigate on submit, fire analytics on button press) belong in event handlers, not in `useEffect`. The Effect form re-fires on every render that satisfies the deps, including ones not caused by the user action.
+    - **Chains of Effects.** An Effect that calls `setState` triggering another Effect that calls `setState` is almost always wrong. Collapse the chain into one event handler that does all the state updates, or one Effect that handles the full synchronization.
+
+    Rule of thumb: ask "is this synchronizing with an external system, or is it just data flowing through React?" If the latter, it goes in render or in an event handler.
+- sequence: 9
+  fragment_type: example
+  content: |
+    ## `useEffect` vs `useLayoutEffect`
+
+    `useLayoutEffect` runs synchronously after DOM mutation and *before* the browser paints. `useEffect` runs after paint. Use `useLayoutEffect` only when you must measure DOM and adjust before the user sees a flicker — typically reading `getBoundingClientRect`, then setting position state used in the same paint. The cost is that you block paint, so a slow `useLayoutEffect` is visible as input lag. Otherwise, `useEffect` is the right default. Both share identical cleanup semantics and Strict Mode double-invocation behavior.
+
+    ```jsx
+    import { useLayoutEffect, useRef, useState } from 'react';
+
+    function Tooltip({ targetRef, children }) {
+      const ref = useRef(null);
+      const [pos, setPos] = useState({ top: 0, left: 0 });
+
+      useLayoutEffect(() => {
+        const t = targetRef.current.getBoundingClientRect();
+        const me = ref.current.getBoundingClientRect();
+        setPos({ top: t.top - me.height, left: t.left });
+      }, [targetRef]);
+
+      return <div ref={ref} style={pos}>{children}</div>;
+    }
+    ```
+- sequence: 10
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
+
+    - **Empty dependency array `[]` while the body references props or state.** Stale closure — the Effect captures the first-render values forever. The `react-hooks/exhaustive-deps` ESLint rule catches this; do not silence it without a written justification.
+    - **Cleanup that throws.** React swallows the throw but the synchronization is left half-stopped. Cleanup must be defensive: check `if (timerId) clearTimeout(timerId)` rather than letting an undefined-method call blow up.
+    - **`setState` in cleanup on unmount paths.** React 18+ no longer warns, but you still leak: the state update queues against an unmounted tree and is discarded. Use a `cancelled` flag (see race-condition section) so the post-await `setState` is skipped after unmount.
+    - **Conditional `useEffect`.** `if (cond) useEffect(...)` violates the Rules of Hooks. Move the condition *inside* the Effect body and early-return.
+    - **Firing analytics from `useEffect` on every render.** Either gate with deps so it fires once per logical event, or — better — move the call into the event handler that caused the navigation/click.
+    - **Fetching in `useEffect` when a Suspense data layer is available.** TanStack Query, SWR, route loaders, and Server Components all handle cancellation/dedup/caching properly. Roll your own only for trivial cases.
+    - **Bundling unrelated synchronizations into one `useEffect`.** Different concerns have different dependencies and different cleanup obligations. One Effect = one synchronization concern.
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] ESLint rule `react-hooks/exhaustive-deps` is enabled at error level. `npx eslint --rule ''react-hooks/exhaustive-deps: error'' --no-eslintrc src/` exits 0 — confirms no Effect omits a referenced reactive value. - [ ] ESLint rule `react-hooks/rules-of-hooks` is enabled at error level. `npx eslint --rule ''react-hooks/rules-of-hooks: error'' --no-eslintrc src/` exits 0 — confirms no conditional or looped hook calls. - [ ] `grep -rnE ''useEffect\([^,]+,\s*\[\s*\]\s*\)'' src/` matches are reviewed: each empty-deps Effect''s body must reference no props, state, or component-scope variables. Annotate confirmed-correct cases with a comment. - [ ] `grep -rn ''fetch('' src/` inside `useEffect` blocks: every match either passes a `signal` from an `AbortController` or sets a `cancelled` flag in cleanup. Inventory with `grep -rn -B2 -A20 ''useEffect'' src/ | grep -E ''fetch\(|AbortController|cancelled''`. - [ ] `<StrictMode>` wraps the app root in `src/main.tsx` (or equivalent entry). `grep -rn ''StrictMode'' src/` returns at least one match at the entry point. - [ ] No `useEffect` whose only job is `setState(derivedFromPropsOrState)`. `grep -rn -A5 ''useEffect'' src/ | grep -B1 ''setState\|set[A-Z]''` flagged matches reviewed — derived values should be computed in render. - [ ] No `useEffect` whose only job is calling an analytics or POST endpoint that should be event-driven.'
+- fragment_type: verification
+  sequence: 12
+  content: |-
+    Audit each Effect against "does this synchronize with an external system, or is it event logic?"
+    - [ ] Every Effect that calls `setInterval`, `setTimeout`, `addEventListener`, `subscribe`, or opens a connection returns a cleanup function. `grep -rnE 'setInterval|setTimeout|addEventListener|\.subscribe\(' src/` cross-referenced against the surrounding `useEffect` body for a `return () =>` line. - [ ] `useLayoutEffect` is used only where DOM measurement-then-adjust is required. `grep -rn 'useLayoutEffect' src/` matches reviewed; default `useEffect` is preferred.

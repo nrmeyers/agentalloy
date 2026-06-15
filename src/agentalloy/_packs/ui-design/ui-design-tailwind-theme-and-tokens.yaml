@@ -1,23 +1,26 @@
 skill_type: domain
 skill_id: ui-design-tailwind-theme-and-tokens
 canonical_name: Tailwind Theme and Design Tokens
-description: "Define brand colors, fonts, and spacing for websites and apps using Tailwind CSS: declare design tokens in CSS with the @theme directive to generate utility classes and keep your UI consistent across components."
+description: 'Define brand colors, fonts, and spacing for websites and apps using Tailwind CSS: declare design tokens in CSS with the @theme directive to generate utility classes and keep your UI consistent across components.'
 category: design
 skill_class: domain
 domain_tags:
-  - tailwind
-  - theme
-  - design-token
-  - css
-  - utility-classes
-  - ui-design
+- tailwind
+- theme
+- design-token
+- css
+- utility-classes
+- ui-design
 related:
 - ui-design-responsive-and-dark-mode
 - ui-design-systems-architecture
 - ui-design-tailwind-utility-classes
 always_apply: false
-phase_scope: [build, design]
-category_scope: [process]
+phase_scope:
+- build
+- design
+category_scope:
+- process
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -321,313 +324,317 @@ raw_prose: |
 
   When you import `tailwindcss` at
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Tailwind v4 moves theme configuration into CSS via the `@theme` directive. Tokens declared there generate utility classes and can be referenced from custom CSS via `theme()`. This is the design-token surface for Tailwind-based design systems. This skill covers theme + token authoring.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Tailwind v4 moves theme configuration into CSS via the `@theme` directive. Tokens declared there generate utility classes and can be referenced from custom CSS via `theme()`. This is the design-token surface for Tailwind-based design systems. This skill covers theme + token authoring.
 
-      Sourced from https://tailwindcss.com/docs/theme (Tailwind v4).
+    Sourced from https://tailwindcss.com/docs/theme (Tailwind v4).
 
-      export const title = "Theme variables";
-      export const description = "Using utility classes as an API for your design tokens.";
+    export const title = "Theme variables";
+    export const description = "Using utility classes as an API for your design tokens.";
 
-      ## Overview
+    ## Overview
 
-      Tailwind is a framework for building custom designs, and different designs need different typography, colors, shadows, breakpoints, and more.
+    Tailwind is a framework for building custom designs, and different designs need different typography, colors, shadows, breakpoints, and more.
 
-      These low-level design decisions are often called _design tokens_, and in Tailwind projects you store those values in _theme variables_.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ### What are theme variables?
+    These low-level design decisions are often called _design tokens_, and in Tailwind projects you store those values in _theme variables_.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ### What are theme variables?
 
-      Theme variables are special CSS variables defined using the `@theme` directive that influence which utility classes exist in your project.
+    Theme variables are special CSS variables defined using the `@theme` directive that influence which utility classes exist in your project.
 
-      For example, you can add a new color to your project by defining a theme variable like `--color-mint-500`:
+    For example, you can add a new color to your project by defining a theme variable like `--color-mint-500`:
 
-      ```css
-      /* [!code filename:app.css] */
-      @import "tailwindcss";
+    ```css
+    /* [!code filename:app.css] */
+    @import "tailwindcss";
 
+    /* [!code highlight:4] */
+    @theme {
+      --color-mint-500: oklch(0.72 0.11 178);
+    }
+    ```
+
+    Now you can use utility classes like `bg-mint-500`, `text-mint-500`, or `fill-mint-500` in your HTML:
+
+    ```html
+    <!-- [!code filename:HTML] -->
+    <!-- [!code word:bg-mint-500] -->
+    <div class="bg-mint-500">
+      <!-- ... -->
+    </div>
+    ```
+
+    Tailwind also generates regular CSS variables for your theme variables so you can reference your design tokens in arbitrary values or inline styles:
+
+    ```html
+    <!-- [!code filename:HTML] -->
+    <!-- [!code word:var(--color-mint-500)] -->
+    <div style="background-color: var(--color-mint-500)">
+      <!-- ... -->
+    </div>
+    ```
+
+    Learn more about how theme variables map to different utility classes in the [theme variable namespaces](#theme-variable-namespaces) documentation.
+- fragment_type: rationale
+  sequence: 3
+  content: |
+    #### Why `@theme` instead of `:root`?
+
+    Theme variables aren't _just_ CSS variables — they also instruct Tailwind to create new utility classes that you can use in your HTML.
+
+    Since they do more than regular CSS variables, Tailwind uses special syntax so that defining theme variables is always explicit. Theme variables are also required to be defined top-level and not nested under other selectors or media queries, and using a special syntax makes it possible to enforce that.
+
+    Defining regular CSS variables with `:root` can still be useful in Tailwind projects when you want to define a variable that isn't meant to be connected to a utility class. Use `@theme` when you want a design token to map directly to a utility class, and use `:root` for defining regular CSS variables that shouldn't have corresponding utility classes.
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    ### Relationship to utility classes
+
+    Some utility classes in Tailwind like `flex` and `object-cover` are static, and are always the same from project to project. But many others are driven by theme variables, and only exist because of the theme variables you've defined.
+
+    For example, theme variables defined in the `--font-*` namespace determine all of the `font-family` utilities that exist in a project:
+
+    ```css
+    /* [!code filename:./node_modules/tailwindcss/theme.css] */
+    @theme {
       /* [!code highlight:4] */
-      @theme {
-        --color-mint-500: oklch(0.72 0.11 178);
-      }
-      ```
+      /* prettier-ignore */
+      --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+      --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+      /* prettier-ignore */
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      /* ... */
+    }
+    ```
 
-      Now you can use utility classes like `bg-mint-500`, `text-mint-500`, or `fill-mint-500` in your HTML:
+    The `font-sans`, `font-serif`, and `font-mono` utilities only exist by default because Tailwind's default theme defines the `--font-sans`, `--font-serif`, and `--font-mono` theme variables.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    If another theme variable like `--font-poppins` were defined, a `font-poppins` utility class would become available to go with it:
 
-      ```html
-      <!-- [!code filename:HTML] -->
-      <!-- [!code word:bg-mint-500] -->
-      <div class="bg-mint-500">
-        <!-- ... -->
-      </div>
-      ```
+    ```css
+    /* [!code filename:app.css] */
+    @import "tailwindcss";
 
-      Tailwind also generates regular CSS variables for your theme variables so you can reference your design tokens in arbitrary values or inline styles:
+    @theme {
+      /* [!code highlight:2] */
+      --font-poppins: Poppins, sans-serif;
+    }
+    ```
 
-      ```html
-      <!-- [!code filename:HTML] -->
-      <!-- [!code word:var(--color-mint-500)] -->
-      <div style="background-color: var(--color-mint-500)">
-        <!-- ... -->
-      </div>
-      ```
+    ```html
+    <!-- [!code filename:HTML] -->
+    <!-- [!code word:font-poppins] -->
+    <h1 class="font-poppins">This headline will use Poppins.</h1>
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |
+    You can name your theme variables whatever you want within these namespaces, and a corresponding utility with the same name will become available to use in your HTML.
 
-      Learn more about how theme variables map to different utility classes in the [theme variable namespaces](#theme-variable-namespaces) documentation.
-  - fragment_type: rationale
-    sequence: 3
-    content: |
-      #### Why `@theme` instead of `:root`?
+    #### Relationship to variants
 
-      Theme variables aren't _just_ CSS variables — they also instruct Tailwind to create new utility classes that you can use in your HTML.
+    Some theme variables are used to define variants rather than utilities. For example theme variables in the `--breakpoint-*` namespace determine which responsive breakpoint variants exist in your project:
 
-      Since they do more than regular CSS variables, Tailwind uses special syntax so that defining theme variables is always explicit. Theme variables are also required to be defined top-level and not nested under other selectors or media queries, and using a special syntax makes it possible to enforce that.
+    ```css
+    /* [!code filename:app.css] */
+    @import "tailwindcss";
 
-      Defining regular CSS variables with `:root` can still be useful in Tailwind projects when you want to define a variable that isn't meant to be connected to a utility class. Use `@theme` when you want a design token to map directly to a utility class, and use `:root` for defining regular CSS variables that shouldn't have corresponding utility classes.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ### Relationship to utility classes
+    @theme {
+      /* [!code highlight:2] */
+      --breakpoint-3xl: 120rem;
+    }
+    ```
 
-      Some utility classes in Tailwind like `flex` and `object-cover` are static, and are always the same from project to project. But many others are driven by theme variables, and only exist because of the theme variables you've defined.
+    Now you can use the `3xl:*` variant to only trigger a utility when the viewport is 120rem or wider:
 
-      For example, theme variables defined in the `--font-*` namespace determine all of the `font-family` utilities that exist in a project:
+    ```html
+    <!-- [!code filename:HTML] -->
+    <!-- [!code word:3xl\:grid-cols-6] -->
+    <div class="3xl:grid-cols-6 grid grid-cols-2 md:grid-cols-4">
+      <!-- ... -->
+    </div>
+    ```
 
-      ```css
-      /* [!code filename:./node_modules/tailwindcss/theme.css] */
-      @theme {
-        /* [!code highlight:4] */
-        /* prettier-ignore */
-        --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-        --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-        /* prettier-ignore */
-        --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        /* ... */
-      }
-      ```
+    Learn more about how theme variables map to different utility classes and variants in the [theme variable namespaces](#theme-variable-namespaces) documentation.
+- fragment_type: example
+  sequence: 7
+  content: |-
+    ### Theme variable namespaces
 
-      The `font-sans`, `font-serif`, and `font-mono` utilities only exist by default because Tailwind's default theme defines the `--font-sans`, `--font-serif`, and `--font-mono` theme variables.
+    Theme variables are defined in _namespaces_ and each namespace corresponds to one or more utility class or variant APIs.
 
-      If another theme variable like `--font-poppins` were defined, a `font-poppins` utility class would become available to go with it:
+    Defining new theme variables in these namespaces will make new corresponding utilities and variants available in your project:
 
-      ```css
-      /* [!code filename:app.css] */
-      @import "tailwindcss";
+    {
+- fragment_type: example
+  sequence: 8
+  content: |-
+    <table>
+      <thead>
+        <tr>
+          <th>Namespace</th>
+          <th>Utility classes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--color-*</code>
+          </td>
+          <td>
+            Color utilities like <code>bg-red-500</code>, <code>text-sky-300</code>, and many more
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--font-*</code>
+          </td>
+          <td>
+            Font family utilities like <code>font-sans</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--text-*</code>
+          </td>
+          <td>
+            Font size utilities like <code>text-xl</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--font-weight-*</code>
+          </td>
+          <td>
+            Font weight utilities like <code>font-bold</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--tracking-*</code>
+          </td>
+          <td>
+            Letter spacing utilities like <code>tracking-wide</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--leading-*</code>
+          </td>
+          <td>
+            Line height utilities like <code>leading-tight</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--breakpoint-*</code>
+          </td>
+          <td>
+            Responsive breakpoint variants like <code>sm:*</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--container-*</code>
+          </td>
+          <td>
+            Container query variants like <code>@sm:*</code> and size utilities like <code>max-w-md</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--spacing-*</code>
+          </td>
+          <td>
+            Spacing and sizing utilities like <code>px-4</code>, <code>max-h-16</code>, and many more
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--radius-*</code>
+          </td>
+          <td>
+            Border radius utilities like <code>rounded-sm</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--shadow-*</code>
+          </td>
+          <td>
+            Box shadow utilities like <code>shadow-md</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--inset-shadow-*</code>
+          </td>
+          <td>
+            Inset box shadow utilities like <code>inset-shadow-xs</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--drop-shadow-*</code>
+          </td>
+          <td>
+            Drop shadow filter utilities like <code>drop-shadow-md</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--blur-*</code>
+          </td>
+          <td>
+            Blur filter utilities like <code>blur-md</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--perspective-*</code>
+          </td>
+          <td>
+            Perspective utilities like <code>perspective-near</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--aspect-*</code>
+          </td>
+          <td>
+            Aspect ratio utilities like <code>aspect-video</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--ease-*</code>
+          </td>
+          <td>
+            Transition timing function utilities like <code>ease-out</code>
+          </td>
+        </tr>
+        <tr>
+          <td className="whitespace-nowrap">
+            <code>--animate-*</code>
+          </td>
+          <td>
+            Animation utilities like <code>animate-spin</code>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    }
+- fragment_type: example
+  sequence: 9
+  content: |-
+    For a list of all of the default theme variables, see the [default theme variable reference](#default-theme-variable-reference).
 
-      @theme {
-        /* [!code highlight:2] */
-        --font-poppins: Poppins, sans-serif;
-      }
-      ```
+    ### Default theme variables
 
-      ```html
-      <!-- [!code filename:HTML] -->
-      <!-- [!code word:font-poppins] -->
-      <h1 class="font-poppins">This headline will use Poppins.</h1>
-      ```
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      You can name your theme variables whatever you want within these namespaces, and a corresponding utility with the same name will become available to use in your HTML.
-
-      #### Relationship to variants
-
-      Some theme variables are used to define variants rather than utilities. For example theme variables in the `--breakpoint-*` namespace determine which responsive breakpoint variants exist in your project:
-
-      ```css
-      /* [!code filename:app.css] */
-      @import "tailwindcss";
-
-      @theme {
-        /* [!code highlight:2] */
-        --breakpoint-3xl: 120rem;
-      }
-      ```
-
-      Now you can use the `3xl:*` variant to only trigger a utility when the viewport is 120rem or wider:
-
-      ```html
-      <!-- [!code filename:HTML] -->
-      <!-- [!code word:3xl\:grid-cols-6] -->
-      <div class="3xl:grid-cols-6 grid grid-cols-2 md:grid-cols-4">
-        <!-- ... -->
-      </div>
-      ```
-
-      Learn more about how theme variables map to different utility classes and variants in the [theme variable namespaces](#theme-variable-namespaces) documentation.
-  - fragment_type: example
-    sequence: 6
-    content: |
-      ### Theme variable namespaces
-
-      Theme variables are defined in _namespaces_ and each namespace corresponds to one or more utility class or variant APIs.
-
-      Defining new theme variables in these namespaces will make new corresponding utilities and variants available in your project:
-
-      {
-
-      <table>
-        <thead>
-          <tr>
-            <th>Namespace</th>
-            <th>Utility classes</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--color-*</code>
-            </td>
-            <td>
-              Color utilities like <code>bg-red-500</code>, <code>text-sky-300</code>, and many more
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--font-*</code>
-            </td>
-            <td>
-              Font family utilities like <code>font-sans</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--text-*</code>
-            </td>
-            <td>
-              Font size utilities like <code>text-xl</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--font-weight-*</code>
-            </td>
-            <td>
-              Font weight utilities like <code>font-bold</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--tracking-*</code>
-            </td>
-            <td>
-              Letter spacing utilities like <code>tracking-wide</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--leading-*</code>
-            </td>
-            <td>
-              Line height utilities like <code>leading-tight</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--breakpoint-*</code>
-            </td>
-            <td>
-              Responsive breakpoint variants like <code>sm:*</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--container-*</code>
-            </td>
-            <td>
-              Container query variants like <code>@sm:*</code> and size utilities like <code>max-w-md</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--spacing-*</code>
-            </td>
-            <td>
-              Spacing and sizing utilities like <code>px-4</code>, <code>max-h-16</code>, and many more
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--radius-*</code>
-            </td>
-            <td>
-              Border radius utilities like <code>rounded-sm</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--shadow-*</code>
-            </td>
-            <td>
-              Box shadow utilities like <code>shadow-md</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--inset-shadow-*</code>
-            </td>
-            <td>
-              Inset box shadow utilities like <code>inset-shadow-xs</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--drop-shadow-*</code>
-            </td>
-            <td>
-              Drop shadow filter utilities like <code>drop-shadow-md</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--blur-*</code>
-            </td>
-            <td>
-              Blur filter utilities like <code>blur-md</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--perspective-*</code>
-            </td>
-            <td>
-              Perspective utilities like <code>perspective-near</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--aspect-*</code>
-            </td>
-            <td>
-              Aspect ratio utilities like <code>aspect-video</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--ease-*</code>
-            </td>
-            <td>
-              Transition timing function utilities like <code>ease-out</code>
-            </td>
-          </tr>
-          <tr>
-            <td className="whitespace-nowrap">
-              <code>--animate-*</code>
-            </td>
-            <td>
-              Animation utilities like <code>animate-spin</code>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      }
-  - fragment_type: example
-    sequence: 7
-    content: |
-      For a list of all of the default theme variables, see the [default theme variable reference](#default-theme-variable-reference).
-
-      ### Default theme variables
-
-      When you import `tailwindcss` at
+    When you import `tailwindcss` at

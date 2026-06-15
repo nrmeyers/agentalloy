@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: github-actions-release-and-publish
 canonical_name: GitHub Actions — Releasing and Publishing Actions
-description: "Package and share your custom GitHub Actions with the community or your organization: create a dedicated repository, define metadata, tag releases with semantic versions, and publish to the GitHub Marketplace for others to use in their workflows."
+description: 'Package and share your custom GitHub Actions with the community or your organization: create a dedicated repository, define metadata, tag releases with semantic versions, and publish to the GitHub Marketplace for others to use in their workflows.'
 category: ops
 skill_class: domain
 domain_tags:
-  - github-actions
-  - release-management
-  - publishing
-  - semantic-versioning
-  - marketplace
+- github-actions
+- release-management
+- publishing
+- semantic-versioning
+- marketplace
 requires:
 - github-actions-workflow-syntax
 related:
@@ -17,228 +17,101 @@ related:
 - github-actions-immutable-releases
 - github-actions-reusable-workflows
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: |
-  # GitHub Actions — Releasing and Publishing Actions
-
-  ## Overview
-
-  Action releases follow a tag pattern: `v1.2.3` for the immutable release, `v1` floating to the latest 1.x. Publishing to Marketplace requires metadata + branding. This skill covers the release lifecycle.
-
-  ---
-
-
-
-
-  ## Introduction
-
-  After you create an action, you'll want to continue releasing new features while working with community contributions. This tutorial describes an example process you can follow to release and maintain actions in open source. The example:
-
-  * Leverages GitHub Actions for continuous integration, dependency updates, release management, and task automation.
-  * Provides confidence through automated tests and build badges.
-  * Indicates how the action can be used, ideally as part of a broader workflow.
-  * Signal what type of community contributions you welcome. (For example, issues, pull requests, or vulnerability reports.)
-
-  For an applied example of this process, see [actions/javascript-action](https://github.com/actions/javascript-action).
-
-  ## Developing and releasing actions
-
-  In this section, we discuss an example process for developing and releasing actions and show how to use GitHub Actions to automate the process.
-
-  ### About JavaScript actions
-
-  JavaScript actions are Node.js repositories with metadata. However, JavaScript actions have additional properties compared to traditional Node.js projects:
-
-  * Dependent packages are committed alongside the code, typically in a compiled and minified form. This means that automated builds and secure community contributions are important.
-
-
-
-  * Tagged releases can be published directly to GitHub Marketplace and consumed by workflows across GitHub.
-
-
-
-  * Many actions make use of GitHub's APIs and third party APIs, so we encourage robust end-to-end testing.
-
-  ### Setting up GitHub Actions workflows
-
-  To support the developer process in the next section, add two GitHub Actions workflows to your repository:
-
-  1. Add a workflow that triggers when a commit is pushed to a feature branch or to `main` or when a pull request is created. Configure the workflow to run your unit and integration tests. For an example, see [this workflow](https://github.com/actions/javascript-action/blob/main/.github/workflows/ci.yml).
-  1. Add a workflow that triggers when a release is published or edited. Configure the workflow to ensure semantic tags are in place. You can use an action like [JasonEtco/build-and-tag-action](https://github.com/JasonEtco/build-and-tag-action) to compile and bundle the JavaScript and metadata file and force push semantic major, minor, and patch tags. For more information about semantic tags, see [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
-
-      
-      > [!NOTE]
-      > If you enable immutable releases for your repository, you cannot use this action to force push tags tied to releases on GitHub Marketplace. To learn how to manage your releases with immutable releases, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/using-immutable-releases-and-tags-to-manage-your-actions-releases).
-      
-
-  ### Example developer process
-
-  Here is an example process that you can follow to automatically run tests, create a release and publish to GitHub Marketplace, and publish your action.
-
-  1. Do feature work in branches per GitHub flow. For more information, see [AUTOTITLE](/get-started/using-github/github-flow).
-     * Whenever a commit is pushed to the feature branch, your testing workflow will automatically run the tests.
-
-  1. Create pull requests to the `main` branch to initiate discussion and review, merging when ready.
-
-     * When a pull request is opened, either from a branch or a fork, your testing workflow will again run the tests, this time with the merge commit.
-
-     * **Note:** for security reasons, workflows triggered by `pull_request` from forks have restricted `GITHUB_TOKEN` permissions and do not have access to secrets. If your tests or other workflows triggered upon pull request require access to secrets, consider using a different event like a [manual trigger](/actions/using-workflows/events-that-trigger-workflows#manual-events) or a [`pull_request_target`](/actions/using-workflows/events-that-trigger-workflows#pull_request_target). For more information, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#pull-request-events-for-forked-repositories).
-
-  1. Create a semantically tagged release.  You may also publish to GitHub Marketplace with a simple checkbox.  For more information, see [AUTOTITLE](/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-a-release) and [AUTOTITLE](/actions/creating-actions/publishing-actions-in-github-marketplace#publishing-an-action).
-
-     * When a release is published or edited, your release workflow will automatically take care of compilation and adjusting tags.
-
-     * We recommend creating releases using semantically versioned tags – for example, `v1.1.3` – and keeping major (`v1`) and minor (`v1.1`) tags current to the latest appropriate commit. For more information, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/manage-custom-actions#using-release-management-for-actions) and [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
-
-  ### Results
-
-  Unlike some other automated release management strategies, this process intentionally does not commit dependencies to the repository.
-
-  ## Prerequisites
-
-  >[!NOTE]
-  > You must accept the terms of service to publish actions in GitHub Marketplace.
-
-  Before you can publish an action, you'll need to create an action in your repository. For more information, see [AUTOTITLE](/actions/creating-actions).
-
-  When you plan to publish your action to GitHub Marketplace, you'll need to ensure that the repository only includes the metadata file, code, and files necessary for the action. Creating a single repository for the action allows you to tag, release, and package the code in a single unit.  GitHub Marketplace uses the action's metadata on your repository page.
-
-  Actions are published to GitHub Marketplace immediately and aren't reviewed by GitHub as long as they meet these requirements:
-
-  * The action must be in a public repository.
-  * Each repository must contain a single action metadata file (`action.yml` or `action.yaml`) at the root.
-    * Repositories may include other actions metadata files in sub-folders, but they will not be automatically listed in the marketplace.
-  * Each repository must _not_ contain any workflow files.
-  * The `name` in the action's metadata file must be unique.
-    * The `name` cannot match an existing action name published on GitHub Marketplace.
-    * The `name` cannot match a user or organization on GitHub Marketplace, unless the user or organization owner is publishing the action. For example, only the GitHub organization can publish an action named `github`.
-    * The `name` cannot match an existing GitHub Marketplace category.
-    * GitHub reserves the names of GitHub Marketplace features.
-
-  ## Publishing an action
-
-  You can add the action you've created to GitHub Marketplace by tagging it as a new release and publishing it.
-
-  To draft a new release and publish the action to GitHub Marketplace, follow these instructions:
-
-
-
-  1. Navigate to the action metadata file in your repository (`action.yml`), and you'll see a banner to publish the action to GitHub Marketplace. Click **Draft a release**.
-  1. Under "Release Action", select **Publish this Action to the GitHub Marketplace**.
-
-     > [!NOTE]
-     > The "Publish" checkbox is disabled if the account that owns the repository has not yet accepted the GitHub Developer Agreement. If you own the repository or are an organization owner, click the link to "accept the GitHub Marketplace Developer Agreement", then accept the agreement. If there is no link, send the organization owner a link to this "Release Action" page and ask them to accept the agreement.
-
-  1. If the labels in your metadata file contain any problems, you will see an error message or a warning message. Address them by updating your metadata file. Once complete, you will see an "Everything looks good!" message.
-  1. Select the **Primary Category** dropdown menu and click a category that will help people find your action in GitHub Marketplace.
-  1. Optionally, select the **Another Category** dropdown menu and click a secondary category.
-  1. In the tag field, type a version for your action. This helps people know what changes or features the release includes. People will see the version in the action's dedicated page.
-  1. In the title field, type a release title.
-  1. Complete all other fields and click **Publish release**. Publishing requires you to use two-factor authentication. For more information, see [AUTOTITLE](/authentication/securing-your-account-with-two-factor-authentication-2fa/configuring-two-factor-authentication).
-
-  ## Removing an action from GitHub Marketplace
-
-  To remove a published action from GitHub Marketplace, you'll need to update each published release. Perform the following steps for each release of the action you've published to .
-
-
-
-
-  1. Select **Publish this Action to the GitHub Marketplace** to remove the check from the box.
-  1. Click **Update release** at the bottom of the page.
-
+raw_prose: "# GitHub Actions — Releasing and Publishing Actions\n\n## Overview\n\nAction releases follow a tag pattern: `v1.2.3` for the immutable release, `v1` floating to the latest 1.x. Publishing to Marketplace requires metadata + branding. This skill covers the release lifecycle.\n\n---\n\n\n\n\n## Introduction\n\nAfter you create an action, you'll want to continue releasing new features while working with community contributions. This tutorial describes an example process you can follow to release and maintain actions in open source. The example:\n\n* Leverages GitHub Actions for continuous integration, dependency updates, release management, and task automation.\n* Provides confidence through automated tests and build badges.\n* Indicates how the action can be used, ideally as part of a broader workflow.\n* Signal what type of community contributions you welcome. (For example, issues, pull requests, or vulnerability reports.)\n\nFor an applied example of this process, see [actions/javascript-action](https://github.com/actions/javascript-action).\n\n## Developing and releasing actions\n\nIn this section, we discuss an example process for developing and releasing actions and show how to use GitHub Actions to automate the process.\n\n### About JavaScript actions\n\nJavaScript actions are Node.js repositories with metadata. However, JavaScript actions have additional properties compared to traditional Node.js projects:\n\n* Dependent packages are committed alongside the code, typically in a compiled and minified form. This means that automated builds and secure community contributions are important.\n\n\n\n* Tagged releases can be published directly to GitHub Marketplace and consumed by workflows across GitHub.\n\n\n\n* Many actions make use of GitHub's APIs and third party APIs, so we encourage robust end-to-end testing.\n\n### Setting up GitHub Actions workflows\n\nTo support the developer process in the next section, add two GitHub Actions workflows to your repository:\n\n1. Add a workflow that triggers when a commit is pushed to a feature branch or to `main` or when a pull request is created. Configure the workflow to run your unit and integration tests. For an example, see [this workflow](https://github.com/actions/javascript-action/blob/main/.github/workflows/ci.yml).\n1. Add a workflow that triggers when a release is published or edited. Configure the workflow to ensure semantic tags are in place. You can use an action like [JasonEtco/build-and-tag-action](https://github.com/JasonEtco/build-and-tag-action) to compile and bundle the JavaScript and metadata file and force push semantic major, minor, and patch tags. For more information about semantic tags, see [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).\n\n    \n    > [!NOTE]\n    > If you enable immutable releases for your repository, you cannot use this action to force push tags tied to releases on GitHub Marketplace. To learn how to manage your releases with immutable releases, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/using-immutable-releases-and-tags-to-manage-your-actions-releases).\n    \n\n### Example developer process\n\nHere is an example process that you can follow to automatically run tests, create a release and publish to GitHub Marketplace, and publish your action.\n\n1. Do feature work in branches per GitHub flow. For more information, see [AUTOTITLE](/get-started/using-github/github-flow).\n   * Whenever a commit is pushed to the feature branch, your testing workflow will automatically run the tests.\n\n1. Create pull requests to the `main` branch to initiate discussion and review, merging when ready.\n\n   * When a pull request is opened, either from a branch or a fork, your testing workflow will again run the tests, this time with the merge commit.\n\n   * **Note:** for security reasons, workflows triggered by `pull_request` from forks have restricted `GITHUB_TOKEN` permissions and do not have access to secrets. If your tests or other workflows triggered upon pull request require access to secrets, consider using a different event like a [manual trigger](/actions/using-workflows/events-that-trigger-workflows#manual-events) or a [`pull_request_target`](/actions/using-workflows/events-that-trigger-workflows#pull_request_target). For more information, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#pull-request-events-for-forked-repositories).\n\n1. Create a semantically tagged release.  You may also publish to GitHub Marketplace with a simple checkbox.  For more information, see [AUTOTITLE](/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-a-release) and [AUTOTITLE](/actions/creating-actions/publishing-actions-in-github-marketplace#publishing-an-action).\n\n   * When a release is published or edited, your release workflow will automatically take care of compilation and adjusting tags.\n\n   * We recommend creating releases using semantically versioned tags – for example, `v1.1.3` – and keeping major (`v1`) and minor (`v1.1`) tags current to the latest appropriate commit. For more information, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/manage-custom-actions#using-release-management-for-actions) and [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).\n\n### Results\n\nUnlike some other automated release management strategies, this process intentionally does not commit dependencies to the repository.\n\n## Prerequisites\n\n>[!NOTE]\n> You must accept the terms of service to publish actions in GitHub Marketplace.\n\nBefore you can publish an action, you'll need to create an action in your repository. For more information, see [AUTOTITLE](/actions/creating-actions).\n\nWhen you plan to publish your action to GitHub Marketplace, you'll need to ensure that the repository only includes the metadata file, code, and files necessary for the action. Creating a single repository for the action allows you to tag, release, and package the code in a single unit.  GitHub Marketplace uses the action's metadata on your repository page.\n\nActions are published to GitHub Marketplace immediately and aren't reviewed by GitHub as long as they meet these requirements:\n\n* The action must be in a public repository.\n* Each repository must contain a single action metadata file (`action.yml` or `action.yaml`) at the root.\n  * Repositories may include other actions metadata files in sub-folders, but they will not be automatically listed in the marketplace.\n* Each repository must _not_ contain any workflow files.\n* The `name` in the action's metadata file must be unique.\n  * The `name` cannot match an existing action name published on GitHub Marketplace.\n  * The `name` cannot match a user or organization on GitHub Marketplace, unless the user or organization owner is publishing the action. For example, only the GitHub organization can publish an action named `github`.\n  * The `name` cannot match an existing GitHub Marketplace category.\n  * GitHub reserves the names of GitHub Marketplace features.\n\n## Publishing an action\n\nYou can add the action you've created to GitHub Marketplace by tagging it as a new release and publishing it.\n\nTo draft a new release and publish the action to GitHub Marketplace, follow these instructions:\n\n\n\n1. Navigate to the action metadata file in your repository (`action.yml`), and you'll see a banner to publish the action to GitHub Marketplace. Click **Draft a release**.\n1. Under \"Release Action\", select **Publish this Action to the GitHub Marketplace**.\n\n   > [!NOTE]\n   > The \"Publish\" checkbox is disabled if the account that owns the repository has not yet accepted the GitHub Developer Agreement. If you own the repository or are an organization owner, click the link to \"accept the GitHub Marketplace Developer Agreement\", then accept the agreement. If there is no link, send the organization owner a link to this \"Release Action\" page and ask them to accept the agreement.\n\n1. If the labels in your metadata file contain any problems, you will see an error message or a warning message. Address them by updating your metadata file. Once complete, you will see an \"Everything looks good!\" message.\n1. Select the **Primary Category** dropdown menu and click a category that will help people find your action in GitHub Marketplace.\n1. Optionally, select the **Another Category** dropdown menu and click a secondary category.\n1. In the tag field, type a version for your action. This helps people know what changes or features the release includes. People will see the version in the action's dedicated page.\n1. In the title field, type a release title.\n1. Complete all other fields and click **Publish release**. Publishing requires you to use two-factor authentication. For more information, see [AUTOTITLE](/authentication/securing-your-account-with-two-factor-authentication-2fa/configuring-two-factor-authentication).\n\n## Removing an action from GitHub Marketplace\n\nTo remove a published action from GitHub Marketplace, you'll need to update each published release. Perform the following steps for each release of the action you've published to .\n\n\n\n\n1. Select **Publish this Action to the GitHub Marketplace** to remove the check from the box.\n1. Click **Update release** at the bottom of the page.\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Prerequisites
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Prerequisites
 
-      >[!NOTE]
-      > You must accept the terms of service to publish actions in GitHub Marketplace.
+    >[!NOTE]
+    > You must accept the terms of service to publish actions in GitHub Marketplace.
 
-      Before you can publish an action, you'll need to create an action in your repository. For more information, see [AUTOTITLE](/actions/creating-actions).
+    Before you can publish an action, you'll need to create an action in your repository. For more information, see [AUTOTITLE](/actions/creating-actions).
 
-      When you plan to publish your action to GitHub Marketplace, you'll need to ensure that the repository only includes the metadata file, code, and files necessary for the action. Creating a single repository for the action allows you to tag, release, and package the code in a single unit.  GitHub Marketplace uses the action's metadata on your repository page.
+    When you plan to publish your action to GitHub Marketplace, you'll need to ensure that the repository only includes the metadata file, code, and files necessary for the action. Creating a single repository for the action allows you to tag, release, and package the code in a single unit.  GitHub Marketplace uses the action's metadata on your repository page.
 
-      Actions are published to GitHub Marketplace immediately and aren't reviewed by GitHub as long as they meet these requirements:
+    Actions are published to GitHub Marketplace immediately and aren't reviewed by GitHub as long as they meet these requirements:
 
-      * The action must be in a public repository.
-      * Each repository must contain a single action metadata file (`action.yml` or `action.yaml`) at the root.
-        * Repositories may include other actions metadata files in sub-folders, but they will not be automatically listed in the marketplace.
-      * Each repository must _not_ contain any workflow files.
-      * The `name` in the action's metadata file must be unique.
-        * The `name` cannot match an existing action name published on GitHub Marketplace.
-        * The `name` cannot match a user or organization on GitHub Marketplace, unless the user or organization owner is publishing the action. For example, only the GitHub organization can publish an action named `github`.
-        * The `name` cannot match an existing GitHub Marketplace category.
-        * GitHub reserves the names of GitHub Marketplace features.
+    * The action must be in a public repository.
+    * Each repository must contain a single action metadata file (`action.yml` or `action.yaml`) at the root.
+      * Repositories may include other actions metadata files in sub-folders, but they will not be automatically listed in the marketplace.
+    * Each repository must _not_ contain any workflow files.
+    * The `name` in the action's metadata file must be unique.
+      * The `name` cannot match an existing action name published on GitHub Marketplace.
+      * The `name` cannot match a user or organization on GitHub Marketplace, unless the user or organization owner is publishing the action. For example, only the GitHub organization can publish an action named `github`.
+      * The `name` cannot match an existing GitHub Marketplace category.
+      * GitHub reserves the names of GitHub Marketplace features.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Setting up GitHub Actions workflows
 
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Setting up GitHub Actions workflows
+    To support the developer process in the next section, add two GitHub Actions workflows to your repository:
 
-      To support the developer process in the next section, add two GitHub Actions workflows to your repository:
+    1. Add a workflow that triggers when a commit is pushed to a feature branch or to `main` or when a pull request is created. Configure the workflow to run your unit and integration tests. For an example, see [this workflow](https://github.com/actions/javascript-action/blob/main/.github/workflows/ci.yml).
+    1. Add a workflow that triggers when a release is published or edited. Configure the workflow to ensure semantic tags are in place. You can use an action like [JasonEtco/build-and-tag-action](https://github.com/JasonEtco/build-and-tag-action) to compile and bundle the JavaScript and metadata file and force push semantic major, minor, and patch tags. For more information about semantic tags, see [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    ## Example developer process
 
-      1. Add a workflow that triggers when a commit is pushed to a feature branch or to `main` or when a pull request is created. Configure the workflow to run your unit and integration tests. For an example, see [this workflow](https://github.com/actions/javascript-action/blob/main/.github/workflows/ci.yml).
-      1. Add a workflow that triggers when a release is published or edited. Configure the workflow to ensure semantic tags are in place. You can use an action like [JasonEtco/build-and-tag-action](https://github.com/JasonEtco/build-and-tag-action) to compile and bundle the JavaScript and metadata file and force push semantic major, minor, and patch tags. For more information about semantic tags, see [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
+    Here is an example process that you can follow to automatically run tests, create a release and publish to GitHub Marketplace, and publish your action.
 
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Example developer process
+    1. Do feature work in branches per GitHub flow. For more information, see [AUTOTITLE](/get-started/using-github/github-flow).
+       * Whenever a commit is pushed to the feature branch, your testing workflow will automatically run the tests.
 
-      Here is an example process that you can follow to automatically run tests, create a release and publish to GitHub Marketplace, and publish your action.
+    1. Create pull requests to the `main` branch to initiate discussion and review, merging when ready.
 
-      1. Do feature work in branches per GitHub flow. For more information, see [AUTOTITLE](/get-started/using-github/github-flow).
-         * Whenever a commit is pushed to the feature branch, your testing workflow will automatically run the tests.
+       * When a pull request is opened, either from a branch or a fork, your testing workflow will again run the tests, this time with the merge commit.
 
-      1. Create pull requests to the `main` branch to initiate discussion and review, merging when ready.
+       * **Note:** for security reasons, workflows triggered by `pull_request` from forks have restricted `GITHUB_TOKEN` permissions and do not have access to secrets. If your tests or other workflows triggered upon pull request require access to secrets, consider using a different event like a [manual trigger](/actions/using-workflows/events-that-trigger-workflows#manual-events) or a [`pull_request_target`](/actions/using-workflows/events-that-trigger-workflows#pull_request_target). For more information, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#pull-request-events-for-forked-repositories).
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    1. Create a semantically tagged release.  You may also publish to GitHub Marketplace with a simple checkbox.  For more information, see [AUTOTITLE](/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-a-release) and [AUTOTITLE](/actions/creating-actions/publishing-actions-in-github-marketplace#publishing-an-action).
 
-         * When a pull request is opened, either from a branch or a fork, your testing workflow will again run the tests, this time with the merge commit.
+       * When a release is published or edited, your release workflow will automatically take care of compilation and adjusting tags.
 
-         * **Note:** for security reasons, workflows triggered by `pull_request` from forks have restricted `GITHUB_TOKEN` permissions and do not have access to secrets. If your tests or other workflows triggered upon pull request require access to secrets, consider using a different event like a [manual trigger](/actions/using-workflows/events-that-trigger-workflows#manual-events) or a [`pull_request_target`](/actions/using-workflows/events-that-trigger-workflows#pull_request_target). For more information, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#pull-request-events-for-forked-repositories).
+       * We recommend creating releases using semantically versioned tags – for example, `v1.1.3` – and keeping major (`v1`) and minor (`v1.1`) tags current to the latest appropriate commit. For more information, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/manage-custom-actions#using-release-management-for-actions) and [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
+- fragment_type: execution
+  sequence: 5
+  content: |
+    ## Publishing an action
 
-      1. Create a semantically tagged release.  You may also publish to GitHub Marketplace with a simple checkbox.  For more information, see [AUTOTITLE](/repositories/releasing-projects-on-github/managing-releases-in-a-repository#creating-a-release) and [AUTOTITLE](/actions/creating-actions/publishing-actions-in-github-marketplace#publishing-an-action).
+    You can add the action you've created to GitHub Marketplace by tagging it as a new release and publishing it.
 
-         * When a release is published or edited, your release workflow will automatically take care of compilation and adjusting tags.
-
-         * We recommend creating releases using semantically versioned tags – for example, `v1.1.3` – and keeping major (`v1`) and minor (`v1.1`) tags current to the latest appropriate commit. For more information, see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/manage-custom-actions#using-release-management-for-actions) and [About semantic versioning](https://docs.npmjs.com/about-semantic-versioning).
-
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ## Publishing an action
-
-      You can add the action you've created to GitHub Marketplace by tagging it as a new release and publishing it.
-
-      To draft a new release and publish the action to GitHub Marketplace, follow these instructions:
-
+    To draft a new release and publish the action to GitHub Marketplace, follow these instructions:
 
 
-      1. Navigate to the action metadata file in your repository (`action.yml`), and you'll see a banner to publish the action to GitHub Marketplace. Click **Draft a release**.
-      1. Under "Release Action", select **Publish this Action to the GitHub Marketplace**.
 
-         > [!NOTE]
-         > The "Publish" checkbox is disabled if the account that owns the repository has not yet accepted the GitHub Developer Agreement. If you own the repository or are an organization owner, click the link to "accept the GitHub Marketplace Developer Agreement", then accept the agreement. If there is no link, send the organization owner a link to this "Release Action" page and ask them to accept the agreement.
+    1. Navigate to the action metadata file in your repository (`action.yml`), and you'll see a banner to publish the action to GitHub Marketplace. Click **Draft a release**.
+    1. Under "Release Action", select **Publish this Action to the GitHub Marketplace**.
 
-      1. If the labels in your metadata file contain any problems, you will see an error message or a warning message. Address them by updating your metadata file. Once complete, you will see an "Everything looks good!" message.
-      1. Select the **Primary Category** dropdown menu and click a category that will help people find your action in GitHub Marketplace.
-      1. Optionally, select the **Another Category** dropdown menu and click a secondary category.
-      1. In the tag field, type a version for your action. This helps people know what changes or features the release includes. People will see the version in the action's dedicated page.
-      1. In the title field, type a release title.
-      1. Complete all other fields and click **Publish release**. Publishing requires you to use two-factor authentication. For more information, see [AUTOTITLE](/authentication/securing-your-account-with-two-factor-authentication-2fa/configuring-two-factor-authentication).
+       > [!NOTE]
+       > The "Publish" checkbox is disabled if the account that owns the repository has not yet accepted the GitHub Developer Agreement. If you own the repository or are an organization owner, click the link to "accept the GitHub Marketplace Developer Agreement", then accept the agreement. If there is no link, send the organization owner a link to this "Release Action" page and ask them to accept the agreement.
 
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## Removing an action from GitHub Marketplace
+    1. If the labels in your metadata file contain any problems, you will see an error message or a warning message. Address them by updating your metadata file. Once complete, you will see an "Everything looks good!" message.
+    1. Select the **Primary Category** dropdown menu and click a category that will help people find your action in GitHub Marketplace.
+    1. Optionally, select the **Another Category** dropdown menu and click a secondary category.
+    1. In the tag field, type a version for your action. This helps people know what changes or features the release includes. People will see the version in the action's dedicated page.
+    1. In the title field, type a release title.
+    1. Complete all other fields and click **Publish release**. Publishing requires you to use two-factor authentication. For more information, see [AUTOTITLE](/authentication/securing-your-account-with-two-factor-authentication-2fa/configuring-two-factor-authentication).
+- fragment_type: execution
+  sequence: 6
+  content: |
+    ## Removing an action from GitHub Marketplace
 
-      To remove a published action from GitHub Marketplace, you'll need to update each published release. Perform the following steps for each release of the action you've published to .
+    To remove a published action from GitHub Marketplace, you'll need to update each published release. Perform the following steps for each release of the action you've published to .
 
 
 
 
-      1. Select **Publish this Action to the GitHub Marketplace** to remove the check from the box.
-      1. Click **Update release** at the bottom of the page.
+    1. Select **Publish this Action to the GitHub Marketplace** to remove the check from the box.
+    1. Click **Update release** at the bottom of the page.

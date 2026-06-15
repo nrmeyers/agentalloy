@@ -1,13 +1,13 @@
 {
-  "name_probe_hit_rate": 0.951,
-  "topic_probe_hit_rate": 0.975,
+  "name_probe_hit_rate": 0.95,
+  "topic_probe_hit_rate": 0.9645,
   "stranded_count": 0,
-  "gold_hit": 8,
-  "gold_hit_total": 8,
+  "gold_hit": 18,
+  "gold_hit_total": 18,
   "tolerance": 0.02,
   "phase_hit_rate_floors": {
-    "build": 0.96,
-    "design": 0.95,
-    "ops": 0.96
+    "build": 0.9551,
+    "design": 0.9583,
+    "ops": 0.9594
   }
 }

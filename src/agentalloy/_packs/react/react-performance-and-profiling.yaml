@@ -1,16 +1,16 @@
 skill_type: domain
 skill_id: react-performance-and-profiling
 canonical_name: React Performance and Profiling
-description: "Fix slow React apps by stopping unnecessary re-renders and effects: use the Profiler to measure render time, understand the render-and-commit cycle, and apply best practices to keep your dashboard or website responsive."
+description: 'Fix slow React apps by stopping unnecessary re-renders and effects: use the Profiler to measure render time, understand the render-and-commit cycle, and apply best practices to keep your dashboard or website responsive.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - performance
-  - profiling
-  - render-and-commit
-  - unnecessary-renders
-  - effects
-  - react
+- performance
+- profiling
+- render-and-commit
+- unnecessary-renders
+- effects
+- react
 requires:
 - react-rendering-keys-and-memoization
 related:
@@ -18,11 +18,12 @@ related:
 - react-context-patterns
 - react-effects-and-cleanup
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: authoring-agent
 change_summary: initial authoring draft
-
 raw_prose: |
   # React Performance and Profiling
 
@@ -215,143 +216,147 @@ raw_prose: |
   * `phase`: `"mount"`, `"update"` or `"nested-update"`. This lets you know whether the tree has just been mounted for the first time or re-rendered due to a change in props, state, or Hooks.
   * `actualDuration`: The number of milliseconds spent rendering the `<Profiler>` and its descendants for the current update. This indicates how well the subtree makes use of memoization (e.g. [`memo`](/reference/react/memo) and [`useMemo`](/reference/react/useMemo)). Ideally this value should decrease significantly after the initial mount as many of the descendants will only need to re-render if their specific props change.
   * `baseDuration`: The number of milliseconds estimating how much time it would take to re-render the entire `<Profiler>` subtree without any optimizations. It is calculated by summing up the most recent render durations of each component in the tree. This value estimates a worst-case cost of rendering (e.g. the initial mount or a tree with no memoization). Compare `ac
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      React performance starts with understanding the render-and-commit cycle: render is the pure function call, commit is when DOM updates apply. Most perf work is removing unnecessary re-renders and unnecessary effects. The Profiler API measures component render time. The 'you might not need an effect' guide is the highest-leverage performance read in the React docs.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    React performance starts with understanding the render-and-commit cycle: render is the pure function call, commit is when DOM updates apply. Most perf work is removing unnecessary re-renders and unnecessary effects. The Profiler API measures component render time. The 'you might not need an effect' guide is the highest-leverage performance read in the React docs.
 
-      Sourced from react.dev/learn/render-and-commit, /you-might-not-need-an-effect, and /reference/react/Profiler.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      Before your components are displayed on screen, they must be rendered by React. Understanding the steps in this process will help you think about how your code executes and explain its behavior.
+    Sourced from react.dev/learn/render-and-commit, /you-might-not-need-an-effect, and /reference/react/Profiler.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    Before your components are displayed on screen, they must be rendered by React. Understanding the steps in this process will help you think about how your code executes and explain its behavior.
 
-      Imagine that your components are cooks in the kitchen, assembling tasty dishes from ingredients. In this scenario, React is the waiter who puts in requests from customers and brings them their orders. This process of requesting and serving UI has three steps:
+    Imagine that your components are cooks in the kitchen, assembling tasty dishes from ingredients. In this scenario, React is the waiter who puts in requests from customers and brings them their orders. This process of requesting and serving UI has three steps:
 
-      1. **Triggering** a render (delivering the guest's order to the kitchen)
-      2. **Rendering** the component (preparing the order in the kitchen)
-      3. **Committing** to the DOM (placing the order on the table)
+    1. **Triggering** a render (delivering the guest's order to the kitchen)
+    2. **Rendering** the component (preparing the order in the kitchen)
+    3. **Committing** to the DOM (placing the order on the table)
 
-      There are two reasons for a component to render:
+    There are two reasons for a component to render:
 
-      1. It's the component's **initial render.**
-      2. The component's (or one of its ancestors') **state has been updated.**
+    1. It's the component's **initial render.**
+    2. The component's (or one of its ancestors') **state has been updated.**
 
-      When your app starts, you need to trigger the initial render. Frameworks and sandboxes sometimes hide this code, but it's done by calling [`createRoot`](/reference/react-dom/client/createRoot) with the target DOM node, and then calling its `render` method with your component:
+    When your app starts, you need to trigger the initial render. Frameworks and sandboxes sometimes hide this code, but it's done by calling [`createRoot`](/reference/react-dom/client/createRoot) with the target DOM node, and then calling its `render` method with your component:
 
-      <Sandpack>
+    <Sandpack>
 
-      ```js src/index.js active
-      import Image from './Image.js';
-      import { createRoot } from 'react-dom/client';
+    ```js src/index.js active
+    import Image from './Image.js';
+    import { createRoot } from 'react-dom/client';
 
-      const root = createRoot(document.getElementById('root'))
-      root.render(<Image />);
-      ```
+    const root = createRoot(document.getElementById('root'))
+    root.render(<Image />);
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    ```js src/Image.js
+    export default function Image() {
+      return (
+        <img
+          src="https://react.dev/images/docs/scientists/ZF6s192.jpg"
+          alt="'Floralis Genérica' by Eduardo Catalano: a gigantic metallic flower sculpture with reflective petals"
+        />
+      );
+    }
+    ```
 
-      ```js src/Image.js
-      export default function Image() {
-        return (
-          <img
-            src="https://react.dev/images/docs/scientists/ZF6s192.jpg"
-            alt="'Floralis Genérica' by Eduardo Catalano: a gigantic metallic flower sculpture with reflective petals"
-          />
-        );
-      }
-      ```
+    </Sandpack>
 
-      </Sandpack>
+    Try commenting out the `root.render()` call and see the component disappear!
 
-      Try commenting out the `root.render()` call and see the component disappear!
+    Once the component has been initially rendered, you can trigger further renders by updating its state with the [`set` function.](/reference/react/useState#setstate) Updating your component's state automatically queues a render. (You can imagine these as a restaurant guest ordering tea, dessert, and all sorts of things after putting in their first order, depending on the state of their thirst or hunger.)
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    Effects are an escape hatch from the React paradigm. They let you "step outside" of React and synchronize your components with some external system like a non-React widget, network, or the browser DOM. If there is no external system involved (for example, if you want to update a component's state when some props or state change), you shouldn't need an Effect. Removing unnecessary Effects will make your code easier to follow, faster to run, and less error-prone.
 
-      Once the component has been initially rendered, you can trigger further renders by updating its state with the [`set` function.](/reference/react/useState#setstate) Updating your component's state automatically queues a render. (You can imagine these as a restaurant guest ordering tea, dessert, and all sorts of things after putting in their first order, depending on the state of their thirst or hunger.)
-  - fragment_type: rationale
-    sequence: 3
-    content: |
-      Effects are an escape hatch from the React paradigm. They let you "step outside" of React and synchronize your components with some external system like a non-React widget, network, or the browser DOM. If there is no external system involved (for example, if you want to update a component's state when some props or state change), you shouldn't need an Effect. Removing unnecessary Effects will make your code easier to follow, faster to run, and less error-prone.
+    There are two common cases in which you don't need Effects:
+- fragment_type: rationale
+  sequence: 5
+  content: |-
+    * **You don't need Effects to transform data for rendering.** For example, let's say you want to filter a list before displaying it. You might feel tempted to write an Effect that updates a state variable when the list changes. However, this is inefficient. When you update the state, React will first call your component functions to calculate what should be on the screen. Then React will ["commit"](/learn/render-and-commit) these changes to the DOM, updating the screen. Then React will run your Effects. If your Effect *also* immediately updates the state, this restarts the whole process from scratch! To avoid the unnecessary render passes, transform all the data at the top level of your components. That code will automatically re-run whenever your props or state change.
+    * **You don't need Effects to handle user events.** For example, let's say you want to send an `/api/buy` POST request and show a notification when the user buys a product. In the Buy button click event handler, you know exactly what happened. By the time an Effect runs, you don't know *what* the user did (for example, which button was clicked). This is why you'll usually handle user events in the corresponding event handlers.
+- fragment_type: rationale
+  sequence: 6
+  content: 'You *do* need Effects to [synchronize](/learn/synchronizing-with-effects#what-are-effects-and-how-are-they-different-from-events) with external systems. For example, you can write an Effect that keeps a jQuery widget synchronized with the React state. You can also fetch data with Effects: for example, you can synchronize the search results with the current search query. Keep in mind that modern [frameworks](/learn/creating-a-react-app#full-stack-frameworks) provide more efficient built-in data fetching mechanisms than writing Effects directly in your components.'
+- fragment_type: execution
+  sequence: 7
+  content: |
+    Suppose you have a component with two state variables: `firstName` and `lastName`. You want to calculate a `fullName` from them by concatenating them. Moreover, you'd like `fullName` to update whenever `firstName` or `lastName` change. Your first instinct might be to add a `fullName` state variable and update it in an Effect:
 
-      There are two common cases in which you don't need Effects:
+    ```js {expectedErrors: {'react-compiler': [8]}} {5-9}
+    function Form() {
+      const [firstName, setFirstName] = useState('Taylor');
+      const [lastName, setLastName] = useState('Swift');
 
-      * **You don't need Effects to transform data for rendering.** For example, let's say you want to filter a list before displaying it. You might feel tempted to write an Effect that updates a state variable when the list changes. However, this is inefficient. When you update the state, React will first call your component functions to calculate what should be on the screen. Then React will ["commit"](/learn/render-and-commit) these changes to the DOM, updating the screen. Then React will run your Effects. If your Effect *also* immediately updates the state, this restarts the whole process from scratch! To avoid the unnecessary render passes, transform all the data at the top level of your components. That code will automatically re-run whenever your props or state change.
-      * **You don't need Effects to handle user events.** For example, let's say you want to send an `/api/buy` POST request and show a notification when the user buys a product. In the Buy button click event handler, you know exactly what happened. By the time an Effect runs, you don't know *what* the user did (for example, which button was clicked). This is why you'll usually handle user events in the corresponding event handlers.
+      // 🔴 Avoid: redundant state and unnecessary Effect
+      const [fullName, setFullName] = useState('');
+      useEffect(() => {
+        setFullName(firstName + ' ' + lastName);
+      }, [firstName, lastName]);
+      // ...
+    }
+    ```
 
-      You *do* need Effects to [synchronize](/learn/synchronizing-with-effects#what-are-effects-and-how-are-they-different-from-events) with external systems. For example, you can write an Effect that keeps a jQuery widget synchronized with the React state. You can also fetch data with Effects: for example, you can synchronize the search results with the current search query. Keep in mind that modern [frameworks](/learn/creating-a-react-app#full-stack-frameworks) provide more efficient built-in data fetching mechanisms than writing Effects directly in your components.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      Suppose you have a component with two state variables: `firstName` and `lastName`. You want to calculate a `fullName` from them by concatenating them. Moreover, you'd like `fullName` to update whenever `firstName` or `lastName` change. Your first instinct might be to add a `fullName` state variable and update it in an Effect:
+    This is more complicated than necessary. It is inefficient too: it does an entire render pass with a stale value for `fullName`, then immediately re-renders with the updated value. Remove the state variable and the Effect:
 
-      ```js {expectedErrors: {'react-compiler': [8]}} {5-9}
-      function Form() {
-        const [firstName, setFirstName] = useState('Taylor');
-        const [lastName, setLastName] = useState('Swift');
+    ```js {4-5}
+    function Form() {
+      const [firstName, setFirstName] = useState('Taylor');
+      const [lastName, setLastName] = u
+- fragment_type: example
+  sequence: 8
+  content: |
+    `<Profiler>` lets you measure rendering performance of a React tree programmatically.
 
-        // 🔴 Avoid: redundant state and unnecessary Effect
-        const [fullName, setFullName] = useState('');
-        useEffect(() => {
-          setFullName(firstName + ' ' + lastName);
-        }, [firstName, lastName]);
-        // ...
-      }
-      ```
+    ```js
+    <Profiler id="App" onRender={onRender}>
+      <App />
+    </Profiler>
+    ```
 
-      This is more complicated than necessary. It is inefficient too: it does an entire render pass with a stale value for `fullName`, then immediately re-renders with the updated value. Remove the state variable and the Effect:
+    Wrap a component tree in a `<Profiler>` to measure its rendering performance.
+- fragment_type: rationale
+  sequence: 9
+  content: |
+    ### `<Profiler>` {/*profiler*/}
 
-      ```js {4-5}
-      function Form() {
-        const [firstName, setFirstName] = useState('Taylor');
-        const [lastName, setLastName] = u
-  - fragment_type: example
-    sequence: 5
-    content: |
-      `<Profiler>` lets you measure rendering performance of a React tree programmatically.
+    Wrap a component tree in a `<Profiler>` to measure its rendering performance.
 
-      ```js
-      <Profiler id="App" onRender={onRender}>
-        <App />
-      </Profiler>
-      ```
+    ```js
+    <Profiler id="App" onRender={onRender}>
+      <App />
+    </Profiler>
+    ```
 
-      Wrap a component tree in a `<Profiler>` to measure its rendering performance.
-  - fragment_type: rationale
-    sequence: 6
-    content: |
-      ### `<Profiler>` {/*profiler*/}
+    #### Props {/*props*/}
 
-      Wrap a component tree in a `<Profiler>` to measure its rendering performance.
+    * `id`: A string identifying the part of the UI you are measuring.
+    * `onRender`: An [`onRender` callback](#onrender-callback) that React calls every time components within the profiled tree update. It receives information about what was rendered and how much time it took.
 
-      ```js
-      <Profiler id="App" onRender={onRender}>
-        <App />
-      </Profiler>
-      ```
+    #### Caveats {/*caveats*/}
 
-      #### Props {/*props*/}
+    * Profiling adds some additional overhead, so **it is disabled in the production build by default.** To opt into production profiling, you need to enable a [special production build with profiling enabled.](/reference/dev-tools/react-performance-tracks#using-profiling-builds)
+- fragment_type: example
+  sequence: 10
+  content: |-
+    ### `onRender` callback {/*onrender-callback*/}
 
-      * `id`: A string identifying the part of the UI you are measuring.
-      * `onRender`: An [`onRender` callback](#onrender-callback) that React calls every time components within the profiled tree update. It receives information about what was rendered and how much time it took.
+    React will call your `onRender` callback with information about what was rendered.
 
-      #### Caveats {/*caveats*/}
+    ```js
+    function onRender(id, phase, actualDuration, baseDuration, startTime, commitTime) {
+      // Aggregate or log render timings...
+    }
+    ```
 
-      * Profiling adds some additional overhead, so **it is disabled in the production build by default.** To opt into production profiling, you need to enable a [special production build with profiling enabled.](/reference/dev-tools/react-performance-tracks#using-profiling-builds)
-  - fragment_type: example
-    sequence: 7
-    content: |
-      ### `onRender` callback {/*onrender-callback*/}
+    #### Parameters {/*onrender-parameters*/}
 
-      React will call your `onRender` callback with information about what was rendered.
-
-      ```js
-      function onRender(id, phase, actualDuration, baseDuration, startTime, commitTime) {
-        // Aggregate or log render timings...
-      }
-      ```
-
-      #### Parameters {/*onrender-parameters*/}
-
-      * `id`: The string `id` prop of the `<Profiler>` tree that has just committed. This lets you identify which part of the tree was committed if you are using multiple profilers.
-      * `phase`: `"mount"`, `"update"` or `"nested-update"`. This lets you know whether the tree has just been mounted for the first time or re-rendered due to a change in props, state, or Hooks.
-      * `actualDuration`: The number of milliseconds spent rendering the `<Profiler>` and its descendants for the current update. This indicates how well the subtree makes use of memoization (e.g. [`memo`](/reference/react/memo) and [`useMemo`](/reference/react/useMemo)). Ideally this value should decrease significantly after the initial mount as many of the descendants will only need to re-render if their specific props change.
-      * `baseDuration`: The number of milliseconds estimating how much time it would take to re-render the entire `<Profiler>` subtree without any optimizations. It is calculated by summing up the most recent render durations of each component in the tree. This value estimates a worst-case cost of rendering (e.g. the initial mount or a tree with no memoization). Compare `ac
+    * `id`: The string `id` prop of the `<Profiler>` tree that has just committed. This lets you identify which part of the tree was committed if you are using multiple profilers.
+    * `phase`: `"mount"`, `"update"` or `"nested-update"`. This lets you know whether the tree has just been mounted for the first time or re-rendered due to a change in props, state, or Hooks.
+    * `actualDuration`: The number of milliseconds spent rendering the `<Profiler>` and its descendants for the current update. This indicates how well the subtree makes use of memoization (e.g. [`memo`](/reference/react/memo) and [`useMemo`](/reference/react/useMemo)). Ideally this value should decrease significantly after the initial mount as many of the descendants will only need to re-render if their specific props change.
+    * `baseDuration`: The number of milliseconds estimating how much time it would take to re-render the entire `<Profiler>` subtree without any optimizations. It is calculated by summing up the most recent render durations of each component in the tree. This value estimates a worst-case cost of rendering (e.g. the initial mount or a tree with no memoization). Compare `ac

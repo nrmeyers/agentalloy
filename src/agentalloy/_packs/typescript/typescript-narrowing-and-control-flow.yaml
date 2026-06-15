@@ -1,19 +1,21 @@
 skill_type: domain
 skill_id: typescript-narrowing-and-control-flow
 canonical_name: TypeScript Narrowing and Control Flow
-description: "Write safer TypeScript code by narrowing union types with typeof, instanceof, equality checks, and custom type guards so the compiler knows the exact type in each branch and prevents runtime errors."
+description: Write safer TypeScript code by narrowing union types with typeof, instanceof, equality checks, and custom type guards so the compiler knows the exact type in each branch and prevents runtime errors.
 category: engineering
 skill_class: domain
 domain_tags:
-  - TypeScript
-  - control flow analysis
-  - type narrowing
-  - union types
-  - type guards
-  - typescript
+- TypeScript
+- control flow analysis
+- type narrowing
+- union types
+- type guards
+- typescript
 always_apply: false
-phase_scope: [build]
-category_scope: [language]
+phase_scope:
+- build
+category_scope:
+- language
 author: authoring-agent
 change_summary: superseded by typescript-narrowing-patterns (merged)
 deprecated: true
@@ -227,217 +229,226 @@ raw_prose: |
   }
   ```
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      # TypeScript Narrowing and Control Flow
+- fragment_type: setup
+  sequence: 1
+  content: |
+    # TypeScript Narrowing and Control Flow
 
-      ## Overview
+    ## Overview
 
-      TypeScript's control-flow analysis narrows union types as the code flows. The compiler tracks how `typeof`, `instanceof`, equality checks, and custom type guards refine a value's type within a branch. This skill covers the narrowing surface end-to-end.
+    TypeScript's control-flow analysis narrows union types as the code flows. The compiler tracks how `typeof`, `instanceof`, equality checks, and custom type guards refine a value's type within a branch. This skill covers the narrowing surface end-to-end.
 
-      Sourced from typescriptlang.org/docs/handbook/2/narrowing.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      Imagine we have a function called `padLeft`.
+    Sourced from typescriptlang.org/docs/handbook/2/narrowing.html.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    Imagine we have a function called `padLeft`.
 
-      ```ts twoslash
-      function padLeft(padding: number | string, input: string): string {
-        throw new Error("Not implemented yet!");
-      }
-      ```
+    ```ts twoslash
+    function padLeft(padding: number | string, input: string): string {
+      throw new Error("Not implemented yet!");
+    }
+    ```
 
-      If `padding` is a `number`, it will treat that as the number of spaces we want to prepend to `input`.
-      If `padding` is a `string`, it should just prepend `padding` to `input`.
-      Let's try to implement the logic for when `padLeft` is passed a `number` for `padding`.
+    If `padding` is a `number`, it will treat that as the number of spaces we want to prepend to `input`.
+    If `padding` is a `string`, it should just prepend `padding` to `input`.
+    Let's try to implement the logic for when `padLeft` is passed a `number` for `padding`.
 
-      ```ts twoslash
-      // @errors: 2345
-      function padLeft(padding: number | string, input: string): string {
+    ```ts twoslash
+    // @errors: 2345
+    function padLeft(padding: number | string, input: string): string {
+      return " ".repeat(padding) + input;
+    }
+    ```
+
+    Uh-oh, we're getting an error on `padding`.
+    TypeScript is warning us that we're passing a value with type `number | string` to the `repeat` function, which only accepts a `number`, and it's right.
+    In other words, we haven't explicitly checked if `padding` is a `number` first, nor are we handling the case where it's a `string`, so let's do exactly that.
+
+    ```ts twoslash
+    function padLeft(padding: number | string, input: string): string {
+      if (typeof padding === "number") {
         return " ".repeat(padding) + input;
       }
-      ```
+      return padding + input;
+    }
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    If this mostly looks like uninteresting JavaScript code, that's sort of the point.
+    Apart from the annotations we put in place, this TypeScript code looks like JavaScript.
+    The idea is that TypeScript's type system aims to make it as easy as possible to write typical JavaScript code without bending over backwards to get type safety.
 
-      Uh-oh, we're getting an error on `padding`.
-      TypeScript is warning us that we're passing a value with type `number | string` to the `repeat` function, which only accepts a `number`, and it's right.
-      In other words, we haven't explicitly checked if `padding` is a `number` first, nor are we handling the case where it's a `string`, so let's do exactly that.
+    While it might not look like much, there's actually a lot going on under the covers here.
+    Much like how TypeScript analyzes runtime values using static types, it overlays type analysis on JavaScript's runtime control flow constructs like `if/else`, conditional ternaries, loops, truthiness checks, etc., which can all affect those types.
 
-      ```ts twoslash
-      function padLeft(padding: number | string, input: string): string {
-        if (typeof padding === "number") {
-          return " ".repeat(padding) + input;
-        }
-        return padding + input;
+    Within our `if` check, TypeScript sees `typeof padding === "number"` and understands that as a special form of code called a _type guard_.
+    TypeScript follows possible paths of execution that our programs can take to analyze the most specific possible type of a value at a given position.
+    It looks at these special checks (called _type guards_) and assignments, and the process of refining types to more specific types than declared is called _narrowing_.
+    In many editors we can observe these types as they change, and we'll even do so in our examples.
+
+    ```ts twoslash
+    function padLeft(padding: number | string, input: string): string {
+      if (typeof padding === "number") {
+        return " ".repeat(padding) + input;
+        //                ^?
       }
-      ```
+      return padding + input;
+      //     ^?
+    }
+    ```
+- fragment_type: execution
+  sequence: 4
+  content: There are a couple of different constructs TypeScript understands for narrowing.
+- fragment_type: example
+  sequence: 5
+  content: |
+    ## `typeof` type guards
 
-      If this mostly looks like uninteresting JavaScript code, that's sort of the point.
-      Apart from the annotations we put in place, this TypeScript code looks like JavaScript.
-      The idea is that TypeScript's type system aims to make it as easy as possible to write typical JavaScript code without bending over backwards to get type safety.
+    As we've seen, JavaScript supports a `typeof` operator which can give very basic information about the type of values we have at runtime.
+    TypeScript expects this to return a certain set of strings:
 
-      While it might not look like much, there's actually a lot going on under the covers here.
-      Much like how TypeScript analyzes runtime values using static types, it overlays type analysis on JavaScript's runtime control flow constructs like `if/else`, conditional ternaries, loops, truthiness checks, etc., which can all affect those types.
+    - `"string"`
+    - `"number"`
+    - `"bigint"`
+    - `"boolean"`
+    - `"symbol"`
+    - `"undefined"`
+    - `"object"`
+    - `"function"`
 
-      Within our `if` check, TypeScript sees `typeof padding === "number"` and understands that as a special form of code called a _type guard_.
-      TypeScript follows possible paths of execution that our programs can take to analyze the most specific possible type of a value at a given position.
-      It looks at these special checks (called _type guards_) and assignments, and the process of refining types to more specific types than declared is called _narrowing_.
-      In many editors we can observe these types as they change, and we'll even do so in our examples.
+    Like we saw with `padLeft`, this operator comes up pretty often in a number of JavaScript libraries, and TypeScript can understand it to narrow types in different branches.
 
-      ```ts twoslash
-      function padLeft(padding: number | string, input: string): string {
-        if (typeof padding === "number") {
-          return " ".repeat(padding) + input;
-          //                ^?
+    In TypeScript, checking against the value returned by `typeof` is a type guard.
+    Because TypeScript encodes how `typeof` operates on different values, it knows about some of its quirks in JavaScript.
+    For example, notice that in the list above, `typeof` doesn't return the string `null`.
+    Check out the following example:
+
+    ```ts twoslash
+    // @errors: 2531 18047
+    function printAll(strs: string | string[] | null) {
+      if (typeof strs === "object") {
+        for (const s of strs) {
+          console.log(s);
         }
-        return padding + input;
-        //     ^?
+      } else if (typeof strs === "string") {
+        console.log(strs);
+      } else {
+        // do nothing
       }
-      ```
+    }
+    ```
 
-      There are a couple of different constructs TypeScript understands for narrowing.
-  - fragment_type: example
-    sequence: 3
-    content: |
-      ## `typeof` type guards
+    In the `printAll` function, we try to check if `strs` is an object to see if it's an array type (now might be a good time to reinforce that arrays are object types in JavaScript).
+    But it turns out that in JavaScript, `typeof null` is actually `"object"`!
+    This is one of those unfortunate accidents of history.
 
-      As we've seen, JavaScript supports a `typeof` operator which can give very basic information about the type of values we have at runtime.
-      TypeScript expects this to return a certain set of strings:
+    Users with enough experience might not be surprised, but not everyone has run into this in JavaScript; luckily, TypeScript lets us know that `strs` was only narrowed down to `string[] | null` instead of just `string[]`.
+- fragment_type: example
+  sequence: 6
+  content: |-
+    # Truthiness narrowing
 
-      - `"string"`
-      - `"number"`
-      - `"bigint"`
-      - `"boolean"`
-      - `"symbol"`
-      - `"undefined"`
-      - `"object"`
-      - `"function"`
+    Truthiness might not be a word you'll find in the dictionary, but it's very much something you'll hear about in JavaScript.
 
-      Like we saw with `padLeft`, this operator comes up pretty often in a number of JavaScript libraries, and TypeScript can understand it to narrow types in different branches.
+    In JavaScript, we can use any expression in conditionals, `&&`s, `||`s, `if` statements, Boolean negations (`!`), and more.
+    As an example, `if` statements don't expect their condition to always have the type `boolean`.
 
-      In TypeScript, checking against the value returned by `typeof` is a type guard.
-      Because TypeScript encodes how `typeof` operates on different values, it knows about some of its quirks in JavaScript.
-      For example, notice that in the list above, `typeof` doesn't return the string `null`.
-      Check out the following example:
+    ```ts twoslash
+    function getUsersOnlineMessage(numUsersOnline: number) {
+      if (numUsersOnline) {
+        return `There are ${numUsersOnline} online now!`;
+      }
+      return "Nobody's here. :(";
+    }
+    ```
 
-      ```ts twoslash
-      // @errors: 2531 18047
-      function printAll(strs: string | string[] | null) {
+    In JavaScript, constructs like `if` first "coerce" their conditions to `boolean`s to make sense of them, and then choose their branches depending on whether the result is `true` or `false`.
+    Values like
+
+    - `0`
+    - `NaN`
+    - `""` (the empty string)
+    - `0n` (the `bigint` version of zero)
+    - `null`
+    - `undefined`
+
+    all coerce to `false`, and other values get coerced to `true`.
+    You can always coerce values to `boolean`s by running them through the `Boolean` function, or by using the shorter double-Boolean negation. (The latter has the advantage that TypeScript infers a narrow literal boolean type `true`, while inferring the first as type `boolean`.)
+- fragment_type: example
+  sequence: 7
+  content: |-
+    ```ts twoslash
+    // both of these result in 'true'
+    Boolean("hello"); // type: boolean, value: true
+    !!"world"; // type: true,    value: true
+    ```
+
+    It's fairly popular to leverage this behavior, especially for guarding against values like `null` or `undefined`.
+    As an example, let's try using it for our `printAll` function.
+
+    ```ts twoslash
+    function printAll(strs: string | string[] | null) {
+      if (strs && typeof strs === "object") {
+        for (const s of strs) {
+          console.log(s);
+        }
+      } else if (typeof strs === "string") {
+        console.log(strs);
+      }
+    }
+    ```
+
+    You'll notice that we've gotten rid of the error above by checking if `strs` is truthy.
+    This at least prevents us from dreaded errors when we run our code like:
+
+    ```txt
+    TypeError: null is not iterable
+    ```
+
+    Keep in mind though that truthiness checking on primitives can often be error prone.
+    As an example, consider a different attempt at writing `printAll`
+- fragment_type: example
+  sequence: 8
+  content: |-
+    ```ts twoslash {class: "do-not-do-this"}
+    function printAll(strs: string | string[] | null) {
+      // !!!!!!!!!!!!!!!!
+      //  DON'T DO THIS!
+      //   KEEP READING
+      // !!!!!!!!!!!!!!!!
+      if (strs) {
         if (typeof strs === "object") {
           for (const s of strs) {
             console.log(s);
           }
         } else if (typeof strs === "string") {
           console.log(strs);
-        } else {
-          // do nothing
         }
       }
-      ```
+    }
+    ```
 
-      In the `printAll` function, we try to check if `strs` is an object to see if it's an array type (now might be a good time to reinforce that arrays are object types in JavaScript).
-      But it turns out that in JavaScript, `typeof null` is actually `"object"`!
-      This is one of those unfortunate accidents of history.
+    We wrapped the entire body of the function in a truthy check, but this has a subtle downside: we may no longer be handling the empty string case correctly.
 
-      Users with enough experience might not be surprised, but not everyone has run into this in JavaScript; luckily, TypeScript lets us know that `strs` was only narrowed down to `string[] | null` instead of just `string[]`.
-  - fragment_type: example
-    sequence: 4
-    content: |
-      # Truthiness narrowing
+    TypeScript doesn't hurt us here at all, but this behavior is worth noting if you're less familiar with JavaScript.
+    TypeScript can often help you catch bugs early on, but if you choose to do _nothing_ with a value, there's only so much that it can do without being overly prescriptive.
+    If you want, you can make sure you handle situations like these with a linter.
 
-      Truthiness might not be a word you'll find in the dictionary, but it's very much something you'll hear about in JavaScript.
-
-      In JavaScript, we can use any expression in conditionals, `&&`s, `||`s, `if` statements, Boolean negations (`!`), and more.
-      As an example, `if` statements don't expect their condition to always have the type `boolean`.
-
-      ```ts twoslash
-      function getUsersOnlineMessage(numUsersOnline: number) {
-        if (numUsersOnline) {
-          return `There are ${numUsersOnline} online now!`;
-        }
-        return "Nobody's here. :(";
+    One last word on narrowing by truthiness is that Boolean negations with `!` filter out from negated branches.
+- fragment_type: example
+  sequence: 9
+  content: |-
+    ```ts twoslash
+    function multiplyAll(
+      values: number[] | undefined,
+      factor: number
+    ): number[] | undefined {
+      if (!values) {
+        return values;
+      } else {
+        return values.map((x) => x * factor);
       }
-      ```
-
-      In JavaScript, constructs like `if` first "coerce" their conditions to `boolean`s to make sense of them, and then choose their branches depending on whether the result is `true` or `false`.
-      Values like
-
-      - `0`
-      - `NaN`
-      - `""` (the empty string)
-      - `0n` (the `bigint` version of zero)
-      - `null`
-      - `undefined`
-
-      all coerce to `false`, and other values get coerced to `true`.
-      You can always coerce values to `boolean`s by running them through the `Boolean` function, or by using the shorter double-Boolean negation. (The latter has the advantage that TypeScript infers a narrow literal boolean type `true`, while inferring the first as type `boolean`.)
-
-      ```ts twoslash
-      // both of these result in 'true'
-      Boolean("hello"); // type: boolean, value: true
-      !!"world"; // type: true,    value: true
-      ```
-
-      It's fairly popular to leverage this behavior, especially for guarding against values like `null` or `undefined`.
-      As an example, let's try using it for our `printAll` function.
-
-      ```ts twoslash
-      function printAll(strs: string | string[] | null) {
-        if (strs && typeof strs === "object") {
-          for (const s of strs) {
-            console.log(s);
-          }
-        } else if (typeof strs === "string") {
-          console.log(strs);
-        }
-      }
-      ```
-
-      You'll notice that we've gotten rid of the error above by checking if `strs` is truthy.
-      This at least prevents us from dreaded errors when we run our code like:
-
-      ```txt
-      TypeError: null is not iterable
-      ```
-
-      Keep in mind though that truthiness checking on primitives can often be error prone.
-      As an example, consider a different attempt at writing `printAll`
-
-      ```ts twoslash {class: "do-not-do-this"}
-      function printAll(strs: string | string[] | null) {
-        // !!!!!!!!!!!!!!!!
-        //  DON'T DO THIS!
-        //   KEEP READING
-        // !!!!!!!!!!!!!!!!
-        if (strs) {
-          if (typeof strs === "object") {
-            for (const s of strs) {
-              console.log(s);
-            }
-          } else if (typeof strs === "string") {
-            console.log(strs);
-          }
-        }
-      }
-      ```
-
-      We wrapped the entire body of the function in a truthy check, but this has a subtle downside: we may no longer be handling the empty string case correctly.
-
-      TypeScript doesn't hurt us here at all, but this behavior is worth noting if you're less familiar with JavaScript.
-      TypeScript can often help you catch bugs early on, but if you choose to do _nothing_ with a value, there's only so much that it can do without being overly prescriptive.
-      If you want, you can make sure you handle situations like these with a linter.
-
-      One last word on narrowing by truthiness is that Boolean negations with `!` filter out from negated branches.
-
-      ```ts twoslash
-      function multiplyAll(
-        values: number[] | undefined,
-        factor: number
-      ): number[] | undefined {
-        if (!values) {
-          return values;
-        } else {
-          return values.map((x) => x * factor);
-        }
-      }
-      ```
+    }
+    ```

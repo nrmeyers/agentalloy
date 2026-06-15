@@ -1,23 +1,26 @@
 skill_type: domain
 skill_id: ui-design-tailwind-utility-classes
 canonical_name: Tailwind CSS Utility-First Styling
-description: "Style websites, dashboards, and apps without writing custom CSS: compose layouts, colors, spacing, and responsive designs directly in your HTML using Tailwind’s utility classes for rapid, consistent UI development."
+description: 'Style websites, dashboards, and apps without writing custom CSS: compose layouts, colors, spacing, and responsive designs directly in your HTML using Tailwind’s utility classes for rapid, consistent UI development.'
 category: design
 skill_class: domain
 domain_tags:
-  - tailwind-css
-  - utility-first
-  - styling
-  - responsive-design
-  - inline-styles
-  - ui-design
+- tailwind-css
+- utility-first
+- styling
+- responsive-design
+- inline-styles
+- ui-design
 related:
 - ui-design-responsive-and-dark-mode
 - ui-design-states-and-variants
 - ui-design-tailwind-theme-and-tokens
 always_apply: false
-phase_scope: [build, design]
-category_scope: [process]
+phase_scope:
+- build
+- design
+category_scope:
+- process
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -160,147 +163,154 @@ raw_prose: |
   ```
 
   </Figure>
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Tailwind CSS provides utility classes for nearly every CSS property. Designing with utilities means composing styles inline rather than writing custom CSS — the framework provides the primitives, you assemble. This skill covers the utility-first workflow.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Tailwind CSS provides utility classes for nearly every CSS property. Designing with utilities means composing styles inline rather than writing custom CSS — the framework provides the primitives, you assemble. This skill covers the utility-first workflow.
 
-      Sourced from https://tailwindcss.com/docs/styling-with-utility-classes (Tailwind v4).
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      You style things with Tailwind by combining many single-purpose presentational classes _(utility classes)_ directly in your markup:
+    Sourced from https://tailwindcss.com/docs/styling-with-utility-classes (Tailwind v4).
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    You style things with Tailwind by combining many single-purpose presentational classes _(utility classes)_ directly in your markup:
 
-      <Figure>
-
-      <Example>
-        {
-          <div className="mx-auto flex max-w-sm items-center gap-x-4 rounded-xl bg-white p-6 shadow-lg outline outline-black/5 dark:bg-slate-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10">
-            <svg className="size-12 shrink-0" viewBox="0 0 40 40">
-              <defs>
-                <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="a">
-                  <stop stopColor="#2397B3" offset="0%"></stop>
-                  <stop stopColor="#13577E" offset="100%"></stop>
-                </linearGradient>
-                <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="b">
-                  <stop stopColor="#73DFF2" offset="0%"></stop>
-                  <stop stopColor="#47B1EB" offset="100%"></stop>
-                </linearGradient>
-              </defs>
-              <g fill="none" fillRule="evenodd">
-                <path
-                  d="M28.872 22.096c.084.622.128 1.258.128 1.904 0 7.732-6.268 14-14 14-2.176 0-4.236-.496-6.073-1.382l-6.022 2.007c-1.564.521-3.051-.966-2.53-2.53l2.007-6.022A13.944 13.944 0 0 1 1 24c0-7.331 5.635-13.346 12.81-13.95A9.967 9.967 0 0 0 13 14c0 5.523 4.477 10 10 10a9.955 9.955 0 0 0 5.872-1.904z"
-                  fill="url(#a)"
-                  transform="translate(1 1)"
-                ></path>
-                <path
-                  d="M35.618 20.073l2.007 6.022c.521 1.564-.966 3.051-2.53 2.53l-6.022-2.007A13.944 13.944 0 0 1 23 28c-7.732 0-14-6.268-14-14S15.268 0 23 0s14 6.268 14 14c0 2.176-.496 4.236-1.382 6.073z"
-                  fill="url(#b)"
-                  transform="translate(1 1)"
-                ></path>
-                <path
-                  d="M18 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM24 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM30 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
-                  fill="#FFF"
-                ></path>
-              </g>
-            </svg>
-            <div>
-              <div className="text-xl font-medium text-black dark:text-white">ChitChat</div>
-              <p className="text-gray-500 dark:text-gray-400">You have a new message!</p>
-            </div>
+    <Figure>
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    <Example>
+      {
+        <div className="mx-auto flex max-w-sm items-center gap-x-4 rounded-xl bg-white p-6 shadow-lg outline outline-black/5 dark:bg-slate-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10">
+          <svg className="size-12 shrink-0" viewBox="0 0 40 40">
+            <defs>
+              <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="a">
+                <stop stopColor="#2397B3" offset="0%"></stop>
+                <stop stopColor="#13577E" offset="100%"></stop>
+              </linearGradient>
+              <linearGradient x1="50%" y1="0%" x2="50%" y2="100%" id="b">
+                <stop stopColor="#73DFF2" offset="0%"></stop>
+                <stop stopColor="#47B1EB" offset="100%"></stop>
+              </linearGradient>
+            </defs>
+            <g fill="none" fillRule="evenodd">
+              <path
+                d="M28.872 22.096c.084.622.128 1.258.128 1.904 0 7.732-6.268 14-14 14-2.176 0-4.236-.496-6.073-1.382l-6.022 2.007c-1.564.521-3.051-.966-2.53-2.53l2.007-6.022A13.944 13.944 0 0 1 1 24c0-7.331 5.635-13.346 12.81-13.95A9.967 9.967 0 0 0 13 14c0 5.523 4.477 10 10 10a9.955 9.955 0 0 0 5.872-1.904z"
+                fill="url(#a)"
+                transform="translate(1 1)"
+              ></path>
+              <path
+                d="M35.618 20.073l2.007 6.022c.521 1.564-.966 3.051-2.53 2.53l-6.022-2.007A13.944 13.944 0 0 1 23 28c-7.732 0-14-6.268-14-14S15.268 0 23 0s14 6.268 14 14c0 2.176-.496 4.236-1.382 6.073z"
+                fill="url(#b)"
+                transform="translate(1 1)"
+              ></path>
+              <path
+                d="M18 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM24 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM30 17a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
+                fill="#FFF"
+              ></path>
+            </g>
+          </svg>
+          <div>
+            <div className="text-xl font-medium text-black dark:text-white">ChitChat</div>
+            <p className="text-gray-500 dark:text-gray-400">You have a new message!</p>
           </div>
-        }
-      </Example>
-
-      ```html
-      <!-- prettier-ignore -->
-      <div class="mx-auto flex max-w-sm items-center gap-x-4 rounded-xl bg-white p-6 shadow-lg outline outline-black/5 dark:bg-slate-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10">
-        <img class="size-12 shrink-0" src="/img/logo.svg" alt="ChitChat Logo" />
-        <div>
-          <div class="text-xl font-medium text-black dark:text-white">ChitChat</div>
-          <p class="text-gray-500 dark:text-gray-400">You have a new message!</p>
         </div>
+      }
+    </Example>
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    ```html
+    <!-- prettier-ignore -->
+    <div class="mx-auto flex max-w-sm items-center gap-x-4 rounded-xl bg-white p-6 shadow-lg outline outline-black/5 dark:bg-slate-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10">
+      <img class="size-12 shrink-0" src="/img/logo.svg" alt="ChitChat Logo" />
+      <div>
+        <div class="text-xl font-medium text-black dark:text-white">ChitChat</div>
+        <p class="text-gray-500 dark:text-gray-400">You have a new message!</p>
       </div>
-      ```
+    </div>
+    ```
 
-      </Figure>
+    </Figure>
 
-      For example, in the UI above we've used:
+    For example, in the UI above we've used:
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    - The [display](/docs/display#flex) and [padding](/docs/padding) utilities (`flex`, `shrink-0`, and `p-6`) to control the overall layout
+    - The [max-width](/docs/max-width) and [margin](/docs/margin) utilities (`max-w-sm` and `mx-auto`) to constrain the card width and center it horizontally
+    - The [background-color](/docs/background-color), [border-radius](/docs/border-radius), and [box-shadow](/docs/box-shadow) utilities (`bg-white`, `rounded-xl`, and `shadow-lg`) to style the card's appearance
+    - The [width](/docs/width) and [height](/docs/height) utilities (`size-12`) to set the width and height of the logo image
+    - The [gap](/docs/gap) utilities (`gap-x-4`) to handle the spacing between the logo and the text
+    - The [font-size](/docs/font-size), [color](/docs/text-color), and [font-weight](/docs/font-weight) utilities (`text-xl`, `text-black`, `font-medium`, etc.) to style the card text
+- fragment_type: rationale
+  sequence: 6
+  content: |
+    Styling things this way contradicts a lot of traditional best practices, but once you try it you'll quickly notice some really important benefits:
 
-      - The [display](/docs/display#flex) and [padding](/docs/padding) utilities (`flex`, `shrink-0`, and `p-6`) to control the overall layout
-      - The [max-width](/docs/max-width) and [margin](/docs/margin) utilities (`max-w-sm` and `mx-auto`) to constrain the card width and center it horizontally
-      - The [background-color](/docs/background-color), [border-radius](/docs/border-radius), and [box-shadow](/docs/box-shadow) utilities (`bg-white`, `rounded-xl`, and `shadow-lg`) to style the card's appearance
-      - The [width](/docs/width) and [height](/docs/height) utilities (`size-12`) to set the width and height of the logo image
-      - The [gap](/docs/gap) utilities (`gap-x-4`) to handle the spacing between the logo and the text
-      - The [font-size](/docs/font-size), [color](/docs/text-color), and [font-weight](/docs/font-weight) utilities (`text-xl`, `text-black`, `font-medium`, etc.) to style the card text
-  - fragment_type: rationale
-    sequence: 3
-    content: |
-      Styling things this way contradicts a lot of traditional best practices, but once you try it you'll quickly notice some really important benefits:
+    - **You get things done faster** — you don't spend any time coming up with class names, making decisions about selectors, or switching between HTML and CSS files, so your designs come together very fast.
+    - **Making changes feels safer** — adding or removing a utility class to an element only ever affects that element, so you never have to worry about accidentally breaking something another page that's using the same CSS.
+    - **Maintaining old projects is easier** — changing something just means finding that element in your project and changing the classes, not trying to remember how all of that custom CSS works that you haven't touched in six months.
+    - **Your code is more portable** — since both the structure and styling live in the same place, you can easily copy and paste entire chunks of UI around, even between different projects.
+    - **Your CSS stops growing** — since utility classes are so reusable, your CSS doesn't continue to grow linearly with every new feature you add to a project.
 
-      - **You get things done faster** — you don't spend any time coming up with class names, making decisions about selectors, or switching between HTML and CSS files, so your designs come together very fast.
-      - **Making changes feels safer** — adding or removing a utility class to an element only ever affects that element, so you never have to worry about accidentally breaking something another page that's using the same CSS.
-      - **Maintaining old projects is easier** — changing something just means finding that element in your project and changing the classes, not trying to remember how all of that custom CSS works that you haven't touched in six months.
-      - **Your code is more portable** — since both the structure and styling live in the same place, you can easily copy and paste entire chunks of UI around, even between different projects.
-      - **Your CSS stops growing** — since utility classes are so reusable, your CSS doesn't continue to grow linearly with every new feature you add to a project.
+    These benefits make a big difference on small projects, but they are even more valuable for teams working on long-running projects at scale.
+- fragment_type: rationale
+  sequence: 7
+  content: |-
+    ### Why not just use inline styles?
 
-      These benefits make a big difference on small projects, but they are even more valuable for teams working on long-running projects at scale.
-  - fragment_type: rationale
-    sequence: 4
-    content: |
-      ### Why not just use inline styles?
+    A common reaction to this approach is wondering, “isn’t this just inline styles?” and in some ways it is — you’re applying styles directly to elements instead of assigning them a class name and then styling that class.
 
-      A common reaction to this approach is wondering, “isn’t this just inline styles?” and in some ways it is — you’re applying styles directly to elements instead of assigning them a class name and then styling that class.
+    But using utility classes has many important advantages over inline styles, for example:
 
-      But using utility classes has many important advantages over inline styles, for example:
+    - **Designing with constraints** — using inline styles, every value is a magic number. With utilities, you’re choosing styles from a [predefined design system](/docs/theme), which makes it much easier to build visually consistent UIs.
+    - **Hover, focus, and other states** — inline styles can’t target states like hover or focus, but Tailwind’s [state variants](/docs/hover-focus-and-other-states) make it easy to style those states with utility classes.
+    - **Media queries** — you can’t use media queries in inline styles, but you can use Tailwind’s [responsive variants](/docs/responsive-design) to build fully responsive interfaces easily.
 
-      - **Designing with constraints** — using inline styles, every value is a magic number. With utilities, you’re choosing styles from a [predefined design system](/docs/theme), which makes it much easier to build visually consistent UIs.
-      - **Hover, focus, and other states** — inline styles can’t target states like hover or focus, but Tailwind’s [state variants](/docs/hover-focus-and-other-states) make it easy to style those states with utility classes.
-      - **Media queries** — you can’t use media queries in inline styles, but you can use Tailwind’s [responsive variants](/docs/responsive-design) to build fully responsive interfaces easily.
+    This component is fully responsive and includes a button with hover and active styles, and is built entirely with utility classes:
 
-      This component is fully responsive and includes a button with hover and active styles, and is built entirely with utility classes:
-
-      <Figure>
-
-      <Example resizable>
-        {
-          <div className="mx-auto max-w-sm space-y-2 rounded-xl bg-white px-8 py-8 shadow-lg ring ring-black/5 @sm:flex @sm:items-center @sm:space-y-0 @sm:gap-x-6 @sm:py-4">
-            <img
-              className="mx-auto block h-24 rounded-full @sm:mx-0 @sm:shrink-0"
-              src={erinLindford.src}
-              alt="Woman's Face"
-            />
-            <div className="space-y-2 text-center @sm:text-left">
-              <div className="space-y-0.5">
-                <p className="text-lg font-semibold text-black">Erin Lindford</p>
-                <p className="font-medium text-gray-500">Product Engineer</p>
-              </div>
-              <button className="rounded-full border border-purple-200 px-4 py-1 text-sm font-semibold text-purple-600 hover:border-transparent hover:bg-purple-600 hover:text-white active:bg-purple-700">
-                Message
-              </button>
+    <Figure>
+- fragment_type: rationale
+  sequence: 8
+  content: |-
+    <Example resizable>
+      {
+        <div className="mx-auto max-w-sm space-y-2 rounded-xl bg-white px-8 py-8 shadow-lg ring ring-black/5 @sm:flex @sm:items-center @sm:space-y-0 @sm:gap-x-6 @sm:py-4">
+          <img
+            className="mx-auto block h-24 rounded-full @sm:mx-0 @sm:shrink-0"
+            src={erinLindford.src}
+            alt="Woman's Face"
+          />
+          <div className="space-y-2 text-center @sm:text-left">
+            <div className="space-y-0.5">
+              <p className="text-lg font-semibold text-black">Erin Lindford</p>
+              <p className="font-medium text-gray-500">Product Engineer</p>
             </div>
+            <button className="rounded-full border border-purple-200 px-4 py-1 text-sm font-semibold text-purple-600 hover:border-transparent hover:bg-purple-600 hover:text-white active:bg-purple-700">
+              Message
+            </button>
           </div>
-        }
-      </Example>
-
-      ```html
-      <!-- [!code classes:sm:flex-row,sm:py-4,sm:gap-6,sm:mx-0,sm:shrink-0,sm:text-left,sm:items-center] -->
-      <!-- [!code classes:hover:text-white,hover:bg-purple-600,hover:border-transparent,active:bg-purple-700] -->
-      <div class="flex flex-col gap-2 p-8 sm:flex-row sm:items-center sm:gap-6 sm:py-4 ...">
-        <img class="mx-auto block h-24 rounded-full sm:mx-0 sm:shrink-0" src="/img/erin-lindford.jpg" alt="" />
-        <div class="space-y-2 text-center sm:text-left">
-          <div class="space-y-0.5">
-            <p class="text-lg font-semibold text-black">Erin Lindford</p>
-            <p className="font-medium text-gray-500">Product Engineer</p>
-          </div>
-          <!-- prettier-ignore -->
-          <button class="border-purple-200 text-purple-600 hover:border-transparent hover:bg-purple-600 hover:text-white active:bg-purple-700 ...">
-            Message
-          </button>
         </div>
+      }
+    </Example>
+- fragment_type: rationale
+  sequence: 9
+  content: |-
+    ```html
+    <!-- [!code classes:sm:flex-row,sm:py-4,sm:gap-6,sm:mx-0,sm:shrink-0,sm:text-left,sm:items-center] -->
+    <!-- [!code classes:hover:text-white,hover:bg-purple-600,hover:border-transparent,active:bg-purple-700] -->
+    <div class="flex flex-col gap-2 p-8 sm:flex-row sm:items-center sm:gap-6 sm:py-4 ...">
+      <img class="mx-auto block h-24 rounded-full sm:mx-0 sm:shrink-0" src="/img/erin-lindford.jpg" alt="" />
+      <div class="space-y-2 text-center sm:text-left">
+        <div class="space-y-0.5">
+          <p class="text-lg font-semibold text-black">Erin Lindford</p>
+          <p className="font-medium text-gray-500">Product Engineer</p>
+        </div>
+        <!-- prettier-ignore -->
+        <button class="border-purple-200 text-purple-600 hover:border-transparent hover:bg-purple-600 hover:text-white active:bg-purple-700 ...">
+          Message
+        </button>
       </div>
-      ```
-
-      </Figure>
+    </div>
+    ```

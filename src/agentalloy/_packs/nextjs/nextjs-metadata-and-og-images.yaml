@@ -1,10 +1,16 @@
 skill_type: domain
 skill_id: nextjs-metadata-and-og-images
 canonical_name: Next.js Metadata and OG Images (Static metadata, generateMetadata, sitemap, robots, opengraph-image)
-description: "Improve SEO and social sharing for your Next.js app: set page titles, descriptions, and Open Graph images via static exports or dynamic generateMetadata functions, and automatically generate sitemaps and robots.txt files."
+description: 'Improve SEO and social sharing for your Next.js app: set page titles, descriptions, and Open Graph images via static exports or dynamic generateMetadata functions, and automatically generate sitemaps and robots.txt files.'
 category: engineering
 skill_class: domain
-domain_tags: [static-metadata-export, generatemetadata-async, opengraph-image-imageresponse, sitemap-route, robots-route, nextjs]
+domain_tags:
+- static-metadata-export
+- generatemetadata-async
+- opengraph-image-imageresponse
+- sitemap-route
+- robots-route
+- nextjs
 requires:
 - nextjs-app-router-routing
 related:
@@ -12,12 +18,12 @@ related:
 - nextjs-data-fetching-and-caching
 - nextjs-ppr-cache-components
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — Next.js 16.2.4 docs https://nextjs.org/docs/app/getting-started/metadata-and-og-images (verified 2026-05-06 against fixtures/upstream/registry.yaml entry nextjs via tier-2 llms_url procedure); generateMetadata API reference https://nextjs.org/docs/app/api-reference/functions/generate-metadata; metadata file conventions https://nextjs.org/docs/app/api-reference/file-conventions/metadata (sitemap.xml.ts, robots.ts, opengraph-image.tsx); ImageResponse https://nextjs.org/docs/app/api-reference/functions/image-response. Skill scope: SEO and social-share metadata in the App Router — static `metadata` exports, `generateMetadata` for dynamic routes, file-convention metadata files (sitemap, robots, opengraph-image), and `ImageResponse` for generated OG images. Original authoring scaffolded with citations against nextjs.org docs, not a verbatim copy of upstream prose.
-
 raw_prose: |
   # Next.js Metadata and OG Images
 
@@ -191,201 +197,195 @@ raw_prose: |
   - [ ] Paginated and filtered routes set `alternates.canonical` to the unfiltered base URL.
   - [ ] OG image route renders in dev (`/<route>/opengraph-image`) without blank output; only Satori-supported CSS is used.
   - [ ] No `metadata` exports live in files that contain `'use client'`.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Next.js Metadata and OG Images
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Next.js Metadata and OG Images
 
-      Next.js App Router generates `<head>` tags from a typed `Metadata` object you export from a Server Component layout or page. For dynamic routes, an async `generateMetadata` function returns the same shape after fetching whatever it needs. File-convention metadata files (`opengraph-image.tsx`, `sitemap.ts`, `robots.ts`, `icon.tsx`) round out SEO output without you hand-writing tags. Get this layer wrong and search engines see the wrong title, social shares look broken, and your OG image URLs resolve as relative paths into nothing.
+    Next.js App Router generates `<head>` tags from a typed `Metadata` object you export from a Server Component layout or page. For dynamic routes, an async `generateMetadata` function returns the same shape after fetching whatever it needs. File-convention metadata files (`opengraph-image.tsx`, `sitemap.ts`, `robots.ts`, `icon.tsx`) round out SEO output without you hand-writing tags. Get this layer wrong and search engines see the wrong title, social shares look broken, and your OG image URLs resolve as relative paths into nothing.
+- sequence: 2
+  fragment_type: example
+  content: |
+    ## Static metadata: the default path
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## Static metadata: the default path
+    Export `metadata: Metadata` from `app/layout.tsx` or any `page.tsx`:
 
-      Export `metadata: Metadata` from `app/layout.tsx` or any `page.tsx`:
+    ```ts
+    // app/layout.tsx
+    import type { Metadata } from 'next';
 
-      ```ts
-      // app/layout.tsx
-      import type { Metadata } from 'next';
-
-      export const metadata: Metadata = {
-        metadataBase: new URL('https://site.example'),
-        title: { default: 'Site', template: '%s | Site' },
+    export const metadata: Metadata = {
+      metadataBase: new URL('https://site.example'),
+      title: { default: 'Site', template: '%s | Site' },
+      description: 'Schematic site description.',
+      openGraph: {
+        title: 'Site',
         description: 'Schematic site description.',
+        images: ['/og-default.png'],
+      },
+      twitter: { card: 'summary_large_image' },
+      robots: { index: true, follow: true },
+      alternates: { canonical: '/' },
+    };
+    ```
+
+    Three things matter here. First, `metadataBase` must be set when any OG image, canonical URL, or alternate uses a relative path — Next.js needs an absolute origin to resolve it. Without it, the build prints a warning and social-share previews break in production. Second, the `title` field uses `{ default, template }` so child pages set just `title: 'About'` and inherit `'About | Site'` from the wrapper; do not hardcode the suffix on every page. Third, `metadata` exports are silently ignored in Client Components — if a `'use client'` directive sits at the top, the export does nothing.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## `generateMetadata` for dynamic routes
+
+    When the metadata depends on the route (a blog post slug, a product ID, a user profile), use the async function form:
+
+    ```ts
+    // app/blog/[slug]/page.tsx
+    import type { Metadata, ResolvingMetadata } from 'next';
+
+    type Props = { params: Promise<{ slug: string }> };
+
+    export async function generateMetadata(
+      { params }: Props,
+      parent: ResolvingMetadata,
+    ): Promise<Metadata> {
+      const { slug } = await params;
+      const post = await getPost(slug);
+
+      const parentOg = (await parent).openGraph ?? {};
+
+      return {
+        title: post.title,
+        description: post.excerpt,
         openGraph: {
-          title: 'Site',
-          description: 'Schematic site description.',
-          images: ['/og-default.png'],
-        },
-        twitter: { card: 'summary_large_image' },
-        robots: { index: true, follow: true },
-        alternates: { canonical: '/' },
-      };
-      ```
-
-      Three things matter here. First, `metadataBase` must be set when any OG image, canonical URL, or alternate uses a relative path — Next.js needs an absolute origin to resolve it. Without it, the build prints a warning and social-share previews break in production. Second, the `title` field uses `{ default, template }` so child pages set just `title: 'About'` and inherit `'About | Site'` from the wrapper; do not hardcode the suffix on every page. Third, `metadata` exports are silently ignored in Client Components — if a `'use client'` directive sits at the top, the export does nothing.
-
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## `generateMetadata` for dynamic routes
-
-      When the metadata depends on the route (a blog post slug, a product ID, a user profile), use the async function form:
-
-      ```ts
-      // app/blog/[slug]/page.tsx
-      import type { Metadata, ResolvingMetadata } from 'next';
-
-      type Props = { params: Promise<{ slug: string }> };
-
-      export async function generateMetadata(
-        { params }: Props,
-        parent: ResolvingMetadata,
-      ): Promise<Metadata> {
-        const { slug } = await params;
-        const post = await getPost(slug);
-
-        const parentOg = (await parent).openGraph ?? {};
-
-        return {
+          ...parentOg,
           title: post.title,
-          description: post.excerpt,
-          openGraph: {
-            ...parentOg,
-            title: post.title,
-            images: [post.coverImage, ...(parentOg.images ?? [])],
-          },
-          alternates: { canonical: `/blog/${slug}` },
-        };
-      }
+          images: [post.coverImage, ...(parentOg.images ?? [])],
+        },
+        alternates: { canonical: `/blog/${slug}` },
+      };
+    }
 
-      export default async function BlogPost({ params }: Props) {
-        const { slug } = await params;
-        const post = await getPost(slug);
-        return <article>{post.body}</article>;
-      }
-      ```
+    export default async function BlogPost({ params }: Props) {
+      const { slug } = await params;
+      const post = await getPost(slug);
+      return <article>{post.body}</article>;
+    }
+    ```
 
-      In Next.js 15+ (still current in 16.2.4), `params` is a Promise — both `generateMetadata` and the page must `await` it. The same data fetched in `generateMetadata` and in the page is automatically deduped by React's request memoization, so calling `getPost(slug)` in both places does not issue two requests. Do not work around this with a manual cache; rely on the memoization. The `parent` argument resolves the metadata from outer layouts so you can extend rather than replace its `openGraph.images` or `twitter` config.
+    In Next.js 15+ (still current in 16.2.4), `params` is a Promise — both `generateMetadata` and the page must `await` it. The same data fetched in `generateMetadata` and in the page is automatically deduped by React's request memoization, so calling `getPost(slug)` in both places does not issue two requests. Do not work around this with a manual cache; rely on the memoization. The `parent` argument resolves the metadata from outer layouts so you can extend rather than replace its `openGraph.images` or `twitter` config.
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    ## File-convention metadata files
 
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## File-convention metadata files
+    Three special files at the route segment level generate metadata output without imports into your pages:
 
-      Three special files at the route segment level generate metadata output without imports into your pages:
+    - `app/opengraph-image.tsx` — default-exports a function returning `ImageResponse`. Next.js wires the rendered PNG into the `og:image` meta tag automatically. `app/twitter-image.tsx` does the same for Twitter.
+    - `app/sitemap.ts` — default-exports a function returning `MetadataRoute.Sitemap` (array of `{ url, lastModified, changeFrequency, priority }`). Served at `/sitemap.xml`.
+    - `app/robots.ts` — default-exports a function returning `MetadataRoute.Robots`. Served at `/robots.txt`.
+    - `app/icon.tsx`, `app/apple-icon.tsx` — generated favicons (or use static `icon.png` / `favicon.ico`).
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    ```ts
+    // app/sitemap.ts
+    import type { MetadataRoute } from 'next';
 
-      - `app/opengraph-image.tsx` — default-exports a function returning `ImageResponse`. Next.js wires the rendered PNG into the `og:image` meta tag automatically. `app/twitter-image.tsx` does the same for Twitter.
-      - `app/sitemap.ts` — default-exports a function returning `MetadataRoute.Sitemap` (array of `{ url, lastModified, changeFrequency, priority }`). Served at `/sitemap.xml`.
-      - `app/robots.ts` — default-exports a function returning `MetadataRoute.Robots`. Served at `/robots.txt`.
-      - `app/icon.tsx`, `app/apple-icon.tsx` — generated favicons (or use static `icon.png` / `favicon.ico`).
+    export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+      const posts = await listPostSlugs();
+      return [
+        { url: 'https://site.example', lastModified: new Date(), changeFrequency: 'weekly', priority: 1 },
+        ...posts.map((slug) => ({
+          url: `https://site.example/blog/${slug}`,
+          lastModified: new Date(),
+          changeFrequency: 'monthly' as const,
+          priority: 0.7,
+        })),
+      ];
+    }
+    ```
 
-      ```ts
-      // app/sitemap.ts
-      import type { MetadataRoute } from 'next';
+    ```ts
+    // app/robots.ts
+    import type { MetadataRoute } from 'next';
 
-      export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-        const posts = await listPostSlugs();
-        return [
-          { url: 'https://site.example', lastModified: new Date(), changeFrequency: 'weekly', priority: 1 },
-          ...posts.map((slug) => ({
-            url: `https://site.example/blog/${slug}`,
-            lastModified: new Date(),
-            changeFrequency: 'monthly' as const,
-            priority: 0.7,
-          })),
-        ];
-      }
-      ```
+    export default function robots(): MetadataRoute.Robots {
+      return {
+        rules: { userAgent: '*', allow: '/', disallow: '/admin/' },
+        sitemap: 'https://site.example/sitemap.xml',
+      };
+    }
+    ```
 
-      ```ts
-      // app/robots.ts
-      import type { MetadataRoute } from 'next';
+    These run on each request unless cached via `revalidate` or static generation. For a site with thousands of URLs, paginate the sitemap (Next.js supports `generateSitemaps` returning multiple ID-keyed sitemap files).
+- sequence: 6
+  fragment_type: example
+  content: |
+    ## `ImageResponse` for OG images
 
-      export default function robots(): MetadataRoute.Robots {
-        return {
-          rules: { userAgent: '*', allow: '/', disallow: '/admin/' },
-          sitemap: 'https://site.example/sitemap.xml',
-        };
-      }
-      ```
+    `ImageResponse` from `next/og` takes JSX, runs it through Satori, and returns a PNG. It runs on the edge runtime by default, so all rendering is fast and globally distributed:
 
-      These run on each request unless cached via `revalidate` or static generation. For a site with thousands of URLs, paginate the sitemap (Next.js supports `generateSitemaps` returning multiple ID-keyed sitemap files).
+    ```tsx
+    // app/blog/[slug]/opengraph-image.tsx
+    import { ImageResponse } from 'next/og';
 
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## `ImageResponse` for OG images
+    export const runtime = 'edge';
+    export const size = { width: 1200, height: 630 };
+    export const contentType = 'image/png';
 
-      `ImageResponse` from `next/og` takes JSX, runs it through Satori, and returns a PNG. It runs on the edge runtime by default, so all rendering is fast and globally distributed:
+    type Props = { params: Promise<{ slug: string }> };
 
-      ```tsx
-      // app/blog/[slug]/opengraph-image.tsx
-      import { ImageResponse } from 'next/og';
+    export default async function OG({ params }: Props) {
+      const { slug } = await params;
+      const post = await getPost(slug);
 
-      export const runtime = 'edge';
-      export const size = { width: 1200, height: 630 };
-      export const contentType = 'image/png';
+      return new ImageResponse(
+        (
+          <div style={{
+            width: '100%', height: '100%',
+            display: 'flex', flexDirection: 'column',
+            background: 'white', padding: 60, fontSize: 64,
+          }}>
+            <div style={{ fontSize: 32, color: '#666' }}>Site</div>
+            <div style={{ marginTop: 24 }}>{post.title}</div>
+          </div>
+        ),
+        { ...size },
+      );
+    }
+    ```
 
-      type Props = { params: Promise<{ slug: string }> };
+    Satori implements only a subset of CSS — flexbox works, grid does not; emoji needs explicit font configuration; `background-image: url(...)` needs absolute URLs. The most common failure mode is a complex layout that renders blank because some CSS property is unsupported. Test the rendered image at `/blog/<slug>/opengraph-image` during development before relying on it in social previews.
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## Streaming and metadata resolution
 
-      export default async function OG({ params }: Props) {
-        const { slug } = await params;
-        const post = await getPost(slug);
+    Metadata streams in after the page in Next.js 16. The document `<title>` can render before the page body's data has resolved, which is fine for crawlers (they wait for full HTML) but slightly unusual to debug — view source shows the metadata appearing late in the document. This is by design; the page does not block on `generateMetadata`.
 
-        return new ImageResponse(
-          (
-            <div style={{
-              width: '100%', height: '100%',
-              display: 'flex', flexDirection: 'column',
-              background: 'white', padding: 60, fontSize: 64,
-            }}>
-              <div style={{ fontSize: 32, color: '#666' }}>Site</div>
-              <div style={{ marginTop: 24 }}>{post.title}</div>
-            </div>
-          ),
-          { ...size },
-        );
-      }
-      ```
+    Two practical consequences for Next.js metadata, OG images, and SEO. First, do not assume `generateMetadata` finishing means the page has finished — the page's own data fetches run in parallel and may still be pending. Second, if a downstream tool scrapes the rendered HTML, it must wait for stream completion (the standard behavior of well-behaved crawlers and modern social-share preview fetchers); curl with default settings to a streamed Next.js page will see the body tags before the title tag, which surprises people instrumenting metadata-extraction pipelines.
+- sequence: 8
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
 
-      Satori implements only a subset of CSS — flexbox works, grid does not; emoji needs explicit font configuration; `background-image: url(...)` needs absolute URLs. The most common failure mode is a complex layout that renders blank because some CSS property is unsupported. Test the rendered image at `/blog/<slug>/opengraph-image` during development before relying on it in social previews.
+    - **`metadata` export in a Client Component.** Silently ignored. Move metadata to a Server Component parent (usually `layout.tsx`) and keep client-only logic in a child.
+    - **Hardcoded `<title>` on every page.** Use `{ default, template }` on the root layout's `metadata.title` so pages set short titles and inherit the suffix.
+    - **Forgetting `metadataBase`.** Build prints a warning; production OG images resolve as relative paths and shared previews break. Always set it in the root layout.
+    - **Duplicate fetches in `page.tsx` and `generateMetadata`.** Rely on React's request memoization — the same call with the same args dedupes. Do not add a manual cache that races the memoized one. If you see two requests, check the args differ (different `await` of `params` paths can defeat memoization).
+    - **No `alternates.canonical` on paginated or filtered routes.** `?page=2` and `?sort=new` get indexed as duplicates without a canonical. Set the canonical to the unfiltered base URL.
+    - **Emoji or unsupported CSS in `ImageResponse`.** Renders blank or with substitution boxes. Stick to flexbox, basic typography, hex colors; supply emoji fonts explicitly via the `fonts` option.
+    - **Mutating `parent` metadata.** `(await parent).openGraph` is shared; spread it before extending. Mutating it leaks into sibling routes.
+- sequence: 9
+  fragment_type: verification
+  content: |
+    ## Verification
 
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## Streaming and metadata resolution
-
-      Metadata streams in after the page in Next.js 16. The document `<title>` can render before the page body's data has resolved, which is fine for crawlers (they wait for full HTML) but slightly unusual to debug — view source shows the metadata appearing late in the document. This is by design; the page does not block on `generateMetadata`.
-
-      Two practical consequences for Next.js metadata, OG images, and SEO. First, do not assume `generateMetadata` finishing means the page has finished — the page's own data fetches run in parallel and may still be pending. Second, if a downstream tool scrapes the rendered HTML, it must wait for stream completion (the standard behavior of well-behaved crawlers and modern social-share preview fetchers); curl with default settings to a streamed Next.js page will see the body tags before the title tag, which surprises people instrumenting metadata-extraction pipelines.
-
-  - sequence: 7
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **`metadata` export in a Client Component.** Silently ignored. Move metadata to a Server Component parent (usually `layout.tsx`) and keep client-only logic in a child.
-      - **Hardcoded `<title>` on every page.** Use `{ default, template }` on the root layout's `metadata.title` so pages set short titles and inherit the suffix.
-      - **Forgetting `metadataBase`.** Build prints a warning; production OG images resolve as relative paths and shared previews break. Always set it in the root layout.
-      - **Duplicate fetches in `page.tsx` and `generateMetadata`.** Rely on React's request memoization — the same call with the same args dedupes. Do not add a manual cache that races the memoized one. If you see two requests, check the args differ (different `await` of `params` paths can defeat memoization).
-      - **No `alternates.canonical` on paginated or filtered routes.** `?page=2` and `?sort=new` get indexed as duplicates without a canonical. Set the canonical to the unfiltered base URL.
-      - **Emoji or unsupported CSS in `ImageResponse`.** Renders blank or with substitution boxes. Stick to flexbox, basic typography, hex colors; supply emoji fonts explicitly via the `fonts` option.
-      - **Mutating `parent` metadata.** `(await parent).openGraph` is shared; spread it before extending. Mutating it leaks into sibling routes.
-
-  - sequence: 8
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `grep -rn 'export const metadata\|export.*generateMetadata' app/` returns at least one hit; matches are in Server Components (no `'use client'` at top of file).
-      - [ ] Root `app/layout.tsx` sets `metadataBase: new URL(...)` — `next build` prints no `metadataBase` warning.
-      - [ ] Root layout `metadata.title` uses `{ default, template }`; child pages set `title: '...'` (string), not the templated form.
-      - [ ] `find app -name 'opengraph-image.*' -o -name 'sitemap.*' -o -name 'robots.*'` lists the expected files; visiting `/sitemap.xml` and `/robots.txt` returns the expected content.
-      - [ ] `generateMetadata` and the page `await` `params` (Next.js 15+ contract); TypeScript types `params` as `Promise<...>`.
-      - [ ] Paginated and filtered routes set `alternates.canonical` to the unfiltered base URL.
-      - [ ] OG image route renders in dev (`/<route>/opengraph-image`) without blank output; only Satori-supported CSS is used.
-      - [ ] No `metadata` exports live in files that contain `'use client'`.
+    - [ ] `grep -rn 'export const metadata\|export.*generateMetadata' app/` returns at least one hit; matches are in Server Components (no `'use client'` at top of file).
+    - [ ] Root `app/layout.tsx` sets `metadataBase: new URL(...)` — `next build` prints no `metadataBase` warning.
+    - [ ] Root layout `metadata.title` uses `{ default, template }`; child pages set `title: '...'` (string), not the templated form.
+    - [ ] `find app -name 'opengraph-image.*' -o -name 'sitemap.*' -o -name 'robots.*'` lists the expected files; visiting `/sitemap.xml` and `/robots.txt` returns the expected content.
+    - [ ] `generateMetadata` and the page `await` `params` (Next.js 15+ contract); TypeScript types `params` as `Promise<...>`.
+    - [ ] Paginated and filtered routes set `alternates.canonical` to the unfiltered base URL.
+    - [ ] OG image route renders in dev (`/<route>/opengraph-image`) without blank output; only Satori-supported CSS is used.
+    - [ ] No `metadata` exports live in files that contain `'use client'`.

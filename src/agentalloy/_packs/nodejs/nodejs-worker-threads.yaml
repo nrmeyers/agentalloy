@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: nodejs-worker-threads
 canonical_name: Node.js Worker Threads
-description: "Speed up CPU-heavy tasks like image processing, data transformation, or complex calculations in Node.js: run JavaScript in parallel using worker threads to avoid blocking the main event loop, communicating via messages or shared memory."
+description: 'Speed up CPU-heavy tasks like image processing, data transformation, or complex calculations in Node.js: run JavaScript in parallel using worker threads to avoid blocking the main event loop, communicating via messages or shared memory.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - nodejs
-  - worker-threads
-  - parallelism
-  - shared-memory
-  - message-passing
+- nodejs
+- worker-threads
+- parallelism
+- shared-memory
+- message-passing
 related:
 - node-event-loop-and-async
 - nodejs-cluster
 - python-multiprocessing
 always_apply: false
-phase_scope: [build]
-category_scope: [language]
+phase_scope:
+- build
+category_scope:
+- language
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -358,52 +360,79 @@ raw_prose: |
   ```
 
   There is no equivalent to this API in browsers.
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Worker threads run JavaScript in parallel within the same process — true parallelism for CPU-bound work. Communication is message-passing or shared memory. This skill covers the worker_threads API.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      The `node:worker_threads` module enables the use of threads that execute JavaScript in parallel. To access it:
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Worker threads run JavaScript in parallel within the same process — true parallelism for CPU-bound work. Communication is message-passing or shared memory. This skill covers the worker_threads API.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    The `node:worker_threads` module enables the use of threads that execute JavaScript in parallel. To access it:
 
-      ```mjs
-      import worker_threads from 'node:worker_threads';
-      ```
+    ```mjs
+    import worker_threads from 'node:worker_threads';
+    ```
 
-      ```cjs
-      'use strict';
+    ```cjs
+    'use strict';
 
-      const worker_threads = require('node:worker_threads');
-      ```
-  - fragment_type: rationale
-    sequence: 3
-    content: |
-      Workers (threads) are useful for performing CPU-intensive JavaScript operations. They do not help much with I/O-intensive work. The Node.js built-in asynchronous I/O operations are more efficient than Workers can be.
-  - fragment_type: example
-    sequence: 4
-    content: |
-      Unlike `child_process` or `cluster`, `worker_threads` can share memory. They do so by transferring `ArrayBuffer` instances or sharing `SharedArrayBuffer` instances.
+    const worker_threads = require('node:worker_threads');
+    ```
+- fragment_type: rationale
+  sequence: 3
+  content: |
+    Workers (threads) are useful for performing CPU-intensive JavaScript operations. They do not help much with I/O-intensive work. The Node.js built-in asynchronous I/O operations are more efficient than Workers can be.
+- fragment_type: example
+  sequence: 4
+  content: |-
+    Unlike `child_process` or `cluster`, `worker_threads` can share memory. They do so by transferring `ArrayBuffer` instances or sharing `SharedArrayBuffer` instances.
 
-      ```mjs
-      import {
-        Worker,
-        isMainThread,
-        parentPort,
-        workerData,
-      } from 'node:worker_threads';
+    ```mjs
+    import {
+      Worker,
+      isMainThread,
+      parentPort,
+      workerData,
+    } from 'node:worker_threads';
 
-      if (!isMainThread) {
-        const { parse } = await import('some-js-parsing-library');
-        const script = workerData;
-        parentPort.postMessage(parse(script));
-      }
+    if (!isMainThread) {
+      const { parse } = await import('some-js-parsing-library');
+      const script = workerData;
+      parentPort.postMessage(parse(script));
+    }
 
-      export default function parseJSAsync(script) {
+    export default function parseJSAsync(script) {
+      return new Promise((resolve, reject) => {
+        const worker = new Worker(new URL(import.meta.url), {
+          workerData: script,
+        });
+        worker.on('message', resolve);
+        worker.once('error', reject);
+        worker.once('exit', (code) => {
+          if (code !== 0)
+            reject(new Error(`Worker stopped with exit code ${code}`));
+        });
+      });
+    };
+    ```
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ```cjs
+    'use strict';
+
+    const {
+      Worker,
+      isMainThread,
+      parentPort,
+      workerData,
+    } = require('node:worker_threads');
+
+    if (isMainThread) {
+      module.exports = function parseJSAsync(script) {
         return new Promise((resolve, reject) => {
-          const worker = new Worker(new URL(import.meta.url), {
+          const worker = new Worker(__filename, {
             workerData: script,
           });
           worker.on('message', resolve);
@@ -414,270 +443,246 @@ fragments:
           });
         });
       };
-      ```
-
-      ```cjs
-      'use strict';
-
-      const {
-        Worker,
-        isMainThread,
-        parentPort,
-        workerData,
-      } = require('node:worker_threads');
-
-      if (isMainThread) {
-        module.exports = function parseJSAsync(script) {
-          return new Promise((resolve, reject) => {
-            const worker = new Worker(__filename, {
-              workerData: script,
-            });
-            worker.on('message', resolve);
-            worker.once('error', reject);
-            worker.once('exit', (code) => {
-              if (code !== 0)
-                reject(new Error(`Worker stopped with exit code ${code}`));
-            });
-          });
-        };
-      } else {
-        const { parse } = require('some-js-parsing-library');
-        const script = workerData;
-        parentPort.postMessage(parse(script));
-      }
-      ```
-  - fragment_type: rationale
-    sequence: 5
-    content: |
-      The above example spawns a Worker thread for each `parseJSAsync()` call. In practice, use a pool of Workers for these kinds of tasks. Otherwise, the overhead of creating Workers would likely exceed their benefit.
-  - fragment_type: example
-    sequence: 6
-    content: |
-      When implementing a worker pool, use the [`AsyncResource`][] API to inform diagnostic tools (e.g. to provide asynchronous stack traces) about the correlation between tasks and their outcomes. See ["Using `AsyncResource` for a `Worker` thread pool"][async-resource-worker-pool] in the `async_hooks` documentation for an example implementation.
-  - fragment_type: rationale
-    sequence: 7
-    content: |
-      Worker threads inherit non-process-specific options by default. Refer to [`Worker constructor options`][] to know how to customize worker thread options, specifically `argv` and `execArgv` options.
-  - fragment_type: example
-    sequence: 8
-    content: |
-      ## `worker_threads.getEnvironmentData(key)`
+    } else {
+      const { parse } = require('some-js-parsing-library');
+      const script = workerData;
+      parentPort.postMessage(parse(script));
+    }
+    ```
+- fragment_type: rationale
+  sequence: 6
+  content: |
+    The above example spawns a Worker thread for each `parseJSAsync()` call. In practice, use a pool of Workers for these kinds of tasks. Otherwise, the overhead of creating Workers would likely exceed their benefit.
+- fragment_type: example
+  sequence: 7
+  content: |
+    When implementing a worker pool, use the [`AsyncResource`][] API to inform diagnostic tools (e.g. to provide asynchronous stack traces) about the correlation between tasks and their outcomes. See ["Using `AsyncResource` for a `Worker` thread pool"][async-resource-worker-pool] in the `async_hooks` documentation for an example implementation.
+- fragment_type: rationale
+  sequence: 8
+  content: |
+    Worker threads inherit non-process-specific options by default. Refer to [`Worker constructor options`][] to know how to customize worker thread options, specifically `argv` and `execArgv` options.
+- fragment_type: example
+  sequence: 9
+  content: |
+    ## `worker_threads.getEnvironmentData(key)`
 
 
 
-      * `key` {any} Any arbitrary, cloneable JavaScript value that can be used as a {Map} key.
-      * Returns: {any}
+    * `key` {any} Any arbitrary, cloneable JavaScript value that can be used as a {Map} key.
+    * Returns: {any}
 
-      Within a worker thread, `worker.getEnvironmentData()` returns a clone of data passed to the spawning thread's `worker.setEnvironmentData()`. Every new `Worker` receives its own copy of the environment data automatically.
+    Within a worker thread, `worker.getEnvironmentData()` returns a clone of data passed to the spawning thread's `worker.setEnvironmentData()`. Every new `Worker` receives its own copy of the environment data automatically.
 
-      ```mjs
-      import {
-        Worker,
-        isMainThread,
-        setEnvironmentData,
-        getEnvironmentData,
-      } from 'node:worker_threads';
+    ```mjs
+    import {
+      Worker,
+      isMainThread,
+      setEnvironmentData,
+      getEnvironmentData,
+    } from 'node:worker_threads';
 
-      if (isMainThread) {
-        setEnvironmentData('Hello', 'World!');
-        const worker = new Worker(new URL(import.meta.url));
-      } else {
-        console.log(getEnvironmentData('Hello'));  // Prints 'World!'.
-      }
-      ```
+    if (isMainThread) {
+      setEnvironmentData('Hello', 'World!');
+      const worker = new Worker(new URL(import.meta.url));
+    } else {
+      console.log(getEnvironmentData('Hello'));  // Prints 'World!'.
+    }
+    ```
 
-      ```cjs
-      'use strict';
+    ```cjs
+    'use strict';
 
-      const {
-        Worker,
-        isMainThread,
-        setEnvironmentData,
-        getEnvironmentData,
-      } = require('node:worker_threads');
+    const {
+      Worker,
+      isMainThread,
+      setEnvironmentData,
+      getEnvironmentData,
+    } = require('node:worker_threads');
 
-      if (isMainThread) {
-        setEnvironmentData('Hello', 'World!');
-        const worker = new Worker(__filename);
-      } else {
-        console.log(getEnvironmentData('Hello'));  // Prints 'World!'.
-      }
-      ```
-  - fragment_type: example
-    sequence: 9
-    content: |
-      ## `worker_threads.isInternalThread`
-
-
-
-      * Type: {boolean}
-
-      Is `true` if this code is running inside of an internal [`Worker`][] thread (e.g the loader thread).
-
-      ```bash
-      node --experimental-loader ./loader.js main.js
-      ```
-
-      ```mjs
-      // loader.js
-      import { isInternalThread } from 'node:worker_threads';
-      console.log(isInternalThread);  // true
-      ```
-
-      ```cjs
-      // loader.js
-      'use strict';
-
-      const { isInternalThread } = require('node:worker_threads');
-      console.log(isInternalThread);  // true
-      ```
-
-      ```mjs
-      // main.js
-      import { isInternalThread } from 'node:worker_threads';
-      console.log(isInternalThread);  // false
-      ```
-
-      ```cjs
-      // main.js
-      'use strict';
-
-      const { isInternalThread } = require('node:worker_threads');
-      console.log(isInternalThread);  // false
-      ```
-  - fragment_type: example
-    sequence: 10
-    content: |
-      ## `worker_threads.isMainThread`
+    if (isMainThread) {
+      setEnvironmentData('Hello', 'World!');
+      const worker = new Worker(__filename);
+    } else {
+      console.log(getEnvironmentData('Hello'));  // Prints 'World!'.
+    }
+    ```
+- fragment_type: example
+  sequence: 10
+  content: |
+    ## `worker_threads.isInternalThread`
 
 
 
-      * Type: {boolean}
+    * Type: {boolean}
 
-      Is `true` if this code is not running inside of a [`Worker`][] thread.
+    Is `true` if this code is running inside of an internal [`Worker`][] thread (e.g the loader thread).
 
-      ```mjs
-      import { Worker, isMainThread } from 'node:worker_threads';
+    ```bash
+    node --experimental-loader ./loader.js main.js
+    ```
 
-      if (isMainThread) {
-        // This re-loads the current file inside a Worker instance.
-        new Worker(new URL(import.meta.url));
-      } else {
-        console.log('Inside Worker!');
-        console.log(isMainThread);  // Prints 'false'.
-      }
-      ```
+    ```mjs
+    // loader.js
+    import { isInternalThread } from 'node:worker_threads';
+    console.log(isInternalThread);  // true
+    ```
 
-      ```cjs
-      'use strict';
+    ```cjs
+    // loader.js
+    'use strict';
 
-      const { Worker, isMainThread } = require('node:worker_threads');
+    const { isInternalThread } = require('node:worker_threads');
+    console.log(isInternalThread);  // true
+    ```
 
-      if (isMainThread) {
-        // This re-loads the current file inside a Worker instance.
-        new Worker(__filename);
-      } else {
-        console.log('Inside Worker!');
-        console.log(isMainThread);  // Prints 'false'.
-      }
-      ```
-  - fragment_type: example
-    sequence: 11
-    content: |
-      ## `worker_threads.markAsUntransferable(object)`
+    ```mjs
+    // main.js
+    import { isInternalThread } from 'node:worker_threads';
+    console.log(isInternalThread);  // false
+    ```
 
+    ```cjs
+    // main.js
+    'use strict';
 
-
-      * `object` {any} Any arbitrary JavaScript value.
-
-      Mark an object as not transferable. If `object` occurs in the transfer list of a [`port.postMessage()`][] call, an error is thrown. This is a no-op if `object` is a primitive value.
-
-      In particular, this makes sense for objects that can be cloned, rather than transferred, and which are used by other objects on the sending side. For example, Node.js marks the `ArrayBuffer`s it uses for its [`Buffer` pool][`Buffer.allocUnsafe()`] with this.
-      `ArrayBuffer.prototype.transfer()` is disallowed on such array buffer instances.
-
-      This operation cannot be undone.
-
-      ```mjs
-      import { MessageChannel, markAsUntransferable } from 'node:worker_threads';
-
-      const pooledBuffer = new ArrayBuffer(8);
-      const typedArray1 = new Uint8Array(pooledBuffer);
-      const typedArray2 = new Float64Array(pooledBuffer);
-
-      markAsUntransferable(pooledBuffer);
-
-      const { port1 } = new MessageChannel();
-      try {
-        // This will throw an error, because pooledBuffer is not transferable.
-        port1.postMessage(typedArray1, [ typedArray1.buffer ]);
-      } catch (error) {
-        // error.name === 'DataCloneError'
-      }
-
-      // The following line prints the contents of typedArray1 -- it still owns
-      // its memory and has not been transferred. Without
-      // `markAsUntransferable()`, this would print an empty Uint8Array and the
-      // postMessage call would have succeeded.
-      // typedArray2 is intact as well.
-      console.log(typedArray1);
-      console.log(typedArray2);
-      ```
-
-      ```cjs
-      'use strict';
-
-      const { MessageChannel, markAsUntransferable } = require('node:worker_threads');
-
-      const pooledBuffer = new ArrayBuffer(8);
-      const typedArray1 = new Uint8Array(pooledBuffer);
-      const typedArray2 = new Float64Array(pooledBuffer);
-
-      markAsUntransferable(pooledBuffer);
-
-      const { port1 } = new MessageChannel();
-      try {
-        // This will throw an error, because pooledBuffer is not transferable.
-        port1.postMessage(typedArray1, [ typedArray1.buffer ]);
-      } catch (error) {
-        // error.name === 'DataCloneError'
-      }
-
-      // The following line prints the contents of typedArray1 -- it still owns
-      // its memory and has not been transferred. Without
-      // `markAsUntransferable()`, this would print an empty Uint8Array and the
-      // postMessage call would have succeeded.
-      // typedArray2 is intact as well.
-      console.log(typedArray1);
-      console.log(typedArray2);
-      ```
-  - fragment_type: example
-    sequence: 12
-    content: |
-      ## `worker_threads.isMarkedAsUntransferable(object)`
+    const { isInternalThread } = require('node:worker_threads');
+    console.log(isInternalThread);  // false
+    ```
+- fragment_type: example
+  sequence: 11
+  content: |
+    ## `worker_threads.isMainThread`
 
 
 
-      * `object` {any} Any JavaScript value.
-      * Returns: {boolean}
+    * Type: {boolean}
 
-      Check if an object is marked as not transferable with [`markAsUntransferable()`][].
+    Is `true` if this code is not running inside of a [`Worker`][] thread.
 
-      ```mjs
-      import { markAsUntransferable, isMarkedAsUntransferable } from 'node:worker_threads';
+    ```mjs
+    import { Worker, isMainThread } from 'node:worker_threads';
 
-      const pooledBuffer = new ArrayBuffer(8);
-      markAsUntransferable(pooledBuffer);
+    if (isMainThread) {
+      // This re-loads the current file inside a Worker instance.
+      new Worker(new URL(import.meta.url));
+    } else {
+      console.log('Inside Worker!');
+      console.log(isMainThread);  // Prints 'false'.
+    }
+    ```
 
-      isMarkedAsUntransferable(pooledBuffer);  // Returns true.
-      ```
+    ```cjs
+    'use strict';
 
-      ```cjs
-      'use strict';
+    const { Worker, isMainThread } = require('node:worker_threads');
 
-      const { markAsUntransferable, isMarkedAsUntransferable } = require('node:worker_threads');
+    if (isMainThread) {
+      // This re-loads the current file inside a Worker instance.
+      new Worker(__filename);
+    } else {
+      console.log('Inside Worker!');
+      console.log(isMainThread);  // Prints 'false'.
+    }
+    ```
+- fragment_type: example
+  sequence: 12
+  content: |-
+    ## `worker_threads.markAsUntransferable(object)`
 
-      const pooledBuffer = new ArrayBuffer(8);
-      markAsUntransferable(pooledBuffer);
+    * `object` {any} Any arbitrary JavaScript value.
 
-      isMarkedAsUntransferable(pooledBuffer);  // Returns true.
-      ```
+    Mark an object as not transferable. If `object` occurs in the transfer list of a [`port.postMessage()`][] call, an error is thrown. This is a no-op if `object` is a primitive value.
+
+    In particular, this makes sense for objects that can be cloned, rather than transferred, and which are used by other objects on the sending side. For example, Node.js marks the `ArrayBuffer`s it uses for its [`Buffer` pool][`Buffer.allocUnsafe()`] with this.
+    `ArrayBuffer.prototype.transfer()` is disallowed on such array buffer instances.
+
+    This operation cannot be undone.
+- fragment_type: example
+  sequence: 13
+  content: |-
+    ```mjs
+    import { MessageChannel, markAsUntransferable } from 'node:worker_threads';
+
+    const pooledBuffer = new ArrayBuffer(8);
+    const typedArray1 = new Uint8Array(pooledBuffer);
+    const typedArray2 = new Float64Array(pooledBuffer);
+
+    markAsUntransferable(pooledBuffer);
+
+    const { port1 } = new MessageChannel();
+    try {
+      // This will throw an error, because pooledBuffer is not transferable.
+      port1.postMessage(typedArray1, [ typedArray1.buffer ]);
+    } catch (error) {
+      // error.name === 'DataCloneError'
+    }
+
+    // The following line prints the contents of typedArray1 -- it still owns
+    // its memory and has not been transferred. Without
+    // `markAsUntransferable()`, this would print an empty Uint8Array and the
+    // postMessage call would have succeeded.
+    // typedArray2 is intact as well.
+    console.log(typedArray1);
+    console.log(typedArray2);
+    ```
+- fragment_type: example
+  sequence: 14
+  content: |-
+    ```cjs
+    'use strict';
+
+    const { MessageChannel, markAsUntransferable } = require('node:worker_threads');
+
+    const pooledBuffer = new ArrayBuffer(8);
+    const typedArray1 = new Uint8Array(pooledBuffer);
+    const typedArray2 = new Float64Array(pooledBuffer);
+
+    markAsUntransferable(pooledBuffer);
+
+    const { port1 } = new MessageChannel();
+    try {
+      // This will throw an error, because pooledBuffer is not transferable.
+      port1.postMessage(typedArray1, [ typedArray1.buffer ]);
+    } catch (error) {
+      // error.name === 'DataCloneError'
+    }
+
+    // The following line prints the contents of typedArray1 -- it still owns
+    // its memory and has not been transferred. Without
+    // `markAsUntransferable()`, this would print an empty Uint8Array and the
+    // postMessage call would have succeeded.
+    // typedArray2 is intact as well.
+    console.log(typedArray1);
+    console.log(typedArray2);
+    ```
+- fragment_type: example
+  sequence: 15
+  content: |-
+    ## `worker_threads.isMarkedAsUntransferable(object)`
+
+
+
+    * `object` {any} Any JavaScript value.
+    * Returns: {boolean}
+
+    Check if an object is marked as not transferable with [`markAsUntransferable()`][].
+
+    ```mjs
+    import { markAsUntransferable, isMarkedAsUntransferable } from 'node:worker_threads';
+
+    const pooledBuffer = new ArrayBuffer(8);
+    markAsUntransferable(pooledBuffer);
+
+    isMarkedAsUntransferable(pooledBuffer);  // Returns true.
+    ```
+
+    ```cjs
+    'use strict';
+
+    const { markAsUntransferable, isMarkedAsUntransferable } = require('node:worker_threads');
+
+    const pooledBuffer = new ArrayBuffer(8);
+    markAsUntransferable(pooledBuffer);
+
+    isMarkedAsUntransferable(pooledBuffer);  // Returns true.
+    ```

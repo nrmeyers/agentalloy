@@ -15,8 +15,8 @@ from agentalloy.install.subcommands.verify import (
     MIN_SKILL_COUNT,
     SCHEMA_VERSION,
     _check_duckdb_present,  # pyright: ignore[reportPrivateUsage]
-    _check_embedding_1024_dim,  # pyright: ignore[reportPrivateUsage]
     _check_embedding_endpoint_reachable,  # pyright: ignore[reportPrivateUsage]
+    _check_embedding_expected_dim,  # pyright: ignore[reportPrivateUsage]
     _check_embedding_via_diagnostics,  # pyright: ignore[reportPrivateUsage]
     _check_harness_config_present,  # pyright: ignore[reportPrivateUsage]
     _check_harness_config_url,  # pyright: ignore[reportPrivateUsage]
@@ -50,33 +50,33 @@ class TestEmbeddingEndpointReachable:
 
 
 # ---------------------------------------------------------------------------
-# Check 2: embedding 1024-dim
+# Check 2: embedding 768-dim
 # ---------------------------------------------------------------------------
 
 
-class TestEmbedding1024Dim:
+class TestEmbeddingExpectedDim:
     @patch("agentalloy.install.subcommands.verify.urlopen")
-    def test_pass_on_1024_dim(self, mock_urlopen: MagicMock) -> None:
-        body = json.dumps({"data": [{"embedding": [0.1] * 1024}]}).encode()
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = body
-        mock_resp.__enter__ = lambda s: s  # pyright: ignore[reportUnknownLambdaType]
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
-        result = _check_embedding_1024_dim("http://localhost:11434", "qwen3-embedding:0.6b")
-        assert result["passed"] is True
-
-    @patch("agentalloy.install.subcommands.verify.urlopen")
-    def test_fail_on_wrong_dim(self, mock_urlopen: MagicMock) -> None:
+    def test_pass_on_expected_dim(self, mock_urlopen: MagicMock) -> None:
         body = json.dumps({"data": [{"embedding": [0.1] * 768}]}).encode()
         mock_resp = MagicMock()
         mock_resp.read.return_value = body
         mock_resp.__enter__ = lambda s: s  # pyright: ignore[reportUnknownLambdaType]
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
-        result = _check_embedding_1024_dim("http://localhost:11434", "wrong-model")
+        result = _check_embedding_expected_dim("http://localhost:11434", "nomic-embed-text-v1.5")
+        assert result["passed"] is True
+
+    @patch("agentalloy.install.subcommands.verify.urlopen")
+    def test_fail_on_wrong_dim(self, mock_urlopen: MagicMock) -> None:
+        body = json.dumps({"data": [{"embedding": [0.1] * 1024}]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = lambda s: s  # pyright: ignore[reportUnknownLambdaType]
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        result = _check_embedding_expected_dim("http://localhost:11434", "wrong-model")
         assert result["passed"] is False
-        assert "768" in result.get("error", "")
+        assert "1024" in result.get("error", "")
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ class TestEmbeddingViaDiagnostics:
 
     def test_fails_when_diag_reports_unavailable(self) -> None:
         diag = {"dependency_readiness": {"embedding_runtime": "unavailable"}}
-        result = _check_embedding_via_diagnostics(diag, "embedding_endpoint_returns_1024_dim")
+        result = _check_embedding_via_diagnostics(diag, "embedding_endpoint_returns_expected_dim")
         assert result["passed"] is False
         assert "unavailable" in result["error"]
         assert "logs agentalloy" in result["remediation"]
@@ -130,7 +130,9 @@ class TestEmbeddingViaDiagnostics:
             patch(
                 "agentalloy.install.subcommands.verify._check_embedding_endpoint_reachable"
             ) as direct_reach,
-            patch("agentalloy.install.subcommands.verify._check_embedding_1024_dim") as direct_dim,
+            patch(
+                "agentalloy.install.subcommands.verify._check_embedding_expected_dim"
+            ) as direct_dim,
             # Stub out the DB / harness / port checks so the test stays focused.
             patch(
                 "agentalloy.install.subcommands.verify._check_duckdb_present",
@@ -163,7 +165,7 @@ class TestEmbeddingViaDiagnostics:
         direct_dim.assert_not_called()
         check_names = [c["name"] for c in result["checks"]]
         assert "embedding_endpoint_reachable" in check_names
-        assert "embedding_endpoint_returns_1024_dim" in check_names
+        assert "embedding_endpoint_returns_expected_dim" in check_names
         # Both embed checks should reflect diagnostics-sourced detail.
         embed_checks = [c for c in result["checks"] if c["name"].startswith("embedding_")]
         for c in embed_checks:

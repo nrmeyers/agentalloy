@@ -1,7 +1,7 @@
 skill_type: domain
 skill_id: rest-versioning-and-compatibility
 canonical_name: REST — Versioning and Backward Compatibility
-description: "Design REST APIs that evolve without breaking existing clients: choose a versioning strategy like URL or header, manage backward compatibility, and plan deprecation and sunset windows for smooth transitions."
+description: 'Design REST APIs that evolve without breaking existing clients: choose a versioning strategy like URL or header, manage backward compatibility, and plan deprecation and sunset windows for smooth transitions.'
 category: design
 skill_class: domain
 domain_tags:
@@ -25,397 +25,257 @@ category_scope:
 - framework
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: '# REST — Versioning and Backward Compatibility
-
+raw_prose: |
+  # REST — Versioning and Backward Compatibility
 
   ## Overview
 
-
   Versioning is the contract you make with consumers about how the API will evolve. The mechanism (URL/header/param) is less important than the discipline (semver, deprecation policy, sunset windows). This skill covers versioning + backward-compatibility patterns.
-
 
   Sourced from microsoft/api-guidelines azure/VersioningGuidelines.md and ConsiderationsForServiceDesign.md.
 
-
   ## Azure Versioning Guidelines
 
-
   ## History
-
 
 
   ## Expand change history
 
-
   | Date        | Notes                                                          |
-
   | ----------- | -------------------------------------------------------------- |
-
   | 2024-Nov-14 | Azure Service Versioning & Breaking Change Guidelines       |
-
 
 
   ## Guidelines
 
-
-  This document provides a "Dos and Don''ts" list for complying with the Azure Versioning and Breaking Change Policy,
-
+  This document provides a "Dos and Don'ts" list for complying with the Azure Versioning and Breaking Change Policy,
   as documented [internally](aka.ms/AzBreakingChangesPolicy) and [externally](https://learn.microsoft.com/azure/developer/intro/azure-service-sdk-tool-versioning).
-
 
   :white_check_mark: **DO** thoroughly ensure/test the API contract is entirely correct before merging it into a production branch of the specs repo.
 
-
   Testing helps avoid "BugFix" changes to the API definition. Testing should be done at the HTTP level as well as through generated SDKs.
-
 
   :white_check_mark: **DO** retire all prior preview API versions 90 days after a new GA or preview API version is released.
 
-
   :white_check_mark: **DO** contact the Azure Breaking Change Review board to coordinate communications to customers
-
   when releasing an API version requiring the retirement of a prior version.
-
 
   :white_check_mark: **DO** create a new preview API version for any features that should remain in preview following a new GA release.
 
-
   :white_check_mark: **DO** use a date strictly later than the most recent GA API version when releasing
-
   a new preview API version.
 
-
   :white_check_mark: **DO** deprovision any API version that has been retired. Retired APIs versions should behave like
-
   an unknown API version (see [ref](https://aka.ms/azapi/guidelines#versioning-api-version-unsupported)).
-
 
   :white_check_mark: **DO** remove retired API versions from the azure-rest-api-specs repo.
 
-
   :white_check_mark: **DO** review any change to service behavior that could disrupt customers with the Azure Breaking Changes review board, even if the change is not part of the API definition.
 
-
   Some examples of behavior changes that must be reviewed are:
-
   - Introducing or changing rate limits to be more restrictive than previously
-
   - Changing the permissions required to successfully execute an operation
 
-
   :no_entry: **DO NOT** change the behavior of an API version that is available to customers either in public preview or GA.
-
   Changes in behavior should always be introduced in a new API version, with prior versions working as before.
-
 
   :no_entry: **DO NOT** introduce breaking changes from a prior GA version just to satisfy ARM or Azure API guidelines.
 
-
   Avoiding breaking changes in a GA API takes precedence over adherence to API guidelines and resolving linter errors.
-
 
   :no_entry: **DO NOT** keep a preview feature in preview for more than 1 year; it must go GA (or be removed) within 1 year after introduction.
 
 
-
   ## Considerations for Service Design
 
-
   <!-- cspell:ignore autorest, etag, idempotency, maxpagesize, openapi -->
-
   <!-- markdownlint-disable MD033 -->
-
 
   ## History
 
-
   | Date        | Notes                                                          |
-
   | ----------- | -------------------------------------------------------------- |
-
   | 2024-Mar-17 | Updated LRO guidelines                                         |
-
   | 2024-Jan-17 | Added guidelines on returning string offsets & lengths         |
-
   | 2022-Jul-15 | Update guidance on long-running operations                     |
-
   | 2022-Feb-01 | Updated error guidance                                         |
-
   | 2021-Sep-11 | Add long-running operations guidance                           |
-
   | 2021-Aug-06 | Updated Azure REST Guidelines per Azure API Stewardship Board. |
-
 
   ## Introduction
 
-
-  Great APIs make your service usable to customers. They are intuitive, naturally reflecting and communicating the underlying model and its behavior. They lend themselves easily to client library implementations in multiple programming languages. And they don''t "get in the way" of the developer, by remaining stable and predictable, _especially over time_.
-
+  Great APIs make your service usable to customers. They are intuitive, naturally reflecting and communicating the underlying model and its behavior. They lend themselves easily to client library implementations in multiple programming languages. And they don't "get in the way" of the developer, by remaining stable and predictable, _especially over time_.
 
   This document provides Microsoft teams building Azure services with a set of guidelines that  help service teams build great APIs. The guidelines create APIs that are approachable, sustainable, and consistent across the Azure platform. We do this by applying a common set of patterns and web standards to the design and development of the API.
-
   For developers, a well defined and constructed API enables them to build fault-tolerant applications that are easy to maintain, support, and grow. For Azure service teams, the API is often the source of code generation enabling a broad audience of developers across multiple languages.
-
 
   Azure Service teams should engage the Azure HTTP/REST Stewardship Board early in the development lifecycle for guidance, discussion, and review of their API. In addition, it is good practice to perform a security review, especially if you are concerned about PII leakage, compliance with GDPR, or any other considerations relative to your situation.
 
-
   It is critically important to design your service to avoid disrupting users as the API evolves:
-
 
   <a href="#principles-api-versioning" name="principles-api-versioning">:white_check_mark:</a> **DO** implement API versioning starting with the very first release of the service.
 
-
   <a href="#principles-compatibility" name="principles-compatibility">:white_check_mark:</a> **DO** ensure that customer workloads never break
-
 
   <a href="#principles-backward-compatibility" name="principles-backward-compatibility">:white_check_mark:</a> **DO** ensure that customers are able to adopt a new version of service or SDK client library **without requiring code changes**
 
-
   ## Azure Management Plane vs Data Plane
-
   _Note: Developing a new service requires the development of at least 1 (management plane) API and potentially one or more additional (data plane) APIs.  When reviewing v1 service APIs, we see common advice provided during the review._
 
-
   A **management plane** API is implemented through the Azure Resource Manager (ARM) and is used to provision and control the operational state of resources.
-
   A **data plane** API is used by developers to implement applications. Occasionally, some operations are useful for provisioning/control and applications. In this case, the operation can appear in both APIs.
-
   Although, best practices and patterns described in this document apply to all HTTP/REST APIs, they are especially important for **data plane** services because it is the primary interface for developers using your service. The **management plane** APIs may have other preferred practices based on the conventions of the [Azure RPC](https://aka.ms/azurerpc).
 
-
   ## Start with the Developer Experience
-
   A great API starts with a well thought out and designed service. Your service should define simple/understandable abstractions with each given a clear name that you use consistently throughout your API and documentation. There must also be an unambiguous relationship between these abstractions.
 
-
   Follow these practices to create clear names for your abstractions:
-
-  - Don''t invent fancy terms or use fancy words. Try explaining the abstraction to someone that is not a domain expert and then name the abstraction using similar verbiage.
-
-  - Don''t include "throwaway" words in names, like "response", "object", "payload", etc.
-
+  - Don't invent fancy terms or use fancy words. Try explaining the abstraction to someone that is not a domain expert and then name the abstraction using similar verbiage.
+  - Don't include "throwaway" words in names, like "response", "object", "payload", etc.
   - Avoid generic names. Names should be specific to the abstraction and highlight how it is different from other abstractions in your service or related services.
-
   - Pick one word/term out of a set of synonyms and stick to it.
 
-
   It is extremely difficult to create an elegant API that works well on top of a poorly designed service; the service team and customers will live with this pain for years to come. So, the service team should empathize with customers by:
-
   - Building apps that consume the API
-
   - Hold reviews and share what is learned with your team
-
   - Get customer feedback from API previews
-
   - Thinking about the code that a customer writes both before and after an HTTP operation
-
   - Initializing and reading from the data structures your service requires
-
   - Thinking about which errors are recoverable at runtime as opposed to indicating a bug in the customer code that must be fixed
-
 
   The whole purpose of a preview to address feedback by improving abstractions, naming, relationships, API operations, and so on. It is OK to make breaking changes during a preview to improve the experience now so that it is sustainable long term.
 
-
   ## Focus on Hero Scenarios
-
   It is important to realize that writing an API is, in many cases, the easiest part of providing a delightful developer experience. There are a large number of downstream activities for each API, e.g. testing, documentation, client libraries, examples, blog posts, videos, and supporting customers in perpetuity. In fact, implementing an API is of miniscule
-
-  '
 fragments:
 - fragment_type: setup
   sequence: 1
-  content: 'Versioning is the contract you make with consumers about how the API will evolve. The mechanism (URL/header/param) is less important than the discipline (semver, deprecation policy, sunset windows). This skill covers versioning + backward-compatibility patterns.
-
+  content: |
+    Versioning is the contract you make with consumers about how the API will evolve. The mechanism (URL/header/param) is less important than the discipline (semver, deprecation policy, sunset windows). This skill covers versioning + backward-compatibility patterns.
 
     Sourced from microsoft/api-guidelines azure/VersioningGuidelines.md and ConsiderationsForServiceDesign.md.
-
-    '
 - fragment_type: execution
   sequence: 2
-  content: '## Azure Versioning Guidelines
-
+  content: |-
+    ## Azure Versioning Guidelines
 
     ## History
-
-
 
     ## Expand change history
 
-
     | Date        | Notes                                                          |
-
     | ----------- | -------------------------------------------------------------- |
-
     | 2024-Nov-14 | Azure Service Versioning & Breaking Change Guidelines       |
-
-
 
     ## Guidelines
 
-
-    This document provides a "Dos and Don''ts" list for complying with the Azure Versioning and Breaking Change Policy,
-
+    This document provides a "Dos and Don'ts" list for complying with the Azure Versioning and Breaking Change Policy,
     as documented [internally](aka.ms/AzBreakingChangesPolicy) and [externally](https://learn.microsoft.com/azure/developer/intro/azure-service-sdk-tool-versioning).
-
 
     :white_check_mark: **DO** thoroughly ensure/test the API contract is entirely correct before merging it into a production branch of the specs repo.
 
-
     Testing helps avoid "BugFix" changes to the API definition. Testing should be done at the HTTP level as well as through generated SDKs.
-
 
     :white_check_mark: **DO** retire all prior preview API versions 90 days after a new GA or preview API version is released.
 
-
     :white_check_mark: **DO** contact the Azure Breaking Change Review board to coordinate communications to customers
-
     when releasing an API version requiring the retirement of a prior version.
 
-
     :white_check_mark: **DO** create a new preview API version for any features that should remain in preview following a new GA release.
-
-
+- fragment_type: execution
+  sequence: 3
+  content: |-
     :white_check_mark: **DO** use a date strictly later than the most recent GA API version when releasing
-
     a new preview API version.
 
-
     :white_check_mark: **DO** deprovision any API version that has been retired. Retired APIs versions should behave like
-
     an unknown API version (see [ref](https://aka.ms/azapi/guidelines#versioning-api-version-unsupported)).
-
 
     :white_check_mark: **DO** remove retired API versions from the azure-rest-api-specs repo.
 
-
     :white_check_mark: **DO** review any change to service behavior that could disrupt customers with the Azure Breaking Changes review board, even if the change is not part of the API definition.
 
-
     Some examples of behavior changes that must be reviewed are:
-
     - Introducing or changing rate limits to be more restrictive than previously
-
     - Changing the permissions required to successfully execute an operation
 
-
     :no_entry: **DO NOT** change the behavior of an API version that is available to customers either in public preview or GA.
-
     Changes in behavior should always be introduced in a new API version, with prior versions working as before.
-
 
     :no_entry: **DO NOT** introduce breaking changes from a prior GA version just to satisfy ARM or Azure API guidelines.
 
-
     Avoiding breaking changes in a GA API takes precedence over adherence to API guidelines and resolving linter errors.
 
-
     :no_entry: **DO NOT** keep a preview feature in preview for more than 1 year; it must go GA (or be removed) within 1 year after introduction.
-
-    '
 - fragment_type: verification
-  sequence: 3
-  content: '## Considerations for Service Design
-
+  sequence: 4
+  content: |-
+    ## Considerations for Service Design
 
     <!-- cspell:ignore autorest, etag, idempotency, maxpagesize, openapi -->
-
     <!-- markdownlint-disable MD033 -->
-
 
     ## History
 
-
     | Date        | Notes                                                          |
-
     | ----------- | -------------------------------------------------------------- |
-
     | 2024-Mar-17 | Updated LRO guidelines                                         |
-
     | 2024-Jan-17 | Added guidelines on returning string offsets & lengths         |
-
     | 2022-Jul-15 | Update guidance on long-running operations                     |
-
     | 2022-Feb-01 | Updated error guidance                                         |
-
     | 2021-Sep-11 | Add long-running operations guidance                           |
-
     | 2021-Aug-06 | Updated Azure REST Guidelines per Azure API Stewardship Board. |
-
 
     ## Introduction
 
-
-    Great APIs make your service usable to customers. They are intuitive, naturally reflecting and communicating the underlying model and its behavior. They lend themselves easily to client library implementations in multiple programming languages. And they don''t "get in the way" of the developer, by remaining stable and predictable, _especially over time_.
-
-
+    Great APIs make your service usable to customers. They are intuitive, naturally reflecting and communicating the underlying model and its behavior. They lend themselves easily to client library implementations in multiple programming languages. And they don't "get in the way" of the developer, by remaining stable and predictable, _especially over time_.
+- fragment_type: verification
+  sequence: 5
+  content: |-
     This document provides Microsoft teams building Azure services with a set of guidelines that  help service teams build great APIs. The guidelines create APIs that are approachable, sustainable, and consistent across the Azure platform. We do this by applying a common set of patterns and web standards to the design and development of the API.
-
     For developers, a well defined and constructed API enables them to build fault-tolerant applications that are easy to maintain, support, and grow. For Azure service teams, the API is often the source of code generation enabling a broad audience of developers across multiple languages.
-
 
     Azure Service teams should engage the Azure HTTP/REST Stewardship Board early in the development lifecycle for guidance, discussion, and review of their API. In addition, it is good practice to perform a security review, especially if you are concerned about PII leakage, compliance with GDPR, or any other considerations relative to your situation.
 
-
     It is critically important to design your service to avoid disrupting users as the API evolves:
-
 
     <a href="#principles-api-versioning" name="principles-api-versioning">:white_check_mark:</a> **DO** implement API versioning starting with the very first release of the service.
 
-
     <a href="#principles-compatibility" name="principles-compatibility">:white_check_mark:</a> **DO** ensure that customer workloads never break
-
-
+- fragment_type: verification
+  sequence: 6
+  content: |-
     <a href="#principles-backward-compatibility" name="principles-backward-compatibility">:white_check_mark:</a> **DO** ensure that customers are able to adopt a new version of service or SDK client library **without requiring code changes**
 
-
     ## Azure Management Plane vs Data Plane
-
     _Note: Developing a new service requires the development of at least 1 (management plane) API and potentially one or more additional (data plane) APIs.  When reviewing v1 service APIs, we see common advice provided during the review._
 
-
     A **management plane** API is implemented through the Azure Resource Manager (ARM) and is used to provision and control the operational state of resources.
-
     A **data plane** API is used by developers to implement applications. Occasionally, some operations are useful for provisioning/control and applications. In this case, the operation can appear in both APIs.
-
     Although, best practices and patterns described in this document apply to all HTTP/REST APIs, they are especially important for **data plane** services because it is the primary interface for developers using your service. The **management plane** APIs may have other preferred practices based on the conventions of the [Azure RPC](https://aka.ms/azurerpc).
 
-
     ## Start with the Developer Experience
-
     A great API starts with a well thought out and designed service. Your service should define simple/understandable abstractions with each given a clear name that you use consistently throughout your API and documentation. There must also be an unambiguous relationship between these abstractions.
-
-
+- fragment_type: verification
+  sequence: 7
+  content: |-
     Follow these practices to create clear names for your abstractions:
-
-    - Don''t invent fancy terms or use fancy words. Try explaining the abstraction to someone that is not a domain expert and then name the abstraction using similar verbiage.
-
-    - Don''t include "throwaway" words in names, like "response", "object", "payload", etc.
-
+    - Don't invent fancy terms or use fancy words. Try explaining the abstraction to someone that is not a domain expert and then name the abstraction using similar verbiage.
+    - Don't include "throwaway" words in names, like "response", "object", "payload", etc.
     - Avoid generic names. Names should be specific to the abstraction and highlight how it is different from other abstractions in your service or related services.
-
     - Pick one word/term out of a set of synonyms and stick to it.
 
-
     It is extremely difficult to create an elegant API that works well on top of a poorly designed service; the service team and customers will live with this pain for years to come. So, the service team should empathize with customers by:
-
     - Building apps that consume the API
-
     - Hold reviews and share what is learned with your team
-
     - Get customer feedback from API previews
-
     - Thinking about the code that a customer writes both before and after an HTTP operation
-
     - Initializing and reading from the data structures your service requires
-
     - Thinking about which errors are recoverable at runtime as opposed to indicating a bug in the customer code that must be fixed
 
-
     The whole purpose of a preview to address feedback by improving abstractions, naming, relationships, API operations, and so on. It is OK to make breaking changes during a preview to improve the experience now so that it is sustainable long term.
-
-
+- fragment_type: verification
+  sequence: 8
+  content: |-
     ## Focus on Hero Scenarios
-
-    It is important to realize that writing an API is, in many cases, the easiest part of providing a delightful developer experience. There are a large number of downstream activities for each API, e.g. testing, documentation, client libraries, examples, blog posts, videos, and supporting customers in perpetuity. In fact, implementing an API is of miniscule'
+    It is important to realize that writing an API is, in many cases, the easiest part of providing a delightful developer experience. There are a large number of downstream activities for each API, e.g. testing, documentation, client libraries, examples, blog posts, videos, and supporting customers in perpetuity. In fact, implementing an API is of miniscule

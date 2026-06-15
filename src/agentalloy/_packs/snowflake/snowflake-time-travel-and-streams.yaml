@@ -1,23 +1,25 @@
 skill_type: domain
 skill_id: snowflake-time-travel-and-streams
 canonical_name: Snowflake Time Travel and Streams
-description: "Recover deleted or changed data and build audit trails in Snowflake: query historical table states within the retention window and use streams to capture row-level inserts, updates, and deletes for incremental processing."
+description: 'Recover deleted or changed data and build audit trails in Snowflake: query historical table states within the retention window and use streams to capture row-level inserts, updates, and deletes for incremental processing.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - time-travel
-  - streams
-  - cdc
-  - audit-trails
-  - data-recovery
-  - snowflake
+- time-travel
+- streams
+- cdc
+- audit-trails
+- data-recovery
+- snowflake
 related:
 - snowflake-data-loading
 - snowflake-dynamic-tables
 - snowflake-snowpipe-auto-ingest
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -176,160 +178,162 @@ raw_prose: |
   One example of a consumer of CDC records is a data pipeline, in which only the data in staging tables that has
   changed since the last extraction is transformed and copied into other tables.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      Time Travel preserves historical table state for the configured retention period (1–90 days). Streams expose row-level change feeds (insert/update/delete) for downstream incremental processing — the standard CDC primitive in Snowflake. This skill covers both time-based and change-feed query patterns.
+    Time Travel preserves historical table state for the configured retention period (1–90 days). Streams expose row-level change feeds (insert/update/delete) for downstream incremental processing — the standard CDC primitive in Snowflake. This skill covers both time-based and change-feed query patterns.
 
-      Sourced from https://docs.snowflake.com/en/user-guide/data-time-travel.html and https://docs.snowflake.com/en/user-guide/streams-intro.html.
-  - fragment_type: rationale
-    sequence: 2
-    content: |
-      ## Understanding & using Time Travel
+    Sourced from https://docs.snowflake.com/en/user-guide/data-time-travel.html and https://docs.snowflake.com/en/user-guide/streams-intro.html.
+- fragment_type: rationale
+  sequence: 2
+  content: |
+    ## Understanding & using Time Travel
 
-      Snowflake Time Travel enables accessing historical data (that is, data that has been changed or deleted) at any point within a defined period.
+    Snowflake Time Travel enables accessing historical data (that is, data that has been changed or deleted) at any point within a defined period.
 
-      It serves as a powerful tool for performing the following tasks:
+    It serves as a powerful tool for performing the following tasks:
 
-      * Restoring objects that might have been accidentally or intentionally deleted. You can restore individual objects,
-        such as tables, or restore all the objects inside a container object by restoring an entire schema or database.
-      * Duplicating and backing up data from key points in the past.
-      * Analyzing data usage/manipulation over specified periods of time.
+    * Restoring objects that might have been accidentally or intentionally deleted. You can restore individual objects,
+      such as tables, or restore all the objects inside a container object by restoring an entire schema or database.
+    * Duplicating and backing up data from key points in the past.
+    * Analyzing data usage/manipulation over specified periods of time.
 
-      ## Introduction to Time Travel
+    ## Introduction to Time Travel
 
-      Using Time Travel, you can perform the following actions within a defined period of time:
+    Using Time Travel, you can perform the following actions within a defined period of time:
 
-      * Query data in the past that has since been updated or deleted.
-      * Create clones of entire tables, schemas, and databases at or before specific points in the past.
-      * Restore tables, schemas, databases, and some other kinds of objects that have been dropped.
+    * Query data in the past that has since been updated or deleted.
+    * Create clones of entire tables, schemas, and databases at or before specific points in the past.
+    * Restore tables, schemas, databases, and some other kinds of objects that have been dropped.
 
-      > **Note:**
-      >
-      > When querying historical data in a table or non-materialized view, the current table or view schema is used. For more
-      > information, see [Usage notes](../sql-reference/constructs/at-before.md) for AT | BEFORE.
+    > **Note:**
+    >
+    > When querying historical data in a table or non-materialized view, the current table or view schema is used. For more
+    > information, see [Usage notes](../sql-reference/constructs/at-before.md) for AT | BEFORE.
 
-      After the defined period of time has elapsed, the data is moved into [Snowflake Fail-safe](data-failsafe.md) and these actions
-      can no longer be performed.
+    After the defined period of time has elapsed, the data is moved into [Snowflake Fail-safe](data-failsafe.md) and these actions
+    can no longer be performed.
 
-      > **Note:**
-      >
-      > A long-running Time Travel query will delay moving any data and objects (tables, schemas, and databases) in the account into Fail-safe,
-      > until the query completes.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ### Time Travel SQL extensions
+    > **Note:**
+    >
+    > A long-running Time Travel query will delay moving any data and objects (tables, schemas, and databases) in the account into Fail-safe,
+    > until the query completes.
+- fragment_type: execution
+  sequence: 3
+  content: |
+    ### Time Travel SQL extensions
 
-      To support Time Travel, the following SQL extensions have been implemented:
+    To support Time Travel, the following SQL extensions have been implemented:
 
-      * [AT | BEFORE](../sql-reference/constructs/at-before.md) clause which can be specified in SELECT statements and CREATE … CLONE commands (immediately
-        after the object name). The clause uses one of the following parameters to pinpoint the exact historical data you want to access:
+    * [AT | BEFORE](../sql-reference/constructs/at-before.md) clause which can be specified in SELECT statements and CREATE … CLONE commands (immediately
+      after the object name). The clause uses one of the following parameters to pinpoint the exact historical data you want to access:
 
-        + TIMESTAMP
-        + OFFSET (time difference in seconds from the present time)
-        + STATEMENT (query ID for statement)
-      * [UNDROP <object>](../sql-reference/sql/undrop.md) command for tables, schemas, databases, accounts, external volumes, and tags.
-  - fragment_type: rationale
-    sequence: 4
-    content: |
-      ### Data retention period
+      + TIMESTAMP
+      + OFFSET (time difference in seconds from the present time)
+      + STATEMENT (query ID for statement)
+    * [UNDROP <object>](../sql-reference/sql/undrop.md) command for tables, schemas, databases, accounts, external volumes, and tags.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ### Data retention period
 
-      A key component of Snowflake Time Travel is the data retention period.
+    A key component of Snowflake Time Travel is the data retention period.
 
-      When data in a table is modified, including deletion of data or dropping an object containing data, Snowflake preserves the state of the data
-      before the update. The data retention period specifies the number of days for which this historical data is preserved and, therefore,
-      Time Travel operations (SELECT, CREATE … CLONE, UNDROP) can be performed on the data.
+    When data in a table is modified, including deletion of data or dropping an object containing data, Snowflake preserves the state of the data
+    before the update. The data retention period specifies the number of days for which this historical data is preserved and, therefore,
+    Time Travel operations (SELECT, CREATE … CLONE, UNDROP) can be performed on the data.
 
-      The standard retention period is 1 day (24 hours) and is automatically enabled for all Snowflake accounts:
+    The standard retention period is 1 day (24 hours) and is automatically enabled for all Snowflake accounts:
 
-      * For Snowflake Standard Edition, the retention period can be set to 0 (or unset back to the default of 1 day) at the account and object
-        level (that is, databases, schemas, and tables).
-      * For Snowflake Enterprise Edition (and higher):
+    * For Snowflake Standard Edition, the retention period can be set to 0 (or unset back to the default of 1 day) at the account and object
+      level (that is, databases, schemas, and tables).
+    * For Snowflake Enterprise Edition (and higher):
 
-        + For transient databases, schemas, and tables, the retention period can be set to 0 (or unset back to the default of 1 day). The same
-          is also true for temporary tables.
-        + For permanent databases, schemas, and tables, the retention period can be set to any value from 0 up to 90 days.
+      + For transient databases, schemas, and tables, the retention period can be set to 0 (or unset back to the default of 1 day). The same
+        is also true for temporary tables.
+      + For permanent databases, schemas, and tables, the retention period can be set to any value from 0 up to 90 days.
 
-      > **Note:**
-      >
-      > A retention period of 0 days for an object effectively deactivates Time Travel for the object.
+    > **Note:**
+    >
+    > A retention period of 0 days for an object effectively deactivates Time Travel for the object.
 
-      When the retention period ends for an object, the historical data is moved into [Snowflake Fail-safe](data-failsafe.md):
+    When the retention period ends for an object, the historical data is moved into [Snowflake Fail-safe](data-failsafe.md):
 
-      * Historical data is no longer available for querying.
-      * Past objects can no longer be cloned.
-      * Past objects that were dropped can no longer be restored.
+    * Historical data is no longer available for querying.
+    * Past objects can no longer be cloned.
+    * Past objects that were dropped can no longer be restored.
 
-      To specify the data retention period for Time Travel:
+    To specify the data retention period for Time Travel:
+- fragment_type: rationale
+  sequence: 5
+  content: |-
+    * The [DATA_RETENTION_TIME_IN_DAYS](../sql-reference/parameters.md) object parameter can be used by users with the ACCOUNTADMIN role to set the default
+      retention period for your account.
+    * The same parameter can be used to explicitly override the default when creating a database, schema, and individual table.
+    * The data retention period for a database, schema, or table can be changed at any time.
+    * The [MIN_DATA_RETENTION_TIME_IN_DAYS](../sql-reference/parameters.md) account parameter can be set by users with the ACCOUNTADMIN role to set a minimum
+      retention period for the account. This parameter does not alter or replace the DATA_RETENTION_TIME_IN_DAYS parameter value. However it
+      may change the effective data retention time. When this parameter is set at the account level, the effective minimum data retention
+      period for an object is determined by MAX(DATA_RETENTION_TIME_IN_DAYS, MIN_DATA_RETENTION_TIME_IN_DAYS).
+- fragment_type: rationale
+  sequence: 6
+  content: |
+    ### Limitations
 
-      * The [DATA_RETENTION_TIME_IN_DAYS](../sql-reference/parameters.md) object parameter can be used by users with the ACCOUNTADMIN role to set the default
-        retention period for your account.
-      * The same parameter can be used to explicitly override the default when creating a database, schema, and individual table.
-      * The data retention period for a database, schema, or table can be changed at any time.
-      * The [MIN_DATA_RETENTION_TIME_IN_DAYS](../sql-reference/parameters.md) account parameter can be set by users with the ACCOUNTADMIN role to set a minimum
-        retention period for the account. This parameter does not alter or replace the DATA_RETENTION_TIME_IN_DAYS parameter value. However it
-        may change the effective data retention time. When this parameter is set at the account level, the effective minimum data retention
-        period for an object is determined by MAX(DATA_RETENTION_TIME_IN_DAYS, MIN_DATA_RETENTION_TIME_IN_DAYS).
-  - fragment_type: rationale
-    sequence: 5
-    content: |
-      ### Limitations
+    When using Time Travel, the following object types are not cloned:
 
-      When using Time Travel, the following object types are not cloned:
+    > * External tables
+    > * Internal (Snowflake) stages
+    > * Hy
+- fragment_type: setup
+  sequence: 7
+  content: |
+    # Introduction to streams
 
-      > * External tables
-      > * Internal (Snowflake) stages
-      > * Hy
-  - fragment_type: setup
-    sequence: 6
-    content: |
-      # Introduction to streams
+    A stream object records data manipulation language (DML) changes made to tables, including inserts (including COPY INTO), updates, and deletes,
+    as well as metadata about each change, so that actions can be taken using the changed data. This process is referred to as change data capture (CDC).
+    This topic introduces key concepts for change data capture using streams.
 
-      A stream object records data manipulation language (DML) changes made to tables, including inserts (including COPY INTO), updates, and deletes,
-      as well as metadata about each change, so that actions can be taken using the changed data. This process is referred to as change data capture (CDC).
-      This topic introduces key concepts for change data capture using streams.
+    An individual table stream tracks the changes made to rows in a *source table*. A table stream (also referred to as simply a “stream”) makes
+    a “change table” available of what changed, at the row level, between two transactional points of time in a table. This allows querying and
+    consuming a sequence of change records in a transactional fashion.
 
-      An individual table stream tracks the changes made to rows in a *source table*. A table stream (also referred to as simply a “stream”) makes
-      a “change table” available of what changed, at the row level, between two transactional points of time in a table. This allows querying and
-      consuming a sequence of change records in a transactional fashion.
+    Streams can be created to query change data on the following objects:
 
-      Streams can be created to query change data on the following objects:
+    * Standard tables, including shared tables.
+    * Views, including secure views
+    * [Directory tables](data-load-dirtables.md)
+    * [Dynamic tables](dynamic-tables-about.md)
+    * [Apache Iceberg™ tables](tables-iceberg.md) with Limitations.
+    * [Event tables](../developer-guide/logging-tracing/event-table-setting-up.md)
+    * [External tables](tables-external-intro.md)
+- fragment_type: rationale
+  sequence: 8
+  content: |-
+    ## Offset storage
 
-      * Standard tables, including shared tables.
-      * Views, including secure views
-      * [Directory tables](data-load-dirtables.md)
-      * [Dynamic tables](dynamic-tables-about.md)
-      * [Apache Iceberg™ tables](tables-iceberg.md) with Limitations.
-      * [Event tables](../developer-guide/logging-tracing/event-table-setting-up.md)
-      * [External tables](tables-external-intro.md)
-  - fragment_type: rationale
-    sequence: 7
-    content: |
-      ## Offset storage
+    When created, a stream logically takes an initial snapshot of every row in the source object (e.g. table, external table, or the underlying
+    tables for a view) by initializing a point in time (called an *offset*) as the current transactional version of the object. The change
+    tracking system utilized by the stream then records information about the DML changes after this snapshot was taken. Change records provide
+    the state of a row before and after the change. Change information mirrors the column structure of the tracked source object and includes
+    additional metadata columns that describe each change event.
 
-      When created, a stream logically takes an initial snapshot of every row in the source object (e.g. table, external table, or the underlying
-      tables for a view) by initializing a point in time (called an *offset*) as the current transactional version of the object. The change
-      tracking system utilized by the stream then records information about the DML changes after this snapshot was taken. Change records provide
-      the state of a row before and after the change. Change information mirrors the column structure of the tracked source object and includes
-      additional metadata columns that describe each change event.
+    Streams use the current table schema. However, since streams may read deleted data to track changes over time, any incompatible schema
+    changes between the offset and the advance can cause query failures.
 
-      Streams use the current table schema. However, since streams may read deleted data to track changes over time, any incompatible schema
-      changes between the offset and the advance can cause query failures.
+    Note that a stream itself does not contain any table data. A stream only stores an offset for the source object and returns CDC
+    records by leveraging the versioning history for the source object. When the first stream for a table is created, several hidden columns
+    are added to the source table and begin storing change tracking metadata. These columns consume a small amount of storage. The CDC records
+    returned when querying a stream rely on a combination of the *offset* stored in the stream and the *change tracking metadata* stored in the
+    table. Note that for streams on views, change tracking must be enabled explicitly for the view and underlying tables to add the hidden
+    columns to these tables.
 
-      Note that a stream itself does not contain any table data. A stream only stores an offset for the source object and returns CDC
-      records by leveraging the versioning history for the source object. When the first stream for a table is created, several hidden columns
-      are added to the source table and begin storing change tracking metadata. These columns consume a small amount of storage. The CDC records
-      returned when querying a stream rely on a combination of the *offset* stored in the stream and the *change tracking metadata* stored in the
-      table. Note that for streams on views, change tracking must be enabled explicitly for the view and underlying tables to add the hidden
-      columns to these tables.
+    It might be useful to think of a stream as a bookmark, which indicates a point in time in the pages of a book (i.e. the source object). A
+    bookmark can be thrown away and other bookmarks inserted in different places in a book. So too, a stream can be dropped and other streams
+    created at the same or different points of time (either by creating the streams consecutively at different times or by using [Time
+    Travel](data-time-travel.md)) to consume the change records for an object at the same or different offsets.
 
-      It might be useful to think of a stream as a bookmark, which indicates a point in time in the pages of a book (i.e. the source object). A
-      bookmark can be thrown away and other bookmarks inserted in different places in a book. So too, a stream can be dropped and other streams
-      created at the same or different points of time (either by creating the streams consecutively at different times or by using [Time
-      Travel](data-time-travel.md)) to consume the change records for an object at the same or different offsets.
-
-      One example of a consumer of CDC records is a data pipeline, in which only the data in staging tables that has
-      changed since the last extraction is transformed and copied into other tables.
+    One example of a consumer of CDC records is a data pipeline, in which only the data in staging tables that has
+    changed since the last extraction is transformed and copied into other tables.

@@ -1,11 +1,11 @@
 name: vue
-version: 1.0.3
+version: 1.0.4
 tier: framework
 description: |
   Vue 3.5+ patterns — Composition API reactivity (ref/reactive/computed/watch), `<script setup>` SFC syntax with defineProps/Emits/Model/Expose, template directives (v-if/v-for/v-bind/v-on/v-model), lifecycle hooks and async components with Suspense, built-in components (Transition, KeepAlive, Teleport). Precision-favored framework tier; sourced from vuejs.org per R1 tier-1 procedure (registry llms_full_url https://vuejs.org/llms-full.txt).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -16,13 +16,13 @@ depends_on:
 skills:
 - skill_id: vue-built-in-components
   file: vue-built-in-components.yaml
-  fragment_count: 5
+  fragment_count: 8
 - skill_id: vue-composition-api-reactivity
   file: vue-composition-api-reactivity.yaml
-  fragment_count: 9
+  fragment_count: 20
 - skill_id: vue-lifecycle-and-async-components
   file: vue-lifecycle-and-async-components.yaml
-  fragment_count: 10
+  fragment_count: 12
 - skill_id: vue-script-setup-and-components
   file: vue-script-setup-and-components.yaml
   fragment_count: 11

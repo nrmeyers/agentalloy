@@ -1,10 +1,20 @@
 skill_type: domain
 skill_id: nextjs-server-actions-and-mutations
 canonical_name: Next.js Server Actions and Mutations ("use server", Form Actions, useActionState, revalidate)
-description: "Handle form submissions and data mutations in Next.js apps without separate API routes: use server actions to process form data, manage pending states, and revalidate cached pages after updates like creating posts or updating profiles."
+description: 'Handle form submissions and data mutations in Next.js apps without separate API routes: use server actions to process form data, manage pending states, and revalidate cached pages after updates like creating posts or updating profiles.'
 category: engineering
 skill_class: domain
-domain_tags: [use-server-directive, form-action-prop, useactionstate-pending, revalidatepath-tag, csrf-authorization, nextjs, forms, server-actions, progressive-enhancement, validation]
+domain_tags:
+- use-server-directive
+- form-action-prop
+- useactionstate-pending
+- revalidatepath-tag
+- csrf-authorization
+- nextjs
+- forms
+- server-actions
+- progressive-enhancement
+- validation
 requires:
 - react-form-actions-and-status
 - react-server-actions
@@ -13,12 +23,12 @@ related:
 - nextjs-data-fetching-and-caching
 - nextjs-redirects-and-rewrites
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — Next.js Mutating Data https://nextjs.org/docs/app/getting-started/mutating-data, Next.js Forms guide https://nextjs.org/docs/app/guides/forms, Next.js Data Security guide https://nextjs.org/docs/app/guides/data-security, revalidatePath https://nextjs.org/docs/app/api-reference/functions/revalidatePath, revalidateTag https://nextjs.org/docs/app/api-reference/functions/revalidateTag, React 'use server' directive https://react.dev/reference/rsc/use-server, React useActionState https://react.dev/reference/react/useActionState, React useFormStatus https://react.dev/reference/react-dom/hooks/useFormStatus (all verified 2026-05-06 against fixtures/upstream/registry.yaml entry nextjs via tier-2 llms_url procedure; Next.js 16.2.4). Skill scope: Next.js App Router Server Functions used as Server Actions for mutations — `'use server'` directive (function-level or module-level), `<form action={fn}>` and `<button formAction={fn}>` integration, reading `FormData` with null-narrowing, `useActionState` for return-state and pending flag, `useFormStatus` for child submit buttons, `revalidatePath` and `revalidateTag` from `next/cache` to invalidate caches after a mutation, `redirect` from `next/navigation` after a mutation (and why it must be outside try/catch), `.bind(null, extraArg)` for passing extra arguments to a form action, `useOptimistic` for optimistic UI, server-side validation with Zod/Valibot, and the security edge: every Server Action is a public POST endpoint and must authorize the caller inside the function body, not just on the page that renders the form. Out of scope: Pages Router API routes, third-party form libraries, file upload streaming, framework-internal RPC wire format. Honest framing per R6 — original authoring scaffolded against current Next.js 16.2.4 docs, not a verbatim copy of upstream prose; React 19's `useActionState` and `useOptimistic` shipped December 2024 and `revalidatePath`/`revalidateTag` are stable in Next.js 16.2.4 (verified 2026-05-06). Merged 2026-06-03: absorbed all unique content from deprecated skill `nextjs-forms-and-server-actions` (progressive enhancement, `Object.fromEntries`, `.bind` for extra args, Zod validation with `safeParse`, `useActionState` with pending state display, server-side form validation patterns).
-
 raw_prose: |
   # Next.js Server Actions and Mutations
 
@@ -321,336 +331,321 @@ raw_prose: |
   - Every Server Action is a network-reachable POST endpoint; page-level auth does not extend to the action (verified 2026-05-06 against nextjs.org/docs/app/guides/data-security).
   - `useFormStatus` returns status only for the parent `<form>` and only when called from a component rendered inside it (verified 2026-05-06 against react.dev/reference/react-dom/hooks/useFormStatus).
   - `useActionState` reducer throws cause React to skip subsequently queued dispatches; catch inside and return error state (verified 2026-05-06 against react.dev/reference/react/useActionState).
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Next.js Server Actions and Mutations
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Next.js Server Actions and Mutations
 
-      Server Functions are async functions that run on the server and are callable from the client over an automatic RPC. When a Server Function is used in a form or mutation context, it is called a **Server Action**. In Next.js 16.x App Router (verified 2026-05-06), Server Actions are the recommended way to mutate data: they remove the per-route API handler boilerplate, integrate with React's `<form action={...}>` to support progressive enhancement, and pair with `revalidatePath` / `revalidateTag` to invalidate the Next.js cache after a write. The single most important framing the upstream Data Security guide gives: **a Server Action is a public POST endpoint reachable by direct request, not just through your UI**. Every Server Action must authenticate and authorize the caller inside its body, even if the form that renders it lives behind a page-level auth check.
+    Server Functions are async functions that run on the server and are callable from the client over an automatic RPC. When a Server Function is used in a form or mutation context, it is called a **Server Action**. In Next.js 16.x App Router (verified 2026-05-06), Server Actions are the recommended way to mutate data: they remove the per-route API handler boilerplate, integrate with React's `<form action={...}>` to support progressive enhancement, and pair with `revalidatePath` / `revalidateTag` to invalidate the Next.js cache after a write. The single most important framing the upstream Data Security guide gives: **a Server Action is a public POST endpoint reachable by direct request, not just through your UI**. Every Server Action must authenticate and authorize the caller inside its body, even if the form that renders it lives behind a page-level auth check.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Defining a Server Action with `'use server'`
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## Defining a Server Action with `'use server'`
+    The `'use server'` directive marks an async function (or every async export of a module) as a Server Function. Two placements are valid:
 
-      The `'use server'` directive marks an async function (or every async export of a module) as a Server Function. Two placements are valid:
+    ```ts
+    // app/lib/actions.ts — module-level: every export is a Server Function
+    'use server'
 
-      ```ts
-      // app/lib/actions.ts — module-level: every export is a Server Function
-      'use server'
+    import { auth } from '@/lib/auth'
+    import { db } from '@/lib/db'
+    import { revalidatePath } from 'next/cache'
 
-      import { auth } from '@/lib/auth'
-      import { db } from '@/lib/db'
-      import { revalidatePath } from 'next/cache'
+    export async function createPost(formData: FormData) {
+      const session = await auth()
+      if (!session?.user) throw new Error('Unauthorized')
 
-      export async function createPost(formData: FormData) {
-        const session = await auth()
-        if (!session?.user) throw new Error('Unauthorized')
-
-        const title = formData.get('title')
-        if (typeof title !== 'string' || title.length === 0) {
-          throw new Error('Title is required')
-        }
-
-        await db.posts.create({ data: { title, userId: session.user.id } })
-        revalidatePath('/posts')
-      }
-      ```
-
-      Module-level `'use server'` is the most common pattern, but it has a foot-gun: every export of that module becomes a network-callable Server Function, including anything you intended as a helper or constant. Type aliases and `interface` declarations are erased and are safe; runtime values (including non-async functions and inadvertently-exported helpers) are not. Keep `actions.ts` files narrow — only async functions you intend to expose to the client. For inline use, place `'use server'` as the first statement inside a single async function:
-
-      ```tsx
-      // app/posts/page.tsx
-      export default function NewPostPage() {
-        async function createPost(formData: FormData) {
-          'use server'
-          // ...
-        }
-        return <form action={createPost}>...</form>
-      }
-      ```
-
-      Per the upstream `'use server'` reference (verified 2026-05-06): the directive must be at the top of the file or as the first statement of the function, single or double quotes, comments above are allowed, only `async` functions may be marked.
-
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Calling a Server Action from a form
-
-      React extends `<form>` so that `action={fn}` accepts a Server Function directly. When the form submits, React serializes the `FormData` and calls the Server Function on the server inside an automatic Transition. `<button formAction={fn}>` overrides the form's action for that button — useful for forms with multiple submit buttons (Save, Save and Continue, Delete).
-
-      ```tsx
-      // app/posts/NewPost.tsx
-      import { createPost } from '@/app/lib/actions'
-
-      export default function NewPost() {
-        return (
-          <form action={createPost}>
-            <input name="title" required />
-            <button type="submit">Create</button>
-          </form>
-        )
-      }
-      ```
-
-      Reading form data: `formData.get('title')` returns `FormDataEntryValue | null` — a union of `string | File | null`. **Always narrow before use** in TypeScript:
-
-      ```ts
       const title = formData.get('title')
-      if (typeof title !== 'string') throw new Error('Invalid title')
-      // title is string here
-      ```
-
-      For multi-field forms, `Object.fromEntries(formData)` collapses the entries to an object — note it includes extra `$ACTION_*` keys that React injects for RPC bookkeeping; strip or ignore them before validation.
-
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Passing extra arguments via `.bind`
-
-      A form action only receives `formData`. To pass an extra argument from a client component (e.g. an entity id), use `Function.prototype.bind`:
-
-      ```tsx
-      // app/posts/DeleteButton.tsx
-      'use client'
-      import { deletePost } from '@/app/lib/actions'
-
-      export function DeleteButton({ postId }: { postId: string }) {
-        const deletePostWithId = deletePost.bind(null, postId)
-        return (
-          <form action={deletePostWithId}>
-            <button>Delete</button>
-          </form>
-        )
+      if (typeof title !== 'string' || title.length === 0) {
+        throw new Error('Title is required')
       }
-      ```
 
-      The bound argument is sent encoded in the form payload. The Server Function signature becomes `(postId: string, formData: FormData)`. Per the Data Security guide, **this argument is still untrusted** — the client can mint any `postId` and POST to the action endpoint directly; authorize ownership inside the action body.
+      await db.posts.create({ data: { title, userId: session.user.id } })
+      revalidatePath('/posts')
+    }
+    ```
+- fragment_type: example
+  sequence: 3
+  content: |-
+    Module-level `'use server'` is the most common pattern, but it has a foot-gun: every export of that module becomes a network-callable Server Function, including anything you intended as a helper or constant. Type aliases and `interface` declarations are erased and are safe; runtime values (including non-async functions and inadvertently-exported helpers) are not. Keep `actions.ts` files narrow — only async functions you intend to expose to the client. For inline use, place `'use server'` as the first statement inside a single async function:
 
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## `useActionState` for return state and pending flag
-
-      `useActionState` (React 19, December 2024) wraps a Server Action so its return value becomes component state and exposes a pending boolean:
-
-      ```tsx
-      // app/posts/NewPost.tsx
-      'use client'
-      import { useActionState } from 'react'
-      import { createPost } from '@/app/lib/actions'
-
-      type State = { error?: string; ok?: boolean }
-      const initialState: State = {}
-
-      export default function NewPost() {
-        const [state, formAction, isPending] = useActionState(createPost, initialState)
-        return (
-          <form action={formAction}>
-            <input name="title" required />
-            <button disabled={isPending}>{isPending ? 'Saving...' : 'Create'}</button>
-            {state.error && <p role="alert">{state.error}</p>}
-          </form>
-        )
-      }
-      ```
-
-      The wrapped Server Function's signature must be `(prevState, formData) => nextState`. Important caveat from the React docs (verified 2026-05-06): if your reducer action throws, React **skips all subsequently queued dispatches**. Catch errors inside the action and return an error state instead of throwing:
-
-      ```ts
-      export async function createPost(prevState: State, formData: FormData): Promise<State> {
+    ```tsx
+    // app/posts/page.tsx
+    export default function NewPostPage() {
+      async function createPost(formData: FormData) {
         'use server'
-        try {
-          // ...
-          return { ok: true }
-        } catch (err) {
-          return { error: err instanceof Error ? err.message : 'Unknown' }
-        }
+        // ...
       }
-      ```
+      return <form action={createPost}>...</form>
+    }
+    ```
 
-      ## `useFormStatus` for child submit buttons
+    Per the upstream `'use server'` reference (verified 2026-05-06): the directive must be at the top of the file or as the first statement of the function, single or double quotes, comments above are allowed, only `async` functions may be marked.
+- sequence: 4
+  fragment_type: example
+  content: |
+    ## Calling a Server Action from a form
 
-      `useFormStatus` (from `react-dom`) lets a child component inside a `<form>` read the form's submission status without the parent passing `isPending` down:
+    React extends `<form>` so that `action={fn}` accepts a Server Function directly. When the form submits, React serializes the `FormData` and calls the Server Function on the server inside an automatic Transition. `<button formAction={fn}>` overrides the form's action for that button — useful for forms with multiple submit buttons (Save, Save and Continue, Delete).
 
-      ```tsx
-      'use client'
-      import { useFormStatus } from 'react-dom'
+    ```tsx
+    // app/posts/NewPost.tsx
+    import { createPost } from '@/app/lib/actions'
 
-      export function SubmitButton() {
-        const { pending } = useFormStatus()
-        return <button disabled={pending}>{pending ? 'Saving...' : 'Save'}</button>
-      }
-      ```
+    export default function NewPost() {
+      return (
+        <form action={createPost}>
+          <input name="title" required />
+          <button type="submit">Create</button>
+        </form>
+      )
+    }
+    ```
 
-      Per the upstream caveats: the Hook returns status only for the **parent** `<form>`, and only when called from a component **rendered inside** that form. A button rendered as a sibling of `<form>`, or the form's own component, will always see `pending: false`.
+    Reading form data: `formData.get('title')` returns `FormDataEntryValue | null` — a union of `string | File | null`. **Always narrow before use** in TypeScript:
 
-  - sequence: 6
-    fragment_type: execution
-    content: |
-      ## Revalidating cache after a mutation
+    ```ts
+    const title = formData.get('title')
+    if (typeof title !== 'string') throw new Error('Invalid title')
+    // title is string here
+    ```
 
-      The Next.js cache survives across requests; after a write you must invalidate it or the UI shows stale data. Two functions in `next/cache`:
+    For multi-field forms, `Object.fromEntries(formData)` collapses the entries to an object — note it includes extra `$ACTION_*` keys that React injects for RPC bookkeeping; strip or ignore them before validation.
+- sequence: 5
+  fragment_type: example
+  content: |
+    ## Passing extra arguments via `.bind`
 
-      ```ts
-      import { revalidatePath, revalidateTag } from 'next/cache'
+    A form action only receives `formData`. To pass an extra argument from a client component (e.g. an entity id), use `Function.prototype.bind`:
 
-      revalidatePath('/posts')              // path-based
-      revalidatePath('/posts/[slug]', 'page') // dynamic segment requires type
-      revalidateTag('posts', 'max')         // tag-based, with cacheLife profile
-      ```
+    ```tsx
+    // app/posts/DeleteButton.tsx
+    'use client'
+    import { deletePost } from '@/app/lib/actions'
 
-      Path-based: `revalidatePath(path, type?)` invalidates a literal path or a dynamic route pattern; the `type` parameter (`'page' | 'layout'`) is required for dynamic segments. Tag-based: `revalidateTag(tag, profile)` invalidates any cached `fetch(..., { next: { tags: ['posts'] } })` or `'use cache'` block tagged with that string. Per the Next.js 16.2.4 docs (verified 2026-05-06), the recommended `profile` is `'max'`, which marks data stale and serves stale-while-revalidate; calling `revalidateTag` without the profile argument is deprecated. Both functions can only be called from Server Functions and Route Handlers — calling them from a Client Component throws.
+    export function DeleteButton({ postId }: { postId: string }) {
+      const deletePostWithId = deletePost.bind(null, postId)
+      return (
+        <form action={deletePostWithId}>
+          <button>Delete</button>
+        </form>
+      )
+    }
+    ```
 
-      ## Redirecting after a mutation
+    The bound argument is sent encoded in the form payload. The Server Function signature becomes `(postId: string, formData: FormData)`. Per the Data Security guide, **this argument is still untrusted** — the client can mint any `postId` and POST to the action endpoint directly; authorize ownership inside the action body.
+- fragment_type: example
+  sequence: 6
+  content: |-
+    ## `useActionState` for return state and pending flag
 
-      `redirect` from `next/navigation` ends the current request and navigates the client. It works by **throwing a framework-handled control-flow exception**, which has a non-obvious consequence: `redirect` must be called **outside any `try/catch`** that could catch the throw. Inside a `try`, the catch swallows the redirect and the user stays on the page silently.
+    `useActionState` (React 19, December 2024) wraps a Server Action so its return value becomes component state and exposes a pending boolean:
 
-      ```ts
+    ```tsx
+    // app/posts/NewPost.tsx
+    'use client'
+    import { useActionState } from 'react'
+    import { createPost } from '@/app/lib/actions'
+
+    type State = { error?: string; ok?: boolean }
+    const initialState: State = {}
+
+    export default function NewPost() {
+      const [state, formAction, isPending] = useActionState(createPost, initialState)
+      return (
+        <form action={formAction}>
+          <input name="title" required />
+          <button disabled={isPending}>{isPending ? 'Saving...' : 'Create'}</button>
+          {state.error && <p role="alert">{state.error}</p>}
+        </form>
+      )
+    }
+    ```
+
+    The wrapped Server Function's signature must be `(prevState, formData) => nextState`. Important caveat from the React docs (verified 2026-05-06): if your reducer action throws, React **skips all subsequently queued dispatches**. Catch errors inside the action and return an error state instead of throwing:
+- fragment_type: example
+  sequence: 7
+  content: |-
+    ```ts
+    export async function createPost(prevState: State, formData: FormData): Promise<State> {
       'use server'
-      import { redirect } from 'next/navigation'
-      import { revalidatePath } from 'next/cache'
-
-      export async function createPost(formData: FormData) {
-        const session = await auth()
-        if (!session?.user) throw new Error('Unauthorized')
-
-        try {
-          await db.posts.create({ data: { /* ... */ } })
-        } catch (err) {
-          // handle DB error
-          return { error: 'Save failed' }
-        }
-        revalidatePath('/posts')
-        redirect('/posts') // OUTSIDE the try — must be reached without being caught
+      try {
+        // ...
+        return { ok: true }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'Unknown' }
       }
-      ```
+    }
+    ```
 
-      Order matters: revalidate before redirect, because `redirect` aborts execution.
+    ## `useFormStatus` for child submit buttons
 
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## Optimistic updates with `useOptimistic`
+    `useFormStatus` (from `react-dom`) lets a child component inside a `<form>` read the form's submission status without the parent passing `isPending` down:
 
-      `useOptimistic` (React 19) lets a client component render a provisional state immediately, then reconcile with the actual Server Action result on resolution. The optimistic state automatically rolls back if the action throws.
+    ```tsx
+    'use client'
+    import { useFormStatus } from 'react-dom'
 
-      ```tsx
-      'use client'
-      import { useOptimistic } from 'react'
-      import { send } from './actions'
+    export function SubmitButton() {
+      const { pending } = useFormStatus()
+      return <button disabled={pending}>{pending ? 'Saving...' : 'Save'}</button>
+    }
+    ```
 
-      type Message = { message: string }
+    Per the upstream caveats: the Hook returns status only for the **parent** `<form>`, and only when called from a component **rendered inside** that form. A button rendered as a sibling of `<form>`, or the form's own component, will always see `pending: false`.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ## Revalidating cache after a mutation
 
-      export function Thread({ messages }: { messages: Message[] }) {
-        const [optimisticMessages, addOptimisticMessage] = useOptimistic<Message[], string>(
-          messages,
-          (state, newMessage) => [...state, { message: newMessage }],
-        )
-        const formAction = async (formData: FormData) => {
-          const message = formData.get('message') as string
-          addOptimisticMessage(message)
-          await send(message)
-        }
-        return (
-          <form action={formAction}>
-            <input name="message" />
-            <button>Send</button>
-          </form>
-        )
+    The Next.js cache survives across requests; after a write you must invalidate it or the UI shows stale data. Two functions in `next/cache`:
+
+    ```ts
+    import { revalidatePath, revalidateTag } from 'next/cache'
+
+    revalidatePath('/posts')              // path-based
+    revalidatePath('/posts/[slug]', 'page') // dynamic segment requires type
+    revalidateTag('posts', 'max')         // tag-based, with cacheLife profile
+    ```
+
+    Path-based: `revalidatePath(path, type?)` invalidates a literal path or a dynamic route pattern; the `type` parameter (`'page' | 'layout'`) is required for dynamic segments. Tag-based: `revalidateTag(tag, profile)` invalidates any cached `fetch(..., { next: { tags: ['posts'] } })` or `'use cache'` block tagged with that string. Per the Next.js 16.2.4 docs (verified 2026-05-06), the recommended `profile` is `'max'`, which marks data stale and serves stale-while-revalidate; calling `revalidateTag` without the profile argument is deprecated. Both functions can only be called from Server Functions and Route Handlers — calling them from a Client Component throws.
+
+    ## Redirecting after a mutation
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    `redirect` from `next/navigation` ends the current request and navigates the client. It works by **throwing a framework-handled control-flow exception**, which has a non-obvious consequence: `redirect` must be called **outside any `try/catch`** that could catch the throw. Inside a `try`, the catch swallows the redirect and the user stays on the page silently.
+
+    ```ts
+    'use server'
+    import { redirect } from 'next/navigation'
+    import { revalidatePath } from 'next/cache'
+
+    export async function createPost(formData: FormData) {
+      const session = await auth()
+      if (!session?.user) throw new Error('Unauthorized')
+
+      try {
+        await db.posts.create({ data: { /* ... */ } })
+      } catch (err) {
+        // handle DB error
+        return { error: 'Save failed' }
       }
-      ```
+      revalidatePath('/posts')
+      redirect('/posts') // OUTSIDE the try — must be reached without being caught
+    }
+    ```
 
-      The provisional message renders on submit; if `send` throws, React rolls back to the prior `messages` prop. Pair with `useActionState` for explicit error display when rollback alone is not enough signal to the user.
+    Order matters: revalidate before redirect, because `redirect` aborts execution.
+- fragment_type: example
+  sequence: 10
+  content: |-
+    ## Optimistic updates with `useOptimistic`
 
-      ## Server-side validation
+    `useOptimistic` (React 19) lets a client component render a provisional state immediately, then reconcile with the actual Server Action result on resolution. The optimistic state automatically rolls back if the action throws.
 
-      Client-side validation is a UX optimization, not a security boundary. Because every Server Action is reachable as a direct POST, a client that bypasses the form (curl, fetch, a modified bundle) submits arbitrary `FormData`. Validate inside the action with a schema library — Zod, Valibot, or hand-written guards:
+    ```tsx
+    'use client'
+    import { useOptimistic } from 'react'
+    import { send } from './actions'
 
-      ```ts
-      'use server'
-      import { z } from 'zod'
+    type Message = { message: string }
 
-      const CreatePost = z.object({
-        title: z.string().min(1).max(200),
-        body: z.string().min(1),
-      })
-
-      export async function createPost(prevState: State, formData: FormData) {
-        const parsed = CreatePost.safeParse(Object.fromEntries(formData))
-        if (!parsed.success) {
-          return { error: parsed.error.flatten().fieldErrors }
-        }
-        // parsed.data is typed and trusted from here on
+    export function Thread({ messages }: { messages: Message[] }) {
+      const [optimisticMessages, addOptimisticMessage] = useOptimistic<Message[], string>(
+        messages,
+        (state, newMessage) => [...state, { message: newMessage }],
+      )
+      const formAction = async (formData: FormData) => {
+        const message = formData.get('message') as string
+        addOptimisticMessage(message)
+        await send(message)
       }
-      ```
+      return (
+        <form action={formAction}>
+          <input name="message" />
+          <button>Send</button>
+        </form>
+      )
+    }
+    ```
 
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## The security edge: a Server Action without authorization
+    The provisional message renders on submit; if `send` throws, React rolls back to the prior `messages` prop. Pair with `useActionState` for explicit error display when rollback alone is not enough signal to the user.
 
-      Walk this edge. You build an admin page that renders a "Delete all records" form. The page redirects non-admins to `/login` at the top, so you reason: only admins ever see the form, only admins can submit it, no auth check needed in the action. The Data Security guide is explicit that this reasoning is wrong (verified 2026-05-06):
+    ## Server-side validation
+- fragment_type: example
+  sequence: 11
+  content: |-
+    Client-side validation is a UX optimization, not a security boundary. Because every Server Action is reachable as a direct POST, a client that bypasses the form (curl, fetch, a modified bundle) submits arbitrary `FormData`. Validate inside the action with a schema library — Zod, Valibot, or hand-written guards:
 
-      ```ts
-      // app/admin/actions.ts — VULNERABLE
-      'use server'
-      export async function deleteAllRecords() {
-        await db.record.deleteMany() // NO AUTH CHECK
+    ```ts
+    'use server'
+    import { z } from 'zod'
+
+    const CreatePost = z.object({
+      title: z.string().min(1).max(200),
+      body: z.string().min(1),
+    })
+
+    export async function createPost(prevState: State, formData: FormData) {
+      const parsed = CreatePost.safeParse(Object.fromEntries(formData))
+      if (!parsed.success) {
+        return { error: parsed.error.flatten().fieldErrors }
       }
-      ```
+      // parsed.data is typed and trusted from here on
+    }
+    ```
+- sequence: 12
+  fragment_type: example
+  content: |
+    ## The security edge: a Server Action without authorization
 
-      An attacker discovers the action ID by inspecting any page that imports it (the framework emits a stable hashed reference into the client bundle), then POSTs directly to the action endpoint with the action header — no UI, no admin page render. The mutation runs. The fix: every Server Action authenticates and authorizes inside its body:
+    Walk this edge. You build an admin page that renders a "Delete all records" form. The page redirects non-admins to `/login` at the top, so you reason: only admins ever see the form, only admins can submit it, no auth check needed in the action. The Data Security guide is explicit that this reasoning is wrong (verified 2026-05-06):
 
-      ```ts
-      'use server'
-      import { auth } from '@/lib/auth'
-      export async function deleteAllRecords() {
-        const session = await auth()
-        if (!session?.user?.isAdmin) throw new Error('Unauthorized')
-        await db.record.deleteMany()
-      }
-      ```
+    ```ts
+    // app/admin/actions.ts — VULNERABLE
+    'use server'
+    export async function deleteAllRecords() {
+      await db.record.deleteMany() // NO AUTH CHECK
+    }
+    ```
 
-      Beyond authentication (is the user logged in?) check **authorization** (does this user have permission for this specific resource?) — the IDOR class. `deletePost(postId)` must verify `post.userId === session.user.id` before deleting, not just that the caller is logged in.
+    An attacker discovers the action ID by inspecting any page that imports it (the framework emits a stable hashed reference into the client bundle), then POSTs directly to the action endpoint with the action header — no UI, no admin page render. The mutation runs. The fix: every Server Action authenticates and authorizes inside its body:
 
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
+    ```ts
+    'use server'
+    import { auth } from '@/lib/auth'
+    export async function deleteAllRecords() {
+      const session = await auth()
+      if (!session?.user?.isAdmin) throw new Error('Unauthorized')
+      await db.record.deleteMany()
+    }
+    ```
 
-      - **Skipping authz "because the client cannot call it."** It can — every Server Action is a public POST endpoint reachable by direct request, regardless of which page renders the form. The page-level auth check on the rendering route does not extend to the action.
-      - **Not revalidating after a mutation.** The Next.js cache serves stale data until invalidated; users see their write succeed but the list page still shows the old rows. Call `revalidatePath` or `revalidateTag` before returning (or before `redirect`).
-      - **Calling `redirect` inside `try/catch`.** `redirect` works by throwing a framework-handled exception. A surrounding `catch` swallows the throw and the navigation never happens. Place `redirect` outside any `try` block.
-      - **Putting the only authorization check in the page that renders the form.** A page-level redirect controls UI rendering, not the Server Action's reachability. Authorize inside the action body.
-      - **`'use server'` at the top of a file that exports types or constants.** Type-only exports (`type`, `interface`) are erased and safe, but every async function export becomes network-callable. Helpers, factories, and inadvertently-exported async values become Server Functions and leak. Keep `actions.ts` narrow.
-      - **Reading `formData.get('field')` without null-narrowing in TypeScript.** The return type is `FormDataEntryValue | null` (`string | File | null`). Treating it as `string` directly compiles only with `as string` casts that hide bugs at runtime when the field is missing or is a file upload.
-      - **Throwing from a `useActionState` reducer instead of returning an error state.** A throw causes React to skip subsequent queued dispatches. Catch inside the action and return `{ error }`.
-      - **Trusting client-side validation only.** Required fields, length checks, and type coercion in the browser are UX, not security. Re-validate inside the action with a schema library.
-      - **Calling `revalidatePath` or `revalidateTag` from a Client Component.** Both are server-only and throw if called from the client. Invoke them from inside the Server Action.
+    Beyond authentication (is the user logged in?) check **authorization** (does this user have permission for this specific resource?) — the IDOR class. `deletePost(postId)` must verify `post.userId === session.user.id` before deleting, not just that the caller is logged in.
+- fragment_type: guardrail
+  sequence: 13
+  content: '- **Skipping authz "because the client cannot call it."** It can — every Server Action is a public POST endpoint reachable by direct request, regardless of which page renders the form. The page-level auth check on the rendering route does not extend to the action. - **Not revalidating after a mutation.** The Next.js cache serves stale data until invalidated; users see their write succeed but the list page still shows the old rows. Call `revalidatePath` or `revalidateTag` before returning (or before `redirect`). - **Calling `redirect` inside `try/catch`.** `redirect` works by throwing a framework-handled exception. A surrounding `catch` swallows the throw and the navigation never happens. Place `redirect` outside any `try` block. - **Putting the only authorization check in the page that renders the form.** A page-level redirect controls UI rendering, not the Server Action''s reachability. Authorize inside the action body. - **`''use server''` at the top of a file that exports types or constants.** Type-only exports (`type`, `interface`) are erased and safe, but every async function export becomes network-callable. Helpers, factories, and inadvertently-exported async values become Server Functions and leak. Keep `actions.ts` narrow. - **Reading `formData.get(''field'')` without null-narrowing in TypeScript.** The return type is `FormDataEntryValue | null` (`string | File | null`).'
+- fragment_type: guardrail
+  sequence: 14
+  content: Treating it as `string` directly compiles only with `as string` casts that hide bugs at runtime when the field is missing or is a file upload. - **Throwing from a `useActionState` reducer instead of returning an error state.** A throw causes React to skip subsequent queued dispatches. Catch inside the action and return `{ error }`. - **Trusting client-side validation only.** Required fields, length checks, and type coercion in the browser are UX, not security. Re-validate inside the action with a schema library. - **Calling `revalidatePath` or `revalidateTag` from a Client Component.** Both are server-only and throw if called from the client. Invoke them from inside the Server Action.
+- fragment_type: verification
+  sequence: 15
+  content: '- [ ] Every `''use server''` file is in `app/lib/actions.ts` or similar narrow location, exporting only async functions. `grep -rn "^''use server''" app/ src/` and audit each file''s exports. - [ ] Every Server Action authenticates the caller. `grep -rnB1 "''use server''" app/ src/` and confirm each enclosing async function calls `auth()`, `requireSession()`, or your Data Access Layer equivalent. - [ ] Every mutating Server Action calls `revalidatePath` or `revalidateTag`. `grep -rln "''use server''" app/ src/ | xargs grep -L "revalidatePath\|revalidateTag"` should return no files (or only files that exclusively read). - [ ] No Server Action calls `redirect` inside a `try` block. `grep -rnB10 "redirect(" app/lib/ | grep -B10 "try {"` — manually audit any matches. - [ ] Every `formData.get(...)` call in a Server Action is followed by a `typeof === ''string''` narrow or schema parse. `grep -rn "formData.get(" app/ src/` and audit each. - [ ] Imports are correct: `grep -rn "from ''next/cache''" app/ src/` shows `revalidatePath`/`revalidateTag` only; `grep -rn "from ''next/navigation''" app/ src/` shows `redirect`; `grep -rn "from ''react''" app/ src/ | grep -E ''useActionState|useOptimistic''` and `grep -rn "from ''react-dom''" app/ src/ | grep useFormStatus`. - [ ] React version is 19+ in `package.json`. `node -e "console.log(require(''./package.json'').dependencies.react)"` returns a 19+ range.'
+- fragment_type: verification
+  sequence: 16
+  content: |-
+    - [ ] Next.js version is 16+ in `package.json`. `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range. - [ ] `revalidateTag` calls pass the `profile` argument (`'max'` or a custom cacheLife profile). `grep -rn "revalidateTag(" app/ src/` and confirm each call has two arguments — single-argument calls are deprecated in Next.js 16.2.4.
 
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] Every `'use server'` file is in `app/lib/actions.ts` or similar narrow location, exporting only async functions. `grep -rn "^'use server'" app/ src/` and audit each file's exports.
-      - [ ] Every Server Action authenticates the caller. `grep -rnB1 "'use server'" app/ src/` and confirm each enclosing async function calls `auth()`, `requireSession()`, or your Data Access Layer equivalent.
-      - [ ] Every mutating Server Action calls `revalidatePath` or `revalidateTag`. `grep -rln "'use server'" app/ src/ | xargs grep -L "revalidatePath\|revalidateTag"` should return no files (or only files that exclusively read).
-      - [ ] No Server Action calls `redirect` inside a `try` block. `grep -rnB10 "redirect(" app/lib/ | grep -B10 "try {"` — manually audit any matches.
-      - [ ] Every `formData.get(...)` call in a Server Action is followed by a `typeof === 'string'` narrow or schema parse. `grep -rn "formData.get(" app/ src/` and audit each.
-      - [ ] Imports are correct: `grep -rn "from 'next/cache'" app/ src/` shows `revalidatePath`/`revalidateTag` only; `grep -rn "from 'next/navigation'" app/ src/` shows `redirect`; `grep -rn "from 'react'" app/ src/ | grep -E 'useActionState|useOptimistic'` and `grep -rn "from 'react-dom'" app/ src/ | grep useFormStatus`.
-      - [ ] React version is 19+ in `package.json`. `node -e "console.log(require('./package.json').dependencies.react)"` returns a 19+ range.
-      - [ ] Next.js version is 16+ in `package.json`. `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range.
-      - [ ] `revalidateTag` calls pass the `profile` argument (`'max'` or a custom cacheLife profile). `grep -rn "revalidateTag(" app/ src/` and confirm each call has two arguments — single-argument calls are deprecated in Next.js 16.2.4.
-
-      ## Verified
-
-      - Server Actions / Server Functions stable in Next.js App Router; React 19 `useActionState` and `useOptimistic` shipped December 2024 (verified 2026-05-06).
-      - `revalidatePath` and `revalidateTag` stable in `next/cache`; `revalidateTag` single-argument form deprecated in Next.js 16.2.4 in favor of explicit `profile` (verified 2026-05-06 against nextjs.org/docs/app/api-reference/functions/revalidateTag).
-      - `redirect` from `next/navigation` works by throwing a framework-handled control-flow exception; must be called outside `try/catch` (verified 2026-05-06 against nextjs.org/docs/app/getting-started/mutating-data).
-      - Every Server Action is a network-reachable POST endpoint; page-level auth does not extend to the action (verified 2026-05-06 against nextjs.org/docs/app/guides/data-security).
-      - `useFormStatus` returns status only for the parent `<form>` and only when called from a component rendered inside it (verified 2026-05-06 against react.dev/reference/react-dom/hooks/useFormStatus).
-      - `useActionState` reducer throws cause React to skip subsequently queued dispatches; catch inside and return error state (verified 2026-05-06 against react.dev/reference/react/useActionState).
+    ## Verified
+- fragment_type: verification
+  sequence: 17
+  content: |-
+    - Server Actions / Server Functions stable in Next.js App Router; React 19 `useActionState` and `useOptimistic` shipped December 2024 (verified 2026-05-06).
+    - `revalidatePath` and `revalidateTag` stable in `next/cache`; `revalidateTag` single-argument form deprecated in Next.js 16.2.4 in favor of explicit `profile` (verified 2026-05-06 against nextjs.org/docs/app/api-reference/functions/revalidateTag).
+    - `redirect` from `next/navigation` works by throwing a framework-handled control-flow exception; must be called outside `try/catch` (verified 2026-05-06 against nextjs.org/docs/app/getting-started/mutating-data).
+    - Every Server Action is a network-reachable POST endpoint; page-level auth does not extend to the action (verified 2026-05-06 against nextjs.org/docs/app/guides/data-security).
+    - `useFormStatus` returns status only for the parent `<form>` and only when called from a component rendered inside it (verified 2026-05-06 against react.dev/reference/react-dom/hooks/useFormStatus).
+    - `useActionState` reducer throws cause React to skip subsequently queued dispatches; catch inside and return error state (verified 2026-05-06 against react.dev/reference/react/useActionState).

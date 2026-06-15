@@ -1,11 +1,11 @@
 name: analytics
-version: 1.0.3
+version: 1.0.4
 tier: domain
 description: |
   Analytics + observability patterns — product-analytics cohorts/sessions (PostHog reference), OpenTelemetry distributed tracing, and OTel metrics + logs. Precision-favored domain tier; sourced from posthog.com/llms.txt indexed pages and open-telemetry.io/docs concepts per R1 tier-2/tier-3 procedures.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -18,7 +18,7 @@ skills:
   fragment_count: 11
 - skill_id: analytics-otel-metrics-and-logs
   file: analytics-otel-metrics-and-logs.yaml
-  fragment_count: 13
+  fragment_count: 17
 - skill_id: analytics-otel-traces
   file: analytics-otel-traces.yaml
   fragment_count: 10

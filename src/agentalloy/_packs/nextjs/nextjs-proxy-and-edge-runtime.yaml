@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: nextjs-proxy-and-edge-runtime
 canonical_name: Next.js 16 Proxy and Edge Runtime (proxy.ts, Matchers, NextResponse, NextRequest)
-description: "Intercept requests before they reach your app to rewrite URLs, redirect users, or modify headers and cookies using Next.js 16's proxy.ts file, which runs on the edge for fast, global request handling."
+description: Intercept requests before they reach your app to rewrite URLs, redirect users, or modify headers and cookies using Next.js 16's proxy.ts file, which runs on the edge for fast, global request handling.
 category: engineering
 skill_class: domain
-domain_tags: [proxy-matcher-config, nextresponse-rewrite-redirect, cookie-header-mutation, edge-runtime-constraints, optimistic-permission-check, nextjs]
+domain_tags:
+- proxy-matcher-config
+- nextresponse-rewrite-redirect
+- cookie-header-mutation
+- edge-runtime-constraints
+- optimistic-permission-check
+- nextjs
 related:
 - nextjs-app-router-routing
 - nextjs-csp-and-security-headers
 - nextjs-redirects-and-rewrites
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — Proxy getting started https://nextjs.org/docs/app/getting-started/proxy, proxy.js file convention https://nextjs.org/docs/app/api-reference/file-conventions/proxy, NextResponse https://nextjs.org/docs/app/api-reference/functions/next-response, NextRequest https://nextjs.org/docs/app/api-reference/functions/next-request, Edge Runtime https://nextjs.org/docs/app/api-reference/edge (all verified 2026-05-06 against fixtures/upstream/registry.yaml entry nextjs via tier-2 llms_url procedure; Next.js 16.2.4). Next.js 16 (October 2025) renamed the Middleware file convention to Proxy — the file is now `proxy.ts` (or `.js`), located at the project root or under `src/` at the same level as `app/`. Functionality is unchanged from Middleware; the rename is a clarification (the docs explicitly note that "middleware" was confusing because of Express.js connotations). Skill scope — the proxy file convention, the single-file rule with module composition, the named-or-default `proxy` export, the `config.matcher` shape (string, array, regex, or object with `source` / `has` / `missing` / `locale`), `NextResponse` (`.redirect`, `.rewrite`, `.next`, `.json`, `.cookies.{get,set,delete}`, `.headers.{get,set,delete}`), `NextRequest` (`.cookies`, `.nextUrl`, `.geo`, `.ip`), the Edge Runtime constraints under which Proxy executes (Web Standard APIs only, no `fs` / `path` / `child_process`, no `eval`, no dynamic `require`, ES modules only, `node_modules` allowed only if pure-ESM and Node-API-free), and the security caveat that Proxy is for optimistic permission checks not full session/authorization. Walks the boundary edge — a `proxy.ts` that does a slow auth-server roundtrip on every request becomes a tail-latency disaster and is explicitly out of scope per upstream guidance ("Proxy is not intended for slow data fetching ... should not be used as a full session management or authorization solution"). Out of scope — Server Actions, Route Handlers (covered by `nextjs-app-router-routing`), the Cache Components system (`fetch` cache options have no effect inside Proxy), and deployment-platform-specific edge details. Honest framing per R6 — Edge Runtime has been stable since Next.js 12 (October 2021); the Middleware → Proxy rename landed in Next.js 16.0 (October 2025); current release Next.js 16.2.4. Migration path — `npx @next/codemod@canary middleware-to-proxy .` renames `middleware.ts` → `proxy.ts` and the exported function `middleware` → `proxy`; imports (`NextRequest`, `NextResponse` from `next/server`) are unchanged. Original authoring scaffolded against the cited upstream pages — not a verbatim import.
-
 raw_prose: |
   # Next.js 16 Proxy and Edge Runtime
 
@@ -184,202 +190,176 @@ raw_prose: |
   - "`fetch` with `options.cache`, `options.next.revalidate`, or `options.next.tags`, has no effect in Proxy" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06).
   - "Proxy ... should not be used as a full session management or authorization solution" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06).
   - Edge Runtime stable since Next.js 12 (October 2021); Proxy rename landed in Next.js 16.0 (October 2025); current release Next.js 16.2.4 per `nextjs.org/docs-index` (verified 2026-05-06).
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Next.js 16 Proxy and Edge Runtime
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Next.js 16 Proxy and Edge Runtime
 
-      Next.js 16 (October 2025) renamed the **Middleware** file convention to **Proxy**. The file is now `proxy.ts` (or `.js`), placed at the project root — or inside `src/` if you use that layout — at the same level as `app/` or `pages/`. Functionality is unchanged from Middleware; the rename clarifies intent. The upstream docs are explicit: the term "middleware" was confused with Express.js middleware and encouraged misuse. Proxy is for header rewrites, A/B-test rewrites to alternate pages, and programmatic redirects based on the incoming request — not for slow data fetching, not for full session management, and not as an authorization solution. This skill covers the file convention, the matcher API, `NextResponse` and `NextRequest`, the Edge Runtime that Proxy runs on, and the operational guardrails around what does and does not work in that runtime.
+    Next.js 16 (October 2025) renamed the **Middleware** file convention to **Proxy**. The file is now `proxy.ts` (or `.js`), placed at the project root — or inside `src/` if you use that layout — at the same level as `app/` or `pages/`. Functionality is unchanged from Middleware; the rename clarifies intent. The upstream docs are explicit: the term "middleware" was confused with Express.js middleware and encouraged misuse. Proxy is for header rewrites, A/B-test rewrites to alternate pages, and programmatic redirects based on the incoming request — not for slow data fetching, not for full session management, and not as an authorization solution. This skill covers the file convention, the matcher API, `NextResponse` and `NextRequest`, the Edge Runtime that Proxy runs on, and the operational guardrails around what does and does not work in that runtime.
+- sequence: 2
+  fragment_type: setup
+  content: |
+    ## File convention — one `proxy.ts`, multiple modules
 
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## File convention — one `proxy.ts`, multiple modules
+    Create a single `proxy.ts` (or `.js`) at the project root or under `src/`. Only one Proxy file is supported per project. You can still organize logic into modules — split request shaping, header injection, A/B routing, and optimistic auth into separate `.ts` files and import them into `proxy.ts`. The single-file constraint exists so the framework can compile the Proxy bundle once and ship it to the edge tier without merging multiple proxy layers.
 
-      Create a single `proxy.ts` (or `.js`) at the project root or under `src/`. Only one Proxy file is supported per project. You can still organize logic into modules — split request shaping, header injection, A/B routing, and optimistic auth into separate `.ts` files and import them into `proxy.ts`. The single-file constraint exists so the framework can compile the Proxy bundle once and ship it to the edge tier without merging multiple proxy layers.
+    The file must export a single Proxy function — either a default export, or a named export called `proxy`. The function receives a `NextRequest`, can be `async`, and returns a `NextResponse` (or `void` / no return value to let the request continue). Imports are unchanged from the Middleware era: `import { NextResponse } from 'next/server'` and `import type { NextRequest } from 'next/server'`.
 
-      The file must export a single Proxy function — either a default export, or a named export called `proxy`. The function receives a `NextRequest`, can be `async`, and returns a `NextResponse` (or `void` / no return value to let the request continue). Imports are unchanged from the Middleware era: `import { NextResponse } from 'next/server'` and `import type { NextRequest } from 'next/server'`.
+    ```ts
+    // proxy.ts
+    import { NextResponse } from 'next/server';
+    import type { NextRequest } from 'next/server';
 
-      ```ts
-      // proxy.ts
-      import { NextResponse } from 'next/server';
-      import type { NextRequest } from 'next/server';
+    export function proxy(request: NextRequest) {
+      return NextResponse.redirect(new URL('/home', request.url));
+    }
 
-      export function proxy(request: NextRequest) {
-        return NextResponse.redirect(new URL('/home', request.url));
+    export const config = {
+      matcher: '/about/:path*',
+    };
+    ```
+- sequence: 3
+  fragment_type: execution
+  content: |
+    ## Migration from Next.js 15 — `middleware.ts` → `proxy.ts`
+
+    If you are upgrading from Next.js 15 or earlier, the migration is mechanical. The function signature and the `next/server` imports are unchanged — only the filename and the exported function name change.
+
+    ```bash
+    npx @next/codemod@canary middleware-to-proxy .
+    ```
+
+    The codemod renames `middleware.ts` → `proxy.ts` and the exported `middleware` → `proxy`. After running it, search the repo for stragglers (vendored examples, comments, READMEs that still say "middleware") — the codemod only touches the convention file. The `middleware` filename still works for one release as a deprecation alias, but new code should use `proxy.ts`.
+- sequence: 4
+  fragment_type: example
+  content: |
+    ## Matchers — filter the path before Proxy runs
+
+    Without a matcher, Proxy runs on **every** request — including static assets, prefetches, and image-optimization URLs. Always declare `config.matcher` to scope it. The matcher accepts:
+
+    - **A single path string**: `matcher: '/about'`
+    - **An array of path strings**: `matcher: ['/about/:path*', '/dashboard/:path*']`
+    - **A regex-shaped string** for negative lookahead exclusion: `matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)']`
+    - **An array of objects** with `source`, optional `has` (require headers/cookies/query), optional `missing` (forbid headers/cookies/query), and optional `locale`:
+
+    ```ts
+    export const config = {
+      matcher: [
+        {
+          source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
+          missing: [
+            { type: 'header', key: 'next-router-prefetch' },
+            { type: 'header', key: 'purpose', value: 'prefetch' },
+          ],
+        },
+      ],
+    };
+    ```
+
+    The object form is how you exclude prefetches — without the `missing` clause above, Proxy fires on every visible `<Link>` prefetch. Path matching uses path-to-regexp syntax (`:path*`, `:slug`) and full regex syntax inside the negative-lookahead form.
+- sequence: 5
+  fragment_type: example
+  content: |
+    ## `NextResponse` — produce a response
+
+    `NextResponse` (from `next/server`) extends the Web `Response` API with redirect, rewrite, header, and cookie helpers. The four primary constructors are:
+
+    - `NextResponse.next()` — continue to the matched route, optionally with mutated request/response headers.
+    - `NextResponse.redirect(url, status?)` — 307/308 redirect to `url`.
+    - `NextResponse.rewrite(url)` — internally render a different URL while keeping the original public URL (A/B tests, experiments).
+    - `NextResponse.json(body, init?)` — short-circuit and return a JSON response from Proxy.
+
+    Cookie and header helpers live on the response object: `response.cookies.set(name, value)`, `response.cookies.delete(name)`, `response.headers.set('x-foo', 'bar')`. Cookies on the **request** are read with `request.cookies.get('name')` and `request.cookies.has('name')`.
+
+    ```ts
+    import { NextResponse } from 'next/server';
+    import type { NextRequest } from 'next/server';
+
+    export function proxy(request: NextRequest) {
+      const response = NextResponse.next();
+      response.cookies.set('vercel', 'fast');
+      response.headers.set('x-experiment', 'A');
+      return response;
+    }
+    ```
+- sequence: 6
+  fragment_type: rationale
+  content: |
+    ## `NextRequest` — read the incoming request
+
+    `NextRequest` extends the Web `Request` with:
+
+    - `request.cookies` — `RequestCookies` API (`get`, `getAll`, `has`, `set`, `delete`, `clear`).
+    - `request.nextUrl` — a parsed, **mutable** `URL` you can edit before passing into `NextResponse.rewrite()`.
+    - `request.geo` — `{ country, region, city, latitude, longitude }` populated by the deployment platform. Not all hosts populate every field — guard before reading.
+    - `request.ip` — the client IP, again populated by the deployment platform.
+
+    `request.url` is the raw URL string; `request.nextUrl` is the parsed equivalent and is what you mutate when computing rewrites.
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## Edge Runtime — what Proxy can and cannot do
+
+    Proxy runs on the **Edge Runtime** by default. Edge is a V8-based isolate environment with the Web Standard API surface — `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `fetch`, `crypto`, `TextEncoder`/`TextDecoder`, `ReadableStream`, `WebSocket`, `atob`/`btoa`. It is NOT Node.js. The trade-off is sub-millisecond cold-starts and globally-distributed execution, at the cost of a smaller standard library and a bundle-size budget.
+
+    Unsupported in the Edge Runtime:
+
+    - **Native Node.js APIs.** No `fs`, no `path`, no `child_process`, no `net`, no `crypto` from `node:crypto` (use the Web `crypto` global instead).
+    - **`require()`.** ES Modules only. `node_modules` packages are usable only if they ship ESM and avoid native Node APIs.
+    - **Dynamic code evaluation.** `eval`, `new Function(string)`, and dynamic `WebAssembly.compile` are disabled. If a transitive dependency contains an unreachable `eval`, you can whitelist it with `unstable_allowDynamic: ['/lib/utilities.js']` in the Proxy config.
+    - **Incremental Static Regeneration.** ISR is a Node-runtime feature.
+    - **`fetch` cache options.** `fetch(url, { cache, next: { revalidate, tags } })` has **no effect** inside Proxy. The Cache Components system runs in the rendering tier, not in the Proxy tier.
+
+    Proxy code that imports `fs` or `child_process` will fail at build time with an Edge Runtime error. Move that work to a Server Component, a Route Handler, or a Server Action — not to Proxy.
+- sequence: 8
+  fragment_type: example
+  content: |
+    ## Optimistic permission checks — what Proxy is good for
+
+    The upstream docs are explicit about the boundary: "Proxy can be helpful for **optimistic checks** such as permission-based redirects, but it should not be used as a full session management or authorization solution." Read the cookie, decide a fast yes/no, redirect unauthenticated users to `/login`, and re-validate the session inside the page or Server Action. Do not trust the Proxy decision alone — it is a UX-level filter, not a security boundary.
+
+    ```ts
+    import { NextResponse } from 'next/server';
+    import type { NextRequest } from 'next/server';
+
+    export function proxy(request: NextRequest) {
+      const session = request.cookies.get('session')?.value;
+      if (!session && request.nextUrl.pathname.startsWith('/dashboard')) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/login';
+        return NextResponse.redirect(url);
       }
+      return NextResponse.next();
+    }
 
-      export const config = {
-        matcher: '/about/:path*',
-      };
-      ```
+    export const config = {
+      matcher: ['/dashboard/:path*'],
+    };
+    ```
 
-  - sequence: 3
-    fragment_type: execution
-    content: |
-      ## Migration from Next.js 15 — `middleware.ts` → `proxy.ts`
+    The session cookie is read but not validated against the auth server in Proxy — that validation happens in the page (`await auth()` at the top of the Server Component) and in every Server Action. The Proxy redirect saves a render for the obvious unauthenticated case; it does not authorize.
+- fragment_type: guardrail
+  sequence: 9
+  content: |-
+    ## Anti-patterns
 
-      If you are upgrading from Next.js 15 or earlier, the migration is mechanical. The function signature and the `next/server` imports are unchanged — only the filename and the exported function name change.
+    - **Full session validation inside Proxy.** A `fetch` to your auth server on every request blocks every request behind one network roundtrip. The docs explicitly warn against this. Validate in the page/Server Action; use Proxy only for the optimistic redirect on a missing-or-malformed cookie. - **Long-running async work.** Every request waits on Proxy. Anything taking more than a few milliseconds belongs downstream — in a Route Handler, a Server Component, or a background job. Proxy is on the request-blocking critical path. - **Using `fetch` with `next.revalidate` / `next.tags` / `cache` inside Proxy.** Has no effect. The Cache Components system does not extend into the Proxy tier. If you need cached data in Proxy, cache at the edge platform level or accept the per-request hit. - **Multiple proxy files.** Next.js enforces a single `proxy.ts`. Split logic into modules and import them; do not try to register a second Proxy. - **Node-only APIs in Proxy.** `import fs from 'fs'`, `require('child_process')`, `node:crypto`, native bindings — all fail at build under Edge. Use the Web `crypto` global, ESM-only packages, and move file I/O downstream. - **No matcher.** A Proxy without `config.matcher` runs on every request including static assets, image optimization, and prefetches — measurable latency on every page.
+- fragment_type: guardrail
+  sequence: 10
+  content: 'Always declare a matcher; exclude `_next/static`, `_next/image`, `favicon.ico`, and prefetches via `missing: [{ type: ''header'', key: ''purpose'', value: ''prefetch'' }]`. - **Assuming `request.geo` is populated.** Geo fields depend on the deployment platform. Self-hosted Node deployments without a geo-aware reverse proxy will see `request.geo` as `undefined` or empty. Always guard (`request.geo?.country ?? ''US''`) before branching on it. - **Treating Proxy as middleware-in-the-Express-sense.** There is no `next()` callback chain, no per-route registration, no ordered middleware stack. There is one function, one matcher, one return value. The rename to "Proxy" was specifically to break this mental model.'
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] Exactly one Proxy file exists. `find . -path ./node_modules -prune -o \( -name ''proxy.ts'' -o -name ''proxy.js'' \) -print | wc -l` returns 1 (or 0 if intentionally absent). - [ ] No legacy `middleware.ts` lingers after migration. `find . -path ./node_modules -prune -o \( -name ''middleware.ts'' -o -name ''middleware.js'' \) -print` returns no lines. - [ ] Proxy declares a matcher. `grep -nE ''export const config'' proxy.ts` returns at least one match, and `grep -nE ''matcher'' proxy.ts` returns at least one match. - [ ] No Node-only API is imported. `grep -nE "from [''\"](fs|path|child_process|net|node:)" proxy.ts` returns no lines, and `grep -nE "require\(" proxy.ts` returns no lines. - [ ] No dynamic code evaluation. `grep -nE "(^|[^a-zA-Z_])eval\(|new Function\(" proxy.ts` returns no lines. - [ ] No `fetch` with cache directives inside Proxy. `grep -nE "next:\s*\{[^}]*(revalidate|tags)" proxy.ts` and `grep -nE "cache:\s*[''\"]" proxy.ts` should return no lines (those options are silently ignored here). - [ ] Imports come from `next/server`. `grep -nE "from [''\"]next/server[''\"]" proxy.ts` returns at least one match for `NextResponse` and `NextRequest`. - [ ] `request.geo` reads are guarded. `grep -nE ''request\.geo\.'' proxy.ts` should be empty (use `request.geo?.country` optional chaining instead). - [ ] Build does not warn about Edge Runtime restrictions.'
+- fragment_type: verification
+  sequence: 12
+  content: |-
+    `pnpm next build 2>&1 | grep -iE 'edge runtime|unsupported.*api'` returns no lines. - [ ] Next.js version is 16.0.0 or later (so the Proxy convention and codemod are available). `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range.
 
-      ```bash
-      npx @next/codemod@canary middleware-to-proxy .
-      ```
-
-      The codemod renames `middleware.ts` → `proxy.ts` and the exported `middleware` → `proxy`. After running it, search the repo for stragglers (vendored examples, comments, READMEs that still say "middleware") — the codemod only touches the convention file. The `middleware` filename still works for one release as a deprecation alias, but new code should use `proxy.ts`.
-
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Matchers — filter the path before Proxy runs
-
-      Without a matcher, Proxy runs on **every** request — including static assets, prefetches, and image-optimization URLs. Always declare `config.matcher` to scope it. The matcher accepts:
-
-      - **A single path string**: `matcher: '/about'`
-      - **An array of path strings**: `matcher: ['/about/:path*', '/dashboard/:path*']`
-      - **A regex-shaped string** for negative lookahead exclusion: `matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)']`
-      - **An array of objects** with `source`, optional `has` (require headers/cookies/query), optional `missing` (forbid headers/cookies/query), and optional `locale`:
-
-      ```ts
-      export const config = {
-        matcher: [
-          {
-            source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
-            missing: [
-              { type: 'header', key: 'next-router-prefetch' },
-              { type: 'header', key: 'purpose', value: 'prefetch' },
-            ],
-          },
-        ],
-      };
-      ```
-
-      The object form is how you exclude prefetches — without the `missing` clause above, Proxy fires on every visible `<Link>` prefetch. Path matching uses path-to-regexp syntax (`:path*`, `:slug`) and full regex syntax inside the negative-lookahead form.
-
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## `NextResponse` — produce a response
-
-      `NextResponse` (from `next/server`) extends the Web `Response` API with redirect, rewrite, header, and cookie helpers. The four primary constructors are:
-
-      - `NextResponse.next()` — continue to the matched route, optionally with mutated request/response headers.
-      - `NextResponse.redirect(url, status?)` — 307/308 redirect to `url`.
-      - `NextResponse.rewrite(url)` — internally render a different URL while keeping the original public URL (A/B tests, experiments).
-      - `NextResponse.json(body, init?)` — short-circuit and return a JSON response from Proxy.
-
-      Cookie and header helpers live on the response object: `response.cookies.set(name, value)`, `response.cookies.delete(name)`, `response.headers.set('x-foo', 'bar')`. Cookies on the **request** are read with `request.cookies.get('name')` and `request.cookies.has('name')`.
-
-      ```ts
-      import { NextResponse } from 'next/server';
-      import type { NextRequest } from 'next/server';
-
-      export function proxy(request: NextRequest) {
-        const response = NextResponse.next();
-        response.cookies.set('vercel', 'fast');
-        response.headers.set('x-experiment', 'A');
-        return response;
-      }
-      ```
-
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## `NextRequest` — read the incoming request
-
-      `NextRequest` extends the Web `Request` with:
-
-      - `request.cookies` — `RequestCookies` API (`get`, `getAll`, `has`, `set`, `delete`, `clear`).
-      - `request.nextUrl` — a parsed, **mutable** `URL` you can edit before passing into `NextResponse.rewrite()`.
-      - `request.geo` — `{ country, region, city, latitude, longitude }` populated by the deployment platform. Not all hosts populate every field — guard before reading.
-      - `request.ip` — the client IP, again populated by the deployment platform.
-
-      `request.url` is the raw URL string; `request.nextUrl` is the parsed equivalent and is what you mutate when computing rewrites.
-
-  - sequence: 7
-    fragment_type: rationale
-    content: |
-      ## Edge Runtime — what Proxy can and cannot do
-
-      Proxy runs on the **Edge Runtime** by default. Edge is a V8-based isolate environment with the Web Standard API surface — `Request`, `Response`, `Headers`, `URL`, `URLSearchParams`, `fetch`, `crypto`, `TextEncoder`/`TextDecoder`, `ReadableStream`, `WebSocket`, `atob`/`btoa`. It is NOT Node.js. The trade-off is sub-millisecond cold-starts and globally-distributed execution, at the cost of a smaller standard library and a bundle-size budget.
-
-      Unsupported in the Edge Runtime:
-
-      - **Native Node.js APIs.** No `fs`, no `path`, no `child_process`, no `net`, no `crypto` from `node:crypto` (use the Web `crypto` global instead).
-      - **`require()`.** ES Modules only. `node_modules` packages are usable only if they ship ESM and avoid native Node APIs.
-      - **Dynamic code evaluation.** `eval`, `new Function(string)`, and dynamic `WebAssembly.compile` are disabled. If a transitive dependency contains an unreachable `eval`, you can whitelist it with `unstable_allowDynamic: ['/lib/utilities.js']` in the Proxy config.
-      - **Incremental Static Regeneration.** ISR is a Node-runtime feature.
-      - **`fetch` cache options.** `fetch(url, { cache, next: { revalidate, tags } })` has **no effect** inside Proxy. The Cache Components system runs in the rendering tier, not in the Proxy tier.
-
-      Proxy code that imports `fs` or `child_process` will fail at build time with an Edge Runtime error. Move that work to a Server Component, a Route Handler, or a Server Action — not to Proxy.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## Optimistic permission checks — what Proxy is good for
-
-      The upstream docs are explicit about the boundary: "Proxy can be helpful for **optimistic checks** such as permission-based redirects, but it should not be used as a full session management or authorization solution." Read the cookie, decide a fast yes/no, redirect unauthenticated users to `/login`, and re-validate the session inside the page or Server Action. Do not trust the Proxy decision alone — it is a UX-level filter, not a security boundary.
-
-      ```ts
-      import { NextResponse } from 'next/server';
-      import type { NextRequest } from 'next/server';
-
-      export function proxy(request: NextRequest) {
-        const session = request.cookies.get('session')?.value;
-        if (!session && request.nextUrl.pathname.startsWith('/dashboard')) {
-          const url = request.nextUrl.clone();
-          url.pathname = '/login';
-          return NextResponse.redirect(url);
-        }
-        return NextResponse.next();
-      }
-
-      export const config = {
-        matcher: ['/dashboard/:path*'],
-      };
-      ```
-
-      The session cookie is read but not validated against the auth server in Proxy — that validation happens in the page (`await auth()` at the top of the Server Component) and in every Server Action. The Proxy redirect saves a render for the obvious unauthenticated case; it does not authorize.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Full session validation inside Proxy.** A `fetch` to your auth server on every request blocks every request behind one network roundtrip. The docs explicitly warn against this. Validate in the page/Server Action; use Proxy only for the optimistic redirect on a missing-or-malformed cookie.
-      - **Long-running async work.** Every request waits on Proxy. Anything taking more than a few milliseconds belongs downstream — in a Route Handler, a Server Component, or a background job. Proxy is on the request-blocking critical path.
-      - **Using `fetch` with `next.revalidate` / `next.tags` / `cache` inside Proxy.** Has no effect. The Cache Components system does not extend into the Proxy tier. If you need cached data in Proxy, cache at the edge platform level or accept the per-request hit.
-      - **Multiple proxy files.** Next.js enforces a single `proxy.ts`. Split logic into modules and import them; do not try to register a second Proxy.
-      - **Node-only APIs in Proxy.** `import fs from 'fs'`, `require('child_process')`, `node:crypto`, native bindings — all fail at build under Edge. Use the Web `crypto` global, ESM-only packages, and move file I/O downstream.
-      - **No matcher.** A Proxy without `config.matcher` runs on every request including static assets, image optimization, and prefetches — measurable latency on every page. Always declare a matcher; exclude `_next/static`, `_next/image`, `favicon.ico`, and prefetches via `missing: [{ type: 'header', key: 'purpose', value: 'prefetch' }]`.
-      - **Assuming `request.geo` is populated.** Geo fields depend on the deployment platform. Self-hosted Node deployments without a geo-aware reverse proxy will see `request.geo` as `undefined` or empty. Always guard (`request.geo?.country ?? 'US'`) before branching on it.
-      - **Treating Proxy as middleware-in-the-Express-sense.** There is no `next()` callback chain, no per-route registration, no ordered middleware stack. There is one function, one matcher, one return value. The rename to "Proxy" was specifically to break this mental model.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] Exactly one Proxy file exists. `find . -path ./node_modules -prune -o \( -name 'proxy.ts' -o -name 'proxy.js' \) -print | wc -l` returns 1 (or 0 if intentionally absent).
-      - [ ] No legacy `middleware.ts` lingers after migration. `find . -path ./node_modules -prune -o \( -name 'middleware.ts' -o -name 'middleware.js' \) -print` returns no lines.
-      - [ ] Proxy declares a matcher. `grep -nE 'export const config' proxy.ts` returns at least one match, and `grep -nE 'matcher' proxy.ts` returns at least one match.
-      - [ ] No Node-only API is imported. `grep -nE "from ['\"](fs|path|child_process|net|node:)" proxy.ts` returns no lines, and `grep -nE "require\(" proxy.ts` returns no lines.
-      - [ ] No dynamic code evaluation. `grep -nE "(^|[^a-zA-Z_])eval\(|new Function\(" proxy.ts` returns no lines.
-      - [ ] No `fetch` with cache directives inside Proxy. `grep -nE "next:\s*\{[^}]*(revalidate|tags)" proxy.ts` and `grep -nE "cache:\s*['\"]" proxy.ts` should return no lines (those options are silently ignored here).
-      - [ ] Imports come from `next/server`. `grep -nE "from ['\"]next/server['\"]" proxy.ts` returns at least one match for `NextResponse` and `NextRequest`.
-      - [ ] `request.geo` reads are guarded. `grep -nE 'request\.geo\.' proxy.ts` should be empty (use `request.geo?.country` optional chaining instead).
-      - [ ] Build does not warn about Edge Runtime restrictions. `pnpm next build 2>&1 | grep -iE 'edge runtime|unsupported.*api'` returns no lines.
-      - [ ] Next.js version is 16.0.0 or later (so the Proxy convention and codemod are available). `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range.
-
-      ## Verified
-
-      - Middleware → Proxy rename and the `npx @next/codemod@canary middleware-to-proxy .` codemod per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Migration to Proxy" section (verified 2026-05-06).
-      - Single-Proxy-file constraint and module composition pattern per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Convention" section (verified 2026-05-06).
-      - Matcher accepting string, string array, regex with negative lookahead, and object array with `source` / `has` / `missing` / `locale` per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Matcher" section (verified 2026-05-06).
-      - `NextResponse` API (`redirect`, `rewrite`, `next`, `json`, `cookies`, `headers`) per `nextjs.org/docs/app/api-reference/functions/next-response` and the Proxy "NextResponse" section (verified 2026-05-06).
-      - `NextRequest` (`cookies`, `nextUrl`, `geo`, `ip`) per `nextjs.org/docs/app/api-reference/functions/next-request` (verified 2026-05-06).
-      - Edge Runtime API surface and unsupported APIs (no native Node APIs, no `require`, no `eval` / `new Function`, ISR unsupported) per `nextjs.org/docs/app/api-reference/edge` (verified 2026-05-06).
-      - "`fetch` with `options.cache`, `options.next.revalidate`, or `options.next.tags`, has no effect in Proxy" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06).
-      - "Proxy ... should not be used as a full session management or authorization solution" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06).
-      - Edge Runtime stable since Next.js 12 (October 2021); Proxy rename landed in Next.js 16.0 (October 2025); current release Next.js 16.2.4 per `nextjs.org/docs-index` (verified 2026-05-06).
+    ## Verified
+- fragment_type: verification
+  sequence: 13
+  content: '- Middleware → Proxy rename and the `npx @next/codemod@canary middleware-to-proxy .` codemod per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Migration to Proxy" section (verified 2026-05-06). - Single-Proxy-file constraint and module composition pattern per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Convention" section (verified 2026-05-06). - Matcher accepting string, string array, regex with negative lookahead, and object array with `source` / `has` / `missing` / `locale` per `nextjs.org/docs/app/api-reference/file-conventions/proxy` "Matcher" section (verified 2026-05-06). - `NextResponse` API (`redirect`, `rewrite`, `next`, `json`, `cookies`, `headers`) per `nextjs.org/docs/app/api-reference/functions/next-response` and the Proxy "NextResponse" section (verified 2026-05-06). - `NextRequest` (`cookies`, `nextUrl`, `geo`, `ip`) per `nextjs.org/docs/app/api-reference/functions/next-request` (verified 2026-05-06). - Edge Runtime API surface and unsupported APIs (no native Node APIs, no `require`, no `eval` / `new Function`, ISR unsupported) per `nextjs.org/docs/app/api-reference/edge` (verified 2026-05-06). - "`fetch` with `options.cache`, `options.next.revalidate`, or `options.next.tags`, has no effect in Proxy" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06). - "Proxy ...'
+- fragment_type: verification
+  sequence: 14
+  content: should not be used as a full session management or authorization solution" — verbatim from `nextjs.org/docs/app/getting-started/proxy` "Use cases" (verified 2026-05-06). - Edge Runtime stable since Next.js 12 (October 2021); Proxy rename landed in Next.js 16.0 (October 2025); current release Next.js 16.2.4 per `nextjs.org/docs-index` (verified 2026-05-06).

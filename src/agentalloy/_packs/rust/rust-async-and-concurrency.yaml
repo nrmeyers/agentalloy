@@ -1,10 +1,16 @@
 skill_type: domain
 skill_id: rust-async-and-concurrency
 canonical_name: Rust Async and Concurrency (Send/Sync, async/await, Threads, Channels, tokio Runtime)
-description: "Write fast, safe Rust code for servers and tools: use threads for CPU-heavy tasks and async/await with tokio for high-concurrency I/O, ensuring data safety across threads with Send and Sync traits."
+description: 'Write fast, safe Rust code for servers and tools: use threads for CPU-heavy tasks and async/await with tokio for high-concurrency I/O, ensuring data safety across threads with Send and Sync traits.'
 category: engineering
 skill_class: domain
-domain_tags: [send-sync-bounds, future-poll-model, mpsc-channel, runtime-selection, cancellation-safety, rust]
+domain_tags:
+- send-sync-bounds
+- future-poll-model
+- mpsc-channel
+- runtime-selection
+- cancellation-safety
+- rust
 requires:
 - rust-ownership-and-borrowing
 related:
@@ -12,12 +18,12 @@ related:
 - rust-cargo-and-features
 - rust-error-handling
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-05. Sources — std::thread https://doc.rust-lang.org/std/thread/index.html, std::sync https://doc.rust-lang.org/std/sync/index.html, await expression https://doc.rust-lang.org/reference/expressions/await-expr.html, std::future::Future https://doc.rust-lang.org/std/future/trait.Future.html, The Rust Programming Language ch16 https://doc.rust-lang.org/book/ch16-00-concurrency.html (all verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `concurrency_and_async`). Honest authorship note: per the curated yaml's known_gaps, Rust stdlib defines the `Future` trait and `async`/`await` syntax but ships no async runtime. tokio (https://docs.rs/tokio/1/tokio/, tokio 1.x line) is community-canonical for servers and is used here as the de facto runtime; smol and async-std exist but are not stdlib. tokio examples in this skill are scaffolded around stdlib semantics — original authoring, not a verbatim copy of upstream prose. Skill scope: `Send`/`Sync` auto-traits, `std::thread::spawn` with channel-based communication, the lazy `Future` poll model, tokio basics (`#[tokio::main]`, `tokio::spawn`, `tokio::sync::Mutex`, `tokio::sync::mpsc`, `tokio::select!`), cancellation safety, and the canonical "MutexGuard held across .await" deadlock. Out of scope: pinning internals beyond a brief note, lock-free programming, executor implementation.
-
 raw_prose: |
   # Rust Async and Concurrency
 
@@ -208,223 +214,210 @@ raw_prose: |
   - [ ] Blocking calls in async contexts go through `tokio::task::spawn_blocking`. `grep -nE '(std::thread::sleep|std::fs::|reqwest::blocking)' src/` returns no matches inside `async fn` bodies.
   - [ ] No `#[tokio::main]` function calls `Runtime::block_on` on another runtime; `grep -n 'block_on' src/` results are only in sync entry points.
   - [ ] Cargo.toml pins tokio to `tokio = { version = "1", features = [...] }` (verified against tokio 1.x line, 2026-05-05) with explicit features, not `features = ["full"]` in production.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Rust Async and Concurrency
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Rust Async and Concurrency
 
-      Rust's concurrency story has two layers. The first is the synchronous, OS-thread layer in `std::thread` plus the synchronization primitives in `std::sync`, governed at compile time by the `Send` and `Sync` auto-traits. The second is the asynchronous layer: `async fn`, `.await`, and the `Future` trait, which the standard library defines but does not execute — you choose a runtime crate (tokio is the de facto choice for network services). The rule is one sentence: pick threads when work is CPU-bound or coarsely parallel, pick async when you have many concurrent IO-bound tasks, never block a thread inside an async task, and never hold a `std::sync::MutexGuard` across an `.await`. Most production Rust async bugs are one of three things: a non-`Send` type smuggled into a multi-threaded runtime, a synchronous lock held across an await point that deadlocks the runtime, or a `tokio::select!` branch that drops a non-cancellation-safe future mid-operation.
+    Rust's concurrency story has two layers. The first is the synchronous, OS-thread layer in `std::thread` plus the synchronization primitives in `std::sync`, governed at compile time by the `Send` and `Sync` auto-traits. The second is the asynchronous layer: `async fn`, `.await`, and the `Future` trait, which the standard library defines but does not execute — you choose a runtime crate (tokio is the de facto choice for network services). The rule is one sentence: pick threads when work is CPU-bound or coarsely parallel, pick async when you have many concurrent IO-bound tasks, never block a thread inside an async task, and never hold a `std::sync::MutexGuard` across an `.await`. Most production Rust async bugs are one of three things: a non-`Send` type smuggled into a multi-threaded runtime, a synchronous lock held across an await point that deadlocks the runtime, or a `tokio::select!` branch that drops a non-cancellation-safe future mid-operation.
+- sequence: 2
+  fragment_type: rationale
+  content: |
+    ## `Send` and `Sync`: the compile-time concurrency contract
 
-  - sequence: 2
-    fragment_type: rationale
-    content: |
-      ## `Send` and `Sync`: the compile-time concurrency contract
+    `Send` and `Sync` are auto-traits the compiler implements for you when every field qualifies:
 
-      `Send` and `Sync` are auto-traits the compiler implements for you when every field qualifies:
+    - `T: Send` means `T` is safe to *transfer ownership of* to another thread. `String`, `Vec<T: Send>`, `Arc<T: Send + Sync>` are `Send`. `Rc<T>` is *not* `Send` — its reference count is non-atomic. Raw pointers `*const T` / `*mut T` are not `Send` by default. `RefCell<T>` is `Send` if `T: Send` but not `Sync`.
+    - `T: Sync` means `&T` is `Send` — i.e., the type is safe to *share* across threads via a reference. `Mutex<T: Send>` is `Sync`. `Cell<T>` and `RefCell<T>` are *not* `Sync` because they permit interior mutability without synchronization.
 
-      - `T: Send` means `T` is safe to *transfer ownership of* to another thread. `String`, `Vec<T: Send>`, `Arc<T: Send + Sync>` are `Send`. `Rc<T>` is *not* `Send` — its reference count is non-atomic. Raw pointers `*const T` / `*mut T` are not `Send` by default. `RefCell<T>` is `Send` if `T: Send` but not `Sync`.
-      - `T: Sync` means `&T` is `Send` — i.e., the type is safe to *share* across threads via a reference. `Mutex<T: Send>` is `Sync`. `Cell<T>` and `RefCell<T>` are *not* `Sync` because they permit interior mutability without synchronization.
+    `std::thread::spawn` requires its closure to be `Send + 'static`. `'static` rules out borrowed references that don't outlive the program; `Send` rules out thread-hostile types. tokio's multi-threaded runtime requires the same of every spawned task and every value held across an `.await` point. If you see a type error along the lines of "future cannot be sent between threads safely / within ... future, the trait `Send` is not implemented for `Rc<...>`", the diagnostic is telling you exactly where you reached for the wrong primitive.
+- fragment_type: example
+  sequence: 3
+  content: |-
+    ## Sync threads: `std::thread` and `std::sync::mpsc`
 
-      `std::thread::spawn` requires its closure to be `Send + 'static`. `'static` rules out borrowed references that don't outlive the program; `Send` rules out thread-hostile types. tokio's multi-threaded runtime requires the same of every spawned task and every value held across an `.await` point. If you see a type error along the lines of "future cannot be sent between threads safely / within ... future, the trait `Send` is not implemented for `Rc<...>`", the diagnostic is telling you exactly where you reached for the wrong primitive.
+    The stdlib's threading API is straightforward. `std::thread::spawn(|| { ... })` returns a `JoinHandle<T>`; call `.join()` to wait for the thread and recover its return value (or its panic). Communication is via channels in `std::sync::mpsc` (multi-producer, single-consumer):
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Sync threads: `std::thread` and `std::sync::mpsc`
+    ```rust
+    use std::sync::mpsc;
+    use std::thread;
 
-      The stdlib's threading API is straightforward. `std::thread::spawn(|| { ... })` returns a `JoinHandle<T>`; call `.join()` to wait for the thread and recover its return value (or its panic). Communication is via channels in `std::sync::mpsc` (multi-producer, single-consumer):
+    fn fan_out(items: Vec<u64>) -> Vec<u64> {
+        let (tx, rx) = mpsc::channel();
+        for item in items {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let result = expensive(item);
+                tx.send(result).expect("receiver dropped");
+            });
+        }
+        drop(tx); // drop the original so rx closes when workers finish
+        rx.iter().collect()
+    }
 
-      ```rust
-      use std::sync::mpsc;
-      use std::thread;
+    fn expensive(x: u64) -> u64 { x * x }
+    ```
+- fragment_type: example
+  sequence: 4
+  content: |-
+    Shared mutable state across threads uses `std::sync::{Arc, Mutex, RwLock}`. `Arc<T>` is the atomic-refcount pointer; `Mutex<T>` provides exclusive access via `lock()` returning a `MutexGuard<T>` that derefs to `&mut T`. `RwLock<T>` allows many readers or one writer. `Mutex` is poisoned if a thread panics while holding the guard — `lock()` returns `Result`, and you handle the poison case explicitly.
 
-      fn fan_out(items: Vec<u64>) -> Vec<u64> {
-          let (tx, rx) = mpsc::channel();
-          for item in items {
-              let tx = tx.clone();
-              thread::spawn(move || {
-                  let result = expensive(item);
-                  tx.send(result).expect("receiver dropped");
-              });
-          }
-          drop(tx); // drop the original so rx closes when workers finish
-          rx.iter().collect()
-      }
+    ```rust
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
-      fn expensive(x: u64) -> u64 { x * x }
-      ```
+    let state = Arc::new(Mutex::new(0u64));
+    let mut handles = Vec::new();
+    for _ in 0..8 {
+        let state = Arc::clone(&state);
+        handles.push(thread::spawn(move || {
+            let mut guard = state.lock().expect("poisoned");
+            *guard += 1;
+        }));
+    }
+    for h in handles { h.join().unwrap(); }
+    ```
+- sequence: 5
+  fragment_type: rationale
+  content: |
+    ## `async`/`await` and the `Future` trait
 
-      Shared mutable state across threads uses `std::sync::{Arc, Mutex, RwLock}`. `Arc<T>` is the atomic-refcount pointer; `Mutex<T>` provides exclusive access via `lock()` returning a `MutexGuard<T>` that derefs to `&mut T`. `RwLock<T>` allows many readers or one writer. `Mutex` is poisoned if a thread panics while holding the guard — `lock()` returns `Result`, and you handle the poison case explicitly.
+    `async fn foo() -> T` desugars to `fn foo() -> impl Future<Output = T>`. Calling it returns a future *that has done nothing*. Futures in Rust are lazy: no work happens until the future is polled by an executor, either by `.await` inside another async context or by being handed to `spawn`. This is unlike JavaScript promises (eager) or Go goroutines (started immediately). The mental model:
 
-      ```rust
-      use std::sync::{Arc, Mutex};
-      use std::thread;
+    ```rust
+    async fn fetch(id: u64) -> String { /* ... */ String::new() }
 
-      let state = Arc::new(Mutex::new(0u64));
-      let mut handles = Vec::new();
-      for _ in 0..8 {
-          let state = Arc::clone(&state);
-          handles.push(thread::spawn(move || {
-              let mut guard = state.lock().expect("poisoned");
-              *guard += 1;
-          }));
-      }
-      for h in handles { h.join().unwrap(); }
-      ```
+    // let fut = fetch(1);  // nothing runs yet
+    // let s = fut.await;   // now the executor drives it to completion
+    ```
 
-  - sequence: 4
-    fragment_type: rationale
-    content: |
-      ## `async`/`await` and the `Future` trait
+    The `Future` trait (https://doc.rust-lang.org/std/future/trait.Future.html, verified 2026-05-05) has one method: `poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>`. The `Pin` is there because async state machines may be self-referential (a local `&str` borrows from a `String` field in the same generated struct). You rarely write `poll` by hand — `async`/`await` generates the state machine for you. `async`/`await` syntax stabilized in Rust 1.39 (November 2019, verified 2026-05-05); the `Future` trait moved to stable in the same release.
+- sequence: 6
+  fragment_type: setup
+  content: |
+    ## The runtime gap and why tokio
 
-      `async fn foo() -> T` desugars to `fn foo() -> impl Future<Output = T>`. Calling it returns a future *that has done nothing*. Futures in Rust are lazy: no work happens until the future is polled by an executor, either by `.await` inside another async context or by being handed to `spawn`. This is unlike JavaScript promises (eager) or Go goroutines (started immediately). The mental model:
+    Stdlib defines `Future`, `async`/`await`, and `Pin`. It defines no executor. Per `fixtures/upstream/curated/rust.yaml` known_gaps: "No stdlib async runtime; tokio/async-std are required but not canonical." The community-canonical choice for network services is **tokio** (1.x line, https://docs.rs/tokio/1/tokio/, verified 2026-05-05). Alternatives: **smol** (small, embeddable), **async-std** (stdlib-shaped API; less actively developed than tokio). For libraries, prefer to write executor-agnostic code on top of `futures` traits where possible; for binaries, pick tokio unless you have a reason not to.
 
-      ```rust
-      async fn fetch(id: u64) -> String { /* ... */ String::new() }
+    Minimal tokio program:
 
-      // let fut = fetch(1);  // nothing runs yet
-      // let s = fut.await;   // now the executor drives it to completion
-      ```
+    ```rust
+    use tokio::time::{sleep, Duration};
 
-      The `Future` trait (https://doc.rust-lang.org/std/future/trait.Future.html, verified 2026-05-05) has one method: `poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>`. The `Pin` is there because async state machines may be self-referential (a local `&str` borrows from a `String` field in the same generated struct). You rarely write `poll` by hand — `async`/`await` generates the state machine for you. `async`/`await` syntax stabilized in Rust 1.39 (November 2019, verified 2026-05-05); the `Future` trait moved to stable in the same release.
+    #[tokio::main]
+    async fn main() {
+        let h = tokio::spawn(async {
+            sleep(Duration::from_millis(100)).await;
+            "done"
+        });
+        println!("{}", h.await.unwrap());
+    }
+    ```
 
-  - sequence: 5
-    fragment_type: setup
-    content: |
-      ## The runtime gap and why tokio
+    `#[tokio::main]` expands to building a `tokio::runtime::Runtime` and calling `block_on` on the async `main`. `tokio::spawn` returns a `JoinHandle<T>` analogous to `std::thread::JoinHandle`; awaiting it yields `Result<T, JoinError>` where `JoinError` distinguishes panic vs cancellation. The default runtime is multi-threaded, so spawned futures must be `Send + 'static`. Pin tokio in `Cargo.toml` as `tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }` and add only the features you use — `features = ["full"]` is fine for prototyping but pulls in the world.
+- sequence: 7
+  fragment_type: example
+  content: |
+    ## tokio sync primitives vs std
 
-      Stdlib defines `Future`, `async`/`await`, and `Pin`. It defines no executor. Per `fixtures/upstream/curated/rust.yaml` known_gaps: "No stdlib async runtime; tokio/async-std are required but not canonical." The community-canonical choice for network services is **tokio** (1.x line, https://docs.rs/tokio/1/tokio/, verified 2026-05-05). Alternatives: **smol** (small, embeddable), **async-std** (stdlib-shaped API; less actively developed than tokio). For libraries, prefer to write executor-agnostic code on top of `futures` traits where possible; for binaries, pick tokio unless you have a reason not to.
+    tokio ships its own `Mutex`, `RwLock`, and channels because the stdlib versions are not designed to be held across an await point. The split:
 
-      Minimal tokio program:
+    - **`std::sync::Mutex`** — blocks the OS thread when contended. *Never hold its guard across `.await`*: the guard is `!Send`, and even if it weren't, blocking the runtime thread to wait on the mutex is exactly what you must not do.
+    - **`tokio::sync::Mutex`** — async-aware. `.lock().await` yields the task instead of blocking the thread. Guard is `Send`. Use it specifically when a critical section must span an `.await`.
+    - **`tokio::sync::mpsc::channel(capacity)`** — bounded async channel. `send` is async and applies backpressure. Prefer over unbounded for production.
+    - **`tokio::sync::oneshot`** — single-value handoff, perfect for "task A computes, task B awaits the result."
+    - **`tokio::sync::broadcast` / `watch`** — fan-out and config-broadcast.
 
-      ```rust
-      use tokio::time::{sleep, Duration};
+    ```rust
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
-      #[tokio::main]
-      async fn main() {
-          let h = tokio::spawn(async {
-              sleep(Duration::from_millis(100)).await;
-              "done"
-          });
-          println!("{}", h.await.unwrap());
-      }
-      ```
+    async fn increment(state: Arc<Mutex<u64>>) {
+        let mut g = state.lock().await;
+        *g += 1;
+        // dropping g here is fine; we did not await with it held longer than needed
+    }
+    ```
 
-      `#[tokio::main]` expands to building a `tokio::runtime::Runtime` and calling `block_on` on the async `main`. `tokio::spawn` returns a `JoinHandle<T>` analogous to `std::thread::JoinHandle`; awaiting it yields `Result<T, JoinError>` where `JoinError` distinguishes panic vs cancellation. The default runtime is multi-threaded, so spawned futures must be `Send + 'static`. Pin tokio in `Cargo.toml` as `tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }` and add only the features you use — `features = ["full"]` is fine for prototyping but pulls in the world.
+    Heuristic: default to `std::sync::Mutex` unless the critical section *must* span an `.await`. The std mutex is faster and simpler. Switch to `tokio::sync::Mutex` only when the await is unavoidable — and even then, prefer message passing over `tokio::sync::mpsc` so a single task owns the data.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ## The "guard across await" deadlock — walked through
 
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## tokio sync primitives vs std
+    This is the single most common production async-Rust bug. Walk it:
 
-      tokio ships its own `Mutex`, `RwLock`, and channels because the stdlib versions are not designed to be held across an await point. The split:
+    ```rust
+    use std::sync::{Arc, Mutex};
 
-      - **`std::sync::Mutex`** — blocks the OS thread when contended. *Never hold its guard across `.await`*: the guard is `!Send`, and even if it weren't, blocking the runtime thread to wait on the mutex is exactly what you must not do.
-      - **`tokio::sync::Mutex`** — async-aware. `.lock().await` yields the task instead of blocking the thread. Guard is `Send`. Use it specifically when a critical section must span an `.await`.
-      - **`tokio::sync::mpsc::channel(capacity)`** — bounded async channel. `send` is async and applies backpressure. Prefer over unbounded for production.
-      - **`tokio::sync::oneshot`** — single-value handoff, perfect for "task A computes, task B awaits the result."
-      - **`tokio::sync::broadcast` / `watch`** — fan-out and config-broadcast.
+    async fn bad(state: Arc<Mutex<Vec<u64>>>, id: u64) {
+        let mut guard = state.lock().expect("poisoned");
+        guard.push(id);
+        // BAD: holding the std MutexGuard across .await
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        guard.push(id + 1);
+    }
+    ```
 
-      ```rust
-      use std::sync::Arc;
-      use tokio::sync::Mutex;
+    Why this is broken: `MutexGuard<Vec<u64>>` is `!Send`. On tokio's multi-threaded runtime, the future generated for `bad` is therefore `!Send`, and `tokio::spawn(bad(...))` will fail to compile with "future cannot be sent between threads safely." That is the *good* outcome — the compiler caught it. On a current-thread runtime (single-threaded), the compile passes but the runtime deadlocks: while the task is suspended at `.await`, the OS thread that holds the guard is blocked from running any *other* task that might also try to take the lock. A peer task on the same thread that the executor wakes and that needs the lock will block, and forward progress halts because the only thread that can release the guard is parked on the timer.
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    The fix is one of three:
 
-      async fn increment(state: Arc<Mutex<u64>>) {
-          let mut g = state.lock().await;
-          *g += 1;
-          // dropping g here is fine; we did not await with it held longer than needed
-      }
-      ```
+    1. Drop the guard before the await: `drop(guard);` after `push(id)`.
+    2. Restructure so the await is outside the critical section — read the value out, await, then re-acquire the lock to write back.
+    3. If the critical section truly spans the await, use `tokio::sync::Mutex` whose guard is `Send` and which yields cooperatively.
 
-      Heuristic: default to `std::sync::Mutex` unless the critical section *must* span an `.await`. The std mutex is faster and simpler. Switch to `tokio::sync::Mutex` only when the await is unavoidable — and even then, prefer message passing over `tokio::sync::mpsc` so a single task owns the data.
+    Clippy's `clippy::await_holding_lock` lint catches the std-mutex case at compile time when run with `-D`. Enable it in CI so the bug never lands.
+- sequence: 10
+  fragment_type: example
+  content: |
+    ## `tokio::select!` and cancellation safety
 
-  - sequence: 7
-    fragment_type: execution
-    content: |
-      ## The "guard across await" deadlock — walked through
+    `tokio::select!` races multiple futures and runs the branch that completes first; the others are *dropped*. Dropping a future cancels it: any work it had not yet finished is abandoned, and Rust's `Drop` runs for partially built locals. This is fine for *cancellation-safe* futures and dangerous for the rest.
 
-      This is the single most common production async-Rust bug. Walk it:
+    ```rust
+    use tokio::sync::mpsc;
+    use tokio::time::{sleep, Duration};
 
-      ```rust
-      use std::sync::{Arc, Mutex};
+    async fn worker(mut rx: mpsc::Receiver<u64>) {
+        loop {
+            tokio::select! {
+                maybe_msg = rx.recv() => {
+                    match maybe_msg {
+                        Some(m) => handle(m).await,
+                        None => return, // channel closed
+                    }
+                }
+                _ = sleep(Duration::from_secs(30)) => {
+                    // periodic heartbeat
+                }
+            }
+        }
+    }
 
-      async fn bad(state: Arc<Mutex<Vec<u64>>>, id: u64) {
-          let mut guard = state.lock().expect("poisoned");
-          guard.push(id);
-          // BAD: holding the std MutexGuard across .await
-          tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-          guard.push(id + 1);
-      }
-      ```
+    async fn handle(_m: u64) {}
+    ```
 
-      Why this is broken: `MutexGuard<Vec<u64>>` is `!Send`. On tokio's multi-threaded runtime, the future generated for `bad` is therefore `!Send`, and `tokio::spawn(bad(...))` will fail to compile with "future cannot be sent between threads safely." That is the *good* outcome — the compiler caught it. On a current-thread runtime (single-threaded), the compile passes but the runtime deadlocks: while the task is suspended at `.await`, the OS thread that holds the guard is blocked from running any *other* task that might also try to take the lock. A peer task on the same thread that the executor wakes and that needs the lock will block, and forward progress halts because the only thread that can release the guard is parked on the timer.
+    `mpsc::Receiver::recv` is documented as cancellation-safe: dropping the future does not lose a message. `tokio::io::AsyncReadExt::read` is *not* generally cancellation-safe — bytes may have been read into a buffer that is then dropped, leaving partial state. Before placing a future in a `select!`, check the docs for the cancellation-safety note. If the future is not cancellation-safe and you need it in a select, hoist it out: store it in a `tokio::pin!`'d local across loop iterations so dropping is your decision, not the select's.
+- fragment_type: guardrail
+  sequence: 11
+  content: '- **Blocking sync code in an async task.** `std::thread::sleep`, `std::fs::read_to_string`, `reqwest::blocking::*`, or any CPU-bound loop inside an async fn stalls the runtime thread, freezing all sibling tasks on it. Use `tokio::time::sleep`, `tokio::fs`, async clients; for unavoidable blocking work, wrap it in `tokio::task::spawn_blocking`. - **`std::sync::Mutex` held across `.await`.** Walked above. Either drop the guard first, restructure, or switch to `tokio::sync::Mutex`. Enable `clippy::await_holding_lock`. - **Unbounded `tokio::sync::mpsc::unbounded_channel` in production.** No backpressure; producers can OOM the process. Use `mpsc::channel(N)` with a deliberate `N`. - **`Arc<Mutex<T>>` everywhere when message passing would be cleaner.** If only one task ever mutates the state, send it commands over an `mpsc::channel` and let that task own the data. No lock, no contention, clearer ownership. - **Spawning tasks and ignoring the `JoinHandle`.** Errors panic into the void; you cannot observe completion. At minimum hold the handle; for fan-out, use `tokio::task::JoinSet` or `futures::future::join_all`. - **Not pinning long-lived futures in a `select!` loop.** A non-cancellation-safe future re-created each loop iteration silently restarts work whenever a sibling branch wins. - **Using `Rc` or `RefCell` in a future you intend to spawn.** Both are `!Send`.'
+- fragment_type: guardrail
+  sequence: 12
+  content: The compiler catches it; the fix is `Arc` and a sync primitive (or a `tokio::sync` primitive if held across await). - **Calling `block_on` from inside an async context.** Re-entering the runtime deadlocks on tokio. Just `.await` the future.
+- sequence: 13
+  fragment_type: verification
+  content: |
+    ## Verification
 
-      The fix is one of three:
-
-      1. Drop the guard before the await: `drop(guard);` after `push(id)`.
-      2. Restructure so the await is outside the critical section — read the value out, await, then re-acquire the lock to write back.
-      3. If the critical section truly spans the await, use `tokio::sync::Mutex` whose guard is `Send` and which yields cooperatively.
-
-      Clippy's `clippy::await_holding_lock` lint catches the std-mutex case at compile time when run with `-D`. Enable it in CI so the bug never lands.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## `tokio::select!` and cancellation safety
-
-      `tokio::select!` races multiple futures and runs the branch that completes first; the others are *dropped*. Dropping a future cancels it: any work it had not yet finished is abandoned, and Rust's `Drop` runs for partially built locals. This is fine for *cancellation-safe* futures and dangerous for the rest.
-
-      ```rust
-      use tokio::sync::mpsc;
-      use tokio::time::{sleep, Duration};
-
-      async fn worker(mut rx: mpsc::Receiver<u64>) {
-          loop {
-              tokio::select! {
-                  maybe_msg = rx.recv() => {
-                      match maybe_msg {
-                          Some(m) => handle(m).await,
-                          None => return, // channel closed
-                      }
-                  }
-                  _ = sleep(Duration::from_secs(30)) => {
-                      // periodic heartbeat
-                  }
-              }
-          }
-      }
-
-      async fn handle(_m: u64) {}
-      ```
-
-      `mpsc::Receiver::recv` is documented as cancellation-safe: dropping the future does not lose a message. `tokio::io::AsyncReadExt::read` is *not* generally cancellation-safe — bytes may have been read into a buffer that is then dropped, leaving partial state. Before placing a future in a `select!`, check the docs for the cancellation-safety note. If the future is not cancellation-safe and you need it in a select, hoist it out: store it in a `tokio::pin!`'d local across loop iterations so dropping is your decision, not the select's.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Blocking sync code in an async task.** `std::thread::sleep`, `std::fs::read_to_string`, `reqwest::blocking::*`, or any CPU-bound loop inside an async fn stalls the runtime thread, freezing all sibling tasks on it. Use `tokio::time::sleep`, `tokio::fs`, async clients; for unavoidable blocking work, wrap it in `tokio::task::spawn_blocking`.
-      - **`std::sync::Mutex` held across `.await`.** Walked above. Either drop the guard first, restructure, or switch to `tokio::sync::Mutex`. Enable `clippy::await_holding_lock`.
-      - **Unbounded `tokio::sync::mpsc::unbounded_channel` in production.** No backpressure; producers can OOM the process. Use `mpsc::channel(N)` with a deliberate `N`.
-      - **`Arc<Mutex<T>>` everywhere when message passing would be cleaner.** If only one task ever mutates the state, send it commands over an `mpsc::channel` and let that task own the data. No lock, no contention, clearer ownership.
-      - **Spawning tasks and ignoring the `JoinHandle`.** Errors panic into the void; you cannot observe completion. At minimum hold the handle; for fan-out, use `tokio::task::JoinSet` or `futures::future::join_all`.
-      - **Not pinning long-lived futures in a `select!` loop.** A non-cancellation-safe future re-created each loop iteration silently restarts work whenever a sibling branch wins.
-      - **Using `Rc` or `RefCell` in a future you intend to spawn.** Both are `!Send`. The compiler catches it; the fix is `Arc` and a sync primitive (or a `tokio::sync` primitive if held across await).
-      - **Calling `block_on` from inside an async context.** Re-entering the runtime deadlocks on tokio. Just `.await` the future.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `cargo clippy -- -D clippy::await_holding_lock -D warnings` exits 0 — the lint catches `std::sync::MutexGuard` held across `.await`.
-      - [ ] `grep -nE 'std::sync::(Mutex|RwLock)' src/` — for each match, manually confirm no `.await` is reachable while a guard from that lock is alive (or the guard is `drop`ped first).
-      - [ ] `grep -n 'unbounded_channel' src/` returns no matches in production code paths, or each match has a comment justifying unbounded use.
-      - [ ] Every `tokio::spawn(...)` either holds the returned `JoinHandle` and `.await`s it, or feeds it into a `JoinSet` / `join_all`. Inventory with `grep -n 'tokio::spawn' src/`.
-      - [ ] Every future used in a `tokio::select!` branch is documented as cancellation-safe in its source, or is held across iterations via `tokio::pin!`. Verify by reading each `select!` block.
-      - [ ] Blocking calls in async contexts go through `tokio::task::spawn_blocking`. `grep -nE '(std::thread::sleep|std::fs::|reqwest::blocking)' src/` returns no matches inside `async fn` bodies.
-      - [ ] No nested `block_on` calls inside async code; `grep -n 'block_on' src/` results are only in sync entry points or tests.
-      - [ ] `Cargo.toml` pins tokio to `tokio = { version = "1", features = [...] }` (verified against tokio 1.x line, 2026-05-05) with explicit features, not `features = ["full"]` in production binaries.
+    - [ ] `cargo clippy -- -D clippy::await_holding_lock -D warnings` exits 0 — the lint catches `std::sync::MutexGuard` held across `.await`.
+    - [ ] `grep -nE 'std::sync::(Mutex|RwLock)' src/` — for each match, manually confirm no `.await` is reachable while a guard from that lock is alive (or the guard is `drop`ped first).
+    - [ ] `grep -n 'unbounded_channel' src/` returns no matches in production code paths, or each match has a comment justifying unbounded use.
+    - [ ] Every `tokio::spawn(...)` either holds the returned `JoinHandle` and `.await`s it, or feeds it into a `JoinSet` / `join_all`. Inventory with `grep -n 'tokio::spawn' src/`.
+    - [ ] Every future used in a `tokio::select!` branch is documented as cancellation-safe in its source, or is held across iterations via `tokio::pin!`. Verify by reading each `select!` block.
+    - [ ] Blocking calls in async contexts go through `tokio::task::spawn_blocking`. `grep -nE '(std::thread::sleep|std::fs::|reqwest::blocking)' src/` returns no matches inside `async fn` bodies.
+    - [ ] No nested `block_on` calls inside async code; `grep -n 'block_on' src/` results are only in sync entry points or tests.
+    - [ ] `Cargo.toml` pins tokio to `tokio = { version = "1", features = [...] }` (verified against tokio 1.x line, 2026-05-05) with explicit features, not `features = ["full"]` in production binaries.

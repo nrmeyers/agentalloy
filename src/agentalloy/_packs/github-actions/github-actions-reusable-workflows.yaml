@@ -1,18 +1,18 @@
 skill_type: domain
 skill_id: github-actions-reusable-workflows
 canonical_name: GitHub Actions Reusable Workflows and Composite Actions
-description: "Automate CI/CD pipelines and avoid copy-pasting steps in GitHub Actions: create reusable workflows to share logic across repos or composite actions to bundle steps, choosing the right pattern for your automation needs."
+description: 'Automate CI/CD pipelines and avoid copy-pasting steps in GitHub Actions: create reusable workflows to share logic across repos or composite actions to bundle steps, choosing the right pattern for your automation needs.'
 category: ops
 skill_class: domain
 domain_tags:
-  - github-actions
-  - reusable-workflows
-  - composite-actions
-  - workflow-reuse
-  - ci-cd
-  - cli-actions
-  - custom-actions
-  - action-authoring
+- github-actions
+- reusable-workflows
+- composite-actions
+- workflow-reuse
+- ci-cd
+- cli-actions
+- custom-actions
+- action-authoring
 requires:
 - github-actions-workflow-syntax
 related:
@@ -20,8 +20,10 @@ related:
 - github-actions-events-and-triggers
 - github-actions-expressions-and-contexts
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: |
   initial authoring draft
@@ -200,159 +202,160 @@ raw_prose: |
   * Secrets the action uses
   * Environment variables the action uses
   * An example of how to use your action in a workflow
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Reusable workflows callable via `uses: org/repo/.github/workflows/x.yml@ref` accept inputs and return outputs. Composite actions encapsulate steps in `action.yml`. This skill covers both reuse paths and when to choose which.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Reusable workflows callable via `uses: org/repo/.github/workflows/x.yml@ref` accept inputs and return outputs. Composite actions encapsulate steps in `action.yml`. This skill covers both reuse paths and when to choose which.
 
-      Sourced from https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      Rather than copying and pasting from one workflow to another, you can make workflows reusable. You and anyone with access to the reusable workflow can then call the reusable workflow from another workflow.
+    Sourced from https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    Rather than copying and pasting from one workflow to another, you can make workflows reusable. You and anyone with access to the reusable workflow can then call the reusable workflow from another workflow.
 
-      Reusing workflows avoids duplication. This makes workflows easier to maintain and allows you to create new workflows more quickly by building on the work of others, just as you do with actions. Workflow reuse also promotes best practice by helping you to use workflows that are well designed, have already been tested, and have been proven to be effective. Your organization can build up a library of reusable workflows that can be centrally maintained.
+    Reusing workflows avoids duplication. This makes workflows easier to maintain and allows you to create new workflows more quickly by building on the work of others, just as you do with actions. Workflow reuse also promotes best practice by helping you to use workflows that are well designed, have already been tested, and have been proven to be effective. Your organization can build up a library of reusable workflows that can be centrally maintained.
 
-      The diagram below shows an in-progress workflow run that uses a reusable workflow.
+    The diagram below shows an in-progress workflow run that uses a reusable workflow.
 
-      * After each of three build jobs on the left of the diagram completes successfully, a dependent job called "Deploy" is run.
-      * The "Deploy" job calls a reusable workflow that contains three jobs: "Staging", "Review", and "Production."
-      * The "Production" deployment job only runs after the "Staging" job has completed successfully.
-      * When a job targets an environment, the workflow run displays a progress bar that shows the number of steps in the job. In the diagram below, the "Production" job contains 8 steps, with step 6 currently being processed.
-      * Using a reusable workflow to run deployment jobs allows you to run those jobs for each build without duplicating code in workflows.
+    * After each of three build jobs on the left of the diagram completes successfully, a dependent job called "Deploy" is run.
+    * The "Deploy" job calls a reusable workflow that contains three jobs: "Staging", "Review", and "Production."
+    * The "Production" deployment job only runs after the "Staging" job has completed successfully.
+    * When a job targets an environment, the workflow run displays a progress bar that shows the number of steps in the job. In the diagram below, the "Production" job contains 8 steps, with step 6 currently being processed.
+    * Using a reusable workflow to run deployment jobs allows you to run those jobs for each build without duplicating code in workflows.
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    ![Diagram of a workflow calling a reusable workflow.](/assets/images/help/actions/reusable-workflows-ci-cd.png)
 
-      ![Diagram of a workflow calling a reusable workflow.](/assets/images/help/actions/reusable-workflows-ci-cd.png)
+    A workflow that uses another workflow is referred to as a "caller" workflow. The reusable workflow is a "called" workflow. One caller workflow can use multiple called workflows. Each called workflow is referenced in a single line. The result is that the caller workflow file may contain just a few lines of YAML, but may perform a large number of tasks when it's run. When you reuse a workflow, the entire called workflow is used, just as if it was part of the caller workflow.
 
-      A workflow that uses another workflow is referred to as a "caller" workflow. The reusable workflow is a "called" workflow. One caller workflow can use multiple called workflows. Each called workflow is referenced in a single line. The result is that the caller workflow file may contain just a few lines of YAML, but may perform a large number of tasks when it's run. When you reuse a workflow, the entire called workflow is used, just as if it was part of the caller workflow.
+    If you reuse a workflow from a different repository, any actions in the called workflow run as if they were part of the caller workflow. For example, if the called workflow uses `actions/checkout`, the action checks out the contents of the repository that hosts the caller workflow, not the called workflow.
 
-      If you reuse a workflow from a different repository, any actions in the called workflow run as if they were part of the caller workflow. For example, if the called workflow uses `actions/checkout`, the action checks out the contents of the repository that hosts the caller workflow, not the called workflow.
+    You can view the reused workflows referenced in your  workflows as dependencies in the dependency graph of the repository containing your workflows. For more information, see “[About the dependency graph](/code-security/supply-chain-security/understanding-your-software-supply-chain/about-the-dependency-graph).”
+- fragment_type: rationale
+  sequence: 4
+  content: |
+    Reusable workflows and composite actions both help you avoid duplicating workflow content. Whereas reusable workflows allow you to reuse an entire workflow, with multiple jobs and steps, composite actions combine multiple steps that you can then run within a job step, just like any other action.
 
-      You can view the reused workflows referenced in your  workflows as dependencies in the dependency graph of the repository containing your workflows. For more information, see “[About the dependency graph](/code-security/supply-chain-security/understanding-your-software-supply-chain/about-the-dependency-graph).”
-  - fragment_type: rationale
-    sequence: 3
-    content: |
-      Reusable workflows and composite actions both help you avoid duplicating workflow content. Whereas reusable workflows allow you to reuse an entire workflow, with multiple jobs and steps, composite actions combine multiple steps that you can then run within a job step, just like any other action.
+    Let's compare some aspects of each solution:
 
-      Let's compare some aspects of each solution:
+    * **Workflow jobs** - Composite actions contain a series of steps that are run as a single step within the caller workflow. Unlike reusable workflows, they cannot contain jobs.
+    * **Logging** - When a composite action runs, the log will show just the step in the caller workflow that ran the composite action, not the individual steps within the composite action. With reusable workflows, every job and step is logged separately.
+    * **Specifying runners** - Reusable workflows contain one or more jobs. As with all workflow jobs, the jobs in a reusable workflow specify the type of machine on which the job will run. Therefore, if the steps must be run on a type of machine that might be different from the machine chosen for the calling workflow job, then you should use a reusable workflow, not a composite action.
+    * **Passing output to steps** - A composite action is run as a step within a workflow job, and you can have multiple steps before or after the step that runs the composite action. Reusable workflows are called directly within a job, and not from within a job step. You can't add steps to a job after calling a reusable workflow, so you can't use `GITHUB_ENV` to pass values to subsequent job steps in the caller workflow.
+- fragment_type: rationale
+  sequence: 5
+  content: |
+    The following table shows the accessibility of reusable workflows to a caller workflow, depending on the visibility of the host repository.
 
-      * **Workflow jobs** - Composite actions contain a series of steps that are run as a single step within the caller workflow. Unlike reusable workflows, they cannot contain jobs.
-      * **Logging** - When a composite action runs, the log will show just the step in the caller workflow that ran the composite action, not the individual steps within the composite action. With reusable workflows, every job and step is logged separately.
-      * **Specifying runners** - Reusable workflows contain one or more jobs. As with all workflow jobs, the jobs in a reusable workflow specify the type of machine on which the job will run. Therefore, if the steps must be run on a type of machine that might be different from the machine chosen for the calling workflow job, then you should use a reusable workflow, not a composite action.
-      * **Passing output to steps** - A composite action is run as a step within a workflow job, and you can have multiple steps before or after the step that runs the composite action. Reusable workflows are called directly within a job, and not from within a job step. You can't add steps to a job after calling a reusable workflow, so you can't use `GITHUB_ENV` to pass values to subsequent job steps in the caller workflow.
-  - fragment_type: rationale
-    sequence: 4
-    content: |
-      The following table shows the accessibility of reusable workflows to a caller workflow, depending on the visibility of the host repository.
+    | Caller repository | Accessible workflows repositories |
+    |----|----|
+    | `private` | `private`, `internal`, and `public` |
+    |  |
+    | `internal` | `internal`, and `public` |
+    |  |
+    | `public` | `public` |
 
-      | Caller repository | Accessible workflows repositories |
-      |----|----|
-      | `private` | `private`, `internal`, and `public` |
-      |  |
-      | `internal` | `internal`, and `public` |
-      |  |
-      | `public` | `public` |
+    The **Actions permissions** on the callers repository's Actions settings page must be configured to allow the use of actions and reusable workflows - see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#allowing-select-actions-and-reusable-workflows-to-run).
 
-      The **Actions permissions** on the callers repository's Actions settings page must be configured to allow the use of actions and reusable workflows - see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#allowing-select-actions-and-reusable-workflows-to-run).
+    For internal or private repositories, the **Access** policy on the Actions settings page of the called workflow's repository must be explicitly configured to allow access from repositories containing caller workflows - see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#allowing-access-to-components-in-a-private-repository).
+- fragment_type: guardrail
+  sequence: 6
+  content: |
+    * You can connect up to ten four levels of workflows. For more information, see [Nesting reusable workflows](/actions/how-tos/sharing-automations/reuse-workflows#nesting-reusable-workflows).
+    * You can call a maximum of 50 20 unique reusable workflows from a single workflow file. This limit includes any trees of nested reusable workflows that may be called starting from your top-level caller workflow file.
 
-      For internal or private repositories, the **Access** policy on the Actions settings page of the called workflow's repository must be explicitly configured to allow access from repositories containing caller workflows - see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#allowing-access-to-components-in-a-private-repository).
-  - fragment_type: guardrail
-    sequence: 5
-    content: |
-      * You can connect up to ten four levels of workflows. For more information, see [Nesting reusable workflows](/actions/how-tos/sharing-automations/reuse-workflows#nesting-reusable-workflows).
-      * You can call a maximum of 50 20 unique reusable workflows from a single workflow file. This limit includes any trees of nested reusable workflows that may be called starting from your top-level caller workflow file.
+      For example, _top-level-caller-workflow.yml_ → _called-workflow-1.yml_ → _called-workflow-2.yml_ counts as 2 reusable workflows.
+- fragment_type: guardrail
+  sequence: 7
+  content: |
+    * Any environment variables set in an `env` context defined at the workflow level in the caller workflow are not propagated to the called workflow. For more information, see [AUTOTITLE](/actions/learn-github-actions/variables) and [AUTOTITLE](/actions/learn-github-actions/contexts#env-context).
+    * Similarly, environment variables set in the `env` context, defined in the called workflow, are not accessible in the `env` context of the caller workflow. Instead, you must use outputs of the reusable workflow. For more information, see [Using outputs from a reusable workflow](/actions/how-tos/sharing-automations/reuse-workflows#using-outputs-from-a-reusable-workflow).
+    * To reuse variables in multiple workflows, set them at the organization, repository, or environment levels and reference them using the `vars` context. For more information see [AUTOTITLE](/actions/learn-github-actions/variables) and [AUTOTITLE](/actions/learn-github-actions/contexts#vars-context).
+    * Reusable workflows are called directly within a job, and not from within a job step. You cannot, therefore, use `GITHUB_ENV` to pass values to job steps in the caller workflow.
+- fragment_type: rationale
+  sequence: 8
+  content: |
+    When you call a reusable workflow, you can only use the following keywords in the job containing the call:
 
-        For example, _top-level-caller-workflow.yml_ → _called-workflow-1.yml_ → _called-workflow-2.yml_ counts as 2 reusable workflows.
-  - fragment_type: guardrail
-    sequence: 6
-    content: |
-      * Any environment variables set in an `env` context defined at the workflow level in the caller workflow are not propagated to the called workflow. For more information, see [AUTOTITLE](/actions/learn-github-actions/variables) and [AUTOTITLE](/actions/learn-github-actions/contexts#env-context).
-      * Similarly, environment variables set in the `env` context, defined in the called workflow, are not accessible in the `env` context of the caller workflow. Instead, you must use outputs of the reusable workflow. For more information, see [Using outputs from a reusable workflow](/actions/how-tos/sharing-automations/reuse-workflows#using-outputs-from-a-reusable-workflow).
-      * To reuse variables in multiple workflows, set them at the organization, repository, or environment levels and reference them using the `vars` context. For more information see [AUTOTITLE](/actions/learn-github-actions/variables) and [AUTOTITLE](/actions/learn-github-actions/contexts#vars-context).
-      * Reusable workflows are called directly within a job, and not from within a job step. You cannot, therefore, use `GITHUB_ENV` to pass values to job steps in the caller workflow.
-  - fragment_type: rationale
-    sequence: 7
-    content: |
-      When you call a reusable workflow, you can only use the following keywords in the job containing the call:
+    * [`jobs.<job_id>.name`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idname)
+    * [`jobs.<job_id>.uses`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_iduses)
+    * [`jobs.<job_id>.with`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idwith)
+- fragment_type: execution
+  sequence: 9
+  content: |
+    ## Choosing a location for your action
 
-      * [`jobs.<job_id>.name`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idname)
-      * [`jobs.<job_id>.uses`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_iduses)
-      * [`jobs.<job_id>.with`](/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idwith)
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      ## Choosing a location for your action
+    If you're developing an action for other people to use, keep the action in its own repository instead of bundling it with other application code. This allows you to version, track, and release the action just like any other software. Storing an action in its own repository makes it easier for the community to discover, narrows the code base for developers fixing issues, and decouples the action's versioning from other application code.
 
-      If you're developing an action for other people to use, keep the action in its own repository instead of bundling it with other application code. This allows you to version, track, and release the action just like any other software. Storing an action in its own repository makes it easier for the community to discover, narrows the code base for developers fixing issues, and decouples the action's versioning from other application code.
+    If you're building an action that you don't plan to make available to others, you can store the action's files in any location in your repository. If you plan to combine action, workflow, and application code in a single repository, store actions in the `.github` directory. For example, `.github/actions/action-a` and `.github/actions/action-b`.
+- fragment_type: execution
+  sequence: 10
+  content: |
+    ## Ensuring compatibility with other platforms
 
-      If you're building an action that you don't plan to make available to others, you can store the action's files in any location in your repository. If you plan to combine action, workflow, and application code in a single repository, store actions in the `.github` directory. For example, `.github/actions/action-a` and `.github/actions/action-b`.
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      ## Ensuring compatibility with other platforms
+    Many people access GitHub at a domain other than github.com, such as GHES or a custom domain. To ensure that your action is compatible, do not use any hard-coded references to API URLs such as `https://api.github.com`. Instead:
 
-      Many people access GitHub at a domain other than github.com, such as GHES or a custom domain. To ensure that your action is compatible, do not use any hard-coded references to API URLs such as `https://api.github.com`. Instead:
+    * Use environment variables:
+      * For the REST API, use the `GITHUB_API_URL` environment variable.
+      * For GraphQL, use the `GITHUB_GRAPHQL_URL` environment variable.
+    * Use a toolkit such as [`@actions/github`](https://github.com/actions/toolkit/tree/main/packages/github), which can automatically set the correct URLs.
+- fragment_type: execution
+  sequence: 11
+  content: |
+    ## Using release management for actions
 
-      * Use environment variables:
-        * For the REST API, use the `GITHUB_API_URL` environment variable.
-        * For GraphQL, use the `GITHUB_GRAPHQL_URL` environment variable.
-      * Use a toolkit such as [`@actions/github`](https://github.com/actions/toolkit/tree/main/packages/github), which can automatically set the correct URLs.
-  - fragment_type: execution
-    sequence: 10
-    content: |
-      ## Using release management for actions
+    If you're developing an action for other people to use, use release management to control how you distribute updates. Users can expect an action's patch version to include necessary critical fixes and security patches, while still remaining compatible with their existing workflows. Release a new major version whenever your changes affect compatibility.
 
-      If you're developing an action for other people to use, use release management to control how you distribute updates. Users can expect an action's patch version to include necessary critical fixes and security patches, while still remaining compatible with their existing workflows. Release a new major version whenever your changes affect compatibility.
+    Users should not reference an action's default branch — it's likely to be unstable. Recommend that users specify a major version when using your action, and only direct them to a more specific version if they encounter issues.
 
-      Users should not reference an action's default branch — it's likely to be unstable. Recommend that users specify a major version when using your action, and only direct them to a more specific version if they encounter issues.
+    ### Using tags for release management
 
-      ### Using tags for release management
+    Use tags for actions release management. With this approach, users can distinguish between major and minor versions:
 
-      Use tags for actions release management. With this approach, users can distinguish between major and minor versions:
+    1. Develop and validate a release on a release branch (for example, `release/v1`).
+    2. Create a release with a release tag using semantic versioning (for example, `v1.0.1`).
+    3. Move the major version tag (for example, `v1`) to point to the Git ref of the current release.
+    4. Introduce a new major version tag (for example, `v2`) for changes that will break existing workflows.
 
-      1. Develop and validate a release on a release branch (for example, `release/v1`).
-      2. Create a release with a release tag using semantic versioning (for example, `v1.0.1`).
-      3. Move the major version tag (for example, `v1`) to point to the Git ref of the current release.
-      4. Introduce a new major version tag (for example, `v2`) for changes that will break existing workflows.
+    Major version tag reference:
 
-      Major version tag reference:
+    ```yaml
+    steps:
+        - uses: actions/javascript-action@v1
+    ```
 
-      ```yaml
-      steps:
-          - uses: actions/javascript-action@v1
-      ```
+    Specific patch release tag:
 
-      Specific patch release tag:
+    ```yaml
+    steps:
+        - uses: actions/javascript-action@v1.0.1
+    ```
 
-      ```yaml
-      steps:
-          - uses: actions/javascript-action@v1.0.1
-      ```
+    Branch reference:
 
-      Branch reference:
+    ```yaml
+    steps:
+        - uses: actions/javascript-action@v1-beta
+    ```
 
-      ```yaml
-      steps:
-          - uses: actions/javascript-action@v1-beta
-      ```
+    Full commit SHA (most immutable; users will not receive updates):
 
-      Full commit SHA (most immutable; users will not receive updates):
+    ```yaml
+    steps:
+        - uses: actions/javascript-action@a824008085750b8e136effc585c3cd6082bd575f
+    ```
+- fragment_type: execution
+  sequence: 12
+  content: |-
+    ## Creating a README file for your action
 
-      ```yaml
-      steps:
-          - uses: actions/javascript-action@a824008085750b8e136effc585c3cd6082bd575f
-      ```
-  - fragment_type: execution
-    sequence: 11
-    content: |
-      ## Creating a README file for your action
+    Create a README file to help people learn how to use your action. Include:
 
-      Create a README file to help people learn how to use your action. Include:
-
-      * A detailed description of what the action does
-      * Required input and output arguments
-      * Optional input and output arguments
-      * Secrets the action uses
-      * Environment variables the action uses
-      * An example of how to use your action in a workflow
+    * A detailed description of what the action does
+    * Required input and output arguments
+    * Optional input and output arguments
+    * Secrets the action uses
+    * Environment variables the action uses
+    * An example of how to use your action in a workflow

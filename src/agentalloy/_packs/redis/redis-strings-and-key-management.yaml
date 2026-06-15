@@ -1,21 +1,23 @@
 skill_type: domain
 skill_id: redis-strings-and-key-management
 canonical_name: Redis Strings and Key Management
-description: "Store and manage simple data like user sessions, counters, and feature flags in Redis: set and get string values, increment or decrement numbers atomically, enforce expiration times, and handle key eviction policies."
+description: 'Store and manage simple data like user sessions, counters, and feature flags in Redis: set and get string values, increment or decrement numbers atomically, enforce expiration times, and handle key eviction policies.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - redis
-  - strings
-  - key-eviction
-  - counters
+- redis
+- strings
+- key-eviction
+- counters
 related:
 - redis-hashes-and-sets
 - redis-lists-and-sorted-sets
 - redis-streams
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: authoring-agent
 change_summary: revised draft based on critic feedback
 raw_prose: |
@@ -117,109 +119,98 @@ raw_prose: |
 
   If you are using replication or persistence, we recommend that you set
   `maxmemory` to leave a little RAM free to
-
 fragments:
-  - fragment_type: rationale
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: rationale
+  sequence: 1
+  content: |
+    ## Overview
 
-      Redis strings are the simplest and most-used value type — binary-safe up to 512MB. The string commands also cover counters (INCR/DECR), atomic conditional sets (SET NX), and TTL management. This skill covers strings + key-level lifecycle and eviction.
+    Redis strings are the simplest and most-used value type — binary-safe up to 512MB. The string commands also cover counters (INCR/DECR), atomic conditional sets (SET NX), and TTL management. This skill covers strings + key-level lifecycle and eviction.
 
-      Sourced from https://redis.io/docs/latest/develop/data-types/strings/ and https://redis.io/docs/latest/develop/reference/eviction/.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Redis Strings
+    Sourced from https://redis.io/docs/latest/develop/data-types/strings/ and https://redis.io/docs/latest/develop/reference/eviction/.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    ```json metadata
+    {
+      "title": "Key eviction",
+      "description": "Overview of Redis key eviction policies (LRU, LFU, etc.)",
+      "categories": ["docs","develop","stack","oss","rs","rc","kubernetes","clients"],
+      "tableOfContents": {"sections":[{"children":[{"id":"setting-maxmemory-for-a-replicated-or-persisted-instance","title":"Setting maxmemory for a replicated or persisted instance"}],"id":"using-the-maxmemory-configuration-directive-maxmem","title":"Using the maxmemory configuration directive {#maxmem}"},{"children":[{"id":"using-the-info-command","title":"Using the INFO command"}],"id":"eviction-policies","title":"Eviction policies"},{"id":"approximated-lru-algorithm-apx-lru","title":"Approximated LRU algorithm {#apx-lru}"},{"id":"lfu-eviction","title":"LFU eviction"},{"id":"lrm-eviction-lrm-eviction","title":"LRM eviction {#lrm-eviction}"}]}
 
-      ```json metadata
-      {
-        "title": "Redis Strings",
-        "description": "Introduction to Redis strings",
-        "categories": ["docs","develop","stack","oss","rs","rc","kubernetes","clients"],
-        "tableOfContents": {"sections":[{"id":"strings-as-counters","title":"Strings as counters"},{"id":"limits","title":"Limits"},{"id":"bitwise-and-bitfield-operations","title":"Bitwise and bitfield operations"},{"id":"performance","title":"Performance"},{"id":"alternatives","title":"Alternatives"},{"id":"learn-more","title":"Learn more"}]}
+    ,
+      "codeExamples": []
+    }
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    Redis is commonly used as a cache to speed up read accesses to a slower server
+    or database. Since cache entries are copies of persistently-stored data, it
+    is usually safe to evict them when the cache runs out of memory (they can be
+    cached again in the future if necessary).
 
-      ,
-        "codeExamples": [{"codetabsId":"set_tutorial-stepset_get","commands":[{"acl_categories":["@write","@string","@slow"],"complexity":"O(1)","name":"SET"},{"acl_categories":["@read","@string","@fast"],"complexity":"O(1)","name":"GET"}],"description":"Foundational: Set and retrieve string values using SET and GET (overwrites existing values)","difficulty":"beginner","id":"set_get","languages":[{"id":"redis-cli","panelId":"panel_redis-cli_set_tutorial-stepset_get"},{"clientId":"redis-py","clientName":"redis-py","id":"Python","langId":"python","panelId":"panel_Python_set_tutorial-stepset_get"},{"id":"Node-js","panelId":"panel_Nodejs_set_tutorial-stepset_get"},{"clientId":"jedis","clientName":"Jedis","id":"Java-Sync","langId":"java","panelId":"panel_Java-Sync_set_tutorial-stepset_get"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Async","langId":"java","panelId":"panel_Java-Async_set_tutorial-stepset_get"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Reactive","langId":"java","panelId":"panel_Java-Reactive_set_tutorial-stepset_get"},{"clientId":"go-redis","clientName":"go-redis","id":"Go","langId":"go","panelId":"panel_Go_set_tutorial-stepset_get"},{"id":"dotnet-Sync (SE-Redis)","panelId":"panel_Csharp-Sync (SERedis)_set_tutorial-stepset_get"},{"clientId":"predis","clientName":"Predis","id":"PHP","langId":"php","panelId":"panel_PHP_set_tutorial-stepset_get"},{"clientId":"redis-rb","clientName":"redis-rb","id":"Ruby","langId":"ruby","panelId":"panel_Ruby_set_tutorial-stepset_get"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Sync","langId":"rust","panelId":"panel_Rust-Sync_set_tutorial-stepset_get"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Async","langId":"rust","panelId":"panel_Rust-Async_set_tutorial-stepset_get"}]},{"buildsUpon":["set_get"],"codetabsId":"set_tutorial-stepsetnx_xx","commands":[{"acl_categories":["@write","@string","@slow"],"complexity":"O(1)","name":"SET"}],"description":"Conditional SET operations: Use NX and XX options to control key existence when you need atomic compare-and-set behavior","difficulty":"intermediate","id":"setnx_xx","languages":[{"id":"redis-cli","panelId":"panel_redis-cli_set_tutorial-stepsetnx_xx"},{"clientId":"redis-py","clientName":"redis-py","id":"Python","langId":"python","panelId":"panel_Python_set_tutorial-stepsetnx_xx"},{"id":"Node-js","panelId":"panel_Nodejs_set_tutorial-stepsetnx_xx"},{"clientId":"jedis","clientName":"Jedis","id":"Java-Sync","langId":"java","panelId":"panel_Java-Sync_set_tutorial-stepsetnx_xx"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Async","langId":"java","panelId":"panel_Java-Async_set_tutorial-stepsetnx_xx"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Reactive","langId":"java","panelId":"panel_Java-Reactive_set_tutorial-stepsetnx_xx"},{"clientId":"go-redis","clientName":"go-redis","id":"Go","langId":"go","panelId":"panel_Go_set_tutorial-stepsetnx_xx"},{"id":"dotnet-Sync (SE-Redis)","panelId":"panel_Csharp-Sync (SERedis)_set_tutorial-stepsetnx_xx"},{"clientId":"predis","clientName":"Predis","id":"PHP","langId":"php","panelId":"panel_PHP_set_tutorial-stepsetnx_xx"},{"clientId":"redis-rb","clientName":"redis-rb","id":"Ruby","langId":"ruby","panelId":"panel_Ruby_set_tutorial-stepsetnx_xx"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Sync","langId":"rust","panelId":"panel_Rust-Sync_set_tutorial-stepsetnx_xx"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Async","langId":"rust","panelId":"panel_Rust-Async_set_tutorial-stepsetnx_xx"}]},{"buildsUpon":["set_get"],"codetabsId":"set_tutorial-stepmset","commands":[{"acl_categories":["@write","@string","@slow"],"complexity":"O(N)","name":"MSET"},{"acl_categories":["@read","@string","@fast"],"complexity":"O(N)","name":"MGET"}],"description":"Set and retrieve multiple values using MSET and MGET when you need to reduce round trips to the server","difficulty":"beginner","id":"mset","languages":[{"id":"redis-cli","panelId":"panel_redis-cli_set_tutorial-stepmset"},{"clientId":"redis-py","clientName":"redis-py","id":"Python","langId":"python","panelId":"panel_Python_set_tutorial-stepmset"},{"id":"Node-js","panelId":"panel_Nodejs_set_tutorial-stepmset"},{"clientId":"jedis","clientName":"Jedis","id":"Java-Sync","langId":"java","panelId":"panel_Java-Sync_set_tutorial-stepmset"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Async","langId":"java","panelId":"panel_Java-Async_set_tutorial-stepmset"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Reactive","langId":"java","panelId":"panel_Java-Reactive_set_tutorial-stepmset"},{"clientId":"go-redis","clientName":"go-redis","id":"Go","langId":"go","panelId":"panel_Go_set_tutorial-stepmset"},{"id":"dotnet-Sync (SE-Redis)","panelId":"panel_Csharp-Sync (SERedis)_set_tutorial-stepmset"},{"clientId":"predis","clientName":"Predis","id":"PHP","langId":"php","panelId":"panel_PHP_set_tutorial-stepmset"},{"clientId":"redis-rb","clientName":"redis-rb","id":"Ruby","langId":"ruby","panelId":"panel_Ruby_set_tutorial-stepmset"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Sync","langId":"rust","panelId":"panel_Rust-Sync_set_tutorial-stepmset"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Async","langId":"rust","panelId":"panel_Rust-Async_set_tutorial-stepmset"}]},{"buildsUpon":["set_get"],"codetabsId":"set_tutorial-stepincr","commands":[{"acl_categories":["@write","@string","@slow"],"complexity":"O(1)","name":"SET"},{"acl_categories":["@write","@string","@fast"],"complexity":"O(1)","name":"INCR"},{"acl_categories":["@write","@string","@fast"],"complexity":"O(1)","name":"INCRBY"}],"description":"Atomic counters: Increment string values using INCR and INCRBY when you need thread-safe operations (initializes to 0 if key doesn\u0026amp;#39;t exist)","difficulty":"beginner","id":"incr","languages":[{"id":"redis-cli","panelId":"panel_redis-cli_set_tutorial-stepincr"},{"clientId":"redis-py","clientName":"redis-py","id":"Python","langId":"python","panelId":"panel_Python_set_tutorial-stepincr"},{"id":"Node-js","panelId":"panel_Nodejs_set_tutorial-stepincr"},{"clientId":"jedis","clientName":"Jedis","id":"Java-Sync","langId":"java","panelId":"panel_Java-Sync_set_tutorial-stepincr"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Async","langId":"java","panelId":"panel_Java-Async_set_tutorial-stepincr"},{"clientId":"lettuce","clientName":"Lettuce","id":"Java-Reactive","langId":"java","panelId":"panel_Java-Reactive_set_tutorial-stepincr"},{"clientId":"go-redis","clientName":"go-redis","id":"Go","langId":"go","panelId":"panel_Go_set_tutorial-stepincr"},{"id":"dotnet-Sync (SE-Redis)","panelId":"panel_Csharp-Sync (SERedis)_set_tutorial-stepincr"},{"clientId":"predis","clientName":"Predis","id":"PHP","langId":"php","panelId":"panel_PHP_set_tutorial-stepincr"},{"clientId":"redis-rb","clientName":"redis-rb","id":"Ruby","langId":"ruby","panelId":"panel_Ruby_set_tutorial-stepincr"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Sync","langId":"rust","panelId":"panel_Rust-Sync_set_tutorial-stepincr"},{"clientId":"redis-rs","clientName":"redis-rs","id":"Rust-Async","langId":"rust","panelId":"panel_Rust-Async_set_tutorial-stepincr"}]}
+    Redis lets you specify an eviction policy to evict keys automatically
+    when the size of the cache exceeds a set memory limit. Whenever a client
+    runs a new command that adds more data to the cache, Redis checks the memory usage.
+    If it is greater than the limit, Redis evicts keys according to the chosen
+    eviction policy until the total memory used is back below the limit.
 
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Key eviction
+    Note that when a command adds a lot of data to the cache (for example, a big set
+    intersection stored into a new key), this might temporarily exceed the limit by
+    a large amount.
 
-      ```json metadata
-      {
-        "title": "Key eviction",
-        "description": "Overview of Redis key eviction policies (LRU, LFU, etc.)",
-        "categories": ["docs","develop","stack","oss","rs","rc","kubernetes","clients"],
-        "tableOfContents": {"sections":[{"children":[{"id":"setting-maxmemory-for-a-replicated-or-persisted-instance","title":"Setting maxmemory for a replicated or persisted instance"}],"id":"using-the-maxmemory-configuration-directive-maxmem","title":"Using the maxmemory configuration directive {#maxmem}"},{"children":[{"id":"using-the-info-command","title":"Using the INFO command"}],"id":"eviction-policies","title":"Eviction policies"},{"id":"approximated-lru-algorithm-apx-lru","title":"Approximated LRU algorithm {#apx-lru}"},{"id":"lfu-eviction","title":"LFU eviction"},{"id":"lrm-eviction-lrm-eviction","title":"LRM eviction {#lrm-eviction}"}]}
+    The sections below explain how to [configure the memory limit](#maxmem) for the cache
+    and also describe the available [eviction policies](#eviction-policies) and when to
+    use them.
 
-      ,
-        "codeExamples": []
-      }
-      ```
-      Redis is commonly used as a cache to speed up read accesses to a slower server
-      or database. Since cache entries are copies of persistently-stored data, it
-      is usually safe to evict them when the cache runs out of memory (they can be
-      cached again in the future if necessary).
+    ## Using the `maxmemory` configuration directive {#maxmem}
 
-      Redis lets you specify an eviction policy to evict keys automatically
-      when the size of the cache exceeds a set memory limit. Whenever a client
-      runs a new command that adds more data to the cache, Redis checks the memory usage.
-      If it is greater than the limit, Redis evicts keys according to the chosen
-      eviction policy until the total memory used is back below the limit.
+    The `maxmemory` configuration directive specifies
+    the maximum amount of memory to use for the cache data. You can
+    set `maxmemory` with the [`redis.conf`](https://github.com/redis/redis/blob/7.4.0/redis.conf)
+    file at startup time. For example, to configure a memory limit of 100 megabytes,
+    you can use the following directive inside `redis.conf`:
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    ```
+    maxmemory 100mb
+    ```
 
-      Note that when a command adds a lot of data to the cache (for example, a big set
-      intersection stored into a new key), this might temporarily exceed the limit by
-      a large amount.
+    You can also use [`CONFIG SET`](https://redis.io/docs/latest/commands/config-set) to
+    set `maxmemory` at runtime using [`redis-cli`](https://redis.io/docs/latest/develop/tools/cli):
 
-      The sections below explain how to [configure the memory limit](#maxmem) for the cache
-      and also describe the available [eviction policies](#eviction-policies) and when to
-      use them.
+    ```bash
+    > CONFIG SET maxmemory 100mb
+    ```
 
-      ## Using the `maxmemory` configuration directive {#maxmem}
+    Set `maxmemory` to zero to specify that you don't want to limit the memory
+    for the dataset. This is the default behavior for 64-bit systems, while 32-bit
+    systems use an implicit memory limit of 3GB.
 
-      The `maxmemory` configuration directive specifies
-      the maximum amount of memory to use for the cache data. You can
-      set `maxmemory` with the [`redis.conf`](https://github.com/redis/redis/blob/7.4.0/redis.conf)
-      file at startup time. For example, to configure a memory limit of 100 megabytes,
-      you can use the following directive inside `redis.conf`:
+    When the size of your cache exceeds the limit set by `maxmemory`, Redis will
+    enforce your chosen [eviction policy](#eviction-policies) to prevent any
+    further growth of the cache.
 
-      ```
-      maxmemory 100mb
-      ```
+    ### Setting `maxmemory` for a replicated or persisted instance
 
-      You can also use [`CONFIG SET`](https://redis.io/docs/latest/commands/config-set) to
-      set `maxmemory` at runtime using [`redis-cli`](https://redis.io/docs/latest/develop/tools/cli):
+    If you are using
+    [replication](https://redis.io/docs/latest/operate/rs/databases/durability-ha/replication)
+    or [persistence](https://redis.io/docs/latest/operate/rs/databases/configure/database-persistence)
+    for a server, Redis will use some RAM as a buffer to store the set of updates waiting
+    to be written to the replicas or AOF files.
+    The memory used by this buffer is not included in the total that
+    is compared to `maxmemory` to see if eviction is required.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    This is because the key evictions themselves generate updates that must be added
+    to the buffer. If the updates were counted among the used
+    memory then in some circumstances, the memory saved by
+    evicting keys would be immediately used up by the update data added to the buffer.
+    This, in turn, would trigger even more evictions and the resulting feedback loop
+    could evict many items from the cache unnecessarily.
 
-      ```bash
-      > CONFIG SET maxmemory 100mb
-      ```
-
-      Set `maxmemory` to zero to specify that you don't want to limit the memory
-      for the dataset. This is the default behavior for 64-bit systems, while 32-bit
-      systems use an implicit memory limit of 3GB.
-
-      When the size of your cache exceeds the limit set by `maxmemory`, Redis will
-      enforce your chosen [eviction policy](#eviction-policies) to prevent any
-      further growth of the cache.
-
-      ### Setting `maxmemory` for a replicated or persisted instance
-
-      If you are using
-      [replication](https://redis.io/docs/latest/operate/rs/databases/durability-ha/replication)
-      or [persistence](https://redis.io/docs/latest/operate/rs/databases/configure/database-persistence)
-      for a server, Redis will use some RAM as a buffer to store the set of updates waiting
-      to be written to the replicas or AOF files.
-      The memory used by this buffer is not included in the total that
-      is compared to `maxmemory` to see if eviction is required.
-
-      This is because the key evictions themselves generate updates that must be added
-      to the buffer. If the updates were counted among the used
-      memory then in some circumstances, the memory saved by
-      evicting keys would be immediately used up by the update data added to the buffer.
-      This, in turn, would trigger even more evictions and the resulting feedback loop
-      could evict many items from the cache unnecessarily.
-
-      If you are using replication or persistence, we recommend that you set
-      `maxmemory` to leave a little RAM free to
+    If you are using replication or persistence, we recommend that you set
+    `maxmemory` to leave a little RAM free to

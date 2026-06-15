@@ -1,11 +1,11 @@
 name: react
-version: 1.0.3
+version: 1.0.4
 tier: framework
 description: |
   React 19+ framework patterns — hooks rules and deps, useEffect lifecycle and cleanup, state management with useState/useReducer/Context, Server Components + Suspense streaming + use() hook, rendering model with keys/reconciliation/memoization. Precision-favored framework tier; sourced from react.dev per R1 tier-2 procedure (registry llms_url https://react.dev/llms.txt).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -16,22 +16,22 @@ depends_on:
 skills:
 - skill_id: react-hooks-rules-and-deps
   file: react-hooks-rules-and-deps.yaml
-  fragment_count: 11
+  fragment_count: 15
 - skill_id: react-effects-and-cleanup
   file: react-effects-and-cleanup.yaml
-  fragment_count: 9
+  fragment_count: 12
 - skill_id: react-state-and-context
   file: react-state-and-context.yaml
-  fragment_count: 8
+  fragment_count: 10
 - skill_id: react-server-components-and-suspense
   file: react-server-components-and-suspense.yaml
-  fragment_count: 13
+  fragment_count: 15
 - skill_id: react-rendering-keys-and-memoization
   file: react-rendering-keys-and-memoization.yaml
   fragment_count: 10
 - skill_id: react-error-boundaries
   file: react-error-boundaries.yaml
-  fragment_count: 9
+  fragment_count: 12
 - skill_id: react-form-actions-and-status
   file: react-form-actions-and-status.yaml
   fragment_count: 7
@@ -43,7 +43,7 @@ skills:
   fragment_count: 8
 - skill_id: react-performance-and-profiling
   file: react-performance-and-profiling.yaml
-  fragment_count: 7
+  fragment_count: 10
 - skill_id: react-refs-and-imperatives
   file: react-refs-and-imperatives.yaml
   fragment_count: 8

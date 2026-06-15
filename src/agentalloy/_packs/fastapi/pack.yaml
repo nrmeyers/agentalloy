@@ -1,11 +1,11 @@
 name: fastapi
-version: 1.0.3
+version: 1.0.4
 tier: framework
 description: |
   FastAPI 0.115+ patterns — path operations and APIRouter, Pydantic v2 request/response models with field/model validators, dependency injection with yield-based cleanup, async + lifespan + BackgroundTasks, OAuth2/JWT/API-key auth with scopes. Precision-favored framework tier; sourced from fastapi.tiangolo.com per R1 tier-3 fallback_root procedure (registry fallback_root https://fastapi.tiangolo.com/).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -19,7 +19,7 @@ skills:
   fragment_count: 9
 - skill_id: fastapi-pydantic-models-and-validation
   file: fastapi-pydantic-models-and-validation.yaml
-  fragment_count: 11
+  fragment_count: 19
 - skill_id: fastapi-dependency-injection
   file: fastapi-dependency-injection.yaml
   fragment_count: 9
@@ -34,7 +34,7 @@ skills:
   fragment_count: 9
 - skill_id: fastapi-cors
   file: fastapi-cors.yaml
-  fragment_count: 5
+  fragment_count: 7
 - skill_id: fastapi-file-uploads
   file: fastapi-file-uploads.yaml
   fragment_count: 9
@@ -43,7 +43,7 @@ skills:
   fragment_count: 12
 - skill_id: fastapi-middleware-patterns
   file: fastapi-middleware-patterns.yaml
-  fragment_count: 9
+  fragment_count: 18
 - skill_id: fastapi-middleware
   file: fastapi-middleware.yaml
   fragment_count: 8

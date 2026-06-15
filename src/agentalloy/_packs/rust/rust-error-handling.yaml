@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: rust-error-handling
 canonical_name: Rust Error Handling (Result, Option, ? Operator, From/Into, thiserror/anyhow)
-description: "Handle errors in Rust without exceptions: use Result and Option for fallible operations, propagate failures with the ? operator, convert error types with From/Into, and choose thiserror for libraries or anyhow for apps to avoid panics."
+description: 'Handle errors in Rust without exceptions: use Result and Option for fallible operations, propagate failures with the ? operator, convert error types with From/Into, and choose thiserror for libraries or anyhow for apps to avoid panics.'
 category: engineering
 skill_class: domain
-domain_tags: [result-propagation, option-combinators, question-mark-operator, error-conversion-from, error-context-anyhow, rust]
+domain_tags:
+- result-propagation
+- option-combinators
+- question-mark-operator
+- error-conversion-from
+- error-context-anyhow
+- rust
 related:
 - error-handling-patterns
 - rust-async-and-concurrency
 - rust-ownership-and-borrowing
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-05. Sources — std::result https://doc.rust-lang.org/std/result/index.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `error_handling_and_exceptions`); std::option https://doc.rust-lang.org/std/option/index.html; The Rust Programming Language ch09 https://doc.rust-lang.org/book/ch09-00-error-handling.html; Rust Reference question-mark operator https://doc.rust-lang.org/reference/expressions/operator-expr.html#the-question-mark-operator. Community crates `thiserror` 1.x and `anyhow` 1.x are referenced as the de facto standard for library and application error types respectively (verified 2026-05-05); they are not stdlib — flagged inline per R6 honesty rule. Skill scope: Result/Option idioms, the `?` operator and its `From::from` desugar, building typed errors with thiserror, opaque application errors with anyhow, and when panic/unwrap/expect are appropriate; not custom Error trait implementations by hand (thiserror covers it), not error reporting/observability.
-
 raw_prose: |
   # Rust Error Handling
 
@@ -188,202 +194,195 @@ raw_prose: |
   - [ ] Every `From<X> for MyError` impl is infallible — no `panic!`, `unwrap`, or `expect` inside its body (`grep -A 5 'impl From' src/`).
   - [ ] Library crates depending on `thiserror` do not also re-export `anyhow::Error` in their public API (`grep -n 'anyhow::Error' src/lib.rs`).
   - [ ] `cargo check` passes — confirms every `?` site has a corresponding `From` impl in scope.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Rust Error Handling
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Rust Error Handling
 
-      Rust has no exceptions. Every fallible operation returns `Result<T, E>` and every "maybe absent" value is `Option<T>`. The `?` operator propagates errors up the stack, calling `From::from` on the error along the way so callers see one unified error type. The rule is one sentence: return `Result<T, E>` for fallible work, propagate with `?`, define a typed error enum with `thiserror` for libraries or use `anyhow::Result` for applications, and reserve `panic!`/`unwrap`/`expect` for genuinely unrecoverable programmer errors. Most production Rust error bugs come from `unwrap()` in library code that should have returned a `Result`, swallowed errors via `let _ = ...`, stringly-typed errors that lose programmatic structure, or `Box<dyn Error>` where a typed enum would have served the caller better.
+    Rust has no exceptions. Every fallible operation returns `Result<T, E>` and every "maybe absent" value is `Option<T>`. The `?` operator propagates errors up the stack, calling `From::from` on the error along the way so callers see one unified error type. The rule is one sentence: return `Result<T, E>` for fallible work, propagate with `?`, define a typed error enum with `thiserror` for libraries or use `anyhow::Result` for applications, and reserve `panic!`/`unwrap`/`expect` for genuinely unrecoverable programmer errors. Most production Rust error bugs come from `unwrap()` in library code that should have returned a `Result`, swallowed errors via `let _ = ...`, stringly-typed errors that lose programmatic structure, or `Box<dyn Error>` where a typed enum would have served the caller better.
+- sequence: 2
+  fragment_type: example
+  content: |
+    ## `Result<T, E>` and `Option<T>`
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## `Result<T, E>` and `Option<T>`
+    `Result` and `Option` are stdlib enums; both are in the prelude:
 
-      `Result` and `Option` are stdlib enums; both are in the prelude:
+    ```rust
+    pub enum Result<T, E> { Ok(T), Err(E) }
+    pub enum Option<T>    { Some(T), None }
+    ```
 
-      ```rust
-      pub enum Result<T, E> { Ok(T), Err(E) }
-      pub enum Option<T>    { Some(T), None }
-      ```
+    Use `Result` when failure carries information (an io error, a parse error, a domain rule violation). Use `Option` when absence is the only failure mode (a lookup that may miss, the head of a possibly-empty list). Do not encode "not found" as `Result<T, ()>` — that is what `Option<T>` is for. Conversely, do not encode rich failure as `Option<T>` — the caller cannot tell *why* it is `None`.
 
-      Use `Result` when failure carries information (an io error, a parse error, a domain rule violation). Use `Option` when absence is the only failure mode (a lookup that may miss, the head of a possibly-empty list). Do not encode "not found" as `Result<T, ()>` — that is what `Option<T>` is for. Conversely, do not encode rich failure as `Option<T>` — the caller cannot tell *why* it is `None`.
+    Useful `Option` combinators (drawn from std::option):
 
-      Useful `Option` combinators (drawn from std::option):
+    - `map(f)` — transform `Some(x)` to `Some(f(x))`, leave `None` alone.
+    - `and_then(f)` — chain a fallible step that itself returns `Option`.
+    - `ok_or(err)` / `ok_or_else(|| err)` — convert `Option<T>` to `Result<T, E>` so `?` works.
+    - `unwrap_or_else(|| default)` — supply a fallback computed lazily.
+    - `?` works on `Option` inside a function that returns `Option`, short-circuiting on `None`.
 
-      - `map(f)` — transform `Some(x)` to `Some(f(x))`, leave `None` alone.
-      - `and_then(f)` — chain a fallible step that itself returns `Option`.
-      - `ok_or(err)` / `ok_or_else(|| err)` — convert `Option<T>` to `Result<T, E>` so `?` works.
-      - `unwrap_or_else(|| default)` — supply a fallback computed lazily.
-      - `?` works on `Option` inside a function that returns `Option`, short-circuiting on `None`.
+    ```rust
+    fn first_admin_email(users: &[User]) -> Option<&str> {
+        let admin = users.iter().find(|u| u.is_admin)?;   // None short-circuits
+        admin.email.as_deref()                            // Option<&str>
+    }
+    ```
+- fragment_type: example
+  sequence: 3
+  content: |-
+    ## The `?` operator and `From::from`
 
-      ```rust
-      fn first_admin_email(users: &[User]) -> Option<&str> {
-          let admin = users.iter().find(|u| u.is_admin)?;   // None short-circuits
-          admin.email.as_deref()                            // Option<&str>
-      }
-      ```
+    Inside a function returning `Result<_, E>`, the expression `expr?` desugars (per the Rust Reference, operator-expr question-mark) to roughly:
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## The `?` operator and `From::from`
+    ```rust
+    match expr {
+        Ok(v)  => v,
+        Err(e) => return Err(From::from(e)),
+    }
+    ```
 
-      Inside a function returning `Result<_, E>`, the expression `expr?` desugars (per the Rust Reference, operator-expr question-mark) to roughly:
+    The `From::from(e)` call is the key. If `expr` returns `Result<T, E1>` and the enclosing function returns `Result<_, E2>`, the compiler will accept `expr?` *only if* `E2: From<E1>` is in scope. This is how a single function that calls `std::io`, `serde_json`, and `reqwest` can return one unified error type — implement `From` for each underlying error and `?` does the conversion automatically.
+- fragment_type: example
+  sequence: 4
+  content: |-
+    ```rust
+    use std::io;
+    use std::num::ParseIntError;
 
-      ```rust
-      match expr {
-          Ok(v)  => v,
-          Err(e) => return Err(From::from(e)),
-      }
-      ```
+    #[derive(Debug)]
+    enum MyError {
+        Io(io::Error),
+        Parse(ParseIntError),
+    }
 
-      The `From::from(e)` call is the key. If `expr` returns `Result<T, E1>` and the enclosing function returns `Result<_, E2>`, the compiler will accept `expr?` *only if* `E2: From<E1>` is in scope. This is how a single function that calls `std::io`, `serde_json`, and `reqwest` can return one unified error type — implement `From` for each underlying error and `?` does the conversion automatically.
+    impl From<io::Error> for MyError {
+        fn from(e: io::Error) -> Self { MyError::Io(e) }
+    }
+    impl From<ParseIntError> for MyError {
+        fn from(e: ParseIntError) -> Self { MyError::Parse(e) }
+    }
 
-      ```rust
-      use std::io;
-      use std::num::ParseIntError;
+    fn parse_config(path: &str) -> Result<u32, MyError> {
+        let raw = std::fs::read_to_string(path)?;   // io::Error -> MyError via From
+        let n: u32 = raw.trim().parse()?;            // ParseIntError -> MyError via From
+        Ok(n)
+    }
+    ```
 
-      #[derive(Debug)]
-      enum MyError {
-          Io(io::Error),
-          Parse(ParseIntError),
-      }
+    Walk this edge case: if you forget the `impl From<ParseIntError> for MyError`, the second `?` fails to compile with `the trait bound MyError: From<ParseIntError> is not satisfied`. The fix is the `From` impl, not `.map_err(MyError::Parse)` at every call site (though `map_err` is the right tool when the conversion is one-off rather than universal).
+- sequence: 5
+  fragment_type: example
+  content: |
+    ## Typed errors with `thiserror` (libraries)
 
-      impl From<io::Error> for MyError {
-          fn from(e: io::Error) -> Self { MyError::Io(e) }
-      }
-      impl From<ParseIntError> for MyError {
-          fn from(e: ParseIntError) -> Self { MyError::Parse(e) }
-      }
+    `thiserror` (community crate, 1.x — verified 2026-05-05; not stdlib) generates the boilerplate for the pattern above:
 
-      fn parse_config(path: &str) -> Result<u32, MyError> {
-          let raw = std::fs::read_to_string(path)?;   // io::Error -> MyError via From
-          let n: u32 = raw.trim().parse()?;            // ParseIntError -> MyError via From
-          Ok(n)
-      }
-      ```
+    ```rust
+    use std::io;
+    use std::num::ParseIntError;
+    use thiserror::Error;
 
-      Walk this edge case: if you forget the `impl From<ParseIntError> for MyError`, the second `?` fails to compile with `the trait bound MyError: From<ParseIntError> is not satisfied`. The fix is the `From` impl, not `.map_err(MyError::Parse)` at every call site (though `map_err` is the right tool when the conversion is one-off rather than universal).
+    #[derive(Debug, Error)]
+    pub enum MyError {
+        #[error("read failed: {0}")]
+        Io(#[from] io::Error),
 
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Typed errors with `thiserror` (libraries)
+        #[error("parse failed: {0}")]
+        Parse(#[from] ParseIntError),
 
-      `thiserror` (community crate, 1.x — verified 2026-05-05; not stdlib) generates the boilerplate for the pattern above:
+        #[error("invalid port {0}")]
+        InvalidPort(u32),
+    }
+    ```
 
-      ```rust
-      use std::io;
-      use std::num::ParseIntError;
-      use thiserror::Error;
+    `#[derive(Error)]` implements `std::error::Error` (including `source()` for chain walking). `#[from]` generates the `From` impl, so `?` works without you writing the conversion. `#[error("...")]` is the `Display` template. Library error types should be enums with one variant per distinct failure mode the caller might want to match on — *not* a single `Other(String)` catch-all that loses structure.
 
-      #[derive(Debug, Error)]
-      pub enum MyError {
-          #[error("read failed: {0}")]
-          Io(#[from] io::Error),
+    Add to `Cargo.toml`:
 
-          #[error("parse failed: {0}")]
-          Parse(#[from] ParseIntError),
+    ```toml
+    [dependencies]
+    thiserror = "1"
+    ```
+- sequence: 6
+  fragment_type: example
+  content: |
+    ## Opaque application errors with `anyhow`
 
-          #[error("invalid port {0}")]
-          InvalidPort(u32),
-      }
-      ```
+    When you are writing a binary, not a library, callers do not need to match on your error variants — they just want a stack of context. `anyhow` (community crate, 1.x — verified 2026-05-05; not stdlib) provides `anyhow::Error`, an opaque error type that wraps any `std::error::Error + Send + Sync + 'static` and carries a chain of context strings.
 
-      `#[derive(Error)]` implements `std::error::Error` (including `source()` for chain walking). `#[from]` generates the `From` impl, so `?` works without you writing the conversion. `#[error("...")]` is the `Display` template. Library error types should be enums with one variant per distinct failure mode the caller might want to match on — *not* a single `Other(String)` catch-all that loses structure.
+    ```rust
+    use anyhow::{Context, Result};
 
-      Add to `Cargo.toml`:
+    fn load_config(path: &str) -> Result<Config> {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("read config {path}"))?;
+        let cfg: Config = toml::from_str(&raw)
+            .with_context(|| format!("parse config {path}"))?;
+        Ok(cfg)
+    }
+    ```
 
-      ```toml
-      [dependencies]
-      thiserror = "1"
-      ```
+    `Result<T>` is `anyhow`'s alias for `Result<T, anyhow::Error>`. `.context(...)` and `.with_context(|| ...)` add a layer to the error chain; the `Display` impl on `anyhow::Error` walks it and prints `context: cause`. Use anyhow in `main.rs`, CLIs, scripts, and integration tests. Do *not* re-export `anyhow::Error` from a library's public API — downstream callers cannot match on its variants.
 
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## Opaque application errors with `anyhow`
+    Add to `Cargo.toml`:
 
-      When you are writing a binary, not a library, callers do not need to match on your error variants — they just want a stack of context. `anyhow` (community crate, 1.x — verified 2026-05-05; not stdlib) provides `anyhow::Error`, an opaque error type that wraps any `std::error::Error + Send + Sync + 'static` and carries a chain of context strings.
+    ```toml
+    [dependencies]
+    anyhow = "1"
+    ```
+- sequence: 7
+  fragment_type: example
+  content: |
+    ## `Result::map_err` for one-off context
 
-      ```rust
-      use anyhow::{Context, Result};
+    When you want to convert one error to another at a single call site (rather than via a blanket `From` impl), use `map_err`:
 
-      fn load_config(path: &str) -> Result<Config> {
-          let raw = std::fs::read_to_string(path)
-              .with_context(|| format!("read config {path}"))?;
-          let cfg: Config = toml::from_str(&raw)
-              .with_context(|| format!("parse config {path}"))?;
-          Ok(cfg)
-      }
-      ```
+    ```rust
+    let n: u32 = raw.trim().parse()
+        .map_err(|e| MyError::InvalidPort(0))?;
+    ```
 
-      `Result<T>` is `anyhow`'s alias for `Result<T, anyhow::Error>`. `.context(...)` and `.with_context(|| ...)` add a layer to the error chain; the `Display` impl on `anyhow::Error` walks it and prints `context: cause`. Use anyhow in `main.rs`, CLIs, scripts, and integration tests. Do *not* re-export `anyhow::Error` from a library's public API — downstream callers cannot match on its variants.
+    `map_err` preserves the chain structure — the resulting `MyError` still flows through `?` to the caller. Reach for `map_err` when the underlying error type is generic and a blanket `From` would be too broad, or when one variant of your error type is a richer reformulation than the source error.
+- sequence: 8
+  fragment_type: execution
+  content: |
+    ## When `panic!` / `unwrap` / `expect` are appropriate
 
-      Add to `Cargo.toml`:
+    `panic!`, `.unwrap()`, and `.expect("...")` abort the current thread (or the process, depending on the panic strategy). They are appropriate for:
 
-      ```toml
-      [dependencies]
-      anyhow = "1"
-      ```
+    - **Programmer errors that indicate a bug.** `slice[idx]` already panics on out-of-range; do not paper over it with `get(idx).unwrap()` — same effect, more noise.
+    - **Tests, examples, and prototypes.** A failing `unwrap()` in a test is a test failure; that is the intent.
+    - **Compile-time-known-good values.** `Regex::new(r"^\d+$").expect("hardcoded regex")` — if the literal regex is broken, that is a build-time bug, not a runtime condition.
+    - **`main()` in small programs**, where `.unwrap()` is a fine way to surface an error and exit with a stack trace. (`main` returning `Result<(), E>` is better in any program with more than one error path.)
 
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## `Result::map_err` for one-off context
+    They are *not* appropriate for:
 
-      When you want to convert one error to another at a single call site (rather than via a blanket `From` impl), use `map_err`:
+    - **Library code.** A library that panics on bad input is a library people stop using.
+    - **Request handlers, RPC servers, long-lived workers.** A panic kills the worker; the rest of the system has to compensate.
+    - **Anywhere the error is recoverable.** If the caller could plausibly retry, ask the user, or fall back to a default — return the error.
+- sequence: 9
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
 
-      ```rust
-      let n: u32 = raw.trim().parse()
-          .map_err(|e| MyError::InvalidPort(0))?;
-      ```
+    - **`unwrap()` in library code.** Returns to the caller as a panic, which they cannot catch with `?`. Return a `Result` and let them decide.
+    - **`let _ = fallible_call();`** Discards the error silently. If you genuinely want to ignore it, log first and write a comment explaining why; otherwise propagate with `?`.
+    - **`Box<dyn Error>` when a typed error enum would do.** `Box<dyn Error>` is opaque — callers cannot match on variants. Use it only at API boundaries that span unknown error types (rare in well-designed code).
+    - **`.unwrap_or_default()` masking real failures.** `parse_int().unwrap_or_default()` silently turns parse failures into `0`, which is almost never what you want in production.
+    - **`panic!` inside a `From` impl.** `From::from` is called by `?` everywhere; a panic here turns *every* `?` site into a potential abort. `From` impls must be infallible — if conversion can fail, use `TryFrom` or a real `Result`.
+    - **Stringly-typed errors via `String` as the error type.** `Result<T, String>` loses programmatic structure; callers cannot match on variants, only on substring contents. Define a typed error enum or use `anyhow`.
+    - **Wrapping the same context twice.** `.context("read config").context("read config")` produces noisy chains. Each layer should add new information.
+- sequence: 10
+  fragment_type: verification
+  content: |
+    ## Verification
 
-      `map_err` preserves the chain structure — the resulting `MyError` still flows through `?` to the caller. Reach for `map_err` when the underlying error type is generic and a blanket `From` would be too broad, or when one variant of your error type is a richer reformulation than the source error.
-
-  - sequence: 7
-    fragment_type: execution
-    content: |
-      ## When `panic!` / `unwrap` / `expect` are appropriate
-
-      `panic!`, `.unwrap()`, and `.expect("...")` abort the current thread (or the process, depending on the panic strategy). They are appropriate for:
-
-      - **Programmer errors that indicate a bug.** `slice[idx]` already panics on out-of-range; do not paper over it with `get(idx).unwrap()` — same effect, more noise.
-      - **Tests, examples, and prototypes.** A failing `unwrap()` in a test is a test failure; that is the intent.
-      - **Compile-time-known-good values.** `Regex::new(r"^\d+$").expect("hardcoded regex")` — if the literal regex is broken, that is a build-time bug, not a runtime condition.
-      - **`main()` in small programs**, where `.unwrap()` is a fine way to surface an error and exit with a stack trace. (`main` returning `Result<(), E>` is better in any program with more than one error path.)
-
-      They are *not* appropriate for:
-
-      - **Library code.** A library that panics on bad input is a library people stop using.
-      - **Request handlers, RPC servers, long-lived workers.** A panic kills the worker; the rest of the system has to compensate.
-      - **Anywhere the error is recoverable.** If the caller could plausibly retry, ask the user, or fall back to a default — return the error.
-
-  - sequence: 8
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **`unwrap()` in library code.** Returns to the caller as a panic, which they cannot catch with `?`. Return a `Result` and let them decide.
-      - **`let _ = fallible_call();`** Discards the error silently. If you genuinely want to ignore it, log first and write a comment explaining why; otherwise propagate with `?`.
-      - **`Box<dyn Error>` when a typed error enum would do.** `Box<dyn Error>` is opaque — callers cannot match on variants. Use it only at API boundaries that span unknown error types (rare in well-designed code).
-      - **`.unwrap_or_default()` masking real failures.** `parse_int().unwrap_or_default()` silently turns parse failures into `0`, which is almost never what you want in production.
-      - **`panic!` inside a `From` impl.** `From::from` is called by `?` everywhere; a panic here turns *every* `?` site into a potential abort. `From` impls must be infallible — if conversion can fail, use `TryFrom` or a real `Result`.
-      - **Stringly-typed errors via `String` as the error type.** `Result<T, String>` loses programmatic structure; callers cannot match on variants, only on substring contents. Define a typed error enum or use `anyhow`.
-      - **Wrapping the same context twice.** `.context("read config").context("read config")` produces noisy chains. Each layer should add new information.
-
-  - sequence: 9
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `cargo clippy -- -W clippy::unwrap_used -W clippy::expect_used -D warnings` exits 0 in library crates; allowed sites are annotated `#[allow(clippy::unwrap_used)]` with a justification comment.
-      - [ ] `grep -n 'unwrap()' src/` results are all in `tests/`, `examples/`, or annotated allow-sites.
-      - [ ] `grep -n 'let _ = ' src/` results are all followed by a comment explaining why the error is intentionally discarded.
-      - [ ] No public function in a library crate returns `Result<_, String>` or `Result<_, Box<dyn std::error::Error>>` — verifiable by `cargo doc` review or `grep -nE 'Result<.*, (String|Box<dyn)' src/`.
-      - [ ] Every `From<X> for MyError` impl is infallible — no `panic!`, `unwrap`, or `expect` inside its body (`grep -A 5 'impl From' src/`).
-      - [ ] Library crates depending on `thiserror` do not also re-export `anyhow::Error` in their public API (`grep -n 'anyhow::Error' src/lib.rs`).
-      - [ ] `cargo check` passes — confirms every `?` site has a corresponding `From` impl in scope.
+    - [ ] `cargo clippy -- -W clippy::unwrap_used -W clippy::expect_used -D warnings` exits 0 in library crates; allowed sites are annotated `#[allow(clippy::unwrap_used)]` with a justification comment.
+    - [ ] `grep -n 'unwrap()' src/` results are all in `tests/`, `examples/`, or annotated allow-sites.
+    - [ ] `grep -n 'let _ = ' src/` results are all followed by a comment explaining why the error is intentionally discarded.
+    - [ ] No public function in a library crate returns `Result<_, String>` or `Result<_, Box<dyn std::error::Error>>` — verifiable by `cargo doc` review or `grep -nE 'Result<.*, (String|Box<dyn)' src/`.
+    - [ ] Every `From<X> for MyError` impl is infallible — no `panic!`, `unwrap`, or `expect` inside its body (`grep -A 5 'impl From' src/`).
+    - [ ] Library crates depending on `thiserror` do not also re-export `anyhow::Error` in their public API (`grep -n 'anyhow::Error' src/lib.rs`).
+    - [ ] `cargo check` passes — confirms every `?` site has a corresponding `From` impl in scope.

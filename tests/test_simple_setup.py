@@ -850,7 +850,7 @@ class TestEmbedEndpoint:
 
         class _MockResp:
             def read(self):
-                return _json.dumps({"data": [{"embedding": [0.1] * 1024}]}).encode()
+                return _json.dumps({"data": [{"embedding": [0.1] * 768}]}).encode()
 
             def __enter__(self):
                 return self
@@ -865,7 +865,7 @@ class TestEmbedEndpoint:
                 _test_embed_endpoint(cfg)
 
         captured = capsys.readouterr()
-        assert "1024-dim vector" in captured.out or "OK" in captured.out
+        assert "768-dim vector" in captured.out or "OK" in captured.out
 
     def test_embed_endpoint_missing_env(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
         cfg = SetupConfig()
@@ -908,7 +908,7 @@ class TestEmbedEndpoint:
         )
 
         # First call: embedding response
-        embed_resp = _json.dumps({"data": [{"embedding": [0.1] * 1024}]}).encode()
+        embed_resp = _json.dumps({"data": [{"embedding": [0.1] * 768}]}).encode()
         # Second call: proxy chat completion response
         chat_resp = _json.dumps(
             {
@@ -954,7 +954,7 @@ class TestEmbedEndpoint:
         import re
 
         clean = re.sub(r"\x1b\[[0-9;]*m", "", captured.out)
-        assert "1024-dim vector" in clean or "OK" in clean
+        assert "768-dim vector" in clean or "OK" in clean
         assert "Skill query test: OK" in clean
         assert "chars returned" in clean
 

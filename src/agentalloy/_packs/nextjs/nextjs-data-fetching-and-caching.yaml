@@ -1,10 +1,20 @@
 skill_type: domain
 skill_id: nextjs-data-fetching-and-caching
 canonical_name: Next.js 16 Data Fetching and Caching (Cache Components, use cache, cacheLife, Revalidation)
-description: "Fetch and cache data in Next.js 16 apps: opt into caching with 'use cache', control freshness with cacheLife profiles, and revalidate by tags to keep content fresh without full rebuilds."
+description: 'Fetch and cache data in Next.js 16 apps: opt into caching with ''use cache'', control freshness with cacheLife profiles, and revalidate by tags to keep content fresh without full rebuilds.'
 category: engineering
 skill_class: domain
-domain_tags: [cache-components-config, use-cache-directive, cachelife-profiles, cachetag-revalidation, streaming-suspense-fallback, nextjs, isr, revalidation, static-site-generation, on-demand-rendering]
+domain_tags:
+- cache-components-config
+- use-cache-directive
+- cachelife-profiles
+- cachetag-revalidation
+- streaming-suspense-fallback
+- nextjs
+- isr
+- revalidation
+- static-site-generation
+- on-demand-rendering
 requires:
 - react-server-components-and-suspense
 related:
@@ -12,13 +22,13 @@ related:
 - nextjs-ppr-cache-components
 - nextjs-server-actions-and-mutations
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   merged 2026-06-03: absorbed unique content from nextjs-isr-and-revalidation (superseded_by: nextjs-isr-and-revalidation)
   Initial authoring 2026-05-06. Sources — Next.js Fetching Data https://nextjs.org/docs/app/getting-started/fetching-data, Caching (Cache Components) https://nextjs.org/docs/app/getting-started/caching, `use cache` directive https://nextjs.org/docs/app/api-reference/directives/use-cache, `cacheLife` https://nextjs.org/docs/app/api-reference/functions/cacheLife, `cacheTag` https://nextjs.org/docs/app/api-reference/functions/cacheTag, `cacheComponents` config https://nextjs.org/docs/app/api-reference/config/next-config-js/cacheComponents, `revalidateTag` https://nextjs.org/docs/app/api-reference/functions/revalidateTag (all verified 2026-05-06 against fixtures/upstream/registry.yaml entry nextjs via tier-2 llms_url procedure; Next.js 16.2.4). Skill scope: the new Cache Components model introduced in Next.js 16 (October 2025) and stable through 16.2.x, opted into via `cacheComponents: true` in `next.config.ts`. Under this model `fetch` is NOT cached across requests by default; identical fetches are still memoized within a single render. Caching is opt-in via the `'use cache'` directive at two scopes — data-level (an async function such as `getProducts()`) and UI-level (a Server Component, page, or layout). `cacheLife` from `next/cache` selects a preset profile (`seconds`, `minutes`, `hours`, `days`, `weeks`, `max`) or accepts a custom `{ stale, revalidate, expire }` object. `cacheTag` tags a cached function so `revalidateTag('posts', 'max')` after a mutation can invalidate it. Components that touch `cookies()`, `headers()`, `searchParams`, or other request-time APIs are dynamic and must be wrapped in `<Suspense>` so they stream around the prerendered shell. Walks the boundary edge: a function carrying `'use cache'` that calls `cookies()` is a contradiction — the runtime API forces dynamic, and the cache directive cannot apply. Out of scope: the previous fetch-cached-by-default model documented in the "Caching and Revalidating (Previous Model)" guide, Pages Router, and ISR-via-`revalidate` route segment config. Original authoring — scaffolded with citations against nextjs.org docs, not a verbatim copy of upstream prose.
-
 raw_prose: |
   # Next.js 16 Data Fetching and Caching
 
@@ -317,338 +327,317 @@ raw_prose: |
   - `revalidateTag(tag, profile)` two-argument signature is current; single-argument form is deprecated; tags are case-sensitive and capped at 256 characters; `profile="max"` provides stale-while-revalidate, per nextjs.org/docs/app/api-reference/functions/revalidateTag (verified 2026-05-06).
   - Identical `fetch` calls memoized within a render but not cached across requests under Cache Components; explicit `'use cache'` is required for cross-request caching, per nextjs.org/docs/app/getting-started/fetching-data (verified 2026-05-06).
   - Request-time APIs (`cookies`, `headers`, `searchParams`, dynamic `params`) require `<Suspense>` wrapping under Cache Components, per nextjs.org/docs/app/getting-started/caching "Working with runtime APIs" (verified 2026-05-06).
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Next.js 16 Data Fetching and Caching
-
-      Next.js 16 (October 2025, current 16.2.4 verified 2026-05-06) introduces **Cache Components**, an opt-in rendering model that replaces the implicit fetch-cached-by-default behavior of earlier App Router versions. With `cacheComponents: true` in `next.config.ts`, fetch results are NOT cached across requests; you opt in to caching explicitly with the `'use cache'` directive. Identical `fetch` calls inside the same render are still memoized so you can call them in the components that need the data instead of prop-drilling. This skill covers the new model end to end: enabling Cache Components, the two scopes of `'use cache'`, `cacheLife` profiles, tag-based revalidation with `cacheTag` and `revalidateTag`, streaming dynamic data through `<Suspense>`, and the request-time-API edge that forces a function to be dynamic.
-
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## Enabling Cache Components
-
-      Cache Components is opt-in. Add the flag in `next.config.ts`:
-
-      ```ts
-      // next.config.ts
-      import type { NextConfig } from 'next'
-
-      const nextConfig: NextConfig = {
-        cacheComponents: true,
-      }
-
-      export default nextConfig
-      ```
-
-      Once enabled, the entire app runs under the new semantics: `fetch` is no longer cached by default, route segment options like `force-static`/`force-dynamic` are not the primary control surface, and every page is treated as a static shell into which dynamic regions stream via `<Suspense>`. `GET` Route Handlers follow the same prerendering model as pages. Migration warning: enabling this mid-app without auditing fetches that previously cached implicitly will silently regress hit rates and load real backends on every request — inventory those callsites first and add `'use cache'` where the implicit caching was load-bearing.
-
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Fetching data in Server Components
-
-      In an `async` Server Component you `await` data directly. The component runs once on the server per render and its output is serialized to the client.
-
-      ```tsx
-      // app/blog/page.tsx
-      export default async function Page() {
-        const data = await fetch('https://api.vercel.app/blog')
-        const posts = await data.json()
-        return (
-          <ul>
-            {posts.map((post: { id: string; title: string }) => (
-              <li key={post.id}>{post.title}</li>
-            ))}
-          </ul>
-        )
-      }
-      ```
-
-      Two properties of `fetch` under Cache Components, verbatim from the upstream docs (verified 2026-05-06): identical `fetch` requests in a React component tree are memoized within a single render so you can call them in the component that needs the data instead of drilling props; `fetch` requests are not cached across requests by default and will block rendering until the request completes — wrap the fetching component in `<Suspense>` to stream, or apply `'use cache'` to cache the result.
-
-      ORM and direct DB queries work identically — credentials and query logic stay on the server, never crossing into the client bundle:
-
-      ```tsx
-      // app/blog/page.tsx
-      import { db, posts } from '@/lib/db'
-
-      export default async function Page() {
-        const allPosts = await db.select().from(posts)
-        return (
-          <ul>
-            {allPosts.map((post) => (
-              <li key={post.id}>{post.title}</li>
-            ))}
-          </ul>
-        )
-      }
-      ```
-
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## `'use cache'` at two scopes
-
-      The `'use cache'` directive caches the return value of an async function or component. Two placements:
-
-      **Data-level** — at the top of an async function body, the function's return value is cached keyed on its arguments and any closed-over values:
-
-      ```tsx
-      // app/lib/data.ts
-      import { cacheLife } from 'next/cache'
-
-      export async function getUsers() {
-        'use cache'
-        cacheLife('hours')
-        return db.query('SELECT * FROM users')
-      }
-      ```
-
-      **UI-level** — at the top of a Server Component, page, or layout body, the entire rendered output is cached:
-
-      ```tsx
-      // app/page.tsx
-      import { cacheLife } from 'next/cache'
-
-      export default async function Page() {
-        'use cache'
-        cacheLife('hours')
-
-        const users = await db.query('SELECT * FROM users')
-        return (
-          <ul>
-            {users.map((user: { id: string; name: string }) => (
-              <li key={user.id}>{user.name}</li>
-            ))}
-          </ul>
-        )
-      }
-      ```
-
-      If `'use cache'` appears at the file level, every exported function in the file is cached. Arguments and any closed-over values from parent scopes automatically become part of the cache key, so different inputs produce separate entries — this is what makes parameterized cached content (e.g. `getUser(id)`) work. Per the upstream constraints (verified 2026-05-06): cache keys must be serializable; functions, class instances, Maps, Sets, and circular references cannot participate. A function that takes a non-serializable arg will miss the cache on every call.
-
-  - sequence: 5
-    fragment_type: rationale
-    content: |
-      ## `cacheLife` profiles
-
-      `cacheLife(profile)` from `next/cache` sets the cache lifetime for the enclosing `'use cache'` function. Preset profile names (verified 2026-05-06 against the cacheLife API reference):
-
-      - `seconds` — real-time data (stock prices, live scores)
-      - `minutes` — frequently updated feeds (social, news)
-      - `hours` — multiple daily updates (inventory, weather)
-      - `days` — daily updates (blog posts, articles)
-      - `weeks` — weekly updates (podcasts, newsletters)
-      - `max` — rarely changes (legal pages, archives)
-
-      Each profile balances three timing properties — `stale` (how long the client may use the cached response without checking), `revalidate` (how often fresh content is generated on the server), and `expire` (when the entry is fully evicted). For custom timing, pass an object: `cacheLife({ stale: 60, revalidate: 300, expire: 3600 })`. Only one `cacheLife` call should execute per function invocation; if you branch on input, ensure only one branch's call runs. If you omit `cacheLife` inside a `'use cache'` function, the `default` profile applies.
-
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## `cacheTag` and `revalidateTag` for invalidation
-
-      `cacheTag(tag)` from `next/cache`, called inside a `'use cache'` function, attaches a string tag to the cache entry. After a mutation you call `revalidateTag(tag, profile)` from a Server Action or Route Handler to invalidate every entry that carries the tag.
-
-      ```tsx
-      // app/lib/posts.ts
-      import { cacheLife, cacheTag } from 'next/cache'
-
-      export async function getPosts() {
-        'use cache'
-        cacheLife('hours')
-        cacheTag('posts')
-        const res = await fetch('https://api.vercel.app/blog')
-        return res.json()
-      }
-      ```
-
-      ```tsx
-      // app/posts/actions.ts
-      'use server'
-      import { revalidateTag } from 'next/cache'
-      import { db } from '@/lib/db'
-
-      export async function createPost(formData: FormData) {
-        await db.posts.insert({ title: formData.get('title') as string })
-        revalidateTag('posts', 'max') // stale-while-revalidate
-      }
-      ```
-
-      Revalidation behavior, verbatim from the upstream `revalidateTag` reference (verified 2026-05-06): with `profile="max"` (recommended) the tag entry is marked stale and the next visit serves stale content while fresh content is fetched in the background; with a custom profile the named profile's behavior applies; the single-argument form `revalidateTag(tag)` is deprecated and will be removed. Tags are case-sensitive and capped at 256 characters. `revalidateTag` does not eagerly refetch — it marks data stale; the next page visit triggers the refresh.
-
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## Streaming dynamic data with `<Suspense>`
-
-      Components that read request-time data — `cookies()`, `headers()`, `searchParams`, dynamic `params` — cannot be statically prerendered. Wrap them in `<Suspense>` so the rest of the page renders as a static shell and the dynamic region streams when the request resolves.
-
-      ```tsx
-      // app/dashboard/page.tsx
-      import { Suspense } from 'react'
-      import { cookies } from 'next/headers'
-
-      async function UserGreeting() {
-        const cookieStore = await cookies()
-        const theme = cookieStore.get('theme')?.value || 'light'
-        return <p>Your theme: {theme}</p>
-      }
-
-      export default function Page() {
-        return (
-          <>
-            <h1>Dashboard</h1>
-            <Suspense fallback={<p>Loading...</p>}>
-              <UserGreeting />
-            </Suspense>
-          </>
-        )
-      }
-      ```
-
-      The same pattern works for any `async` data-fetching child whose result must be fresh per request. Without the boundary the dynamic component blocks the entire page from streaming until its data resolves.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## The boundary edge: `'use cache'` plus `cookies()`
-
-      Walk this edge. A function tries to combine caching with a request-time API:
-
-      ```tsx
-      // BROKEN — request-time API inside a cached function
-      import { cookies } from 'next/headers'
-      import { cacheLife } from 'next/cache'
-
-      export async function getDashboard() {
-        'use cache'
-        cacheLife('minutes')
-        const session = await cookies() // dynamic — forces request-time
-        return db.dashboards.findForUser(session.get('uid')?.value)
-      }
-      ```
-
-      The function is internally contradictory: `cookies()` makes the function dynamic and the cache directive cannot apply. The fix is to split: a cached function that takes the user id as a serializable argument, and a thin dynamic wrapper that reads the cookie and calls the cached function with the id.
-
-      ```tsx
-      // app/lib/dashboard.ts
-      import { cacheLife, cacheTag } from 'next/cache'
-
-      export async function getDashboard(userId: string) {
-        'use cache'
-        cacheLife('minutes')
-        cacheTag(`dashboard:${userId}`)
-        return db.dashboards.findForUser(userId)
-      }
-
-      // app/dashboard/Dashboard.tsx
-      import { cookies } from 'next/headers'
-      import { getDashboard } from '@/app/lib/dashboard'
-
-      export default async function Dashboard() {
-        const session = await cookies()
-        const userId = session.get('uid')?.value
-        if (!userId) return null
-        const data = await getDashboard(userId) // cached per userId
-        return <pre>{JSON.stringify(data)}</pre>
-      }
-      ```
-
-      The wrapper is dynamic (so it must live inside a `<Suspense>` boundary), but the expensive work behind it is cached per user with a tag that supports targeted invalidation.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Enabling `cacheComponents: true` mid-app without auditing implicit fetch caches.** Pages that previously cached `fetch` calls by default will now hit your origin on every request. Inventory `fetch` callsites and add `'use cache'` where the implicit cache was load-bearing before flipping the flag.
-      - **Putting `'use cache'` on a function that calls `cookies()`, `headers()`, or `searchParams`.** The request-time API forces the function dynamic; the cache directive does not apply. Split the function into a cached pure function keyed by a serializable id and a thin dynamic wrapper that reads the request data.
-      - **Caching a function with a non-serializable argument.** Class instances, Maps, Sets, functions, and circular structures cannot participate in cache keys. Passing one produces a miss every call — the function still runs but you pay the cache machinery overhead with no hit-rate benefit.
-      - **Applying `'use cache'` to mutations.** The directive caches return values; a mutation has side effects that you do not want to deduplicate. Mutations belong in Server Actions or Route Handlers; call `revalidateTag` after the mutation to invalidate the relevant cached reads.
-      - **Forgetting `<Suspense>` around request-time data.** A bare `cookies()`-reading component blocks the entire response until the request resolves, defeating the static-shell-plus-streaming model. Wrap every dynamic region.
-      - **Suspense boundaries placed too granularly.** A boundary per row produces a fallback waterfall, each fallback animating in turn. Group siblings that should appear together under one boundary.
-      - **Calling the deprecated `revalidateTag(tag)` single-argument form.** It currently works only with TypeScript errors suppressed and is slated for removal. Use `revalidateTag(tag, 'max')` or `updateTag` per the current API.
-      - **Tagging cached functions with high-cardinality dynamic strings without a budget.** A tag per user-id-per-resource is fine for targeted invalidation but produces an unbounded tag table — make sure the tag domain is intentional and finite enough to operate.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `cacheComponents: true` is set in `next.config.ts`. Run `node -e "import('./next.config.ts').then(m => console.log(m.default.cacheComponents))"` (or `grep -n cacheComponents next.config.ts`) and confirm the flag.
-      - [ ] Every cached function imports its helpers from `next/cache`. `grep -rnE "from ['\\\"]next/cache['\\\"]" app/ src/` lists the import sites; spot-check that each `'use cache'` block has a matching `cacheLife` import in scope.
-      - [ ] Every `'use cache'` directive sits at the top of an async function or file, not inside a function body. `grep -rn "'use cache'" app/ src/` and audit each match for placement.
-      - [ ] No `'use cache'` function calls `cookies()`, `headers()`, or reads `searchParams`. `grep -rn -B2 -A20 "'use cache'" app/ src/ | grep -E '(cookies|headers|searchParams)\\(' ` should return no hits inside cached blocks.
-      - [ ] Every `cacheTag(...)` call has a corresponding `revalidateTag(...)` somewhere in the codebase. `grep -rnE "cacheTag\\(" app/ src/` and `grep -rnE "revalidateTag\\(" app/ src/` — every tag value in the first should appear in the second or be intentionally never-revalidated.
-      - [ ] No deprecated single-argument `revalidateTag` calls remain. `grep -rnE "revalidateTag\\([^,)]+\\)" app/ src/` should return no hits; all calls take a profile second argument.
-      - [ ] Every component reading request-time APIs is inside a `<Suspense>` boundary. `grep -rnE "(cookies|headers)\\(\\)" app/ src/` lists candidates; verify each is rendered under a `<Suspense fallback=...>`.
-      - [ ] Every `<Suspense>` has a non-empty `fallback` prop. `grep -rnE "<Suspense[^>]*fallback=" app/ src/` count matches `grep -rn '<Suspense' app/ src/`.
-      - [ ] Next.js version is 16.x (Cache Components requires 16+). `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range.
-
-      ## Verified
-
-      - Cache Components opt-in via `cacheComponents: true` in `next.config.ts`, including the migration note about `GET` Route Handlers following the page prerendering model, per nextjs.org/docs/app/getting-started/caching (verified 2026-05-06).
-      - `'use cache'` two-scope semantics (data-level and UI-level), cache key derived from arguments and closed-over values, file-level placement caches all exports, per nextjs.org/docs/app/api-reference/directives/use-cache and the Caching getting-started page (verified 2026-05-06).
-      - `cacheLife` preset profiles `seconds`, `minutes`, `hours`, `days`, `weeks`, `max`, plus the custom `{ stale, revalidate, expire }` shape, per nextjs.org/docs/app/api-reference/functions/cacheLife — Next.js 16.2.4 (verified 2026-05-06).
-      - `revalidateTag(tag, profile)` two-argument signature is current; single-argument form is deprecated; tags are case-sensitive and capped at 256 characters; `profile="max"` provides stale-while-revalidate, per nextjs.org/docs/app/api-reference/functions/revalidateTag (verified 2026-05-06).
-      - Identical `fetch` calls memoized within a render but not cached across requests under Cache Components; explicit `'use cache'` is required for cross-request caching, per nextjs.org/docs/app/getting-started/fetching-data (verified 2026-05-06).
-      - Request-time APIs (`cookies`, `headers`, `searchParams`, dynamic `params`) require `<Suspense>` wrapping under Cache Components, per nextjs.org/docs/app/getting-started/caching "Working with runtime APIs" (verified 2026-05-06).
-
-  - sequence: 11
-    fragment_type: execution
-    content: |
-      ## Incremental Static Regeneration (legacy time-based)
-
-      Outside the Cache Components model, Next.js App Router still supports time-based ISR via the `revalidate` route segment config plus `generateStaticParams`. With ISR you can update static content without rebuilding the entire site, reduce server load by serving prerendered pages for most requests, get automatic `cache-control` headers, and handle large content sets without long `next build` times.
-
-      ```tsx
-      // app/blog/[id]/page.tsx
-      interface Post { id: string; title: string; content: string }
-
-      // Next.js will invalidate the cache when a request comes in,
-      // at most once every 60 seconds.
-      export const revalidate = 60
-
-      export async function generateStaticParams() {
-        const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) => res.json())
-        return posts.map((post) => ({ id: String(post.id) }))
-      }
-
-      export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-        const { id } = await params
-        const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then((res) => res.json())
-        return (
-          <main>
-            <h1>{post.title}</h1>
-            <p>{post.content}</p>
-          </main>
-        )
-      }
-      ```
-
-      How this flow works: during `next build`, all known params are generated; requests to those pages are cached and instantaneous; after the revalidate window passes, the next request still returns the cached (now stale) page while the cache is invalidated and a new version is generated in the background; once generated, the next request returns the updated page and re-caches it. If an un-prebuilt param is requested and exists, the page is generated on-demand — controlled by [`dynamicParams`](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams). If the resource does not exist, a 404 is returned.
-
-  - sequence: 12
-    fragment_type: example
-    content: |
-      ## On-demand revalidation with `revalidatePath`
-
-      `revalidatePath(path)` from `next/cache` invalidates the cached output for a specific route, complementing tag-based invalidation. Use it from a Server Action or Route Handler after a mutation when invalidating by route is more natural than by tag — for example, refreshing a single post page after editing it.
-
-      ```tsx
-      // app/posts/[id]/actions.ts
-      'use server'
-      import { revalidatePath } from 'next/cache'
-
-      export async function updatePost(id: string, formData: FormData) {
-        await db.posts.update(id, { title: formData.get('title') as string })
-        revalidatePath(`/posts/${id}`)
-      }
-      ```
-
-      Choose `revalidateTag` when many routes share the same underlying data (tag the data once, invalidate broadly). Choose `revalidatePath` when the invalidation maps cleanly to a single route or a small set of routes. The two are complementary, not exclusive.
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Next.js 16 Data Fetching and Caching
+
+    Next.js 16 (October 2025, current 16.2.4 verified 2026-05-06) introduces **Cache Components**, an opt-in rendering model that replaces the implicit fetch-cached-by-default behavior of earlier App Router versions. With `cacheComponents: true` in `next.config.ts`, fetch results are NOT cached across requests; you opt in to caching explicitly with the `'use cache'` directive. Identical `fetch` calls inside the same render are still memoized so you can call them in the components that need the data instead of prop-drilling. This skill covers the new model end to end: enabling Cache Components, the two scopes of `'use cache'`, `cacheLife` profiles, tag-based revalidation with `cacheTag` and `revalidateTag`, streaming dynamic data through `<Suspense>`, and the request-time-API edge that forces a function to be dynamic.
+- sequence: 2
+  fragment_type: setup
+  content: |
+    ## Enabling Cache Components
+
+    Cache Components is opt-in. Add the flag in `next.config.ts`:
+
+    ```ts
+    // next.config.ts
+    import type { NextConfig } from 'next'
+
+    const nextConfig: NextConfig = {
+      cacheComponents: true,
+    }
+
+    export default nextConfig
+    ```
+
+    Once enabled, the entire app runs under the new semantics: `fetch` is no longer cached by default, route segment options like `force-static`/`force-dynamic` are not the primary control surface, and every page is treated as a static shell into which dynamic regions stream via `<Suspense>`. `GET` Route Handlers follow the same prerendering model as pages. Migration warning: enabling this mid-app without auditing fetches that previously cached implicitly will silently regress hit rates and load real backends on every request — inventory those callsites first and add `'use cache'` where the implicit caching was load-bearing.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## Fetching data in Server Components
+
+    In an `async` Server Component you `await` data directly. The component runs once on the server per render and its output is serialized to the client.
+
+    ```tsx
+    // app/blog/page.tsx
+    export default async function Page() {
+      const data = await fetch('https://api.vercel.app/blog')
+      const posts = await data.json()
+      return (
+        <ul>
+          {posts.map((post: { id: string; title: string }) => (
+            <li key={post.id}>{post.title}</li>
+          ))}
+        </ul>
+      )
+    }
+    ```
+
+    Two properties of `fetch` under Cache Components, verbatim from the upstream docs (verified 2026-05-06): identical `fetch` requests in a React component tree are memoized within a single render so you can call them in the component that needs the data instead of drilling props; `fetch` requests are not cached across requests by default and will block rendering until the request completes — wrap the fetching component in `<Suspense>` to stream, or apply `'use cache'` to cache the result.
+
+    ORM and direct DB queries work identically — credentials and query logic stay on the server, never crossing into the client bundle:
+
+    ```tsx
+    // app/blog/page.tsx
+    import { db, posts } from '@/lib/db'
+
+    export default async function Page() {
+      const allPosts = await db.select().from(posts)
+      return (
+        <ul>
+          {allPosts.map((post) => (
+            <li key={post.id}>{post.title}</li>
+          ))}
+        </ul>
+      )
+    }
+    ```
+- sequence: 4
+  fragment_type: execution
+  content: |
+    ## `'use cache'` at two scopes
+
+    The `'use cache'` directive caches the return value of an async function or component. Two placements:
+
+    **Data-level** — at the top of an async function body, the function's return value is cached keyed on its arguments and any closed-over values:
+
+    ```tsx
+    // app/lib/data.ts
+    import { cacheLife } from 'next/cache'
+
+    export async function getUsers() {
+      'use cache'
+      cacheLife('hours')
+      return db.query('SELECT * FROM users')
+    }
+    ```
+
+    **UI-level** — at the top of a Server Component, page, or layout body, the entire rendered output is cached:
+
+    ```tsx
+    // app/page.tsx
+    import { cacheLife } from 'next/cache'
+
+    export default async function Page() {
+      'use cache'
+      cacheLife('hours')
+
+      const users = await db.query('SELECT * FROM users')
+      return (
+        <ul>
+          {users.map((user: { id: string; name: string }) => (
+            <li key={user.id}>{user.name}</li>
+          ))}
+        </ul>
+      )
+    }
+    ```
+
+    If `'use cache'` appears at the file level, every exported function in the file is cached. Arguments and any closed-over values from parent scopes automatically become part of the cache key, so different inputs produce separate entries — this is what makes parameterized cached content (e.g. `getUser(id)`) work. Per the upstream constraints (verified 2026-05-06): cache keys must be serializable; functions, class instances, Maps, Sets, and circular references cannot participate. A function that takes a non-serializable arg will miss the cache on every call.
+- sequence: 5
+  fragment_type: rationale
+  content: |
+    ## `cacheLife` profiles
+
+    `cacheLife(profile)` from `next/cache` sets the cache lifetime for the enclosing `'use cache'` function. Preset profile names (verified 2026-05-06 against the cacheLife API reference):
+
+    - `seconds` — real-time data (stock prices, live scores)
+    - `minutes` — frequently updated feeds (social, news)
+    - `hours` — multiple daily updates (inventory, weather)
+    - `days` — daily updates (blog posts, articles)
+    - `weeks` — weekly updates (podcasts, newsletters)
+    - `max` — rarely changes (legal pages, archives)
+
+    Each profile balances three timing properties — `stale` (how long the client may use the cached response without checking), `revalidate` (how often fresh content is generated on the server), and `expire` (when the entry is fully evicted). For custom timing, pass an object: `cacheLife({ stale: 60, revalidate: 300, expire: 3600 })`. Only one `cacheLife` call should execute per function invocation; if you branch on input, ensure only one branch's call runs. If you omit `cacheLife` inside a `'use cache'` function, the `default` profile applies.
+- sequence: 6
+  fragment_type: example
+  content: |
+    ## `cacheTag` and `revalidateTag` for invalidation
+
+    `cacheTag(tag)` from `next/cache`, called inside a `'use cache'` function, attaches a string tag to the cache entry. After a mutation you call `revalidateTag(tag, profile)` from a Server Action or Route Handler to invalidate every entry that carries the tag.
+
+    ```tsx
+    // app/lib/posts.ts
+    import { cacheLife, cacheTag } from 'next/cache'
+
+    export async function getPosts() {
+      'use cache'
+      cacheLife('hours')
+      cacheTag('posts')
+      const res = await fetch('https://api.vercel.app/blog')
+      return res.json()
+    }
+    ```
+
+    ```tsx
+    // app/posts/actions.ts
+    'use server'
+    import { revalidateTag } from 'next/cache'
+    import { db } from '@/lib/db'
+
+    export async function createPost(formData: FormData) {
+      await db.posts.insert({ title: formData.get('title') as string })
+      revalidateTag('posts', 'max') // stale-while-revalidate
+    }
+    ```
+
+    Revalidation behavior, verbatim from the upstream `revalidateTag` reference (verified 2026-05-06): with `profile="max"` (recommended) the tag entry is marked stale and the next visit serves stale content while fresh content is fetched in the background; with a custom profile the named profile's behavior applies; the single-argument form `revalidateTag(tag)` is deprecated and will be removed. Tags are case-sensitive and capped at 256 characters. `revalidateTag` does not eagerly refetch — it marks data stale; the next page visit triggers the refresh.
+- sequence: 7
+  fragment_type: example
+  content: |
+    ## Streaming dynamic data with `<Suspense>`
+
+    Components that read request-time data — `cookies()`, `headers()`, `searchParams`, dynamic `params` — cannot be statically prerendered. Wrap them in `<Suspense>` so the rest of the page renders as a static shell and the dynamic region streams when the request resolves.
+
+    ```tsx
+    // app/dashboard/page.tsx
+    import { Suspense } from 'react'
+    import { cookies } from 'next/headers'
+
+    async function UserGreeting() {
+      const cookieStore = await cookies()
+      const theme = cookieStore.get('theme')?.value || 'light'
+      return <p>Your theme: {theme}</p>
+    }
+
+    export default function Page() {
+      return (
+        <>
+          <h1>Dashboard</h1>
+          <Suspense fallback={<p>Loading...</p>}>
+            <UserGreeting />
+          </Suspense>
+        </>
+      )
+    }
+    ```
+
+    The same pattern works for any `async` data-fetching child whose result must be fresh per request. Without the boundary the dynamic component blocks the entire page from streaming until its data resolves.
+- sequence: 8
+  fragment_type: example
+  content: |
+    ## The boundary edge: `'use cache'` plus `cookies()`
+
+    Walk this edge. A function tries to combine caching with a request-time API:
+
+    ```tsx
+    // BROKEN — request-time API inside a cached function
+    import { cookies } from 'next/headers'
+    import { cacheLife } from 'next/cache'
+
+    export async function getDashboard() {
+      'use cache'
+      cacheLife('minutes')
+      const session = await cookies() // dynamic — forces request-time
+      return db.dashboards.findForUser(session.get('uid')?.value)
+    }
+    ```
+
+    The function is internally contradictory: `cookies()` makes the function dynamic and the cache directive cannot apply. The fix is to split: a cached function that takes the user id as a serializable argument, and a thin dynamic wrapper that reads the cookie and calls the cached function with the id.
+
+    ```tsx
+    // app/lib/dashboard.ts
+    import { cacheLife, cacheTag } from 'next/cache'
+
+    export async function getDashboard(userId: string) {
+      'use cache'
+      cacheLife('minutes')
+      cacheTag(`dashboard:${userId}`)
+      return db.dashboards.findForUser(userId)
+    }
+
+    // app/dashboard/Dashboard.tsx
+    import { cookies } from 'next/headers'
+    import { getDashboard } from '@/app/lib/dashboard'
+
+    export default async function Dashboard() {
+      const session = await cookies()
+      const userId = session.get('uid')?.value
+      if (!userId) return null
+      const data = await getDashboard(userId) // cached per userId
+      return <pre>{JSON.stringify(data)}</pre>
+    }
+    ```
+
+    The wrapper is dynamic (so it must live inside a `<Suspense>` boundary), but the expensive work behind it is cached per user with a tag that supports targeted invalidation.
+- fragment_type: guardrail
+  sequence: 9
+  content: |-
+    ## Anti-patterns
+
+    - **Enabling `cacheComponents: true` mid-app without auditing implicit fetch caches.** Pages that previously cached `fetch` calls by default will now hit your origin on every request. Inventory `fetch` callsites and add `'use cache'` where the implicit cache was load-bearing before flipping the flag. - **Putting `'use cache'` on a function that calls `cookies()`, `headers()`, or `searchParams`.** The request-time API forces the function dynamic; the cache directive does not apply. Split the function into a cached pure function keyed by a serializable id and a thin dynamic wrapper that reads the request data. - **Caching a function with a non-serializable argument.** Class instances, Maps, Sets, functions, and circular structures cannot participate in cache keys. Passing one produces a miss every call — the function still runs but you pay the cache machinery overhead with no hit-rate benefit. - **Applying `'use cache'` to mutations.** The directive caches return values; a mutation has side effects that you do not want to deduplicate. Mutations belong in Server Actions or Route Handlers; call `revalidateTag` after the mutation to invalidate the relevant cached reads. - **Forgetting `<Suspense>` around request-time data.** A bare `cookies()`-reading component blocks the entire response until the request resolves, defeating the static-shell-plus-streaming model.
+- fragment_type: guardrail
+  sequence: 10
+  content: Wrap every dynamic region. - **Suspense boundaries placed too granularly.** A boundary per row produces a fallback waterfall, each fallback animating in turn. Group siblings that should appear together under one boundary. - **Calling the deprecated `revalidateTag(tag)` single-argument form.** It currently works only with TypeScript errors suppressed and is slated for removal. Use `revalidateTag(tag, 'max')` or `updateTag` per the current API. - **Tagging cached functions with high-cardinality dynamic strings without a budget.** A tag per user-id-per-resource is fine for targeted invalidation but produces an unbounded tag table — make sure the tag domain is intentional and finite enough to operate.
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] `cacheComponents: true` is set in `next.config.ts`. Run `node -e "import(''./next.config.ts'').then(m => console.log(m.default.cacheComponents))"` (or `grep -n cacheComponents next.config.ts`) and confirm the flag. - [ ] Every cached function imports its helpers from `next/cache`. `grep -rnE "from [''\\\"]next/cache[''\\\"]" app/ src/` lists the import sites; spot-check that each `''use cache''` block has a matching `cacheLife` import in scope. - [ ] Every `''use cache''` directive sits at the top of an async function or file, not inside a function body. `grep -rn "''use cache''" app/ src/` and audit each match for placement. - [ ] No `''use cache''` function calls `cookies()`, `headers()`, or reads `searchParams`. `grep -rn -B2 -A20 "''use cache''" app/ src/ | grep -E ''(cookies|headers|searchParams)\\('' ` should return no hits inside cached blocks. - [ ] Every `cacheTag(...)` call has a corresponding `revalidateTag(...)` somewhere in the codebase. `grep -rnE "cacheTag\\(" app/ src/` and `grep -rnE "revalidateTag\\(" app/ src/` — every tag value in the first should appear in the second or be intentionally never-revalidated. - [ ] No deprecated single-argument `revalidateTag` calls remain. `grep -rnE "revalidateTag\\([^,)]+\\)" app/ src/` should return no hits; all calls take a profile second argument. - [ ] Every component reading request-time APIs is inside a `<Suspense>` boundary.'
+- fragment_type: verification
+  sequence: 12
+  content: |-
+    `grep -rnE "(cookies|headers)\\(\\)" app/ src/` lists candidates; verify each is rendered under a `<Suspense fallback=...>`. - [ ] Every `<Suspense>` has a non-empty `fallback` prop. `grep -rnE "<Suspense[^>]*fallback=" app/ src/` count matches `grep -rn '<Suspense' app/ src/`. - [ ] Next.js version is 16.x (Cache Components requires 16+). `node -e "console.log(require('./package.json').dependencies.next)"` returns a 16+ range.
+
+    ## Verified
+- fragment_type: verification
+  sequence: 13
+  content: '- Cache Components opt-in via `cacheComponents: true` in `next.config.ts`, including the migration note about `GET` Route Handlers following the page prerendering model, per nextjs.org/docs/app/getting-started/caching (verified 2026-05-06). - `''use cache''` two-scope semantics (data-level and UI-level), cache key derived from arguments and closed-over values, file-level placement caches all exports, per nextjs.org/docs/app/api-reference/directives/use-cache and the Caching getting-started page (verified 2026-05-06). - `cacheLife` preset profiles `seconds`, `minutes`, `hours`, `days`, `weeks`, `max`, plus the custom `{ stale, revalidate, expire }` shape, per nextjs.org/docs/app/api-reference/functions/cacheLife — Next.js 16.2.4 (verified 2026-05-06). - `revalidateTag(tag, profile)` two-argument signature is current; single-argument form is deprecated; tags are case-sensitive and capped at 256 characters; `profile="max"` provides stale-while-revalidate, per nextjs.org/docs/app/api-reference/functions/revalidateTag (verified 2026-05-06). - Identical `fetch` calls memoized within a render but not cached across requests under Cache Components; explicit `''use cache''` is required for cross-request caching, per nextjs.org/docs/app/getting-started/fetching-data (verified 2026-05-06).'
+- fragment_type: verification
+  sequence: 14
+  content: '- Request-time APIs (`cookies`, `headers`, `searchParams`, dynamic `params`) require `<Suspense>` wrapping under Cache Components, per nextjs.org/docs/app/getting-started/caching "Working with runtime APIs" (verified 2026-05-06).'
+- fragment_type: execution
+  sequence: 15
+  content: |-
+    ## Incremental Static Regeneration (legacy time-based)
+
+    Outside the Cache Components model, Next.js App Router still supports time-based ISR via the `revalidate` route segment config plus `generateStaticParams`. With ISR you can update static content without rebuilding the entire site, reduce server load by serving prerendered pages for most requests, get automatic `cache-control` headers, and handle large content sets without long `next build` times.
+- fragment_type: execution
+  sequence: 16
+  content: |-
+    ```tsx
+    // app/blog/[id]/page.tsx
+    interface Post { id: string; title: string; content: string }
+
+    // Next.js will invalidate the cache when a request comes in,
+    // at most once every 60 seconds.
+    export const revalidate = 60
+
+    export async function generateStaticParams() {
+      const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) => res.json())
+      return posts.map((post) => ({ id: String(post.id) }))
+    }
+
+    export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+      const { id } = await params
+      const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then((res) => res.json())
+      return (
+        <main>
+          <h1>{post.title}</h1>
+          <p>{post.content}</p>
+        </main>
+      )
+    }
+    ```
+- fragment_type: execution
+  sequence: 17
+  content: 'How this flow works: during `next build`, all known params are generated; requests to those pages are cached and instantaneous; after the revalidate window passes, the next request still returns the cached (now stale) page while the cache is invalidated and a new version is generated in the background; once generated, the next request returns the updated page and re-caches it. If an un-prebuilt param is requested and exists, the page is generated on-demand — controlled by [`dynamicParams`](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams). If the resource does not exist, a 404 is returned.'
+- sequence: 18
+  fragment_type: example
+  content: |
+    ## On-demand revalidation with `revalidatePath`
+
+    `revalidatePath(path)` from `next/cache` invalidates the cached output for a specific route, complementing tag-based invalidation. Use it from a Server Action or Route Handler after a mutation when invalidating by route is more natural than by tag — for example, refreshing a single post page after editing it.
+
+    ```tsx
+    // app/posts/[id]/actions.ts
+    'use server'
+    import { revalidatePath } from 'next/cache'
+
+    export async function updatePost(id: string, formData: FormData) {
+      await db.posts.update(id, { title: formData.get('title') as string })
+      revalidatePath(`/posts/${id}`)
+    }
+    ```
+
+    Choose `revalidateTag` when many routes share the same underlying data (tag the data once, invalidate broadly). Choose `revalidatePath` when the invalidation maps cleanly to a single route or a small set of routes. The two are complementary, not exclusive.

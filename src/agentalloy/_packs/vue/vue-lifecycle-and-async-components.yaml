@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: vue-lifecycle-and-async-components
 canonical_name: Vue Lifecycle Hooks and Async Components
-description: "Build Vue 3 apps with the Composition API: run setup and cleanup logic at specific lifecycle moments, and load heavy components only when needed using async components and Suspense for better performance."
+description: 'Build Vue 3 apps with the Composition API: run setup and cleanup logic at specific lifecycle moments, and load heavy components only when needed using async components and Suspense for better performance.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - vue
-  - composition-api
-  - lifecycle-hooks
-  - async-components
-  - suspense
+- vue
+- composition-api
+- lifecycle-hooks
+- async-components
+- suspense
 requires:
 - vue-composition-api-reactivity
 related:
@@ -17,8 +17,10 @@ related:
 - vue-pinia-state-management
 - vue-script-setup-and-components
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: initial authoring draft
 raw_prose: |
@@ -310,318 +312,313 @@ raw_prose: |
 
   If an error component is provided, it will be displayed when the Promise returned by the loader function is rejected. You can also specify a timeout to show the error component when the request is taking too long.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
-
-      Composition API lifecycle hooks register callbacks at specific points in a component's lifecycle. Async components defer loading until needed and integrate with `<Suspense>` for loading/error states. This skill covers both surfaces.
-
-      Sourced from https://vuejs.org/api/composition-api-lifecycle.html and https://vuejs.org/guide/components/async.html (Vue 3.5+).
-
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Composition API: Lifecycle Hooks
-
-      ::info Usage Note
-      All APIs listed on this page must be called synchronously during the `setup()` phase of a component. See [Guide - Lifecycle Hooks](/guide/essentials/lifecycle) for more details.
-      :::
-
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## onMounted()
-
-      Registers a callback to be called after the component has been mounted.
-
-      * **Type**
-
-        ```ts
-        function onMounted(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        A component is considered mounted after:
-
-        * All of its synchronous child components have been mounted (does not include async components or components inside `<Suspense>` trees).
-
-        * Its own DOM tree has been created and inserted into the parent container. Note it only guarantees that the component's DOM tree is in-document if the application's root container is also in-document.
-
-        This hook is typically used for performing side effects that need access to the component's rendered DOM, or for limiting DOM-related code to the client in a [server-rendered application](/guide/scaling-up/ssr).
-
-        **This hook is not called during server-side rendering.**
-
-      * **Example**
-
-        Accessing an element via template ref:
-
-        ```vue
-        <script setup>
-        import { ref, onMounted } from 'vue'
-
-        const el = ref()
-
-        onMounted(() => {
-          el.value // <div>
-        })
-        </script>
-
-        <template>
-          <div ref="el"></div>
-        </template>
-        ```
-
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ## onUpdated()
-
-      Registers a callback to be called after the component has updated its DOM tree due to a reactive state change.
-
-      * **Type**
-
-        ```ts
-        function onUpdated(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        A parent component's updated hook is called after that of its child components.
-
-        This hook is called after any DOM update of the component, which can be caused by different state changes, because multiple state changes can be batched into a single render cycle for performance reasons. If you need to access the updated DOM after a specific state change, use [nextTick()](/api/general#nexttick) instead.
-
-        **This hook is not called during server-side rendering.**
-
-        :::warning
-        Do not mutate component state in the updated hook - this will likely lead to an infinite update loop!
-        :::
-
-      * **Example**
-
-        Accessing updated DOM:
-
-        ```vue
-        <script setup>
-        import { ref, onUpdated } from 'vue'
-
-        const count = ref(0)
-
-        onUpdated(() => {
-          // text content should be the same as current `count.value`
-          console.log(document.getElementById('count').textContent)
-        })
-        </script>
-
-        <template>
-          <button id="count" @click="count++">{{ count }}</button>
-        </template>
-        ```
-
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## onUnmounted()
-
-      Registers a callback to be called after the component has been unmounted.
-
-      * **Type**
-
-        ```ts
-        function onUnmounted(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        A component is considered unmounted after:
-
-        * All of its child components have been unmounted.
-
-        * All of its associated reactive effects (render effect and computed / watchers created during `setup()`) have been stopped.
-
-        Use this hook to clean up manually created side effects such as timers, DOM event listeners or server connections.
-
-        **This hook is not called during server-side rendering.**
-
-      * **Example**
-
-        ```vue
-        <script setup>
-        import { onMounted, onUnmounted } from 'vue'
-
-        let intervalId
-        onMounted(() => {
-          intervalId = setInterval(() => {
-            // ...
-          })
-        })
-
-        onUnmounted(() => clearInterval(intervalId))
-        </script>
-        ```
-
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ## onBeforeMount()
-
-      Registers a hook to be called right before the component is to be mounted.
-
-      * **Type**
-
-        ```ts
-        function onBeforeMount(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        When this hook is called, the component has finished setting up its reactive state, but no DOM nodes have been created yet. It is about to execute its DOM render effect for the first time.
-
-        **This hook is not called during server-side rendering.**
-
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      ## onBeforeUpdate()
-
-      Registers a hook to be called right before the component is about to update its DOM tree due to a reactive state change.
-
-      * **Type**
-
-        ```ts
-        function onBeforeUpdate(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        This hook can be used to access the DOM state before Vue updates the DOM. It is also safe to modify component state inside this hook.
-
-        **This hook is not called during server-side rendering.**
-
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      ## onBeforeUnmount()
-
-      Registers a hook to be called right before a component instance is to be unmounted.
-
-      * **Type**
-
-        ```ts
-        function onBeforeUnmount(callback: () => void, target?: ComponentInternalInstance | null): void
-        ```
-
-      * **Details**
-
-        When this hook is called, the component instance is still fully functional.
-
-        **This hook is not called during server-side rendering.**
-
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      # Async Components
-
-      ## Basic Usage
-
-      In large applications, we may need to divide the app into smaller chunks and only load a component from the server when it's needed. To make that possible, Vue has a [`defineAsyncComponent`](/api/general#defineasynccomponent) function:
-
-      ```js
-      import { defineAsyncComponent } from 'vue'
-
-      const AsyncComp = defineAsyncComponent(() => {
-        return new Promise((resolve, reject) => {
-          // ...load component from server
-          resolve(/* loaded component */)
-        })
-      })
-      // ... use `AsyncComp` like a normal component
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
+
+    Composition API lifecycle hooks register callbacks at specific points in a component's lifecycle. Async components defer loading until needed and integrate with `<Suspense>` for loading/error states. This skill covers both surfaces.
+
+    Sourced from https://vuejs.org/api/composition-api-lifecycle.html and https://vuejs.org/guide/components/async.html (Vue 3.5+).
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Composition API: Lifecycle Hooks
+
+    ::info Usage Note
+    All APIs listed on this page must be called synchronously during the `setup()` phase of a component. See [Guide - Lifecycle Hooks](/guide/essentials/lifecycle) for more details.
+    :::
+- fragment_type: execution
+  sequence: 3
+  content: |
+    ## onMounted()
+
+    Registers a callback to be called after the component has been mounted.
+
+    * **Type**
+
+      ```ts
+      function onMounted(callback: () => void, target?: ComponentInternalInstance | null): void
       ```
 
-      As you can see, `defineAsyncComponent` accepts a loader function that returns a Promise. The Promise's `resolve` callback should be called when you have retrieved your component definition from the server. You can also call `reject(reason)` to indicate the load has failed.
+    * **Details**
 
-      [ES module dynamic import](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import) also returns a Promise, so most of the time we will use it in combination with `defineAsyncComponent`. Bundlers like Vite and webpack also support the syntax (and will use it as bundle split points), so we can use it to import Vue SFCs:
+      A component is considered mounted after:
 
-      ```js
-      import { defineAsyncComponent } from 'vue'
+      * All of its synchronous child components have been mounted (does not include async components or components inside `<Suspense>` trees).
 
-      const AsyncComp = defineAsyncComponent(() =>
-        import('./components/MyComponent.vue')
-      )
-      ```
+      * Its own DOM tree has been created and inserted into the parent container. Note it only guarantees that the component's DOM tree is in-document if the application's root container is also in-document.
 
-      The resulting `AsyncComp` is a wrapper component that only calls the loader function when it is actually rendered on the page. In addition, it will pass along any props and slots to the inner component, so you can use the async wrapper to seamlessly replace the original component while achieving lazy loading.
+      This hook is typically used for performing side effects that need access to the component's rendered DOM, or for limiting DOM-related code to the client in a [server-rendered application](/guide/scaling-up/ssr).
 
-      As with normal components, async components can be [registered globally](/guide/components/registration#global-registration) using `app.component()`:
+      **This hook is not called during server-side rendering.**
 
-      ```js
-      app.component('MyComponent', defineAsyncComponent(() =>
-        import('./components/MyComponent.vue')
-      ))
-      ```
+    * **Example**
 
-      You can also use `defineAsyncComponent` when [registering a component locally](/guide/components/registration#local-registration):
-
-      ```vue
-      <script>
-      import { defineAsyncComponent } from 'vue'
-
-      export default {
-        components: {
-          AdminPage: defineAsyncComponent(() =>
-            import('./components/AdminPageComponent.vue')
-          )
-        }
-      }
-      </script>
-
-      <template>
-        <AdminPage />
-      </template>
-      ```
-
-      They can also be defined directly inside their parent component:
+      Accessing an element via template ref:
 
       ```vue
       <script setup>
-      import { defineAsyncComponent } from 'vue'
+      import { ref, onMounted } from 'vue'
 
-      const AdminPage = defineAsyncComponent(() =>
-        import('./components/AdminPageComponent.vue')
-      )
+      const el = ref()
+
+      onMounted(() => {
+        el.value // <div>
+      })
       </script>
 
       <template>
-        <AdminPage />
+        <div ref="el"></div>
       </template>
       ```
+- fragment_type: execution
+  sequence: 4
+  content: |
+    ## onUpdated()
 
-  - fragment_type: execution
-    sequence: 10
-    content: |
-      ## Loading and Error States
+    Registers a callback to be called after the component has updated its DOM tree due to a reactive state change.
 
-      Asynchronous operations inevitably involve loading and error states - `defineAsyncComponent()` supports handling these states via advanced options:
+    * **Type**
 
-      ```js
-      const AsyncComp = defineAsyncComponent({
-        // the loader function
-        loader: () => import('./Foo.vue'),
-
-        // A component to use while the async component is loading
-        loadingComponent: LoadingComponent,
-        // Delay before showing the loading component. Default: 200ms.
-        delay: 200,
-
-        // A component to use if the load fails
-        errorComponent: ErrorComponent,
-        // The error component will be displayed if a timeout is
-        // provided and exceeded. Default: Infinity.
-        timeout: 3000
-      })
+      ```ts
+      function onUpdated(callback: () => void, target?: ComponentInternalInstance | null): void
       ```
 
-      If a loading component is provided, it will be displayed first while the inner component is being loaded. There is a default 200ms delay before the loading component is shown - this is because on fast networks, an instant loading state may get replaced too fast and end up looking like a flicker.
+    * **Details**
 
-      If an error component is provided, it will be displayed when the Promise returned by the loader function is rejected. You can also specify a timeout to show the error component when the request is taking too long.
+      A parent component's updated hook is called after that of its child components.
+
+      This hook is called after any DOM update of the component, which can be caused by different state changes, because multiple state changes can be batched into a single render cycle for performance reasons. If you need to access the updated DOM after a specific state change, use [nextTick()](/api/general#nexttick) instead.
+
+      **This hook is not called during server-side rendering.**
+
+      :::warning
+      Do not mutate component state in the updated hook - this will likely lead to an infinite update loop!
+      :::
+
+    * **Example**
+
+      Accessing updated DOM:
+
+      ```vue
+      <script setup>
+      import { ref, onUpdated } from 'vue'
+
+      const count = ref(0)
+
+      onUpdated(() => {
+        // text content should be the same as current `count.value`
+        console.log(document.getElementById('count').textContent)
+      })
+      </script>
+
+      <template>
+        <button id="count" @click="count++">{{ count }}</button>
+      </template>
+      ```
+- fragment_type: execution
+  sequence: 5
+  content: |
+    ## onUnmounted()
+
+    Registers a callback to be called after the component has been unmounted.
+
+    * **Type**
+
+      ```ts
+      function onUnmounted(callback: () => void, target?: ComponentInternalInstance | null): void
+      ```
+
+    * **Details**
+
+      A component is considered unmounted after:
+
+      * All of its child components have been unmounted.
+
+      * All of its associated reactive effects (render effect and computed / watchers created during `setup()`) have been stopped.
+
+      Use this hook to clean up manually created side effects such as timers, DOM event listeners or server connections.
+
+      **This hook is not called during server-side rendering.**
+
+    * **Example**
+
+      ```vue
+      <script setup>
+      import { onMounted, onUnmounted } from 'vue'
+
+      let intervalId
+      onMounted(() => {
+        intervalId = setInterval(() => {
+          // ...
+        })
+      })
+
+      onUnmounted(() => clearInterval(intervalId))
+      </script>
+      ```
+- fragment_type: execution
+  sequence: 6
+  content: |
+    ## onBeforeMount()
+
+    Registers a hook to be called right before the component is to be mounted.
+
+    * **Type**
+
+      ```ts
+      function onBeforeMount(callback: () => void, target?: ComponentInternalInstance | null): void
+      ```
+
+    * **Details**
+
+      When this hook is called, the component has finished setting up its reactive state, but no DOM nodes have been created yet. It is about to execute its DOM render effect for the first time.
+
+      **This hook is not called during server-side rendering.**
+- fragment_type: execution
+  sequence: 7
+  content: |
+    ## onBeforeUpdate()
+
+    Registers a hook to be called right before the component is about to update its DOM tree due to a reactive state change.
+
+    * **Type**
+
+      ```ts
+      function onBeforeUpdate(callback: () => void, target?: ComponentInternalInstance | null): void
+      ```
+
+    * **Details**
+
+      This hook can be used to access the DOM state before Vue updates the DOM. It is also safe to modify component state inside this hook.
+
+      **This hook is not called during server-side rendering.**
+- fragment_type: execution
+  sequence: 8
+  content: |
+    ## onBeforeUnmount()
+
+    Registers a hook to be called right before a component instance is to be unmounted.
+
+    * **Type**
+
+      ```ts
+      function onBeforeUnmount(callback: () => void, target?: ComponentInternalInstance | null): void
+      ```
+
+    * **Details**
+
+      When this hook is called, the component instance is still fully functional.
+
+      **This hook is not called during server-side rendering.**
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    # Async Components
+
+    ## Basic Usage
+
+    In large applications, we may need to divide the app into smaller chunks and only load a component from the server when it's needed. To make that possible, Vue has a [`defineAsyncComponent`](/api/general#defineasynccomponent) function:
+
+    ```js
+    import { defineAsyncComponent } from 'vue'
+
+    const AsyncComp = defineAsyncComponent(() => {
+      return new Promise((resolve, reject) => {
+        // ...load component from server
+        resolve(/* loaded component */)
+      })
+    })
+    // ... use `AsyncComp` like a normal component
+    ```
+
+    As you can see, `defineAsyncComponent` accepts a loader function that returns a Promise. The Promise's `resolve` callback should be called when you have retrieved your component definition from the server. You can also call `reject(reason)` to indicate the load has failed.
+
+    [ES module dynamic import](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/import) also returns a Promise, so most of the time we will use it in combination with `defineAsyncComponent`. Bundlers like Vite and webpack also support the syntax (and will use it as bundle split points), so we can use it to import Vue SFCs:
+- fragment_type: execution
+  sequence: 10
+  content: |-
+    ```js
+    import { defineAsyncComponent } from 'vue'
+
+    const AsyncComp = defineAsyncComponent(() =>
+      import('./components/MyComponent.vue')
+    )
+    ```
+
+    The resulting `AsyncComp` is a wrapper component that only calls the loader function when it is actually rendered on the page. In addition, it will pass along any props and slots to the inner component, so you can use the async wrapper to seamlessly replace the original component while achieving lazy loading.
+
+    As with normal components, async components can be [registered globally](/guide/components/registration#global-registration) using `app.component()`:
+
+    ```js
+    app.component('MyComponent', defineAsyncComponent(() =>
+      import('./components/MyComponent.vue')
+    ))
+    ```
+
+    You can also use `defineAsyncComponent` when [registering a component locally](/guide/components/registration#local-registration):
+
+    ```vue
+    <script>
+    import { defineAsyncComponent } from 'vue'
+
+    export default {
+      components: {
+        AdminPage: defineAsyncComponent(() =>
+          import('./components/AdminPageComponent.vue')
+        )
+      }
+    }
+    </script>
+
+    <template>
+      <AdminPage />
+    </template>
+    ```
+
+    They can also be defined directly inside their parent component:
+- fragment_type: execution
+  sequence: 11
+  content: |-
+    ```vue
+    <script setup>
+    import { defineAsyncComponent } from 'vue'
+
+    const AdminPage = defineAsyncComponent(() =>
+      import('./components/AdminPageComponent.vue')
+    )
+    </script>
+
+    <template>
+      <AdminPage />
+    </template>
+    ```
+- fragment_type: execution
+  sequence: 12
+  content: |-
+    ## Loading and Error States
+
+    Asynchronous operations inevitably involve loading and error states - `defineAsyncComponent()` supports handling these states via advanced options:
+
+    ```js
+    const AsyncComp = defineAsyncComponent({
+      // the loader function
+      loader: () => import('./Foo.vue'),
+
+      // A component to use while the async component is loading
+      loadingComponent: LoadingComponent,
+      // Delay before showing the loading component. Default: 200ms.
+      delay: 200,
+
+      // A component to use if the load fails
+      errorComponent: ErrorComponent,
+      // The error component will be displayed if a timeout is
+      // provided and exceeded. Default: Infinity.
+      timeout: 3000
+    })
+    ```
+
+    If a loading component is provided, it will be displayed first while the inner component is being loaded. There is a default 200ms delay before the loading component is shown - this is because on fast networks, an instant loading state may get replaced too fast and end up looking like a flicker.
+
+    If an error component is provided, it will be displayed when the Promise returned by the loader function is rejected. You can also specify a timeout to show the error component when the request is taking too long.

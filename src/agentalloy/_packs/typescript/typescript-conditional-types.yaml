@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: typescript-conditional-types
 canonical_name: TypeScript Conditional Types
-description: "Write flexible TypeScript utilities that adapt their output type based on input, like extracting return types or transforming data structures: use conditional types with infer to branch logic at compile time for safer, more generic code."
+description: 'Write flexible TypeScript utilities that adapt their output type based on input, like extracting return types or transforming data structures: use conditional types with infer to branch logic at compile time for safer, more generic code.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - conditional-types
-  - generics
-  - type-inference
-  - type-transforms
-  - typescript
+- conditional-types
+- generics
+- type-inference
+- type-transforms
+- typescript
 requires:
 - ts-generics-and-conditional-types
 - typescript-generics-deep
@@ -18,8 +18,10 @@ related:
 - typescript-type-operators
 - typescript-utility-types
 always_apply: false
-phase_scope: [build]
-category_scope: [language]
+phase_scope:
+- build
+category_scope:
+- language
 author: navistone
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
@@ -241,232 +243,234 @@ raw_prose: |
   type T1 = ReturnType<typeof stringOrNum>;
   //   ^?
   ```
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Conditional types let a type expression branch on whether one type extends another. Combined with `infer`, they form a pattern-matching system that powers most of TypeScript's utility types. This skill covers the syntax + key idioms.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      At the heart of most useful programs, we have to make decisions based on input.
-      JavaScript programs are no different, but given the fact that values can be easily introspected, those decisions are also based on the types of the inputs.
-      _Conditional types_ help describe the relation between the types of inputs and outputs.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Conditional types let a type expression branch on whether one type extends another. Combined with `infer`, they form a pattern-matching system that powers most of TypeScript's utility types. This skill covers the syntax + key idioms.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    At the heart of most useful programs, we have to make decisions based on input.
+    JavaScript programs are no different, but given the fact that values can be easily introspected, those decisions are also based on the types of the inputs.
+    _Conditional types_ help describe the relation between the types of inputs and outputs.
 
-      Conditional types take a form that looks a little like conditional expressions (`condition ? trueExpression : falseExpression`) in JavaScript:
+    Conditional types take a form that looks a little like conditional expressions (`condition ? trueExpression : falseExpression`) in JavaScript:
 
-      ```ts twoslash
-      type SomeType = any;
-      type OtherType = any;
-      type TrueType = any;
-      type FalseType = any;
-      type Stuff =
-        // ---cut---
-        SomeType extends OtherType ? TrueType : FalseType;
-      ```
-
-      When the type on the left of the `extends` is assignable to the one on the right, then you'll get the type in the first branch (the "true" branch); otherwise you'll get the type in the latter branch (the "false" branch).
-  - fragment_type: example
-    sequence: 3
-    content: |
-      ```ts twoslash
-      interface Animal {
-        live(): void;
-      }
-      interface Dog extends Animal {
-        woof(): void;
-      }
-
-      type Example1 = Dog extends Animal ? number : string;
-      //   ^?
-
-      type Example2 = RegExp extends Animal ? number : string;
-      //   ^?
-      ```
-  - fragment_type: example
-    sequence: 4
-    content: |
-      ```ts twoslash
-      interface IdLabel {
-        id: number /* some fields */;
-      }
-      interface NameLabel {
-        name: string /* other fields */;
-      }
-
-      function createLabel(id: number): IdLabel;
-      function createLabel(name: string): NameLabel;
-      function createLabel(nameOrId: string | number): IdLabel | NameLabel;
-      function createLabel(nameOrId: string | number): IdLabel | NameLabel {
-        throw "unimplemented";
-      }
-      ```
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      These overloads for `createLabel` describe a single JavaScript function that makes a choice based on the types of its inputs. Note a few things:
-
-      1. If a library has to make the same sort of choice over and over throughout its API, this becomes cumbersome.
-      2. We have to create three overloads: one for each case when we're _sure_ of the type (one for `string` and one for `number`), and one for the most general case (taking a `string | number`). For every new type `createLabel` can handle, the number of overloads grows exponentially.
-
-      Instead, we can encode that logic in a conditional type:
-  - fragment_type: example
-    sequence: 6
-    content: |
-      ```ts twoslash
-      interface IdLabel {
-        id: number /* some fields */;
-      }
-      interface NameLabel {
-        name: string /* other fields */;
-      }
+    ```ts twoslash
+    type SomeType = any;
+    type OtherType = any;
+    type TrueType = any;
+    type FalseType = any;
+    type Stuff =
       // ---cut---
-      type NameOrId<T extends number | string> = T extends number
-        ? IdLabel
-        : NameLabel;
-      ```
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      We can then use that conditional type to simplify our overloads down to a single function with no overloads.
+      SomeType extends OtherType ? TrueType : FalseType;
+    ```
 
-      ```ts twoslash
-      interface IdLabel {
-        id: number /* some fields */;
-      }
-      interface NameLabel {
-        name: string /* other fields */;
-      }
-      type NameOrId<T extends number | string> = T extends number
-        ? IdLabel
-        : NameLabel;
-      // ---cut---
-      function createLabel<T extends number | string>(idOrName: T): NameOrId<T> {
-        throw "unimplemented";
-      }
+    When the type on the left of the `extends` is assignable to the one on the right, then you'll get the type in the first branch (the "true" branch); otherwise you'll get the type in the latter branch (the "false" branch).
+- fragment_type: example
+  sequence: 3
+  content: |
+    ```ts twoslash
+    interface Animal {
+      live(): void;
+    }
+    interface Dog extends Animal {
+      woof(): void;
+    }
 
-      let a = createLabel("typescript");
-      //  ^?
+    type Example1 = Dog extends Animal ? number : string;
+    //   ^?
 
-      let b = createLabel(2.8);
-      //  ^?
+    type Example2 = RegExp extends Animal ? number : string;
+    //   ^?
+    ```
+- fragment_type: example
+  sequence: 4
+  content: |
+    ```ts twoslash
+    interface IdLabel {
+      id: number /* some fields */;
+    }
+    interface NameLabel {
+      name: string /* other fields */;
+    }
 
-      let c = createLabel(Math.random() ? "hello" : 42);
-      //  ^?
-      ```
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      ### Conditional Type Constraints
+    function createLabel(id: number): IdLabel;
+    function createLabel(name: string): NameLabel;
+    function createLabel(nameOrId: string | number): IdLabel | NameLabel;
+    function createLabel(nameOrId: string | number): IdLabel | NameLabel {
+      throw "unimplemented";
+    }
+    ```
+- fragment_type: execution
+  sequence: 5
+  content: |
+    These overloads for `createLabel` describe a single JavaScript function that makes a choice based on the types of its inputs. Note a few things:
 
-      Often, the checks in a conditional type will provide us with some new information.
-      Just like narrowing with type guards can give us a more specific type, the true branch of a conditional type will further constrain generics by the type we check against.
+    1. If a library has to make the same sort of choice over and over throughout its API, this becomes cumbersome.
+    2. We have to create three overloads: one for each case when we're _sure_ of the type (one for `string` and one for `number`), and one for the most general case (taking a `string | number`). For every new type `createLabel` can handle, the number of overloads grows exponentially.
 
-      For example, let's take the following:
+    Instead, we can encode that logic in a conditional type:
+- fragment_type: example
+  sequence: 6
+  content: |
+    ```ts twoslash
+    interface IdLabel {
+      id: number /* some fields */;
+    }
+    interface NameLabel {
+      name: string /* other fields */;
+    }
+    // ---cut---
+    type NameOrId<T extends number | string> = T extends number
+      ? IdLabel
+      : NameLabel;
+    ```
+- fragment_type: execution
+  sequence: 7
+  content: |
+    We can then use that conditional type to simplify our overloads down to a single function with no overloads.
 
-      ```ts twoslash
-      // @errors: 2536
-      type MessageOf<T> = T["message"];
-      ```
+    ```ts twoslash
+    interface IdLabel {
+      id: number /* some fields */;
+    }
+    interface NameLabel {
+      name: string /* other fields */;
+    }
+    type NameOrId<T extends number | string> = T extends number
+      ? IdLabel
+      : NameLabel;
+    // ---cut---
+    function createLabel<T extends number | string>(idOrName: T): NameOrId<T> {
+      throw "unimplemented";
+    }
 
-      In this example, TypeScript errors because `T` isn't known to have a property called `message`.
-      We could constrain `T`, and TypeScript would no longer complain:
+    let a = createLabel("typescript");
+    //  ^?
 
-      ```ts twoslash
-      type MessageOf<T extends { message: unknown }> = T["message"];
+    let b = createLabel(2.8);
+    //  ^?
 
-      interface Email {
-        message: string;
-      }
+    let c = createLabel(Math.random() ? "hello" : 42);
+    //  ^?
+    ```
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ### Conditional Type Constraints
 
-      type EmailMessageContents = MessageOf<Email>;
-      //   ^?
-      ```
+    Often, the checks in a conditional type will provide us with some new information.
+    Just like narrowing with type guards can give us a more specific type, the true branch of a conditional type will further constrain generics by the type we check against.
 
-      However, what if we wanted `MessageOf` to take any type, and default to something like `never` if a `message` property isn't available?
-      We can do this by moving the constraint out and introducing a conditional type:
+    For example, let's take the following:
 
-      ```ts twoslash
-      type MessageOf<T> = T extends { message: unknown } ? T["message"] : never;
+    ```ts twoslash
+    // @errors: 2536
+    type MessageOf<T> = T["message"];
+    ```
 
-      interface Email {
-        message: string;
-      }
+    In this example, TypeScript errors because `T` isn't known to have a property called `message`.
+    We could constrain `T`, and TypeScript would no longer complain:
 
-      interface Dog {
-        bark(): void;
-      }
+    ```ts twoslash
+    type MessageOf<T extends { message: unknown }> = T["message"];
 
-      type EmailMessageContents = MessageOf<Email>;
-      //   ^?
+    interface Email {
+      message: string;
+    }
 
-      type DogMessageContents = MessageOf<Dog>;
-      //   ^?
-      ```
+    type EmailMessageContents = MessageOf<Email>;
+    //   ^?
+    ```
 
-      Within the true branch, TypeScript knows that `T` _will_ have a `message` property.
+    However, what if we wanted `MessageOf` to take any type, and default to something like `never` if a `message` property isn't available?
+    We can do this by moving the constraint out and introducing a conditional type:
 
-      As another example, we could also write a type called `Flatten` that flattens array types to their element types, but leaves them alone otherwise:
+    ```ts twoslash
+    type MessageOf<T> = T extends { message: unknown } ? T["message"] : never;
 
-      ```ts twoslash
-      type Flatten<T> = T extends any[] ? T[number] : T;
+    interface Email {
+      message: string;
+    }
 
-      // Extracts out the element type.
-      type Str = Flatten<string[]>;
-      //   ^?
+    interface Dog {
+      bark(): void;
+    }
 
-      // Leaves the type alone.
-      type Num = Flatten<number>;
-      //   ^?
-      ```
+    type EmailMessageContents = MessageOf<Email>;
+    //   ^?
 
-      When `Flatten` is given an array type, it uses an indexed access with `number` to fetch out `string[]`'s element type.
-      Otherwise, it just returns the type it was given.
+    type DogMessageContents = MessageOf<Dog>;
+    //   ^?
+    ```
 
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      ### Inferring Within Conditional Types
+    Within the true branch, TypeScript knows that `T` _will_ have a `message` property.
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    As another example, we could also write a type called `Flatten` that flattens array types to their element types, but leaves them alone otherwise:
 
-      We just found ourselves using conditional types to apply constraints and then extract out types.
-      This ends up being such a common operation that conditional types make it easier.
+    ```ts twoslash
+    type Flatten<T> = T extends any[] ? T[number] : T;
 
-      Conditional types provide us with a way to infer from types we compare against in the true branch using the `infer` keyword.
-      For example, we could have inferred the element type in `Flatten` instead of fetching it out "manually" with an indexed access type:
+    // Extracts out the element type.
+    type Str = Flatten<string[]>;
+    //   ^?
 
-      ```ts twoslash
-      type Flatten<Type> = Type extends Array<infer Item> ? Item : Type;
-      ```
+    // Leaves the type alone.
+    type Num = Flatten<number>;
+    //   ^?
+    ```
 
-      Here, we used the `infer` keyword to declaratively introduce a new generic type variable named `Item` instead of specifying how to retrieve the element type of `Type` within the true branch.
-      This frees us from having to think about how to dig through and probing apart the structure of the types we're interested in.
+    When `Flatten` is given an array type, it uses an indexed access with `number` to fetch out `string[]`'s element type.
+    Otherwise, it just returns the type it was given.
+- fragment_type: execution
+  sequence: 10
+  content: |-
+    ### Inferring Within Conditional Types
 
-      We can write some useful helper type aliases using the `infer` keyword.
-      For example, for simple cases, we can extract the return type out from function types:
+    We just found ourselves using conditional types to apply constraints and then extract out types.
+    This ends up being such a common operation that conditional types make it easier.
 
-      ```ts twoslash
-      type GetReturnType<Type> = Type extends (...args: never[]) => infer Return
-        ? Return
-        : never;
+    Conditional types provide us with a way to infer from types we compare against in the true branch using the `infer` keyword.
+    For example, we could have inferred the element type in `Flatten` instead of fetching it out "manually" with an indexed access type:
 
-      type Num = GetReturnType<() => number>;
-      //   ^?
+    ```ts twoslash
+    type Flatten<Type> = Type extends Array<infer Item> ? Item : Type;
+    ```
 
-      type Str = GetReturnType<(x: string) => string>;
-      //   ^?
+    Here, we used the `infer` keyword to declaratively introduce a new generic type variable named `Item` instead of specifying how to retrieve the element type of `Type` within the true branch.
+    This frees us from having to think about how to dig through and probing apart the structure of the types we're interested in.
 
-      type Bools = GetReturnType<(a: boolean, b: boolean) => boolean[]>;
-      //   ^?
-      ```
+    We can write some useful helper type aliases using the `infer` keyword.
+    For example, for simple cases, we can extract the return type out from function types:
 
-      When inferring from a type with multiple call signatures (such as the type of an overloaded function), inferences are made from the _last_ signature (which, presumably, is the most permissive catch-all case). It is not possible to perform overload resolution based on a list of argument types.
+    ```ts twoslash
+    type GetReturnType<Type> = Type extends (...args: never[]) => infer Return
+      ? Return
+      : never;
 
-      ```ts twoslash
-      declare function stringOrNum(x: string): number;
-      declare function stringOrNum(x: number): string;
-      declare function stringOrNum(x: string | number): string | number;
+    type Num = GetReturnType<() => number>;
+    //   ^?
 
-      type T1 = ReturnType<typeof stringOrNum>;
-      //   ^?
-      ```
+    type Str = GetReturnType<(x: string) => string>;
+    //   ^?
+
+    type Bools = GetReturnType<(a: boolean, b: boolean) => boolean[]>;
+    //   ^?
+    ```
+- fragment_type: execution
+  sequence: 11
+  content: |-
+    When inferring from a type with multiple call signatures (such as the type of an overloaded function), inferences are made from the _last_ signature (which, presumably, is the most permissive catch-all case). It is not possible to perform overload resolution based on a list of argument types.
+
+    ```ts twoslash
+    declare function stringOrNum(x: string): number;
+    declare function stringOrNum(x: number): string;
+    declare function stringOrNum(x: string | number): string | number;
+
+    type T1 = ReturnType<typeof stringOrNum>;
+    //   ^?
+    ```

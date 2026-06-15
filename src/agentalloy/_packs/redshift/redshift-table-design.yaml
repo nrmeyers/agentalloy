@@ -1,240 +1,85 @@
 skill_type: domain
 skill_id: redshift-table-design
 canonical_name: Amazon Redshift Table Design
-description: "Design fast Amazon Redshift tables for analytics and reporting: choose distribution keys to minimize data shuffling on joins, set sort keys to speed up range scans, and apply column encoding to reduce storage costs."
+description: 'Design fast Amazon Redshift tables for analytics and reporting: choose distribution keys to minimize data shuffling on joins, set sort keys to speed up range scans, and apply column encoding to reduce storage costs.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - redshift
-  - table design
-  - distribution style
-  - sort key
-  - automatic optimization
+- redshift
+- table design
+- distribution style
+- sort key
+- automatic optimization
 related:
 - redshift-query-tuning
 - redshift-workload-management
 - snowflake-tables-and-clustering
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: navistone
 change_summary: initial authoring draft
-raw_prose: |
-  # Amazon Redshift Table Design
-
-  ## Overview
-
-  Redshift's MPP architecture rewards intentional table design — DISTKEY drives data shuffling cost on joins; SORTKEY drives zone-map pruning on range scans; column encoding compresses storage. Automatic table optimization can take over once a workload is observed. This skill covers the design surface.
-
-  Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-best-dist-key.html and https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-sort-key.html.
-
-  ## Choose the best distribution style
-
-  When you run a query, the query optimizer redistributes the rows to the compute nodes as needed to perform any joins and aggregations. The goal in selecting a table distribution style is to minimize the impact of the redistribution step by locating the data where it needs to be before the query is run.
-
-  **Note**  
-  When you use automatic table optimization, you don't need to choose the distribution style of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).
-
-  Some suggestions for the best approach follow:
-
-  1. Distribute the fact table and one dimension table on their common columns.
-
-     Your fact table can have only one distribution key. Any tables that join on another key aren't collocated with the fact table. Choose one dimension to collocate based on how frequently it is joined and the size of the joining rows. Designate both the dimension table's primary key and the fact table's corresponding foreign key as the DISTKEY.
-
-  1. Choose the largest dimension based on the size of the filtered dataset.
-
-     Only the rows that are used in the join must be distributed, so consider the size of the dataset after filtering, not the size of the table.
-
-  1. Choose a column with high cardinality in the filtered result set.
-
-     If you distribute a sales table on a date column, for example, you should probably get fairly even data distribution, unless most of your sales are seasonal. However, if you commonly use a range-restricted predicate to filter for a narrow date period, most of the filtered rows occur on a limited set of slices and the query workload is skewed.
-
-  1. Change some dimension tables to use ALL distribution.
-
-     If a dimension table cannot be collocated with the fact table or other important joining tables, you can improve query performance significantly by distributing the entire table to all of the nodes. Using ALL distribution multiplies storage space requirements and increases load times and maintenance operations, so you should weigh all factors before choosing ALL distribution.
-
-  To have Amazon Redshift choose the appropriate distribution style, specify `AUTO` for the distribution style.
-
-  For more information about choosing distribution styles, see [Data distribution for query optimization](t_Distributing_data.md).
-
-  ## Choose the best sort key
-
-  Amazon Redshift stores your data on disk in sorted order according to the sort key. The Amazon Redshift query optimizer uses sort order when it determines optimal query plans.
-
-  **Note**  
-  When you use automatic table optimization, you don't need to choose the sort key of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).
-
-  Some suggestions for the best approach follow:
-  + To have Amazon Redshift choose the appropriate sort order, specify `AUTO` for the sort key.
-  + If recent data is queried most frequently, specify the timestamp column as the leading column for the sort key.
-
-    Queries are more efficient because they can skip entire blocks that fall outside the time range.
-  + If you do frequent range filtering or equality filtering on one column, specify that column as the sort key.
-
-     Amazon Redshift can skip reading entire blocks of data for that column. It can do so because it tracks the minimum and maximum column values stored on each block and can skip blocks that don't apply to the predicate range.
-  + If you frequently join a table, specify the join column as both the sort key and the distribution key.
-
-     Doing this enables the query optimizer to choose a sort merge join instead of a slower hash join. Because the data is already sorted on the join key, the query optimizer can bypass the sort phase of the sort merge join.
-
-  ## Automatic table optimization
-
-  Automatic table optimization is a self-tuning capability that automatically optimizes the design of tables by applying sort and distribution keys without the need for administrator intervention. By using automation to tune the design of tables, you can get started and get the fastest performance without investing time to manually tune and implement table optimizations.
-
-  Automatic table optimization continuously observes how queries interact with tables. It uses advanced artificial intelligence methods to choose sort and distribution keys to optimize performance for the cluster's workload. If Amazon Redshift determines that applying a key improves cluster performance, tables are automatically altered within hours from the time the cluster was created, with minimal impact to queries.
-
-  To take advantage of this automation, an Amazon Redshift administrator creates a new table, or alters an existing table to enable it to use automatic optimization. Existing tables with a distribution style or sort key of `AUTO` are already enabled for automation. When you run queries against those tables, Amazon Redshift determines if a sort key or distribution key will improve performance. If so, then Amazon Redshift automatically modifies the table without requiring administrator intervention. If a minimum number of queries are run, optimizations are applied within hours of the cluster being launched.
-
-  If Amazon Redshift determines that a distribution key improves the performance of queries, tables where distribution style is `AUTO` can have their distribution style changed to `KEY`.
-
-  **Topics**
-  + [Enabling, disabling, and monitoring automatic table optimization](c_ato-enabling-disabling-monitoring.md)
-  + [Managing workload exclusions from Autonomics](t_Manage_workload_exclusion.md)
-  + [Column compression to reduce the size of stored data](t_Compressing_data_on_disk.md)
-  + [Data distribution for query optimization](t_Distributing_data.md)
-  + [Sort keys](t_Sorting_data.md)
-  + [Table constraints](t_Defining_constraints.md)
-
-  ## Amazon Redshift best practices for designing tables
-
-  As you plan your database, certain key table design decisions heavily influence overall query performance. These design choices also have a significant effect on storage requirements, which in turn affects query performance by reducing the number of I/O operations and minimizing the memory required to process queries.
-
-  In this section, you can find a summary of the most important design decisions and best practices for optimizing query performance. [Automatic table optimization](t_Creating_tables.md) provides more detailed explanations and examples of table design options.
-
-  **Topics**
-  + [Choose the best sort key](c_best-practices-sort-key.md)
-  + [Choose the best distribution style](c_best-practices-best-dist-key.md)
-  + [Let COPY choose compression encodings](c_best-practices-use-auto-compression.md)
-  + [Define primary key and foreign key constraints](c_best-practices-defining-constraints.md)
-  + [Use the smallest possible column size](c_best-practices-smallest-column-size.md)
-  + [Use date/time data types for date columns](c_best-practices-timestamp-date-columns.md)
-
-  ## Performing a deep copy
-
-  A deep copy recreates and repopulates a table by using a bulk insert, which automatically sorts the table. If a table has a large unsorted Region, a deep copy is much faster than a vacuum. We recommend that you only make concurrent updates during a deep copy operation if you can track them. After the process has completed, move the delta updates into the new table. A VACUUM operation supports concurrent updates automatically.
-
-  You can choose one of the following methods to create a copy of the original table:
-  + Use the original table DDL.
-
-    If the CREATE TABLE DDL is available, this is the fastest and preferred method. If you create a new table, you can specify all table and column attributes, including primary key and foreign keys. You can find the original DDL by using the SHOW TABLE function.
-  + Use CREATE TABLE LIKE.
-
-    If the original DDL is not available, you can use CREATE TABLE LIKE to recreate the original table. The new table inherits the encoding, distribution key, sort key, and not-null attributes of the parent table. The new table doesn't inherit the primary key and foreign key attributes of the parent table, but you can add them using [ALTER TABLE](r_ALTER_TABLE.md).
-  + Create a temporary table and truncate the original table.
-
-    If you must retain the primary key and foreign key attributes of the parent table. If the parent table has dependencies, you can use CREATE TABLE ... AS (CTAS) to create a temporary table. Then truncate the original table and populate it from the temporary table.
-
-    Using a temporary table improves performance significantly compared to using a permanent table, but there is a risk of losing data. A temporary table is automatically dropped at the end of the session in which it is created. TRUNCATE commits immediately, even if it is inside a transaction block. If the TRUNCATE succeeds but the session shuts down before the following INSERT completes, the data is lost. If data loss is unacceptable, use a permanent table.
-
-  After you create a copy of a table, you might have to grant access to the new table. You can use [GRANT](r_GRANT.md) to define access privileges. To view and grant all of a table's access privileges, you must be one of the following:
-  + A superuser.
-  + The owner of the table you want to copy.
-  + A user with the ACCESS SYSTEM TABLE privilege to see the table's privileges, and with the grant privilege for all relevant permissions.
-
-  Additionally, you might have to grant usage permission for the schema your deep copy is in. Granting usage permission is necessary if your deep copy's schema is different from the original table's schema, and also isn't the `public` schema. To view and grant usage privileges you must be one of the following:
-  + A superuser.
-  + A user who can grant the USAGE permission for the deep copy's schema.
-
-  **To perform a deep copy using the original table DDL**
-
-  1. (Optional) Recreate the table DDL by running a script called `v_generate_tb
+raw_prose: "# Amazon Redshift Table Design\n\n## Overview\n\nRedshift's MPP architecture rewards intentional table design — DISTKEY drives data shuffling cost on joins; SORTKEY drives zone-map pruning on range scans; column encoding compresses storage. Automatic table optimization can take over once a workload is observed. This skill covers the design surface.\n\nSourced from https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-best-dist-key.html and https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-sort-key.html.\n\n## Choose the best distribution style\n\nWhen you run a query, the query optimizer redistributes the rows to the compute nodes as needed to perform any joins and aggregations. The goal in selecting a table distribution style is to minimize the impact of the redistribution step by locating the data where it needs to be before the query is run.\n\n**Note**  \nWhen you use automatic table optimization, you don't need to choose the distribution style of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).\n\nSome suggestions for the best approach follow:\n\n1. Distribute the fact table and one dimension table on their common columns.\n\n   Your fact table can have only one distribution key. Any tables that join on another key aren't collocated with the fact table. Choose one dimension to collocate based on how frequently it is joined and the size of the joining rows. Designate both the dimension table's primary key and the fact table's corresponding foreign key as the DISTKEY.\n\n1. Choose the largest dimension based on the size of the filtered dataset.\n\n   Only the rows that are used in the join must be distributed, so consider the size of the dataset after filtering, not the size of the table.\n\n1. Choose a column with high cardinality in the filtered result set.\n\n   If you distribute a sales table on a date column, for example, you should probably get fairly even data distribution, unless most of your sales are seasonal. However, if you commonly use a range-restricted predicate to filter for a narrow date period, most of the filtered rows occur on a limited set of slices and the query workload is skewed.\n\n1. Change some dimension tables to use ALL distribution.\n\n   If a dimension table cannot be collocated with the fact table or other important joining tables, you can improve query performance significantly by distributing the entire table to all of the nodes. Using ALL distribution multiplies storage space requirements and increases load times and maintenance operations, so you should weigh all factors before choosing ALL distribution.\n\nTo have Amazon Redshift choose the appropriate distribution style, specify `AUTO` for the distribution style.\n\nFor more information about choosing distribution styles, see [Data distribution for query optimization](t_Distributing_data.md).\n\n## Choose the best sort key\n\nAmazon Redshift stores your data on disk in sorted order according to the sort key. The Amazon Redshift query optimizer uses sort order when it determines optimal query plans.\n\n**Note**  \nWhen you use automatic table optimization, you don't need to choose the sort key of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).\n\nSome suggestions for the best approach follow:\n+ To have Amazon Redshift choose the appropriate sort order, specify `AUTO` for the sort key.\n+ If recent data is queried most frequently, specify the timestamp column as the leading column for the sort key.\n\n  Queries are more efficient because they can skip entire blocks that fall outside the time range.\n+ If you do frequent range filtering or equality filtering on one column, specify that column as the sort key.\n\n   Amazon Redshift can skip reading entire blocks of data for that column. It can do so because it tracks the minimum and maximum column values stored on each block and can skip blocks that don't apply to the predicate range.\n+ If you frequently join a table, specify the join column as both the sort key and the distribution key.\n\n   Doing this enables the query optimizer to choose a sort merge join instead of a slower hash join. Because the data is already sorted on the join key, the query optimizer can bypass the sort phase of the sort merge join.\n\n## Automatic table optimization\n\nAutomatic table optimization is a self-tuning capability that automatically optimizes the design of tables by applying sort and distribution keys without the need for administrator intervention. By using automation to tune the design of tables, you can get started and get the fastest performance without investing time to manually tune and implement table optimizations.\n\nAutomatic table optimization continuously observes how queries interact with tables. It uses advanced artificial intelligence methods to choose sort and distribution keys to optimize performance for the cluster's workload. If Amazon Redshift determines that applying a key improves cluster performance, tables are automatically altered within hours from the time the cluster was created, with minimal impact to queries.\n\nTo take advantage of this automation, an Amazon Redshift administrator creates a new table, or alters an existing table to enable it to use automatic optimization. Existing tables with a distribution style or sort key of `AUTO` are already enabled for automation. When you run queries against those tables, Amazon Redshift determines if a sort key or distribution key will improve performance. If so, then Amazon Redshift automatically modifies the table without requiring administrator intervention. If a minimum number of queries are run, optimizations are applied within hours of the cluster being launched.\n\nIf Amazon Redshift determines that a distribution key improves the performance of queries, tables where distribution style is `AUTO` can have their distribution style changed to `KEY`.\n\n**Topics**\n+ [Enabling, disabling, and monitoring automatic table optimization](c_ato-enabling-disabling-monitoring.md)\n+ [Managing workload exclusions from Autonomics](t_Manage_workload_exclusion.md)\n+ [Column compression to reduce the size of stored data](t_Compressing_data_on_disk.md)\n+ [Data distribution for query optimization](t_Distributing_data.md)\n+ [Sort keys](t_Sorting_data.md)\n+ [Table constraints](t_Defining_constraints.md)\n\n## Amazon Redshift best practices for designing tables\n\nAs you plan your database, certain key table design decisions heavily influence overall query performance. These design choices also have a significant effect on storage requirements, which in turn affects query performance by reducing the number of I/O operations and minimizing the memory required to process queries.\n\nIn this section, you can find a summary of the most important design decisions and best practices for optimizing query performance. [Automatic table optimization](t_Creating_tables.md) provides more detailed explanations and examples of table design options.\n\n**Topics**\n+ [Choose the best sort key](c_best-practices-sort-key.md)\n+ [Choose the best distribution style](c_best-practices-best-dist-key.md)\n+ [Let COPY choose compression encodings](c_best-practices-use-auto-compression.md)\n+ [Define primary key and foreign key constraints](c_best-practices-defining-constraints.md)\n+ [Use the smallest possible column size](c_best-practices-smallest-column-size.md)\n+ [Use date/time data types for date columns](c_best-practices-timestamp-date-columns.md)\n\n## Performing a deep copy\n\nA deep copy recreates and repopulates a table by using a bulk insert, which automatically sorts the table. If a table has a large unsorted Region, a deep copy is much faster than a vacuum. We recommend that you only make concurrent updates during a deep copy operation if you can track them. After the process has completed, move the delta updates into the new table. A VACUUM operation supports concurrent updates automatically.\n\nYou can choose one of the following methods to create a copy of the original table:\n+ Use the original table DDL.\n\n  If the CREATE TABLE DDL is available, this is the fastest and preferred method. If you create a new table, you can specify all table and column attributes, including primary key and foreign keys. You can find the original DDL by using the SHOW TABLE function.\n+ Use CREATE TABLE LIKE.\n\n  If the original DDL is not available, you can use CREATE TABLE LIKE to recreate the original table. The new table inherits the encoding, distribution key, sort key, and not-null attributes of the parent table. The new table doesn't inherit the primary key and foreign key attributes of the parent table, but you can add them using [ALTER TABLE](r_ALTER_TABLE.md).\n+ Create a temporary table and truncate the original table.\n\n  If you must retain the primary key and foreign key attributes of the parent table. If the parent table has dependencies, you can use CREATE TABLE ... AS (CTAS) to create a temporary table. Then truncate the original table and populate it from the temporary table.\n\n  Using a temporary table improves performance significantly compared to using a permanent table, but there is a risk of losing data. A temporary table is automatically dropped at the end of the session in which it is created. TRUNCATE commits immediately, even if it is inside a transaction block. If the TRUNCATE succeeds but the session shuts down before the following INSERT completes, the data is lost. If data loss is unacceptable, use a permanent table.\n\nAfter you create a copy of a table, you might have to grant access to the new table. You can use [GRANT](r_GRANT.md) to define access privileges. To view and grant all of a table's access privileges, you must be one of the following:\n+ A superuser.\n+ The owner of the table you want to copy.\n+ A user with the ACCESS SYSTEM TABLE privilege to see the table's privileges, and with the grant privilege for all relevant permissions.\n\nAdditionally, you might have to grant usage permission for the schema your deep copy is in. Granting usage permission is necessary if your deep copy's schema is different from the original table's schema, and also isn't the `public` schema. To view and grant usage privileges you must be one of the following:\n+ A superuser.\n+ A user who can grant the USAGE permission for the deep copy's schema.\n\n**To perform a deep copy using the original table DDL**\n\n1. (Optional) Recreate the table DDL by running a script called `v_generate_tb\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Redshift's MPP architecture rewards intentional table design — DISTKEY drives data shuffling cost on joins; SORTKEY drives zone-map pruning on range scans; column encoding compresses storage. Automatic table optimization can take over once a workload is observed. This skill covers the design surface.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Redshift's MPP architecture rewards intentional table design — DISTKEY drives data shuffling cost on joins; SORTKEY drives zone-map pruning on range scans; column encoding compresses storage. Automatic table optimization can take over once a workload is observed. This skill covers the design surface.
 
-      Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-best-dist-key.html and https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-sort-key.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      When you run a query, the query optimizer redistributes the rows to the compute nodes as needed to perform any joins and aggregations. The goal in selecting a table distribution style is to minimize the impact of the redistribution step by locating the data where it needs to be before the query is run.
+    Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-best-dist-key.html and https://docs.aws.amazon.com/redshift/latest/dg/c_best-practices-sort-key.html.
+- fragment_type: execution
+  sequence: 2
+  content: "When you run a query, the query optimizer redistributes the rows to the compute nodes as needed to perform any joins and aggregations. The goal in selecting a table distribution style is to minimize the impact of the redistribution step by locating the data where it needs to be before the query is run.\n\n**Note**  \nWhen you use automatic table optimization, you don't need to choose the distribution style of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).\n\nSome suggestions for the best approach follow:\n\n1. Distribute the fact table and one dimension table on their common columns.\n\n   Your fact table can have only one distribution key. Any tables that join on another key aren't collocated with the fact table. Choose one dimension to collocate based on how frequently it is joined and the size of the joining rows. Designate both the dimension table's primary key and the fact table's corresponding foreign key as the DISTKEY.\n\n1. Choose the largest dimension based on the size of the filtered dataset.\n\n   Only the rows that are used in the join must be distributed, so consider the size of the dataset after filtering, not the size of the table.\n\n1. Choose a column with high cardinality in the filtered result set.\n\n   If you distribute a sales table on a date column, for example, you should probably get fairly even data distribution, unless most of your sales are seasonal. However, if you commonly use a range-restricted predicate to filter for a narrow date period, most of the filtered rows occur on a limited set of slices and the query workload is skewed.\n\n1. Change some dimension tables to use ALL distribution.\n\n   If a dimension table cannot be collocated with the fact table or other important joining tables, you can improve query performance significantly by distributing the entire table to all of the nodes. Using ALL distribution multiplies storage space requirements and increases load times and maintenance operations, so you should weigh all factors before choosing ALL distribution.\n\nTo have Amazon Redshift choose the appropriate distribution style, specify `AUTO` for the distribution style.\n\nFor more information about choosing distribution styles, see [Data distribution for query optimization](t_Distributing_data.md).\n"
+- fragment_type: execution
+  sequence: 3
+  content: "Amazon Redshift stores your data on disk in sorted order according to the sort key. The Amazon Redshift query optimizer uses sort order when it determines optimal query plans.\n\n**Note**  \nWhen you use automatic table optimization, you don't need to choose the sort key of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).\n\nSome suggestions for the best approach follow:\n+ To have Amazon Redshift choose the appropriate sort order, specify `AUTO` for the sort key.\n+ If recent data is queried most frequently, specify the timestamp column as the leading column for the sort key.\n\n  Queries are more efficient because they can skip entire blocks that fall outside the time range.\n+ If you do frequent range filtering or equality filtering on one column, specify that column as the sort key.\n\n   Amazon Redshift can skip reading entire blocks of data for that column. It can do so because it tracks the minimum and maximum column values stored on each block and can skip blocks that don't apply to the predicate range.\n+ If you frequently join a table, specify the join column as both the sort key and the distribution key.\n\n   Doing this enables the query optimizer to choose a sort merge join instead of a slower hash join. Because the data is already sorted on the join key, the query optimizer can bypass the sort phase of the sort merge join.\n"
+- fragment_type: execution
+  sequence: 4
+  content: |
+    Automatic table optimization is a self-tuning capability that automatically optimizes the design of tables by applying sort and distribution keys without the need for administrator intervention. By using automation to tune the design of tables, you can get started and get the fastest performance without investing time to manually tune and implement table optimizations.
 
-      **Note**  
-      When you use automatic table optimization, you don't need to choose the distribution style of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).
+    Automatic table optimization continuously observes how queries interact with tables. It uses advanced artificial intelligence methods to choose sort and distribution keys to optimize performance for the cluster's workload. If Amazon Redshift determines that applying a key improves cluster performance, tables are automatically altered within hours from the time the cluster was created, with minimal impact to queries.
 
-      Some suggestions for the best approach follow:
+    To take advantage of this automation, an Amazon Redshift administrator creates a new table, or alters an existing table to enable it to use automatic optimization. Existing tables with a distribution style or sort key of `AUTO` are already enabled for automation. When you run queries against those tables, Amazon Redshift determines if a sort key or distribution key will improve performance. If so, then Amazon Redshift automatically modifies the table without requiring administrator intervention. If a minimum number of queries are run, optimizations are applied within hours of the cluster being launched.
 
-      1. Distribute the fact table and one dimension table on their common columns.
+    If Amazon Redshift determines that a distribution key improves the performance of queries, tables where distribution style is `AUTO` can have their distribution style changed to `KEY`.
+- fragment_type: execution
+  sequence: 5
+  content: |
+    As you plan your database, certain key table design decisions heavily influence overall query performance. These design choices also have a significant effect on storage requirements, which in turn affects query performance by reducing the number of I/O operations and minimizing the memory required to process queries.
 
-         Your fact table can have only one distribution key. Any tables that join on another key aren't collocated with the fact table. Choose one dimension to collocate based on how frequently it is joined and the size of the joining rows. Designate both the dimension table's primary key and the fact table's corresponding foreign key as the DISTKEY.
+    In this section, you can find a summary of the most important design decisions and best practices for optimizing query performance. [Automatic table optimization](t_Creating_tables.md) provides more detailed explanations and examples of table design options.
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    A deep copy recreates and repopulates a table by using a bulk insert, which automatically sorts the table. If a table has a large unsorted Region, a deep copy is much faster than a vacuum. We recommend that you only make concurrent updates during a deep copy operation if you can track them. After the process has completed, move the delta updates into the new table. A VACUUM operation supports concurrent updates automatically.
 
-      1. Choose the largest dimension based on the size of the filtered dataset.
+    You can choose one of the following methods to create a copy of the original table:
+    + Use the original table DDL.
 
-         Only the rows that are used in the join must be distributed, so consider the size of the dataset after filtering, not the size of the table.
+      If the CREATE TABLE DDL is available, this is the fastest and preferred method. If you create a new table, you can specify all table and column attributes, including primary key and foreign keys. You can find the original DDL by using the SHOW TABLE function.
+    + Use CREATE TABLE LIKE.
 
-      1. Choose a column with high cardinality in the filtered result set.
+      If the original DDL is not available, you can use CREATE TABLE LIKE to recreate the original table. The new table inherits the encoding, distribution key, sort key, and not-null attributes of the parent table. The new table doesn't inherit the primary key and foreign key attributes of the parent table, but you can add them using [ALTER TABLE](r_ALTER_TABLE.md).
+    + Create a temporary table and truncate the original table.
 
-         If you distribute a sales table on a date column, for example, you should probably get fairly even data distribution, unless most of your sales are seasonal. However, if you commonly use a range-restricted predicate to filter for a narrow date period, most of the filtered rows occur on a limited set of slices and the query workload is skewed.
+      If you must retain the primary key and foreign key attributes of the parent table. If the parent table has dependencies, you can use CREATE TABLE ... AS (CTAS) to create a temporary table. Then truncate the original table and populate it from the temporary table.
+- fragment_type: execution
+  sequence: 7
+  content: |2-
+      Using a temporary table improves performance significantly compared to using a permanent table, but there is a risk of losing data. A temporary table is automatically dropped at the end of the session in which it is created. TRUNCATE commits immediately, even if it is inside a transaction block. If the TRUNCATE succeeds but the session shuts down before the following INSERT completes, the data is lost. If data loss is unacceptable, use a permanent table.
 
-      1. Change some dimension tables to use ALL distribution.
+    After you create a copy of a table, you might have to grant access to the new table. You can use [GRANT](r_GRANT.md) to define access privileges. To view and grant all of a table's access privileges, you must be one of the following:
+    + A superuser.
+    + The owner of the table you want to copy.
+    + A user with the ACCESS SYSTEM TABLE privilege to see the table's privileges, and with the grant privilege for all relevant permissions.
 
-         If a dimension table cannot be collocated with the fact table or other important joining tables, you can improve query performance significantly by distributing the entire table to all of the nodes. Using ALL distribution multiplies storage space requirements and increases load times and maintenance operations, so you should weigh all factors before choosing ALL distribution.
+    Additionally, you might have to grant usage permission for the schema your deep copy is in. Granting usage permission is necessary if your deep copy's schema is different from the original table's schema, and also isn't the `public` schema. To view and grant usage privileges you must be one of the following:
+    + A superuser.
+    + A user who can grant the USAGE permission for the deep copy's schema.
 
-      To have Amazon Redshift choose the appropriate distribution style, specify `AUTO` for the distribution style.
+    **To perform a deep copy using the original table DDL**
 
-      For more information about choosing distribution styles, see [Data distribution for query optimization](t_Distributing_data.md).
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      Amazon Redshift stores your data on disk in sorted order according to the sort key. The Amazon Redshift query optimizer uses sort order when it determines optimal query plans.
-
-      **Note**  
-      When you use automatic table optimization, you don't need to choose the sort key of your table. For more information, see [Automatic table optimization](t_Creating_tables.md).
-
-      Some suggestions for the best approach follow:
-      + To have Amazon Redshift choose the appropriate sort order, specify `AUTO` for the sort key.
-      + If recent data is queried most frequently, specify the timestamp column as the leading column for the sort key.
-
-        Queries are more efficient because they can skip entire blocks that fall outside the time range.
-      + If you do frequent range filtering or equality filtering on one column, specify that column as the sort key.
-
-         Amazon Redshift can skip reading entire blocks of data for that column. It can do so because it tracks the minimum and maximum column values stored on each block and can skip blocks that don't apply to the predicate range.
-      + If you frequently join a table, specify the join column as both the sort key and the distribution key.
-
-         Doing this enables the query optimizer to choose a sort merge join instead of a slower hash join. Because the data is already sorted on the join key, the query optimizer can bypass the sort phase of the sort merge join.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      Automatic table optimization is a self-tuning capability that automatically optimizes the design of tables by applying sort and distribution keys without the need for administrator intervention. By using automation to tune the design of tables, you can get started and get the fastest performance without investing time to manually tune and implement table optimizations.
-
-      Automatic table optimization continuously observes how queries interact with tables. It uses advanced artificial intelligence methods to choose sort and distribution keys to optimize performance for the cluster's workload. If Amazon Redshift determines that applying a key improves cluster performance, tables are automatically altered within hours from the time the cluster was created, with minimal impact to queries.
-
-      To take advantage of this automation, an Amazon Redshift administrator creates a new table, or alters an existing table to enable it to use automatic optimization. Existing tables with a distribution style or sort key of `AUTO` are already enabled for automation. When you run queries against those tables, Amazon Redshift determines if a sort key or distribution key will improve performance. If so, then Amazon Redshift automatically modifies the table without requiring administrator intervention. If a minimum number of queries are run, optimizations are applied within hours of the cluster being launched.
-
-      If Amazon Redshift determines that a distribution key improves the performance of queries, tables where distribution style is `AUTO` can have their distribution style changed to `KEY`.
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      As you plan your database, certain key table design decisions heavily influence overall query performance. These design choices also have a significant effect on storage requirements, which in turn affects query performance by reducing the number of I/O operations and minimizing the memory required to process queries.
-
-      In this section, you can find a summary of the most important design decisions and best practices for optimizing query performance. [Automatic table optimization](t_Creating_tables.md) provides more detailed explanations and examples of table design options.
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      A deep copy recreates and repopulates a table by using a bulk insert, which automatically sorts the table. If a table has a large unsorted Region, a deep copy is much faster than a vacuum. We recommend that you only make concurrent updates during a deep copy operation if you can track them. After the process has completed, move the delta updates into the new table. A VACUUM operation supports concurrent updates automatically.
-
-      You can choose one of the following methods to create a copy of the original table:
-      + Use the original table DDL.
-
-        If the CREATE TABLE DDL is available, this is the fastest and preferred method. If you create a new table, you can specify all table and column attributes, including primary key and foreign keys. You can find the original DDL by using the SHOW TABLE function.
-      + Use CREATE TABLE LIKE.
-
-        If the original DDL is not available, you can use CREATE TABLE LIKE to recreate the original table. The new table inherits the encoding, distribution key, sort key, and not-null attributes of the parent table. The new table doesn't inherit the primary key and foreign key attributes of the parent table, but you can add them using [ALTER TABLE](r_ALTER_TABLE.md).
-      + Create a temporary table and truncate the original table.
-
-        If you must retain the primary key and foreign key attributes of the parent table. If the parent table has dependencies, you can use CREATE TABLE ... AS (CTAS) to create a temporary table. Then truncate the original table and populate it from the temporary table.
-
-        Using a temporary table improves performance significantly compared to using a permanent table, but there is a risk of losing data. A temporary table is automatically dropped at the end of the session in which it is created. TRUNCATE commits immediately, even if it is inside a transaction block. If the TRUNCATE succeeds but the session shuts down before the following INSERT completes, the data is lost. If data loss is unacceptable, use a permanent table.
-
-      After you create a copy of a table, you might have to grant access to the new table. You can use [GRANT](r_GRANT.md) to define access privileges. To view and grant all of a table's access privileges, you must be one of the following:
-      + A superuser.
-      + The owner of the table you want to copy.
-      + A user with the ACCESS SYSTEM TABLE privilege to see the table's privileges, and with the grant privilege for all relevant permissions.
-
-      Additionally, you might have to grant usage permission for the schema your deep copy is in. Granting usage permission is necessary if your deep copy's schema is different from the original table's schema, and also isn't the `public` schema. To view and grant usage privileges you must be one of the following:
-      + A superuser.
-      + A user who can grant the USAGE permission for the deep copy's schema.
-
-      **To perform a deep copy using the original table DDL**
-
-      1. (Optional) Recreate the table DDL by running a script called `v_generate_tb
+    1. (Optional) Recreate the table DDL by running a script called `v_generate_tb

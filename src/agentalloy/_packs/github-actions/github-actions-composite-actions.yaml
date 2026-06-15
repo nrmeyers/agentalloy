@@ -1,7 +1,7 @@
 skill_type: domain
 skill_id: github-actions-composite-actions
 canonical_name: GitHub Actions — Composite and CLI Actions
-description: "Automate CI/CD workflows on GitHub by creating reusable custom actions: package shell scripts or Node.js code into composite or CLI actions that other repositories can import and version independently."
+description: 'Automate CI/CD workflows on GitHub by creating reusable custom actions: package shell scripts or Node.js code into composite or CLI actions that other repositories can import and version independently.'
 category: ops
 skill_class: domain
 domain_tags:
@@ -13,8 +13,10 @@ domain_tags:
 always_apply: false
 deprecated: true
 superseded_by: github-actions-reusable-workflows
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: navistone
 change_summary: |
   hand-authored Opus expansion
@@ -161,12 +163,12 @@ fragments:
 
     ### Using tags for release management
 
-
     > [!NOTE] If you have enabled immutable releases to help prevent supply chain attacks and accidental changes to your releases, instead see [AUTOTITLE](/actions/how-tos/create-and-publish-actions/using-immutable-releases-and-tags-to-manage-your-actions-releases).
 
-
     We recommend using tags for actions release management. Using this approach, your users can easily distinguish between major and minor versions:
-
+- fragment_type: execution
+  sequence: 4
+  content: |-
     1. Develop and validate a release on a release branch (for example, `release/v1`).
     1. Create a release with a release tag using semantic versioning (for example, `v1.0.1`). For more information, see [AUTOTITLE](/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
     1. Move the major version tag (for example, `v1`) to point to the Git ref of the current release. For more information, see [Git basics - tagging](https://git-scm.com/book/en/v2/Git-Basics-Tagging).
@@ -198,7 +200,9 @@ fragments:
     ```
 
     ### Using a commit's SHA for release management
-
+- fragment_type: execution
+  sequence: 5
+  content: |-
     Each Git commit receives a calculated SHA value, which is unique and immutable. Your action's users might prefer to rely on a commit's SHA value, as this approach can be more reliable than specifying a tag, which could be deleted or moved. However, this means that users will not receive further updates made to the action. You must use a commit's full SHA value, and not an abbreviated value.
 
     ```yaml
@@ -206,7 +210,7 @@ fragments:
         - uses: actions/javascript-action@a824008085750b8e136effc585c3cd6082bd575f
     ```
 - fragment_type: execution
-  sequence: 4
+  sequence: 6
   content: |-
     ## Creating a README file for your action
 

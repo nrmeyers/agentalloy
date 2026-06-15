@@ -121,7 +121,7 @@ class TestRecommendModels:
         assert "ingest_model" not in opt
         assert "ingest_runner" not in opt
 
-    def test_all_presets_use_qwen3_embedding_gguf(self) -> None:
+    def test_all_presets_use_nomic_embedding_gguf(self) -> None:
         for hw_fn, host in [
             (_hw(), "CPU+RAM"),
             (_hw(os_kind="macos", arch="arm64"), "iGPU"),
@@ -137,7 +137,7 @@ class TestRecommendModels:
             result = recommend_models(hw_fn, host)
             opt = result["options"][0]
             # llama-server is the sole runner; the embed GGUF is uniform.
-            assert opt["embed_model"] == "Qwen3-Embedding-0.6B-Q8_0.gguf"
+            assert opt["embed_model"] == "nomic-embed-text-v1.5.Q8_0.gguf"
             assert opt["embed_runner"] == "llama-server"
 
     def test_every_option_carries_reranker(self) -> None:

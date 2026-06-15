@@ -1,11 +1,11 @@
 name: snowflake
-version: 1.0.3
+version: 1.0.4
 tier: store
 description: |
   Snowflake data warehouse patterns — virtual warehouse sizing and cost, table types and clustering keys, Time Travel + Streams for change tracking, Tasks for scheduled automation, and data loading via COPY INTO + Snowpipe. Precision-favored store tier; sourced from docs.snowflake.com via the .md-suffix sub-page convention per R1 tier-1 procedure (registry llms_full_url https://docs.snowflake.com/llms-full.txt).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -18,13 +18,13 @@ skills:
   fragment_count: 6
 - skill_id: snowflake-tables-and-clustering
   file: snowflake-tables-and-clustering.yaml
-  fragment_count: 15
+  fragment_count: 16
 - skill_id: snowflake-tasks-and-automation
   file: snowflake-tasks-and-automation.yaml
   fragment_count: 5
 - skill_id: snowflake-time-travel-and-streams
   file: snowflake-time-travel-and-streams.yaml
-  fragment_count: 7
+  fragment_count: 8
 - skill_id: snowflake-warehouses-and-cost
   file: snowflake-warehouses-and-cost.yaml
   fragment_count: 16

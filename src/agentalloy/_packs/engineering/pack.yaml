@@ -3,8 +3,8 @@ version: 2.0.2
 tier: foundation
 description: Engineering practices that span stacks — error handling, naming, ADRs, technical-debt management, reading code. Always installed. Re-authored 2026-05-04 against R1 tiered sourcing; pre-POC v1 archived to archive/pre-poc-packs-2026-05-04/.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: true

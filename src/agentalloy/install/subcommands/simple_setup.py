@@ -225,7 +225,7 @@ class SetupConfig:
 
 # llama-server (llama.cpp) is the sole inference runner. The embed GGUF is the
 # only model the wizard prompts for; the reranker GGUF is fixed.
-_DEFAULT_EMBED_MODEL = "Qwen3-Embedding-0.6B-Q8_0.gguf"
+_DEFAULT_EMBED_MODEL = "nomic-embed-text-v1.5.Q8_0.gguf"
 _RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 # Human-readable labels for hardware targets
@@ -1097,7 +1097,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # AMD needs ROCm device mounts + a ROCm Ollama image, and Docker Desktop
     # on macOS cannot pass Metal through at all. Users who want GPU should
     # choose the native install. The bundled Ollama sidecar handles inference
-    # on CPU using the qwen3-embedding:0.6b model — functional for embeddings
+    # on CPU using the nomic-embed-text-v1.5 model — functional for embeddings
     # but slower than GPU.
     _print(
         "\n  [yellow]Note — container deployment is CPU-only on every host.[/yellow]\n"

@@ -1,372 +1,176 @@
 skill_type: domain
 skill_id: webhooks-event-types-and-schemas
 canonical_name: Webhooks — Event Types and Schemas
-description: "Design and document webhook event types for services like Svix or Stripe: define clear verb_noun identifiers, publish JSON schemas, and plan versioning so consumers know exactly what data to expect for each event."
+description: 'Design and document webhook event types for services like Svix or Stripe: define clear verb_noun identifiers, publish JSON schemas, and plan versioning so consumers know exactly what data to expect for each event.'
 category: design
 skill_class: domain
 domain_tags:
-  - event-types
-  - schemas
-  - versioning
-  - catalogs
-  - webhooks
+- event-types
+- schemas
+- versioning
+- catalogs
+- webhooks
 related:
 - webhooks-documentation
 - webhooks-signature-verification
 - webhooks-versioning-and-evolution
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: |
-  # Webhooks — Event Types and Schemas
-
-  ## Overview
-
-  Each webhook payload is an event with a type and a schema. Good event-type design uses verb_noun naming, declares JSON Schemas, and plans versioning from day one. This skill covers event-type catalog patterns.
-
-  Sourced from svix-docs event-types.mdx (excerpt).
-
-  ## Event Types
-
-  Each message sent through Svix has an associated event type.
-  Event types are identifiers denoting the type of message being sent.
-  Because they are the primary way for webhook consumers to configure what events they are interested in receiving, we highly recommend including an event catalog that describes each event type and provides sample payloads in your documentation.
-  To make it easy for webhook consumers to find and subscribe to the right events, Svix automatically generates an event catalog. See more about [publishing your event catalog here](#publishing-your-event-catalog).
-
-  Event types are just a string, for example: `user.signup`, `invoice.paid` and `workflow.completed`.
-
-  Webhook consumers can choose which events are sent to which endpoint. By default, all messages are sent to all endpoints. Though when adding or editing endpoints, users can choose to only subscribe to some of the event types for this particular endpoint.
-
-  **Bulk Create**
-
-  It's recommended to add the event types you are going to use ahead of time. You can do it by [importing them from an OpenAPI spec](#import-event-types-from-an-openapi-specification) or [bulk creating them from code](#bulk-creating-event-types-from-code).
-
-  ## What your users will see
-
-  This is how choosing event types look like in the [pre-built application portal](app-portal.mdx):
-
-  ![Management UI screenshot](/img/event-type-selection.png)
-
-  ## Event Type Format
-
-  Event types have a pattern defined a `^[a-zA-Z0-9\\-_.]+$`, meaning it can contain any of the following characters:
-
-  - A through Z (uppercase or lowercase)
-  - 0 through 9
-  - Special characters: `-`, `_`, `.`
-
-  **Style guide**
-
-  We recommend you use period-delimited event type names (e.g. `<group>.<event>`). If you do, the App Portal UI will logically group them for your users and make it easier for them to subscribe an endpoint to all events in a particular group of event types.
-
-  ## Using event types
-
-  You can add, edit, and delete event types in [the dashboard](https://dashboard.svix.com) or through the API below.
-
-  ```js
-  const svix = new Svix("AUTH_TOKEN");
-  const eventType = await svix.eventType.create({
-    name: "user.signup",
-    description: "A user has signed up",
-  });
-  ```
-
-  ```python
-  from svix.api import Svix, EventTypeIn
-
-  svix = Svix("AUTH_TOKEN")
-  app = svix.event_type.create(EventTypeIn(
-      name="user.signup",
-      description="A user has signed up"
-  ))
-  ```
-
-  ```rust
-   let svix = Svix::new("AUTH_TOKEN".to_string(), None);
-   let event_type = svix
-       .event_type()
-       .create(
-           EventTypeIn {
-               name: "user.signup".to_string(),
-               description: "A user has signed up".to_str
-               ..EventTypeIn::default()
-           },
-           None,
-       )
-       .await?;
-  ```
-
-  ```go
-  	svix "github.com/svix/svix-webhooks/go"
-  )
-
-  svixClient := svix.New("AUTH_TOKEN", nil)
-  app, err := svixClient.EventType.Create(ctx, &svix.EventTypeIn{
-      Name: "user.signup",
-      Description: "A user has signed up",
-  })}
-  ```
-
-  ```java
-  Svix svix = new Svix("AUTH_TOKEN");
-  svix.getEventType()
-    .create(new EventTypeIn()
-      .name("user.signup")
-      .description("A user has signed up")
-    );
-  ```
-
-  ```kotlin
-  val svix = Svix("AUTH_TOKEN");
-  svix.eventType.create(
-                  EventTypeIn(
-                      name = "user.signup",
-                      description = "A user has signed up",
-                  ));
-  ```
-
-  ```ruby
-  svix = Svix::Client.new("AUTH_TOKEN")
-  svix.event_type.create(Svix::EventTypeIn.new({
-          "name" => "user.signup",
-          "description" => "A user has signed up"}))
-  ```
-
-  ```csharp
-  var svix = new SvixClient("AUTH_TOKEN", new SvixOptions("https://api.us.svix.com"));
-  await svix.EventType.CreateAsync(new EventTypeIn(
-      name: "user.signup",
-      description: "A user has signed up"
-  ))
-  ```
-
-  ```php
-  $svix = new Svix('AUTH_TOKEN');
-
-  $eventType = $svix->eventType->create(EventTypeIn::create(
-      name: 'user.signup',
-      description: 'A user has signed up'
-  ));
-  ```
-
-  ```shell
-  export SVIX_AUTH_TOKEN='AUTH_TOKEN'
-  svix event-type create '{ "name": "user.signup", "description": "A user has signed up" }'
-  ```
-
-  ```shell
-  export SVIX_AUTH_TOKEN='AUTH_TOKEN'
-
-  curl -X POST "https://api.us.svix.com/api/v1/event-type/" \
-      -H  "Accept: application/json" \
-      -H  "Content-Type: application/json" \
-      -H  "Authorization: Bearer ${SVIX_AUTH_TOKEN}" \
-      -d '{ "name": "user.signup", "description": "A user has signed up" }'
-  ```
-
-  ## Event Type Schema
-
-  One of the best ways to help your users integrate with you is by defining schemas for your event types. Event type schemas allow your users to anticipate the shape of the message body they will receive as well as introduce guardrails for each data type.
-
-  Schemas can be created using our visual schema editor, or by providing your own JSONSchema (Draft 7) spec either in the UI or [the API](https://api.svix.com/docs#tag/Event-Type/operation/v1.event-type.create).
-
-  ![schema-editor-basic](/img/schema-editor-basic.png)
-
-  Once you have a schema defined, your users will be able to view the schema definition as well as an example event from the Event Catalog in the App Portal.
-
-  ![schema-preview](/img/schema-preview.png)
-
-  To learn more about creating schemas, check out our guide on [adding your first event type schema](./tutorials/event-type-schema).
-
-  ### Schema validation
-
-  Svix doesn't enforce the event type schema when creating a message. There are a few reasons to why we do it, though the main one is that we would much rather send a message with a bad schema, than block messages because the schema was slightly wrong. This is especially true for more strict schemas like ones that enforce some fields follow a specific regex (a potentially minor violation).
-
-  Additionally, since the payload is fully controlled by our customers (you), it's very easy to verify the schema on the sender side, before sending to Svix, which ensures people get exactly the level of validation they expect.
-
-  We do however love schemas and think they are super important, so we plan on adding an automatic SDK generator that will have type checked and validated schemas for you client side, so that bad schemas will fail at compile time, not run time!
+raw_prose: "# Webhooks — Event Types and Schemas\n\n## Overview\n\nEach webhook payload is an event with a type and a schema. Good event-type design uses verb_noun naming, declares JSON Schemas, and plans versioning from day one. This skill covers event-type catalog patterns.\n\nSourced from svix-docs event-types.mdx (excerpt).\n\n## Event Types\n\nEach message sent through Svix has an associated event type.\nEvent types are identifiers denoting the type of message being sent.\nBecause they are the primary way for webhook consumers to configure what events they are interested in receiving, we highly recommend including an event catalog that describes each event type and provides sample payloads in your documentation.\nTo make it easy for webhook consumers to find and subscribe to the right events, Svix automatically generates an event catalog. See more about [publishing your event catalog here](#publishing-your-event-catalog).\n\nEvent types are just a string, for example: `user.signup`, `invoice.paid` and `workflow.completed`.\n\nWebhook consumers can choose which events are sent to which endpoint. By default, all messages are sent to all endpoints. Though when adding or editing endpoints, users can choose to only subscribe to some of the event types for this particular endpoint.\n\n**Bulk Create**\n\nIt's recommended to add the event types you are going to use ahead of time. You can do it by [importing them from an OpenAPI spec](#import-event-types-from-an-openapi-specification) or [bulk creating them from code](#bulk-creating-event-types-from-code).\n\n## What your users will see\n\nThis is how choosing event types look like in the [pre-built application portal](app-portal.mdx):\n\n![Management UI screenshot](/img/event-type-selection.png)\n\n## Event Type Format\n\nEvent types have a pattern defined a `^[a-zA-Z0-9\\\\-_.]+$`, meaning it can contain any of the following characters:\n\n- A through Z (uppercase or lowercase)\n- 0 through 9\n- Special characters: `-`, `_`, `.`\n\n**Style guide**\n\nWe recommend you use period-delimited event type names (e.g. `<group>.<event>`). If you do, the App Portal UI will logically group them for your users and make it easier for them to subscribe an endpoint to all events in a particular group of event types.\n\n## Using event types\n\nYou can add, edit, and delete event types in [the dashboard](https://dashboard.svix.com) or through the API below.\n\n```js\nconst svix = new Svix(\"AUTH_TOKEN\");\nconst eventType = await svix.eventType.create({\n  name: \"user.signup\",\n  description: \"A user has signed up\",\n});\n```\n\n```python\nfrom svix.api import Svix, EventTypeIn\n\nsvix = Svix(\"AUTH_TOKEN\")\napp = svix.event_type.create(EventTypeIn(\n    name=\"user.signup\",\n    description=\"A user has signed up\"\n))\n```\n\n```rust\n let svix = Svix::new(\"AUTH_TOKEN\".to_string(), None);\n let event_type = svix\n     .event_type()\n     .create(\n         EventTypeIn {\n             name: \"user.signup\".to_string(),\n             description: \"A user has signed up\".to_str\n             ..EventTypeIn::default()\n         },\n         None,\n     )\n     .await?;\n```\n\n```go\n\tsvix \"github.com/svix/svix-webhooks/go\"\n)\n\nsvixClient := svix.New(\"AUTH_TOKEN\", nil)\napp, err := svixClient.EventType.Create(ctx, &svix.EventTypeIn{\n    Name: \"user.signup\",\n    Description: \"A user has signed up\",\n})}\n```\n\n```java\nSvix svix = new Svix(\"AUTH_TOKEN\");\nsvix.getEventType()\n  .create(new EventTypeIn()\n    .name(\"user.signup\")\n    .description(\"A user has signed up\")\n  );\n```\n\n```kotlin\nval svix = Svix(\"AUTH_TOKEN\");\nsvix.eventType.create(\n                EventTypeIn(\n                    name = \"user.signup\",\n                    description = \"A user has signed up\",\n                ));\n```\n\n```ruby\nsvix = Svix::Client.new(\"AUTH_TOKEN\")\nsvix.event_type.create(Svix::EventTypeIn.new({\n        \"name\" => \"user.signup\",\n        \"description\" => \"A user has signed up\"}))\n```\n\n```csharp\nvar svix = new SvixClient(\"AUTH_TOKEN\", new SvixOptions(\"https://api.us.svix.com\"));\nawait svix.EventType.CreateAsync(new EventTypeIn(\n    name: \"user.signup\",\n    description: \"A user has signed up\"\n))\n```\n\n```php\n$svix = new Svix('AUTH_TOKEN');\n\n$eventType = $svix->eventType->create(EventTypeIn::create(\n    name: 'user.signup',\n    description: 'A user has signed up'\n));\n```\n\n```shell\nexport SVIX_AUTH_TOKEN='AUTH_TOKEN'\nsvix event-type create '{ \"name\": \"user.signup\", \"description\": \"A user has signed up\" }'\n```\n\n```shell\nexport SVIX_AUTH_TOKEN='AUTH_TOKEN'\n\ncurl -X POST \"https://api.us.svix.com/api/v1/event-type/\" \\\n    -H  \"Accept: application/json\" \\\n    -H  \"Content-Type: application/json\" \\\n    -H  \"Authorization: Bearer ${SVIX_AUTH_TOKEN}\" \\\n    -d '{ \"name\": \"user.signup\", \"description\": \"A user has signed up\" }'\n```\n\n## Event Type Schema\n\nOne of the best ways to help your users integrate with you is by defining schemas for your event types. Event type schemas allow your users to anticipate the shape of the message body they will receive as well as introduce guardrails for each data type.\n\nSchemas can be created using our visual schema editor, or by providing your own JSONSchema (Draft 7) spec either in the UI or [the API](https://api.svix.com/docs#tag/Event-Type/operation/v1.event-type.create).\n\n![schema-editor-basic](/img/schema-editor-basic.png)\n\nOnce you have a schema defined, your users will be able to view the schema definition as well as an example event from the Event Catalog in the App Portal.\n\n![schema-preview](/img/schema-preview.png)\n\nTo learn more about creating schemas, check out our guide on [adding your first event type schema](./tutorials/event-type-schema).\n\n### Schema validation\n\nSvix doesn't enforce the event type schema when creating a message. There are a few reasons to why we do it, though the main one is that we would much rather send a message with a bad schema, than block messages because the schema was slightly wrong. This is especially true for more strict schemas like ones that enforce some fields follow a specific regex (a potentially minor violation).\n\nAdditionally, since the payload is fully controlled by our customers (you), it's very easy to verify the schema on the sender side, before sending to Svix, which ensures people get exactly the level of validation they expect.\n\nWe do however love schemas and think they are super important, so we plan on adding an automatic SDK generator that will have type checked and validated schemas for you client side, so that bad schemas will fail at compile time, not run time!\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      Each webhook payload is an event with a type and a schema. Good event-type design uses verb_noun naming, declares JSON Schemas, and plans versioning from day one. This skill covers event-type catalog patterns.
+    Each webhook payload is an event with a type and a schema. Good event-type design uses verb_noun naming, declares JSON Schemas, and plans versioning from day one. This skill covers event-type catalog patterns.
 
-      Sourced from svix-docs event-types.mdx (excerpt).
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Event Types
+    Sourced from svix-docs event-types.mdx (excerpt).
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Event Types
 
-      Each message sent through Svix has an associated event type.
-      Event types are identifiers denoting the type of message being sent.
-      Because they are the primary way for webhook consumers to configure what events they are interested in receiving, we highly recommend including an event catalog that describes each event type and provides sample payloads in your documentation.
-      To make it easy for webhook consumers to find and subscribe to the right events, Svix automatically generates an event catalog. See more about [publishing your event catalog here](#publishing-your-event-catalog).
+    Each message sent through Svix has an associated event type.
+    Event types are identifiers denoting the type of message being sent.
+    Because they are the primary way for webhook consumers to configure what events they are interested in receiving, we highly recommend including an event catalog that describes each event type and provides sample payloads in your documentation.
+    To make it easy for webhook consumers to find and subscribe to the right events, Svix automatically generates an event catalog. See more about [publishing your event catalog here](#publishing-your-event-catalog).
 
-      Event types are just a string, for example: `user.signup`, `invoice.paid` and `workflow.completed`.
+    Event types are just a string, for example: `user.signup`, `invoice.paid` and `workflow.completed`.
 
-      Webhook consumers can choose which events are sent to which endpoint. By default, all messages are sent to all endpoints. Though when adding or editing endpoints, users can choose to only subscribe to some of the event types for this particular endpoint.
-  - fragment_type: guardrail
-    sequence: 3
-    content: |
-      **Bulk Create**
+    Webhook consumers can choose which events are sent to which endpoint. By default, all messages are sent to all endpoints. Though when adding or editing endpoints, users can choose to only subscribe to some of the event types for this particular endpoint.
+- fragment_type: guardrail
+  sequence: 3
+  content: |
+    **Bulk Create**
 
-      It's recommended to add the event types you are going to use ahead of time. You can do it by [importing them from an OpenAPI spec](#import-event-types-from-an-openapi-specification) or [bulk creating them from code](#bulk-creating-event-types-from-code).
-  - fragment_type: example
-    sequence: 4
-    content: |
-      ## What your users will see
+    It's recommended to add the event types you are going to use ahead of time. You can do it by [importing them from an OpenAPI spec](#import-event-types-from-an-openapi-specification) or [bulk creating them from code](#bulk-creating-event-types-from-code).
+- fragment_type: example
+  sequence: 4
+  content: |
+    ## What your users will see
 
-      This is how choosing event types look like in the [pre-built application portal](app-portal.mdx):
+    This is how choosing event types look like in the [pre-built application portal](app-portal.mdx):
 
-      ![Management UI screenshot](/img/event-type-selection.png)
-  - fragment_type: setup
-    sequence: 5
-    content: |
-      ## Event Type Format
+    ![Management UI screenshot](/img/event-type-selection.png)
+- fragment_type: setup
+  sequence: 5
+  content: |
+    ## Event Type Format
 
-      Event types have a pattern defined a `^[a-zA-Z0-9\\-_.]+$`, meaning it can contain any of the following characters:
+    Event types have a pattern defined a `^[a-zA-Z0-9\\-_.]+$`, meaning it can contain any of the following characters:
 
-      - A through Z (uppercase or lowercase)
-      - 0 through 9
-      - Special characters: `-`, `_`, `.`
-  - fragment_type: rationale
-    sequence: 6
-    content: |
-      **Style guide**
+    - A through Z (uppercase or lowercase)
+    - 0 through 9
+    - Special characters: `-`, `_`, `.`
+- fragment_type: rationale
+  sequence: 6
+  content: |
+    **Style guide**
 
-      We recommend you use period-delimited event type names (e.g. `<group>.<event>`). If you do, the App Portal UI will logically group them for your users and make it easier for them to subscribe an endpoint to all events in a particular group of event types.
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      ## Using event types
+    We recommend you use period-delimited event type names (e.g. `<group>.<event>`). If you do, the App Portal UI will logically group them for your users and make it easier for them to subscribe an endpoint to all events in a particular group of event types.
+- fragment_type: execution
+  sequence: 7
+  content: |-
+    ## Using event types
 
-      You can add, edit, and delete event types in [the dashboard](https://dashboard.svix.com) or through the API below.
+    You can add, edit, and delete event types in [the dashboard](https://dashboard.svix.com) or through the API below.
 
-      ```js
-      const svix = new Svix("AUTH_TOKEN");
-      const eventType = await svix.eventType.create({
+    ```js
+    const svix = new Svix("AUTH_TOKEN");
+    const eventType = await svix.eventType.create({
+      name: "user.signup",
+      description: "A user has signed up",
+    });
+    ```
+
+    ```python
+    from svix.api import Svix, EventTypeIn
+
+    svix = Svix("AUTH_TOKEN")
+    app = svix.event_type.create(EventTypeIn(
+        name="user.signup",
+        description="A user has signed up"
+    ))
+    ```
+
+    ```rust
+     let svix = Svix::new("AUTH_TOKEN".to_string(), None);
+     let event_type = svix
+         .event_type()
+         .create(
+             EventTypeIn {
+                 name: "user.signup".to_string(),
+                 description: "A user has signed up".to_str
+                 ..EventTypeIn::default()
+             },
+             None,
+         )
+         .await?;
+    ```
+- fragment_type: execution
+  sequence: 8
+  content: "```go\n\tsvix \"github.com/svix/svix-webhooks/go\"\n)\n\nsvixClient := svix.New(\"AUTH_TOKEN\", nil)\napp, err := svixClient.EventType.Create(ctx, &svix.EventTypeIn{\n    Name: \"user.signup\",\n    Description: \"A user has signed up\",\n})}\n```\n\n```java\nSvix svix = new Svix(\"AUTH_TOKEN\");\nsvix.getEventType()\n  .create(new EventTypeIn()\n    .name(\"user.signup\")\n    .description(\"A user has signed up\")\n  );\n```\n\n```kotlin\nval svix = Svix(\"AUTH_TOKEN\");\nsvix.eventType.create(\n            EventTypeIn(\n                name = \"user.signup\",\n                description = \"A user has signed up\",\n            ));\n```\n\n```ruby\nsvix = Svix::Client.new(\"AUTH_TOKEN\")\nsvix.event_type.create(Svix::EventTypeIn.new({\n        \"name\" => \"user.signup\",\n        \"description\" => \"A user has signed up\"}))\n```"
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    ```csharp
+    var svix = new SvixClient("AUTH_TOKEN", new SvixOptions("https://api.us.svix.com"));
+    await svix.EventType.CreateAsync(new EventTypeIn(
         name: "user.signup",
-        description: "A user has signed up",
-      });
-      ```
+        description: "A user has signed up"
+    ))
+    ```
 
-      ```python
-      from svix.api import Svix, EventTypeIn
+    ```php
+    $svix = new Svix('AUTH_TOKEN');
 
-      svix = Svix("AUTH_TOKEN")
-      app = svix.event_type.create(EventTypeIn(
-          name="user.signup",
-          description="A user has signed up"
-      ))
-      ```
+    $eventType = $svix->eventType->create(EventTypeIn::create(
+        name: 'user.signup',
+        description: 'A user has signed up'
+    ));
+    ```
 
-      ```rust
-       let svix = Svix::new("AUTH_TOKEN".to_string(), None);
-       let event_type = svix
-           .event_type()
-           .create(
-               EventTypeIn {
-                   name: "user.signup".to_string(),
-                   description: "A user has signed up".to_str
-                   ..EventTypeIn::default()
-               },
-               None,
-           )
-           .await?;
-      ```
+    ```shell
+    export SVIX_AUTH_TOKEN='AUTH_TOKEN'
+    svix event-type create '{ "name": "user.signup", "description": "A user has signed up" }'
+    ```
 
-      ```go
-      	svix "github.com/svix/svix-webhooks/go"
-      )
+    ```shell
+    export SVIX_AUTH_TOKEN='AUTH_TOKEN'
 
-      svixClient := svix.New("AUTH_TOKEN", nil)
-      app, err := svixClient.EventType.Create(ctx, &svix.EventTypeIn{
-          Name: "user.signup",
-          Description: "A user has signed up",
-      })}
-      ```
+    curl -X POST "https://api.us.svix.com/api/v1/event-type/" \
+        -H  "Accept: application/json" \
+        -H  "Content-Type: application/json" \
+        -H  "Authorization: Bearer ${SVIX_AUTH_TOKEN}" \
+        -d '{ "name": "user.signup", "description": "A user has signed up" }'
+    ```
+- fragment_type: example
+  sequence: 10
+  content: |
+    ## Event Type Schema
 
-      ```java
-      Svix svix = new Svix("AUTH_TOKEN");
-      svix.getEventType()
-        .create(new EventTypeIn()
-          .name("user.signup")
-          .description("A user has signed up")
-        );
-      ```
+    One of the best ways to help your users integrate with you is by defining schemas for your event types. Event type schemas allow your users to anticipate the shape of the message body they will receive as well as introduce guardrails for each data type.
 
-      ```kotlin
-      val svix = Svix("AUTH_TOKEN");
-      svix.eventType.create(
-                  EventTypeIn(
-                      name = "user.signup",
-                      description = "A user has signed up",
-                  ));
-      ```
+    Schemas can be created using our visual schema editor, or by providing your own JSONSchema (Draft 7) spec either in the UI or [the API](https://api.svix.com/docs#tag/Event-Type/operation/v1.event-type.create).
 
-      ```ruby
-      svix = Svix::Client.new("AUTH_TOKEN")
-      svix.event_type.create(Svix::EventTypeIn.new({
-              "name" => "user.signup",
-              "description" => "A user has signed up"}))
-      ```
+    ![schema-editor-basic](/img/schema-editor-basic.png)
 
-      ```csharp
-      var svix = new SvixClient("AUTH_TOKEN", new SvixOptions("https://api.us.svix.com"));
-      await svix.EventType.CreateAsync(new EventTypeIn(
-          name: "user.signup",
-          description: "A user has signed up"
-      ))
-      ```
+    Once you have a schema defined, your users will be able to view the schema definition as well as an example event from the Event Catalog in the App Portal.
 
-      ```php
-      $svix = new Svix('AUTH_TOKEN');
+    ![schema-preview](/img/schema-preview.png)
+- fragment_type: rationale
+  sequence: 11
+  content: |-
+    ### Schema validation
 
-      $eventType = $svix->eventType->create(EventTypeIn::create(
-          name: 'user.signup',
-          description: 'A user has signed up'
-      ));
-      ```
+    Svix doesn't enforce the event type schema when creating a message. There are a few reasons to why we do it, though the main one is that we would much rather send a message with a bad schema, than block messages because the schema was slightly wrong. This is especially true for more strict schemas like ones that enforce some fields follow a specific regex (a potentially minor violation).
 
-      ```shell
-      export SVIX_AUTH_TOKEN='AUTH_TOKEN'
-      svix event-type create '{ "name": "user.signup", "description": "A user has signed up" }'
-      ```
+    Additionally, since the payload is fully controlled by our customers (you), it's very easy to verify the schema on the sender side, before sending to Svix, which ensures people get exactly the level of validation they expect.
 
-      ```shell
-      export SVIX_AUTH_TOKEN='AUTH_TOKEN'
-
-      curl -X POST "https://api.us.svix.com/api/v1/event-type/" \
-          -H  "Accept: application/json" \
-          -H  "Content-Type: application/json" \
-          -H  "Authorization: Bearer ${SVIX_AUTH_TOKEN}" \
-          -d '{ "name": "user.signup", "description": "A user has signed up" }'
-      ```
-  - fragment_type: example
-    sequence: 8
-    content: |
-      ## Event Type Schema
-
-      One of the best ways to help your users integrate with you is by defining schemas for your event types. Event type schemas allow your users to anticipate the shape of the message body they will receive as well as introduce guardrails for each data type.
-
-      Schemas can be created using our visual schema editor, or by providing your own JSONSchema (Draft 7) spec either in the UI or [the API](https://api.svix.com/docs#tag/Event-Type/operation/v1.event-type.create).
-
-      ![schema-editor-basic](/img/schema-editor-basic.png)
-
-      Once you have a schema defined, your users will be able to view the schema definition as well as an example event from the Event Catalog in the App Portal.
-
-      ![schema-preview](/img/schema-preview.png)
-  - fragment_type: rationale
-    sequence: 9
-    content: |
-      ### Schema validation
-
-      Svix doesn't enforce the event type schema when creating a message. There are a few reasons to why we do it, though the main one is that we would much rather send a message with a bad schema, than block messages because the schema was slightly wrong. This is especially true for more strict schemas like ones that enforce some fields follow a specific regex (a potentially minor violation).
-
-      Additionally, since the payload is fully controlled by our customers (you), it's very easy to verify the schema on the sender side, before sending to Svix, which ensures people get exactly the level of validation they expect.
-
-      We do however love schemas and think they are super important, so we plan on adding an automatic SDK generator that will have type checked and validated schemas for you client side, so that bad schemas will fail at compile time, not run time!
+    We do however love schemas and think they are super important, so we plan on adding an automatic SDK generator that will have type checked and validated schemas for you client side, so that bad schemas will fail at compile time, not run time!

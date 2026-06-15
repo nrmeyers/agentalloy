@@ -73,6 +73,10 @@ _GGUF_URL_MAP: dict[str, str] = {
         "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF"
         "/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
     ),
+    "nomic-embed-text-v1.5.Q8_0.gguf": (
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF"
+        "/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf"
+    ),
     "Qwen3-Reranker-0.6B-Q8_0.gguf": (
         "https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF"
         "/resolve/main/qwen3-reranker-0.6b-q8_0.gguf"

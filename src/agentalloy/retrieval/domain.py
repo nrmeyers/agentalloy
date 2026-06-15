@@ -459,11 +459,7 @@ def retrieve_domain_candidates(
     # Stage 2: Safe embedding with circuit-breaker integration
     # ------------------------------------------------------------------
     try:
-        task_description = (
-            "Given a software engineering task description, retrieve relevant "
-            "skill instruction fragments"
-        )
-        embed_input = f"Instruct: {task_description}\nQuery:{task}"
+        embed_input = f"search_query: {task}"
         query_vec = safe_embed(lm, embedding_model, [embed_input])[0]
     except EmbeddingError as exc:
         if exc.code not in _DEGRADABLE_EMBEDDING_CODES:

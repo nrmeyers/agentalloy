@@ -1,27 +1,29 @@
 name: csharp-dotnet
-version: 1.0.3
+version: 1.0.4
 tier: language
 description: C# / .NET 9 patterns — async + Task with CancellationToken/Channels, exception design with when filters and AggregateException, nullable reference types and pattern matching, System.Text.Json with source generation, MSTest v3 testing idioms. Precision-favored language tier; sourced from learn.microsoft.com .NET 9 docs per R1 tiered sourcing (fixtures/upstream/curated/csharp.yaml).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
-depends_on: [core, engineering]
+depends_on:
+- core
+- engineering
 skills:
-  - skill_id: csharp-async-and-tasks
-    file: csharp-async-and-tasks.yaml
-    fragment_count: 10
-  - skill_id: csharp-error-handling
-    file: csharp-error-handling.yaml
-    fragment_count: 11
-  - skill_id: csharp-nullable-and-pattern-matching
-    file: csharp-nullable-and-pattern-matching.yaml
-    fragment_count: 10
-  - skill_id: csharp-system-text-json
-    file: csharp-system-text-json.yaml
-    fragment_count: 10
-  - skill_id: csharp-mstest-testing
-    file: csharp-mstest-testing.yaml
-    fragment_count: 9
+- skill_id: csharp-async-and-tasks
+  file: csharp-async-and-tasks.yaml
+  fragment_count: 14
+- skill_id: csharp-error-handling
+  file: csharp-error-handling.yaml
+  fragment_count: 11
+- skill_id: csharp-nullable-and-pattern-matching
+  file: csharp-nullable-and-pattern-matching.yaml
+  fragment_count: 10
+- skill_id: csharp-system-text-json
+  file: csharp-system-text-json.yaml
+  fragment_count: 11
+- skill_id: csharp-mstest-testing
+  file: csharp-mstest-testing.yaml
+  fragment_count: 10

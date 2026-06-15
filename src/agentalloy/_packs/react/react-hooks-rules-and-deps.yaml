@@ -1,22 +1,28 @@
 skill_type: domain
 skill_id: react-hooks-rules-and-deps
 canonical_name: React Hooks Rules and Deps Array (useState, useEffect, useMemo, useCallback, exhaustive-deps)
-description: "Build React apps with hooks like useState and useEffect: follow the Rules of Hooks, write exhaustive dependency arrays to avoid stale closures, and use useMemo or useCallback for performance to prevent bugs and unnecessary re-renders."
+description: 'Build React apps with hooks like useState and useEffect: follow the Rules of Hooks, write exhaustive dependency arrays to avoid stale closures, and use useMemo or useCallback for performance to prevent bugs and unnecessary re-renders.'
 category: engineering
 skill_class: domain
-domain_tags: [rules-of-hooks, exhaustive-deps-lint, usememo-vs-usecallback, useref-mutable-box, usereducer-state-reducer, react]
+domain_tags:
+- rules-of-hooks
+- exhaustive-deps-lint
+- usememo-vs-usecallback
+- useref-mutable-box
+- usereducer-state-reducer
+- react
 related:
 - react-effects-and-cleanup
 - react-rendering-keys-and-memoization
 - react-state-and-context
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   merged 2026-06-03: absorbed useMemo/useCallback from react-rendering-keys-and-memoization — added the filtered-list + stable handler example.
   Initial authoring 2026-05-06. Sources — React built-in Hooks reference https://react.dev/reference/react/hooks, Rules of Hooks https://react.dev/reference/rules/rules-of-hooks, You Might Not Need an Effect https://react.dev/learn/you-might-not-need-an-effect, eslint-plugin-react-hooks exhaustive-deps lint https://react.dev/reference/eslint-plugin-react-hooks/lints/exhaustive-deps, Lifecycle of Reactive Effects https://react.dev/learn/lifecycle-of-reactive-effects (all verified 2026-05-06 against fixtures/upstream/registry.yaml entry react via tier-2 llms_url procedure). React 19+; React Compiler stable in 19. Skill scope: the Rules of Hooks (top-level call only, React-functions only, stable call order), `useState` setter semantics (no merge, functional updater, lazy init), `useEffect` lifecycle (commit, cleanup on re-run and unmount, deps-gated re-run, Strict-Mode dev double-invocation), the deps array discipline enforced by `react-hooks/exhaustive-deps`, `useMemo`/`useCallback` referential-identity use cases vs cargo-cult memoization (with a forward note on the React Compiler), `useRef` as a non-rendering mutable box, `useReducer` for co-dependent transitions, and the dominant anti-patterns (conditional hook calls, suppressing exhaustive-deps, object/array literals in deps, deriving state via Effect, reading `.current` during render). Out of scope: `useContext`, `useTransition`/`useDeferredValue`, `useSyncExternalStore`, `useEffectEvent`, custom hook composition patterns beyond a passing reference. Original authoring — scaffolded with citations against the React docs, not a verbatim copy of upstream prose.
-
 raw_prose: |
   # React Hooks Rules and Deps Array
 
@@ -248,268 +254,248 @@ raw_prose: |
   ```
 
   Two reasons this is correct, not cargo-cult: (a) `handleToggle` is passed to a `React.memo`'d `ItemRow`, and an inline arrow `id => onToggle(id)` would defeat the `memo` by handing each row a fresh function identity every render; (b) the filter computation is keyed on `[todos, filter]`, so it skips work when neither changed. Wrap every value in `useMemo` and you pay bookkeeping cost for no benefit — reach for it for memoized-child props or profiled-expensive work.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # React Hooks Rules and Deps Array
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # React Hooks Rules and Deps Array
 
-      React hooks are how function components express state, effects, and memoization. Three things make hooks correct in production: you obey the Rules of Hooks (top-level only, React functions only, stable call order across renders), you write the deps array exhaustively (`react-hooks/exhaustive-deps` non-suppressed), and you reach for an Effect only when you are synchronizing with something *outside* React. Most production hook bugs are one of four things — a hook call hidden inside an `if`/early-return, a missing dep producing a stale closure, an object or array literal in a deps array creating a fresh identity every render, or an Effect used to derive state from props that should have been computed during render. This skill targets React 19+ (the React Compiler is stable in 19, verified 2026-05-06).
+    React hooks are how function components express state, effects, and memoization. Three things make hooks correct in production: you obey the Rules of Hooks (top-level only, React functions only, stable call order across renders), you write the deps array exhaustively (`react-hooks/exhaustive-deps` non-suppressed), and you reach for an Effect only when you are synchronizing with something *outside* React. Most production hook bugs are one of four things — a hook call hidden inside an `if`/early-return, a missing dep producing a stale closure, an object or array literal in a deps array creating a fresh identity every render, or an Effect used to derive state from props that should have been computed during render. This skill targets React 19+ (the React Compiler is stable in 19, verified 2026-05-06).
+- sequence: 2
+  fragment_type: execution
+  content: |
+    ## Rules of Hooks
 
-  - sequence: 2
-    fragment_type: execution
-    content: |
-      ## Rules of Hooks
+    Two rules, both non-negotiable.
 
-      Two rules, both non-negotiable.
+    1. **Only call hooks at the top level of a component or custom hook.** Never inside `if`, `for`, `while`, `switch`, or after an early `return`. Never inside a nested function (except another custom hook).
+    2. **Only call hooks from React function components or custom hooks (functions whose name starts with `use`).** Never from a class, a regular function, or an event handler closure.
 
-      1. **Only call hooks at the top level of a component or custom hook.** Never inside `if`, `for`, `while`, `switch`, or after an early `return`. Never inside a nested function (except another custom hook).
-      2. **Only call hooks from React function components or custom hooks (functions whose name starts with `use`).** Never from a class, a regular function, or an event handler closure.
+    Why: React identifies which hook call belongs to which slot of state purely by call order — index 0 is the first `useState`, index 1 is the second, etc. If a conditional skips a hook on one render and includes it on the next, every subsequent slot shifts and React binds your component's state to the wrong values. The `react-hooks/rules-of-hooks` ESLint rule catches violations statically; treat it as build-blocking.
 
-      Why: React identifies which hook call belongs to which slot of state purely by call order — index 0 is the first `useState`, index 1 is the second, etc. If a conditional skips a hook on one render and includes it on the next, every subsequent slot shifts and React binds your component's state to the wrong values. The `react-hooks/rules-of-hooks` ESLint rule catches violations statically; treat it as build-blocking.
+    ```tsx
+    import { useState, useEffect } from 'react';
 
-      ```tsx
-      import { useState, useEffect } from 'react';
-
-      // ❌ wrong: hook inside a condition
-      function Counter({ enabled }: { enabled: boolean }) {
-        if (enabled) {
-          const [n, setN] = useState(0); // shifts the slot table
-        }
-        // ...
+    // ❌ wrong: hook inside a condition
+    function Counter({ enabled }: { enabled: boolean }) {
+      if (enabled) {
+        const [n, setN] = useState(0); // shifts the slot table
       }
+      // ...
+    }
 
-      // ✅ correct: hook at top level, branch on the value
-      function Counter({ enabled }: { enabled: boolean }) {
-        const [n, setN] = useState(0);
-        if (!enabled) return null;
-        return <button onClick={() => setN(n + 1)}>{n}</button>;
+    // ✅ correct: hook at top level, branch on the value
+    function Counter({ enabled }: { enabled: boolean }) {
+      const [n, setN] = useState(0);
+      if (!enabled) return null;
+      return <button onClick={() => setN(n + 1)}>{n}</button>;
+    }
+    ```
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## `useState`: setter does not merge, prefer the functional updater
+
+    The `useState` setter *replaces* the value — it does not merge like the legacy class `setState`. For object state you spread the previous value yourself.
+
+    ```tsx
+    import { useState } from 'react';
+
+    function Form() {
+      const [form, setForm] = useState({ name: '', email: '' });
+      // ❌ overwrites email with undefined
+      // setForm({ name: 'Ada' });
+      // ✅ spread the previous value
+      setForm(prev => ({ ...prev, name: 'Ada' }));
+    }
+    ```
+
+    When the next state depends on the previous, always pass a function: `setN(prev => prev + 1)`. The functional form receives the queued value, not the value captured by the closure that scheduled the update — so two synchronous calls produce two increments instead of one. For an expensive initial value, pass an initializer function rather than computing eagerly: `useState(() => expensive())` runs the initializer once on mount instead of on every render. This matters for any non-trivial default — JSON.parse of a large blob, building a Map from an array, computing a derived structure — anything you would not want to redo on every render.
+- sequence: 4
+  fragment_type: example
+  content: |
+    ## `useEffect`: synchronize with external systems, deps-gate the re-run
+
+    An Effect runs *after commit*, the cleanup runs before the Effect re-runs and again on unmount. The deps array gates whether the Effect re-runs on a given render: empty `[]` means "after first commit only"; `[a, b]` means "when `a` or `b` changes by `Object.is`"; omitting the array means "every commit" (almost never what you want).
+
+    In React 19 Strict Mode, every Effect is intentionally invoked twice in development — mount, cleanup, mount — to surface missing-cleanup bugs. This is a feature, not a bug, and it does not happen in production. Code defensively: write the cleanup, and assume your component can be remounted at any time.
+
+    ```tsx
+    import { useEffect, useState } from 'react';
+
+    function ChatRoom({ roomId }: { roomId: string }) {
+      const [messages, setMessages] = useState<string[]>([]);
+      useEffect(() => {
+        const conn = openConnection(roomId);
+        conn.onMessage(m => setMessages(prev => [...prev, m]));
+        return () => conn.close(); // runs on roomId change AND unmount
+      }, [roomId]);
+      return <ul>{messages.map((m, i) => <li key={i}>{m}</li>)}</ul>;
+    }
+
+    declare function openConnection(roomId: string): {
+      onMessage(cb: (m: string) => void): void;
+      close(): void;
+    };
+    ```
+- fragment_type: rationale
+  sequence: 5
+  content: |-
+    ## Deps array: `exhaustive-deps` is non-optional discipline
+
+    `react-hooks/exhaustive-deps` flags every reactive value (prop, state, value derived from them) referenced inside the Effect that is missing from the deps array. The fix is almost never `// eslint-disable-next-line` — that suppresses the lint and ships a stale closure. The fix is one of:
+
+    - Add the dep.
+    - Move the value *inside* the Effect (so it is no longer a closure-over-render value).
+    - Move the value *out* of the component (a constant, a module-level helper).
+    - Wrap an unstable function in `useCallback` or an unstable object in `useMemo`.
+
+    The trap that bites people: an object or array literal in the deps array creates a new identity on every render, so the Effect re-runs every render — the opposite of what you wanted.
+- fragment_type: rationale
+  sequence: 6
+  content: |-
+    ```tsx
+    import { useEffect, useMemo } from 'react';
+
+    function Search({ query, filters }: { query: string; filters: { tags: string[] } }) {
+      // ❌ new object identity every render -> Effect runs every render
+      // useEffect(() => { fetchResults(query, { tags: filters.tags }); },
+      //          [query, { tags: filters.tags }]);
+
+      // ✅ stabilize the object identity, then list the stable value
+      const params = useMemo(() => ({ tags: filters.tags }), [filters.tags]);
+      useEffect(() => {
+        fetchResults(query, params);
+      }, [query, params]);
+    }
+
+    declare function fetchResults(q: string, p: { tags: string[] }): void;
+    ```
+
+    Walked: render N produces `params` identity A. The deps array `[query, params]` records A. Render N+1 produces a new `params` object — without `useMemo` it is identity B; the deps changed, so the Effect re-runs unnecessarily. With `useMemo` keyed on `filters.tags`, identity stays A as long as `filters.tags` is `Object.is`-equal, and the Effect runs only when the underlying value actually changes.
+- fragment_type: rationale
+  sequence: 7
+  content: |-
+    ## `useMemo` and `useCallback`: identity, not micro-optimization
+
+    `useMemo(fn, deps)` caches the *return value* of `fn` across renders while `deps` are unchanged. `useCallback(fn, deps)` caches the *function reference* itself. Both exist for two reasons, and neither is "make it faster by default":
+
+    1. **Referential identity for downstream memoization.** A child wrapped in `React.memo`, or a value in another hook's deps array, needs a stable identity to skip re-renders or re-runs. `useCallback` and `useMemo` provide it.
+    2. **Genuinely expensive computation.** A `O(n²)` reduction over a 10k-row dataset is worth caching. A string concatenation is not.
+
+    Premature memoization adds complexity for no measurable win and can even slow renders (the cache check itself costs). React 19's React Compiler aims to insert these automatically — but you still author code that is *correct* without it, since the Compiler is an optimization, not a semantic change. Profile before you sprinkle `useMemo`/`useCallback` on every value.
+- fragment_type: rationale
+  sequence: 8
+  content: |-
+    ```tsx
+    import { memo, useCallback, useMemo, useState } from 'react';
+
+    type Item = { id: string; label: string };
+    const Row = memo(function Row({ item, onPick }: { item: Item; onPick: (id: string) => void }) {
+      return <li onClick={() => onPick(item.id)}>{item.label}</li>;
+    });
+
+    function List({ items }: { items: Item[] }) {
+      const [selected, setSelected] = useState<string | null>(null);
+      // stable identity — Row.memo can skip re-renders when items don't change
+      const onPick = useCallback((id: string) => setSelected(id), []);
+      const sorted = useMemo(() => [...items].sort((a, b) => a.label.localeCompare(b.label)), [items]);
+      return (
+        <ul>
+          {sorted.map(it => <Row key={it.id} item={it} onPick={onPick} />)}
+          {selected && <p>{selected}</p>}
+        </ul>
+      );
+    }
+    ```
+- sequence: 9
+  fragment_type: example
+  content: |
+    ## `useRef`: mutable box for non-rendering values
+
+    `useRef(initial)` returns an object `{ current: initial }` that persists across renders. Reading or writing `.current` does **not** trigger a re-render. Use refs for: DOM node handles, timer/interval IDs, the previous value of a prop, imperative third-party library handles, and any "I need this to survive renders but it doesn't drive the UI" value.
+
+    ```tsx
+    import { useEffect, useRef, useState } from 'react';
+
+    function useDebounce<T>(value: T, ms: number): T {
+      const [debounced, setDebounced] = useState(value);
+      const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+      useEffect(() => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => setDebounced(value), ms);
+        return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+      }, [value, ms]);
+      return debounced;
+    }
+    ```
+
+    Do **not** read `.current` during render to influence output — refs are not reactive, the value can change between commit and the next render, and you will race with concurrent rendering. Read refs in event handlers or Effects, write them anywhere.
+- sequence: 10
+  fragment_type: example
+  content: |
+    ## `useReducer`: co-dependent state transitions
+
+    Reach for `useReducer` when state has multiple sub-fields whose updates are co-dependent — a wizard form whose `step` and `errors` and `values` move together, an editor whose `selection` and `cursor` and `history` are interdependent. Reducers must be pure (no side effects, same input → same output). They pair naturally with TypeScript discriminated-union actions, which give you exhaustive case checking.
+
+    ```tsx
+    import { useReducer } from 'react';
+
+    type State = { step: number; values: Record<string, string>; errors: string[] };
+    type Action =
+      | { type: 'next' }
+      | { type: 'back' }
+      | { type: 'set'; field: string; value: string }
+      | { type: 'fail'; errors: string[] };
+
+    function reducer(state: State, action: Action): State {
+      switch (action.type) {
+        case 'next':  return { ...state, step: state.step + 1, errors: [] };
+        case 'back':  return { ...state, step: Math.max(0, state.step - 1) };
+        case 'set':   return { ...state, values: { ...state.values, [action.field]: action.value } };
+        case 'fail':  return { ...state, errors: action.errors };
       }
-      ```
+    }
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## `useState`: setter does not merge, prefer the functional updater
+    function Wizard() {
+      const [state, dispatch] = useReducer(reducer, { step: 0, values: {}, errors: [] });
+      return <button onClick={() => dispatch({ type: 'next' })}>step {state.step}</button>;
+    }
+    ```
+- fragment_type: guardrail
+  sequence: 11
+  content: |-
+    - **Hook call inside `if`/loop/early-return.** Shifts the slot table; React binds wrong state. Move the hook to the top, branch on its value. - **`// eslint-disable-next-line react-hooks/exhaustive-deps`.** The vast majority of suppressions ship a stale closure. Fix the underlying identity issue (move the value, memoize it, or accept the dep). - **Object/array/function literal directly in a deps array.** New identity every render → Effect re-runs every render. Hoist with `useMemo`/`useCallback` or move outside the component. - **Using `useEffect` to derive state from props.** `setX` inside an Effect that depends on a prop creates a render → effect → re-render cycle and ships a stale value on the first paint. Compute the derived value during render instead. (See react.dev/learn/you-might-not-need-an-effect.)
+    - **Reading `ref.current` during render.** Refs are not reactive; the value can change after you read it. Use state, or read the ref only in event handlers and Effects. - **`useMemo`/`useCallback` on every value.** Cargo-cult memoization adds cache-check cost and code noise. Reach for them only when downstream identity matters or the computation is profiled-expensive. - **`async` directly on the Effect callback.** `useEffect(async () => {...})` returns a Promise where React expects a cleanup function — your cleanup never runs.
+- fragment_type: guardrail
+  sequence: 12
+  content: 'Wrap an inner async function and call it: `useEffect(() => { let alive = true; (async () => { ... if (alive) setX(v); })(); return () => { alive = false; }; }, [...])`. - **`async void` of a different flavor: setting state in cleanup.** Cleanup is for tearing down subscriptions/timers/AbortControllers, not for committing state. State updates in cleanup target an unmounted component and React will warn.'
+- fragment_type: verification
+  sequence: 13
+  content: '- [ ] `eslint --rule ''react-hooks/rules-of-hooks: error'' --rule ''react-hooks/exhaustive-deps: error'' src/` exits 0. - [ ] `grep -rnE ''eslint-disable.*react-hooks/(exhaustive-deps|rules-of-hooks)'' src/` returns no matches, or each match has a comment justifying the suppression with a link to the ticket. - [ ] No object, array, or function *literal* appears inside a deps array. Inventory with `grep -rnE ''\}, ?\[.*\{|\}, ?\[.*\[|\}, ?\[.*=>'' src/` and audit each hit. - [ ] No hook is called from inside an `if`/`for`/`while`/`switch` or after a `return`. The `react-hooks/rules-of-hooks` lint covers this; running it as `--max-warnings 0` enforces it. - [ ] `grep -rnE ''useEffect\(\s*async'' src/` returns no matches — Effect callbacks are not `async` (they would return a Promise instead of a cleanup function). - [ ] No `ref.current` read inside JSX or top-level component body. `grep -rnE ''\.current'' src/` and confirm each access is inside an event handler, Effect, or imperative method. - [ ] Every `useEffect` that opens a subscription, timer, or AbortController returns a cleanup function. Inventory with `grep -rn ''useEffect'' src/`; confirm each callback either is trivially synchronous-and-pure (rare) or returns a `() => ...` cleanup.'
+- fragment_type: verification
+  sequence: 14
+  content: '- [ ] React DevTools Profiler shows no component re-rendering on every parent commit when its props are referentially stable — confirms `React.memo` + `useCallback`/`useMemo` are wired correctly where used. - [ ] React Strict Mode is enabled in development (`<StrictMode>` wraps the app root). Components survive the dev-mode double mount/cleanup cycle without duplicating subscriptions, double-counting, or invalidating tokens.'
+- sequence: 15
+  fragment_type: example
+  content: |
+    ## `useMemo` and `useCallback` in list rendering: stabilizing props to memoized children
 
-      The `useState` setter *replaces* the value — it does not merge like the legacy class `setState`. For object state you spread the previous value yourself.
+    A second canonical use case for `useMemo`/`useCallback`: stabilizing the props of a `React.memo`-wrapped list row so the row can actually skip re-renders. `useMemo(fn, deps)` caches the result of `fn` between renders, recomputing only when a dep in `deps` changes (`Object.is` compare). `useCallback(fn, deps)` is the same idea for a function reference: the returned function is stable across renders unless deps change.
 
-      ```tsx
-      import { useState } from 'react';
+    ```tsx
+    import { useMemo, useCallback } from 'react';
 
-      function Form() {
-        const [form, setForm] = useState({ name: '', email: '' });
-        // ❌ overwrites email with undefined
-        // setForm({ name: 'Ada' });
-        // ✅ spread the previous value
-        setForm(prev => ({ ...prev, name: 'Ada' }));
-      }
-      ```
+    function TodoList({ todos, filter, onToggle }) {
+      const visible = useMemo(
+        () => todos.filter(t => filter === 'all' || (filter === 'open' && !t.done)),
+        [todos, filter]
+      );
+      const handleToggle = useCallback(id => onToggle(id), [onToggle]);
+      return visible.map(todo => (
+        <ItemRow key={todo.id} todo={todo} onToggle={handleToggle} />
+      ));
+    }
+    ```
 
-      When the next state depends on the previous, always pass a function: `setN(prev => prev + 1)`. The functional form receives the queued value, not the value captured by the closure that scheduled the update — so two synchronous calls produce two increments instead of one. For an expensive initial value, pass an initializer function rather than computing eagerly: `useState(() => expensive())` runs the initializer once on mount instead of on every render. This matters for any non-trivial default — JSON.parse of a large blob, building a Map from an array, computing a derived structure — anything you would not want to redo on every render.
-
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## `useEffect`: synchronize with external systems, deps-gate the re-run
-
-      An Effect runs *after commit*, the cleanup runs before the Effect re-runs and again on unmount. The deps array gates whether the Effect re-runs on a given render: empty `[]` means "after first commit only"; `[a, b]` means "when `a` or `b` changes by `Object.is`"; omitting the array means "every commit" (almost never what you want).
-
-      In React 19 Strict Mode, every Effect is intentionally invoked twice in development — mount, cleanup, mount — to surface missing-cleanup bugs. This is a feature, not a bug, and it does not happen in production. Code defensively: write the cleanup, and assume your component can be remounted at any time.
-
-      ```tsx
-      import { useEffect, useState } from 'react';
-
-      function ChatRoom({ roomId }: { roomId: string }) {
-        const [messages, setMessages] = useState<string[]>([]);
-        useEffect(() => {
-          const conn = openConnection(roomId);
-          conn.onMessage(m => setMessages(prev => [...prev, m]));
-          return () => conn.close(); // runs on roomId change AND unmount
-        }, [roomId]);
-        return <ul>{messages.map((m, i) => <li key={i}>{m}</li>)}</ul>;
-      }
-
-      declare function openConnection(roomId: string): {
-        onMessage(cb: (m: string) => void): void;
-        close(): void;
-      };
-      ```
-
-  - sequence: 5
-    fragment_type: rationale
-    content: |
-      ## Deps array: `exhaustive-deps` is non-optional discipline
-
-      `react-hooks/exhaustive-deps` flags every reactive value (prop, state, value derived from them) referenced inside the Effect that is missing from the deps array. The fix is almost never `// eslint-disable-next-line` — that suppresses the lint and ships a stale closure. The fix is one of:
-
-      - Add the dep.
-      - Move the value *inside* the Effect (so it is no longer a closure-over-render value).
-      - Move the value *out* of the component (a constant, a module-level helper).
-      - Wrap an unstable function in `useCallback` or an unstable object in `useMemo`.
-
-      The trap that bites people: an object or array literal in the deps array creates a new identity on every render, so the Effect re-runs every render — the opposite of what you wanted.
-
-      ```tsx
-      import { useEffect, useMemo } from 'react';
-
-      function Search({ query, filters }: { query: string; filters: { tags: string[] } }) {
-        // ❌ new object identity every render -> Effect runs every render
-        // useEffect(() => { fetchResults(query, { tags: filters.tags }); },
-        //          [query, { tags: filters.tags }]);
-
-        // ✅ stabilize the object identity, then list the stable value
-        const params = useMemo(() => ({ tags: filters.tags }), [filters.tags]);
-        useEffect(() => {
-          fetchResults(query, params);
-        }, [query, params]);
-      }
-
-      declare function fetchResults(q: string, p: { tags: string[] }): void;
-      ```
-
-      Walked: render N produces `params` identity A. The deps array `[query, params]` records A. Render N+1 produces a new `params` object — without `useMemo` it is identity B; the deps changed, so the Effect re-runs unnecessarily. With `useMemo` keyed on `filters.tags`, identity stays A as long as `filters.tags` is `Object.is`-equal, and the Effect runs only when the underlying value actually changes.
-
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## `useMemo` and `useCallback`: identity, not micro-optimization
-
-      `useMemo(fn, deps)` caches the *return value* of `fn` across renders while `deps` are unchanged. `useCallback(fn, deps)` caches the *function reference* itself. Both exist for two reasons, and neither is "make it faster by default":
-
-      1. **Referential identity for downstream memoization.** A child wrapped in `React.memo`, or a value in another hook's deps array, needs a stable identity to skip re-renders or re-runs. `useCallback` and `useMemo` provide it.
-      2. **Genuinely expensive computation.** A `O(n²)` reduction over a 10k-row dataset is worth caching. A string concatenation is not.
-
-      Premature memoization adds complexity for no measurable win and can even slow renders (the cache check itself costs). React 19's React Compiler aims to insert these automatically — but you still author code that is *correct* without it, since the Compiler is an optimization, not a semantic change. Profile before you sprinkle `useMemo`/`useCallback` on every value.
-
-      ```tsx
-      import { memo, useCallback, useMemo, useState } from 'react';
-
-      type Item = { id: string; label: string };
-      const Row = memo(function Row({ item, onPick }: { item: Item; onPick: (id: string) => void }) {
-        return <li onClick={() => onPick(item.id)}>{item.label}</li>;
-      });
-
-      function List({ items }: { items: Item[] }) {
-        const [selected, setSelected] = useState<string | null>(null);
-        // stable identity — Row.memo can skip re-renders when items don't change
-        const onPick = useCallback((id: string) => setSelected(id), []);
-        const sorted = useMemo(() => [...items].sort((a, b) => a.label.localeCompare(b.label)), [items]);
-        return (
-          <ul>
-            {sorted.map(it => <Row key={it.id} item={it} onPick={onPick} />)}
-            {selected && <p>{selected}</p>}
-          </ul>
-        );
-      }
-      ```
-
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## `useRef`: mutable box for non-rendering values
-
-      `useRef(initial)` returns an object `{ current: initial }` that persists across renders. Reading or writing `.current` does **not** trigger a re-render. Use refs for: DOM node handles, timer/interval IDs, the previous value of a prop, imperative third-party library handles, and any "I need this to survive renders but it doesn't drive the UI" value.
-
-      ```tsx
-      import { useEffect, useRef, useState } from 'react';
-
-      function useDebounce<T>(value: T, ms: number): T {
-        const [debounced, setDebounced] = useState(value);
-        const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-        useEffect(() => {
-          if (timerRef.current) clearTimeout(timerRef.current);
-          timerRef.current = setTimeout(() => setDebounced(value), ms);
-          return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-        }, [value, ms]);
-        return debounced;
-      }
-      ```
-
-      Do **not** read `.current` during render to influence output — refs are not reactive, the value can change between commit and the next render, and you will race with concurrent rendering. Read refs in event handlers or Effects, write them anywhere.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## `useReducer`: co-dependent state transitions
-
-      Reach for `useReducer` when state has multiple sub-fields whose updates are co-dependent — a wizard form whose `step` and `errors` and `values` move together, an editor whose `selection` and `cursor` and `history` are interdependent. Reducers must be pure (no side effects, same input → same output). They pair naturally with TypeScript discriminated-union actions, which give you exhaustive case checking.
-
-      ```tsx
-      import { useReducer } from 'react';
-
-      type State = { step: number; values: Record<string, string>; errors: string[] };
-      type Action =
-        | { type: 'next' }
-        | { type: 'back' }
-        | { type: 'set'; field: string; value: string }
-        | { type: 'fail'; errors: string[] };
-
-      function reducer(state: State, action: Action): State {
-        switch (action.type) {
-          case 'next':  return { ...state, step: state.step + 1, errors: [] };
-          case 'back':  return { ...state, step: Math.max(0, state.step - 1) };
-          case 'set':   return { ...state, values: { ...state.values, [action.field]: action.value } };
-          case 'fail':  return { ...state, errors: action.errors };
-        }
-      }
-
-      function Wizard() {
-        const [state, dispatch] = useReducer(reducer, { step: 0, values: {}, errors: [] });
-        return <button onClick={() => dispatch({ type: 'next' })}>step {state.step}</button>;
-      }
-      ```
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Hook call inside `if`/loop/early-return.** Shifts the slot table; React binds wrong state. Move the hook to the top, branch on its value.
-      - **`// eslint-disable-next-line react-hooks/exhaustive-deps`.** The vast majority of suppressions ship a stale closure. Fix the underlying identity issue (move the value, memoize it, or accept the dep).
-      - **Object/array/function literal directly in a deps array.** New identity every render → Effect re-runs every render. Hoist with `useMemo`/`useCallback` or move outside the component.
-      - **Using `useEffect` to derive state from props.** `setX` inside an Effect that depends on a prop creates a render → effect → re-render cycle and ships a stale value on the first paint. Compute the derived value during render instead. (See react.dev/learn/you-might-not-need-an-effect.)
-      - **Reading `ref.current` during render.** Refs are not reactive; the value can change after you read it. Use state, or read the ref only in event handlers and Effects.
-      - **`useMemo`/`useCallback` on every value.** Cargo-cult memoization adds cache-check cost and code noise. Reach for them only when downstream identity matters or the computation is profiled-expensive.
-      - **`async` directly on the Effect callback.** `useEffect(async () => {...})` returns a Promise where React expects a cleanup function — your cleanup never runs. Wrap an inner async function and call it: `useEffect(() => { let alive = true; (async () => { ... if (alive) setX(v); })(); return () => { alive = false; }; }, [...])`.
-      - **`async void` of a different flavor: setting state in cleanup.** Cleanup is for tearing down subscriptions/timers/AbortControllers, not for committing state. State updates in cleanup target an unmounted component and React will warn.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `eslint --rule 'react-hooks/rules-of-hooks: error' --rule 'react-hooks/exhaustive-deps: error' src/` exits 0.
-      - [ ] `grep -rnE 'eslint-disable.*react-hooks/(exhaustive-deps|rules-of-hooks)' src/` returns no matches, or each match has a comment justifying the suppression with a link to the ticket.
-      - [ ] No object, array, or function *literal* appears inside a deps array. Inventory with `grep -rnE '\}, ?\[.*\{|\}, ?\[.*\[|\}, ?\[.*=>' src/` and audit each hit.
-      - [ ] No hook is called from inside an `if`/`for`/`while`/`switch` or after a `return`. The `react-hooks/rules-of-hooks` lint covers this; running it as `--max-warnings 0` enforces it.
-      - [ ] `grep -rnE 'useEffect\(\s*async' src/` returns no matches — Effect callbacks are not `async` (they would return a Promise instead of a cleanup function).
-      - [ ] No `ref.current` read inside JSX or top-level component body. `grep -rnE '\.current' src/` and confirm each access is inside an event handler, Effect, or imperative method.
-      - [ ] Every `useEffect` that opens a subscription, timer, or AbortController returns a cleanup function. Inventory with `grep -rn 'useEffect' src/`; confirm each callback either is trivially synchronous-and-pure (rare) or returns a `() => ...` cleanup.
-      - [ ] React DevTools Profiler shows no component re-rendering on every parent commit when its props are referentially stable — confirms `React.memo` + `useCallback`/`useMemo` are wired correctly where used.
-      - [ ] React Strict Mode is enabled in development (`<StrictMode>` wraps the app root). Components survive the dev-mode double mount/cleanup cycle without duplicating subscriptions, double-counting, or invalidating tokens.
-
-  - sequence: 11
-    fragment_type: example
-    content: |
-      ## `useMemo` and `useCallback` in list rendering: stabilizing props to memoized children
-
-      A second canonical use case for `useMemo`/`useCallback`: stabilizing the props of a `React.memo`-wrapped list row so the row can actually skip re-renders. `useMemo(fn, deps)` caches the result of `fn` between renders, recomputing only when a dep in `deps` changes (`Object.is` compare). `useCallback(fn, deps)` is the same idea for a function reference: the returned function is stable across renders unless deps change.
-
-      ```tsx
-      import { useMemo, useCallback } from 'react';
-
-      function TodoList({ todos, filter, onToggle }) {
-        const visible = useMemo(
-          () => todos.filter(t => filter === 'all' || (filter === 'open' && !t.done)),
-          [todos, filter]
-        );
-        const handleToggle = useCallback(id => onToggle(id), [onToggle]);
-        return visible.map(todo => (
-          <ItemRow key={todo.id} todo={todo} onToggle={handleToggle} />
-        ));
-      }
-      ```
-
-      Two reasons this is correct, not cargo-cult: (a) `handleToggle` is passed to a `React.memo`'d `ItemRow`, and an inline arrow `id => onToggle(id)` would defeat the `memo` by handing each row a fresh function identity every render; (b) the filter computation is keyed on `[todos, filter]`, so it skips work when neither changed. Wrap every value in `useMemo` and you pay bookkeeping cost for no benefit — reach for it for memoized-child props or profiled-expensive work.
+    Two reasons this is correct, not cargo-cult: (a) `handleToggle` is passed to a `React.memo`'d `ItemRow`, and an inline arrow `id => onToggle(id)` would defeat the `memo` by handing each row a fresh function identity every render; (b) the filter computation is keyed on `[todos, filter]`, so it skips work when neither changed. Wrap every value in `useMemo` and you pay bookkeeping cost for no benefit — reach for it for memoized-child props or profiled-expensive work.

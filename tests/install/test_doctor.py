@@ -237,16 +237,16 @@ class TestCheckEmbeddingDim:
     def test_dim_mismatch_fails(self, tmp_path: Path) -> None:
         with patch("agentalloy.storage.vector_store.open_or_create") as mock_oc:
             mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = 768
+            mock_vs.embedding_dim.return_value = 1024
             mock_oc.return_value = mock_vs
             result = _check_embedding_dim(str(tmp_path / "skills.duck"))
         assert result["passed"] is False
-        assert "768" in result["error"]
+        assert "1024" in result["error"]
 
     def test_dim_match_passes(self, tmp_path: Path) -> None:
         with patch("agentalloy.storage.vector_store.open_or_create") as mock_oc:
             mock_vs = MagicMock()
-            mock_vs.embedding_dim.return_value = 1024
+            mock_vs.embedding_dim.return_value = 768
             mock_oc.return_value = mock_vs
             result = _check_embedding_dim(str(tmp_path / "skills.duck"))
         assert result["passed"] is True

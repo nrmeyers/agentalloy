@@ -1,14 +1,14 @@
 skill_type: domain
 skill_id: temporal-schedules-and-timers
 canonical_name: Temporal Schedules, Timers, and Timeouts
-description: "Run background jobs on a calendar or interval, pause workflows durably, and set execution limits: use Temporal schedules for recurring tasks, timers for delays, and timeouts to prevent long-running processes from hanging."
+description: 'Run background jobs on a calendar or interval, pause workflows durably, and set execution limits: use Temporal schedules for recurring tasks, timers for delays, and timeouts to prevent long-running processes from hanging.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - temporal
-  - schedules
-  - timers
-  - timeouts
+- temporal
+- schedules
+- timers
+- timeouts
 requires:
 - temporal-workers
 - temporal-workflow-basics
@@ -17,8 +17,10 @@ related:
 - temporal-activity-basics
 - temporal-message-passing
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -174,134 +176,136 @@ raw_prose: |
 
   ---END SOURCE---
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Temporal exposes three time primitives: **Schedules** trigger workflow runs on a calendar/interval; in-workflow **timers** (`workflow.sleep`) pause execution durably; and **timeouts** bound the duration of activity and workflow execution. This skill covers all three.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Temporal exposes three time primitives: **Schedules** trigger workflow runs on a calendar/interval; in-workflow **timers** (`workflow.sleep`) pause execution durably; and **timeouts** bound the duration of activity and workflow execution. This skill covers all three.
 
-      Sourced from https://docs.temporal.io/develop/python/schedules, timers, and timeouts.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Schedule a Workflow {#schedule-a-workflow}
+    Sourced from https://docs.temporal.io/develop/python/schedules, timers, and timeouts.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Schedule a Workflow {#schedule-a-workflow}
 
-      **How to Schedule a Workflow Execution**
+    **How to Schedule a Workflow Execution**
 
-      Scheduling Workflows is a crucial aspect of any automation process, especially when dealing with time-sensitive tasks. By scheduling a Workflow, you can automate repetitive tasks, reduce the need for manual intervention, and ensure timely execution of your business processes.
+    Scheduling Workflows is a crucial aspect of any automation process, especially when dealing with time-sensitive tasks. By scheduling a Workflow, you can automate repetitive tasks, reduce the need for manual intervention, and ensure timely execution of your business processes.
 
-      Use any of the following actions to help Schedule a Workflow Execution and take control over your automation process.
-  - fragment_type: example
-    sequence: 3
-    content: |
-      ### Create a Scheduled Workflow {#create}
+    Use any of the following actions to help Schedule a Workflow Execution and take control over your automation process.
+- fragment_type: example
+  sequence: 3
+  content: |
+    ### Create a Scheduled Workflow {#create}
 
-      **How to create a Scheduled Workflow**
+    **How to create a Scheduled Workflow**
 
-      The create action enables you to create a new Schedule. When you create a new Schedule, a unique Schedule ID is generated, which you can use to reference the Schedule in other Schedule commands.
+    The create action enables you to create a new Schedule. When you create a new Schedule, a unique Schedule ID is generated, which you can use to reference the Schedule in other Schedule commands.
 
-      To create a Scheduled Workflow Execution in Python, use the [create_schedule()](https://python.temporal.io/temporalio.client.Client.html#create_schedule)
-      asynchronous method on the Client.
-      Then pass the Schedule ID and the Schedule object to the method to create a Scheduled Workflow Execution.
-      Set the `action` parameter to `ScheduleActionStartWorkflow` to start a Workflow Execution.
-      Optionally, you can set the `spec` parameter to `ScheduleSpec` to specify the schedule or set the `intervals` parameter to `ScheduleIntervalSpec` to specify the interval.
-      Other options include: `cron_expressions`, `skip`, `start_at`, and `jitter`.
+    To create a Scheduled Workflow Execution in Python, use the [create_schedule()](https://python.temporal.io/temporalio.client.Client.html#create_schedule)
+    asynchronous method on the Client.
+    Then pass the Schedule ID and the Schedule object to the method to create a Scheduled Workflow Execution.
+    Set the `action` parameter to `ScheduleActionStartWorkflow` to start a Workflow Execution.
+    Optionally, you can set the `spec` parameter to `ScheduleSpec` to specify the schedule or set the `intervals` parameter to `ScheduleIntervalSpec` to specify the interval.
+    Other options include: `cron_expressions`, `skip`, `start_at`, and `jitter`.
 
-      <div className="copycode-notice-container">
-        <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/schedule_your_workflow/start_schedule_dacx.py">
-          View the source code
-        </a>{' '}
-        in the context of the rest of the application code.
-      </div>
+    <div className="copycode-notice-container">
+      <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/schedule_your_workflow/start_schedule_dacx.py">
+        View the source code
+      </a>{' '}
+      in the context of the rest of the application code.
+    </div>
 
-      ```python
-      # ...
-      async def main():
-          client = await Client.connect("localhost:7233")
+    ```python
+    # ...
+    async def main():
+        client = await Client.connect("localhost:7233")
 
-          await client.create_schedule(
-              "workflow-schedule-id",
-              Schedule(
-                  action=ScheduleActionStartWorkflow(
-                      YourSchedulesWorkflow.run,
-                      "my schedule arg",
-                      id="schedules-workflow-id",
-                      task_queue="schedules-task-queue",
-                  ),
-                  spec=ScheduleSpec(
-                      intervals=[ScheduleIntervalSpec(every=timedelta(minutes=2))]
-                  ),
-                  state=ScheduleState(note="Here's a note on my Schedule."),
-              ),
-          )
-      ```
-  - fragment_type: example
-    sequence: 4
-    content: |
-      # workflows / timers
+        await client.create_schedule(
+            "workflow-schedule-id",
+            Schedule(
+                action=ScheduleActionStartWorkflow(
+                    YourSchedulesWorkflow.run,
+                    "my schedule arg",
+                    id="schedules-workflow-id",
+                    task_queue="schedules-task-queue",
+                ),
+                spec=ScheduleSpec(
+                    intervals=[ScheduleIntervalSpec(every=timedelta(minutes=2))]
+                ),
+                state=ScheduleState(note="Here's a note on my Schedule."),
+            ),
+        )
+    ```
+- fragment_type: example
+  sequence: 4
+  content: |
+    # workflows / timers
 
-      A Workflow can set a durable Timer for a fixed time period.
-      In some SDKs, the function is called `sleep()`, and in others, it's called `timer()`.
+    A Workflow can set a durable Timer for a fixed time period.
+    In some SDKs, the function is called `sleep()`, and in others, it's called `timer()`.
 
-      A Workflow can sleep for months.
-      Timers are persisted, so even if your Worker or Temporal Service is down when the time period completes, as soon as your Worker and Temporal Service are back up, the `sleep()` call will resolve and your code will continue executing.
+    A Workflow can sleep for months.
+    Timers are persisted, so even if your Worker or Temporal Service is down when the time period completes, as soon as your Worker and Temporal Service are back up, the `sleep()` call will resolve and your code will continue executing.
 
-      Sleeping is a resource-light operation: it does not tie up the process, and you can run millions of Timers off a single Worker.
+    Sleeping is a resource-light operation: it does not tie up the process, and you can run millions of Timers off a single Worker.
 
-      To set a Timer in Python, call the [`asyncio.sleep()`](https://docs.python.org/3/library/asyncio-task.html#sleeping) function and pass the duration in seconds you want to wait before continuing.
+    To set a Timer in Python, call the [`asyncio.sleep()`](https://docs.python.org/3/library/asyncio-task.html#sleeping) function and pass the duration in seconds you want to wait before continuing.
 
-      <div className="copycode-notice-container">
-        <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/continue_as_new/your_workflows_dacx.py">
-          View the source code
-        </a>{' '}
-        in the context of the rest of the application code.
-      </div>
+    <div className="copycode-notice-container">
+      <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/continue_as_new/your_workflows_dacx.py">
+        View the source code
+      </a>{' '}
+      in the context of the rest of the application code.
+    </div>
 
-      ```python
-      # ...
-          await asyncio.sleep(10)
-      ```
-  - fragment_type: example
-    sequence: 5
-    content: |
-      ## Workflow timeouts {#workflow-timeouts}
+    ```python
+    # ...
+        await asyncio.sleep(10)
+    ```
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ## Workflow timeouts {#workflow-timeouts}
 
-      Each Workflow timeout controls the maximum duration of a different aspect of a Workflow Execution.
+    Each Workflow timeout controls the maximum duration of a different aspect of a Workflow Execution.
 
-      Before we continue, we want to note that we generally do not recommend setting Workflow Timeouts, because Workflows are designed to be long-running and resilient.
-      Instead, setting a Timeout can limit its ability to handle unexpected delays or long-running processes.
-      If you need to perform an action inside your Workflow after a specific period of time, we recommend using a Timer.
+    Before we continue, we want to note that we generally do not recommend setting Workflow Timeouts, because Workflows are designed to be long-running and resilient.
+    Instead, setting a Timeout can limit its ability to handle unexpected delays or long-running processes.
+    If you need to perform an action inside your Workflow after a specific period of time, we recommend using a Timer.
 
-      Workflow timeouts are set when [starting the Workflow Execution](#workflow-timeouts).
+    Workflow timeouts are set when [starting the Workflow Execution](#workflow-timeouts).
 
-      - **[Workflow Execution Timeout](/encyclopedia/detecting-workflow-failures#workflow-execution-timeout)** - restricts the maximum amount of time that a single Workflow Execution can be executed.
-      - **[Workflow Run Timeout](/encyclopedia/detecting-workflow-failures#workflow-run-timeout):** restricts the maximum amount of time that a single Workflow Run can last.
-      - **[Workflow Task Timeout](/encyclopedia/detecting-workflow-failures#workflow-task-timeout):** restricts the maximum amount of time that a Worker can execute a Workflow Task.
+    - **[Workflow Execution Timeout](/encyclopedia/detecting-workflow-failures#workflow-execution-timeout)** - restricts the maximum amount of time that a single Workflow Execution can be executed.
+    - **[Workflow Run Timeout](/encyclopedia/detecting-workflow-failures#workflow-run-timeout):** restricts the maximum amount of time that a single Workflow Run can last.
+    - **[Workflow Task Timeout](/encyclopedia/detecting-workflow-failures#workflow-task-timeout):** restricts the maximum amount of time that a Worker can execute a Workflow Task.
+- fragment_type: example
+  sequence: 6
+  content: |-
+    Set the timeout to either the [`start_workflow()`](https://python.temporal.io/temporalio.client.Client.html#start_workflow) or [`execute_workflow()`](https://python.temporal.io/temporalio.client.Client.html#execute_workflow) asynchronous methods.
 
-      Set the timeout to either the [`start_workflow()`](https://python.temporal.io/temporalio.client.Client.html#start_workflow) or [`execute_workflow()`](https://python.temporal.io/temporalio.client.Client.html#execute_workflow) asynchronous methods.
+    Available timeouts are:
 
-      Available timeouts are:
+    - `execution_timeout`
+    - `run_timeout`
+    - `task_timeout`
 
-      - `execution_timeout`
-      - `run_timeout`
-      - `task_timeout`
+    <div className="copycode-notice-container">
+      <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/workflow_timeouts_retries/workflows_dacx.py">
+        View the source code
+      </a>{' '}
+      in the context of the rest of the application code.
+    </div>
 
-      <div className="copycode-notice-container">
-        <a href="https://github.com/temporalio/documentation/blob/main/sample-apps/python/workflow_timeouts_retries/workflows_dacx.py">
-          View the source code
-        </a>{' '}
-        in the context of the rest of the application code.
-      </div>
-
-      ```python
-      # ...
-          result = await client.execute_workflow(
-              YourWorkflow.run,
-              "your timeout argument",
-              id="your-workflow-id",
-              task_queue="your-task-queue",
-              # Set Workflow Timeout duration
-              execution_timeout=timedelta(seconds=2),
-              # run_timeout=timedelta(seconds=2),
-              # task_timeout=timedelta(seconds=2),
-          )
-      ```
+    ```python
+    # ...
+        result = await client.execute_workflow(
+            YourWorkflow.run,
+            "your timeout argument",
+            id="your-workflow-id",
+            task_queue="your-task-queue",
+            # Set Workflow Timeout duration
+            execution_timeout=timedelta(seconds=2),
+            # run_timeout=timedelta(seconds=2),
+            # task_timeout=timedelta(seconds=2),
+        )
+    ```

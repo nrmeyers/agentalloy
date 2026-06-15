@@ -1,15 +1,15 @@
 skill_type: domain
 skill_id: github-actions-workflow-syntax
 canonical_name: GitHub Actions Workflow Syntax
-description: "Automate your development workflow with GitHub Actions: write YAML files in .github/workflows/ to define triggers, jobs, steps, and permissions for CI/CD pipelines, matrix builds, and conditional execution."
+description: 'Automate your development workflow with GitHub Actions: write YAML files in .github/workflows/ to define triggers, jobs, steps, and permissions for CI/CD pipelines, matrix builds, and conditional execution.'
 category: ops
 skill_class: domain
 domain_tags:
-  - github-actions
-  - workflow
-  - yaml
-  - automation
-  - ci/cd
+- github-actions
+- workflow
+- yaml
+- automation
+- ci/cd
 requires:
 - github-actions-events-and-triggers
 related:
@@ -17,455 +17,243 @@ related:
 - github-actions-expressions-and-contexts
 - github-actions-reusable-workflows
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: |
-  # GitHub Actions Workflow Syntax
-
-  ## Overview
-
-  GitHub Actions workflows are YAML files in `.github/workflows/`. The schema covers triggers, jobs, steps, conditional execution, matrix builds, dependency ordering, and permissions. This skill covers the workflow-syntax surface end-to-end.
-
-  Sourced from https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax.
-
-  ## About YAML syntax for workflows
-
-  Workflow files use YAML syntax, and must have either a `.yml` or `.yaml` file extension. 
-
-  You must store workflow files in the `.github/workflows` directory of your repository.
-
-  ## `name`
-
-  ## `run-name`
-
-  The name for workflow runs generated from the workflow.  displays the workflow run name in the list of workflow runs on your repository's "Actions" tab. If `run-name` is omitted or is only whitespace, then the run name is set to event-specific information for the workflow run. For example, for a workflow triggered by a `push` or `pull_request` event, it is set as the commit message or the title of the pull request.
-
-  This value can include expressions and can reference the [`github`](/actions/learn-github-actions/contexts#github-context) and [`inputs`](/actions/learn-github-actions/contexts#inputs-context).
-
-  ### Example of `run-name`
-
-  ```yaml
-  run-name: Deploy to $ by @$
-  ```
-
-  ## `on`
-
-  ## `on.<event_name>.types`
-
-  ## `on.<pull_request|pull_request_target>.<branches|branches-ignore>`
-
-  ### Example: Including branches
-
-  ### Example: Excluding branches
-
-  ### Example: Including and excluding branches
-
-  ## `on.push.<branches|tags|branches-ignore|tags-ignore>`
-
-  ### Example: Including branches and tags
-
-  ### Example: Excluding branches and tags
-
-  ### Example: Including and excluding branches and tags
-
-  ## `on.<push|pull_request|pull_request_target>.<paths|paths-ignore>`
-
-  ### Example: Including paths
-
-  ### Example: Excluding paths
-
-  ### Example: Including and excluding paths
-
-  ### Git diff comparisons
-
-  ## `on.schedule`
-
-  You can use `on.schedule` to define a time schedule for your workflows.
-
-  For more information about `schedule` events, see [AUTOTITLE](/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
-
-  ## `on.workflow_call`
-
-  Use `on.workflow_call` to define the inputs and outputs for a reusable workflow. You can also map the secrets that are available to the called workflow. For more information on reusable workflows, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
-
-  ## `on.workflow_call.inputs`
-
-  When using the `workflow_call` keyword, you can optionally specify inputs that are passed to the called workflow from the caller workflow. For more information about the `workflow_call` keyword, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#workflow-reuse-events).
-
-  In addition to the standard input parameters that are available, `on.workflow_call.inputs` requires a `type` parameter. For more information, see [`on.workflow_call.inputs.<input_id>.type`](#onworkflow_callinputsinput_idtype).
-
-  If a `default` parameter is not set, the default value of the input is `false` for a boolean, `0` for a number, and `""` for a string.
-
-  Within the called workflow, you can use the `inputs` context to refer to an input. For more information, see [AUTOTITLE](/actions/learn-github-actions/contexts#inputs-context).
-
-  If a caller workflow passes an input that is not specified in the called workflow, this results in an error.
-
-  ### Example of `on.workflow_call.inputs`
-
-  ```yaml
-  on:
-    workflow_call:
-      inputs:
-        username:
-          description: 'A username passed from the caller workflow'
-          default: 'john-doe'
-          required: false
-          type: string
-
-  jobs:
-    print-username:
-      runs-on: ubuntu-latest
-
-      steps:
-        - name: Print the input name to STDOUT
-          run: echo The username is $
-  ```
-
-  For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
-
-  ## `on.workflow_call.inputs.<input_id>.type`
-
-  Required if input is defined for the `on.workflow_call` keyword. The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `number`, or `string`.
-
-  ## `on.workflow_call.outputs`
-
-  A map of outputs for a called workflow. Called workflow outputs are available to all downstream jobs in the caller workflow. Each output has an identifier, an optional `description,` and a `value.` The `value` must be set to the value of an output from a job within the called workflow.
-
-  In the example below, two outputs are defined for this reusable workflow: `workflow_output1` and `workflow_output2`. These are mapped to outputs called `job_output1` and `job_output2`, both from a job called `my_job`.
-
-  ### Example of `on.workflow_call.outputs`
-
-  ```yaml
-  on:
-    workflow_call:
-      # Map the workflow outputs to job outputs
-      outputs:
-        workflow_output1:
-          description: "The first job output"
-          value: $
-        workflow_output2:
-          description: "The second job output"
-          value: $
-  ```
-
-  For information on how to reference a job output, see [`jobs.<job_id>.outputs`](#jobsjob_idoutputs). For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
-
-  ## `on.workflow_call.secrets`
-
-  A map of the secrets that can be used in the called workflow.
-
-  Within the called workflow, you can use the `secrets` context to refer to a secret.
-
-  > [!NOTE]
-  > If you are passing the secret to a nested reusable workflow, then you must use [`jobs.<job_id>.secrets`](#jobsjob_idsecrets) again to pass the secret. For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows#passing-secrets-to-nested-workflows).
-
-  If a caller workflow passes a secret that is not specified in the called workflow, this results in an error.
-
-  ### Example of `on.workflow_call.secrets`
-
-  ```yaml
-  on:
-    workflow_call:
-      secrets:
-        access-token:
-          description: 'A token passed from the caller workflow'
-          required: false
-
-  jobs:
-
-    pass-secret-to-action:
-      runs-on: ubuntu-latest
-      steps:
-      # passing the secret to an action
-        - name: Pass the received secret to an action
-          uses: ./.github/actions/my-action
-          with:
-            token: $
-
-    # passing the secret to a nested reusable workflow
-    pass-secret-to-workflow:
-      uses: ./.github/workflows/my-workflow
-      secrets:
-         token: $
-  ```
-
-  ## `on.workflow_call.secrets.<secret_id>`
-
-  A string identifier to associate with the secret.
-
-  ## `on.workflow_call.secrets.<secret_id>.required`
-
-  A boolean specifying whether the secret must be supplied.
-
-  ## `on.workflow_run.<branches|branches-ignore>`
-
-  ## `on.workflow_dispatch`
-
-  ## `on.workflow_dispatch.inputs`
-
-  ### Example of `on.workflow_dispatch.inputs`
-
-  ## `on.workflow_dispatch.inputs.<input_id>.required`
-
-  A boolean specifying whether the input must be supplied.
-
-  ## `on.workflow_dispatch.inputs.<input_id>.type`
-
-  The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `choice`, `number`, `environment` or `string`.
-
-  ## `permissions`
-
-  ### Defining access for the `GITHUB_TOKEN` scopes
-
-  #### Changing the permissions in a forked repository
-
-  ## How permissions are calculated for a workflow job
-
-  The permissions for the `GITHUB_TOKEN` are initially set to the default setting for the enterprise, organization, or repository. If the default is set to the restricted permissions at any of these levels then this will apply to the relevant repositories. For example, if you choose the restricted default at the organization level then all repositories in that organization will use the restricted permissions as the default. The permissions are then adjusted based on any configuration within the workflow file, first at the workflow level and then at the job level. Finally, if the workflow was triggered by a pull request event other than `pull_request_target` from a forked repository, and the **Send write tokens to workflows from pull requests** setting is not selected, the permissions are adjusted to change any write permissions to read only.
-
-  ### Setting the `GITHUB_TOKEN` permissions for all jobs in a workflow
-
-  You can specify `permissions` at the top level of a workflow, so that the setting applies to all jobs in the workflow.
-
-  #### Example: Setting the `GITHUB_TOKEN` permissions for an entire workflow
-
-  ## Using the `permissions` key for forked repositories
-
-  You can use the `permissions` key to add and remove `read` permissions for forked repositories, but typically you can't grant `write` access. The exception to this behavior is where an admin user has selected the **Send write tokens to workflows from pull requests** option in the  settings. For more information, see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#enabling-workflows-for-private-repository-forks).
-
-  ### Permissions for workflow runs triggered by
-
+raw_prose: "# GitHub Actions Workflow Syntax\n\n## Overview\n\nGitHub Actions workflows are YAML files in `.github/workflows/`. The schema covers triggers, jobs, steps, conditional execution, matrix builds, dependency ordering, and permissions. This skill covers the workflow-syntax surface end-to-end.\n\nSourced from https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax.\n\n## About YAML syntax for workflows\n\nWorkflow files use YAML syntax, and must have either a `.yml` or `.yaml` file extension. \n\nYou must store workflow files in the `.github/workflows` directory of your repository.\n\n## `name`\n\n## `run-name`\n\nThe name for workflow runs generated from the workflow.  displays the workflow run name in the list of workflow runs on your repository's \"Actions\" tab. If `run-name` is omitted or is only whitespace, then the run name is set to event-specific information for the workflow run. For example, for a workflow triggered by a `push` or `pull_request` event, it is set as the commit message or the title of the pull request.\n\nThis value can include expressions and can reference the [`github`](/actions/learn-github-actions/contexts#github-context) and [`inputs`](/actions/learn-github-actions/contexts#inputs-context).\n\n### Example of `run-name`\n\n```yaml\nrun-name: Deploy to $ by @$\n```\n\n## `on`\n\n## `on.<event_name>.types`\n\n## `on.<pull_request|pull_request_target>.<branches|branches-ignore>`\n\n### Example: Including branches\n\n### Example: Excluding branches\n\n### Example: Including and excluding branches\n\n## `on.push.<branches|tags|branches-ignore|tags-ignore>`\n\n### Example: Including branches and tags\n\n### Example: Excluding branches and tags\n\n### Example: Including and excluding branches and tags\n\n## `on.<push|pull_request|pull_request_target>.<paths|paths-ignore>`\n\n### Example: Including paths\n\n### Example: Excluding paths\n\n### Example: Including and excluding paths\n\n### Git diff comparisons\n\n## `on.schedule`\n\nYou can use `on.schedule` to define a time schedule for your workflows.\n\nFor more information about `schedule` events, see [AUTOTITLE](/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).\n\n## `on.workflow_call`\n\nUse `on.workflow_call` to define the inputs and outputs for a reusable workflow. You can also map the secrets that are available to the called workflow. For more information on reusable workflows, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).\n\n## `on.workflow_call.inputs`\n\nWhen using the `workflow_call` keyword, you can optionally specify inputs that are passed to the called workflow from the caller workflow. For more information about the `workflow_call` keyword, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#workflow-reuse-events).\n\nIn addition to the standard input parameters that are available, `on.workflow_call.inputs` requires a `type` parameter. For more information, see [`on.workflow_call.inputs.<input_id>.type`](#onworkflow_callinputsinput_idtype).\n\nIf a `default` parameter is not set, the default value of the input is `false` for a boolean, `0` for a number, and `\"\"` for a string.\n\nWithin the called workflow, you can use the `inputs` context to refer to an input. For more information, see [AUTOTITLE](/actions/learn-github-actions/contexts#inputs-context).\n\nIf a caller workflow passes an input that is not specified in the called workflow, this results in an error.\n\n### Example of `on.workflow_call.inputs`\n\n```yaml\non:\n  workflow_call:\n    inputs:\n      username:\n        description: 'A username passed from the caller workflow'\n        default: 'john-doe'\n        required: false\n        type: string\n\njobs:\n  print-username:\n    runs-on: ubuntu-latest\n\n    steps:\n      - name: Print the input name to STDOUT\n        run: echo The username is $\n```\n\nFor more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).\n\n## `on.workflow_call.inputs.<input_id>.type`\n\nRequired if input is defined for the `on.workflow_call` keyword. The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `number`, or `string`.\n\n## `on.workflow_call.outputs`\n\nA map of outputs for a called workflow. Called workflow outputs are available to all downstream jobs in the caller workflow. Each output has an identifier, an optional `description,` and a `value.` The `value` must be set to the value of an output from a job within the called workflow.\n\nIn the example below, two outputs are defined for this reusable workflow: `workflow_output1` and `workflow_output2`. These are mapped to outputs called `job_output1` and `job_output2`, both from a job called `my_job`.\n\n### Example of `on.workflow_call.outputs`\n\n```yaml\non:\n  workflow_call:\n    # Map the workflow outputs to job outputs\n    outputs:\n      workflow_output1:\n        description: \"The first job output\"\n        value: $\n      workflow_output2:\n        description: \"The second job output\"\n        value: $\n```\n\nFor information on how to reference a job output, see [`jobs.<job_id>.outputs`](#jobsjob_idoutputs). For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).\n\n## `on.workflow_call.secrets`\n\nA map of the secrets that can be used in the called workflow.\n\nWithin the called workflow, you can use the `secrets` context to refer to a secret.\n\n> [!NOTE]\n> If you are passing the secret to a nested reusable workflow, then you must use [`jobs.<job_id>.secrets`](#jobsjob_idsecrets) again to pass the secret. For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows#passing-secrets-to-nested-workflows).\n\nIf a caller workflow passes a secret that is not specified in the called workflow, this results in an error.\n\n### Example of `on.workflow_call.secrets`\n\n```yaml\non:\n  workflow_call:\n    secrets:\n      access-token:\n        description: 'A token passed from the caller workflow'\n        required: false\n\njobs:\n\n  pass-secret-to-action:\n    runs-on: ubuntu-latest\n    steps:\n    # passing the secret to an action\n      - name: Pass the received secret to an action\n        uses: ./.github/actions/my-action\n        with:\n          token: $\n\n  # passing the secret to a nested reusable workflow\n  pass-secret-to-workflow:\n    uses: ./.github/workflows/my-workflow\n    secrets:\n       token: $\n```\n\n## `on.workflow_call.secrets.<secret_id>`\n\nA string identifier to associate with the secret.\n\n## `on.workflow_call.secrets.<secret_id>.required`\n\nA boolean specifying whether the secret must be supplied.\n\n## `on.workflow_run.<branches|branches-ignore>`\n\n## `on.workflow_dispatch`\n\n## `on.workflow_dispatch.inputs`\n\n### Example of `on.workflow_dispatch.inputs`\n\n## `on.workflow_dispatch.inputs.<input_id>.required`\n\nA boolean specifying whether the input must be supplied.\n\n## `on.workflow_dispatch.inputs.<input_id>.type`\n\nThe value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `choice`, `number`, `environment` or `string`.\n\n## `permissions`\n\n### Defining access for the `GITHUB_TOKEN` scopes\n\n#### Changing the permissions in a forked repository\n\n## How permissions are calculated for a workflow job\n\nThe permissions for the `GITHUB_TOKEN` are initially set to the default setting for the enterprise, organization, or repository. If the default is set to the restricted permissions at any of these levels then this will apply to the relevant repositories. For example, if you choose the restricted default at the organization level then all repositories in that organization will use the restricted permissions as the default. The permissions are then adjusted based on any configuration within the workflow file, first at the workflow level and then at the job level. Finally, if the workflow was triggered by a pull request event other than `pull_request_target` from a forked repository, and the **Send write tokens to workflows from pull requests** setting is not selected, the permissions are adjusted to change any write permissions to read only.\n\n### Setting the `GITHUB_TOKEN` permissions for all jobs in a workflow\n\nYou can specify `permissions` at the top level of a workflow, so that the setting applies to all jobs in the workflow.\n\n#### Example: Setting the `GITHUB_TOKEN` permissions for an entire workflow\n\n## Using the `permissions` key for forked repositories\n\nYou can use the `permissions` key to add and remove `read` permissions for forked repositories, but typically you can't grant `write` access. The exception to this behavior is where an admin user has selected the **Send write tokens to workflows from pull requests** option in the  settings. For more information, see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#enabling-workflows-for-private-repository-forks).\n\n### Permissions for workflow runs triggered by\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      GitHub Actions workflows are YAML files in `.github/workflows/`. The schema covers triggers, jobs, steps, conditional execution, matrix builds, dependency ordering, and permissions. This skill covers the workflow-syntax surface end-to-end.
+    GitHub Actions workflows are YAML files in `.github/workflows/`. The schema covers triggers, jobs, steps, conditional execution, matrix builds, dependency ordering, and permissions. This skill covers the workflow-syntax surface end-to-end.
 
-      Sourced from https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax.
-  - fragment_type: setup
-    sequence: 2
-    content: |
-      ## About YAML syntax for workflows
+    Sourced from https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax.
+- fragment_type: setup
+  sequence: 2
+  content: "## About YAML syntax for workflows\n\nWorkflow files use YAML syntax, and must have either a `.yml` or `.yaml` file extension. \n\nYou must store workflow files in the `.github/workflows` directory of your repository.\n"
+- fragment_type: execution
+  sequence: 3
+  content: |
+    ## `name`
 
-      Workflow files use YAML syntax, and must have either a `.yml` or `.yaml` file extension. 
+    ## `run-name`
 
-      You must store workflow files in the `.github/workflows` directory of your repository.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## `name`
+    The name for workflow runs generated from the workflow.  displays the workflow run name in the list of workflow runs on your repository's "Actions" tab. If `run-name` is omitted or is only whitespace, then the run name is set to event-specific information for the workflow run. For example, for a workflow triggered by a `push` or `pull_request` event, it is set as the commit message or the title of the pull request.
 
-      ## `run-name`
+    This value can include expressions and can reference the [`github`](/actions/learn-github-actions/contexts#github-context) and [`inputs`](/actions/learn-github-actions/contexts#inputs-context).
 
-      The name for workflow runs generated from the workflow.  displays the workflow run name in the list of workflow runs on your repository's "Actions" tab. If `run-name` is omitted or is only whitespace, then the run name is set to event-specific information for the workflow run. For example, for a workflow triggered by a `push` or `pull_request` event, it is set as the commit message or the title of the pull request.
+    ### Example of `run-name`
 
-      This value can include expressions and can reference the [`github`](/actions/learn-github-actions/contexts#github-context) and [`inputs`](/actions/learn-github-actions/contexts#inputs-context).
+    ```yaml
+    run-name: Deploy to $ by @$
+    ```
+- fragment_type: execution
+  sequence: 4
+  content: |
+    ## `on`
 
-      ### Example of `run-name`
+    ## `on.<event_name>.types`
 
-      ```yaml
-      run-name: Deploy to $ by @$
-      ```
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ## `on`
+    ## `on.<pull_request|pull_request_target>.<branches|branches-ignore>`
 
-      ## `on.<event_name>.types`
+    ### Example: Including branches
 
-      ## `on.<pull_request|pull_request_target>.<branches|branches-ignore>`
+    ### Example: Excluding branches
 
-      ### Example: Including branches
+    ### Example: Including and excluding branches
 
-      ### Example: Excluding branches
+    ## `on.push.<branches|tags|branches-ignore|tags-ignore>`
 
-      ### Example: Including and excluding branches
+    ### Example: Including branches and tags
 
-      ## `on.push.<branches|tags|branches-ignore|tags-ignore>`
+    ### Example: Excluding branches and tags
 
-      ### Example: Including branches and tags
+    ### Example: Including and excluding branches and tags
+- fragment_type: execution
+  sequence: 5
+  content: |
+    ## `on.<push|pull_request|pull_request_target>.<paths|paths-ignore>`
 
-      ### Example: Excluding branches and tags
+    ### Example: Including paths
 
-      ### Example: Including and excluding branches and tags
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## `on.<push|pull_request|pull_request_target>.<paths|paths-ignore>`
+    ### Example: Excluding paths
 
-      ### Example: Including paths
+    ### Example: Including and excluding paths
 
-      ### Example: Excluding paths
+    ### Git diff comparisons
 
-      ### Example: Including and excluding paths
+    ## `on.schedule`
 
-      ### Git diff comparisons
+    You can use `on.schedule` to define a time schedule for your workflows.
 
-      ## `on.schedule`
+    For more information about `schedule` events, see [AUTOTITLE](/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ## `on.workflow_call`
 
-      You can use `on.schedule` to define a time schedule for your workflows.
+    Use `on.workflow_call` to define the inputs and outputs for a reusable workflow. You can also map the secrets that are available to the called workflow. For more information on reusable workflows, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
 
-      For more information about `schedule` events, see [AUTOTITLE](/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ## `on.workflow_call`
+    ## `on.workflow_call.inputs`
 
-      Use `on.workflow_call` to define the inputs and outputs for a reusable workflow. You can also map the secrets that are available to the called workflow. For more information on reusable workflows, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
+    When using the `workflow_call` keyword, you can optionally specify inputs that are passed to the called workflow from the caller workflow. For more information about the `workflow_call` keyword, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#workflow-reuse-events).
 
-      ## `on.workflow_call.inputs`
+    In addition to the standard input parameters that are available, `on.workflow_call.inputs` requires a `type` parameter. For more information, see [`on.workflow_call.inputs.<input_id>.type`](#onworkflow_callinputsinput_idtype).
 
-      When using the `workflow_call` keyword, you can optionally specify inputs that are passed to the called workflow from the caller workflow. For more information about the `workflow_call` keyword, see [AUTOTITLE](/actions/using-workflows/events-that-trigger-workflows#workflow-reuse-events).
+    If a `default` parameter is not set, the default value of the input is `false` for a boolean, `0` for a number, and `""` for a string.
 
-      In addition to the standard input parameters that are available, `on.workflow_call.inputs` requires a `type` parameter. For more information, see [`on.workflow_call.inputs.<input_id>.type`](#onworkflow_callinputsinput_idtype).
+    Within the called workflow, you can use the `inputs` context to refer to an input. For more information, see [AUTOTITLE](/actions/learn-github-actions/contexts#inputs-context).
 
-      If a `default` parameter is not set, the default value of the input is `false` for a boolean, `0` for a number, and `""` for a string.
+    If a caller workflow passes an input that is not specified in the called workflow, this results in an error.
+- fragment_type: execution
+  sequence: 7
+  content: |-
+    ### Example of `on.workflow_call.inputs`
 
-      Within the called workflow, you can use the `inputs` context to refer to an input. For more information, see [AUTOTITLE](/actions/learn-github-actions/contexts#inputs-context).
+    ```yaml
+    on:
+      workflow_call:
+        inputs:
+          username:
+            description: 'A username passed from the caller workflow'
+            default: 'john-doe'
+            required: false
+            type: string
 
-      If a caller workflow passes an input that is not specified in the called workflow, this results in an error.
+    jobs:
+      print-username:
+        runs-on: ubuntu-latest
 
-      ### Example of `on.workflow_call.inputs`
+        steps:
+          - name: Print the input name to STDOUT
+            run: echo The username is $
+    ```
 
-      ```yaml
-      on:
-        workflow_call:
-          inputs:
-            username:
-              description: 'A username passed from the caller workflow'
-              default: 'john-doe'
-              required: false
-              type: string
+    For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
 
-      jobs:
-        print-username:
-          runs-on: ubuntu-latest
+    ## `on.workflow_call.inputs.<input_id>.type`
 
-          steps:
-            - name: Print the input name to STDOUT
-              run: echo The username is $
-      ```
+    Required if input is defined for the `on.workflow_call` keyword. The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `number`, or `string`.
 
-      For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
+    ## `on.workflow_call.outputs`
 
-      ## `on.workflow_call.inputs.<input_id>.type`
+    A map of outputs for a called workflow. Called workflow outputs are available to all downstream jobs in the caller workflow. Each output has an identifier, an optional `description,` and a `value.` The `value` must be set to the value of an output from a job within the called workflow.
 
-      Required if input is defined for the `on.workflow_call` keyword. The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `number`, or `string`.
+    In the example below, two outputs are defined for this reusable workflow: `workflow_output1` and `workflow_output2`. These are mapped to outputs called `job_output1` and `job_output2`, both from a job called `my_job`.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ### Example of `on.workflow_call.outputs`
 
-      ## `on.workflow_call.outputs`
+    ```yaml
+    on:
+      workflow_call:
+        # Map the workflow outputs to job outputs
+        outputs:
+          workflow_output1:
+            description: "The first job output"
+            value: $
+          workflow_output2:
+            description: "The second job output"
+            value: $
+    ```
 
-      A map of outputs for a called workflow. Called workflow outputs are available to all downstream jobs in the caller workflow. Each output has an identifier, an optional `description,` and a `value.` The `value` must be set to the value of an output from a job within the called workflow.
+    For information on how to reference a job output, see [`jobs.<job_id>.outputs`](#jobsjob_idoutputs). For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
 
-      In the example below, two outputs are defined for this reusable workflow: `workflow_output1` and `workflow_output2`. These are mapped to outputs called `job_output1` and `job_output2`, both from a job called `my_job`.
+    ## `on.workflow_call.secrets`
 
-      ### Example of `on.workflow_call.outputs`
+    A map of the secrets that can be used in the called workflow.
 
-      ```yaml
-      on:
-        workflow_call:
-          # Map the workflow outputs to job outputs
-          outputs:
-            workflow_output1:
-              description: "The first job output"
-              value: $
-            workflow_output2:
-              description: "The second job output"
-              value: $
-      ```
+    Within the called workflow, you can use the `secrets` context to refer to a secret.
 
-      For information on how to reference a job output, see [`jobs.<job_id>.outputs`](#jobsjob_idoutputs). For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows).
+    > [!NOTE]
+    > If you are passing the secret to a nested reusable workflow, then you must use [`jobs.<job_id>.secrets`](#jobsjob_idsecrets) again to pass the secret. For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows#passing-secrets-to-nested-workflows).
 
-      ## `on.workflow_call.secrets`
+    If a caller workflow passes a secret that is not specified in the called workflow, this results in an error.
 
-      A map of the secrets that can be used in the called workflow.
+    ### Example of `on.workflow_call.secrets`
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    ```yaml
+    on:
+      workflow_call:
+        secrets:
+          access-token:
+            description: 'A token passed from the caller workflow'
+            required: false
 
-      Within the called workflow, you can use the `secrets` context to refer to a secret.
+    jobs:
 
-      > [!NOTE]
-      > If you are passing the secret to a nested reusable workflow, then you must use [`jobs.<job_id>.secrets`](#jobsjob_idsecrets) again to pass the secret. For more information, see [AUTOTITLE](/actions/using-workflows/reusing-workflows#passing-secrets-to-nested-workflows).
+      pass-secret-to-action:
+        runs-on: ubuntu-latest
+        steps:
+        # passing the secret to an action
+          - name: Pass the received secret to an action
+            uses: ./.github/actions/my-action
+            with:
+              token: $
 
-      If a caller workflow passes a secret that is not specified in the called workflow, this results in an error.
+      # passing the secret to a nested reusable workflow
+      pass-secret-to-workflow:
+        uses: ./.github/workflows/my-workflow
+        secrets:
+           token: $
+    ```
 
-      ### Example of `on.workflow_call.secrets`
+    ## `on.workflow_call.secrets.<secret_id>`
 
-      ```yaml
-      on:
-        workflow_call:
-          secrets:
-            access-token:
-              description: 'A token passed from the caller workflow'
-              required: false
+    A string identifier to associate with the secret.
 
-      jobs:
+    ## `on.workflow_call.secrets.<secret_id>.required`
 
-        pass-secret-to-action:
-          runs-on: ubuntu-latest
-          steps:
-          # passing the secret to an action
-            - name: Pass the received secret to an action
-              uses: ./.github/actions/my-action
-              with:
-                token: $
+    A boolean specifying whether the secret must be supplied.
+- fragment_type: execution
+  sequence: 10
+  content: |
+    ## `on.workflow_run.<branches|branches-ignore>`
 
-        # passing the secret to a nested reusable workflow
-        pass-secret-to-workflow:
-          uses: ./.github/workflows/my-workflow
-          secrets:
-             token: $
-      ```
+    ## `on.workflow_dispatch`
 
-      ## `on.workflow_call.secrets.<secret_id>`
+    ## `on.workflow_dispatch.inputs`
 
-      A string identifier to associate with the secret.
+    ### Example of `on.workflow_dispatch.inputs`
 
-      ## `on.workflow_call.secrets.<secret_id>.required`
+    ## `on.workflow_dispatch.inputs.<input_id>.required`
 
-      A boolean specifying whether the secret must be supplied.
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      ## `on.workflow_run.<branches|branches-ignore>`
+    A boolean specifying whether the input must be supplied.
 
-      ## `on.workflow_dispatch`
+    ## `on.workflow_dispatch.inputs.<input_id>.type`
 
-      ## `on.workflow_dispatch.inputs`
+    The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `choice`, `number`, `environment` or `string`.
 
-      ### Example of `on.workflow_dispatch.inputs`
+    ## `permissions`
 
-      ## `on.workflow_dispatch.inputs.<input_id>.required`
+    ### Defining access for the `GITHUB_TOKEN` scopes
 
-      A boolean specifying whether the input must be supplied.
+    #### Changing the permissions in a forked repository
+- fragment_type: execution
+  sequence: 11
+  content: |
+    ## How permissions are calculated for a workflow job
 
-      ## `on.workflow_dispatch.inputs.<input_id>.type`
+    The permissions for the `GITHUB_TOKEN` are initially set to the default setting for the enterprise, organization, or repository. If the default is set to the restricted permissions at any of these levels then this will apply to the relevant repositories. For example, if you choose the restricted default at the organization level then all repositories in that organization will use the restricted permissions as the default. The permissions are then adjusted based on any configuration within the workflow file, first at the workflow level and then at the job level. Finally, if the workflow was triggered by a pull request event other than `pull_request_target` from a forked repository, and the **Send write tokens to workflows from pull requests** setting is not selected, the permissions are adjusted to change any write permissions to read only.
 
-      The value of this parameter is a string specifying the data type of the input. This must be one of: `boolean`, `choice`, `number`, `environment` or `string`.
+    ### Setting the `GITHUB_TOKEN` permissions for all jobs in a workflow
 
-      ## `permissions`
+    You can specify `permissions` at the top level of a workflow, so that the setting applies to all jobs in the workflow.
 
-      ### Defining access for the `GITHUB_TOKEN` scopes
+    #### Example: Setting the `GITHUB_TOKEN` permissions for an entire workflow
+- fragment_type: execution
+  sequence: 12
+  content: |-
+    ## Using the `permissions` key for forked repositories
 
-      #### Changing the permissions in a forked repository
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      ## How permissions are calculated for a workflow job
+    You can use the `permissions` key to add and remove `read` permissions for forked repositories, but typically you can't grant `write` access. The exception to this behavior is where an admin user has selected the **Send write tokens to workflows from pull requests** option in the  settings. For more information, see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#enabling-workflows-for-private-repository-forks).
 
-      The permissions for the `GITHUB_TOKEN` are initially set to the default setting for the enterprise, organization, or repository. If the default is set to the restricted permissions at any of these levels then this will apply to the relevant repositories. For example, if you choose the restricted default at the organization level then all repositories in that organization will use the restricted permissions as the default. The permissions are then adjusted based on any configuration within the workflow file, first at the workflow level and then at the job level. Finally, if the workflow was triggered by a pull request event other than `pull_request_target` from a forked repository, and the **Send write tokens to workflows from pull requests** setting is not selected, the permissions are adjusted to change any write permissions to read only.
-
-      ### Setting the `GITHUB_TOKEN` permissions for all jobs in a workflow
-
-      You can specify `permissions` at the top level of a workflow, so that the setting applies to all jobs in the workflow.
-
-      #### Example: Setting the `GITHUB_TOKEN` permissions for an entire workflow
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      ## Using the `permissions` key for forked repositories
-
-      You can use the `permissions` key to add and remove `read` permissions for forked repositories, but typically you can't grant `write` access. The exception to this behavior is where an admin user has selected the **Send write tokens to workflows from pull requests** option in the  settings. For more information, see [AUTOTITLE](/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#enabling-workflows-for-private-repository-forks).
-
-      ### Permissions for workflow runs triggered by
+    ### Permissions for workflow runs triggered by

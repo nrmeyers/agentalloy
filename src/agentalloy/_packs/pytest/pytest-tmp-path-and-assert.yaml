@@ -1,21 +1,24 @@
 skill_type: domain
 skill_id: pytest-tmp-path-and-assert
 canonical_name: Pytest tmp_path and Assertion Introspection
-description: "Write Python tests that create isolated temp files for each run and get detailed failure messages when assertions fail, using pytest’s tmp_path fixture and its built-in assertion introspection."
+description: Write Python tests that create isolated temp files for each run and get detailed failure messages when assertions fail, using pytest’s tmp_path fixture and its built-in assertion introspection.
 category: tooling
 skill_class: domain
 domain_tags:
-  - pytest
-  - temporary directories
-  - assertions
-  - introspection
+- pytest
+- temporary directories
+- assertions
+- introspection
 related:
 - pytest-fixtures
 - pytest-monkeypatch
 - pytest-parametrize
 always_apply: false
-phase_scope: [build, review]
-category_scope: [tooling]
+phase_scope:
+- build
+- review
+category_scope:
+- tooling
 author: navistone
 change_summary: initial authoring draft
 raw_prose: |
@@ -354,303 +357,305 @@ raw_prose: |
 
   ```python
   def test_raisesgroup_match_a
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      The `tmp_path` fixture provides a per-test temporary directory; `tmp_path_factory` provides session-scoped temp dirs. Pytest also rewrites `assert` statements at import time to produce detailed failure messages with intermediate values. This skill covers both surfaces.
-
-      Sourced from https://docs.pytest.org/en/stable/how-to/tmp_path.html and https://docs.pytest.org/en/stable/how-to/assert.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      You can use the ``tmp_path`` fixture which will provide a temporary directory unique to each test function.
-
-      ``tmp_path`` is a `pathlib.Path` object. Here is an example test usage:
-
-      ```python
-      # content of test_tmp_path.py
-      CONTENT = "content"
-      ```
-
-
-          def test_create_file(tmp_path):
-              d = tmp_path / "sub"
-              d.mkdir()
-              p = d / "hello.txt"
-              p.write_text(CONTENT, encoding="utf-8")
-              assert p.read_text(encoding="utf-8") == CONTENT
-              assert len(list(tmp_path.iterdir())) == 1
-              assert 0
-
-      Running this would result in a passed test except for the last ``assert 0`` line which we use to look at values:
-
-      ```pytest
-      $ pytest test_tmp_path.py
-      =========================== test session starts ============================
-      platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
-      rootdir: /home/sweet/project
-      collected 1 item
-      ```
-
-          test_tmp_path.py F                                                   [100%]
-
-          ================================= FAILURES =================================
-          _____________________________ test_create_file _____________________________
-
-          tmp_path = PosixPath('PYTEST_TMPDIR/test_create_file0')
-
-              def test_create_file(tmp_path):
-                  d = tmp_path / "sub"
-                  d.mkdir()
-                  p = d / "hello.txt"
-                  p.write_text(CONTENT, encoding="utf-8")
-                  assert p.read_text(encoding="utf-8") == CONTENT
-                  assert len(list(tmp_path.iterdir())) == 1
-          >       assert 0
-          E       assert 0
-
-          test_tmp_path.py:11: AssertionError
-          ========================= short test summary info ==========================
-          FAILED test_tmp_path.py::test_create_file - assert 0
-          ============================ 1 failed in 0.12s =============================
-  - fragment_type: verification
-    sequence: 3
-    content: |
-      By default, ``pytest`` retains the temporary directory for the last 3 ``pytest``
-      invocations. Concurrent invocations of the same test function are supported by
-      configuring the base temporary directory to be unique for each concurrent
-      run. See `temporary directory location and retention`_ for details.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      The ``tmp_path_factory`` is a session-scoped fixture which can be used
-      to create arbitrary temporary directories from any other fixture or test.
-
-      For example, suppose your test suite needs a large image on disk, which is
-      generated procedurally. Instead of computing the same image for each test
-      that uses it into its own ``tmp_path``, you can generate it once per-session
-      to save time:
-
-      ```python
-      # contents of conftest.py
-      import pytest
-      ```
-
-
-          @pytest.fixture(scope="session")
-          def image_file(tmp_path_factory):
-              img = compute_expensive_image()
-              fn = tmp_path_factory.mktemp("data") / "img.png"
-              img.save(fn)
-              return fn
-
-
-          # contents of test_image.py
-          def test_histogram(image_file):
-              img = load_image(image_file)
-              # compute and test histogram
-
-      See `tmp_path_factory API <tmp_path_factory factory api>` for details.
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      The ``tmpdir`` and ``tmpdir_factory`` fixtures are similar to ``tmp_path``
-      and ``tmp_path_factory``, but use/return legacy `py.path.local`_ objects
-      rather than standard `pathlib.Path` objects.
-
-      .. note::
-          These days, it is preferred to use ``tmp_path`` and ``tmp_path_factory``.
-
-          In order to help modernize old code bases, one can run pytest with the legacypath
-          plugin disabled:
-
-          ```bash
-          pytest -p no:legacypath
-      ```
-
-          This will trigger errors on tests using the legacy paths.
-          It can also be permanently set as part of the `addopts` parameter in the
-          config file.
-
-      See `tmpdir <tmpdir>` `tmpdir_factory <tmpdir_factory>`
-      API for details.
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ``pytest`` allows you to use the standard Python ``assert`` for verifying
-      expectations and values in Python tests.  For example, you can write the
-      following:
-
-      ```python
-      # content of test_assert1.py
-      def f():
-          return 3
-      ```
-
-
-          def test_function():
-              assert f() == 4
-
-      to assert that your function returns a certain value. If this assertion fails
-      you will see the return value of the function call:
-
-      ```pytest
-      $ pytest test_assert1.py
-      =========================== test session starts ============================
-      platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
-      rootdir: /home/sweet/project
-      collected 1 item
-      ```
-
-          test_assert1.py F                                                    [100%]
-
-          ================================= FAILURES =================================
-          ______________________________ test_function _______________________________
-
-              def test_function():
-      >       assert f() == 4
-      E       assert 3 == 4
-      E        +  where 3 = f()
-
-          test_assert1.py:6: AssertionError
-          ========================= short test summary info ==========================
-          FAILED test_assert1.py::test_function - assert 3 == 4
-          ============================ 1 failed in 0.12s =============================
-  - fragment_type: verification
-    sequence: 7
-    content: |
-      ``pytest`` has support for showing the values of the most common subexpressions
-      including calls, attributes, comparisons, and binary and unary
-      operators. (See `tbreportdemo`).  This allows you to use the
-      idiomatic python constructs without boilerplate code while not losing
-      introspection information.
-
-      If a message is specified with the assertion like this:
-
-      ```python
-      assert a % 2 == 0, "value was odd, should be even"
-      ```
-
-      it is printed alongside the assertion introspection in the traceback.
-
-      See `assert-details` for more information on assertion introspection.
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      When comparing floating point values (or arrays of floats), small rounding
-      errors are common. Instead of using ``assert abs(a - b) < tol`` or
-      ``numpy.isclose``, you can use `pytest.approx`:
-
-      ```python
-      import pytest
-      import numpy as np
-      ```
-
-
-          def test_floats():
-              assert (0.1 + 0.2) == pytest.approx(0.3)
-
-
-          def test_arrays():
-              a = np.array([1.0, 2.0, 3.0])
-              b = np.array([0.9999, 2.0001, 3.0])
-              assert a == pytest.approx(b)
-
-      ``pytest.approx`` works with scalars, lists, dictionaries, and NumPy arrays.
-      It also supports comparisons involving NaNs.
-
-      See `pytest.approx` for details.
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      In order to write assertions about raised exceptions, you can use
-      `pytest.raises` as a context manager like this:
-
-      ```python
-      import pytest
-      ```
-
-
-          def test_zero_division():
-              with pytest.raises(ZeroDivisionError):
-                  1 / 0
-
-      and if you need to have access to the actual exception info you may use:
-
-      ```python
-      def test_recursion_depth():
-          with pytest.raises(RuntimeError) as excinfo:
-      ```
-
-              def f():
-                  f()
-
-              f()
-          assert "maximum recursion" in str(excinfo.value)
-
-      ``excinfo`` is an `~pytest.ExceptionInfo` instance, which is a wrapper around
-      the actual exception raised.  The main attributes of interest are
-      ``.type``, ``.value`` and ``.traceback``.
-
-      Note that ``pytest.raises`` will match the exception type or any subclasses (like the standard ``except`` statement).
-      If you want to check if a block of code is raising an exact exception type, you need to check that explicitly:
-
-
-      ```python
-      def test_foo_not_implemented():
-          def foo():
-              raise NotImplementedError
-      ```
-
-              with pytest.raises(RuntimeError) as excinfo:
-                  foo()
-              assert excinfo.type is RuntimeError
-
-      The `pytest.raises` call will succeed, even though the function raises `NotImplementedError`, because
-      `NotImplementedError` is a subclass of `RuntimeError`; however the following `assert` statement will
-      catch the problem.
-  - fragment_type: verification
-    sequence: 10
-    content: |
-      You can pass a ``match`` keyword parameter to the context-manager to test
-      that a regular expression matches on the string representation of an exception
-      (similar to the ``TestCase.assertRaisesRegex`` method from ``unittest``):
-
-      ```python
-      import pytest
-      ```
-
-
-          def myfunc():
-              raise ValueError("Exception 123 raised")
-
-
-          def test_match():
-              with pytest.raises(ValueError, match=r".* 123 .*"):
-                  myfunc()
-
-      Notes:
-
-      * The ``match`` parameter is matched with the `re.search`
-        function, so in the above example ``match='123'`` would have worked as well.
-      * The ``match`` parameter also matches against `PEP-678 <https://peps.python.org/pep-0678/>`__ ``__notes__``.
-  - fragment_type: execution
-    sequence: 11
-    content: |
-      When expecting a `BaseExceptionGroup` or `ExceptionGroup` you can use `pytest.RaisesGroup`:
-
-      ```python
-      def test_exception_in_group():
-          with pytest.RaisesGroup(ValueError):
-              raise ExceptionGroup("group msg", [ValueError("value msg")])
-          with pytest.RaisesGroup(ValueError, TypeError):
-              raise ExceptionGroup("msg", [ValueError("foo"), TypeError("bar")])
-      ```
-
-
-      It accepts a ``match`` parameter, that checks against the group message, and a ``check`` parameter that takes an arbitrary callable which it passes the group to, and only succeeds if the callable returns ``True``.
-
-      ```python
-      def test_raisesgroup_match_a
+- fragment_type: setup
+  sequence: 1
+  content: |
+    The `tmp_path` fixture provides a per-test temporary directory; `tmp_path_factory` provides session-scoped temp dirs. Pytest also rewrites `assert` statements at import time to produce detailed failure messages with intermediate values. This skill covers both surfaces.
+
+    Sourced from https://docs.pytest.org/en/stable/how-to/tmp_path.html and https://docs.pytest.org/en/stable/how-to/assert.html.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    You can use the ``tmp_path`` fixture which will provide a temporary directory unique to each test function.
+
+    ``tmp_path`` is a `pathlib.Path` object. Here is an example test usage:
+
+    ```python
+    # content of test_tmp_path.py
+    CONTENT = "content"
+    ```
+
+        def test_create_file(tmp_path):
+            d = tmp_path / "sub"
+            d.mkdir()
+            p = d / "hello.txt"
+            p.write_text(CONTENT, encoding="utf-8")
+            assert p.read_text(encoding="utf-8") == CONTENT
+            assert len(list(tmp_path.iterdir())) == 1
+            assert 0
+
+    Running this would result in a passed test except for the last ``assert 0`` line which we use to look at values:
+
+    ```pytest
+    $ pytest test_tmp_path.py
+    =========================== test session starts ============================
+    platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
+    rootdir: /home/sweet/project
+    collected 1 item
+    ```
+
+        test_tmp_path.py F                                                   [100%]
+- fragment_type: execution
+  sequence: 3
+  content: |2-
+        ================================= FAILURES =================================
+        _____________________________ test_create_file _____________________________
+
+        tmp_path = PosixPath('PYTEST_TMPDIR/test_create_file0')
+
+            def test_create_file(tmp_path):
+                d = tmp_path / "sub"
+                d.mkdir()
+                p = d / "hello.txt"
+                p.write_text(CONTENT, encoding="utf-8")
+                assert p.read_text(encoding="utf-8") == CONTENT
+                assert len(list(tmp_path.iterdir())) == 1
+        >       assert 0
+        E       assert 0
+- fragment_type: execution
+  sequence: 4
+  content: |2-
+        test_tmp_path.py:11: AssertionError
+        ========================= short test summary info ==========================
+        FAILED test_tmp_path.py::test_create_file - assert 0
+        ============================ 1 failed in 0.12s =============================
+- fragment_type: verification
+  sequence: 5
+  content: |
+    By default, ``pytest`` retains the temporary directory for the last 3 ``pytest``
+    invocations. Concurrent invocations of the same test function are supported by
+    configuring the base temporary directory to be unique for each concurrent
+    run. See `temporary directory location and retention`_ for details.
+- fragment_type: execution
+  sequence: 6
+  content: |
+    The ``tmp_path_factory`` is a session-scoped fixture which can be used
+    to create arbitrary temporary directories from any other fixture or test.
+
+    For example, suppose your test suite needs a large image on disk, which is
+    generated procedurally. Instead of computing the same image for each test
+    that uses it into its own ``tmp_path``, you can generate it once per-session
+    to save time:
+
+    ```python
+    # contents of conftest.py
+    import pytest
+    ```
+
+
+        @pytest.fixture(scope="session")
+        def image_file(tmp_path_factory):
+            img = compute_expensive_image()
+            fn = tmp_path_factory.mktemp("data") / "img.png"
+            img.save(fn)
+            return fn
+
+
+        # contents of test_image.py
+        def test_histogram(image_file):
+            img = load_image(image_file)
+            # compute and test histogram
+
+    See `tmp_path_factory API <tmp_path_factory factory api>` for details.
+- fragment_type: execution
+  sequence: 7
+  content: |
+    The ``tmpdir`` and ``tmpdir_factory`` fixtures are similar to ``tmp_path``
+    and ``tmp_path_factory``, but use/return legacy `py.path.local`_ objects
+    rather than standard `pathlib.Path` objects.
+
+    .. note::
+        These days, it is preferred to use ``tmp_path`` and ``tmp_path_factory``.
+
+        In order to help modernize old code bases, one can run pytest with the legacypath
+        plugin disabled:
+
+        ```bash
+        pytest -p no:legacypath
+    ```
+
+        This will trigger errors on tests using the legacy paths.
+        It can also be permanently set as part of the `addopts` parameter in the
+        config file.
+
+    See `tmpdir <tmpdir>` `tmpdir_factory <tmpdir_factory>`
+    API for details.
+- fragment_type: execution
+  sequence: 8
+  content: |
+    ``pytest`` allows you to use the standard Python ``assert`` for verifying
+    expectations and values in Python tests.  For example, you can write the
+    following:
+
+    ```python
+    # content of test_assert1.py
+    def f():
+        return 3
+    ```
+
+
+        def test_function():
+            assert f() == 4
+
+    to assert that your function returns a certain value. If this assertion fails
+    you will see the return value of the function call:
+
+    ```pytest
+    $ pytest test_assert1.py
+    =========================== test session starts ============================
+    platform linux -- Python 3.x.y, pytest-9.x.y, pluggy-1.x.y
+    rootdir: /home/sweet/project
+    collected 1 item
+    ```
+
+        test_assert1.py F                                                    [100%]
+
+        ================================= FAILURES =================================
+        ______________________________ test_function _______________________________
+
+            def test_function():
+    >       assert f() == 4
+    E       assert 3 == 4
+    E        +  where 3 = f()
+
+        test_assert1.py:6: AssertionError
+        ========================= short test summary info ==========================
+        FAILED test_assert1.py::test_function - assert 3 == 4
+        ============================ 1 failed in 0.12s =============================
+- fragment_type: verification
+  sequence: 9
+  content: |
+    ``pytest`` has support for showing the values of the most common subexpressions
+    including calls, attributes, comparisons, and binary and unary
+    operators. (See `tbreportdemo`).  This allows you to use the
+    idiomatic python constructs without boilerplate code while not losing
+    introspection information.
+
+    If a message is specified with the assertion like this:
+
+    ```python
+    assert a % 2 == 0, "value was odd, should be even"
+    ```
+
+    it is printed alongside the assertion introspection in the traceback.
+
+    See `assert-details` for more information on assertion introspection.
+- fragment_type: execution
+  sequence: 10
+  content: |
+    When comparing floating point values (or arrays of floats), small rounding
+    errors are common. Instead of using ``assert abs(a - b) < tol`` or
+    ``numpy.isclose``, you can use `pytest.approx`:
+
+    ```python
+    import pytest
+    import numpy as np
+    ```
+
+
+        def test_floats():
+            assert (0.1 + 0.2) == pytest.approx(0.3)
+
+
+        def test_arrays():
+            a = np.array([1.0, 2.0, 3.0])
+            b = np.array([0.9999, 2.0001, 3.0])
+            assert a == pytest.approx(b)
+
+    ``pytest.approx`` works with scalars, lists, dictionaries, and NumPy arrays.
+    It also supports comparisons involving NaNs.
+
+    See `pytest.approx` for details.
+- fragment_type: execution
+  sequence: 11
+  content: |
+    In order to write assertions about raised exceptions, you can use
+    `pytest.raises` as a context manager like this:
+
+    ```python
+    import pytest
+    ```
+
+
+        def test_zero_division():
+            with pytest.raises(ZeroDivisionError):
+                1 / 0
+
+    and if you need to have access to the actual exception info you may use:
+
+    ```python
+    def test_recursion_depth():
+        with pytest.raises(RuntimeError) as excinfo:
+    ```
+
+            def f():
+                f()
+
+            f()
+        assert "maximum recursion" in str(excinfo.value)
+
+    ``excinfo`` is an `~pytest.ExceptionInfo` instance, which is a wrapper around
+    the actual exception raised.  The main attributes of interest are
+    ``.type``, ``.value`` and ``.traceback``.
+
+    Note that ``pytest.raises`` will match the exception type or any subclasses (like the standard ``except`` statement).
+    If you want to check if a block of code is raising an exact exception type, you need to check that explicitly:
+
+
+    ```python
+    def test_foo_not_implemented():
+        def foo():
+            raise NotImplementedError
+    ```
+
+            with pytest.raises(RuntimeError) as excinfo:
+                foo()
+            assert excinfo.type is RuntimeError
+
+    The `pytest.raises` call will succeed, even though the function raises `NotImplementedError`, because
+    `NotImplementedError` is a subclass of `RuntimeError`; however the following `assert` statement will
+    catch the problem.
+- fragment_type: verification
+  sequence: 12
+  content: |
+    You can pass a ``match`` keyword parameter to the context-manager to test
+    that a regular expression matches on the string representation of an exception
+    (similar to the ``TestCase.assertRaisesRegex`` method from ``unittest``):
+
+    ```python
+    import pytest
+    ```
+
+
+        def myfunc():
+            raise ValueError("Exception 123 raised")
+
+
+        def test_match():
+            with pytest.raises(ValueError, match=r".* 123 .*"):
+                myfunc()
+
+    Notes:
+
+    * The ``match`` parameter is matched with the `re.search`
+      function, so in the above example ``match='123'`` would have worked as well.
+    * The ``match`` parameter also matches against `PEP-678 <https://peps.python.org/pep-0678/>`__ ``__notes__``.
+- fragment_type: execution
+  sequence: 13
+  content: |-
+    When expecting a `BaseExceptionGroup` or `ExceptionGroup` you can use `pytest.RaisesGroup`:
+
+    ```python
+    def test_exception_in_group():
+        with pytest.RaisesGroup(ValueError):
+            raise ExceptionGroup("group msg", [ValueError("value msg")])
+        with pytest.RaisesGroup(ValueError, TypeError):
+            raise ExceptionGroup("msg", [ValueError("foo"), TypeError("bar")])
+    ```
+
+
+    It accepts a ``match`` parameter, that checks against the group message, and a ``check`` parameter that takes an arbitrary callable which it passes the group to, and only succeeds if the callable returns ``True``.
+
+    ```python
+    def test_raisesgroup_match_a

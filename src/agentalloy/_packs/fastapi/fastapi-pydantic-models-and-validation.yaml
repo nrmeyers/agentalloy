@@ -1,16 +1,23 @@
 skill_type: domain
 skill_id: fastapi-pydantic-models-and-validation
 canonical_name: FastAPI Request/Response Models with Pydantic v2 (Field, response_model, exclude_unset, Validators)
-description: "Define API request and response shapes with Pydantic v2 in FastAPI: validate incoming JSON, enforce field constraints, filter output fields, and generate OpenAPI docs using model_config and @field_validator decorators."
+description: 'Define API request and response shapes with Pydantic v2 in FastAPI: validate incoming JSON, enforce field constraints, filter output fields, and generate OpenAPI docs using model_config and @field_validator decorators.'
 category: engineering
 skill_class: domain
-domain_tags: [request-body-model, response-model-shape, field-constraints-validation, model-config-strict, field-validator-decorator, fastapi]
+domain_tags:
+- request-body-model
+- response-model-shape
+- field-constraints-validation
+- model-config-strict
+- field-validator-decorator
+- fastapi
 related:
 - fastapi-dependency-injection
 - fastapi-routing-and-path-operations
 - fastapi-testing
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
@@ -251,271 +258,261 @@ raw_prose: |
   - Never mix `pydantic.v1.BaseModel` and `pydantic.BaseModel` in the same module or call site. The two types are not interchangeable, and FastAPI's route inspection picks one path or the other based on which base class it sees — silent drift between request parsing and response serialization is the result.
   - Never write a `@field_validator` that makes a network or database call. Validators run on every request; a synchronous DB lookup in a validator is an injection of latency and a coupling between the model layer and the data layer. Move that check into the route or a dependency.
   - Never expose a Pydantic model directly as both the input and output type for a resource with secrets. Even with `response_model_exclude={"password"}`, a future refactor that drops the `exclude` set re-leaks the secret. Two model classes is the durable boundary.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      ## Why this skill exists
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    ## Why this skill exists
 
-      FastAPI uses Pydantic models as the declarative surface for both **request bodies** (parsed from JSON, validated, type-coerced or strict-rejected) and **response models** (used for output filtering, OpenAPI schema generation, and example payloads). The Pydantic v2 rewrite (June 2023, GA) replaced the v1 `class Config` and `@validator`/`@root_validator` decorators with `model_config = ConfigDict(...)`, `@field_validator`, and `@model_validator` (verified 2026-05-06). FastAPI 0.100+ (July 2023) ships native Pydantic v2 support, and 0.115+ is the current line.
+    FastAPI uses Pydantic models as the declarative surface for both **request bodies** (parsed from JSON, validated, type-coerced or strict-rejected) and **response models** (used for output filtering, OpenAPI schema generation, and example payloads). The Pydantic v2 rewrite (June 2023, GA) replaced the v1 `class Config` and `@validator`/`@root_validator` decorators with `model_config = ConfigDict(...)`, `@field_validator`, and `@model_validator` (verified 2026-05-06). FastAPI 0.100+ (July 2023) ships native Pydantic v2 support, and 0.115+ is the current line.
 
-      Use this skill when defining request DTOs, splitting input/output models so secrets do not leak into responses, adding field-level constraints, customizing validation with `@field_validator` and `@model_validator`, returning partial models with `response_model_exclude_unset=True`, raising `HTTPException` for domain errors, or enriching the OpenAPI schema via `Field(..., description=..., examples=[...])`. The skill is a query-anchor for Pydantic-v2-on-FastAPI: BaseModel, request body, response model, validation, ConfigDict.
+    Use this skill when defining request DTOs, splitting input/output models so secrets do not leak into responses, adding field-level constraints, customizing validation with `@field_validator` and `@model_validator`, returning partial models with `response_model_exclude_unset=True`, raising `HTTPException` for domain errors, or enriching the OpenAPI schema via `Field(..., description=..., examples=[...])`. The skill is a query-anchor for Pydantic-v2-on-FastAPI: BaseModel, request body, response model, validation, ConfigDict.
 
-      This skill covers the model layer. Middleware, dependency injection, and per-route auth are in the sibling `fastapi-middleware-patterns` skill. Pydantic v2 model and validator details live in their own skill; this one cites that material for cross-reference but tailors examples to FastAPI path operations.
+    This skill covers the model layer. Middleware, dependency injection, and per-route auth are in the sibling `fastapi-middleware-patterns` skill. Pydantic v2 model and validator details live in their own skill; this one cites that material for cross-reference but tailors examples to FastAPI path operations.
+- sequence: 2
+  fragment_type: setup
+  content: |
+    ## Setup: imports for FastAPI 0.115+ and Pydantic v2
 
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## Setup: imports for FastAPI 0.115+ and Pydantic v2
+    FastAPI re-exports the path-operation primitives; Pydantic v2 names come from `pydantic` directly. Required installs: `fastapi>=0.115`, which pulls `pydantic>=2`. The legacy v1 surface is reachable via `pydantic.v1` for migration, but new code must not import from there.
 
-      FastAPI re-exports the path-operation primitives; Pydantic v2 names come from `pydantic` directly. Required installs: `fastapi>=0.115`, which pulls `pydantic>=2`. The legacy v1 surface is reachable via `pydantic.v1` for migration, but new code must not import from there.
+    ```python
+    from typing import Annotated
+    from fastapi import Body, FastAPI, HTTPException
+    from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-      ```python
-      from typing import Annotated
-      from fastapi import Body, FastAPI, HTTPException
-      from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+    app = FastAPI()
+    ```
 
-      app = FastAPI()
-      ```
+    Every name in this skill's code blocks is imported above. `BaseModel` is the v2 model base class. `Field` adds per-field metadata and constraints. `ConfigDict` is the v2 replacement for the v1 `class Config` inner class. `field_validator` and `model_validator` are the v2 decorators that replace the deprecated v1 `@validator` and `@root_validator` (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/validators). `Annotated` is used for the FastAPI-recommended `Annotated[T, Body(...)]` pattern.
+- fragment_type: example
+  sequence: 3
+  content: |-
+    ## Request body: a Pydantic model as a function argument
 
-      Every name in this skill's code blocks is imported above. `BaseModel` is the v2 model base class. `Field` adds per-field metadata and constraints. `ConfigDict` is the v2 replacement for the v1 `class Config` inner class. `field_validator` and `model_validator` are the v2 decorators that replace the deprecated v1 `@validator` and `@root_validator` (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/validators). `Annotated` is used for the FastAPI-recommended `Annotated[T, Body(...)]` pattern.
+    To declare a request body, type a path-operation function argument as a Pydantic model. FastAPI inspects the signature, parses the incoming JSON body into the model, and on validation failure returns HTTP 422 with a structured `detail` array describing each error (FastAPI docs, "Request Body", verified 2026-05-06).
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Request body: a Pydantic model as a function argument
+    ```python
+    class Item(BaseModel):
+        name: str
+        description: str | None = Field(default=None, max_length=300)
+        price: float = Field(gt=0, description="The price must be greater than zero")
+        tax: float | None = None
 
-      To declare a request body, type a path-operation function argument as a Pydantic model. FastAPI inspects the signature, parses the incoming JSON body into the model, and on validation failure returns HTTP 422 with a structured `detail` array describing each error (FastAPI docs, "Request Body", verified 2026-05-06).
+    @app.post("/items/")
+    async def create_item(item: Item) -> Item:
+        return item
+    ```
 
-      ```python
-      class Item(BaseModel):
-          name: str
-          description: str | None = Field(default=None, max_length=300)
-          price: float = Field(gt=0, description="The price must be greater than zero")
-          tax: float | None = None
+    Field constraints surfaced via `Field` participate in two places: they constrain validation (a `price` of `0` raises 422 with a `greater_than` error), and they enrich the generated OpenAPI schema (the `description` text appears in `/docs`). Constraint kwargs available on numeric fields include `gt`, `ge`, `lt`, `le`; on strings `min_length`, `max_length`, `pattern`; on collections `min_length`, `max_length` (FastAPI docs, "Body - Fields" and Pydantic docs, "Fields", verified 2026-05-06).
+- fragment_type: example
+  sequence: 4
+  content: |-
+    Multiple body params compose by name: `def f(item: Item, user: User)` causes FastAPI to expect a JSON object `{"item": {...}, "user": {...}}` — each model becomes a top-level key. To force a single-model body to be wrapped under its own key (instead of being the raw body), pass `embed=True`:
 
-      @app.post("/items/")
-      async def create_item(item: Item) -> Item:
-          return item
-      ```
+    ```python
+    @app.post("/items/wrapped")
+    async def create_wrapped(item: Annotated[Item, Body(embed=True)]) -> Item:
+        return item
+    ```
+- sequence: 5
+  fragment_type: execution
+  content: |
+    ## ConfigDict: strict mode, extra="forbid", str_strip_whitespace
 
-      Field constraints surfaced via `Field` participate in two places: they constrain validation (a `price` of `0` raises 422 with a `greater_than` error), and they enrich the generated OpenAPI schema (the `description` text appears in `/docs`). Constraint kwargs available on numeric fields include `gt`, `ge`, `lt`, `le`; on strings `min_length`, `max_length`, `pattern`; on collections `min_length`, `max_length` (FastAPI docs, "Body - Fields" and Pydantic docs, "Fields", verified 2026-05-06).
+    Pydantic v2 model behavior is configured via the class-level `model_config` attribute, which takes a `ConfigDict`. This replaces the v1 `class Config:` inner-class pattern, which is deprecated and emits warnings (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/models). Three settings recur in API code:
 
-      Multiple body params compose by name: `def f(item: Item, user: User)` causes FastAPI to expect a JSON object `{"item": {...}, "user": {...}}` — each model becomes a top-level key. To force a single-model body to be wrapped under its own key (instead of being the raw body), pass `embed=True`:
+    ```python
+    class Item(BaseModel):
+        model_config = ConfigDict(
+            strict=True,
+            extra="forbid",
+            str_strip_whitespace=True,
+        )
+        name: str
+        price: float = Field(gt=0)
+    ```
 
-      ```python
-      @app.post("/items/wrapped")
-      async def create_wrapped(item: Annotated[Item, Body(embed=True)]) -> Item:
-          return item
-      ```
+    `strict=True` rejects coercions that v2 would otherwise perform — a JSON string `"42"` will not be coerced into `int 42`; the request gets a 422. Use this when the API contract is "client must send the right type." `extra="forbid"` rejects unknown fields with a 422 instead of silently dropping them — important for catching client typos and stale clients sending removed fields. `str_strip_whitespace=True` trims whitespace on string fields before further validation, normalizing input. A fourth setting worth knowing is `from_attributes=True` (was v1 `orm_mode`), which lets Pydantic build a model from an arbitrary object's attributes — used when returning SQLAlchemy ORM rows through a `response_model`.
+- sequence: 6
+  fragment_type: execution
+  content: |
+    ## Validators: @field_validator and @model_validator
 
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## ConfigDict: strict mode, extra="forbid", str_strip_whitespace
+    When `Field` constraints are not enough, write a validator. Pydantic v2 has two decorators (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/validators):
 
-      Pydantic v2 model behavior is configured via the class-level `model_config` attribute, which takes a `ConfigDict`. This replaces the v1 `class Config:` inner-class pattern, which is deprecated and emits warnings (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/models). Three settings recur in API code:
+    ```python
+    class User(BaseModel):
+        username: str
+        password: str
+        password_confirm: str
 
-      ```python
-      class Item(BaseModel):
-          model_config = ConfigDict(
-              strict=True,
-              extra="forbid",
-              str_strip_whitespace=True,
-          )
-          name: str
-          price: float = Field(gt=0)
-      ```
+        @field_validator("username")
+        @classmethod
+        def username_alnum(cls, v: str) -> str:
+            if not v.isalnum():
+                raise ValueError("username must be alphanumeric")
+            return v
 
-      `strict=True` rejects coercions that v2 would otherwise perform — a JSON string `"42"` will not be coerced into `int 42`; the request gets a 422. Use this when the API contract is "client must send the right type." `extra="forbid"` rejects unknown fields with a 422 instead of silently dropping them — important for catching client typos and stale clients sending removed fields. `str_strip_whitespace=True` trims whitespace on string fields before further validation, normalizing input. A fourth setting worth knowing is `from_attributes=True` (was v1 `orm_mode`), which lets Pydantic build a model from an arbitrary object's attributes — used when returning SQLAlchemy ORM rows through a `response_model`.
+        @model_validator(mode="after")
+        def passwords_match(self) -> "User":
+            if self.password != self.password_confirm:
+                raise ValueError("passwords do not match")
+            return self
+    ```
 
-  - sequence: 5
-    fragment_type: execution
-    content: |
-      ## Validators: @field_validator and @model_validator
+    `@field_validator("name")` runs per-field; the decorated function must be a classmethod. `mode="before"` (default `"after"`) lets the validator see the raw input before Pydantic's own coercion runs. `@model_validator(mode="after")` receives the fully-validated model instance via `self` and can enforce cross-field invariants like "password must equal password_confirm." `mode="before"` on a model validator receives the raw input dict — useful for normalizing aliases. The v1 `@validator` and `@root_validator` decorators are deprecated in v2 and should be migrated; mixing `pydantic.v1` imports with v2 `BaseModel` produces silent type confusion and is a common source of bugs in partially-migrated codebases.
+- sequence: 7
+  fragment_type: execution
+  content: |
+    ## response_model: output shape and filtering
 
-      When `Field` constraints are not enough, write a validator. Pydantic v2 has two decorators (verified 2026-05-06 against docs.pydantic.dev/latest/concepts/validators):
+    The path-operation decorator accepts `response_model=` to declare the response shape. FastAPI does two things with it: (1) it generates the OpenAPI response schema from this declaration, and (2) it **filters** the actual return value through the model — fields not declared on `response_model` are dropped from the response, even if the route returns them. This is the critical leverage point for not leaking secrets: declare a `UserOut` without `password`, return a `UserIn` (or a DB row) that has one, and the password is filtered out before serialization (FastAPI docs, "Response Model" and "Extra Models", verified 2026-05-06).
 
-      ```python
-      class User(BaseModel):
-          username: str
-          password: str
-          password_confirm: str
+    ```python
+    class UserIn(BaseModel):
+        username: str
+        password: str
+        email: str
 
-          @field_validator("username")
-          @classmethod
-          def username_alnum(cls, v: str) -> str:
-              if not v.isalnum():
-                  raise ValueError("username must be alphanumeric")
-              return v
+    class UserOut(BaseModel):
+        username: str
+        email: str
 
-          @model_validator(mode="after")
-          def passwords_match(self) -> "User":
-              if self.password != self.password_confirm:
-                  raise ValueError("passwords do not match")
-              return self
-      ```
+    @app.post("/users/", response_model=UserOut)
+    async def create_user(user: UserIn) -> UserIn:
+        # returning UserIn including password — response_model=UserOut filters it out
+        return user
+    ```
 
-      `@field_validator("name")` runs per-field; the decorated function must be a classmethod. `mode="before"` (default `"after"`) lets the validator see the raw input before Pydantic's own coercion runs. `@model_validator(mode="after")` receives the fully-validated model instance via `self` and can enforce cross-field invariants like "password must equal password_confirm." `mode="before"` on a model validator receives the raw input dict — useful for normalizing aliases. The v1 `@validator` and `@root_validator` decorators are deprecated in v2 and should be migrated; mixing `pydantic.v1` imports with v2 `BaseModel` produces silent type confusion and is a common source of bugs in partially-migrated codebases.
+    The opposite direction is the trap: if `response_model` declares a field that the returned object lacks, you get a validation error at response time, not at request time. And if `response_model` declares a **subset** and the route returns an object with extra fields the client expected, those extras are silently filtered out — a common surprise when a model is shared across endpoints and one endpoint trims it.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ## response_model_exclude_unset and friends
 
-  - sequence: 6
-    fragment_type: execution
-    content: |
-      ## response_model: output shape and filtering
+    The `response_model_exclude_unset=True` flag drops fields that the user (or the constructor) did not explicitly set, falling back to defaults. This is useful for PATCH-style partial responses where you want to return only the fields that were actually present in the input or were modified — clients can distinguish "field omitted" from "field set to its default." Siblings: `response_model_exclude_none=True` drops fields whose value is `None` (regardless of whether they were set); `response_model_exclude={"password"}` and `response_model_include={...}` operate on a named set of fields (FastAPI docs, "Response Model" — "Use the response_model_exclude_unset parameter", verified 2026-05-06).
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    ```python
+    class Item(BaseModel):
+        name: str
+        description: str | None = None
+        price: float
+        tax: float = 10.5
+        tags: list[str] = []
 
-      The path-operation decorator accepts `response_model=` to declare the response shape. FastAPI does two things with it: (1) it generates the OpenAPI response schema from this declaration, and (2) it **filters** the actual return value through the model — fields not declared on `response_model` are dropped from the response, even if the route returns them. This is the critical leverage point for not leaking secrets: declare a `UserOut` without `password`, return a `UserIn` (or a DB row) that has one, and the password is filtered out before serialization (FastAPI docs, "Response Model" and "Extra Models", verified 2026-05-06).
+    items = {
+        "foo": {"name": "Foo", "price": 50.2},
+        "bar": {"name": "Bar", "description": "The Bar", "price": 62, "tax": 20.2},
+        "baz": {"name": "Baz", "description": None, "price": 50.2, "tax": 10.5, "tags": []},
+    }
 
-      ```python
-      class UserIn(BaseModel):
-          username: str
-          password: str
-          email: str
+    @app.get("/items/{item_id}", response_model=Item, response_model_exclude_unset=True)
+    async def read_item(item_id: str) -> dict:
+        return items[item_id]
+    ```
 
-      class UserOut(BaseModel):
-          username: str
-          email: str
+    For `foo`, the response is `{"name": "Foo", "price": 50.2}` — `description`, `tax`, `tags` are unset and excluded. For `bar`, those fields were set so they appear. For `baz`, every field was set explicitly, including the values that happen to equal defaults, so the response includes them all. `exclude_unset` is set/unset, not value/default.
+- sequence: 10
+  fragment_type: execution
+  content: |
+    ## HTTPException for domain errors and OpenAPI enrichment
 
-      @app.post("/users/", response_model=UserOut)
-      async def create_user(user: UserIn) -> UserIn:
-          # returning UserIn including password — response_model=UserOut filters it out
-          return user
-      ```
+    When the request validates but the domain rejects (item not found, business rule fails), raise `HTTPException` from the route or a dependency. FastAPI converts it to a JSON response with the chosen `status_code` and `detail` (FastAPI docs, "Handling Errors" — "Use HTTPException", verified 2026-05-06). Pair with `responses=` on the path operation to surface the error in OpenAPI:
 
-      The opposite direction is the trap: if `response_model` declares a field that the returned object lacks, you get a validation error at response time, not at request time. And if `response_model` declares a **subset** and the route returns an object with extra fields the client expected, those extras are silently filtered out — a common surprise when a model is shared across endpoints and one endpoint trims it.
+    ```python
+    items = {"foo": "The Foo Wrestlers"}
 
-  - sequence: 7
-    fragment_type: execution
-    content: |
-      ## response_model_exclude_unset and friends
+    @app.get(
+        "/items/{item_id}",
+        responses={404: {"description": "Item not found"}},
+    )
+    async def read_item(item_id: str) -> dict:
+        if item_id not in items:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return {"item": items[item_id]}
+    ```
 
-      The `response_model_exclude_unset=True` flag drops fields that the user (or the constructor) did not explicitly set, falling back to defaults. This is useful for PATCH-style partial responses where you want to return only the fields that were actually present in the input or were modified — clients can distinguish "field omitted" from "field set to its default." Siblings: `response_model_exclude_none=True` drops fields whose value is `None` (regardless of whether they were set); `response_model_exclude={"password"}` and `response_model_include={...}` operate on a named set of fields (FastAPI docs, "Response Model" — "Use the response_model_exclude_unset parameter", verified 2026-05-06).
+    OpenAPI extras on `Field` enrich `/docs` and downstream client generators: `Field(..., description="Quantity", examples=[42])` adds a description and example to the property's schema. Validation errors raised by Pydantic during request parsing surface as 422 with a structured `detail` array; FastAPI's request-body validation handler is registered automatically and you do not implement it yourself.
+- fragment_type: example
+  sequence: 11
+  content: |-
+    ## End-to-end: input/output split, validators, response_model
 
-      ```python
-      class Item(BaseModel):
-          name: str
-          description: str | None = None
-          price: float
-          tax: float = 10.5
-          tags: list[str] = []
+    This single example walks the case-space: a `UserIn` with a password, a `UserOut` without one, a `@field_validator` that enforces alphanumeric usernames, a `@model_validator` that catches mismatched password confirmation, and `response_model=UserOut` filtering the password out at the wire.
+- fragment_type: example
+  sequence: 12
+  content: |-
+    ```python
+    from typing import Annotated
+    from fastapi import Body, FastAPI, HTTPException
+    from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-      items = {
-          "foo": {"name": "Foo", "price": 50.2},
-          "bar": {"name": "Bar", "description": "The Bar", "price": 62, "tax": 20.2},
-          "baz": {"name": "Baz", "description": None, "price": 50.2, "tax": 10.5, "tags": []},
-      }
+    app = FastAPI()
 
-      @app.get("/items/{item_id}", response_model=Item, response_model_exclude_unset=True)
-      async def read_item(item_id: str) -> dict:
-          return items[item_id]
-      ```
+    class UserIn(BaseModel):
+        model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+        username: str = Field(min_length=3, max_length=32)
+        password: str = Field(min_length=8)
+        password_confirm: str
+        email: str
 
-      For `foo`, the response is `{"name": "Foo", "price": 50.2}` — `description`, `tax`, `tags` are unset and excluded. For `bar`, those fields were set so they appear. For `baz`, every field was set explicitly, including the values that happen to equal defaults, so the response includes them all. `exclude_unset` is set/unset, not value/default.
+        @field_validator("username")
+        @classmethod
+        def username_alnum(cls, v: str) -> str:
+            if not v.isalnum():
+                raise ValueError("username must be alphanumeric")
+            return v
 
-  - sequence: 8
-    fragment_type: execution
-    content: |
-      ## HTTPException for domain errors and OpenAPI enrichment
+        @model_validator(mode="after")
+        def passwords_match(self) -> "UserIn":
+            if self.password != self.password_confirm:
+                raise ValueError("passwords do not match")
+            return self
 
-      When the request validates but the domain rejects (item not found, business rule fails), raise `HTTPException` from the route or a dependency. FastAPI converts it to a JSON response with the chosen `status_code` and `detail` (FastAPI docs, "Handling Errors" — "Use HTTPException", verified 2026-05-06). Pair with `responses=` on the path operation to surface the error in OpenAPI:
+    class UserOut(BaseModel):
+        username: str
+        email: str
 
-      ```python
-      items = {"foo": "The Foo Wrestlers"}
+    _users: dict[str, UserIn] = {}
 
-      @app.get(
-          "/items/{item_id}",
-          responses={404: {"description": "Item not found"}},
-      )
-      async def read_item(item_id: str) -> dict:
-          if item_id not in items:
-              raise HTTPException(status_code=404, detail="Item not found")
-          return {"item": items[item_id]}
-      ```
+    @app.post("/users/", response_model=UserOut)
+    async def create_user(user: Annotated[UserIn, Body()]) -> UserIn:
+        if user.username in _users:
+            raise HTTPException(status_code=409, detail="username taken")
+        _users[user.username] = user
+        # returning UserIn — response_model=UserOut filters password and password_confirm
+        return user
+    ```
+- fragment_type: example
+  sequence: 13
+  content: 'Three paths: a request with `{"username": "ab", ...}` fails the `min_length=3` constraint at parse time and gets 422 with `string_too_short`. A request with mismatched passwords passes per-field validation and trips the `model_validator`, returning 422 with the validator''s `ValueError` text. A valid request creates the user; the response is `{"username": "...", "email": "..."}` — the password fields are dropped by `response_model=UserOut`, not by hand.'
+- fragment_type: verification
+  sequence: 14
+  content: |-
+    ## Verification checklist
 
-      OpenAPI extras on `Field` enrich `/docs` and downstream client generators: `Field(..., description="Quantity", examples=[42])` adds a description and example to the property's schema. Validation errors raised by Pydantic during request parsing surface as 422 with a structured `detail` array; FastAPI's request-body validation handler is registered automatically and you do not implement it yourself.
+    Mechanical checks for any FastAPI request/response model surface:
+- fragment_type: verification
+  sequence: 15
+  content: '- [ ] No `pydantic.v1` imports in new modules. `grep -rn ''from pydantic\.v1\|import pydantic\.v1'' src/` returns nothing. - [ ] No deprecated v1 validator decorators in v2 code. `grep -rnE ''@validator\b|@root_validator\b'' src/` returns nothing; expected hits are `@field_validator` and `@model_validator`. - [ ] No legacy `class Config:` inner class on `BaseModel` subclasses. `grep -rnB1 ''class Config:'' src/` should not show lines preceded by a class extending `BaseModel`. Replace with `model_config = ConfigDict(...)`. - [ ] Every path operation that returns a model declares `response_model=` (or a typed return annotation FastAPI can pick up). `grep -rn ''response_model='' src/` enumerates the declared shapes; spot-check that response models do not include password, secret, or token fields. - [ ] Input and output models for sensitive resources (users, accounts, tokens) are split. `grep -rn ''class User'' src/` should show at least `UserIn`/`UserOut` (or equivalent) — a single `User` model used for both is a likely leak surface. - [ ] Constraint kwargs on `Field` are non-empty for any field that has a documented domain range. `grep -rn ''Field('' src/` and confirm `gt`, `ge`, `lt`, `le`, `min_length`, `max_length`, or `pattern` are present where the contract requires them. - [ ] `extra="forbid"` is set on request models that should reject unknown fields.'
+- fragment_type: verification
+  sequence: 16
+  content: '`grep -rn ''extra=\"forbid\"'' src/` enumerates them. - [ ] `pytest -k validation` passes — the test suite exercises at least one happy path and one constraint-violating path per request model, asserting the 422 status and a recognizable error code in `detail`. - [ ] OpenAPI schema diff after a model change is reviewed. `curl -s http://localhost:8000/openapi.json > openapi.new.json && diff openapi.old.json openapi.new.json` — unintended widenings or narrowings of response shapes show up here.'
+- fragment_type: guardrail
+  sequence: 17
+  content: |-
+    ## Guardrails: never do these
 
-  - sequence: 9
-    fragment_type: example
-    content: |
-      ## End-to-end: input/output split, validators, response_model
+    Lines you do not cross when modeling FastAPI request and response bodies. Each item has shipped a real outage or a real client-facing surprise.
+- fragment_type: guardrail
+  sequence: 18
+  content: '- Never return a model that contains a password, token, or other secret field through a path operation that lacks a `response_model` filter. Even a typed return annotation like `-> UserIn` will serialize the password. Declare a separate `UserOut` and pass `response_model=UserOut`, or add the field to `response_model_exclude={"password"}`. - Never use the v1 `@validator` or `@root_validator` decorators in v2 code. Both are deprecated in Pydantic v2 (verified 2026-05-06) and will be removed; they also have different argument signatures than the v2 replacements, so cargo-culting an old example introduces subtle bugs. Use `@field_validator` and `@model_validator`. - Never use the v1 `class Config:` inner class on a v2 `BaseModel`. It is deprecated and Pydantic emits a warning; use `model_config = ConfigDict(...)`. - Never mutate the model in-place from a `@model_validator(mode="after")` with the expectation that Pydantic will re-validate. The validator runs once after parsing; if you mutate `self` in ways that violate other constraints, those constraints are not re-checked. - Never declare `response_model=Model` over a class that includes a SQLAlchemy mapped column or other non-Pydantic attribute without setting `model_config = ConfigDict(from_attributes=True)`. Pydantic will fail to build the model from an ORM row otherwise.'
+- fragment_type: guardrail
+  sequence: 19
+  content: |-
+    - Never rely on `response_model_exclude_none=True` to hide secrets. If the secret is not `None`, it serializes. Use `response_model_exclude={"password"}` or a separate output model — `exclude_none` is a presentation tweak, not a security boundary. - Never expand a shared model with optional new fields and assume existing endpoints stay byte-stable. Adding a field with a default is non-breaking for the model but **does** change the response shape unless `response_model_exclude_unset=True` was already set; clients with strict schema validation will fail. - Never mix `pydantic.v1.BaseModel` and `pydantic.BaseModel` in the same module or call site. The two types are not interchangeable, and FastAPI's route inspection picks one path or the other based on which base class it sees — silent drift between request parsing and response serialization is the result. - Never write a `@field_validator` that makes a network or database call. Validators run on every request; a synchronous DB lookup in a validator is an injection of latency and a coupling between the model layer and the data layer. Move that check into the route or a dependency. - Never expose a Pydantic model directly as both the input and output type for a resource with secrets. Even with `response_model_exclude={"password"}`, a future refactor that drops the `exclude` set re-leaks the secret.
 
-      This single example walks the case-space: a `UserIn` with a password, a `UserOut` without one, a `@field_validator` that enforces alphanumeric usernames, a `@model_validator` that catches mismatched password confirmation, and `response_model=UserOut` filtering the password out at the wire.
-
-      ```python
-      from typing import Annotated
-      from fastapi import Body, FastAPI, HTTPException
-      from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-      app = FastAPI()
-
-      class UserIn(BaseModel):
-          model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-          username: str = Field(min_length=3, max_length=32)
-          password: str = Field(min_length=8)
-          password_confirm: str
-          email: str
-
-          @field_validator("username")
-          @classmethod
-          def username_alnum(cls, v: str) -> str:
-              if not v.isalnum():
-                  raise ValueError("username must be alphanumeric")
-              return v
-
-          @model_validator(mode="after")
-          def passwords_match(self) -> "UserIn":
-              if self.password != self.password_confirm:
-                  raise ValueError("passwords do not match")
-              return self
-
-      class UserOut(BaseModel):
-          username: str
-          email: str
-
-      _users: dict[str, UserIn] = {}
-
-      @app.post("/users/", response_model=UserOut)
-      async def create_user(user: Annotated[UserIn, Body()]) -> UserIn:
-          if user.username in _users:
-              raise HTTPException(status_code=409, detail="username taken")
-          _users[user.username] = user
-          # returning UserIn — response_model=UserOut filters password and password_confirm
-          return user
-      ```
-
-      Three paths: a request with `{"username": "ab", ...}` fails the `min_length=3` constraint at parse time and gets 422 with `string_too_short`. A request with mismatched passwords passes per-field validation and trips the `model_validator`, returning 422 with the validator's `ValueError` text. A valid request creates the user; the response is `{"username": "...", "email": "..."}` — the password fields are dropped by `response_model=UserOut`, not by hand.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification checklist
-
-      Mechanical checks for any FastAPI request/response model surface:
-
-      - [ ] No `pydantic.v1` imports in new modules. `grep -rn 'from pydantic\.v1\|import pydantic\.v1' src/` returns nothing.
-      - [ ] No deprecated v1 validator decorators in v2 code. `grep -rnE '@validator\b|@root_validator\b' src/` returns nothing; expected hits are `@field_validator` and `@model_validator`.
-      - [ ] No legacy `class Config:` inner class on `BaseModel` subclasses. `grep -rnB1 'class Config:' src/` should not show lines preceded by a class extending `BaseModel`. Replace with `model_config = ConfigDict(...)`.
-      - [ ] Every path operation that returns a model declares `response_model=` (or a typed return annotation FastAPI can pick up). `grep -rn 'response_model=' src/` enumerates the declared shapes; spot-check that response models do not include password, secret, or token fields.
-      - [ ] Input and output models for sensitive resources (users, accounts, tokens) are split. `grep -rn 'class User' src/` should show at least `UserIn`/`UserOut` (or equivalent) — a single `User` model used for both is a likely leak surface.
-      - [ ] Constraint kwargs on `Field` are non-empty for any field that has a documented domain range. `grep -rn 'Field(' src/` and confirm `gt`, `ge`, `lt`, `le`, `min_length`, `max_length`, or `pattern` are present where the contract requires them.
-      - [ ] `extra="forbid"` is set on request models that should reject unknown fields. `grep -rn 'extra=\"forbid\"' src/` enumerates them.
-      - [ ] `pytest -k validation` passes — the test suite exercises at least one happy path and one constraint-violating path per request model, asserting the 422 status and a recognizable error code in `detail`.
-      - [ ] OpenAPI schema diff after a model change is reviewed. `curl -s http://localhost:8000/openapi.json > openapi.new.json && diff openapi.old.json openapi.new.json` — unintended widenings or narrowings of response shapes show up here.
-
-  - sequence: 11
-    fragment_type: guardrail
-    content: |
-      ## Guardrails: never do these
-
-      Lines you do not cross when modeling FastAPI request and response bodies. Each item has shipped a real outage or a real client-facing surprise.
-
-      - Never return a model that contains a password, token, or other secret field through a path operation that lacks a `response_model` filter. Even a typed return annotation like `-> UserIn` will serialize the password. Declare a separate `UserOut` and pass `response_model=UserOut`, or add the field to `response_model_exclude={"password"}`.
-      - Never use the v1 `@validator` or `@root_validator` decorators in v2 code. Both are deprecated in Pydantic v2 (verified 2026-05-06) and will be removed; they also have different argument signatures than the v2 replacements, so cargo-culting an old example introduces subtle bugs. Use `@field_validator` and `@model_validator`.
-      - Never use the v1 `class Config:` inner class on a v2 `BaseModel`. It is deprecated and Pydantic emits a warning; use `model_config = ConfigDict(...)`.
-      - Never mutate the model in-place from a `@model_validator(mode="after")` with the expectation that Pydantic will re-validate. The validator runs once after parsing; if you mutate `self` in ways that violate other constraints, those constraints are not re-checked.
-      - Never declare `response_model=Model` over a class that includes a SQLAlchemy mapped column or other non-Pydantic attribute without setting `model_config = ConfigDict(from_attributes=True)`. Pydantic will fail to build the model from an ORM row otherwise.
-      - Never rely on `response_model_exclude_none=True` to hide secrets. If the secret is not `None`, it serializes. Use `response_model_exclude={"password"}` or a separate output model — `exclude_none` is a presentation tweak, not a security boundary.
-      - Never expand a shared model with optional new fields and assume existing endpoints stay byte-stable. Adding a field with a default is non-breaking for the model but **does** change the response shape unless `response_model_exclude_unset=True` was already set; clients with strict schema validation will fail.
-      - Never mix `pydantic.v1.BaseModel` and `pydantic.BaseModel` in the same module or call site. The two types are not interchangeable, and FastAPI's route inspection picks one path or the other based on which base class it sees — silent drift between request parsing and response serialization is the result.
-      - Never write a `@field_validator` that makes a network or database call. Validators run on every request; a synchronous DB lookup in a validator is an injection of latency and a coupling between the model layer and the data layer. Move that check into the route or a dependency.
-      - Never expose a Pydantic model directly as both the input and output type for a resource with secrets. Even with `response_model_exclude={"password"}`, a future refactor that drops the `exclude` set re-leaks the secret. Two model classes is the durable boundary.
+    Two model classes is the durable boundary.

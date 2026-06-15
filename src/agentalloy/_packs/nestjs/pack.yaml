@@ -1,11 +1,11 @@
 name: nestjs
-version: 1.0.2
+version: 1.0.3
 tier: framework
 description: |
   NestJS 10+ patterns — module system and dependency injection, controllers and HTTP routing decorators, request lifecycle hooks (pipes/guards/interceptors), exception filters with HttpException hierarchy, and Express-compatible middleware. Precision-favored framework tier; sourced from docs.nestjs.com markdown via the nestjs/docs.nestjs.com GitHub repo per R1 tier-3 procedure (registry tier corrected from 1 → 3 on 2026-05-06: published llms.txt URLs return SPA index HTML, not LLM text).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -17,10 +17,10 @@ depends_on:
 skills:
 - skill_id: nestjs-controllers-and-routing
   file: nestjs-controllers-and-routing.yaml
-  fragment_count: 9
+  fragment_count: 10
 - skill_id: nestjs-exception-filters
   file: nestjs-exception-filters.yaml
-  fragment_count: 8
+  fragment_count: 10
 - skill_id: nestjs-middleware
   file: nestjs-middleware.yaml
   fragment_count: 13

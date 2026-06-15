@@ -1,21 +1,23 @@
 skill_type: domain
 skill_id: nextjs-streaming-and-suspense
 canonical_name: Next.js Streaming and Suspense
-description: "Make your Next.js pages load faster by showing static content immediately while data fetches in the background: use React Suspense and loading.tsx to stream HTML chunks, display fallback UIs, and avoid blocking the whole page on slow queries."
+description: 'Make your Next.js pages load faster by showing static content immediately while data fetches in the background: use React Suspense and loading.tsx to stream HTML chunks, display fallback UIs, and avoid blocking the whole page on slow queries.'
 category: engineering
 skill_class: domain
 deprecated: true
 superseded_by: nextjs-ppr-cache-components
 domain_tags:
-  - streaming-ssr
-  - suspense-boundaries
-  - loading-ts
-  - route-level-loading
-  - selective-hydration
-  - nextjs
+- streaming-ssr
+- suspense-boundaries
+- loading-ts
+- route-level-loading
+- selective-hydration
+- nextjs
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: authoring-agent
 change_summary: |
   initial authoring draft. Deprecated 2026-06-03: superseded by nextjs-ppr-cache-components
@@ -128,111 +130,114 @@ raw_prose: |
 
   See the [`loading.js` API reference](/docs/app/api-reference/file-conventions/loading) for more details.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Streaming SSR means HTML can ship to the browser before all data is ready. React Suspense + Next.js loading.tsx make this declarative. This skill covers the streaming surface.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Streaming SSR means HTML can ship to the browser before all data is ready. React Suspense + Next.js loading.tsx make this declarative. This skill covers the streaming surface.
 
-      In traditional server-side rendering, the server produces the full HTML document before sending anything. A single slow database query or API call can block the entire page. Streaming changes this by using [chunked transfer encoding](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Transfer-Encoding) to send parts of the response as they become ready. The browser starts rendering HTML while the server is still generating the rest.
+    In traditional server-side rendering, the server produces the full HTML document before sending anything. A single slow database query or API call can block the entire page. Streaming changes this by using [chunked transfer encoding](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Transfer-Encoding) to send parts of the response as they become ready. The browser starts rendering HTML while the server is still generating the rest.
 
-      This is especially impactful for pages that combine fast static content (headers, navigation, layout) with slower dynamic content (personalized data, analytics, recommendations). The static parts can be prerendered and served from a CDN, painting instantly, while the dynamic parts stream in from the server as they become ready.
+    This is especially impactful for pages that combine fast static content (headers, navigation, layout) with slower dynamic content (personalized data, analytics, recommendations). The static parts can be prerendered and served from a CDN, painting instantly, while the dynamic parts stream in from the server as they become ready.
 
-      React's server renderer produces HTML in chunks aligned with `<Suspense>` boundaries. Next.js integrates this into the App Router so streaming works without additional configuration.
-  - fragment_type: example
-    sequence: 2
-    content: |
-      The companion [streaming demo](https://streaming-demo.labs.vercel.dev/) ([source](https://github.com/vercel-labs/streaming-demo)) lets you see each concept from this guide in action:
+    React's server renderer produces HTML in chunks aligned with `<Suspense>` boundaries. Next.js integrates this into the App Router so streaming works without additional configuration.
+- fragment_type: example
+  sequence: 2
+  content: |
+    The companion [streaming demo](https://streaming-demo.labs.vercel.dev/) ([source](https://github.com/vercel-labs/streaming-demo)) lets you see each concept from this guide in action:
 
-      - Page-level streaming with `loading.tsx` (skeleton appears instantly, content streams in after ~2s)
-      - Granular streaming with sibling `<Suspense>` boundaries that resolve independently
-      - Hydration comparison: a single blocking pass vs split hydration with Suspense boundaries
-      - Raw HTML streaming in a Route Handler, with early CSS discovery
-      - A configurable `ReadableStream` API endpoint for experimenting with chunk sizes and browser buffering
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      When a browser requests a page, two streams work together during the initial page load:
+    - Page-level streaming with `loading.tsx` (skeleton appears instantly, content streams in after ~2s)
+    - Granular streaming with sibling `<Suspense>` boundaries that resolve independently
+    - Hydration comparison: a single blocking pass vs split hydration with Suspense boundaries
+    - Raw HTML streaming in a Route Handler, with early CSS discovery
+    - A configurable `ReadableStream` API endpoint for experimenting with chunk sizes and browser buffering
+- fragment_type: execution
+  sequence: 3
+  content: |
+    When a browser requests a page, two streams work together during the initial page load:
 
-      ### The HTML stream
+    ### The HTML stream
 
-      React's server renderer produces progressive HTML chunks. The static parts of your page (layouts, navigation, Suspense fallbacks) render first and are sent immediately. When an async [Server Component](/docs/app/glossary#server-component) resolves, React streams its completed HTML along with inline `<script>` tags: one that swaps the fallback DOM node with the new content, and another carrying the [component payload](#the-component-payload) so React can later hydrate it. The browser executes the swap instantly, without waiting for the page's JavaScript bundle to load or hydration to complete. This is what the user _sees_: the page painting progressively, section by section.
+    React's server renderer produces progressive HTML chunks. The static parts of your page (layouts, navigation, Suspense fallbacks) render first and are sent immediately. When an async [Server Component](/docs/app/glossary#server-component) resolves, React streams its completed HTML along with inline `<script>` tags: one that swaps the fallback DOM node with the new content, and another carrying the [component payload](#the-component-payload) so React can later hydrate it. The browser executes the swap instantly, without waiting for the page's JavaScript bundle to load or hydration to complete. This is what the user _sees_: the page painting progressively, section by section.
 
-      ### The component payload
+    ### The component payload
 
-      The component payload is a serialized representation of the component tree that React uses to [hydrate](/docs/app/glossary#hydration) the page and handle client-side updates. On initial load, it arrives embedded in the HTML stream (as described above). On **client-side navigation**, only the component payload is fetched (with an `rsc: 1` request header) and no HTML is transferred at all. React uses it to update the component tree in place.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ### The static shell
+    The component payload is a serialized representation of the component tree that React uses to [hydrate](/docs/app/glossary#hydration) the page and handle client-side updates. On initial load, it arrives embedded in the HTML stream (as described above). On **client-side navigation**, only the component payload is fetched (with an `rsc: 1` request header) and no HTML is transferred at all. React uses it to update the component tree in place.
+- fragment_type: execution
+  sequence: 4
+  content: |
+    ### The static shell
 
-      Everything that renders before any async work resolves is called the **static shell**: your layouts, navigation, and the fallback UI defined by your `<Suspense>` boundaries. It is sent immediately, giving the user something to see and interact with while dynamic content streams in. With [Cache Components](/docs/app/getting-started/caching), the static shell is prerendered at build time and served instantly from the edge.
+    Everything that renders before any async work resolves is called the **static shell**: your layouts, navigation, and the fallback UI defined by your `<Suspense>` boundaries. It is sent immediately, giving the user something to see and interact with while dynamic content streams in. With [Cache Components](/docs/app/getting-started/caching), the static shell is prerendered at build time and served instantly from the edge.
 
-      <Image
-        alt="How Server Rendering with Streaming Works"
-        srcLight="/docs/light/server-rendering-with-streaming.png"
-        srcDark="/docs/dark/server-rendering-with-streaming.png"
-        width="1600"
-        height="785"
-      />
+    <Image
+      alt="How Server Rendering with Streaming Works"
+      srcLight="/docs/light/server-rendering-with-streaming.png"
+      srcDark="/docs/dark/server-rendering-with-streaming.png"
+      width="1600"
+      height="785"
+    />
 
-      Each `<Suspense>` boundary is an independent streaming point. Components inside different boundaries resolve and stream in independently. They don't block each other.
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## Page-level streaming with `loading.js`
+    Each `<Suspense>` boundary is an independent streaming point. Components inside different boundaries resolve and stream in independently. They don't block each other.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    ## Page-level streaming with `loading.js`
 
-      The simplest way to add streaming is with a `loading.js` file. Place it alongside your `page.js` and Next.js automatically wraps the page content in a `<Suspense>` boundary, using your loading component as the fallback.
+    The simplest way to add streaming is with a `loading.js` file. Place it alongside your `page.js` and Next.js automatically wraps the page content in a `<Suspense>` boundary, using your loading component as the fallback.
 
-      <Image
-        alt="loading.js special file"
-        srcLight="/docs/light/loading-special-file.png"
-        srcDark="/docs/dark/loading-special-file.png"
-        width="1600"
-        height="606"
-      />
+    <Image
+      alt="loading.js special file"
+      srcLight="/docs/light/loading-special-file.png"
+      srcDark="/docs/dark/loading-special-file.png"
+      width="1600"
+      height="606"
+    />
 
-      ```tsx filename="app/dashboard/loading.tsx" switcher
-      export default function Loading() {
-        return (
-          <div className="animate-pulse">
-            <div className="h-8 w-48 bg-gray-200 rounded mb-4" />
-            <div className="h-4 w-full bg-gray-200 rounded mb-2" />
-            <div className="h-4 w-full bg-gray-200 rounded mb-2" />
-            <div className="h-4 w-2/3 bg-gray-200 rounded" />
-          </div>
-        )
-      }
-      ```
+    ```tsx filename="app/dashboard/loading.tsx" switcher
+    export default function Loading() {
+      return (
+        <div className="animate-pulse">
+          <div className="h-8 w-48 bg-gray-200 rounded mb-4" />
+          <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+          <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+          <div className="h-4 w-2/3 bg-gray-200 rounded" />
+        </div>
+      )
+    }
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ```jsx filename="app/dashboard/loading.js" switcher
+    export default function Loading() {
+      return (
+        <div className="animate-pulse">
+          <div className="h-8 w-48 bg-gray-200 rounded mb-4" />
+          <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+          <div className="h-4 w-full bg-gray-200 rounded mb-2" />
+          <div className="h-4 w-2/3 bg-gray-200 rounded" />
+        </div>
+      )
+    }
+    ```
 
-      ```jsx filename="app/dashboard/loading.js" switcher
-      export default function Loading() {
-        return (
-          <div className="animate-pulse">
-            <div className="h-8 w-48 bg-gray-200 rounded mb-4" />
-            <div className="h-4 w-full bg-gray-200 rounded mb-2" />
-            <div className="h-4 w-full bg-gray-200 rounded mb-2" />
-            <div className="h-4 w-2/3 bg-gray-200 rounded" />
-          </div>
-        )
-      }
-      ```
+    Behind the scenes, `loading.js` is nested inside `layout.js` and wraps `page.js` in a `<Suspense>` boundary:
 
-      Behind the scenes, `loading.js` is nested inside `layout.js` and wraps `page.js` in a `<Suspense>` boundary:
+    <Image
+      alt="loading.js overview"
+      srcLight="/docs/light/loading-overview.png"
+      srcDark="/docs/dark/loading-overview.png"
+      width="1600"
+      height="768"
+    />
 
-      <Image
-        alt="loading.js overview"
-        srcLight="/docs/light/loading-overview.png"
-        srcDark="/docs/dark/loading-overview.png"
-        width="1600"
-        height="768"
-      />
+    This means:
 
-      This means:
+    - The layout renders immediately as part of the static shell.
+    - The loading skeleton is shown instantly as the Suspense fallback.
+    - When the page component finishes loading, its HTML replaces the skeleton.
 
-      - The layout renders immediately as part of the static shell.
-      - The loading skeleton is shown instantly as the Suspense fallback.
-      - When the page component finishes loading, its HTML replaces the skeleton.
-
-      `loading.js` is useful when there's nothing meaningful to show until the page's data resolves. If the page needs to await data before it can render anything, a full-page skeleton is a reasonable fallback.
-
-      See the [`loading.js` API reference](/docs/app/api-reference/file-conventions/loading) for more details.
+    `loading.js` is useful when there's nothing meaningful to show until the page's data resolves. If the page needs to await data before it can render anything, a full-page skeleton is a reasonable fallback.
+- fragment_type: execution
+  sequence: 7
+  content: See the [`loading.js` API reference](/docs/app/api-reference/file-conventions/loading) for more details.

@@ -1,11 +1,11 @@
 name: webhooks
-version: 1.0.4
+version: 1.0.5
 tier: protocol
 description: |
   Webhook protocol patterns — HMAC signature verification (svix-id / svix-timestamp / svix-signature headers, replay protection), consumer idempotency for at-least-once delivery, event-type design and schemas, and consumer endpoint patterns (auth, scaling, polling fallbacks). Precision-favored protocol tier; sourced from svix/svix-docs GitHub repo per R1 tier-2 procedure (registry svix entry).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -18,13 +18,13 @@ skills:
   fragment_count: 16
 - skill_id: webhooks-event-types-and-schemas
   file: webhooks-event-types-and-schemas.yaml
-  fragment_count: 9
+  fragment_count: 11
 - skill_id: webhooks-idempotency
   file: webhooks-idempotency.yaml
-  fragment_count: 7
+  fragment_count: 16
 - skill_id: webhooks-signature-verification
   file: webhooks-signature-verification.yaml
-  fragment_count: 11
+  fragment_count: 18
 - skill_id: webhooks-documentation
   file: webhooks-documentation.yaml
   fragment_count: 8

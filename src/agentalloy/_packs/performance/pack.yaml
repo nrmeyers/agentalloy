@@ -3,8 +3,8 @@ version: 1.0.2
 tier: foundation
 description: Performance practices that span stacks — measure first, profile correctly, optimize the bottleneck, know when to stop. Always installed.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: true

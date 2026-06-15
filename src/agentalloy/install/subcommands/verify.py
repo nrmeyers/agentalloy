@@ -3,7 +3,7 @@
 
 Runs 8 enumerated checks from contracts.md:
 1. embedding_endpoint_reachable
-2. embedding_endpoint_returns_1024_dim
+2. embedding_endpoint_returns_expected_dim
 3. duckdb_present
 4. ladybug_present
 5. skill_count_meets_minimum
@@ -169,9 +169,9 @@ def _check_embedding_endpoint_reachable(embed_url: str) -> dict[str, Any]:
         }
 
 
-def _check_embedding_1024_dim(embed_url: str, model: str) -> dict[str, Any]:
-    """Check 2: POST /v1/embeddings returns a 1024-dim vector."""
-    bad = _validate_probe_url(embed_url, "embedding_1024_dim")
+def _check_embedding_expected_dim(embed_url: str, model: str) -> dict[str, Any]:
+    """Check 2: POST /v1/embeddings returns a 768-dim vector."""
+    bad = _validate_probe_url(embed_url, "embedding_expected_dim")
     if bad:
         return bad
     t0 = time.monotonic()
@@ -185,7 +185,7 @@ def _check_embedding_1024_dim(embed_url: str, model: str) -> dict[str, Any]:
         if not embeddings:
             duration = int((time.monotonic() - t0) * 1000)
             return {
-                "name": "embedding_endpoint_returns_1024_dim",
+                "name": "embedding_endpoint_returns_expected_dim",
                 "passed": False,
                 "duration_ms": duration,
                 "error": "No embeddings returned",
@@ -195,13 +195,13 @@ def _check_embedding_1024_dim(embed_url: str, model: str) -> dict[str, Any]:
         duration = int((time.monotonic() - t0) * 1000)
         if dim == EMBEDDING_DIM:
             return {
-                "name": "embedding_endpoint_returns_1024_dim",
+                "name": "embedding_endpoint_returns_expected_dim",
                 "passed": True,
                 "duration_ms": duration,
                 "detail": f"POST /v1/embeddings with model={model} returned {dim}-dim vector",
             }
         return {
-            "name": "embedding_endpoint_returns_1024_dim",
+            "name": "embedding_endpoint_returns_expected_dim",
             "passed": False,
             "duration_ms": duration,
             "error": f"Expected {EMBEDDING_DIM}-dim, got {dim}-dim",
@@ -210,7 +210,7 @@ def _check_embedding_1024_dim(embed_url: str, model: str) -> dict[str, Any]:
     except (URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
         duration = int((time.monotonic() - t0) * 1000)
         return {
-            "name": "embedding_endpoint_returns_1024_dim",
+            "name": "embedding_endpoint_returns_expected_dim",
             "passed": False,
             "duration_ms": duration,
             "error": str(exc),
@@ -738,7 +738,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     env = _read_env_values(install_state.user_config_dir())
 
     embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
-    embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "qwen3-embedding:0.6b")
+    embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "nomic-embed-text-v1.5.Q8_0.gguf")
     user_corpus = install_state.corpus_dir()
     duck_path = env.get("DUCKDB_PATH", str(user_corpus / "skills.duck"))
     ladybug_path = env.get("LADYBUG_DB_PATH", str(user_corpus / "ladybug"))
@@ -765,12 +765,12 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     if is_container:
         embed_checks = [
             _check_embedding_via_diagnostics(diag, "embedding_endpoint_reachable"),
-            _check_embedding_via_diagnostics(diag, "embedding_endpoint_returns_1024_dim"),
+            _check_embedding_via_diagnostics(diag, "embedding_endpoint_returns_expected_dim"),
         ]
     else:
         embed_checks = [
             _check_embedding_endpoint_reachable(embed_url),
-            _check_embedding_1024_dim(embed_url, embed_model),
+            _check_embedding_expected_dim(embed_url, embed_model),
         ]
 
     checks = [
@@ -799,7 +799,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
 def add_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:  # pyright: ignore[reportPrivateUsage]
     p: argparse.ArgumentParser = subparsers.add_parser(
         "verify",
-        help="Install-time smoke test (embed → retrieve → 1024-dim, harness config, etc.).",
+        help="Install-time smoke test (embed → retrieve → 768-dim, harness config, etc.).",
     )
     add_json_flag(p)
     p.set_defaults(func=run)

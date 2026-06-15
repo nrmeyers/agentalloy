@@ -53,57 +53,59 @@ def test_cosine_zero_vector() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_intent_similarity_query_is_raw_text(tmp_path: Path) -> None:
-    """Query passed to embed should be the raw text (no Qwen prefix)."""
+def test_intent_similarity_query_has_search_query_prefix(tmp_path: Path) -> None:
+    """Query passed to embed carries the nomic ``search_query: `` prefix."""
     query = [1.0, 0.0]
     refs = [[0.99, 0.14], [0.0, 1.0]]
     client = _mock_client([query] + refs)
-    _intent_similarity("done", "completion", client, "embed-model", threshold=0.75)
+    _intent_similarity("done", "completion", client, "embed-model", threshold=0.56)
 
     call_args = client.embed.call_args
     texts: list[str] = call_args.kwargs.get("texts", [])
-    assert texts[0] == "done"
+    assert texts[0] == "search_query: done"
 
 
-def test_intent_similarity_references_are_raw(tmp_path: Path) -> None:
-    """Reference phrases should be passed raw (no prefix)."""
+def test_intent_similarity_references_have_search_query_prefix(tmp_path: Path) -> None:
+    """Reference phrases carry the nomic ``search_query: `` prefix (symmetric task)."""
     query = [1.0, 0.0]
     refs = [[0.99, 0.14], [0.0, 1.0]]
     client = _mock_client([query] + refs)
-    _intent_similarity("done", "completion", client, "embed-model", threshold=0.75)
+    _intent_similarity("done", "completion", client, "embed-model", threshold=0.56)
 
     call_args = client.embed.call_args
     texts: list[str] = call_args.kwargs.get("texts", [])
 
-    expected_refs = _INTENT_REFERENCES["completion"]
+    expected_refs = [f"search_query: {r}" for r in _INTENT_REFERENCES["completion"]]
     actual_refs = texts[1:]
     assert actual_refs == expected_refs
 
 
 def test_intent_similarity_truncation(tmp_path: Path) -> None:
-    """Long input should be truncated before embedding."""
+    """Long input is truncated before embedding; the nomic ``search_query: ``
+    prefix is prepended after truncation (final = prefix + capped raw)."""
     query = [1.0, 0.0]
     refs = [[0.99, 0.14]]
     client = _mock_client([query] + refs)
     long_text = "x" * (_MAX_INPUT_CHARS + 500)
-    _intent_similarity(long_text, "completion", client, "embed-model", threshold=0.75)
+    _intent_similarity(long_text, "completion", client, "embed-model", threshold=0.56)
 
     call_args = client.embed.call_args
     texts: list[str] = call_args.kwargs.get("texts", [])
-    assert len(texts[0]) == _MAX_INPUT_CHARS
+    assert len(texts[0]) == _MAX_INPUT_CHARS + len("search_query: ")
+    assert texts[0].startswith("search_query: ")
 
 
-def test_topic_similarity_query_is_raw_text(tmp_path: Path) -> None:
-    """Topic mode should also use raw text (no Qwen prefix)."""
+def test_topic_similarity_query_has_search_query_prefix(tmp_path: Path) -> None:
+    """Topic mode also carries the nomic ``search_query: `` prefix on query and topics."""
     query = [1.0, 0.0]
     topics = [[0.99, 0.14]]
     client = _mock_client([query] + topics)
-    _topic_similarity("auth question", ["authentication"], client, "embed-model", threshold=0.75)
+    _topic_similarity("auth question", ["authentication"], client, "embed-model", threshold=0.56)
 
     call_args = client.embed.call_args
     texts: list[str] = call_args.kwargs.get("texts", [])
-    assert texts[0] == "auth question"
-    assert texts[1] == "authentication"
+    assert texts[0] == "search_query: auth question"
+    assert texts[1] == "search_query: authentication"
 
 
 def test_unknown_intent_returns_unknown() -> None:

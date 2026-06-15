@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: nextjs-data-security-patterns
 canonical_name: Next.js Data Security Patterns
-description: "Secure Next.js apps by preventing data leaks in React Server Components: build a strict data access layer, keep sensitive imports server-only, and use the React taint API to block unauthorized data exposure to the client."
+description: 'Secure Next.js apps by preventing data leaks in React Server Components: build a strict data access layer, keep sensitive imports server-only, and use the React taint API to block unauthorized data exposure to the client.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - data-security
-  - nextjs
-  - server-components
-  - data-access-layer
-  - authorization
+- data-security
+- nextjs
+- server-components
+- data-access-layer
+- authorization
 related:
 - nextjs-app-router-routing
 - nextjs-csp-and-security-headers
 - nextjs-server-actions-and-mutations
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: initial authoring draft
 raw_prose: |
@@ -271,234 +273,237 @@ raw_prose: |
 
   Read more about `server-only` in the [preventing environment poisoning](/docs/app/getting-started/server-and-client-components#preventing-environment-poisoning) section.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Next.js's blurred client/server boundary creates new security failure modes. The fix is a disciplined Data Access Layer + server-only imports + the React taint API. This skill covers the canonical patterns.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Next.js's blurred client/server boundary creates new security failure modes. The fix is a disciplined Data Access Layer + server-only imports + the React taint API. This skill covers the canonical patterns.
 
-      [React Server Components](https://react.dev/reference/rsc/server-components) improve performance and simplify data fetching, but also shift where and how data is accessed, changing some of the traditional security assumptions for handling data in frontend apps.
+    [React Server Components](https://react.dev/reference/rsc/server-components) improve performance and simplify data fetching, but also shift where and how data is accessed, changing some of the traditional security assumptions for handling data in frontend apps.
 
-      This guide will help you understand how to think about data security in Next.js and how to implement best practices.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      There are three main approaches we recommend for fetching data in Next.js, depending on the size and age of your project:
+    This guide will help you understand how to think about data security in Next.js and how to implement best practices.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    There are three main approaches we recommend for fetching data in Next.js, depending on the size and age of your project:
 
-      - [HTTP APIs](#external-http-apis): for existing large applications and organizations.
-      - [Data Access Layer](#data-access-layer): for new projects.
-      - [Component-Level Data Access](#component-level-data-access): for prototypes and learning.
+    - [HTTP APIs](#external-http-apis): for existing large applications and organizations.
+    - [Data Access Layer](#data-access-layer): for new projects.
+    - [Component-Level Data Access](#component-level-data-access): for prototypes and learning.
 
-      We recommend choosing one data fetching approach and avoiding mixing them. This makes it clear for both developers working in your code base and security auditors what to expect.
-  - fragment_type: example
-    sequence: 3
-    content: |
-      ```tsx filename="app/page.tsx"
+    We recommend choosing one data fetching approach and avoiding mixing them. This makes it clear for both developers working in your code base and security auditors what to expect.
+- fragment_type: example
+  sequence: 3
+  content: |
+    ```tsx filename="app/page.tsx"
 
-      export default async function Page() {
-        const cookieStore = cookies()
-        const token = cookieStore.get('AUTH_TOKEN')?.value
+    export default async function Page() {
+      const cookieStore = cookies()
+      const token = cookieStore.get('AUTH_TOKEN')?.value
 
-        const res = await fetch('https://api.example.com/profile', {
-          headers: {
-            Cookie: `AUTH_TOKEN=${token}`,
-            // Other headers
-          },
-        })
-
-        // ....
-      }
-      ```
-
-      This approach works well when:
-
-      - You already have security practices in place.
-      - Separate backend teams use other languages or manage APIs independently.
-  - fragment_type: example
-    sequence: 4
-    content: |
-      ```ts filename="data/auth.ts"
-
-      // Cached helper methods makes it easy to get the same value in many places
-      // without manually passing it around. This discourages passing it from Server
-      // Component to Server Component which minimizes risk of passing it to a Client
-      // Component.
-      export const getCurrentUser = cache(async () => {
-        const token = cookies().get('AUTH_TOKEN')
-        const decodedToken = await decryptAndValidate(token)
-        // Don't include secret tokens or private information as public fields.
-        // Use classes to avoid accidentally passing the whole object to the client.
-        return new User(decodedToken.id)
-      })
-      ```
-
-      ```tsx filename="data/user-dto.tsx"
-
-      function canSeeUsername(viewer: User) {
-        // Public info for now, but can change
-        return true
-      }
-
-      function canSeePhoneNumber(viewer: User, team: string) {
-        // Privacy rules
-        return viewer.isAdmin || team === viewer.team
-      }
-
-      export async function getProfileDTO(slug: string) {
-        // Don't pass values, read back cached values, also solves context and easier to make it lazy
-
-        // use a database API that supports safe templating of queries
-        const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
-        const userData = rows[0]
-
-        const currentUser = await getCurrentUser()
-
-        // only return the data relevant for this query and not everything
-        // <https://www.w3.org/2001/tag/doc/APIMinimization>
-        return {
-          username: canSeeUsername(currentUser) ? userData.username : null,
-          phonenumber: canSeePhoneNumber(currentUser, userData.team)
-            ? userData.phonenumber
-            : null,
-        }
-      }
-      ```
-
-      ```tsx filename="app/page.tsx"
-
-      export async function Page({ params: { slug } }) {
-        // This page can now safely pass around this profile knowing
-        // that it shouldn't contain anything sensitive.
-        const profile = await getProfile(slug);
-        ...
-      }
-      ```
-
-      > **Good to know:** Secret keys should be stored in environment variables, but only the Data Access Layer should access `process.env`. This keeps secrets from being exposed to other parts of the application.
-  - fragment_type: example
-    sequence: 5
-    content: |
-      ```tsx filename="app/page.tsx"
-
-      export async function Page({ params: { slug } }) {
-        const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
-        const userData = rows[0]
-        // EXPOSED: This exposes all the fields in userData to the client because
-        // we are passing the data from the Server Component to the Client.
-        return <Profile user={userData} />
-      }
-      ```
-
-      ```tsx filename="app/ui/profile.tsx"
-      'use client'
-
-      // BAD: This is a bad props interface because it accepts way more data than the
-      // Client Component needs and it encourages server components to pass all that
-      // data down. A better solution would be to accept a limited object with just
-      // the fields necessary for rendering the profile.
-      export default async function Profile({ user }: { user: User }) {
-        return (
-          <div>
-            <h1>{user.name}</h1>
-            ...
-          </div>
-        )
-      }
-      ```
-
-      You should sanitize the data before passing it to the Client Component:
-
-      ```ts filename="data/user.ts"
-
-      export async function getUser(slug: string) {
-        const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
-        const user = rows[0]
-
-        // Return only the public fields
-        return {
-          name: user.name,
-        }
-      }
-      ```
-
-      ```tsx filename="app/page.tsx"
-
-      export default async function Page({
-        params: { slug },
-      }: {
-        params: { slug: string }
-      }) {
-        const publicProfile = await getUser(slug)
-        return <Profile user={publicProfile} />
-      }
-      ```
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      On the initial load, both Server and Client Components run on the server to generate HTML. However, they execute in isolated module systems. This ensures that Server Components can access private data and APIs, while Client Components cannot.
-
-      **Server Components:**
-
-      - Run only on the server.
-      - Can safely access environment variables, secrets, databases, and internal APIs.
-
-      **Client Components:**
-
-      - Run on the server during prerendering, but must follow the same security assumptions as code running in the browser.
-      - Must not access privileged data or server-only modules.
-
-      This ensures the app is secure by default, but it's possible to accidentally expose private data through how data is fetched or passed to components.
-  - fragment_type: example
-    sequence: 7
-    content: |
-      To prevent accidental exposure of private data to the client, you can use React Taint APIs:
-
-      - [`experimental_taintObjectReference`](https://react.dev/reference/react/experimental_taintObjectReference) for data objects.
-      - [`experimental_taintUniqueValue`](https://react.dev/reference/react/experimental_taintUniqueValue) for specific values.
-
-      You can enable usage in your Next.js app with the [`experimental.taint`](/docs/app/api-reference/config/next-config-js/taint) option in `next.config.js`:
-
-      ```js filename="next.config.js"
-      module.exports = {
-        experimental: {
-          taint: true,
+      const res = await fetch('https://api.example.com/profile', {
+        headers: {
+          Cookie: `AUTH_TOKEN=${token}`,
+          // Other headers
         },
+      })
+
+      // ....
+    }
+    ```
+
+    This approach works well when:
+
+    - You already have security practices in place.
+    - Separate backend teams use other languages or manage APIs independently.
+- fragment_type: example
+  sequence: 4
+  content: |-
+    ```ts filename="data/auth.ts"
+
+    // Cached helper methods makes it easy to get the same value in many places
+    // without manually passing it around. This discourages passing it from Server
+    // Component to Server Component which minimizes risk of passing it to a Client
+    // Component.
+    export const getCurrentUser = cache(async () => {
+      const token = cookies().get('AUTH_TOKEN')
+      const decodedToken = await decryptAndValidate(token)
+      // Don't include secret tokens or private information as public fields.
+      // Use classes to avoid accidentally passing the whole object to the client.
+      return new User(decodedToken.id)
+    })
+    ```
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ```tsx filename="data/user-dto.tsx"
+
+    function canSeeUsername(viewer: User) {
+      // Public info for now, but can change
+      return true
+    }
+
+    function canSeePhoneNumber(viewer: User, team: string) {
+      // Privacy rules
+      return viewer.isAdmin || team === viewer.team
+    }
+
+    export async function getProfileDTO(slug: string) {
+      // Don't pass values, read back cached values, also solves context and easier to make it lazy
+
+      // use a database API that supports safe templating of queries
+      const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
+      const userData = rows[0]
+
+      const currentUser = await getCurrentUser()
+
+      // only return the data relevant for this query and not everything
+      // <https://www.w3.org/2001/tag/doc/APIMinimization>
+      return {
+        username: canSeeUsername(currentUser) ? userData.username : null,
+        phonenumber: canSeePhoneNumber(currentUser, userData.team)
+          ? userData.phonenumber
+          : null,
       }
-      ```
+    }
+    ```
 
-      This prevents the tainted objects or values from being passed to the client. However, it's an additional layer of protection, you should still filter and sanitize the data in your [DAL](#data-access-layer) before passing it to React's render context.
+    ```tsx filename="app/page.tsx"
 
-      > **Good to know:**
-      >
-      > - By default, environment variables are only available on the Server. Next.js exposes any environment variable prefixed with `NEXT_PUBLIC_` to the client. [Learn more](/docs/app/guides/environment-variables).
-      > - Functions and classes are already blocked from being passed to Client Components by default.
-  - fragment_type: example
-    sequence: 8
-    content: |
-      To prevent server-only code from being executed on the client, you can mark a module with the [`server-only`](https://www.npmjs.com/package/server-only) package:
+    export async function Page({ params: { slug } }) {
+      // This page can now safely pass around this profile knowing
+      // that it shouldn't contain anything sensitive.
+      const profile = await getProfile(slug);
+      ...
+    }
+    ```
+- fragment_type: example
+  sequence: 6
+  content: '> **Good to know:** Secret keys should be stored in environment variables, but only the Data Access Layer should access `process.env`. This keeps secrets from being exposed to other parts of the application.'
+- fragment_type: example
+  sequence: 7
+  content: |
+    ```tsx filename="app/page.tsx"
 
-      ```ts filename="lib/data.ts"
+    export async function Page({ params: { slug } }) {
+      const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
+      const userData = rows[0]
+      // EXPOSED: This exposes all the fields in userData to the client because
+      // we are passing the data from the Server Component to the Client.
+      return <Profile user={userData} />
+    }
+    ```
 
-      //...
-      ```
+    ```tsx filename="app/ui/profile.tsx"
+    'use client'
 
-      This ensures that proprietary code or internal business logic stays on the server by causing a build error if the module is imported in the client environment.
+    // BAD: This is a bad props interface because it accepts way more data than the
+    // Client Component needs and it encourages server components to pass all that
+    // data down. A better solution would be to accept a limited object with just
+    // the fields necessary for rendering the profile.
+    export default async function Profile({ user }: { user: User }) {
+      return (
+        <div>
+          <h1>{user.name}</h1>
+          ...
+        </div>
+      )
+    }
+    ```
 
-      Next.js handles `server-only` imports internally. The contents of these packages from NPM are not used. However, if your linting rules flag extraneous dependencies, you may install them to avoid issues.
+    You should sanitize the data before passing it to the Client Component:
 
-      ```bash package="npm"
-      npm install server-only
-      ```
+    ```ts filename="data/user.ts"
 
-      ```bash package="yarn"
-      yarn add server-only
-      ```
+    export async function getUser(slug: string) {
+      const [rows] = await sql`SELECT * FROM user WHERE slug = ${slug}`
+      const user = rows[0]
 
-      ```bash package="pnpm"
-      pnpm add server-only
-      ```
+      // Return only the public fields
+      return {
+        name: user.name,
+      }
+    }
+    ```
 
-      ```bash package="bun"
-      bun add server-only
-      ```
+    ```tsx filename="app/page.tsx"
 
-      Read more about `server-only` in the [preventing environment poisoning](/docs/app/getting-started/server-and-client-components#preventing-environment-poisoning) section.
+    export default async function Page({
+      params: { slug },
+    }: {
+      params: { slug: string }
+    }) {
+      const publicProfile = await getUser(slug)
+      return <Profile user={publicProfile} />
+    }
+    ```
+- fragment_type: execution
+  sequence: 8
+  content: |
+    On the initial load, both Server and Client Components run on the server to generate HTML. However, they execute in isolated module systems. This ensures that Server Components can access private data and APIs, while Client Components cannot.
+
+    **Server Components:**
+
+    - Run only on the server.
+    - Can safely access environment variables, secrets, databases, and internal APIs.
+
+    **Client Components:**
+
+    - Run on the server during prerendering, but must follow the same security assumptions as code running in the browser.
+    - Must not access privileged data or server-only modules.
+
+    This ensures the app is secure by default, but it's possible to accidentally expose private data through how data is fetched or passed to components.
+- fragment_type: example
+  sequence: 9
+  content: |
+    To prevent accidental exposure of private data to the client, you can use React Taint APIs:
+
+    - [`experimental_taintObjectReference`](https://react.dev/reference/react/experimental_taintObjectReference) for data objects.
+    - [`experimental_taintUniqueValue`](https://react.dev/reference/react/experimental_taintUniqueValue) for specific values.
+
+    You can enable usage in your Next.js app with the [`experimental.taint`](/docs/app/api-reference/config/next-config-js/taint) option in `next.config.js`:
+
+    ```js filename="next.config.js"
+    module.exports = {
+      experimental: {
+        taint: true,
+      },
+    }
+    ```
+
+    This prevents the tainted objects or values from being passed to the client. However, it's an additional layer of protection, you should still filter and sanitize the data in your [DAL](#data-access-layer) before passing it to React's render context.
+
+    > **Good to know:**
+    >
+    > - By default, environment variables are only available on the Server. Next.js exposes any environment variable prefixed with `NEXT_PUBLIC_` to the client. [Learn more](/docs/app/guides/environment-variables).
+    > - Functions and classes are already blocked from being passed to Client Components by default.
+- fragment_type: example
+  sequence: 10
+  content: |-
+    To prevent server-only code from being executed on the client, you can mark a module with the [`server-only`](https://www.npmjs.com/package/server-only) package:
+
+    ```ts filename="lib/data.ts"
+
+    //...
+    ```
+
+    This ensures that proprietary code or internal business logic stays on the server by causing a build error if the module is imported in the client environment.
+
+    Next.js handles `server-only` imports internally. The contents of these packages from NPM are not used. However, if your linting rules flag extraneous dependencies, you may install them to avoid issues.
+
+    ```bash package="npm"
+    npm install server-only
+    ```
+
+    ```bash package="yarn"
+    yarn add server-only
+    ```
+
+    ```bash package="pnpm"
+    pnpm add server-only
+    ```
+
+    ```bash package="bun"
+    bun add server-only
+    ```
+
+    Read more about `server-only` in the [preventing environment poisoning](/docs/app/getting-started/server-and-client-components#preventing-environment-poisoning) section.

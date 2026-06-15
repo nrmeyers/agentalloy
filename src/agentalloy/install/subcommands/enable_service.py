@@ -192,7 +192,7 @@ def _render_llama_embed_unit(llama_bin: str, model_path: Path) -> str:
         "\n"
         "[Service]\n"
         "Type=simple\n"
-        f"ExecStart={llama_bin} --embeddings --port {_LLAMA_EMBED_PORT} "
+        f"ExecStart={llama_bin} --embeddings --pooling mean --port {_LLAMA_EMBED_PORT} "
         f"--ubatch-size 2048 -m {model_path}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
@@ -240,7 +240,7 @@ def _write_llama_units() -> list[str]:
     units = [
         (
             "agentalloy-embed.service",
-            _render_llama_embed_unit(llama_bin, _model_path("Qwen3-Embedding-0.6B-Q8_0.gguf")),
+            _render_llama_embed_unit(llama_bin, _model_path("nomic-embed-text-v1.5.Q8_0.gguf")),
         ),
         (
             "agentalloy-rerank.service",
@@ -430,7 +430,7 @@ def _write_llama_launchd_agents() -> list[str]:
         logger.warning("llama-server not on PATH; skipping embed/reranker LaunchAgents")
         return []
 
-    embed_model = _model_path("Qwen3-Embedding-0.6B-Q8_0.gguf")
+    embed_model = _model_path("nomic-embed-text-v1.5.Q8_0.gguf")
     rerank_model = _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")
 
     written: list[str] = []
@@ -441,6 +441,8 @@ def _write_llama_launchd_agents() -> list[str]:
             [
                 llama_bin,
                 "--embeddings",
+                "--pooling",
+                "mean",
                 "--port",
                 str(_LLAMA_EMBED_PORT),
                 "--ubatch-size",

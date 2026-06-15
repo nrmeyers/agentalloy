@@ -1,16 +1,16 @@
 skill_type: domain
 skill_id: rest-common-patterns
 canonical_name: REST — Common API Patterns
-description: "Design robust APIs that go beyond basic CRUD: implement pagination for large datasets, handle long-running operations, support filtering and partial updates, and manage concurrency with conditional requests."
+description: 'Design robust APIs that go beyond basic CRUD: implement pagination for large datasets, handle long-running operations, support filtering and partial updates, and manage concurrency with conditional requests.'
 category: design
 skill_class: domain
 domain_tags:
-  - REST
-  - API patterns
-  - long-running operations
-  - pagination
-  - filtering
-  - rest
+- REST
+- API patterns
+- long-running operations
+- pagination
+- filtering
+- rest
 requires:
 - rest-http-and-resource-design
 related:
@@ -18,8 +18,11 @@ related:
 - rest-versioning-and-compatibility
 - writing-api-docs
 always_apply: false
-phase_scope: [build, design]
-category_scope: [framework]
+phase_scope:
+- build
+- design
+category_scope:
+- framework
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -159,144 +162,154 @@ raw_prose: |
   Operator                 | Description           | Example
   --------------------     | --------------------- | -----------------------------------------------------
   **Comparison Operators** |
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Most production APIs need patterns the basic REST surface doesn't cover: pagination at scale, long-running ops, conditional requests for concurrency, partial updates. This skill covers the common patterns that recur across API teams.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Most production APIs need patterns the basic REST surface doesn't cover: pagination at scale, long-running ops, conditional requests for concurrency, partial updates. This skill covers the common patterns that recur across API teams.
 
-      Sourced from microsoft/api-guidelines azure/Guidelines.md (Common API Patterns).
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      <a href="#actions" name="actions"></a>
-      ### Performing an Action
-      The REST specification is used to model the state of a resource, and is primarily intended to handle CRUD (Create, Read, Update, Delete) operations. However, many services require the ability to perform an action on a resource, e.g. getting the thumbnail of an image or rebooting a VM.  It is also sometimes useful to perform an action on a collection.
+    Sourced from microsoft/api-guidelines azure/Guidelines.md (Common API Patterns).
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    <a href="#actions" name="actions"></a>
+    ### Performing an Action
+    The REST specification is used to model the state of a resource, and is primarily intended to handle CRUD (Create, Read, Update, Delete) operations. However, many services require the ability to perform an action on a resource, e.g. getting the thumbnail of an image or rebooting a VM.  It is also sometimes useful to perform an action on a collection.
 
-      <a href="#actions-url-pattern-for-resource-action" name="actions-url-pattern-for-resource-action">:ballot_box_with_check:</a> **YOU SHOULD** pattern your URL like this to perform an action on a resource
-      **URL Pattern**
-      ```text
-      https://.../<resource-collection>/<resource-id>:<action>?<input parameters>
-      ```
+    <a href="#actions-url-pattern-for-resource-action" name="actions-url-pattern-for-resource-action">:ballot_box_with_check:</a> **YOU SHOULD** pattern your URL like this to perform an action on a resource
+    **URL Pattern**
+    ```text
+    https://.../<resource-collection>/<resource-id>:<action>?<input parameters>
+    ```
 
-      **Example**
-      ```text
-      https://.../users/Bob:grant?access=read
-      ```
+    **Example**
+    ```text
+    https://.../users/Bob:grant?access=read
+    ```
 
-      <a href="#actions-url-pattern-for-collection-action" name="actions-url-pattern-for-collection-action">:ballot_box_with_check:</a> **YOU SHOULD** pattern your URL like this to perform an action on a collection
-      **URL Pattern**
-      ```text
-      https://.../<resource-collection>:<action>?<input parameters>
-      ```
+    <a href="#actions-url-pattern-for-collection-action" name="actions-url-pattern-for-collection-action">:ballot_box_with_check:</a> **YOU SHOULD** pattern your URL like this to perform an action on a collection
+    **URL Pattern**
+    ```text
+    https://.../<resource-collection>:<action>?<input parameters>
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    **Example**
+    ```text
+    https://.../users:grant?access=read
+    ```
 
-      **Example**
-      ```text
-      https://.../users:grant?access=read
-      ```
+    Note: To avoid potential collision of actions and resource ids, you should disallow the use of the ":" character in resource ids.
 
-      Note: To avoid potential collision of actions and resource ids, you should disallow the use of the ":" character in resource ids.
+    <a href="#actions-use-post-method" name="actions-use-post-method">:white_check_mark:</a> **DO** use a POST operation for any action on a resource or collection.
 
-      <a href="#actions-use-post-method" name="actions-use-post-method">:white_check_mark:</a> **DO** use a POST operation for any action on a resource or collection.
+    <a href="#actions-support-repeatability-headers" name="actions-support-repeatability-headers">:white_check_mark:</a> **DO** support the Repeatability-Request-ID & Repeatability-First-Sent request headers if the action needs to be idempotent if retries occur.
 
-      <a href="#actions-support-repeatability-headers" name="actions-support-repeatability-headers">:white_check_mark:</a> **DO** support the Repeatability-Request-ID & Repeatability-First-Sent request headers if the action needs to be idempotent if retries occur.
+    <a href="#actions-synchronous-success-status-code" name="actions-synchronous-success-status-code">:white_check_mark:</a> **DO** return a `200-OK` when the action completes synchronously and successfully.
 
-      <a href="#actions-synchronous-success-status-code" name="actions-synchronous-success-status-code">:white_check_mark:</a> **DO** return a `200-OK` when the action completes synchronously and successfully.
+    <a href="#actions-action-name-is-verb" name="actions-action-name-is-verb">:ballot_box_with_check:</a> **YOU SHOULD** use a verb as the `<action>` component of the path.
+- fragment_type: execution
+  sequence: 4
+  content: <a href="#actions-no-actions-for-crud" name="actions-no-actions-for-crud">:no_entry:</a> **DO NOT** use an action operation when the operation behavior could reasonably be defined as one of the standard REST Create, Read, Update, Delete, or List operations.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    <a href="#collections" name="collections"></a>
+    ### Collections
+    <a href="#collections-response-is-object" name="collections-response-is-object">:white_check_mark:</a> **DO** structure the response to a list operation as an object with a top-level array field containing the set (or subset) of resources.
 
-      <a href="#actions-action-name-is-verb" name="actions-action-name-is-verb">:ballot_box_with_check:</a> **YOU SHOULD** use a verb as the `<action>` component of the path.
+    <a href="#collections-support-server-driven-paging" name="collections-support-server-driven-paging">:ballot_box_with_check:</a> **YOU SHOULD** support paging today if there is ever a chance in the future that the number of items can grow to be very large.
 
-      <a href="#actions-no-actions-for-crud" name="actions-no-actions-for-crud">:no_entry:</a> **DO NOT** use an action operation when the operation behavior could reasonably be defined as one of the standard REST Create, Read, Update, Delete, or List operations.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      <a href="#collections" name="collections"></a>
-      ### Collections
-      <a href="#collections-response-is-object" name="collections-response-is-object">:white_check_mark:</a> **DO** structure the response to a list operation as an object with a top-level array field containing the set (or subset) of resources.
+    NOTE: It is a breaking change to add paging in the future
 
-      <a href="#collections-support-server-driven-paging" name="collections-support-server-driven-paging">:ballot_box_with_check:</a> **YOU SHOULD** support paging today if there is ever a chance in the future that the number of items can grow to be very large.
+    <a href="#collections-use-get-method" name="collections-use-get-method">:heavy_check_mark:</a> **YOU MAY** expose an operation that lists your resources by supporting a GET method with a URL to a resource-collection (as opposed to a resource-id).
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    **Example Response Body**
+    ```json
+    {
+        "value": [
+           { "id": "Item 01", "etag": "\"abc\"", "price": 99.95, "size": "Medium" },
+           { … },
+           { … },
+           { "id": "Item 99", "etag": "\"def\"", "price": 59.99, "size": "Large" }
+        ],
+        "nextLink": "{opaqueUrl}"
+     }
+    ```
 
-      NOTE: It is a breaking change to add paging in the future
+    <a href="#collections-items-have-id-and-etag" name="collections-items-have-id-and-etag">:white_check_mark:</a> **DO** include the _id_ field and _etag_ field (if supported) for each item as this allows the customer to modify the item in a future operation. Note that the etag field _must_ have escaped quotes embedded within it; for example, "\"abc\"" or W/"\"abc\"".
 
-      <a href="#collections-use-get-method" name="collections-use-get-method">:heavy_check_mark:</a> **YOU MAY** expose an operation that lists your resources by supporting a GET method with a URL to a resource-collection (as opposed to a resource-id).
+    <a href="#collections-document-pagination-reliability" name="collections-document-pagination-reliability">:white_check_mark:</a> **DO** clearly document that resources may be skipped or duplicated across pages of a paginated collection unless the operation has made special provisions to prevent this (like taking a time-expiring snapshot of the collection).
+- fragment_type: execution
+  sequence: 7
+  content: |-
+    <a href="#collections-include-nextlink-for-more-results" name="collections-include-nextlink-for-more-results">:white_check_mark:</a> **DO** return a `nextLink` field with an absolute URL that the client can GET in order to retrieve the next page of the collection.
 
-      **Example Response Body**
-      ```json
-      {
-          "value": [
-             { "id": "Item 01", "etag": "\"abc\"", "price": 99.95, "size": "Medium" },
-             { … },
-             { … },
-             { "id": "Item 99", "etag": "\"def\"", "price": 59.99, "size": "Large" }
-          ],
-          "nextLink": "{opaqueUrl}"
-       }
-      ```
+    Note: The service is responsible for performing any URL-encoding required on the `nextLink` URL.
 
-      <a href="#collections-items-have-id-and-etag" name="collections-items-have-id-and-etag">:white_check_mark:</a> **DO** include the _id_ field and _etag_ field (if supported) for each item as this allows the customer to modify the item in a future operation. Note that the etag field _must_ have escaped quotes embedded within it; for example, "\"abc\"" or W/"\"abc\"".
+    <a href="#collections-nextlink-includes-all-query-params" name="collections-nextlink-includes-all-query-params">:white_check_mark:</a> **DO** include any query parameters required by the service in `nextLink`, including `api-version`.
 
-      <a href="#collections-document-pagination-reliability" name="collections-document-pagination-reliability">:white_check_mark:</a> **DO** clearly document that resources may be skipped or duplicated across pages of a paginated collection unless the operation has made special provisions to prevent this (like taking a time-expiring snapshot of the collection).
+    <a href="#collections-response-array-name" name="collections-response-array-name">:ballot_box_with_check:</a> **YOU SHOULD** use `value` as the name of the top-level array field unless a more appropriate name is available.
 
-      <a href="#collections-include-nextlink-for-more-results" name="collections-include-nextlink-for-more-results">:white_check_mark:</a> **DO** return a `nextLink` field with an absolute URL that the client can GET in order to retrieve the next page of the collection.
+    <a href="#collections-no-nextlink-on-last-page" name="collections-no-nextlink-on-last-page">:no_entry:</a> **DO NOT** return the `nextLink` field at all when returning the last page of the collection.
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    <a href="#collections-nextlink-value-never-null" name="collections-nextlink-value-never-null">:no_entry:</a> **DO NOT** return the `nextLink` field with a value of null.
 
-      Note: The service is responsible for performing any URL-encoding required on the `nextLink` URL.
+    <a href="#collections-avoid-count-property" name="collections-avoid-count-property">:warning:</a> **YOU SHOULD NOT** return a `count` of all objects in the collection as this may be expensive to compute.
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    #### Query options
 
-      <a href="#collections-nextlink-includes-all-query-params" name="collections-nextlink-includes-all-query-params">:white_check_mark:</a> **DO** include any query parameters required by the service in `nextLink`, including `api-version`.
+    <a href="#collections-query-options" name="collections-query-options">:heavy_check_mark:</a> **YOU MAY** support the following query parameters allowing customers to control the list operation:
 
-      <a href="#collections-response-array-name" name="collections-response-array-name">:ballot_box_with_check:</a> **YOU SHOULD** use `value` as the name of the top-level array field unless a more appropriate name is available.
+    Parameter&nbsp;name | Type | Description
+    ------------------- | ---- | -----------
+    `filter`       | string            | an expression on the resource type that selects the resources to be returned
+    `orderby`      | string&nbsp;array | a list of expressions that specify the order of the returned resources
+    `skip`         | integer           | an offset into the collection of the first resource to be returned
+    `top`          | integer           | the maximum number of resources to return from the collection
+    `maxpagesize`  | integer           | the maximum number of resources to include in a single response
+    `select`       | string&nbsp;array | a list of field names to be returned for each resource
+    `expand`       | string&nbsp;array | a list of the related resources to be included in line with each resource
 
-      <a href="#collections-no-nextlink-on-last-page" name="collections-no-nextlink-on-last-page">:no_entry:</a> **DO NOT** return the `nextLink` field at all when returning the last page of the collection.
+    <a href="#collections-error-on-unknown-parameter" name="collections-error-on-unknown-parameter">:white_check_mark:</a> **DO** return an error if the client specifies any parameter not supported by the service.
+- fragment_type: execution
+  sequence: 10
+  content: |-
+    <a href="#collections-parameter-names-case-sensitivity" name="collections-parameter-names-case-sensitivity">:white_check_mark:</a> **DO** treat these query parameter names as case-sensitive.
 
-      <a href="#collections-nextlink-value-never-null" name="collections-nextlink-value-never-null">:no_entry:</a> **DO NOT** return the `nextLink` field with a value of null.
+    <a href="#collections-select-expand-ordering" name="collections-select-expand-ordering">:white_check_mark:</a> **DO** apply `select` or `expand` options after applying all the query options in the table above.
 
-      <a href="#collections-avoid-count-property" name="collections-avoid-count-property">:warning:</a> **YOU SHOULD NOT** return a `count` of all objects in the collection as this may be expensive to compute.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      #### Query options
+    <a href="#collections-query-options-ordering" name="collections-query-options-ordering">:white_check_mark:</a> **DO** apply the query options to the collection in the order shown in the table above.
 
-      <a href="#collections-query-options" name="collections-query-options">:heavy_check_mark:</a> **YOU MAY** support the following query parameters allowing customers to control the list operation:
+    <a href="#collections-query-options-no-dollar-sign" name="collections-query-options-no-dollar-sign">:no_entry:</a> **DO NOT** prefix any of these query parameter names with "$" (the convention in the [OData standard](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_QueryingCollections)).
+- fragment_type: execution
+  sequence: 11
+  content: |-
+    #### filter
 
-      Parameter&nbsp;name | Type | Description
-      ------------------- | ---- | -----------
-      `filter`       | string            | an expression on the resource type that selects the resources to be returned
-      `orderby`      | string&nbsp;array | a list of expressions that specify the order of the returned resources
-      `skip`         | integer           | an offset into the collection of the first resource to be returned
-      `top`          | integer           | the maximum number of resources to return from the collection
-      `maxpagesize`  | integer           | the maximum number of resources to include in a single response
-      `select`       | string&nbsp;array | a list of field names to be returned for each resource
-      `expand`       | string&nbsp;array | a list of the related resources to be included in line with each resource
+    <a href="#collections-filter-param" name="collections-filter-param">:heavy_check_mark:</a> **YOU MAY** support filtering of the results of a list operation with the `filter` query parameter.
 
-      <a href="#collections-error-on-unknown-parameter" name="collections-error-on-unknown-parameter">:white_check_mark:</a> **DO** return an error if the client specifies any parameter not supported by the service.
+    The value of the `filter` query parameter is an expression involving the fields of the resource that produces a Boolean value. This expression is evaluated for each resource in the collection and only items where the expression evaluates to true are included in the response.
 
-      <a href="#collections-parameter-names-case-sensitivity" name="collections-parameter-names-case-sensitivity">:white_check_mark:</a> **DO** treat these query parameter names as case-sensitive.
+    <a href="#collections-filter-behavior" name="collections-filter-behavior">:white_check_mark:</a> **DO** omit all resources from the collection for which the filter expression evaluates to false or to null, or references properties that are unavailable due to permissions.
 
-      <a href="#collections-select-expand-ordering" name="collections-select-expand-ordering">:white_check_mark:</a> **DO** apply `select` or `expand` options after applying all the query options in the table above.
+    Example: return all Products whose Price is less than $10.00
 
-      <a href="#collections-query-options-ordering" name="collections-query-options-ordering">:white_check_mark:</a> **DO** apply the query options to the collection in the order shown in the table above.
+    ```text
+    GET https://api.contoso.com/products?filter=price lt 10.00
+    ```
 
-      <a href="#collections-query-options-no-dollar-sign" name="collections-query-options-no-dollar-sign">:no_entry:</a> **DO NOT** prefix any of these query parameter names with "$" (the convention in the [OData standard](http://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part1-protocol.html#sec_QueryingCollections)).
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      #### filter
+    ##### filter operators
 
-      <a href="#collections-filter-param" name="collections-filter-param">:heavy_check_mark:</a> **YOU MAY** support filtering of the results of a list operation with the `filter` query parameter.
+    :heavy_check_mark: **YOU MAY** support the following operators in filter expressions:
 
-      The value of the `filter` query parameter is an expression involving the fields of the resource that produces a Boolean value. This expression is evaluated for each resource in the collection and only items where the expression evaluates to true are included in the response.
-
-      <a href="#collections-filter-behavior" name="collections-filter-behavior">:white_check_mark:</a> **DO** omit all resources from the collection for which the filter expression evaluates to false or to null, or references properties that are unavailable due to permissions.
-
-      Example: return all Products whose Price is less than $10.00
-
-      ```text
-      GET https://api.contoso.com/products?filter=price lt 10.00
-      ```
-
-      ##### filter operators
-
-      :heavy_check_mark: **YOU MAY** support the following operators in filter expressions:
-
-      Operator                 | Description           | Example
-      --------------------     | --------------------- | -----------------------------------------------------
-      **Comparison Operators** |
+    Operator                 | Description           | Example
+    --------------------     | --------------------- | -----------------------------------------------------
+    **Comparison Operators** |

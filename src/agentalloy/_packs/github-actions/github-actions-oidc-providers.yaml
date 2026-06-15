@@ -1,21 +1,23 @@
 skill_type: domain
 skill_id: github-actions-oidc-providers
 canonical_name: GitHub Actions — OIDC for GCP, Vault, and Cloud Providers
-description: "Deploy code to Google Cloud, HashiCorp Vault, or other cloud providers from GitHub Actions without storing long-lived secrets: configure OpenID Connect (OIDC) to exchange short-lived tokens for temporary access."
+description: 'Deploy code to Google Cloud, HashiCorp Vault, or other cloud providers from GitHub Actions without storing long-lived secrets: configure OpenID Connect (OIDC) to exchange short-lived tokens for temporary access.'
 category: ops
 skill_class: domain
 domain_tags:
-  - oidc
-  - github-actions
-  - gcp
-  - vault
+- oidc
+- github-actions
+- gcp
+- vault
 related:
 - github-actions-deployment-environments
 - github-actions-events-and-triggers
 - github-actions-secrets
 always_apply: false
-phase_scope: [build]
-category_scope: [ops]
+phase_scope:
+- build
+category_scope:
+- ops
 author: authoring-agent
 change_summary: corrected draft based on critic feedback
 raw_prose: |
@@ -174,144 +176,150 @@ raw_prose: |
 
   For more information, see the HashiCorp Vault [documentation](https://www.vaultproject.io/docs/auth/jwt).
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Prerequisites
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Prerequisites
 
-      > [!NOTE]
-      > Google Cloud Platform does not have fixed IP ranges defined for these endpoints.
+    > [!NOTE]
+    > Google Cloud Platform does not have fixed IP ranges defined for these endpoints.
 
-      * Make sure that the value of the issuer claim that's included with the JSON Web Token (JWT) is set to a publicly routable URL. For more information, see [AUTOTITLE](/enterprise-server@latest/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect).
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Adding a Google Cloud Workload Identity Provider
+    * Make sure that the value of the issuer claim that's included with the JSON Web Token (JWT) is set to a publicly routable URL. For more information, see [AUTOTITLE](/enterprise-server@latest/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect).
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Adding a Google Cloud Workload Identity Provider
 
-      To configure the OIDC identity provider in GCP, you will need to perform the following configuration. For instructions on making these changes, refer to [the GCP documentation](https://github.com/google-github-actions/auth).
+    To configure the OIDC identity provider in GCP, you will need to perform the following configuration. For instructions on making these changes, refer to [the GCP documentation](https://github.com/google-github-actions/auth).
 
-      1. Create a new identity pool.
-      1. Configure the mapping and add conditions.
-      1. Connect the new pool to a service account.
+    1. Create a new identity pool.
+    1. Configure the mapping and add conditions.
+    1. Connect the new pool to a service account.
 
-      Additional guidance for configuring the identity provider:
+    Additional guidance for configuring the identity provider:
 
-      * For security hardening, make sure you've reviewed [Configuring the OIDC trust with the cloud](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud). For an example, see [Configuring the subject in your cloud provider](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-subject-in-your-cloud-provider).
-      * For the service account to be available for configuration, it needs to be assigned to the `roles/iam.workloadIdentityUser` role. For more information, see [the GCP documentation](https://cloud.google.com/iam/docs/workload-identity-federation?_ga=2.114275588.-285296507.1634918453#conditions).
-      * The Issuer URL to use: `https://HOSTNAME/_services/token``https://token.actions.githubusercontent.com`
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Updating your workflow
+    * For security hardening, make sure you've reviewed [Configuring the OIDC trust with the cloud](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud). For an example, see [Configuring the subject in your cloud provider](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-subject-in-your-cloud-provider).
+    * For the service account to be available for configuration, it needs to be assigned to the `roles/iam.workloadIdentityUser` role. For more information, see [the GCP documentation](https://cloud.google.com/iam/docs/workload-identity-federation?_ga=2.114275588.-285296507.1634918453#conditions).
+    * The Issuer URL to use: `https://HOSTNAME/_services/token``https://token.actions.githubusercontent.com`
+- fragment_type: execution
+  sequence: 3
+  content: |-
+    ## Updating your workflow
 
-      To update your workflows for OIDC, you will need to make two changes to your YAML:
-      1. Add permissions settings for the token.
-      1. Use the [`google-github-actions/auth`](https://github.com/google-github-actions/auth) action to exchange the OIDC token (JWT) for a cloud access token.
+    To update your workflows for OIDC, you will need to make two changes to your YAML:
+    1. Add permissions settings for the token.
+    1. Use the [`google-github-actions/auth`](https://github.com/google-github-actions/auth) action to exchange the OIDC token (JWT) for a cloud access token.
 
-      ### Adding permissions settings
+    ### Adding permissions settings
 
-      The `id-token` permission is required in your workflow YAML to allow GitHub Actions to request an ID token from the OIDC provider. This token will be used to authenticate with GCP or Vault.
+    The `id-token` permission is required in your workflow YAML to allow GitHub Actions to request an ID token from the OIDC provider. This token will be used to authenticate with GCP or Vault.
 
-      ```yaml
-      permissions:
-        id-token: write
-      ```
+    ```yaml
+    permissions:
+      id-token: write
+    ```
 
-      ### Requesting the access token
+    ### Requesting the access token
 
-      The `google-github-actions/auth` action receives a JWT from the OIDC provider, and then requests an access token from GCP. For more information, see the GCP [documentation](https://github.com/google-github-actions/auth).
+    The `google-github-actions/auth` action receives a JWT from the OIDC provider, and then requests an access token from GCP. For more information, see the GCP [documentation](https://github.com/google-github-actions/auth).
 
-      This example has a job called `Get_OIDC_ID_token` that uses actions to request a list of services from GCP.
+    This example has a job called `Get_OIDC_ID_token` that uses actions to request a list of services from GCP.
 
-      * `WORKLOAD-IDENTITY-PROVIDER`: Replace this with the path to your identity provider in GCP. For example, `projects/example-project-id/locations/global/workloadIdentityPools/name-of-pool/providers/name-of-provider`
-      * `SERVICE-ACCOUNT`: Replace this with the name of your service account in GCP.
+    * `WORKLOAD-IDENTITY-PROVIDER`: Replace this with the path to your identity provider in GCP. For example, `projects/example-project-id/locations/global/workloadIdentityPools/name-of-pool/providers/name-of-provider`
+    * `SERVICE-ACCOUNT`: Replace this with the name of your service account in GCP.
+- fragment_type: execution
+  sequence: 4
+  content: |-
+    This action exchanges a OIDC token for a Google Cloud access token, using [Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation).
 
-      This action exchanges a OIDC token for a Google Cloud access token, using [Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation).
+    ```yaml copy
 
-      ```yaml copy
+    name: List services in GCP
+    on:
+      pull_request:
+        branches:
+          - main
 
-      name: List services in GCP
-      on:
-        pull_request:
-          branches:
-            - main
+    permissions:
+      id-token: write
 
-      permissions:
-        id-token: write
+    jobs:
+      Get_OIDC_ID_token:
+        runs-on: ubuntu-latest
+        steps:
+        - id: 'auth'
+          name: 'Authenticate to GCP'
+          uses: 'google-github-actions/auth@f1e2d3c4b5a6f7e8d9c0b1a2c3d4e5f6a7b8c9d0'
+          with:
+              create_credentials_file: 'true'
+              workload_identity_provider: 'WORKLOAD-IDENTITY-PROVIDER'
+              service_account: 'SERVICE-ACCOUNT'
+        - id: 'gcloud'
+          name: 'gcloud'
+          run: |-
+            gcloud auth login --brief --cred-file="$"
+            gcloud services list
+    ```
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    ## Adding the identity provider to HashiCorp Vault
 
-      jobs:
-        Get_OIDC_ID_token:
-          runs-on: ubuntu-latest
-          steps:
-          - id: 'auth'
-            name: 'Authenticate to GCP'
-            uses: 'google-github-actions/auth@f1e2d3c4b5a6f7e8d9c0b1a2c3d4e5f6a7b8c9d0'
-            with:
-                create_credentials_file: 'true'
-                workload_identity_provider: 'WORKLOAD-IDENTITY-PROVIDER'
-                service_account: 'SERVICE-ACCOUNT'
-          - id: 'gcloud'
-            name: 'gcloud'
-            run: |-
-              gcloud auth login --brief --cred-file="$"
-              gcloud services list
-      ```
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ## Adding the identity provider to HashiCorp Vault
+    To use OIDC with HashiCorp Vault, you will need to add a trust configuration for the OIDC provider. For more information, see the HashiCorp Vault [documentation](https://www.vaultproject.io/docs/auth/jwt).
 
-      To use OIDC with HashiCorp Vault, you will need to add a trust configuration for the OIDC provider. For more information, see the HashiCorp Vault [documentation](https://www.vaultproject.io/docs/auth/jwt).
+    To configure your Vault server to accept JSON Web Tokens (JWT) for authentication:
 
-      To configure your Vault server to accept JSON Web Tokens (JWT) for authentication:
+    1. Enable the JWT `auth` method, and use `write` to apply the configuration to your Vault.
+       For `oidc_discovery_url` and `bound_issuer` parameters, use `https://HOSTNAME/_services/token``https://token.actions.githubusercontent.com`. These parameters allow the Vault server to verify the received JSON Web Tokens (JWT) during the authentication process.
 
-      1. Enable the JWT `auth` method, and use `write` to apply the configuration to your Vault.
-         For `oidc_discovery_url` and `bound_issuer` parameters, use `https://HOSTNAME/_services/token``https://token.actions.githubusercontent.com`. These parameters allow the Vault server to verify the received JSON Web Tokens (JWT) during the authentication process.
+       ```shell copy
+       vault auth enable jwt
+       ```
 
-         ```shell copy
-         vault auth enable jwt
-         ```
+       ```shell copy
+       vault write auth/jwt/config \
+         bound_issuer="https://HOSTNAME/_services/tokenhttps://token.actions.githubusercontent.com" \
+         oidc_discovery_url="https://HOSTNAME/_services/tokenhttps://token.actions.githubusercontent.com"
+       ```
+- fragment_type: execution
+  sequence: 6
+  content: |2-
+       > [!NOTE]
+       > If a unique issuer URL for an enterprise was set using the REST API (as described in [AUTOTITLE](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#switching-to-a-unique-token-url)), the values for `bound_issuer` and `oidc_discovery_url` must match that unique URL. For example, for an enterprise named `octocat` that uses the unique issuer URL, `bound_issuer` and `oidc_discovery_url` must be set to `https://token.actions.githubusercontent.com/octocat`.
 
-         ```shell copy
-         vault write auth/jwt/config \
-           bound_issuer="https://HOSTNAME/_services/tokenhttps://token.actions.githubusercontent.com" \
-           oidc_discovery_url="https://HOSTNAME/_services/tokenhttps://token.actions.githubusercontent.com"
-         ```
+    1. Configure a policy that only grants access to the specific paths your workflows will use to retrieve secrets. For more advanced policies, see the HashiCorp Vault [Policies documentation](https://www.vaultproject.io/docs/concepts/policies).
 
-         > [!NOTE]
-         > If a unique issuer URL for an enterprise was set using the REST API (as described in [AUTOTITLE](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#switching-to-a-unique-token-url)), the values for `bound_issuer` and `oidc_discovery_url` must match that unique URL. For example, for an enterprise named `octocat` that uses the unique issuer URL, `bound_issuer` and `oidc_discovery_url` must be set to `https://token.actions.githubusercontent.com/octocat`.
+       ```shell copy
+       vault policy write myproject-production - <<EOF
+       # Read-only permission on 'secret/data/production/*' path
 
-      1. Configure a policy that only grants access to the specific paths your workflows will use to retrieve secrets. For more advanced policies, see the HashiCorp Vault [Policies documentation](https://www.vaultproject.io/docs/concepts/policies).
+       path "secret/data/production/*" {
+         capabilities = [ "read" ]
+       }
+       EOF
+       ```
 
-         ```shell copy
-         vault policy write myproject-production - <<EOF
-         # Read-only permission on 'secret/data/production/*' path
+    1. Configure roles to group different policies together. If the authentication is successful, these policies are attached to the resulting Vault access token.
+- fragment_type: execution
+  sequence: 7
+  content: |2-
+       ```shell copy
+       vault write auth/jwt/role/myproject-production -<<EOF
+       {
+         "role_type": "jwt",
+         "user_claim": "actor",
+         "bound_claims": {
+           "repository": "user-or-org-name/repo-name"
+         },
+         "policies": ["myproject-production"],
+         "ttl": "10m"
+       }
+       EOF
+       ```
 
-         path "secret/data/production/*" {
-           capabilities = [ "read" ]
-         }
-         EOF
-         ```
+    * `ttl` defines the validity of the resulting access token.
+    * Ensure that the `bound_claims` parameter is defined for your security requirements, and has at least one condition. Optionally, you can also set the `bound_subject` as well as the `bound_audiences` parameter.
+    * To check arbitrary claims in the received JWT payload, the `bound_claims` parameter contains a set of claims and their required values. In the above example, the role will accept any incoming authentication requests from the `repo-name` repository owned by the `user-or-org-name` account.
+    * To see all the available claims supported by 's OIDC provider, see [AUTOTITLE](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud).
 
-      1. Configure roles to group different policies together. If the authentication is successful, these policies are attached to the resulting Vault access token.
-
-         ```shell copy
-         vault write auth/jwt/role/myproject-production -<<EOF
-         {
-           "role_type": "jwt",
-           "user_claim": "actor",
-           "bound_claims": {
-             "repository": "user-or-org-name/repo-name"
-           },
-           "policies": ["myproject-production"],
-           "ttl": "10m"
-         }
-         EOF
-         ```
-
-      * `ttl` defines the validity of the resulting access token.
-      * Ensure that the `bound_claims` parameter is defined for your security requirements, and has at least one condition. Optionally, you can also set the `bound_subject` as well as the `bound_audiences` parameter.
-      * To check arbitrary claims in the received JWT payload, the `bound_claims` parameter contains a set of claims and their required values. In the above example, the role will accept any incoming authentication requests from the `repo-name` repository owned by the `user-or-org-name` account.
-      * To see all the available claims supported by 's OIDC provider, see [AUTOTITLE](/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#configuring-the-oidc-trust-with-the-cloud).
-
-      For more information, see the HashiCorp Vault [documentation](https://www.vaultproject.io/docs/auth/jwt).
+    For more information, see the HashiCorp Vault [documentation](https://www.vaultproject.io/docs/auth/jwt).

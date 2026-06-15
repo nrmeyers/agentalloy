@@ -4,8 +4,8 @@ tier: tooling
 description: |
   Generic testing strategy and Vitest reference patterns — runner fundamentals (describe/hooks/filtering), mocks/spies/module mocking (deferred to needs-human), snapshot testing, and browser/E2E testing with DevTools. Precision-favored tooling tier; cross-cutting strategy skills sit alongside language-specific testing packs (pytest already shipped). Sourced from vitest.dev/llms-full.txt (R1 tier-1) and agent-skills/ canonical testing methodology.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false

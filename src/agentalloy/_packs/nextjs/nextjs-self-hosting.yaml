@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: nextjs-self-hosting
 canonical_name: Next.js Self-Hosting
-description: "Deploy Next.js apps on your own servers or in Docker containers: configure standalone output, handle image optimization, set up ISR caching, and use a reverse proxy like Nginx for production hosting."
+description: 'Deploy Next.js apps on your own servers or in Docker containers: configure standalone output, handle image optimization, set up ISR caching, and use a reverse proxy like Nginx for production hosting.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - nextjs
-  - self-hosting
-  - docker
-  - image-optimization
-  - reverse-proxy
+- nextjs
+- self-hosting
+- docker
+- image-optimization
+- reverse-proxy
 related:
 - nextjs-data-fetching-and-caching
 - nextjs-instrumentation-and-otel
 - nextjs-production-checklist
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: initial authoring draft
 raw_prose: |
@@ -141,124 +143,128 @@ raw_prose: |
 
     async get(key
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Self-hosting Next.js is well-supported but requires conscious choices — standalone output for Docker, image-optimization handling (sharp + standalone), ISR cache backend, and reverse proxy configuration. This skill covers the decision tree.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Self-hosting Next.js is well-supported but requires conscious choices — standalone output for Docker, image-optimization handling (sharp + standalone), ISR cache backend, and reverse proxy configuration. This skill covers the decision tree.
 
-      When [deploying](/docs/app/getting-started/deploying) your Next.js app, you may want to configure how different features are handled based on your infrastructure.
-  - fragment_type: rationale
-    sequence: 2
-    content: |
-      > **🎥 Watch:** Learn more about self-hosting Next.js → [YouTube (45 minutes)](https://www.youtube.com/watch?v=sIVL4JMqRfc).
+    When [deploying](/docs/app/getting-started/deploying) your Next.js app, you may want to configure how different features are handled based on your infrastructure.
+- fragment_type: rationale
+  sequence: 2
+  content: |
+    > **🎥 Watch:** Learn more about self-hosting Next.js → [YouTube (45 minutes)](https://www.youtube.com/watch?v=sIVL4JMqRfc).
 
-      When self-hosting, it's recommended to use a reverse proxy (like nginx) in front of your Next.js server rather than exposing it directly to the internet. A reverse proxy can handle malformed requests, slow connection attacks, payload size limits, rate limiting, and other security concerns, offloading these tasks from the Next.js server. This allows the server to dedicate its resources to rendering rather than request validation.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      [Image Optimization](/docs/app/api-reference/components/image) through `next/image` works self-hosted with zero configuration when deploying using `next start`. If you would prefer to have a separate service to optimize images, you can [configure an image loader](/docs/app/api-reference/components/image#loader).
+    When self-hosting, it's recommended to use a reverse proxy (like nginx) in front of your Next.js server rather than exposing it directly to the internet. A reverse proxy can handle malformed requests, slow connection attacks, payload size limits, rate limiting, and other security concerns, offloading these tasks from the Next.js server. This allows the server to dedicate its resources to rendering rather than request validation.
+- fragment_type: execution
+  sequence: 3
+  content: |
+    [Image Optimization](/docs/app/api-reference/components/image) through `next/image` works self-hosted with zero configuration when deploying using `next start`. If you would prefer to have a separate service to optimize images, you can [configure an image loader](/docs/app/api-reference/components/image#loader).
 
-      Image Optimization can be used with a [static export](/docs/app/guides/static-exports#image-optimization) by defining a custom image loader in `next.config.js`. Note that images are optimized at runtime, not during the build.
+    Image Optimization can be used with a [static export](/docs/app/guides/static-exports#image-optimization) by defining a custom image loader in `next.config.js`. Note that images are optimized at runtime, not during the build.
 
-      > **Good to know:**
-      >
-      > - On glibc-based Linux systems, Image Optimization may require [additional configuration](https://sharp.pixelplumbing.com/install#linux-memory-allocator) to prevent excessive memory usage.
-      > - Learn more about the [caching behavior of optimized images](/docs/app/api-reference/components/image#minimumcachettl) and how to configure the TTL.
-      > - You can also [disable Image Optimization](/docs/app/api-reference/components/image#unoptimized) and still retain other benefits of using `next/image` if you prefer. For example, if you are optimizing images yourself separately.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      [Proxy](/docs/app/api-reference/file-conventions/proxy) works self-hosted with zero configuration when deploying using `next start`. Since it requires access to the incoming request, it is not supported when using a [static export](/docs/app/guides/static-exports).
+    > **Good to know:**
+    >
+    > - On glibc-based Linux systems, Image Optimization may require [additional configuration](https://sharp.pixelplumbing.com/install#linux-memory-allocator) to prevent excessive memory usage.
+    > - Learn more about the [caching behavior of optimized images](/docs/app/api-reference/components/image#minimumcachettl) and how to configure the TTL.
+    > - You can also [disable Image Optimization](/docs/app/api-reference/components/image#unoptimized) and still retain other benefits of using `next/image` if you prefer. For example, if you are optimizing images yourself separately.
+- fragment_type: execution
+  sequence: 4
+  content: |
+    [Proxy](/docs/app/api-reference/file-conventions/proxy) works self-hosted with zero configuration when deploying using `next start`. Since it requires access to the incoming request, it is not supported when using a [static export](/docs/app/guides/static-exports).
 
-      If you are looking to add logic (or use an external package) that requires all Node.js APIs, you might be able to move this logic to a [layout](/docs/app/api-reference/file-conventions/layout) as a [Server Component](/docs/app/getting-started/server-and-client-components). For example, checking [headers](/docs/app/api-reference/functions/headers) and [redirecting](/docs/app/api-reference/functions/redirect). You can also use headers, cookies, or query parameters to [redirect](/docs/app/api-reference/config/next-config-js/redirects#header-cookie-and-query-matching) or [rewrite](/docs/app/api-reference/config/next-config-js/rewrites#header-cookie-and-query-matching) through `next.config.js`. If that does not work, you can also use a [custom server](/docs/pages/guides/custom-server).
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      Next.js can support both build time and runtime environment variables.
+    If you are looking to add logic (or use an external package) that requires all Node.js APIs, you might be able to move this logic to a [layout](/docs/app/api-reference/file-conventions/layout) as a [Server Component](/docs/app/getting-started/server-and-client-components). For example, checking [headers](/docs/app/api-reference/functions/headers) and [redirecting](/docs/app/api-reference/functions/redirect). You can also use headers, cookies, or query parameters to [redirect](/docs/app/api-reference/config/next-config-js/redirects#header-cookie-and-query-matching) or [rewrite](/docs/app/api-reference/config/next-config-js/rewrites#header-cookie-and-query-matching) through `next.config.js`. If that does not work, you can also use a [custom server](/docs/pages/guides/custom-server).
+- fragment_type: execution
+  sequence: 5
+  content: |
+    Next.js can support both build time and runtime environment variables.
 
-      **By default, environment variables are only available on the server**. To expose an environment variable to the browser, it must be prefixed with `NEXT_PUBLIC_`. However, these public environment variables will be inlined into the JavaScript bundle during `next build`.
+    **By default, environment variables are only available on the server**. To expose an environment variable to the browser, it must be prefixed with `NEXT_PUBLIC_`. However, these public environment variables will be inlined into the JavaScript bundle during `next build`.
 
-      To read runtime environment variables, we recommend using `getServerSideProps` or [incrementally adopting the App Router](/docs/app/guides/migrating/app-router-migration).
+    To read runtime environment variables, we recommend using `getServerSideProps` or [incrementally adopting the App Router](/docs/app/guides/migrating/app-router-migration).
 
-      You safely read environment variables on the server during dynamic rendering.
+    You safely read environment variables on the server during dynamic rendering.
 
-      ```tsx filename="app/page.ts" switcher
+    ```tsx filename="app/page.ts" switcher
 
-      export default async function Component() {
-        await connection()
-        // cookies, headers, and other Request-time APIs
-        // will also opt into dynamic rendering, meaning
-        // this env variable is evaluated at runtime
-        const value = process.env.MY_VALUE
-        // ...
+    export default async function Component() {
+      await connection()
+      // cookies, headers, and other Request-time APIs
+      // will also opt into dynamic rendering, meaning
+      // this env variable is evaluated at runtime
+      const value = process.env.MY_VALUE
+      // ...
+    }
+    ```
+
+    ```jsx filename="app/page.js" switcher
+
+    export default async function Component() {
+      await connection()
+      // cookies, headers, and other Request-time APIs
+      // will also opt into dynamic rendering, meaning
+      // this env variable is evaluated at runtime
+      const value = process.env.MY_VALUE
+      // ...
+    }
+    ```
+
+    This allows you to use a singular Docker image that can be promoted through multiple environments with different values.
+
+    > **Good to know:**
+    >
+    > - You can run code on server startup using the [`register` function](/docs/app/guides/instrumentation).
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    Next.js can cache responses, generated static pages, build outputs, and other static assets like images, fonts, and scripts.
+
+    Caching and revalidating pages (with [Incremental Static Regeneration](/docs/app/guides/incremental-static-regeneration)) use the **same Next.js server cache**. By default, this cache is stored on the local filesystem (on disk) of each Next.js server instance.
+
+    This works automatically for a single self-hosted `next start` instance with persistent local disk. If you run multiple instances, use ephemeral compute, or place a CDN/reverse proxy in front of Next.js, also review [Configuring Caching](#configuring-caching), [Multi-Instance Cache Coordination](#multi-instance-cache-coordination), and [Usage with CDNs](#usage-with-cdns).
+
+    You can configure the Next.js cache location if you want to persist cached pages and data to durable storage, or share the cache across multiple containers or instances of your Next.js application.
+
+    ### Automatic Caching
+- fragment_type: execution
+  sequence: 7
+  content: |-
+    - Next.js sets the `Cache-Control` header of `public, max-age=31536000, immutable` to truly immutable assets. It cannot be overridden. These immutable files contain a SHA-hash in the file name, so they can be safely cached indefinitely. For example, [Static Image Imports](/docs/app/getting-started/images#local-images). You can [configure the TTL](/docs/app/api-reference/components/image#minimumcachettl) for images.
+    - Incremental Static Regeneration (ISR) sets the `Cache-Control` header of `s-maxage: <revalidate in getStaticProps>, stale-while-revalidate`. This revalidation time is defined in your [`getStaticProps` function](/docs/pages/building-your-application/data-fetching/get-static-props) in seconds. If you set `revalidate: false`, it will default to a one-year cache duration. To leverage this at the CDN layer, your CDN/reverse proxy must respect these directives and cache-key variability ([CDN Caching](/docs/app/guides/cdn-caching)); otherwise, responses may bypass CDN caching or serve stale/mismatched variants during client-side navigation.
+    - Dynamically rendered pages set a `Cache-Control` header of `private, no-cache, no-store, max-age=0, must-revalidate` to prevent user-specific data from being cached. This applies to both the App Router and Pages Router. This also includes [Draft Mode](/docs/app/guides/draft-mode).
+- fragment_type: execution
+  sequence: 8
+  content: |-
+    ### Static Assets
+
+    If you want to host static assets on a different domain or CDN, you can use the `assetPrefix` [configuration](/docs/app/api-reference/config/next-config-js/assetPrefix) in `next.config.js`. Next.js will use this asset prefix when retrieving JavaScript or CSS files. Separating your assets to a different domain does come with the downside of extra time spent on DNS and TLS resolution.
+
+    [Learn more about `assetPrefix`](/docs/app/api-reference/config/next-config-js/assetPrefix).
+
+    ### Configuring Caching
+
+    By default, generated cache assets will be stored in memory (defaults to 50mb) and on disk. On ephemeral compute platforms (common serverless setups), local disk is often non-persistent or unavailable, so this cache is effectively short-lived and per-instance. If you are hosting Next.js using a container orchestration platform like Kubernetes, each pod will have a copy of the cache. To prevent stale data from being shown since the cache is not shared between pods by default, you can configure the Next.js cache to provide a cache handler and disable in-memory caching.
+
+    To configure the cache location when self-hosting, you can configure a custom handler in your `next.config.js` file:
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    For production deployments, use this as a starting point and extend it with durable storage, eviction policies, error handling, and distributed tag coordination. See [Custom Next.js Cache Handler](/docs/app/api-reference/config/next-config-js/incrementalCacheHandlerPath) and the [Redis `cacheHandler` example](https://github.com/vercel/next.js/tree/canary/examples/cache-handler-redis). If you are configuring backends for `'use cache'` directives, use [`cacheHandlers`](/docs/app/api-reference/config/next-config-js/cacheHandlers).
+
+    ```jsx filename="next.config.js"
+    module.exports = {
+      cacheHandler: require.resolve('./cache-handler.js'),
+      cacheMaxMemorySize: 0, // disable default in-memory caching
+    }
+    ```
+
+    Then, create `cache-handler.js` in the root of your project, for example:
+
+    ```jsx filename="cache-handler.js"
+    const cache = new Map()
+
+    module.exports = class CacheHandler {
+      constructor(options) {
+        this.options = options
       }
-      ```
 
-      ```jsx filename="app/page.js" switcher
-
-      export default async function Component() {
-        await connection()
-        // cookies, headers, and other Request-time APIs
-        // will also opt into dynamic rendering, meaning
-        // this env variable is evaluated at runtime
-        const value = process.env.MY_VALUE
-        // ...
-      }
-      ```
-
-      This allows you to use a singular Docker image that can be promoted through multiple environments with different values.
-
-      > **Good to know:**
-      >
-      > - You can run code on server startup using the [`register` function](/docs/app/guides/instrumentation).
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      Next.js can cache responses, generated static pages, build outputs, and other static assets like images, fonts, and scripts.
-
-      Caching and revalidating pages (with [Incremental Static Regeneration](/docs/app/guides/incremental-static-regeneration)) use the **same Next.js server cache**. By default, this cache is stored on the local filesystem (on disk) of each Next.js server instance.
-
-      This works automatically for a single self-hosted `next start` instance with persistent local disk. If you run multiple instances, use ephemeral compute, or place a CDN/reverse proxy in front of Next.js, also review [Configuring Caching](#configuring-caching), [Multi-Instance Cache Coordination](#multi-instance-cache-coordination), and [Usage with CDNs](#usage-with-cdns).
-
-      You can configure the Next.js cache location if you want to persist cached pages and data to durable storage, or share the cache across multiple containers or instances of your Next.js application.
-
-      ### Automatic Caching
-
-      - Next.js sets the `Cache-Control` header of `public, max-age=31536000, immutable` to truly immutable assets. It cannot be overridden. These immutable files contain a SHA-hash in the file name, so they can be safely cached indefinitely. For example, [Static Image Imports](/docs/app/getting-started/images#local-images). You can [configure the TTL](/docs/app/api-reference/components/image#minimumcachettl) for images.
-      - Incremental Static Regeneration (ISR) sets the `Cache-Control` header of `s-maxage: <revalidate in getStaticProps>, stale-while-revalidate`. This revalidation time is defined in your [`getStaticProps` function](/docs/pages/building-your-application/data-fetching/get-static-props) in seconds. If you set `revalidate: false`, it will default to a one-year cache duration. To leverage this at the CDN layer, your CDN/reverse proxy must respect these directives and cache-key variability ([CDN Caching](/docs/app/guides/cdn-caching)); otherwise, responses may bypass CDN caching or serve stale/mismatched variants during client-side navigation.
-      - Dynamically rendered pages set a `Cache-Control` header of `private, no-cache, no-store, max-age=0, must-revalidate` to prevent user-specific data from being cached. This applies to both the App Router and Pages Router. This also includes [Draft Mode](/docs/app/guides/draft-mode).
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      ### Static Assets
-
-      If you want to host static assets on a different domain or CDN, you can use the `assetPrefix` [configuration](/docs/app/api-reference/config/next-config-js/assetPrefix) in `next.config.js`. Next.js will use this asset prefix when retrieving JavaScript or CSS files. Separating your assets to a different domain does come with the downside of extra time spent on DNS and TLS resolution.
-
-      [Learn more about `assetPrefix`](/docs/app/api-reference/config/next-config-js/assetPrefix).
-
-      ### Configuring Caching
-
-      By default, generated cache assets will be stored in memory (defaults to 50mb) and on disk. On ephemeral compute platforms (common serverless setups), local disk is often non-persistent or unavailable, so this cache is effectively short-lived and per-instance. If you are hosting Next.js using a container orchestration platform like Kubernetes, each pod will have a copy of the cache. To prevent stale data from being shown since the cache is not shared between pods by default, you can configure the Next.js cache to provide a cache handler and disable in-memory caching.
-
-      To configure the cache location when self-hosting, you can configure a custom handler in your `next.config.js` file:
-
-      For production deployments, use this as a starting point and extend it with durable storage, eviction policies, error handling, and distributed tag coordination. See [Custom Next.js Cache Handler](/docs/app/api-reference/config/next-config-js/incrementalCacheHandlerPath) and the [Redis `cacheHandler` example](https://github.com/vercel/next.js/tree/canary/examples/cache-handler-redis). If you are configuring backends for `'use cache'` directives, use [`cacheHandlers`](/docs/app/api-reference/config/next-config-js/cacheHandlers).
-
-      ```jsx filename="next.config.js"
-      module.exports = {
-        cacheHandler: require.resolve('./cache-handler.js'),
-        cacheMaxMemorySize: 0, // disable default in-memory caching
-      }
-      ```
-
-      Then, create `cache-handler.js` in the root of your project, for example:
-
-      ```jsx filename="cache-handler.js"
-      const cache = new Map()
-
-      module.exports = class CacheHandler {
-        constructor(options) {
-          this.options = options
-        }
-
-        async get(key
+      async get(key

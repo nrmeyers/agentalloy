@@ -31,7 +31,7 @@ def test_defaults_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     expected_corpus = str(tmp_path / "_xdg_data" / "agentalloy" / "corpus")
     assert s.ladybug_db_path == f"{expected_corpus}/ladybug"
     assert s.duckdb_path == f"{expected_corpus}/skills.duck"
-    assert s.runtime_embedding_model == "qwen3-embedding:0.6b"
+    assert s.runtime_embedding_model == "nomic-embed-text-v1.5.Q8_0.gguf"
 
 
 def test_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

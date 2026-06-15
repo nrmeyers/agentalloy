@@ -1,11 +1,11 @@
 name: rest
-version: 1.0.3
+version: 1.0.4
 tier: protocol
 description: |
   REST API design patterns — HTTP and resource design fundamentals (URLs as nouns, method semantics, status codes, JSON conventions), common API patterns (pagination, long-running operations, conditional requests, partial updates), and versioning + backward-compatibility discipline. Precision-favored protocol tier; sourced from microsoft/api-guidelines (Azure REST API Guidelines + Considerations + Versioning) per R1 tier-3 procedure.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -15,10 +15,10 @@ depends_on:
 skills:
 - skill_id: rest-common-patterns
   file: rest-common-patterns.yaml
-  fragment_count: 5
+  fragment_count: 11
 - skill_id: rest-http-and-resource-design
   file: rest-http-and-resource-design.yaml
   fragment_count: 11
 - skill_id: rest-versioning-and-compatibility
   file: rest-versioning-and-compatibility.yaml
-  fragment_count: 3
+  fragment_count: 8

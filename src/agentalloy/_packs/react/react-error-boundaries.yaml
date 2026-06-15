@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: react-error-boundaries
 canonical_name: React Error Boundaries
-description: "Prevent your entire React app from crashing when a component fails: wrap UI sections in error boundaries to catch rendering errors, show a fallback message, and log the issue without affecting the rest of the page."
+description: 'Prevent your entire React app from crashing when a component fails: wrap UI sections in error boundaries to catch rendering errors, show a fallback message, and log the issue without affecting the rest of the page.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - react
-  - error-handling
-  - class-components
-  - componentDidCatch
-  - getDerivedStateFromError
+- react
+- error-handling
+- class-components
+- componentDidCatch
+- getDerivedStateFromError
 related:
 - error-handling-patterns
 - react-effects-and-cleanup
 - react-server-components-and-suspense
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -269,200 +271,205 @@ raw_prose: |
 
   If you implement `componentDidMount`,
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Error boundaries are class components that catch errors thrown during rendering, in lifecycle methods, and in constructors of the children below them. They DO NOT catch errors in event handlers, async code, server-side rendering, or themselves. Implement with `static getDerivedStateFromError` for fallback state and `componentDidCatch` for logging. This skill covers the error-boundary pattern + its limits.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Error boundaries are class components that catch errors thrown during rendering, in lifecycle methods, and in constructors of the children below them. They DO NOT catch errors in event handlers, async code, server-side rendering, or themselves. Implement with `static getDerivedStateFromError` for fallback state and `componentDidCatch` for logging. This skill covers the error-boundary pattern + its limits.
 
-      We recommend defining components as functions instead of classes. [See how to migrate.](#alternatives)
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      `Component` is the base class for the React components defined as [JavaScript classes.](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes) Class components are still supported by React, but we don't recommend using them in new code.
+    We recommend defining components as functions instead of classes. [See how to migrate.](#alternatives)
+- fragment_type: execution
+  sequence: 2
+  content: |
+    `Component` is the base class for the React components defined as [JavaScript classes.](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes) Class components are still supported by React, but we don't recommend using them in new code.
 
-      ```js
-      class Greeting extends Component {
-        render() {
-          return <h1>Hello, {this.props.name}!</h1>;
-        }
+    ```js
+    class Greeting extends Component {
+      render() {
+        return <h1>Hello, {this.props.name}!</h1>;
       }
-      ```
-  - fragment_type: example
-    sequence: 3
-    content: |
-      To define a React component as a class, extend the built-in `Component` class and define a [`render` method:](#render)
+    }
+    ```
+- fragment_type: example
+  sequence: 3
+  content: |
+    To define a React component as a class, extend the built-in `Component` class and define a [`render` method:](#render)
 
-      ```js
-      import { Component } from 'react';
+    ```js
+    import { Component } from 'react';
 
-      class Greeting extends Component {
-        render() {
-          return <h1>Hello, {this.props.name}!</h1>;
-        }
+    class Greeting extends Component {
+      render() {
+        return <h1>Hello, {this.props.name}!</h1>;
       }
-      ```
+    }
+    ```
 
-      Only the `render` method is required, other methods are optional.
+    Only the `render` method is required, other methods are optional.
 
-      [See more examples below.](#usage)
-  - fragment_type: example
-    sequence: 4
-    content: |
-      The [context](/learn/passing-data-deeply-with-context) of a class component is available as `this.context`. It is only available if you specify *which* context you want to receive using [`static contextType`](#static-contexttype).
+    [See more examples below.](#usage)
+- fragment_type: example
+  sequence: 4
+  content: |
+    The [context](/learn/passing-data-deeply-with-context) of a class component is available as `this.context`. It is only available if you specify *which* context you want to receive using [`static contextType`](#static-contexttype).
 
-      A class component can only read one context at a time.
+    A class component can only read one context at a time.
 
-      ```js {2,5}
-      class Button extends Component {
-        static contextType = ThemeContext;
+    ```js {2,5}
+    class Button extends Component {
+      static contextType = ThemeContext;
 
-        render() {
-          const theme = this.context;
-          const className = 'button-' + theme;
-          return (
-            <button className={className}>
-              {this.props.children}
+      render() {
+        const theme = this.context;
+        const className = 'button-' + theme;
+        return (
+          <button className={className}>
+            {this.props.children}
+          </button>
+        );
+      }
+    }
+
+    Reading `this.context` in class components is equivalent to [`useContext`](/reference/react/useContext) in function components.
+
+    [See how to migrate.](#migrating-a-component-with-context-from-a-class-to-a-function)
+- fragment_type: example
+  sequence: 5
+  content: |
+    The props passed to a class component are available as `this.props`.
+
+    ```js {3}
+    class Greeting extends Component {
+      render() {
+        return <h1>Hello, {this.props.name}!</h1>;
+      }
+    }
+
+    <Greeting name="Taylor" />
+    ```
+
+    Reading `this.props` in class components is equivalent to [declaring props](/learn/passing-props-to-a-component#step-2-read-props-inside-the-child-component) in function components.
+
+    [See how to migrate.](#migrating-a-simple-component-from-a-class-to-a-function)
+- fragment_type: example
+  sequence: 6
+  content: |
+    The state of a class component is available as `this.state`. The `state` field must be an object. Do not mutate the state directly. If you wish to change the state, call `setState` with the new state.
+
+    ```js {2-4,7-9,18}
+    class Counter extends Component {
+      state = {
+        age: 42,
+      };
+
+      handleAgeChange = () => {
+        this.setState({
+          age: this.state.age + 1
+        });
+      };
+
+      render() {
+        return (
+          <>
+            <button onClick={this.handleAgeChange}>
+            Increment age
             </button>
-          );
-        }
+            <p>You are {this.state.age}.</p>
+          </>
+        );
+      }
+    }
+    ```
+
+    Defining `state` in class components is equivalent to calling [`useState`](/reference/react/useState) in function components.
+
+    [See how to migrate.](#migrating-a-component-with-state-from-a-class-to-a-function)
+- fragment_type: example
+  sequence: 7
+  content: |-
+    The [constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/constructor) runs before your class component *mounts* (gets added to the screen). Typically, a constructor is only used for two purposes in React. It lets you declare state and [bind](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_objects/Function/bind) your class methods to the class instance:
+
+    ```js {2-6}
+    class Counter extends Component {
+      constructor(props) {
+        super(props);
+        this.state = { counter: 0 };
+        this.handleClick = this.handleClick.bind(this);
       }
 
-      Reading `this.context` in class components is equivalent to [`useContext`](/reference/react/useContext) in function components.
-
-      [See how to migrate.](#migrating-a-component-with-context-from-a-class-to-a-function)
-  - fragment_type: example
-    sequence: 5
-    content: |
-      The props passed to a class component are available as `this.props`.
-
-      ```js {3}
-      class Greeting extends Component {
-        render() {
-          return <h1>Hello, {this.props.name}!</h1>;
-        }
+      handleClick() {
+        // ...
       }
+    ```
 
-      <Greeting name="Taylor" />
-      ```
+    If you use modern JavaScript syntax, constructors are rarely needed. Instead, you can rewrite this code above using the [public class field syntax](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Public_class_fields) which is supported both by modern browsers and tools like [Babel:](https://babeljs.io/)
 
-      Reading `this.props` in class components is equivalent to [declaring props](/learn/passing-props-to-a-component#step-2-read-props-inside-the-child-component) in function components.
+    ```js {2,4}
+    class Counter extends Component {
+      state = { counter: 0 };
 
-      [See how to migrate.](#migrating-a-simple-component-from-a-class-to-a-function)
-  - fragment_type: example
-    sequence: 6
-    content: |
-      The state of a class component is available as `this.state`. The `state` field must be an object. Do not mutate the state directly. If you wish to change the state, call `setState` with the new state.
-
-      ```js {2-4,7-9,18}
-      class Counter extends Component {
-        state = {
-          age: 42,
-        };
-
-        handleAgeChange = () => {
-          this.setState({
-            age: this.state.age + 1
-          });
-        };
-
-        render() {
-          return (
-            <>
-              <button onClick={this.handleAgeChange}>
-              Increment age
-              </button>
-              <p>You are {this.state.age}.</p>
-            </>
-          );
-        }
+      handleClick = () => {
+        // ...
       }
-      ```
+    }
+    ```
 
-      Defining `state` in class components is equivalent to calling [`useState`](/reference/react/useState) in function components.
+    A constructor should not contain any side effects or subscriptions.
 
-      [See how to migrate.](#migrating-a-component-with-state-from-a-class-to-a-function)
-  - fragment_type: example
-    sequence: 7
-    content: |
-      The [constructor](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/constructor) runs before your class component *mounts* (gets added to the screen). Typically, a constructor is only used for two purposes in React. It lets you declare state and [bind](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_objects/Function/bind) your class methods to the class instance:
+    #### Parameters {/*constructor-parameters*/}
+- fragment_type: example
+  sequence: 8
+  content: |-
+    * `props`: The component's initial props.
 
-      ```js {2-6}
-      class Counter extends Component {
-        constructor(props) {
-          super(props);
-          this.state = { counter: 0 };
-          this.handleClick = this.handleClick.bind(this);
-        }
+    #### Returns {/*constructor-returns*/}
 
-        handleClick() {
-          // ...
-        }
-      ```
+    `constructor` should not return anything.
 
-      If you use modern JavaScript syntax, constructors are rarely needed. Instead, you can rewrite this code above using the [public class field syntax](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Classes/Public_class_fields) which is supported both by modern browsers and tools like [Babel:](https://babeljs.io/)
+    #### Caveats {/*constructor-caveats*/}
 
-      ```js {2,4}
-      class Counter extends Component {
-        state = { counter: 0 };
+    * Do not run any side effects or subscriptions in the constructor. Instead, use [`componentDidMount`](#componentdidmount) for that.
 
-        handleClick = () => {
-          // ...
-        }
-      }
-      ```
+    * Inside a constructor, you need to call `super(props)` before any other statement. If you don't do that, `this.props` will be `undefined` while the constructor runs, which can be confusing and cause bugs.
 
-      A constructor should not contain any side effects or subscriptions.
+    * Constructor is the only place where you can assign [`this.state`](#state) directly. In all other methods, you need to use [`this.setState()`](#setstate) instead. Do not call `setState` in the constructor.
 
-      #### Parameters {/*constructor-parameters*/}
+    * When you use [server rendering,](/reference/react-dom/server) the constructor will run on the server too, followed by the [`render`](#render) method. However, lifecycle methods like `componentDidMount` or `componentWillUnmount` will not run on the server.
 
-      * `props`: The component's initial props.
+    * When [Strict Mode](/reference/react/StrictMode) is on, React will call `constructor` twice in development and then throw away one of the instances. This helps you notice the accidental side effects that need to be moved out of the `constructor`.
+- fragment_type: example
+  sequence: 9
+  content: There is no exact equivalent for `constructor` in function components. To declare state in a function component, call [`useState`.](/reference/react/useState) To avoid recalculating the initial state, [pass a function to `useState`.](/reference/react/useState#avoiding-recreating-the-initial-state)
+- fragment_type: example
+  sequence: 10
+  content: |-
+    If you define `componentDidCatch`, React will call it when some child component (including distant children) throws an error during rendering. This lets you log that error to an error reporting service in production.
 
-      #### Returns {/*constructor-returns*/}
+    Typically, it is used together with [`static getDerivedStateFromError`](#static-getderivedstatefromerror) which lets you update state in response to an error and display an error message to the user. A component with these methods is called an *Error Boundary*.
 
-      `constructor` should not return anything.
+    [See an example.](#catching-rendering-errors-with-an-error-boundary)
 
-      #### Caveats {/*constructor-caveats*/}
+    #### Parameters {/*componentdidcatch-parameters*/}
 
-      * Do not run any side effects or subscriptions in the constructor. Instead, use [`componentDidMount`](#componentdidmount) for that.
+    * `error`: The error that was thrown. In practice, it will usually be an instance of [`Error`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error) but this is not guaranteed because JavaScript allows to [`throw`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/throw) any value, including strings or even `null`.
 
-      * Inside a constructor, you need to call `super(props)` before any other statement. If you don't do that, `this.props` will be `undefined` while the constructor runs, which can be confusing and cause bugs.
+    * `info`: An object containing additional information about the error. Its `componentStack` field contains a stack trace with the component that threw, as well as the names and source locations of all its parent components. In production, the component names will be minified. If you set up production error reporting, you can decode the component stack using sourcemaps the same way as you would do for regular JavaScript error stacks.
+- fragment_type: example
+  sequence: 11
+  content: |-
+    #### Returns {/*componentdidcatch-returns*/}
 
-      * Constructor is the only place where you can assign [`this.state`](#state) directly. In all other methods, you need to use [`this.setState()`](#setstate) instead. Do not call `setState` in the constructor.
+    `componentDidCatch` should not return anything.
 
-      * When you use [server rendering,](/reference/react-dom/server) the constructor will run on the server too, followed by the [`render`](#render) method. However, lifecycle methods like `componentDidMount` or `componentWillUnmount` will not run on the server.
+    #### Caveats {/*componentdidcatch-caveats*/}
 
-      * When [Strict Mode](/reference/react/StrictMode) is on, React will call `constructor` twice in development and then throw away one of the instances. This helps you notice the accidental side effects that need to be moved out of the `constructor`.
+    * In the past, it was common to call `setState` inside `componentDidCatch` in order to update the UI and display the fallback error message. This is deprecated in favor of defining [`static getDerivedStateFromError`.](#static-getderivedstatefromerror)
 
-      There is no exact equivalent for `constructor` in function components. To declare state in a function component, call [`useState`.](/reference/react/useState) To avoid recalculating the initial state, [pass a function to `useState`.](/reference/react/useState#avoiding-recreating-the-initial-state)
-  - fragment_type: example
-    sequence: 8
-    content: |
-      If you define `componentDidCatch`, React will call it when some child component (including distant children) throws an error during rendering. This lets you log that error to an error reporting service in production.
+    * Production and development builds of React slightly differ in the way `componentDidCatch` handles errors. In development, the errors will bubble up to `window`, which means that any `window.onerror` or `window.addEventListener('error', callback)` will intercept the errors that have been caught by `componentDidCatch`. In production, instead, the errors will not bubble up, which means any ancestor error handler will only receive errors not explicitly caught by `componentDidCatch`.
 
-      Typically, it is used together with [`static getDerivedStateFromError`](#static-getderivedstatefromerror) which lets you update state in response to an error and display an error message to the user. A component with these methods is called an *Error Boundary*.
+    There is no direct equivalent for `componentDidCatch` in function components yet. If you'd like to avoid creating class components, write a single `ErrorBoundary` component like above and use it throughout your app. Alternatively, you can use the [`react-error-boundary`](https://github.com/bvaughn/react-error-boundary) package which does that for you.
+- fragment_type: example
+  sequence: 12
+  content: |-
+    If you define the `componentDidMount` method, React will call it when your component is added *(mounted)* to the screen. This is a common place to start data fetching, set up subscriptions, or manipulate the DOM nodes.
 
-      [See an example.](#catching-rendering-errors-with-an-error-boundary)
-
-      #### Parameters {/*componentdidcatch-parameters*/}
-
-      * `error`: The error that was thrown. In practice, it will usually be an instance of [`Error`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error) but this is not guaranteed because JavaScript allows to [`throw`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/throw) any value, including strings or even `null`.
-
-      * `info`: An object containing additional information about the error. Its `componentStack` field contains a stack trace with the component that threw, as well as the names and source locations of all its parent components. In production, the component names will be minified. If you set up production error reporting, you can decode the component stack using sourcemaps the same way as you would do for regular JavaScript error stacks.
-
-      #### Returns {/*componentdidcatch-returns*/}
-
-      `componentDidCatch` should not return anything.
-
-      #### Caveats {/*componentdidcatch-caveats*/}
-
-      * In the past, it was common to call `setState` inside `componentDidCatch` in order to update the UI and display the fallback error message. This is deprecated in favor of defining [`static getDerivedStateFromError`.](#static-getderivedstatefromerror)
-
-      * Production and development builds of React slightly differ in the way `componentDidCatch` handles errors. In development, the errors will bubble up to `window`, which means that any `window.onerror` or `window.addEventListener('error', callback)` will intercept the errors that have been caught by `componentDidCatch`. In production, instead, the errors will not bubble up, which means any ancestor error handler will only receive errors not explicitly caught by `componentDidCatch`.
-
-      There is no direct equivalent for `componentDidCatch` in function components yet. If you'd like to avoid creating class components, write a single `ErrorBoundary` component like above and use it throughout your app. Alternatively, you can use the [`react-error-boundary`](https://github.com/bvaughn/react-error-boundary) package which does that for you.
-  - fragment_type: example
-    sequence: 9
-    content: |
-      If you define the `componentDidMount` method, React will call it when your component is added *(mounted)* to the screen. This is a common place to start data fetching, set up subscriptions, or manipulate the DOM nodes.
-
-      If you implement `componentDidMount`,
+    If you implement `componentDidMount`,

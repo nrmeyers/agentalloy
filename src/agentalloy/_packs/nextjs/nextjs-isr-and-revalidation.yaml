@@ -1,20 +1,22 @@
 skill_type: domain
 skill_id: nextjs-isr-and-revalidation
 canonical_name: Next.js ISR and Revalidation
-description: "Serve fast, static pages for blogs, docs, or product listings that update without full rebuilds: configure time-based or on-demand revalidation in Next.js to refresh content automatically or after user actions like form submissions."
+description: 'Serve fast, static pages for blogs, docs, or product listings that update without full rebuilds: configure time-based or on-demand revalidation in Next.js to refresh content automatically or after user actions like form submissions.'
 category: engineering
 skill_class: domain
 deprecated: true
 superseded_by: nextjs-data-fetching-and-caching
 domain_tags:
-  - nextjs
-  - isr
-  - revalidation
-  - static-site-generation
-  - on-demand-rendering
+- nextjs
+- isr
+- revalidation
+- static-site-generation
+- on-demand-rendering
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: authoring-agent
 change_summary: |
   initial authoring draft. Deprecated 2026-06-03: superseded by nextjs-data-fetching-and-caching
@@ -229,231 +231,227 @@ raw_prose: |
 
   - [`getStaticProps`](/docs/pages/building-your-application/data-fetching/get-static-props)
   - [`res.revalidate`](/docs/pages/building-your-application/routing/api-routes#response-helpers)
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      ISR is Next.js's strategy for static-with-updates pages. Time-based via `revalidate`; on-demand via `revalidatePath`/`revalidateTag`. This skill covers both modes + their trade-offs.
+    ISR is Next.js's strategy for static-with-updates pages. Time-based via `revalidate`; on-demand via `revalidatePath`/`revalidateTag`. This skill covers both modes + their trade-offs.
 
-      - [Next.js Commerce](https://vercel.com/templates/next.js/nextjs-commerce)
-      - [On-Demand ISR](https://on-demand-isr.vercel.app)
-      - [Next.js Forms](https://github.com/vercel/next.js/tree/canary/examples/next-forms)
+    - [Next.js Commerce](https://vercel.com/templates/next.js/nextjs-commerce)
+    - [On-Demand ISR](https://on-demand-isr.vercel.app)
+    - [Next.js Forms](https://github.com/vercel/next.js/tree/canary/examples/next-forms)
 
-      Incremental Static Regeneration (ISR) enables you to:
+    Incremental Static Regeneration (ISR) enables you to:
 
-      - Update static content without rebuilding the entire site
-      - Reduce server load by serving prerendered, static pages for most requests
-      - Ensure proper `cache-control` headers are automatically added to pages
-      - Handle large amounts of content pages without long `next build` times
+    - Update static content without rebuilding the entire site
+    - Reduce server load by serving prerendered, static pages for most requests
+    - Ensure proper `cache-control` headers are automatically added to pages
+    - Handle large amounts of content pages without long `next build` times
+- fragment_type: example
+  sequence: 2
+  content: |
+    Here's a minimal example:
 
-  - fragment_type: example
-    sequence: 2
-    content: |
-      Here's a minimal example:
+    ```tsx filename="app/blog/[id]/page.tsx" switcher
+    interface Post {
+      id: string
+      title: string
+      content: string
+    }
 
-      ```tsx filename="app/blog/[id]/page.tsx" switcher
-      interface Post {
-        id: string
-        title: string
-        content: string
+    // Next.js will invalidate the cache when a
+    // request comes in, at most once every 60 seconds.
+    export const revalidate = 60
+
+    export async function generateStaticParams() {
+      const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) =>
+        res.json()
+      )
+      return posts.map((post) => ({
+        id: String(post.id),
+      }))
+    }
+
+    export default async function Page({
+      params,
+    }: {
+      params: Promise<{ id: string }>
+    }) {
+      const { id } = await params
+      const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then(
+        (res) => res.json()
+      )
+      return (
+        <main>
+          <h1>{post.title}</h1>
+          <p>{post.content}</p>
+        </main>
+      )
+    }
+    ```
+
+    ```jsx filename="app/blog/[id]/page.jsx" switcher
+    // Next.js will invalidate the cache when a
+    // request comes in, at most once every 60 seconds.
+    export const revalidate = 60
+
+    export async function generateStaticParams() {
+      const posts = await fetch('https://api.vercel.app/blog').then((res) =>
+        res.json()
+      )
+      return posts.map((post) => ({
+        id: String(post.id),
+      }))
+    }
+
+    export default async function Page({ params }) {
+      const { id } = await params
+      const post = await fetch(`https://api.vercel.app/blog/${id}`).then((res) =>
+        res.json()
+      )
+      return (
+        <main>
+          <h1>{post.title}</h1>
+          <p>{post.content}</p>
+        </main>
+      )
+    }
+    ```
+- fragment_type: execution
+  sequence: 3
+  content: |
+    Here's how this example works:
+
+    1. During `next build`, all known blog posts are generated
+    2. All requests made to these pages (e.g. `/blog/1`) are cached and instantaneous
+    3. After 60 seconds has passed, the next request will still return the cached (now stale) page
+    4. The cache is invalidated and a new version of the page begins generating in the background
+    5. Once generated successfully, the next request will return the updated page and cache it for subsequent requests
+    6. If `/blog/26` is requested, and it exists, the page will be generated on-demand. This behavior can be changed by using a different [dynamicParams](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams) value. However, if the post does not exist, then 404 is returned.
+- fragment_type: example
+  sequence: 4
+  content: |-
+    ```tsx filename="pages/blog/[id].tsx" switcher
+
+    interface Post {
+      id: string
+      title: string
+      content: string
+    }
+
+    interface Props {
+      post: Post
+    }
+
+    export const getStaticPaths: GetStaticPaths = async () => {
+      const posts = await fetch('https://api.vercel.app/blog').then((res) =>
+        res.json()
+      )
+      const paths = posts.map((post: Post) => ({
+        params: { id: String(post.id) },
+      }))
+
+      return { paths, fallback: 'blocking' }
+    }
+
+    export const getStaticProps: GetStaticProps<Props> = async ({
+      params,
+    }: {
+      params: { id: string }
+    }) => {
+      const post = await fetch(`https://api.vercel.app/blog/${params.id}`).then(
+        (res) => res.json()
+      )
+
+      return {
+        props: { post },
+        // Next.js will invalidate the cache when a
+        // request comes in, at most once every 60 seconds.
+        revalidate: 60,
       }
+    }
 
-      // Next.js will invalidate the cache when a
-      // request comes in, at most once every 60 seconds.
-      export const revalidate = 60
+    export default function Page({ post }: Props) {
+      return (
+        <main>
+          <h1>{post.title}</h1>
+          <p>{post.content}</p>
+        </main>
+      )
+    }
+    ```
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ```jsx filename="pages/blog/[id].jsx" switcher
+    export async function getStaticPaths() {
+      const posts = await fetch('https://api.vercel.app/blog').then((res) =>
+        res.json()
+      )
+      const paths = posts.map((post) => ({
+        params: { id: post.id },
+      }))
 
-      export async function generateStaticParams() {
-        const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) =>
-          res.json()
-        )
-        return posts.map((post) => ({
-          id: String(post.id),
-        }))
+      return { paths, fallback: 'blocking' }
+    }
+
+    export async function getStaticProps({ params }) {
+      const post = await fetch(`https://api.vercel.app/blog/${params.id}`).then(
+        (res) => res.json()
+      )
+
+      return {
+        props: { post },
+        // Next.js will invalidate the cache when a
+        // request comes in, at most once every 60 seconds.
+        revalidate: 60,
       }
+    }
 
-      export default async function Page({
-        params,
-      }: {
-        params: Promise<{ id: string }>
-      }) {
-        const { id } = await params
-        const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then(
-          (res) => res.json()
-        )
-        return (
-          <main>
-            <h1>{post.title}</h1>
-            <p>{post.content}</p>
-          </main>
-        )
-      }
-      ```
+    export default function Page({ post }) {
+      return (
+        <main>
+          <h1>{post.title}</h1>
+          <p>{post.content}</p>
+        </main>
+      )
+    }
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |
+    Here's how this example works:
 
-      ```jsx filename="app/blog/[id]/page.jsx" switcher
-      // Next.js will invalidate the cache when a
-      // request comes in, at most once every 60 seconds.
-      export const revalidate = 60
-
-      export async function generateStaticParams() {
-        const posts = await fetch('https://api.vercel.app/blog').then((res) =>
-          res.json()
-        )
-        return posts.map((post) => ({
-          id: String(post.id),
-        }))
-      }
-
-      export default async function Page({ params }) {
-        const { id } = await params
-        const post = await fetch(`https://api.vercel.app/blog/${id}`).then((res) =>
-          res.json()
-        )
-        return (
-          <main>
-            <h1>{post.title}</h1>
-            <p>{post.content}</p>
-          </main>
-        )
-      }
-      ```
-
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      Here's how this example works:
-
-      1. During `next build`, all known blog posts are generated
-      2. All requests made to these pages (e.g. `/blog/1`) are cached and instantaneous
-      3. After 60 seconds has passed, the next request will still return the cached (now stale) page
-      4. The cache is invalidated and a new version of the page begins generating in the background
-      5. Once generated successfully, the next request will return the updated page and cache it for subsequent requests
-      6. If `/blog/26` is requested, and it exists, the page will be generated on-demand. This behavior can be changed by using a different [dynamicParams](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams) value. However, if the post does not exist, then 404 is returned.
-
-  - fragment_type: example
-    sequence: 4
-    content: |
-      ```tsx filename="pages/blog/[id].tsx" switcher
-
-      interface Post {
-        id: string
-        title: string
-        content: string
-      }
-
-      interface Props {
-        post: Post
-      }
-
-      export const getStaticPaths: GetStaticPaths = async () => {
-        const posts = await fetch('https://api.vercel.app/blog').then((res) =>
-          res.json()
-        )
-        const paths = posts.map((post: Post) => ({
-          params: { id: String(post.id) },
-        }))
-
-        return { paths, fallback: 'blocking' }
-      }
-
-      export const getStaticProps: GetStaticProps<Props> = async ({
-        params,
-      }: {
-        params: { id: string }
-      }) => {
-        const post = await fetch(`https://api.vercel.app/blog/${params.id}`).then(
-          (res) => res.json()
-        )
-
-        return {
-          props: { post },
-          // Next.js will invalidate the cache when a
-          // request comes in, at most once every 60 seconds.
-          revalidate: 60,
-        }
-      }
-
-      export default function Page({ post }: Props) {
-        return (
-          <main>
-            <h1>{post.title}</h1>
-            <p>{post.content}</p>
-          </main>
-        )
-      }
-      ```
-
-      ```jsx filename="pages/blog/[id].jsx" switcher
-      export async function getStaticPaths() {
-        const posts = await fetch('https://api.vercel.app/blog').then((res) =>
-          res.json()
-        )
-        const paths = posts.map((post) => ({
-          params: { id: post.id },
-        }))
-
-        return { paths, fallback: 'blocking' }
-      }
-
-      export async function getStaticProps({ params }) {
-        const post = await fetch(`https://api.vercel.app/blog/${params.id}`).then(
-          (res) => res.json()
-        )
-
-        return {
-          props: { post },
-          // Next.js will invalidate the cache when a
-          // request comes in, at most once every 60 seconds.
-          revalidate: 60,
-        }
-      }
-
-      export default function Page({ post }) {
-        return (
-          <main>
-            <h1>{post.title}</h1>
-            <p>{post.content}</p>
-          </main>
-        )
-      }
-      ```
-
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      Here's how this example works:
-
-      1. During `next build`, all known blog posts are generated
-      2. All requests made to these pages (e.g. `/blog/1`) are cached and instantaneous
-      3. After 60 seconds has passed, the next request will still return the cached (now stale) page
-      4. The cache is invalidated and a new version of the page begins generating in the background
-      5. Once generated successfully, the next request will return the updated page and cache it for subsequent requests
-      6. If `/blog/26` is requested, and it exists, the page will be generated on-demand. This behavior can be changed by using a different [fallback](/docs/pages/api-reference/functions/get-static-paths#fallback-false) value. However, if the post does not exist, then 404 is returned.
-
-  - fragment_type: rationale
-    sequence: 6
-    content: |
-      ## Reference
+    1. During `next build`, all known blog posts are generated
+    2. All requests made to these pages (e.g. `/blog/1`) are cached and instantaneous
+    3. After 60 seconds has passed, the next request will still return the cached (now stale) page
+    4. The cache is invalidated and a new version of the page begins generating in the background
+    5. Once generated successfully, the next request will return the updated page and cache it for subsequent requests
+    6. If `/blog/26` is requested, and it exists, the page will be generated on-demand. This behavior can be changed by using a different [fallback](/docs/pages/api-reference/functions/get-static-paths#fallback-false) value. However, if the post does not exist, then 404 is returned.
+- fragment_type: rationale
+  sequence: 7
+  content: |-
+    ## Reference
 
 
 
-      ### Route segment config
+    ### Route segment config
 
-      - [`revalidate`](/docs/app/guides/caching-without-cache-components#route-segment-config-revalidate)
-      - [`dynamicParams`](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams)
+    - [`revalidate`](/docs/app/guides/caching-without-cache-components#route-segment-config-revalidate)
+    - [`dynamicParams`](/docs/app/api-reference/file-conventions/route-segment-config/dynamicParams)
 
-      ### Functions
+    ### Functions
 
-      - [`revalidatePath`](/docs/app/api-reference/functions/revalidatePath)
-      - [`revalidateTag`](/docs/app/api-reference/functions/revalidateTag)
+    - [`revalidatePath`](/docs/app/api-reference/functions/revalidatePath)
+    - [`revalidateTag`](/docs/app/api-reference/functions/revalidateTag)
 
 
 
 
 
-      ### Functions
+    ### Functions
 
-      - [`getStaticProps`](/docs/pages/building-your-application/data-fetching/get-static-props)
-      - [`res.revalidate`](/docs/pages/building-your-application/routing/api-routes#response-helpers)
+    - [`getStaticProps`](/docs/pages/building-your-application/data-fetching/get-static-props)
+    - [`res.revalidate`](/docs/pages/building-your-application/routing/api-routes#response-helpers)

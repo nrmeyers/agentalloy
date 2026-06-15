@@ -1,7 +1,7 @@
 skill_type: domain
 skill_id: sdd-verify-and-review
 canonical_name: SDD Verify and Code Review
-description: "Review code before merging to ensure it meets quality standards: check for correctness, readability, security, and performance, and verify the implementation matches the original design to prevent drift."
+description: 'Review code before merging to ensure it meets quality standards: check for correctness, readability, security, and performance, and verify the implementation matches the original design to prevent drift.'
 category: review
 skill_class: workflow
 domain_tags:
@@ -15,227 +15,532 @@ related:
 - code-review-practices
 - sys-sdd-build
 always_apply: false
-phase_scope: [design]
-category_scope: [process]
+phase_scope:
+- design
+category_scope:
+- process
 author: navistone
 change_summary: initial authoring draft
-raw_prose: "# SDD — Verify and Code Review\n\n## Overview\n\nThe verify phase is the gate before delivery. Tests pass, the linter is green, types check, and a structured review compares the implementation against the spec/design/plan to catch drift. This skill covers the verify checklist + review patterns.\n\nSourced from agent-skills/code-review-and-quality.\n\n---\n\n\n# Code Review and Quality\n\n## Overview\n\nMulti-dimensional code review with quality gates. Every change gets reviewed before merge — no exceptions. Review covers five axes: correctness, readability, architecture, security, and performance.\n\n**The approval standard:** Approve a change when it definitely improves overall code health, even if it isn't perfect. Perfect code doesn't exist — the goal is continuous improvement. Don't block a change because it isn't exactly how you would have written it. If it improves the codebase and follows the project's conventions, approve it.\n\n## When to Use\n\n- Before merging any\
-  \ PR or change\n- After completing a feature implementation\n- When another agent or model produced code you need to evaluate\n- When refactoring existing code\n- After any bug fix (review both the fix and the regression test)\n\n## The Five-Axis Review\n\nEvery review evaluates code across these dimensions:\n\n### 1. Correctness\n\nDoes the code do what it claims to do?\n\n- Does it match the spec or task requirements?\n- Are edge cases handled (null, empty, boundary values)?\n- Are error paths handled (not just the happy path)?\n- Does it pass all tests? Are the tests actually testing the right things?\n- Are there off-by-one errors, race conditions, or state inconsistencies?\n\n### 2. Readability & Simplicity\n\nCan another engineer (or agent) understand this code without the author explaining it?\n\n- Are names descriptive and consistent with project conventions? (No `temp`, `data`, `result` without context)\n- Is the control flow straightforward (avoid nested ternaries, deep callbacks)?\n\
-  - Is the code organized logically (related code grouped, clear module boundaries)?\n- Are there any \"clever\" tricks that should be simplified?\n- **Could this be done in fewer lines?** (1000 lines where 100 suffice is a failure)\n- **Are abstractions earning their complexity?** (Don't generalize until the third use case)\n- Would comments help clarify non-obvious intent? (But don't comment obvious code.)\n- Are there dead code artifacts: no-op variables (`_unused`), backwards-compat shims, or `// removed` comments?\n\n### 3. Architecture\n\nDoes the change fit the system's design?\n\n- Does it follow existing patterns or introduce a new one? If new, is it justified?\n- Does it maintain clean module boundaries?\n- Is there code duplication that should be shared?\n- Are dependencies flowing in the right direction (no circular dependencies)?\n- Is the abstraction level appropriate (not over-engineered, not too coupled)?\n\n### 4. Security\n\nFor detailed security guidance, see `security-and-hardening`.\
-  \ Does the change introduce vulnerabilities?\n\n- Is user input validated and sanitized?\n- Are secrets kept out of code, logs, and version control?\n- Is authentication/authorization checked where needed?\n- Are SQL queries parameterized (no string concatenation)?\n- Are outputs encoded to prevent XSS?\n- Are dependencies from trusted sources with no known vulnerabilities?\n- Is data from external sources (APIs, logs, user content, config files) treated as untrusted?\n- Are external data flows validated at system boundaries before use in logic or rendering?\n\n### 5. Performance\n\nFor detailed profiling and optimization, see `performance-optimization`. Does the change introduce performance problems?\n\n- Any N+1 query patterns?\n- Any unbounded loops or unconstrained data fetching?\n- Any synchronous operations that should be async?\n- Any unnecessary re-renders in UI components?\n- Any missing pagination on list endpoints?\n- Any large objects created in hot paths?\n\n## Change Sizing\n\
-  \nSmall, focused changes are easier to review, faster to merge, and safer to deploy. Target these sizes:\n\n```\n~100 lines changed   → Good. Reviewable in one sitting.\n~300 lines changed   → Acceptable if it's a single logical change.\n~1000 lines changed  → Too large. Split it.\n```\n\n**What counts as \"one change\":** A single self-contained modification that addresses one thing, includes related tests, and keeps the system functional after submission. One part of a feature — not the whole feature.\n\n**Splitting strategies when a change is too large:**\n\n| Strategy | How | When |\n|----------|-----|------|\n| **Stack** | Submit a small change, start the next one based on it | Sequential dependencies |\n| **By file group** | Separate changes for groups needing different reviewers | Cross-cutting concerns |\n| **Horizontal** | Create shared code/stubs first, then consumers | Layered architecture |\n| **Vertical** | Break into smaller full-stack slices of the feature | Feature work\
-  \ |\n\n**When large changes are acceptable:** Complete file deletions and automated refactoring where the reviewer only needs to verify intent, not every line.\n\n**Separate refactoring from feature work.** A change that refactors existing code and adds new behavior is two changes — submit them separately. Small cleanups (variable renaming) can be included at reviewer discretion.\n\n## Change Descriptions\n\nEvery change needs a description that stands alone in version control history.\n\n**First line:** Short, imperative, standalone. \"Delete the FizzBuzz RPC\" not \"Deleting the FizzBuzz RPC.\" Must be informative enough that someone searching history can understand the change without reading the diff.\n\n**Body:** What is changing and why. Include context, decisions, and reasoning not visible in the code itself. Link to bug numbers, benchmark results, or design docs where relevant. Acknowledge approach shortcomings when they exist.\n\n**Anti-patterns:** \"Fix bug,\" \"Fix build,\" \"\
-  Add patch,\" \"Moving code from A to B,\" \"Phase 1,\" \"Add convenience functions.\"\n\n## Review Process\n\n### Step 1: Understand the Context\n\nBefore looking at code, understand the intent:\n\n```\n- What is this change trying to accomplish?\n- What spec or task does it implement?\n- What is the expected behavior change?\n```\n\n### Step 2: Review the Tests First\n\nTests reveal intent and coverage:\n\n```\n- Do tests exist for the change?\n- Do they test behavior (not implementation details)?\n- Are edge cases covered?\n- Do tests have descriptive names?\n- Would the tests catch a regression if the code changed?\n```\n\n### Step 3: Review the Implementation\n\nWalk through the code with the five axes in mind:\n\n```\nFor each file changed:\n1. Correctness: Does this code do what the test says it should?\n2. Readability: Can I understand this without help?\n3. Architecture: Does this fit the system?\n4. Security: Any vulnerabilities?\n5. Performance: Any bottlenecks?\n```\n\n### Step\
-  \ 4: Categorize Findings\n\nLabel every comment with its severity so the author knows what's required vs optional:\n\n| Prefix | Meaning | Author Action |\n|--------|---------|---------------|\n| *(no prefix)* | Required change | Must address before merge |\n| **Critical:** | Blocks merge | Security vulnerability, data loss, broken functionality |\n| **Nit:** | Minor, optional | Author may ignore — formatting, style preferences |\n| **Optional:** / **Consider:** | Suggestion | Worth considering but not required |\n| **FYI** | Informational only | No action needed — context for future reference |\n\nThis prevents authors from treating all feedback as mandatory and wasting time on optional suggestions.\n\n### Step 5: Verify the Verification\n\nCheck the author's verification story:\n\n```\n- What tests were run?\n- Did the build pass?\n- Was the change tested manually?\n- Are there screenshots for UI changes?\n- Is there a before/after comparison?\n```\n\n## Multi-Model Review Pattern\n\n\
-  Use different models for different review perspectives:\n\n```\nModel A writes the code\n    │\n    ▼\nModel B reviews for correctness and architecture\n    │\n    ▼\nModel A addresses the feedback\n    │\n    ▼\nHuman makes the final call\n```\n\nThis catches issues that a single model might miss — different models have different blind spots.\n\n**Example prompt for a review agent:**\n```\nReview this code change for correctness, security, and adherence to\nour project conventions. The spec says [X]. The change should [Y].\nFlag any issues as Critical, Important, or Suggestion.\n```\n\n## Dead Code Hygiene\n\nAfter any refactoring or implementation change, check for orphaned code:\n\n1. Identify code that is now unreachable or unused\n2. List it explicitly\n3. **Ask before deleting:** \"Should I remove these now-unused elements: [list]?\"\n\nDon't leave dead code lying around — it confuses future readers and agents. But don't silently delete things you're not sure about. When in doubt,\
-  \ — replaced by formatDate()\n- OldTaskCard component in src/components/ — replaced by TaskCard\n- LEGACY_API_URL constant in src/config.ts — no remaining references\n→ Safe to remove these?\n```\n\n## Artifact Completeness Evaluation (Soft Advisory)\n\nWhen you see a `[agentalloy-eval]` block in your context, the system is\nasking you to evaluate whether a specific artifact meets its completeness\ncriteria. This is a **soft advisory** — it does not block your work.\n\n```\n[agentalloy-eval] Soft completeness check — does this artifact meet the bar?\nCriteria: <criteria text>\n\n<artifact content>\n```\n\n**How to respond:**\n\n1. Read the criteria and the artifact content.\n2. Compare them honestly — does the artifact actually meet the stated bar?\n3. If yes, acknowledge it briefly and continue.\n4. If no, note what's missing and address it before proceeding.\n\nThis is your chance to catch quality issues that automated checks can't\ndetect: incomplete specs, half-finished implementations, missing edge\ncases, or artifacts that look structurally correct but lack substance.\nBe honest but pragmatic — \"good enough to proceed\" counts as complete.\n```"
+raw_prose: |-
+  # SDD — Verify and Code Review
+
+  ## Overview
+
+  The verify phase is the gate before delivery. Tests pass, the linter is green, types check, and a structured review compares the implementation against the spec/design/plan to catch drift. This skill covers the verify checklist + review patterns.
+
+  Sourced from agent-skills/code-review-and-quality.
+
+  ---
+
+
+  # Code Review and Quality
+
+  ## Overview
+
+  Multi-dimensional code review with quality gates. Every change gets reviewed before merge — no exceptions. Review covers five axes: correctness, readability, architecture, security, and performance.
+
+  **The approval standard:** Approve a change when it definitely improves overall code health, even if it isn't perfect. Perfect code doesn't exist — the goal is continuous improvement. Don't block a change because it isn't exactly how you would have written it. If it improves the codebase and follows the project's conventions, approve it.
+
+  ## When to Use
+
+  - Before merging any PR or change
+  - After completing a feature implementation
+  - When another agent or model produced code you need to evaluate
+  - When refactoring existing code
+  - After any bug fix (review both the fix and the regression test)
+
+  ## The Five-Axis Review
+
+  Every review evaluates code across these dimensions:
+
+  ### 1. Correctness
+
+  Does the code do what it claims to do?
+
+  - Does it match the spec or task requirements?
+  - Are edge cases handled (null, empty, boundary values)?
+  - Are error paths handled (not just the happy path)?
+  - Does it pass all tests? Are the tests actually testing the right things?
+  - Are there off-by-one errors, race conditions, or state inconsistencies?
+
+  ### 2. Readability & Simplicity
+
+  Can another engineer (or agent) understand this code without the author explaining it?
+
+  - Are names descriptive and consistent with project conventions? (No `temp`, `data`, `result` without context)
+  - Is the control flow straightforward (avoid nested ternaries, deep callbacks)?
+  - Is the code organized logically (related code grouped, clear module boundaries)?
+  - Are there any "clever" tricks that should be simplified?
+  - **Could this be done in fewer lines?** (1000 lines where 100 suffice is a failure)
+  - **Are abstractions earning their complexity?** (Don't generalize until the third use case)
+  - Would comments help clarify non-obvious intent? (But don't comment obvious code.)
+  - Are there dead code artifacts: no-op variables (`_unused`), backwards-compat shims, or `// removed` comments?
+
+  ### 3. Architecture
+
+  Does the change fit the system's design?
+
+  - Does it follow existing patterns or introduce a new one? If new, is it justified?
+  - Does it maintain clean module boundaries?
+  - Is there code duplication that should be shared?
+  - Are dependencies flowing in the right direction (no circular dependencies)?
+  - Is the abstraction level appropriate (not over-engineered, not too coupled)?
+
+  ### 4. Security
+
+  For detailed security guidance, see `security-and-hardening`. Does the change introduce vulnerabilities?
+
+  - Is user input validated and sanitized?
+  - Are secrets kept out of code, logs, and version control?
+  - Is authentication/authorization checked where needed?
+  - Are SQL queries parameterized (no string concatenation)?
+  - Are outputs encoded to prevent XSS?
+  - Are dependencies from trusted sources with no known vulnerabilities?
+  - Is data from external sources (APIs, logs, user content, config files) treated as untrusted?
+  - Are external data flows validated at system boundaries before use in logic or rendering?
+
+  ### 5. Performance
+
+  For detailed profiling and optimization, see `performance-optimization`. Does the change introduce performance problems?
+
+  - Any N+1 query patterns?
+  - Any unbounded loops or unconstrained data fetching?
+  - Any synchronous operations that should be async?
+  - Any unnecessary re-renders in UI components?
+  - Any missing pagination on list endpoints?
+  - Any large objects created in hot paths?
+
+  ## Change Sizing
+
+  Small, focused changes are easier to review, faster to merge, and safer to deploy. Target these sizes:
+
+  ```
+  ~100 lines changed   → Good. Reviewable in one sitting.
+  ~300 lines changed   → Acceptable if it's a single logical change.
+  ~1000 lines changed  → Too large. Split it.
+  ```
+
+  **What counts as "one change":** A single self-contained modification that addresses one thing, includes related tests, and keeps the system functional after submission. One part of a feature — not the whole feature.
+
+  **Splitting strategies when a change is too large:**
+
+  | Strategy | How | When |
+  |----------|-----|------|
+  | **Stack** | Submit a small change, start the next one based on it | Sequential dependencies |
+  | **By file group** | Separate changes for groups needing different reviewers | Cross-cutting concerns |
+  | **Horizontal** | Create shared code/stubs first, then consumers | Layered architecture |
+  | **Vertical** | Break into smaller full-stack slices of the feature | Feature work |
+
+  **When large changes are acceptable:** Complete file deletions and automated refactoring where the reviewer only needs to verify intent, not every line.
+
+  **Separate refactoring from feature work.** A change that refactors existing code and adds new behavior is two changes — submit them separately. Small cleanups (variable renaming) can be included at reviewer discretion.
+
+  ## Change Descriptions
+
+  Every change needs a description that stands alone in version control history.
+
+  **First line:** Short, imperative, standalone. "Delete the FizzBuzz RPC" not "Deleting the FizzBuzz RPC." Must be informative enough that someone searching history can understand the change without reading the diff.
+
+  **Body:** What is changing and why. Include context, decisions, and reasoning not visible in the code itself. Link to bug numbers, benchmark results, or design docs where relevant. Acknowledge approach shortcomings when they exist.
+
+  **Anti-patterns:** "Fix bug," "Fix build," "Add patch," "Moving code from A to B," "Phase 1," "Add convenience functions."
+
+  ## Review Process
+
+  ### Step 1: Understand the Context
+
+  Before looking at code, understand the intent:
+
+  ```
+  - What is this change trying to accomplish?
+  - What spec or task does it implement?
+  - What is the expected behavior change?
+  ```
+
+  ### Step 2: Review the Tests First
+
+  Tests reveal intent and coverage:
+
+  ```
+  - Do tests exist for the change?
+  - Do they test behavior (not implementation details)?
+  - Are edge cases covered?
+  - Do tests have descriptive names?
+  - Would the tests catch a regression if the code changed?
+  ```
+
+  ### Step 3: Review the Implementation
+
+  Walk through the code with the five axes in mind:
+
+  ```
+  For each file changed:
+  1. Correctness: Does this code do what the test says it should?
+  2. Readability: Can I understand this without help?
+  3. Architecture: Does this fit the system?
+  4. Security: Any vulnerabilities?
+  5. Performance: Any bottlenecks?
+  ```
+
+  ### Step 4: Categorize Findings
+
+  Label every comment with its severity so the author knows what's required vs optional:
+
+  | Prefix | Meaning | Author Action |
+  |--------|---------|---------------|
+  | *(no prefix)* | Required change | Must address before merge |
+  | **Critical:** | Blocks merge | Security vulnerability, data loss, broken functionality |
+  | **Nit:** | Minor, optional | Author may ignore — formatting, style preferences |
+  | **Optional:** / **Consider:** | Suggestion | Worth considering but not required |
+  | **FYI** | Informational only | No action needed — context for future reference |
+
+  This prevents authors from treating all feedback as mandatory and wasting time on optional suggestions.
+
+  ### Step 5: Verify the Verification
+
+  Check the author's verification story:
+
+  ```
+  - What tests were run?
+  - Did the build pass?
+  - Was the change tested manually?
+  - Are there screenshots for UI changes?
+  - Is there a before/after comparison?
+  ```
+
+  ## Multi-Model Review Pattern
+
+  Use different models for different review perspectives:
+
+  ```
+  Model A writes the code
+      │
+      ▼
+  Model B reviews for correctness and architecture
+      │
+      ▼
+  Model A addresses the feedback
+      │
+      ▼
+  Human makes the final call
+  ```
+
+  This catches issues that a single model might miss — different models have different blind spots.
+
+  **Example prompt for a review agent:**
+  ```
+  Review this code change for correctness, security, and adherence to
+  our project conventions. The spec says [X]. The change should [Y].
+  Flag any issues as Critical, Important, or Suggestion.
+  ```
+
+  ## Dead Code Hygiene
+
+  After any refactoring or implementation change, check for orphaned code:
+
+  1. Identify code that is now unreachable or unused
+  2. List it explicitly
+  3. **Ask before deleting:** "Should I remove these now-unused elements: [list]?"
+
+  Don't leave dead code lying around — it confuses future readers and agents. But don't silently delete things you're not sure about. When in doubt, — replaced by formatDate()
+  - OldTaskCard component in src/components/ — replaced by TaskCard
+  - LEGACY_API_URL constant in src/config.ts — no remaining references
+  → Safe to remove these?
+  ```
+
+  ## Artifact Completeness Evaluation (Soft Advisory)
+
+  When you see a `[agentalloy-eval]` block in your context, the system is
+  asking you to evaluate whether a specific artifact meets its completeness
+  criteria. This is a **soft advisory** — it does not block your work.
+
+  ```
+  [agentalloy-eval] Soft completeness check — does this artifact meet the bar?
+  Criteria: <criteria text>
+
+  <artifact content>
+  ```
+
+  **How to respond:**
+
+  1. Read the criteria and the artifact content.
+  2. Compare them honestly — does the artifact actually meet the stated bar?
+  3. If yes, acknowledge it briefly and continue.
+  4. If no, note what's missing and address it before proceeding.
+
+  This is your chance to catch quality issues that automated checks can't
+  detect: incomplete specs, half-finished implementations, missing edge
+  cases, or artifacts that look structurally correct but lack substance.
+  Be honest but pragmatic — "good enough to proceed" counts as complete.
+  ```
 fragments:
 - fragment_type: setup
   sequence: 1
-  content: 'The verify phase is the gate before delivery. Tests pass, the linter is green, types check, and a structured review compares the implementation against the spec/design/plan to catch drift. This skill covers the verify checklist + review patterns.
-
+  content: |
+    The verify phase is the gate before delivery. Tests pass, the linter is green, types check, and a structured review compares the implementation against the spec/design/plan to catch drift. This skill covers the verify checklist + review patterns.
 
     Sourced from agent-skills/code-review-and-quality.
-
-    '
 - fragment_type: execution
   sequence: 2
-  content: 'Multi-dimensional code review with quality gates. Every change gets reviewed before merge — no exceptions. Review covers five axes: correctness, readability, architecture, security, and performance.
+  content: |
+    Multi-dimensional code review with quality gates. Every change gets reviewed before merge — no exceptions. Review covers five axes: correctness, readability, architecture, security, and performance.
 
-
-    **The approval standard:** Approve a change when it definitely improves overall code health, even if it isn''t perfect. Perfect code doesn''t exist — the goal is continuous improvement. Don''t block a change because it isn''t exactly how you would have written it. If it improves the codebase and follows the project''s conventions, approve it.
-
-    '
+    **The approval standard:** Approve a change when it definitely improves overall code health, even if it isn't perfect. Perfect code doesn't exist — the goal is continuous improvement. Don't block a change because it isn't exactly how you would have written it. If it improves the codebase and follows the project's conventions, approve it.
 - fragment_type: rationale
   sequence: 3
-  content: '## When to Use
-
+  content: |
+    ## When to Use
 
     - Before merging any PR or change
-
     - After completing a feature implementation
-
     - When another agent or model produced code you need to evaluate
-
     - When refactoring existing code
-
     - After any bug fix (review both the fix and the regression test)
-
-    '
 - fragment_type: execution
   sequence: 4
-  content: '## The Five-Axis Review
-
+  content: |-
+    ## The Five-Axis Review
 
     Every review evaluates code across these dimensions:
 
-
     ### 1. Correctness
-
 
     Does the code do what it claims to do?
 
-
     - Does it match the spec or task requirements?
-
     - Are edge cases handled (null, empty, boundary values)?
-
     - Are error paths handled (not just the happy path)?
-
     - Does it pass all tests? Are the tests actually testing the right things?
-
     - Are there off-by-one errors, race conditions, or state inconsistencies?
-
 
     ### 2. Readability & Simplicity
 
-
     Can another engineer (or agent) understand this code without the author explaining it?
 
-
     - Are names descriptive and consistent with project conventions? (No `temp`, `data`, `result` without context)
-
     - Is the control flow straightforward (avoid nested ternaries, deep callbacks)?
-
     - Is the code organized logically (related code grouped, clear module boundaries)?
-
     - Are there any "clever" tricks that should be simplified?
-
     - **Could this be done in fewer lines?** (1000 lines where 100 suffice is a failure)
-
-    - **Are abstractions earning their complexity?** (Don''t generalize until the third use case)
-
-    - Would comments help clarify non-obvious intent? (But don''t comment obvious code.)
-
+    - **Are abstractions earning their complexity?** (Don't generalize until the third use case)
+    - Would comments help clarify non-obvious intent? (But don't comment obvious code.)
     - Are there dead code artifacts: no-op variables (`_unused`), backwards-compat shims, or `// removed` comments?
-
 
     ### 3. Architecture
 
-
-    Does the change fit the system''s design?
-
-
+    Does the change fit the system's design?
+- fragment_type: execution
+  sequence: 5
+  content: |-
     - Does it follow existing patterns or introduce a new one? If new, is it justified?
-
     - Does it maintain clean module boundaries?
-
     - Is there code duplication that should be shared?
-
     - Are dependencies flowing in the right direction (no circular dependencies)?
-
     - Is the abstraction level appropriate (not over-engineered, not too coupled)?
-
 
     ### 4. Security
 
-
     For detailed security guidance, see `security-and-hardening`. Does the change introduce vulnerabilities?
 
-
     - Is user input validated and sanitized?
-
     - Are secrets kept out of code, logs, and version control?
-
     - Is authentication/authorization checked where needed?
-
     - Are SQL queries parameterized (no string concatenation)?
-
     - Are outputs encoded to prevent XSS?
-
     - Are dependencies from trusted sources with no known vulnerabilities?
-
     - Is data from external sources (APIs, logs, user content, config files) treated as untrusted?
-
     - Are external data flows validated at system boundaries before use in logic or rendering?
-
 
     ### 5. Performance
 
-
     For detailed profiling and optimization, see `performance-optimization`. Does the change introduce performance problems?
 
-
     - Any N+1 query patterns?
-
     - Any unbounded loops or unconstrained data fetching?
-
     - Any synchronous operations that should be async?
-
     - Any unnecessary re-renders in UI components?
-
     - Any missing pagination on list endpoints?
-
     - Any large objects created in hot paths?
-
-    '
 - fragment_type: rationale
-  sequence: 5
-  content: '## Change Sizing
-
+  sequence: 6
+  content: |
+    ## Change Sizing
 
     Small, focused changes are easier to review, faster to merge, and safer to deploy. Target these sizes:
 
-
     ```
-
     ~100 lines changed   → Good. Reviewable in one sitting.
-
-    ~300 lines changed   → Acceptable if it''s a single logical change.
-
+    ~300 lines changed   → Acceptable if it's a single logical change.
     ~1000 lines changed  → Too large. Split it.
-
     ```
-
 
     **What counts as "one change":** A single self-contained modification that addresses one thing, includes related tests, and keeps the system functional after submission. One part of a feature — not the whole feature.
 
-
     **Splitting strategies when a change is too large:**
 
-
     | Strategy | How | When |
-
     |----------|-----|------|
-
     | **Stack** | Submit a small change, start the next one based on it | Sequential dependencies |
-
     | **By file group** | Separate changes for groups needing different reviewers | Cross-cutting concerns |
-
     | **Horizontal** | Create shared code/stubs first, then consumers | Layered architecture |
-
     | **Vertical** | Break into smaller full-stack slices of the feature | Feature work |
-
 
     **When large changes are acceptable:** Complete file deletions and automated refactoring where the reviewer only needs to verify intent, not every line.
 
-
     **Separate refactoring from feature work.** A change that refactors existing code and adds new behavior is two changes — submit them separately. Small cleanups (variable renaming) can be included at reviewer discretion.
-
-    '
 - fragment_type: execution
-  sequence: 6
-  content: '## Change Descriptions
-
+  sequence: 7
+  content: |
+    ## Change Descriptions
 
     Every change needs a description that stands alone in version control history.
 
-
     **First line:** Short, imperative, standalone. "Delete the FizzBuzz RPC" not "Deleting the FizzBuzz RPC." Must be informative enough that someone searching history can understand the change without reading the diff.
-
 
     **Body:** What is changing and why. Include context, decisions, and reasoning not visible in the code itself. Link to bug numbers, benchmark results, or design docs where relevant. Acknowledge approach shortcomings when they exist.
 
-
     **Anti-patterns:** "Fix bug," "Fix build," "Add patch," "Moving code from A to B," "Phase 1," "Add convenience functions."
-
-    '
 - fragment_type: execution
-  sequence: 7
-  content: "## Review Process\n\n### Step 1: Understand the Context\n\nBefore looking at code, understand the intent:\n\n```\n- What is this change trying to accomplish?\n- What spec or task does it implement?\n- What is the expected behavior change?\n```\n\n### Step 2: Review the Tests First\n\nTests reveal intent and coverage:\n\n```\n- Do tests exist for the change?\n- Do they test behavior (not implementation details)?\n- Are edge cases covered?\n- Do tests have descriptive names?\n- Would the tests catch a regression if the code changed?\n```\n\n### Step 3: Review the Implementation\n\nWalk through the code with the five axes in mind:\n\n```\nFor each file changed:\n1. Correctness: Does this code do what the test says it should?\n2. Readability: Can I understand this without help?\n3. Architecture: Does this fit the system?\n4. Security: Any vulnerabilities?\n5. Performance: Any bottlenecks?\n```\n\n### Step 4: Categorize Findings\n\nLabel every comment with its severity so the author\
-    \ knows what's required vs optional:\n\n| Prefix | Meaning | Author Action |\n|--------|---------|---------------|\n| *(no prefix)* | Required change | Must address before merge |\n| **Critical:** | Blocks merge | Security vulnerability, data loss, broken functionality |\n| **Nit:** | Minor, optional | Author may ignore — formatting, style preferences |\n| **Optional:** / **Consider:** | Suggestion | Worth considering but not required |\n| **FYI** | Informational only | No action needed — context for future reference |\n\nThis prevents authors from treating all feedback as mandatory and wasting time on optional suggestions.\n\n### Step 5: Verify the Verification\n\nCheck the author's verification story:\n\n```\n- What tests were run?\n- Did the build pass?\n- Was the change tested manually?\n- Are there screenshots for UI changes?\n- Is there a before/after comparison?\n```\n\n## Multi-Model Review Pattern\n\nUse different models for different review perspectives:\n\n```\nModel A writes\
-    \ the code\n    │\n    ▼\nModel B reviews for correctness and architecture\n    │\n    ▼\nModel A addresses the feedback\n    │\n    ▼\nHuman makes the final call\n```\n\nThis catches issues that a single model might miss — different models have different blind spots.\n\n**Example prompt for a review agent:**\n```\nReview this code change for correctness, security, and adherence to\nour project conventions. The spec says [X]. The change should [Y].\nFlag any issues as Critical, Important, or Suggestion.\n```\n\n## Dead Code Hygiene\n\nAfter any refactoring or implementation change, check for orphaned code:\n\n1. Identify code that is now unreachable or unused\n2. List it explicitly\n3. **Ask before deleting:** \"Should I remove these now-unused elements: [list]?\"\n\nDon't leave dead code lying around — it confuses future readers and agents. But don't silently delete things you're not sure about. When in doubt, ask.\n\n```\nDEAD CODE IDENTIFIED:\n- formatLegacyDate() in src/utils/date.ts\
-  \ — replaced by formatDate()\n- OldTaskCard component in src/components/ — replaced by TaskCard\n- LEGACY_API_URL constant in src/config.ts — no remaining references\n→ Safe to remove these?\n```\n\n## Artifact Completeness Evaluation (Soft Advisory)\n\nWhen you see a `[agentalloy-eval]` block in your context, the system is\nasking you to evaluate whether a specific artifact meets its completeness\ncriteria. This is a **soft advisory** — it does not block your work.\n\n```\n[agentalloy-eval] Soft completeness check — does this artifact meet the bar?\nCriteria: <criteria text>\n\n<artifact content>\n```\n\n**How to respond:**\n\n1. Read the criteria and the artifact content.\n2. Compare them honestly — does the artifact actually meet the stated bar?\n3. If yes, acknowledge it briefly and continue.\n4. If no, note what's missing and address it before proceeding.\n\nThis is your chance to catch quality issues that automated checks can't\ndetect: incomplete specs, half-finished implementations, missing edge\ncases, or artifacts that look structurally correct but lack substance.\nBe honest but pragmatic — \"good enough to proceed\" counts as complete.\n```"
+  sequence: 8
+  content: |-
+    ## Review Process
+
+    ### Step 1: Understand the Context
+
+    Before looking at code, understand the intent:
+
+    ```
+    - What is this change trying to accomplish?
+    - What spec or task does it implement?
+    - What is the expected behavior change?
+    ```
+
+    ### Step 2: Review the Tests First
+
+    Tests reveal intent and coverage:
+
+    ```
+    - Do tests exist for the change?
+    - Do they test behavior (not implementation details)?
+    - Are edge cases covered?
+    - Do tests have descriptive names?
+    - Would the tests catch a regression if the code changed?
+    ```
+
+    ### Step 3: Review the Implementation
+
+    Walk through the code with the five axes in mind:
+
+    ```
+    For each file changed:
+    1. Correctness: Does this code do what the test says it should?
+    2. Readability: Can I understand this without help?
+    3. Architecture: Does this fit the system?
+    4. Security: Any vulnerabilities?
+    5. Performance: Any bottlenecks?
+    ```
+
+    ### Step 4: Categorize Findings
+
+    Label every comment with its severity so the author knows what's required vs optional:
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    | Prefix | Meaning | Author Action |
+    |--------|---------|---------------|
+    | *(no prefix)* | Required change | Must address before merge |
+    | **Critical:** | Blocks merge | Security vulnerability, data loss, broken functionality |
+    | **Nit:** | Minor, optional | Author may ignore — formatting, style preferences |
+    | **Optional:** / **Consider:** | Suggestion | Worth considering but not required |
+    | **FYI** | Informational only | No action needed — context for future reference |
+
+    This prevents authors from treating all feedback as mandatory and wasting time on optional suggestions.
+
+    ### Step 5: Verify the Verification
+
+    Check the author's verification story:
+
+    ```
+    - What tests were run?
+    - Did the build pass?
+    - Was the change tested manually?
+    - Are there screenshots for UI changes?
+    - Is there a before/after comparison?
+    ```
+
+    ## Multi-Model Review Pattern
+
+    Use different models for different review perspectives:
+
+    ```
+    Model A writes the code
+        │
+        ▼
+    Model B reviews for correctness and architecture
+        │
+        ▼
+    Model A addresses the feedback
+        │
+        ▼
+    Human makes the final call
+    ```
+
+    This catches issues that a single model might miss — different models have different blind spots.
+
+    **Example prompt for a review agent:**
+    ```
+    Review this code change for correctness, security, and adherence to
+    our project conventions. The spec says [X]. The change should [Y].
+    Flag any issues as Critical, Important, or Suggestion.
+    ```
+
+    ## Dead Code Hygiene
+- fragment_type: execution
+  sequence: 10
+  content: |-
+    After any refactoring or implementation change, check for orphaned code:
+
+    1. Identify code that is now unreachable or unused
+    2. List it explicitly
+    3. **Ask before deleting:** "Should I remove these now-unused elements: [list]?"
+
+    Don't leave dead code lying around — it confuses future readers and agents. But don't silently delete things you're not sure about. When in doubt, ask.
+
+    ```
+    DEAD CODE IDENTIFIED:
+    - formatLegacyDate() in src/utils/date.ts — replaced by formatDate()
+    - OldTaskCard component in src/components/ — replaced by TaskCard
+    - LEGACY_API_URL constant in src/config.ts — no remaining references
+    → Safe to remove these?
+    ```
+
+    ## Artifact Completeness Evaluation (Soft Advisory)
+
+    When you see a `[agentalloy-eval]` block in your context, the system is
+    asking you to evaluate whether a specific artifact meets its completeness
+    criteria. This is a **soft advisory** — it does not block your work.
+
+    ```
+    [agentalloy-eval] Soft completeness check — does this artifact meet the bar?
+    Criteria: <criteria text>
+
+    <artifact content>
+    ```
+
+    **How to respond:**
+
+    1. Read the criteria and the artifact content.
+    2. Compare them honestly — does the artifact actually meet the stated bar?
+    3. If yes, acknowledge it briefly and continue.
+    4. If no, note what's missing and address it before proceeding.
+- fragment_type: execution
+  sequence: 11
+  content: |-
+    This is your chance to catch quality issues that automated checks can't
+    detect: incomplete specs, half-finished implementations, missing edge
+    cases, or artifacts that look structurally correct but lack substance.
+    Be honest but pragmatic — "good enough to proceed" counts as complete.
+    ```
 applies_to_phases:
 - qa
 exit_gates:
@@ -246,4 +551,20 @@ signal_keywords:
 - done with qa
 - tests pass
 - ready to ship
-contract_template: "---\nphase: qa\ntask_slug: {{task_slug}}\ndomain_tags: []\nscope:\n  touches: []\n  avoids: []\nsuccess_criteria: []\nrelated_contracts: []\ncreated_at: {{created_at}}\n---\n\n# {{task_slug}}\n\n## QA scope\n<describe what needs verification>\n"
+contract_template: |
+  ---
+  phase: qa
+  task_slug: {{task_slug}}
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## QA scope
+  <describe what needs verification>

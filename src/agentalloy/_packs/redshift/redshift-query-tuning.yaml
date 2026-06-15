@@ -1,408 +1,133 @@
 skill_type: domain
 skill_id: redshift-query-tuning
 canonical_name: Amazon Redshift Query Performance Tuning
-description: "Speed up slow analytics queries in Amazon Redshift: use EXPLAIN to find bottlenecks, run ANALYZE and VACUUM to keep data organized, and rewrite SQL for better performance."
+description: 'Speed up slow analytics queries in Amazon Redshift: use EXPLAIN to find bottlenecks, run ANALYZE and VACUUM to keep data organized, and rewrite SQL for better performance.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - query tuning
-  - EXPLAIN plans
-  - VACUUM
-  - ANALYZE
-  - best practices
-  - redshift
+- query tuning
+- EXPLAIN plans
+- VACUUM
+- ANALYZE
+- best practices
+- redshift
 related:
 - redshift-spectrum-and-iceberg
 - redshift-table-design
 - redshift-workload-management
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: navistone
 change_summary: initial authoring draft
-raw_prose: |
-  # Amazon Redshift Query Performance Tuning
-
-  ## Overview
-
-  Redshift query performance hinges on three things: planner statistics (ANALYZE), physical layout (VACUUM SORT + DELETE), and query shape (EXPLAIN-driven rewrites). The query-alerts system surfaces actionable diagnostics on top of these. This skill covers all four.
-
-  Sourced from https://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html, /r_VACUUM_command.html, /r_ANALYZE.html, and /c_designing-queries-best-practices.html.
-
-  ---
-
-
-  # EXPLAIN
-
-  Displays the execution plan for a query statement without running the query. For information about the query analysis workflow, see [Query analysis workflow](c-query-analysis-process.md).
-
-  ## Syntax
-
-      EXPLAIN [ VERBOSE ] query
-
-  ## Parameters
-
-  VERBOSE   
-  Displays the full query plan instead of just a summary.
-
-   *query*   
-  Query statement to explain. The query can be a SELECT, INSERT, CREATE TABLE AS, UPDATE, or DELETE statement.
-
-  ## Usage notes
-
-  EXPLAIN performance is sometimes influenced by the time it takes to create temporary tables. For example, a query that uses the common subexpression optimization requires temporary tables to be created and analyzed in order to return the EXPLAIN output. The query plan depends on the schema and statistics of the temporary tables. Therefore, the EXPLAIN command for this type of query might take longer to run than expected.
-
-  You can use EXPLAIN only for the following commands:
-  + SELECT
-  + SELECT INTO
-  + CREATE TABLE AS
-  + INSERT
-  + UPDATE
-  + DELETE
-
-  The EXPLAIN command will fail if you use it for other SQL commands, such as data definition language (DDL) or database operations.
-
-  The EXPLAIN output relative unit costs are used by Amazon Redshift to choose a query plan. Amazon Redshift compares the sizes of various resource estimates to determine the plan.
-
-  ## Query planning and execution steps
-
-  The execution plan for a specific Amazon Redshift query statement breaks down execution and calculation of a query into a discrete sequence of steps and table operations that eventually produce a final result set for the query. For information about query planning, see [Query processing](c-query-processing.md).
-
-  The following table provides a summary of steps that Amazon Redshift can use in developing an execution plan for any query a user submits for execution.
-
-  [\[See the AWS documentation website for more details\]](http://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html)
-
-  ## Using EXPLAIN for RLS
-
-  If a query contains a table that is subject to row-level security (RLS) policies, EXPLAIN displays a special RLS SecureScan node. Amazon Redshift also logs the same node type to the STL\$1EXPLAIN system table. EXPLAIN doesn't reveal the RLS predicate that applies to dim\$1tbl. The RLS SecureScan node type serves as an indicator that the execution plan contains additional operations that are invisible to the current user.
-
-  The following example illustrates an RLS SecureScan node.
-
-      EXPLAIN
-      SELECT D.cint
-      FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k
-      WHERE F.k_dim / 10 > 0;
-                                 QUERY PLAN
-  ------------------------------------------------------------------------
-   XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)
-     Hash Cond: ("outer".k_dim = "inner"."k")
-     ->  *XN* *RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*
-           Filter: ((k_dim / 10) > 0)
-     ->  XN Hash  (cost=0.07..0.07 rows=2 width=8)
-           ->  XN Seq Scan on dim_tbl d  (cost=0.00..0.07 rows=2 width=8)
-                 Filter: (("k" / 10) > 0)
-
-  To enable full investigation of query plans that are subject to RLS, Amazon Redshift offers the EXPLAIN RLS system permissions. Users that have been granted this permission can inspect complete query plans that also include RLS predicates. 
-
-  The following example illustrates an additional Seq Scan below the RLS SecureScan node also includes the RLS policy predicate (k\$1dim > 1).
-
-      EXPLAIN SELECT D.cint
-      FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k
-      WHERE F.k_dim / 10 > 0;
-                                      QUERY PLAN
-  ---------------------------------------------------------------------------------
-   XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)
-     Hash Cond: ("outer".k_dim = "inner"."k")
-     *->  XN RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*
-           Filter: ((k_dim / 10) > 0)
-           ->  *XN* *Seq Scan on fact_tbl rls_table  (cost=0.00..0.06 rows=5 width=8)
-                 Filter: (k
-
-  ---
-
-
-  # VACUUM
-
-  Re-sorts rows and reclaims space in either a specified table or all tables in the current database.
-
-  **Note**  
-  Only users with the necessary table permissions can effectively vacuum a table. If VACUUM is run without the necessary table permissions, the operation completes successfully but has no effect. For a list of valid table permissions to effectively run VACUUM, see the following Required privileges section.
-
-  Amazon Redshift automatically sorts data and runs VACUUM DELETE in the background. This lessens the need to run the VACUUM command. For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md). 
-
-  By default, VACUUM skips the sort phase for any table where more than 95 percent of the table's rows are already sorted. Skipping the sort phase can significantly improve VACUUM performance. To change the default sort or delete threshold for a single table, include the table name and the TO *threshold* PERCENT parameter when you run VACUUM. 
-
-  Users can access tables while they are being vacuumed. You can perform queries and write operations while a table is being vacuumed, but when data manipulation language (DML) commands and a vacuum run concurrently, both might take longer. If you run UPDATE and DELETE statements during a vacuum, system performance might be reduced. VACUUM DELETE temporarily blocks update and delete operations. 
-
-  Amazon Redshift automatically performs a DELETE ONLY vacuum in the background. Automatic vacuum operation pauses when users run data definition language (DDL) operations, such as ALTER TABLE.
-
-  **Note**  
-  The Amazon Redshift VACUUM command syntax and behavior are substantially different from the PostgreSQL VACUUM operation. For example, the default VACUUM operation in Amazon Redshift is VACUUM FULL, which reclaims disk space and re-sorts all rows. In contrast, the default VACUUM operation in PostgreSQL simply reclaims space and makes it available for reuse.
-
-  For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md).
-
-  ## Required privileges
-
-  Following are required privileges for VACUUM:
-  + Superuser
-  + Users with the VACUUM privilege
-  + Table owner
-  + Database owner whom the table is shared to
-
-  ## Syntax
-
-      VACUUM [ FULL | SORT ONLY | DELETE ONLY | REINDEX | RECLUSTER ]
-      [ [ table_name ] [ TO threshold PERCENT ] [ BOOST ] ]
-
-  ---
-
-
-  # ANALYZE
-
-  Updates table statistics for use by the query planner. 
-
-  ## Required privileges
-
-  Following are required privileges for ANALYZE:
-  + Superuser
-  + Users with the ANALYZE privilege
-  + Owner of the relation
-  + Database owner whom the table is shared to
-
-  ## Syntax
-
-      ANALYZE [ VERBOSE ]
-      [ [ table_name [ ( column_name [, ...] ) ] ]
-      [ PREDICATE COLUMNS | ALL  COLUMNS ]
-
-  ## Parameters
-
-  VERBOSE   
-  A clause that returns progress information messages about the ANALYZE operation. This option is useful when you don't specify a table.
-
-   *table\$1name*   
-  You can analyze specific tables, including temporary tables. You can qualify the table with its schema name. You can optionally specify a table\$1name to analyze a single table. You can't specify more than one *table\$1name* with a single ANALYZE *table\$1name* statement. If you don't specify a *table\$1name* value, all of the tables in the currently connected database are analyzed, including the persistent tables in the system catalog. Amazon Redshift skips analyzing a table if the percentage of rows that have changed since the last ANALYZE is lower than the analyze threshold. For more information, see [Analyze threshold](#r_ANALYZE-threshold).  
-  You don't need to analyze Amazon Redshift system tables (STL and STV tables).
-
-   *column\$1name*   
-  If you specify a *table\$1name*, you can also specify one or more columns in the table (as a column-separated list within parentheses). If a column list is specified, only the listed columns are analyzed.
-
-  PREDICATE COLUMNS \$1 ALL COLUMNS   
-  Clauses that indicate whether ANALYZE should include only predicate columns. Specify PREDICATE COLUMNS to analyze only columns that have been used as predicates in previous queries or are likely candidates to be used as predicates. Specify ALL COLUMNS to analyze all columns. The default is ALL COLUMNS.   
-  A column is included in the set of predicate columns if any of the following is true:  
-  + The column has been used in a query as a part of a filter, join condition, or group by clause.
-  + The column is a distribution key.
-  + The column is part of a sort key.
-  If no columns are marked as predicate columns, for example because the table has not yet been queried, all of the columns are analyzed even when PREDICATE COLUMNS is specified. When this happens, Amazon Redshift might respond with a message like No predicate columns found for "*table-name*". Analyzing all columns. For more information about predicate columns, see [Analyzing tables](t_Analyzing_tables.md).
-
-  ---
-
-
-  # Amazon Redshift best practices for designing queries
-
-  To maximize query performance, follow these recommendations when creating queries:
-  + Design tables according to best practices to provide a solid foundation for query performance. For more information, see [Amazon Redshift best practices for designing tables](c_designing-tables-best-practices.md).
-  + Avoid using `select *`. Include only the columns you specifically need.
-  + Use a [CASE conditional expression](r_CASE_function.md) to perform complex aggregations instead of selecting from the same table multiple times.
-  + Don't use cross-joins unless absolutely necessary. These joins without a join condition result in the Cartesian product of two tables. Cross-joins are typically run as nested-loop joins, which are the slowest of the possible join types. 
-  + Use subqueries in cases where one table in the query is used only for predicate conditions and the subquery returns a small number of rows (less than about 200). The following example uses a subquery to avoid joining the LISTING table.
-
-      ```
-      select sum(sales.qtysold)
-      from sales
-      where salesid in (select listid from listing where listtime > '2008-12-26');
-      ```
-  + Use predicates to restrict the dataset as much as possible.
-  + In the predicate, use the least expensive operators that you can. [Comparison condition](r_comparison_condition.md) operators are preferable to [LIKE](r_patternmatching_condition_like.md) operators. LIKE operators are still preferable to [SIMILAR TO](pattern-matching-conditions-similar-to.md) or [POSIX operators](pattern-matching-conditions-posix.md).
-  + Avoid using functions in query predicates. Using them can drive up the cost of the query by requiring large numbers of rows to resolve the intermediate steps of the query.
-  + If possible, use a WHERE clause to restrict the dataset. The query planner can then use row order to help determine which records match the criteria, so it can skip scanning large numbers of disk blocks. Without this,
-
+raw_prose: "# Amazon Redshift Query Performance Tuning\n\n## Overview\n\nRedshift query performance hinges on three things: planner statistics (ANALYZE), physical layout (VACUUM SORT + DELETE), and query shape (EXPLAIN-driven rewrites). The query-alerts system surfaces actionable diagnostics on top of these. This skill covers all four.\n\nSourced from https://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html, /r_VACUUM_command.html, /r_ANALYZE.html, and /c_designing-queries-best-practices.html.\n\n---\n\n\n# EXPLAIN\n\nDisplays the execution plan for a query statement without running the query. For information about the query analysis workflow, see [Query analysis workflow](c-query-analysis-process.md).\n\n## Syntax\n\n    EXPLAIN [ VERBOSE ] query\n\n## Parameters\n\nVERBOSE   \nDisplays the full query plan instead of just a summary.\n\n *query*   \nQuery statement to explain. The query can be a SELECT, INSERT, CREATE TABLE AS, UPDATE, or DELETE statement.\n\n## Usage notes\n\nEXPLAIN performance is sometimes influenced by the time it takes to create temporary tables. For example, a query that uses the common subexpression optimization requires temporary tables to be created and analyzed in order to return the EXPLAIN output. The query plan depends on the schema and statistics of the temporary tables. Therefore, the EXPLAIN command for this type of query might take longer to run than expected.\n\nYou can use EXPLAIN only for the following commands:\n+ SELECT\n+ SELECT INTO\n+ CREATE TABLE AS\n+ INSERT\n+ UPDATE\n+ DELETE\n\nThe EXPLAIN command will fail if you use it for other SQL commands, such as data definition language (DDL) or database operations.\n\nThe EXPLAIN output relative unit costs are used by Amazon Redshift to choose a query plan. Amazon Redshift compares the sizes of various resource estimates to determine the plan.\n\n## Query planning and execution steps\n\nThe execution plan for a specific Amazon Redshift query statement breaks down execution and calculation of a query into a discrete sequence of steps and table operations that eventually produce a final result set for the query. For information about query planning, see [Query processing](c-query-processing.md).\n\nThe following table provides a summary of steps that Amazon Redshift can use in developing an execution plan for any query a user submits for execution.\n\n[\\[See the AWS documentation website for more details\\]](http://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html)\n\n## Using EXPLAIN for RLS\n\nIf a query contains a table that is subject to row-level security (RLS) policies, EXPLAIN displays a special RLS SecureScan node. Amazon Redshift also logs the same node type to the STL\\$1EXPLAIN system table. EXPLAIN doesn't reveal the RLS predicate that applies to dim\\$1tbl. The RLS SecureScan node type serves as an indicator that the execution plan contains additional operations that are invisible to the current user.\n\nThe following example illustrates an RLS SecureScan node.\n\n    EXPLAIN\n    SELECT D.cint\n    FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k\n    WHERE F.k_dim / 10 > 0;\n                               QUERY PLAN\n------------------------------------------------------------------------\n XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)\n   Hash Cond: (\"outer\".k_dim = \"inner\".\"k\")\n   ->  *XN* *RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*\n         Filter: ((k_dim / 10) > 0)\n   ->  XN Hash  (cost=0.07..0.07 rows=2 width=8)\n         ->  XN Seq Scan on dim_tbl d  (cost=0.00..0.07 rows=2 width=8)\n               Filter: ((\"k\" / 10) > 0)\n\nTo enable full investigation of query plans that are subject to RLS, Amazon Redshift offers the EXPLAIN RLS system permissions. Users that have been granted this permission can inspect complete query plans that also include RLS predicates. \n\nThe following example illustrates an additional Seq Scan below the RLS SecureScan node also includes the RLS policy predicate (k\\$1dim > 1).\n\n    EXPLAIN SELECT D.cint\n    FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k\n    WHERE F.k_dim / 10 > 0;\n                                    QUERY PLAN\n---------------------------------------------------------------------------------\n XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)\n   Hash Cond: (\"outer\".k_dim = \"inner\".\"k\")\n   *->  XN RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*\n         Filter: ((k_dim / 10) > 0)\n         ->  *XN* *Seq Scan on fact_tbl rls_table  (cost=0.00..0.06 rows=5 width=8)\n               Filter: (k\n\n---\n\n\n# VACUUM\n\nRe-sorts rows and reclaims space in either a specified table or all tables in the current database.\n\n**Note**  \nOnly users with the necessary table permissions can effectively vacuum a table. If VACUUM is run without the necessary table permissions, the operation completes successfully but has no effect. For a list of valid table permissions to effectively run VACUUM, see the following Required privileges section.\n\nAmazon Redshift automatically sorts data and runs VACUUM DELETE in the background. This lessens the need to run the VACUUM command. For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md). \n\nBy default, VACUUM skips the sort phase for any table where more than 95 percent of the table's rows are already sorted. Skipping the sort phase can significantly improve VACUUM performance. To change the default sort or delete threshold for a single table, include the table name and the TO *threshold* PERCENT parameter when you run VACUUM. \n\nUsers can access tables while they are being vacuumed. You can perform queries and write operations while a table is being vacuumed, but when data manipulation language (DML) commands and a vacuum run concurrently, both might take longer. If you run UPDATE and DELETE statements during a vacuum, system performance might be reduced. VACUUM DELETE temporarily blocks update and delete operations. \n\nAmazon Redshift automatically performs a DELETE ONLY vacuum in the background. Automatic vacuum operation pauses when users run data definition language (DDL) operations, such as ALTER TABLE.\n\n**Note**  \nThe Amazon Redshift VACUUM command syntax and behavior are substantially different from the PostgreSQL VACUUM operation. For example, the default VACUUM operation in Amazon Redshift is VACUUM FULL, which reclaims disk space and re-sorts all rows. In contrast, the default VACUUM operation in PostgreSQL simply reclaims space and makes it available for reuse.\n\nFor more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md).\n\n## Required privileges\n\nFollowing are required privileges for VACUUM:\n+ Superuser\n+ Users with the VACUUM privilege\n+ Table owner\n+ Database owner whom the table is shared to\n\n## Syntax\n\n    VACUUM [ FULL | SORT ONLY | DELETE ONLY | REINDEX | RECLUSTER ]\n    [ [ table_name ] [ TO threshold PERCENT ] [ BOOST ] ]\n\n---\n\n\n# ANALYZE\n\nUpdates table statistics for use by the query planner. \n\n## Required privileges\n\nFollowing are required privileges for ANALYZE:\n+ Superuser\n+ Users with the ANALYZE privilege\n+ Owner of the relation\n+ Database owner whom the table is shared to\n\n## Syntax\n\n    ANALYZE [ VERBOSE ]\n    [ [ table_name [ ( column_name [, ...] ) ] ]\n    [ PREDICATE COLUMNS | ALL  COLUMNS ]\n\n## Parameters\n\nVERBOSE   \nA clause that returns progress information messages about the ANALYZE operation. This option is useful when you don't specify a table.\n\n *table\\$1name*   \nYou can analyze specific tables, including temporary tables. You can qualify the table with its schema name. You can optionally specify a table\\$1name to analyze a single table. You can't specify more than one *table\\$1name* with a single ANALYZE *table\\$1name* statement. If you don't specify a *table\\$1name* value, all of the tables in the currently connected database are analyzed, including the persistent tables in the system catalog. Amazon Redshift skips analyzing a table if the percentage of rows that have changed since the last ANALYZE is lower than the analyze threshold. For more information, see [Analyze threshold](#r_ANALYZE-threshold).  \nYou don't need to analyze Amazon Redshift system tables (STL and STV tables).\n\n *column\\$1name*   \nIf you specify a *table\\$1name*, you can also specify one or more columns in the table (as a column-separated list within parentheses). If a column list is specified, only the listed columns are analyzed.\n\nPREDICATE COLUMNS \\$1 ALL COLUMNS   \nClauses that indicate whether ANALYZE should include only predicate columns. Specify PREDICATE COLUMNS to analyze only columns that have been used as predicates in previous queries or are likely candidates to be used as predicates. Specify ALL COLUMNS to analyze all columns. The default is ALL COLUMNS.   \nA column is included in the set of predicate columns if any of the following is true:  \n+ The column has been used in a query as a part of a filter, join condition, or group by clause.\n+ The column is a distribution key.\n+ The column is part of a sort key.\nIf no columns are marked as predicate columns, for example because the table has not yet been queried, all of the columns are analyzed even when PREDICATE COLUMNS is specified. When this happens, Amazon Redshift might respond with a message like No predicate columns found for \"*table-name*\". Analyzing all columns. For more information about predicate columns, see [Analyzing tables](t_Analyzing_tables.md).\n\n---\n\n\n# Amazon Redshift best practices for designing queries\n\nTo maximize query performance, follow these recommendations when creating queries:\n+ Design tables according to best practices to provide a solid foundation for query performance. For more information, see [Amazon Redshift best practices for designing tables](c_designing-tables-best-practices.md).\n+ Avoid using `select *`. Include only the columns you specifically need.\n+ Use a [CASE conditional expression](r_CASE_function.md) to perform complex aggregations instead of selecting from the same table multiple times.\n+ Don't use cross-joins unless absolutely necessary. These joins without a join condition result in the Cartesian product of two tables. Cross-joins are typically run as nested-loop joins, which are the slowest of the possible join types. \n+ Use subqueries in cases where one table in the query is used only for predicate conditions and the subquery returns a small number of rows (less than about 200). The following example uses a subquery to avoid joining the LISTING table.\n\n    ```\n    select sum(sales.qtysold)\n    from sales\n    where salesid in (select listid from listing where listtime > '2008-12-26');\n    ```\n+ Use predicates to restrict the dataset as much as possible.\n+ In the predicate, use the least expensive operators that you can. [Comparison condition](r_comparison_condition.md) operators are preferable to [LIKE](r_patternmatching_condition_like.md) operators. LIKE operators are still preferable to [SIMILAR TO](pattern-matching-conditions-similar-to.md) or [POSIX operators](pattern-matching-conditions-posix.md).\n+ Avoid using functions in query predicates. Using them can drive up the cost of the query by requiring large numbers of rows to resolve the intermediate steps of the query.\n+ If possible, use a WHERE clause to restrict the dataset. The query planner can then use row order to help determine which records match the criteria, so it can skip scanning large numbers of disk blocks. Without this,\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Redshift query performance hinges on three things: planner statistics (ANALYZE), physical layout (VACUUM SORT + DELETE), and query shape (EXPLAIN-driven rewrites). The query-alerts system surfaces actionable diagnostics on top of these. This skill covers all four.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Redshift query performance hinges on three things: planner statistics (ANALYZE), physical layout (VACUUM SORT + DELETE), and query shape (EXPLAIN-driven rewrites). The query-alerts system surfaces actionable diagnostics on top of these. This skill covers all four.
 
-      Sourced from https://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html, /r_VACUUM_command.html, /r_ANALYZE.html, and /c_designing-queries-best-practices.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## EXPLAIN
+    Sourced from https://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html, /r_VACUUM_command.html, /r_ANALYZE.html, and /c_designing-queries-best-practices.html.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## EXPLAIN
 
-      Displays the execution plan for a query statement without running the query. For information about the query analysis workflow, see [Query analysis workflow](c-query-analysis-process.md).
+    Displays the execution plan for a query statement without running the query. For information about the query analysis workflow, see [Query analysis workflow](c-query-analysis-process.md).
 
-      ## Syntax
+    ## Syntax
 
-          EXPLAIN [ VERBOSE ] query
-  - fragment_type: setup
-    sequence: 3
-    content: |
-      ## Parameters
+        EXPLAIN [ VERBOSE ] query
+- fragment_type: setup
+  sequence: 3
+  content: "## Parameters\n\nVERBOSE   \nDisplays the full query plan instead of just a summary.\n\n *query*   \nQuery statement to explain. The query can be a SELECT, INSERT, CREATE TABLE AS, UPDATE, or DELETE statement.\n"
+- fragment_type: verification
+  sequence: 4
+  content: |
+    ## Usage notes
 
-      VERBOSE   
-      Displays the full query plan instead of just a summary.
+    EXPLAIN performance is sometimes influenced by the time it takes to create temporary tables. For example, a query that uses the common subexpression optimization requires temporary tables to be created and analyzed in order to return the EXPLAIN output. The query plan depends on the schema and statistics of the temporary tables. Therefore, the EXPLAIN command for this type of query might take longer to run than expected.
 
-       *query*   
-      Query statement to explain. The query can be a SELECT, INSERT, CREATE TABLE AS, UPDATE, or DELETE statement.
-  - fragment_type: verification
-    sequence: 4
-    content: |
-      ## Usage notes
+    You can use EXPLAIN only for the following commands:
+    + SELECT
+    + SELECT INTO
+    + CREATE TABLE AS
+    + INSERT
+    + UPDATE
+    + DELETE
 
-      EXPLAIN performance is sometimes influenced by the time it takes to create temporary tables. For example, a query that uses the common subexpression optimization requires temporary tables to be created and analyzed in order to return the EXPLAIN output. The query plan depends on the schema and statistics of the temporary tables. Therefore, the EXPLAIN command for this type of query might take longer to run than expected.
+    The EXPLAIN command will fail if you use it for other SQL commands, such as data definition language (DDL) or database operations.
 
-      You can use EXPLAIN only for the following commands:
-      + SELECT
-      + SELECT INTO
-      + CREATE TABLE AS
-      + INSERT
-      + UPDATE
-      + DELETE
+    The EXPLAIN output relative unit costs are used by Amazon Redshift to choose a query plan. Amazon Redshift compares the sizes of various resource estimates to determine the plan.
+- fragment_type: execution
+  sequence: 5
+  content: |
+    ## Query planning and execution steps
 
-      The EXPLAIN command will fail if you use it for other SQL commands, such as data definition language (DDL) or database operations.
+    The execution plan for a specific Amazon Redshift query statement breaks down execution and calculation of a query into a discrete sequence of steps and table operations that eventually produce a final result set for the query. For information about query planning, see [Query processing](c-query-processing.md).
 
-      The EXPLAIN output relative unit costs are used by Amazon Redshift to choose a query plan. Amazon Redshift compares the sizes of various resource estimates to determine the plan.
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## Query planning and execution steps
+    The following table provides a summary of steps that Amazon Redshift can use in developing an execution plan for any query a user submits for execution.
 
-      The execution plan for a specific Amazon Redshift query statement breaks down execution and calculation of a query into a discrete sequence of steps and table operations that eventually produce a final result set for the query. For information about query planning, see [Query processing](c-query-processing.md).
+    [\[See the AWS documentation website for more details\]](http://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html)
+- fragment_type: example
+  sequence: 6
+  content: |
+    ## Using EXPLAIN for RLS
 
-      The following table provides a summary of steps that Amazon Redshift can use in developing an execution plan for any query a user submits for execution.
+    If a query contains a table that is subject to row-level security (RLS) policies, EXPLAIN displays a special RLS SecureScan node. Amazon Redshift also logs the same node type to the STL\$1EXPLAIN system table. EXPLAIN doesn't reveal the RLS predicate that applies to dim\$1tbl. The RLS SecureScan node type serves as an indicator that the execution plan contains additional operations that are invisible to the current user.
 
-      [\[See the AWS documentation website for more details\]](http://docs.aws.amazon.com/redshift/latest/dg/r_EXPLAIN.html)
-  - fragment_type: example
-    sequence: 6
-    content: |
-      ## Using EXPLAIN for RLS
+    The following example illustrates an RLS SecureScan node.
 
-      If a query contains a table that is subject to row-level security (RLS) policies, EXPLAIN displays a special RLS SecureScan node. Amazon Redshift also logs the same node type to the STL\$1EXPLAIN system table. EXPLAIN doesn't reveal the RLS predicate that applies to dim\$1tbl. The RLS SecureScan node type serves as an indicator that the execution plan contains additional operations that are invisible to the current user.
+        EXPLAIN
+        SELECT D.cint
+        FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k
+        WHERE F.k_dim / 10 > 0;
+                                   QUERY PLAN
+    ------------------------------------------------------------------------
+     XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)
+       Hash Cond: ("outer".k_dim = "inner"."k")
+       ->  *XN* *RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*
+             Filter: ((k_dim / 10) > 0)
+       ->  XN Hash  (cost=0.07..0.07 rows=2 width=8)
+             ->  XN Seq Scan on dim_tbl d  (cost=0.00..0.07 rows=2 width=8)
+                   Filter: (("k" / 10) > 0)
+- fragment_type: example
+  sequence: 7
+  content: "To enable full investigation of query plans that are subject to RLS, Amazon Redshift offers the EXPLAIN RLS system permissions. Users that have been granted this permission can inspect complete query plans that also include RLS predicates. \n\nThe following example illustrates an additional Seq Scan below the RLS SecureScan node also includes the RLS policy predicate (k\\$1dim > 1).\n\n    EXPLAIN SELECT D.cint\n    FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k\n    WHERE F.k_dim / 10 > 0;\n                                    QUERY PLAN\n---------------------------------------------------------------------------------\n XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)\n   Hash Cond: (\"outer\".k_dim = \"inner\".\"k\")\n   *->  XN RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*\n         Filter: ((k_dim / 10) > 0)\n         ->  *XN* *Seq Scan on fact_tbl rls_table  (cost=0.00..0.06 rows=5 width=8)\n               Filter: (k\n"
+- fragment_type: execution
+  sequence: 8
+  content: "# VACUUM\n\nRe-sorts rows and reclaims space in either a specified table or all tables in the current database.\n\n**Note**  \nOnly users with the necessary table permissions can effectively vacuum a table. If VACUUM is run without the necessary table permissions, the operation completes successfully but has no effect. For a list of valid table permissions to effectively run VACUUM, see the following Required privileges section.\n"
+- fragment_type: verification
+  sequence: 9
+  content: "Amazon Redshift automatically sorts data and runs VACUUM DELETE in the background. This lessens the need to run the VACUUM command. For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md). \n\nBy default, VACUUM skips the sort phase for any table where more than 95 percent of the table's rows are already sorted. Skipping the sort phase can significantly improve VACUUM performance. To change the default sort or delete threshold for a single table, include the table name and the TO *threshold* PERCENT parameter when you run VACUUM. \n\nUsers can access tables while they are being vacuumed. You can perform queries and write operations while a table is being vacuumed, but when data manipulation language (DML) commands and a vacuum run concurrently, both might take longer. If you run UPDATE and DELETE statements during a vacuum, system performance might be reduced. VACUUM DELETE temporarily blocks update and delete operations. \n\nAmazon Redshift automatically performs a DELETE ONLY vacuum in the background. Automatic vacuum operation pauses when users run data definition language (DDL) operations, such as ALTER TABLE.\n"
+- fragment_type: setup
+  sequence: 10
+  content: "**Note**  \nThe Amazon Redshift VACUUM command syntax and behavior are substantially different from the PostgreSQL VACUUM operation. For example, the default VACUUM operation in Amazon Redshift is VACUUM FULL, which reclaims disk space and re-sorts all rows. In contrast, the default VACUUM operation in PostgreSQL simply reclaims space and makes it available for reuse.\n\nFor more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md).\n"
+- fragment_type: setup
+  sequence: 11
+  content: |
+    ## Required privileges
 
-      The following example illustrates an RLS SecureScan node.
+    Following are required privileges for VACUUM:
+    + Superuser
+    + Users with the VACUUM privilege
+    + Table owner
+    + Database owner whom the table is shared to
+- fragment_type: execution
+  sequence: 12
+  content: |
+    ## Syntax
 
-          EXPLAIN
-          SELECT D.cint
-          FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k
-          WHERE F.k_dim / 10 > 0;
-                                     QUERY PLAN
-      ------------------------------------------------------------------------
-       XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)
-         Hash Cond: ("outer".k_dim = "inner"."k")
-         ->  *XN* *RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*
-               Filter: ((k_dim / 10) > 0)
-         ->  XN Hash  (cost=0.07..0.07 rows=2 width=8)
-               ->  XN Seq Scan on dim_tbl d  (cost=0.00..0.07 rows=2 width=8)
-                     Filter: (("k" / 10) > 0)
-  - fragment_type: example
-    sequence: 7
-    content: |
-      To enable full investigation of query plans that are subject to RLS, Amazon Redshift offers the EXPLAIN RLS system permissions. Users that have been granted this permission can inspect complete query plans that also include RLS predicates. 
-
-      The following example illustrates an additional Seq Scan below the RLS SecureScan node also includes the RLS policy predicate (k\$1dim > 1).
-
-          EXPLAIN SELECT D.cint
-          FROM fact_tbl F INNER JOIN dim_tbl D ON F.k_dim = D.k
-          WHERE F.k_dim / 10 > 0;
-                                          QUERY PLAN
-      ---------------------------------------------------------------------------------
-       XN Hash Join DS_DIST_ALL_NONE  (cost=0.08..0.25 rows=1 width=4)
-         Hash Cond: ("outer".k_dim = "inner"."k")
-         *->  XN RLS SecureScan f  (cost=0.00..0.14 rows=2 width=4)*
-               Filter: ((k_dim / 10) > 0)
-               ->  *XN* *Seq Scan on fact_tbl rls_table  (cost=0.00..0.06 rows=5 width=8)
-                     Filter: (k
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      # VACUUM
-
-      Re-sorts rows and reclaims space in either a specified table or all tables in the current database.
-
-      **Note**  
-      Only users with the necessary table permissions can effectively vacuum a table. If VACUUM is run without the necessary table permissions, the operation completes successfully but has no effect. For a list of valid table permissions to effectively run VACUUM, see the following Required privileges section.
-  - fragment_type: verification
-    sequence: 9
-    content: |
-      Amazon Redshift automatically sorts data and runs VACUUM DELETE in the background. This lessens the need to run the VACUUM command. For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md). 
-
-      By default, VACUUM skips the sort phase for any table where more than 95 percent of the table's rows are already sorted. Skipping the sort phase can significantly improve VACUUM performance. To change the default sort or delete threshold for a single table, include the table name and the TO *threshold* PERCENT parameter when you run VACUUM. 
-
-      Users can access tables while they are being vacuumed. You can perform queries and write operations while a table is being vacuumed, but when data manipulation language (DML) commands and a vacuum run concurrently, both might take longer. If you run UPDATE and DELETE statements during a vacuum, system performance might be reduced. VACUUM DELETE temporarily blocks update and delete operations. 
-
-      Amazon Redshift automatically performs a DELETE ONLY vacuum in the background. Automatic vacuum operation pauses when users run data definition language (DDL) operations, such as ALTER TABLE.
-  - fragment_type: setup
-    sequence: 10
-    content: |
-      **Note**  
-      The Amazon Redshift VACUUM command syntax and behavior are substantially different from the PostgreSQL VACUUM operation. For example, the default VACUUM operation in Amazon Redshift is VACUUM FULL, which reclaims disk space and re-sorts all rows. In contrast, the default VACUUM operation in PostgreSQL simply reclaims space and makes it available for reuse.
-
-      For more information, see [Vacuuming tables](t_Reclaiming_storage_space202.md).
-  - fragment_type: setup
-    sequence: 11
-    content: |
-      ## Required privileges
-
-      Following are required privileges for VACUUM:
-      + Superuser
-      + Users with the VACUUM privilege
-      + Table owner
-      + Database owner whom the table is shared to
-  - fragment_type: execution
-    sequence: 12
-    content: |
-      ## Syntax
-
-          VACUUM [ FULL | SORT ONLY | DELETE ONLY | REINDEX | RECLUSTER ]
-          [ [ table_name ] [ TO threshold PERCENT ] [ BOOST ] ]
-  - fragment_type: setup
-    sequence: 13
-    content: |
-      # ANALYZE
-
-      Updates table statistics for use by the query planner. 
-
-      ## Required privileges
-
-      Following are required privileges for ANALYZE:
-      + Superuser
-      + Users with the ANALYZE privilege
-      + Owner of the relation
-      + Database owner whom the table is shared to
-
-      ## Syntax
-
-          ANALYZE [ VERBOSE ]
-          [ [ table_name [ ( column_name [, ...] ) ] ]
-          [ PREDICATE COLUMNS | ALL  COLUMNS ]
-
-      ## Parameters
-
-      VERBOSE   
-      A clause that returns progress information messages about the ANALYZE operation. This option is useful when you don't specify a table.
-
-       *table\$1name*   
-      You can analyze specific tables, including temporary tables. You can qualify the table with its schema name. You can optionally specify a table\$1name to analyze a single table. You can't specify more than one *table\$1name* with a single ANALYZE *table\$1name* statement. If you don't specify a *table\$1name* value, all of the tables in the currently connected database are analyzed, including the persistent tables in the system catalog. Amazon Redshift skips analyzing a table if the percentage of rows that have changed since the last ANALYZE is lower than the analyze threshold. For more information, see [Analyze threshold](#r_ANALYZE-threshold).  
-      You don't need to analyze Amazon Redshift system tables (STL and STV tables).
-
-       *column\$1name*   
-      If you specify a *table\$1name*, you can also specify one or more columns in the table (as a column-separated list within parentheses). If a column list is specified, only the listed columns are analyzed.
-
-      PREDICATE COLUMNS \$1 ALL COLUMNS   
-      Clauses that indicate whether ANALYZE should include only predicate columns. Specify PREDICATE COLUMNS to analyze only columns that have been used as predicates in previous queries or are likely candidates to be used as predicates. Specify ALL COLUMNS to analyze all columns. The default is ALL COLUMNS.   
-      A column is included in the set of predicate columns if any of the following is true:  
-      + The column has been used in a query as a part of a filter, join condition, or group by clause.
-      + The column is a distribution key.
-      + The column is part of a sort key.
-      If no columns are marked as predicate columns, for example because the table has not yet been queried, all of the columns are analyzed even when PREDICATE COLUMNS is specified. When this happens, Amazon Redshift might respond with a message like No predicate columns found for "*table-name*". Analyzing all columns. For more information about predicate columns, see [Analyzing tables](t_Analyzing_tables.md).
-  - fragment_type: rationale
-    sequence: 14
-    content: |
-      # Amazon Redshift best practices for designing queries
-
-      To maximize query performance, follow these recommendations when creating queries:
-      + Design tables according to best practices to provide a solid foundation for query performance. For more information, see [Amazon Redshift best practices for designing tables](c_designing-tables-best-practices.md).
-      + Avoid using `select *`. Include only the columns you specifically need.
-      + Use a [CASE conditional expression](r_CASE_function.md) to perform complex aggregations instead of selecting from the same table multiple times.
-      + Don't use cross-joins unless absolutely necessary. These joins without a join condition result in the Cartesian product of two tables. Cross-joins are typically run as nested-loop joins, which are the slowest of the possible join types. 
-      + Use subqueries in cases where one table in the query is used only for predicate conditions and the subquery returns a small number of rows (less than about 200). The following example uses a subquery to avoid joining the LISTING table.
-
-          ```
-          select sum(sales.qtysold)
-          from sales
-          where salesid in (select listid from listing where listtime > '2008-12-26');
-          ```
-      + Use predicates to restrict the dataset as much as possible.
-      + In the predicate, use the least expensive operators that you can. [Comparison condition](r_comparison_condition.md) operators are preferable to [LIKE](r_patternmatching_condition_like.md) operators. LIKE operators are still preferable to [SIMILAR TO](pattern-matching-conditions-similar-to.md) or [POSIX operators](pattern-matching-conditions-posix.md).
-      + Avoid using functions in query predicates. Using them can drive up the cost of the query by requiring large numbers of rows to resolve the intermediate steps of the query.
-      + If possible, use a WHERE clause to restrict the dataset. The query planner can then use row order to help determine which records match the criteria, so it can skip scanning large numbers of disk blocks. Without this,
+        VACUUM [ FULL | SORT ONLY | DELETE ONLY | REINDEX | RECLUSTER ]
+        [ [ table_name ] [ TO threshold PERCENT ] [ BOOST ] ]
+- fragment_type: setup
+  sequence: 13
+  content: "# ANALYZE\n\nUpdates table statistics for use by the query planner. \n\n## Required privileges\n\nFollowing are required privileges for ANALYZE:\n+ Superuser\n+ Users with the ANALYZE privilege\n+ Owner of the relation\n+ Database owner whom the table is shared to\n\n## Syntax\n\n    ANALYZE [ VERBOSE ]\n    [ [ table_name [ ( column_name [, ...] ) ] ]\n    [ PREDICATE COLUMNS | ALL  COLUMNS ]\n\n## Parameters\n\nVERBOSE   \nA clause that returns progress information messages about the ANALYZE operation. This option is useful when you don't specify a table.\n\n *table\\$1name*   \nYou can analyze specific tables, including temporary tables. You can qualify the table with its schema name. You can optionally specify a table\\$1name to analyze a single table. You can't specify more than one *table\\$1name* with a single ANALYZE *table\\$1name* statement. If you don't specify a *table\\$1name* value, all of the tables in the currently connected database are analyzed, including the persistent tables in the system catalog. Amazon Redshift skips analyzing a table if the percentage of rows that have changed since the last ANALYZE is lower than the analyze threshold. For more information, see [Analyze threshold](#r_ANALYZE-threshold).  \nYou don't need to analyze Amazon Redshift system tables (STL and STV tables).\n\n *column\\$1name*   \nIf you specify a *table\\$1name*, you can also specify one or more columns in the table (as a column-separated list within parentheses). If a column list is specified, only the listed columns are analyzed."
+- fragment_type: setup
+  sequence: 14
+  content: "PREDICATE COLUMNS \\$1 ALL COLUMNS   \nClauses that indicate whether ANALYZE should include only predicate columns. Specify PREDICATE COLUMNS to analyze only columns that have been used as predicates in previous queries or are likely candidates to be used as predicates. Specify ALL COLUMNS to analyze all columns. The default is ALL COLUMNS.   \nA column is included in the set of predicate columns if any of the following is true:  \n+ The column has been used in a query as a part of a filter, join condition, or group by clause.\n+ The column is a distribution key.\n+ The column is part of a sort key.\nIf no columns are marked as predicate columns, for example because the table has not yet been queried, all of the columns are analyzed even when PREDICATE COLUMNS is specified. When this happens, Amazon Redshift might respond with a message like No predicate columns found for \"*table-name*\". Analyzing all columns. For more information about predicate columns, see [Analyzing tables](t_Analyzing_tables.md)."
+- fragment_type: rationale
+  sequence: 15
+  content: "# Amazon Redshift best practices for designing queries\n\nTo maximize query performance, follow these recommendations when creating queries:\n+ Design tables according to best practices to provide a solid foundation for query performance. For more information, see [Amazon Redshift best practices for designing tables](c_designing-tables-best-practices.md).\n+ Avoid using `select *`. Include only the columns you specifically need.\n+ Use a [CASE conditional expression](r_CASE_function.md) to perform complex aggregations instead of selecting from the same table multiple times.\n+ Don't use cross-joins unless absolutely necessary. These joins without a join condition result in the Cartesian product of two tables. Cross-joins are typically run as nested-loop joins, which are the slowest of the possible join types. \n+ Use subqueries in cases where one table in the query is used only for predicate conditions and the subquery returns a small number of rows (less than about 200). The following example uses a subquery to avoid joining the LISTING table.\n\n    ```\n    select sum(sales.qtysold)\n    from sales\n    where salesid in (select listid from listing where listtime > '2008-12-26');\n    ```\n+ Use predicates to restrict the dataset as much as possible.\n+ In the predicate, use the least expensive operators that you can. [Comparison condition](r_comparison_condition.md) operators are preferable to [LIKE](r_patternmatching_condition_like.md) operators. LIKE operators are still preferable to [SIMILAR TO](pattern-matching-conditions-similar-to.md) or [POSIX operators](pattern-matching-conditions-posix.md).\n+ Avoid using functions in query predicates. Using them can drive up the cost of the query by requiring large numbers of rows to resolve the intermediate steps of the query.\n+ If possible, use a WHERE clause to restrict the dataset. The query planner can then use row order to help determine which records match the criteria, so it can skip scanning large numbers of disk blocks. Without this,"

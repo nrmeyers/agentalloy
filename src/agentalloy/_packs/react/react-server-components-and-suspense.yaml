@@ -1,22 +1,31 @@
 skill_type: domain
 skill_id: react-server-components-and-suspense
 canonical_name: React Server Components and Suspense (RSC, "use client", Streaming, use() for Promises)
-description: "Build fast React apps that fetch data on the server and stream HTML to the browser: use Server Components for async data, Suspense for loading states, and the use hook to read promises during render."
+description: 'Build fast React apps that fetch data on the server and stream HTML to the browser: use Server Components for async data, Suspense for loading states, and the use hook to read promises during render.'
 category: engineering
 skill_class: domain
-domain_tags: [server-component-async, use-client-boundary, suspense-fallback, use-promise-hook, streaming-error-fallback, lazy-code-splitting, react-query-suspense-query, route-level-suspense, react]
+domain_tags:
+- server-component-async
+- use-client-boundary
+- suspense-fallback
+- use-promise-hook
+- streaming-error-fallback
+- lazy-code-splitting
+- react-query-suspense-query
+- route-level-suspense
+- react
 related:
 - nextjs-data-fetching-and-caching
 - nextjs-ppr-cache-components
 - react-server-actions
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   merged 2026-06-03: absorbed unique content from react-suspense-and-streaming (superseded_by: react-suspense-and-streaming) — added lazy() code splitting, useSuspenseQuery integration, route-level Suspense, and the useEffect-doesn't-suspend note.
   Initial authoring 2026-05-06. Sources — React Server Components reference https://react.dev/reference/rsc/server-components, Suspense https://react.dev/reference/react/Suspense, 'use client' directive https://react.dev/reference/rsc/use-client, 'use server' directive https://react.dev/reference/rsc/use-server, Server Functions https://react.dev/reference/rsc/server-functions, use() hook https://react.dev/reference/react/use (all verified 2026-05-06 via tier-2 llms_url procedure against react.dev/llms-index). Skill scope: React 19+ Server Components rendered ahead of bundling on the server with `async`/`await` data access, `'use client'` as the module boundary that enters the client bundle, `'use server'` and Server Functions for client-callable mutations, `<Suspense>` boundaries with fallback rendering, streaming HTML out of order so slow data does not block the shell, the `use()` hook for reading promises and context during render, and Error Boundaries paired with Suspense for the data-error / data-loading split. Walks the boundary edge: a server component that imports a client component that imports a heavy library — the library still ships to the client because the client component crosses the boundary. Out of scope: Next.js App Router specifics, Remix-specific loaders, custom RSC bundler integration. Honest framing per R6 — RSC and `use()` are stable in React 19 (released December 2024) but the underlying APIs that bundlers and frameworks integrate against are explicitly NOT semver-stable in React 19.x per the upstream Server Functions docs; most users encounter RSC through a framework (Next.js App Router being dominant), not by wiring it themselves.
-
 raw_prose: |
   # React Server Components and Suspense
 
@@ -288,314 +297,293 @@ raw_prose: |
   ```
 
   Fast routes render immediately; navigation into `/heavy` shows `<PageSkeleton />` until that route's data and code are ready. Pair with feature-level Suspense boundaries inside each route for finer-grained streaming.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # React Server Components and Suspense
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # React Server Components and Suspense
 
-      React Server Components (RSC), stable in React 19 (December 2024), introduce a new component type that renders ahead of time on the server, in an environment separate from the client, before bundling. Server Components can be `async` and `await` data directly. They never re-render on the client; their output is serialized and streamed to the browser. Pair this with `<Suspense>` for streaming fallback UI, the `use()` hook for reading promises during render, and Error Boundaries for failure modes, and you have the React 19 data-flow story. The framing the upstream docs give honestly: Server Components are stable, but the integrator-facing APIs that bundlers and frameworks plug into are explicitly NOT semver-stable in 19.x. Most readers will encounter RSC through Next.js App Router, not by wiring it themselves.
+    React Server Components (RSC), stable in React 19 (December 2024), introduce a new component type that renders ahead of time on the server, in an environment separate from the client, before bundling. Server Components can be `async` and `await` data directly. They never re-render on the client; their output is serialized and streamed to the browser. Pair this with `<Suspense>` for streaming fallback UI, the `use()` hook for reading promises during render, and Error Boundaries for failure modes, and you have the React 19 data-flow story. The framing the upstream docs give honestly: Server Components are stable, but the integrator-facing APIs that bundlers and frameworks plug into are explicitly NOT semver-stable in 19.x. Most readers will encounter RSC through Next.js App Router, not by wiring it themselves.
+- sequence: 2
+  fragment_type: example
+  content: |
+    ## Server Components: async, server-only, never hydrated
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## Server Components: async, server-only, never hydrated
+    A Server Component is just a React component, but it runs once on the server and its output is serialized. Because it never runs on the client, it can `await` data directly and import server-only modules without bundling them.
 
-      A Server Component is just a React component, but it runs once on the server and its output is serialized. Because it never runs on the client, it can `await` data directly and import server-only modules without bundling them.
+    ```jsx
+    // app/products/[id]/page.jsx — Server Component (no directive needed)
+    import { db } from '@/lib/db';
+    import marked from 'marked'; // heavy library — stays on server
+    import BuyButton from './BuyButton';
 
-      ```jsx
-      // app/products/[id]/page.jsx — Server Component (no directive needed)
-      import { db } from '@/lib/db';
-      import marked from 'marked'; // heavy library — stays on server
-      import BuyButton from './BuyButton';
+    export default async function Page({ params }) {
+      const product = await db.products.findById(params.id);
+      const descriptionHtml = marked(product.description);
+      return (
+        <article>
+          <h1>{product.name}</h1>
+          <div dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
+          <BuyButton productId={product.id} />
+        </article>
+      );
+    }
+    ```
 
-      export default async function Page({ params }) {
-        const product = await db.products.findById(params.id);
-        const descriptionHtml = marked(product.description);
-        return (
-          <article>
-            <h1>{product.name}</h1>
-            <div dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
-            <BuyButton productId={product.id} />
-          </article>
-        );
+    Key properties: `marked` is imported in the server component and is not shipped to the client. `db` is server-only. Server Components have no state, no effects, no event handlers — those live in Client Components. The output is a serializable tree containing primitives, JSX, and references to Client Component modules. Props passed from server to client must be serializable: numbers, strings, plain objects, arrays, Server Functions (references), and JSX. Functions, classes, and Maps/Sets are not serializable across the boundary.
+- sequence: 3
+  fragment_type: setup
+  content: |
+    ## `'use client'`: the module boundary that enters the client bundle
+
+    The `'use client'` directive at the top of a module marks the module and its transitive dependencies as client code. Anything imported from a `'use client'` module ends up in the client bundle. The directive at the TOP of the file is the boundary; you cannot put `'use client'` inside a function body.
+
+    ```jsx
+    // app/products/[id]/BuyButton.jsx
+    'use client';
+    import { useState } from 'react';
+
+    export default function BuyButton({ productId }) {
+      const [loading, setLoading] = useState(false);
+      return (
+        <button
+          disabled={loading}
+          onClick={async () => {
+            setLoading(true);
+            await fetch('/api/cart', { method: 'POST', body: JSON.stringify({ productId }) });
+            setLoading(false);
+          }}
+        >
+          {loading ? 'Adding...' : 'Buy'}
+        </button>
+      );
+    }
+    ```
+
+    Server-into-client nesting is allowed and common: the `Page` server component renders `<BuyButton productId={...} />`, passing a serializable prop. Client-into-server is NOT allowed directly — you cannot import a Server Component from a `'use client'` module — but you can pass a Server Component as a `children` prop from a server parent into a client wrapper. The upstream docs note: when a `'use client'` module is imported from another client module, the directive has no effect (it is already client-side). The directive must be at the very beginning of the file, single or double quotes (not backticks), comments above are OK.
+- sequence: 4
+  fragment_type: example
+  content: |
+    ## The boundary edge: a client component pulling in a heavy library
+
+    Walk this edge. You have a server component that imports a client component, and the client component imports a heavy markdown library:
+
+    ```jsx
+    // ServerPage.jsx — Server Component
+    import RichEditor from './RichEditor';
+    export default async function ServerPage() {
+      const draft = await db.drafts.get();
+      return <RichEditor initial={draft.text} />;
+    }
+
+    // RichEditor.jsx — Client Component
+    'use client';
+    import { useState } from 'react';
+    import marked from 'marked'; // SHIPS TO CLIENT
+    export default function RichEditor({ initial }) {
+      const [text, setText] = useState(initial);
+      return <div dangerouslySetInnerHTML={{ __html: marked(text) }} />;
+    }
+    ```
+
+    `marked` is bundled to the client because `RichEditor` crossed the boundary and pulled it in transitively. The fix is to move the markdown rendering server-side: render the HTML in `ServerPage`, pass the rendered HTML as a string prop to `RichEditor`, and drop `marked` from the client component entirely. The mental model: every `'use client'` is a one-way door into the client bundle, and everything reachable from it goes with it.
+- sequence: 5
+  fragment_type: example
+  content: |
+    ## `'use server'` and Server Functions for mutations
+
+    `'use server'` marks an async function (or a whole module) as a Server Function — callable from the client over an automatic RPC. The framework creates a reference and passes it through to the client; calling it on the client triggers a network request to execute it on the server.
+
+    ```jsx
+    // app/notes/actions.js
+    'use server';
+    import { db } from '@/lib/db';
+    export async function createNote(formData) {
+      const title = formData.get('title');
+      // ALWAYS authorize — arguments from the client are untrusted input
+      const userId = await requireSession();
+      return db.notes.create({ data: { title, userId } });
+    }
+    ```
+
+    ```jsx
+    // app/notes/NewNote.jsx
+    'use client';
+    import { createNote } from './actions';
+    export default function NewNote() {
+      return (
+        <form action={createNote}>
+          <input name="title" />
+          <button>Create</button>
+        </form>
+      );
+    }
+    ```
+
+    Caveats from the upstream docs (verified 2026-05-06): `'use server'` only goes on async functions; Server Functions are designed for mutations, not data fetching (no caching of return values is guaranteed); arguments and return values must be serializable; treat all arguments as untrusted input and authorize every call; Server Functions passed to `<form action={...}>` or `formAction` are automatically called inside a Transition.
+- sequence: 6
+  fragment_type: execution
+  content: |
+    ## `<Suspense>`: fallback UI while children load
+
+    `<Suspense fallback={...}>` displays the fallback while any child suspends, then swaps in the children when they are ready. A child suspends by throwing a promise — server components awaiting data and the `use()` hook both do this implicitly.
+
+    ```jsx
+    import { Suspense } from 'react';
+    import ProductDetails from './ProductDetails';
+    import Reviews from './Reviews';
+
+    export default function Page({ id }) {
+      return (
+        <main>
+          <Suspense fallback={<p>Loading details...</p>}>
+            <ProductDetails id={id} />
+          </Suspense>
+          <Suspense fallback={<p>Loading reviews...</p>}>
+            <Reviews id={id} />
+          </Suspense>
+        </main>
+      );
+    }
+    ```
+
+    Suspense boundaries scope where the fallback renders. With server-side streaming, the React server can flush the shell first (everything outside the suspended boundary), then stream the inner content of each Suspense boundary as its data resolves — out of order. Slow `Reviews` does not block the page from showing `ProductDetails` once that data is ready. Granularity matters: too few boundaries and the whole page waits for the slowest piece; too many and you get a fallback waterfall (each fallback rendering before the next, animations flickering). Place a boundary around each independent data unit.
+- sequence: 7
+  fragment_type: example
+  content: |
+    ## `use()` for reading promises and context during render
+
+    `use()` (React 19+) reads the value of a resource — a Promise or a Context — during render. When called with a Promise, the component suspends until the promise resolves; the nearest Suspense boundary shows its fallback. If the promise rejects, the nearest Error Boundary catches it.
+
+    ```jsx
+    'use client';
+    import { use, Suspense } from 'react';
+
+    function ProductDetails({ productPromise }) {
+      const product = use(productPromise); // suspends here
+      return <h1>{product.name}</h1>;
+    }
+
+    export default function ProductPage({ productPromise }) {
+      return (
+        <Suspense fallback={<p>Loading...</p>}>
+          <ProductDetails productPromise={productPromise} />
+        </Suspense>
+      );
+    }
+    ```
+
+    The pattern: a Server Component starts the fetch and passes the unawaited promise as a prop to a Client Component, which calls `use()` on it. The promise is created on the server, streamed to the client, and resolved on the client without a mount-then-fetch waterfall. Important from the upstream docs (verified 2026-05-06): unlike standard React Hooks, `use()` CAN be called inside loops and conditional statements (`if`). The function that calls `use()` must still be a Component or Hook. When fetching data INSIDE a Server Component, prefer `async`/`await` over `use()` — `async` Server Components pick up rendering from the awaited point.
+- sequence: 8
+  fragment_type: example
+  content: |
+    ## Error Boundaries paired with Suspense
+
+    Error Boundaries are class components (or the `react-error-boundary` library) that catch errors thrown during render, lifecycle, and constructors of the tree below. Combined with Suspense, you get the data-error / data-loading split: Suspense handles "data not ready yet", the Error Boundary handles "data threw."
+
+    ```jsx
+    'use client';
+    import { Component, Suspense } from 'react';
+
+    class ErrorBoundary extends Component {
+      state = { error: null };
+      static getDerivedStateFromError(error) { return { error }; }
+      componentDidCatch(error, info) { reportError(error, info); }
+      render() {
+        if (this.state.error) return this.props.fallback(this.state.error);
+        return this.props.children;
       }
-      ```
+    }
 
-      Key properties: `marked` is imported in the server component and is not shipped to the client. `db` is server-only. Server Components have no state, no effects, no event handlers — those live in Client Components. The output is a serializable tree containing primitives, JSX, and references to Client Component modules. Props passed from server to client must be serializable: numbers, strings, plain objects, arrays, Server Functions (references), and JSX. Functions, classes, and Maps/Sets are not serializable across the boundary.
-
-  - sequence: 3
-    fragment_type: setup
-    content: |
-      ## `'use client'`: the module boundary that enters the client bundle
-
-      The `'use client'` directive at the top of a module marks the module and its transitive dependencies as client code. Anything imported from a `'use client'` module ends up in the client bundle. The directive at the TOP of the file is the boundary; you cannot put `'use client'` inside a function body.
-
-      ```jsx
-      // app/products/[id]/BuyButton.jsx
-      'use client';
-      import { useState } from 'react';
-
-      export default function BuyButton({ productId }) {
-        const [loading, setLoading] = useState(false);
-        return (
-          <button
-            disabled={loading}
-            onClick={async () => {
-              setLoading(true);
-              await fetch('/api/cart', { method: 'POST', body: JSON.stringify({ productId }) });
-              setLoading(false);
-            }}
-          >
-            {loading ? 'Adding...' : 'Buy'}
-          </button>
-        );
-      }
-      ```
-
-      Server-into-client nesting is allowed and common: the `Page` server component renders `<BuyButton productId={...} />`, passing a serializable prop. Client-into-server is NOT allowed directly — you cannot import a Server Component from a `'use client'` module — but you can pass a Server Component as a `children` prop from a server parent into a client wrapper. The upstream docs note: when a `'use client'` module is imported from another client module, the directive has no effect (it is already client-side). The directive must be at the very beginning of the file, single or double quotes (not backticks), comments above are OK.
-
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## The boundary edge: a client component pulling in a heavy library
-
-      Walk this edge. You have a server component that imports a client component, and the client component imports a heavy markdown library:
-
-      ```jsx
-      // ServerPage.jsx — Server Component
-      import RichEditor from './RichEditor';
-      export default async function ServerPage() {
-        const draft = await db.drafts.get();
-        return <RichEditor initial={draft.text} />;
-      }
-
-      // RichEditor.jsx — Client Component
-      'use client';
-      import { useState } from 'react';
-      import marked from 'marked'; // SHIPS TO CLIENT
-      export default function RichEditor({ initial }) {
-        const [text, setText] = useState(initial);
-        return <div dangerouslySetInnerHTML={{ __html: marked(text) }} />;
-      }
-      ```
-
-      `marked` is bundled to the client because `RichEditor` crossed the boundary and pulled it in transitively. The fix is to move the markdown rendering server-side: render the HTML in `ServerPage`, pass the rendered HTML as a string prop to `RichEditor`, and drop `marked` from the client component entirely. The mental model: every `'use client'` is a one-way door into the client bundle, and everything reachable from it goes with it.
-
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## `'use server'` and Server Functions for mutations
-
-      `'use server'` marks an async function (or a whole module) as a Server Function — callable from the client over an automatic RPC. The framework creates a reference and passes it through to the client; calling it on the client triggers a network request to execute it on the server.
-
-      ```jsx
-      // app/notes/actions.js
-      'use server';
-      import { db } from '@/lib/db';
-      export async function createNote(formData) {
-        const title = formData.get('title');
-        // ALWAYS authorize — arguments from the client are untrusted input
-        const userId = await requireSession();
-        return db.notes.create({ data: { title, userId } });
-      }
-      ```
-
-      ```jsx
-      // app/notes/NewNote.jsx
-      'use client';
-      import { createNote } from './actions';
-      export default function NewNote() {
-        return (
-          <form action={createNote}>
-            <input name="title" />
-            <button>Create</button>
-          </form>
-        );
-      }
-      ```
-
-      Caveats from the upstream docs (verified 2026-05-06): `'use server'` only goes on async functions; Server Functions are designed for mutations, not data fetching (no caching of return values is guaranteed); arguments and return values must be serializable; treat all arguments as untrusted input and authorize every call; Server Functions passed to `<form action={...}>` or `formAction` are automatically called inside a Transition.
-
-  - sequence: 6
-    fragment_type: execution
-    content: |
-      ## `<Suspense>`: fallback UI while children load
-
-      `<Suspense fallback={...}>` displays the fallback while any child suspends, then swaps in the children when they are ready. A child suspends by throwing a promise — server components awaiting data and the `use()` hook both do this implicitly.
-
-      ```jsx
-      import { Suspense } from 'react';
-      import ProductDetails from './ProductDetails';
-      import Reviews from './Reviews';
-
-      export default function Page({ id }) {
-        return (
-          <main>
-            <Suspense fallback={<p>Loading details...</p>}>
-              <ProductDetails id={id} />
-            </Suspense>
-            <Suspense fallback={<p>Loading reviews...</p>}>
-              <Reviews id={id} />
-            </Suspense>
-          </main>
-        );
-      }
-      ```
-
-      Suspense boundaries scope where the fallback renders. With server-side streaming, the React server can flush the shell first (everything outside the suspended boundary), then stream the inner content of each Suspense boundary as its data resolves — out of order. Slow `Reviews` does not block the page from showing `ProductDetails` once that data is ready. Granularity matters: too few boundaries and the whole page waits for the slowest piece; too many and you get a fallback waterfall (each fallback rendering before the next, animations flickering). Place a boundary around each independent data unit.
-
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## `use()` for reading promises and context during render
-
-      `use()` (React 19+) reads the value of a resource — a Promise or a Context — during render. When called with a Promise, the component suspends until the promise resolves; the nearest Suspense boundary shows its fallback. If the promise rejects, the nearest Error Boundary catches it.
-
-      ```jsx
-      'use client';
-      import { use, Suspense } from 'react';
-
-      function ProductDetails({ productPromise }) {
-        const product = use(productPromise); // suspends here
-        return <h1>{product.name}</h1>;
-      }
-
-      export default function ProductPage({ productPromise }) {
-        return (
+    export default function Page({ productPromise }) {
+      return (
+        <ErrorBoundary fallback={(e) => <p>Failed: {e.message}</p>}>
           <Suspense fallback={<p>Loading...</p>}>
             <ProductDetails productPromise={productPromise} />
           </Suspense>
-        );
-      }
-      ```
+        </ErrorBoundary>
+      );
+    }
+    ```
 
-      The pattern: a Server Component starts the fetch and passes the unawaited promise as a prop to a Client Component, which calls `use()` on it. The promise is created on the server, streamed to the client, and resolved on the client without a mount-then-fetch waterfall. Important from the upstream docs (verified 2026-05-06): unlike standard React Hooks, `use()` CAN be called inside loops and conditional statements (`if`). The function that calls `use()` must still be a Component or Hook. When fetching data INSIDE a Server Component, prefer `async`/`await` over `use()` — `async` Server Components pick up rendering from the awaited point.
+    A rejected promise read by `use()` propagates to the nearest Error Boundary above the Suspense boundary. Always log inside `componentDidCatch` — silent error boundaries swallow real bugs. Place the Error Boundary OUTSIDE the Suspense boundary you want it to cover; placing it inside means the Suspense fallback renders first and never fails over to the error UI.
+- fragment_type: guardrail
+  sequence: 9
+  content: |-
+    ## Anti-patterns
 
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## Error Boundaries paired with Suspense
+    - **`'use client'` at the root of every file.** Defeats the purpose of RSC — the entire tree becomes a client bundle and you lose server-side data fetching, server-only imports, and zero-JS leaf nodes. Push the directive down to the leaves that actually need state, effects, or browser APIs. - **Fetching on the client when the data could come from the server render.** `useEffect(() => fetch(...))` in a client component creates a mount-then-fetch waterfall and a loading flicker. If the data is needed for first paint, fetch it in a Server Component and pass the result down, or pass an unawaited promise and `use()` it. - **Suspense boundaries placed too granularly.** A `<Suspense>` per row produces a cascade of fallbacks rendering one after another, each animating, each shifting layout. Group siblings that should appear together under one boundary. - **Reading `use()` after early returns or in event handlers.** `use()` relaxes some hook rules (it works in `if`/loops) but it must still be called from a Component or Hook during render — not in an event handler, not in `useEffect`. - **Server Functions without authorization.** Arguments arrive over the network from an untrusted client. Every `'use server'` function must authenticate the caller and authorize the action before touching state.
+- fragment_type: guardrail
+  sequence: 10
+  content: |-
+    The upstream docs are explicit: "Always treat arguments to Server Functions as untrusted input and authorize any mutations."
+    - **Importing client-only deps in Server Components.** A package that touches `window` at module top-level will crash the server render. Keep `'use client'` boundaries between such packages and the server. - **Error Boundaries that swallow without logging.** `componentDidCatch` is the only place to record the error; if it does nothing, the failure is invisible in production. - **Passing non-serializable props from server to client.** Functions (other than Server Functions), class instances, Maps, Sets, Dates with custom prototypes, and circular structures cannot cross the boundary. The render fails with a serialization error at build or request time.
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] `grep -rn "''use client''" src/` inventories every client boundary; spot-check that none are at the root of `app/` or `pages/` layouts that should remain server-rendered. - [ ] `grep -rn "''use server''" src/` inventories every Server Function; trace each to an authorization check (a `requireSession`, `requireUser`, or equivalent) inside the body. - [ ] Bundle analyzer (`source-map-explorer`, `@next/bundle-analyzer`, or framework-equivalent) shows no server-only dependency in the client bundle. Run the analyzer and grep its output for known server-only packages (`marked`, your db driver, your ORM): `pnpm build && pnpm analyze | grep -E ''(marked|pg|@prisma/client)''` should return no client-bundle hits. - [ ] Every `<Suspense>` has a non-empty `fallback` prop. `grep -rnE ''<Suspense[^>]*fallback='' src/` and confirm count matches `grep -rn ''<Suspense'' src/`. - [ ] No `use(` call appears inside a `useEffect`, event handler, or non-component function. `grep -rn ''use('' src/` and audit each match. - [ ] Every Error Boundary implements both `getDerivedStateFromError` (to set fallback state) and `componentDidCatch` (to log). `grep -rn ''getDerivedStateFromError'' src/` and `grep -rn ''componentDidCatch'' src/` should produce paired matches. - [ ] React version pinned to `^19.0.0` or later in `package.json`.'
+- fragment_type: verification
+  sequence: 12
+  content: |-
+    `node -e "console.log(require('./package.json').dependencies.react)"` returns a 19+ range. - [ ] Server Functions are async. `grep -rnB1 "'use server'" src/` and confirm each enclosing function has the `async` keyword.
 
-      Error Boundaries are class components (or the `react-error-boundary` library) that catch errors thrown during render, lifecycle, and constructors of the tree below. Combined with Suspense, you get the data-error / data-loading split: Suspense handles "data not ready yet", the Error Boundary handles "data threw."
+    ## Verified
 
-      ```jsx
-      'use client';
-      import { Component, Suspense } from 'react';
+    - React Server Components stable in React 19 (released December 2024) per react.dev/reference/rsc/server-components (verified 2026-05-06 via tier-2 llms_url procedure).
+    - `use()` hook stable in React 19 per react.dev/reference/react/use (verified 2026-05-06).
+    - Server Functions integrator APIs explicitly NOT semver-stable in React 19.x per react.dev/reference/rsc/server-functions, which recommends pinning React to a specific version when integrating as a bundler or framework (verified 2026-05-06).
+    - `'use client'` and `'use server'` directive caveats (top-of-file placement, quote rules, comments allowed above) per react.dev/reference/rsc/use-client and react.dev/reference/rsc/use-server (verified 2026-05-06).
+    - `use()` may be called in loops and conditionals, unlike standard hooks, per react.dev/reference/react/use Caveats (verified 2026-05-06).
+- sequence: 13
+  fragment_type: example
+  content: |
+    ## Lazy code splitting with Suspense
 
-      class ErrorBoundary extends Component {
-        state = { error: null };
-        static getDerivedStateFromError(error) { return { error }; }
-        componentDidCatch(error, info) { reportError(error, info); }
-        render() {
-          if (this.state.error) return this.props.fallback(this.state.error);
-          return this.props.children;
-        }
-      }
+    `React.lazy()` defers loading a component module until it actually renders; `<Suspense>` shows the fallback while the chunk downloads. This is the standard route-level or feature-level code-splitting pattern, orthogonal to data-fetching Suspense.
 
-      export default function Page({ productPromise }) {
-        return (
-          <ErrorBoundary fallback={(e) => <p>Failed: {e.message}</p>}>
-            <Suspense fallback={<p>Loading...</p>}>
-              <ProductDetails productPromise={productPromise} />
-            </Suspense>
-          </ErrorBoundary>
-        );
-      }
-      ```
+    ```tsx
+    import { lazy, Suspense } from 'react';
+    const AdminPanel = lazy(() => import('./AdminPanel'));
 
-      A rejected promise read by `use()` propagates to the nearest Error Boundary above the Suspense boundary. Always log inside `componentDidCatch` — silent error boundaries swallow real bugs. Place the Error Boundary OUTSIDE the Suspense boundary you want it to cover; placing it inside means the Suspense fallback renders first and never fails over to the error UI.
+    <Suspense fallback={<div>Loading admin...</div>}>
+      <AdminPanel />
+    </Suspense>
+    ```
 
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
+    The `lazy()` import call must return a Promise resolving to a module with a default export. Combine with route-level Suspense to keep initial bundles small without manual loading state.
+- sequence: 14
+  fragment_type: example
+  content: |
+    ## Suspense-aware data libraries (React Query and similar)
 
-      - **`'use client'` at the root of every file.** Defeats the purpose of RSC — the entire tree becomes a client bundle and you lose server-side data fetching, server-only imports, and zero-JS leaf nodes. Push the directive down to the leaves that actually need state, effects, or browser APIs.
-      - **Fetching on the client when the data could come from the server render.** `useEffect(() => fetch(...))` in a client component creates a mount-then-fetch waterfall and a loading flicker. If the data is needed for first paint, fetch it in a Server Component and pass the result down, or pass an unawaited promise and `use()` it.
-      - **Suspense boundaries placed too granularly.** A `<Suspense>` per row produces a cascade of fallbacks rendering one after another, each animating, each shifting layout. Group siblings that should appear together under one boundary.
-      - **Reading `use()` after early returns or in event handlers.** `use()` relaxes some hook rules (it works in `if`/loops) but it must still be called from a Component or Hook during render — not in an event handler, not in `useEffect`.
-      - **Server Functions without authorization.** Arguments arrive over the network from an untrusted client. Every `'use server'` function must authenticate the caller and authorize the action before touching state. The upstream docs are explicit: "Always treat arguments to Server Functions as untrusted input and authorize any mutations."
-      - **Importing client-only deps in Server Components.** A package that touches `window` at module top-level will crash the server render. Keep `'use client'` boundaries between such packages and the server.
-      - **Error Boundaries that swallow without logging.** `componentDidCatch` is the only place to record the error; if it does nothing, the failure is invisible in production.
-      - **Passing non-serializable props from server to client.** Functions (other than Server Functions), class instances, Maps, Sets, Dates with custom prototypes, and circular structures cannot cross the boundary. The render fails with a serialization error at build or request time.
+    Suspense is triggered by a child throwing a Promise. Plain `useEffect(() => fetch(...))` does NOT throw, so it does NOT trigger Suspense — the fallback never shows for that fetch. To make Suspense work for client-side data you need a Suspense-aware fetcher:
 
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
+    ```tsx
+    import { useSuspenseQuery } from '@tanstack/react-query';
 
-      - [ ] `grep -rn "'use client'" src/` inventories every client boundary; spot-check that none are at the root of `app/` or `pages/` layouts that should remain server-rendered.
-      - [ ] `grep -rn "'use server'" src/` inventories every Server Function; trace each to an authorization check (a `requireSession`, `requireUser`, or equivalent) inside the body.
-      - [ ] Bundle analyzer (`source-map-explorer`, `@next/bundle-analyzer`, or framework-equivalent) shows no server-only dependency in the client bundle. Run the analyzer and grep its output for known server-only packages (`marked`, your db driver, your ORM): `pnpm build && pnpm analyze | grep -E '(marked|pg|@prisma/client)'` should return no client-bundle hits.
-      - [ ] Every `<Suspense>` has a non-empty `fallback` prop. `grep -rnE '<Suspense[^>]*fallback=' src/` and confirm count matches `grep -rn '<Suspense' src/`.
-      - [ ] No `use(` call appears inside a `useEffect`, event handler, or non-component function. `grep -rn 'use(' src/` and audit each match.
-      - [ ] Every Error Boundary implements both `getDerivedStateFromError` (to set fallback state) and `componentDidCatch` (to log). `grep -rn 'getDerivedStateFromError' src/` and `grep -rn 'componentDidCatch' src/` should produce paired matches.
-      - [ ] React version pinned to `^19.0.0` or later in `package.json`. `node -e "console.log(require('./package.json').dependencies.react)"` returns a 19+ range.
-      - [ ] Server Functions are async. `grep -rnB1 "'use server'" src/` and confirm each enclosing function has the `async` keyword.
+    function UserDetails({ id }: { id: string }) {
+      const { data: user } = useSuspenseQuery({
+        queryKey: ['user', id],
+        queryFn: () => fetchUser(id),
+      });
+      return <div>{user.name}</div>;
+    }
+    ```
 
-      ## Verified
+    `useSuspenseQuery` suspends while the query is pending; wrap the consumer in `<Suspense>` and no `isLoading` check is needed in the component body. Equivalent patterns exist in SWR, Relay, and the `use()`-with-Promise pattern from a Server Component. Ad-hoc `useState` + `useEffect` data fetches integrate via none of these and will not trigger Suspense.
+- sequence: 15
+  fragment_type: example
+  content: |
+    ## Route-level Suspense
 
-      - React Server Components stable in React 19 (released December 2024) per react.dev/reference/rsc/server-components (verified 2026-05-06 via tier-2 llms_url procedure).
-      - `use()` hook stable in React 19 per react.dev/reference/react/use (verified 2026-05-06).
-      - Server Functions integrator APIs explicitly NOT semver-stable in React 19.x per react.dev/reference/rsc/server-functions, which recommends pinning React to a specific version when integrating as a bundler or framework (verified 2026-05-06).
-      - `'use client'` and `'use server'` directive caveats (top-of-file placement, quote rules, comments allowed above) per react.dev/reference/rsc/use-client and react.dev/reference/rsc/use-server (verified 2026-05-06).
-      - `use()` may be called in loops and conditionals, unlike standard hooks, per react.dev/reference/react/use Caveats (verified 2026-05-06).
+    Route-level Suspense lets fast routes ship while slow ones stream their initial content. In React Router or Next.js you wrap the route tree (or a sub-tree) in a Suspense boundary with a page-level skeleton:
 
-  - sequence: 11
-    fragment_type: example
-    content: |
-      ## Lazy code splitting with Suspense
+    ```tsx
+    <Suspense fallback={<PageSkeleton />}>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/heavy" element={<HeavyRoute />} />
+      </Routes>
+    </Suspense>
+    ```
 
-      `React.lazy()` defers loading a component module until it actually renders; `<Suspense>` shows the fallback while the chunk downloads. This is the standard route-level or feature-level code-splitting pattern, orthogonal to data-fetching Suspense.
-
-      ```tsx
-      import { lazy, Suspense } from 'react';
-      const AdminPanel = lazy(() => import('./AdminPanel'));
-
-      <Suspense fallback={<div>Loading admin...</div>}>
-        <AdminPanel />
-      </Suspense>
-      ```
-
-      The `lazy()` import call must return a Promise resolving to a module with a default export. Combine with route-level Suspense to keep initial bundles small without manual loading state.
-
-  - sequence: 12
-    fragment_type: example
-    content: |
-      ## Suspense-aware data libraries (React Query and similar)
-
-      Suspense is triggered by a child throwing a Promise. Plain `useEffect(() => fetch(...))` does NOT throw, so it does NOT trigger Suspense — the fallback never shows for that fetch. To make Suspense work for client-side data you need a Suspense-aware fetcher:
-
-      ```tsx
-      import { useSuspenseQuery } from '@tanstack/react-query';
-
-      function UserDetails({ id }: { id: string }) {
-        const { data: user } = useSuspenseQuery({
-          queryKey: ['user', id],
-          queryFn: () => fetchUser(id),
-        });
-        return <div>{user.name}</div>;
-      }
-      ```
-
-      `useSuspenseQuery` suspends while the query is pending; wrap the consumer in `<Suspense>` and no `isLoading` check is needed in the component body. Equivalent patterns exist in SWR, Relay, and the `use()`-with-Promise pattern from a Server Component. Ad-hoc `useState` + `useEffect` data fetches integrate via none of these and will not trigger Suspense.
-
-  - sequence: 13
-    fragment_type: example
-    content: |
-      ## Route-level Suspense
-
-      Route-level Suspense lets fast routes ship while slow ones stream their initial content. In React Router or Next.js you wrap the route tree (or a sub-tree) in a Suspense boundary with a page-level skeleton:
-
-      ```tsx
-      <Suspense fallback={<PageSkeleton />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/heavy" element={<HeavyRoute />} />
-        </Routes>
-      </Suspense>
-      ```
-
-      Fast routes render immediately; navigation into `/heavy` shows `<PageSkeleton />` until that route's data and code are ready. Pair with feature-level Suspense boundaries inside each route for finer-grained streaming.
+    Fast routes render immediately; navigation into `/heavy` shows `<PageSkeleton />` until that route's data and code are ready. Pair with feature-level Suspense boundaries inside each route for finer-grained streaming.

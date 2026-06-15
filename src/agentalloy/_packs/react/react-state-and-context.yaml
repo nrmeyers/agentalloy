@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: react-state-and-context
 canonical_name: React State Management (useState vs useReducer, Context, External Stores)
-description: "Manage data in React apps by choosing the right tool: use useState for simple values, useReducer for complex logic, Context to share data across components, and external stores for global state, keeping things simple and local whenever possible."
+description: 'Manage data in React apps by choosing the right tool: use useState for simple values, useReducer for complex logic, Context to share data across components, and external stores for global state, keeping things simple and local whenever possible.'
 category: engineering
 skill_class: domain
-domain_tags: [usestate-functional-update, usereducer-action-types, context-provider-value, lifting-state-up, external-store-decision, react]
+domain_tags:
+- usestate-functional-update
+- usereducer-action-types
+- context-provider-value
+- lifting-state-up
+- external-store-decision
+- react
 related:
 - react-context-patterns
 - react-hooks-rules-and-deps
 - react-rendering-keys-and-memoization
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: framework
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — React managing state https://react.dev/learn/managing-state, useReducer reference https://react.dev/reference/react/useReducer, useContext reference https://react.dev/reference/react/useContext, createContext reference https://react.dev/reference/react/createContext, extracting state logic into a reducer https://react.dev/learn/extracting-state-logic-into-a-reducer, scaling up with reducer and context https://react.dev/learn/scaling-up-with-reducer-and-context, useSyncExternalStore reference https://react.dev/reference/react/useSyncExternalStore (all verified 2026-05-06 via tier-2 llms_url procedure against react.dev/llms-index, react.dev/hooks-ref, react.dev/effect-pitfalls). Skill scope: `useState` patterns (scalar, object spread, functional update, lazy init), `useReducer` with discriminated-union action types, lifting state up as the default before context, `createContext` + `Provider` + `useContext`, the reducer-plus-context "scaling up" pattern, and the decision boundary to an external store via `useSyncExternalStore` (Zustand, Jotai, Redux, TanStack Query for server state). React 19+ era. Out of scope: class components, legacy `contextTypes`, React Native specifics, `useDeferredValue`/`useTransition` beyond a passing reference.
-
 raw_prose: |
   # React State Management
 
@@ -185,197 +191,184 @@ raw_prose: |
   - [ ] Server data is fetched via TanStack Query / SWR / RTK Query, not `useState` + `useEffect`. `grep -rnE 'fetch\(|axios' src/` returns matches only inside query-fn definitions, not inside components or effects.
   - [ ] Every `createContext(null)` is paired with a `use<Name>()` hook that throws when the value is `null`. `grep -rn 'createContext' src/` and confirm each context export has a guarded consumer hook.
   - [ ] Every external-store subscription uses `useSyncExternalStore`. `grep -rn 'addEventListener\|subscribe' src/` returns no in-component subscription wiring outside `useSyncExternalStore` callbacks (or framework-provided hooks that wrap it).
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # React State Management
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # React State Management
 
-      React 19+ exposes a layered set of state primitives: `useState` for local component state, `useReducer` for state with multiple co-dependent fields and discrete transitions, `createContext`/`useContext` for passing values through the tree without prop-drilling, and `useSyncExternalStore` for subscribing to state that lives outside React. The rule is one sentence: prefer the most local primitive that fits — `useState` until co-dependent fields force `useReducer`, lifting state up until depth forces context, and React state until you genuinely need a store outside React (server state, cross-tab sync, framework-agnostic state). Most production React state bugs are one of four things: stale closures from missing functional updates in `setState`, treating context as a state library and re-rendering every consumer on every change, putting server state into `useState` and reinventing caching/refetching badly, or reaching for `useReducer` on a single boolean toggle.
+    React 19+ exposes a layered set of state primitives: `useState` for local component state, `useReducer` for state with multiple co-dependent fields and discrete transitions, `createContext`/`useContext` for passing values through the tree without prop-drilling, and `useSyncExternalStore` for subscribing to state that lives outside React. The rule is one sentence: prefer the most local primitive that fits — `useState` until co-dependent fields force `useReducer`, lifting state up until depth forces context, and React state until you genuinely need a store outside React (server state, cross-tab sync, framework-agnostic state). Most production React state bugs are one of four things: stale closures from missing functional updates in `setState`, treating context as a state library and re-rendering every consumer on every change, putting server state into `useState` and reinventing caching/refetching badly, or reaching for `useReducer` on a single boolean toggle.
+- sequence: 2
+  fragment_type: example
+  content: |
+    ## `useState` patterns: scalar, object, functional, lazy
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## `useState` patterns: scalar, object, functional, lazy
+    `useState(initial)` returns `[value, setValue]`. For primitives — counters, flags, single strings — call it directly: `const [count, setCount] = useState(0)`. For objects, the setter replaces the whole value; you spread the previous state to keep a "patch-style" update: `setUser(prev => ({ ...prev, email }))`. The functional form `setX(prev => next)` is mandatory whenever the next value depends on the current one inside an event handler that may batch multiple updates, or inside an effect that closes over a stale value.
 
-      `useState(initial)` returns `[value, setValue]`. For primitives — counters, flags, single strings — call it directly: `const [count, setCount] = useState(0)`. For objects, the setter replaces the whole value; you spread the previous state to keep a "patch-style" update: `setUser(prev => ({ ...prev, email }))`. The functional form `setX(prev => next)` is mandatory whenever the next value depends on the current one inside an event handler that may batch multiple updates, or inside an effect that closes over a stale value.
+    ```tsx
+    import { useState } from 'react';
 
-      ```tsx
-      import { useState } from 'react';
+    function Counter() {
+      const [count, setCount] = useState(0);
 
-      function Counter() {
-        const [count, setCount] = useState(0);
+      function handleTriple() {
+        // BAD — all three reads see the same captured `count`.
+        // setCount(count + 1); setCount(count + 1); setCount(count + 1);
 
-        function handleTriple() {
-          // BAD — all three reads see the same captured `count`.
-          // setCount(count + 1); setCount(count + 1); setCount(count + 1);
-
-          // GOOD — functional updates compose correctly across batched setStates.
-          setCount(prev => prev + 1);
-          setCount(prev => prev + 1);
-          setCount(prev => prev + 1);
-        }
-
-        return <button onClick={handleTriple}>{count}</button>;
-      }
-      ```
-
-      Lazy initialization — `useState(() => buildInitial())` — runs the initializer once on mount instead of on every render. Use it when the default is expensive (parsing a large blob, reading from `localStorage`). Passing `useState(buildInitial())` (no arrow) re-computes on every render even though the result is discarded.
-
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## `useReducer`: when state has discrete transitions
-
-      Reach for `useReducer` when state has multiple co-dependent fields and a small set of discrete actions that mutate them together. The reducer is a pure function `(state, action) => state`. Pair it with a TypeScript discriminated union so the compiler enforces the action surface.
-
-      ```tsx
-      import { useReducer } from 'react';
-
-      type State = { tasks: string[]; filter: 'all' | 'open' };
-      type Action =
-        | { type: 'add'; task: string }
-        | { type: 'remove'; index: number }
-        | { type: 'set_filter'; filter: State['filter'] };
-
-      function reducer(state: State, action: Action): State {
-        switch (action.type) {
-          case 'add':
-            return { ...state, tasks: [...state.tasks, action.task] };
-          case 'remove':
-            return { ...state, tasks: state.tasks.filter((_, i) => i !== action.index) };
-          case 'set_filter':
-            return { ...state, filter: action.filter };
-        }
+        // GOOD — functional updates compose correctly across batched setStates.
+        setCount(prev => prev + 1);
+        setCount(prev => prev + 1);
+        setCount(prev => prev + 1);
       }
 
-      function TaskList() {
-        const [state, dispatch] = useReducer(reducer, { tasks: [], filter: 'all' });
-        return <button onClick={() => dispatch({ type: 'add', task: 'write tests' })}>add</button>;
+      return <button onClick={handleTriple}>{count}</button>;
+    }
+    ```
+
+    Lazy initialization — `useState(() => buildInitial())` — runs the initializer once on mount instead of on every render. Use it when the default is expensive (parsing a large blob, reading from `localStorage`). Passing `useState(buildInitial())` (no arrow) re-computes on every render even though the result is discarded.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## `useReducer`: when state has discrete transitions
+
+    Reach for `useReducer` when state has multiple co-dependent fields and a small set of discrete actions that mutate them together. The reducer is a pure function `(state, action) => state`. Pair it with a TypeScript discriminated union so the compiler enforces the action surface.
+
+    ```tsx
+    import { useReducer } from 'react';
+
+    type State = { tasks: string[]; filter: 'all' | 'open' };
+    type Action =
+      | { type: 'add'; task: string }
+      | { type: 'remove'; index: number }
+      | { type: 'set_filter'; filter: State['filter'] };
+
+    function reducer(state: State, action: Action): State {
+      switch (action.type) {
+        case 'add':
+          return { ...state, tasks: [...state.tasks, action.task] };
+        case 'remove':
+          return { ...state, tasks: state.tasks.filter((_, i) => i !== action.index) };
+        case 'set_filter':
+          return { ...state, filter: action.filter };
       }
-      ```
+    }
 
-      The reducer pattern collapses the "five `setState` calls in a row" anti-pattern into one `dispatch`, and surfaces the state machine as readable code. Do NOT reach for `useReducer` on a single boolean toggle — `useState(false)` plus `setOpen(o => !o)` is shorter and clearer. The threshold is roughly: three or more co-dependent fields, or two-plus discrete action types.
+    function TaskList() {
+      const [state, dispatch] = useReducer(reducer, { tasks: [], filter: 'all' });
+      return <button onClick={() => dispatch({ type: 'add', task: 'write tests' })}>add</button>;
+    }
+    ```
 
-  - sequence: 4
-    fragment_type: rationale
-    content: |
-      ## Lifting state up — the default before context
+    The reducer pattern collapses the "five `setState` calls in a row" anti-pattern into one `dispatch`, and surfaces the state machine as readable code. Do NOT reach for `useReducer` on a single boolean toggle — `useState(false)` plus `setOpen(o => !o)` is shorter and clearer. The threshold is roughly: three or more co-dependent fields, or two-plus discrete action types.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Lifting state up — the default before context
 
-      When two sibling components need the same data, hoist it to their nearest common parent and pass via props. This is the React default — explicit data flow, easy to trace in devtools, no extra primitive. Lifting becomes uncomfortable only when the common ancestor is many levels above the consumers and intermediate components must forward props they do not use ("prop drilling"). That discomfort is the trigger for context, not before.
+    When two sibling components need the same data, hoist it to their nearest common parent and pass via props. This is the React default — explicit data flow, easy to trace in devtools, no extra primitive. Lifting becomes uncomfortable only when the common ancestor is many levels above the consumers and intermediate components must forward props they do not use ("prop drilling"). That discomfort is the trigger for context, not before.
 
-      ## `createContext`, `Provider`, and `useContext`
+    ## `createContext`, `Provider`, and `useContext`
 
-      Context is a value-passing primitive: `createContext(default)` returns a `Context` object; `<Context.Provider value={...}>` makes that value available to all descendants; `useContext(Context)` reads it. The `default` is used only for consumers that have no Provider above them — usually a sentinel that throws if read, to catch missing-Provider bugs early.
+    Context is a value-passing primitive: `createContext(default)` returns a `Context` object; `<Context.Provider value={...}>` makes that value available to all descendants; `useContext(Context)` reads it. The `default` is used only for consumers that have no Provider above them — usually a sentinel that throws if read, to catch missing-Provider bugs early.
+- fragment_type: rationale
+  sequence: 5
+  content: |-
+    ```tsx
+    import { createContext, useContext, useMemo, useState } from 'react';
 
-      ```tsx
-      import { createContext, useContext, useMemo, useState } from 'react';
+    type Theme = { mode: 'light' | 'dark' };
+    const ThemeContext = createContext<Theme | null>(null);
 
-      type Theme = { mode: 'light' | 'dark' };
-      const ThemeContext = createContext<Theme | null>(null);
+    function useTheme(): Theme {
+      const value = useContext(ThemeContext);
+      if (value === null) throw new Error('useTheme must be used inside ThemeProvider');
+      return value;
+    }
 
-      function useTheme(): Theme {
-        const value = useContext(ThemeContext);
-        if (value === null) throw new Error('useTheme must be used inside ThemeProvider');
-        return value;
-      }
+    function ThemeProvider({ children }: { children: React.ReactNode }) {
+      const [mode, setMode] = useState<'light' | 'dark'>('light');
+      // Memoize the value so consumers do not re-render when the parent re-renders
+      // for unrelated reasons.
+      const value = useMemo(() => ({ mode }), [mode]);
+      return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+    }
+    ```
 
-      function ThemeProvider({ children }: { children: React.ReactNode }) {
-        const [mode, setMode] = useState<'light' | 'dark'>('light');
-        // Memoize the value so consumers do not re-render when the parent re-renders
-        // for unrelated reasons.
-        const value = useMemo(() => ({ mode }), [mode]);
-        return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-      }
-      ```
+    The caveat that bites people: every time the `value` prop's *identity* changes, every consumer of the context re-renders. A Provider with `value={{ mode }}` (object literal) creates a new object on every render of the Provider, so every consumer re-renders on every parent render even if `mode` is unchanged. Wrap the value in `useMemo` — or split a "frequently-changing" context from a "rarely-changing" context so updates do not stampede every consumer.
+- sequence: 6
+  fragment_type: execution
+  content: |
+    ## Reducer + Context: the scaling-up pattern
 
-      The caveat that bites people: every time the `value` prop's *identity* changes, every consumer of the context re-renders. A Provider with `value={{ mode }}` (object literal) creates a new object on every render of the Provider, so every consumer re-renders on every parent render even if `mode` is unchanged. Wrap the value in `useMemo` — or split a "frequently-changing" context from a "rarely-changing" context so updates do not stampede every consumer.
+    The React docs' "scaling up with reducer and context" pattern combines `useReducer` with two contexts: one carrying state, one carrying `dispatch`. Deeply nested children call `dispatch` without prop-drilling, and components that only need to dispatch (not read state) avoid re-rendering when state changes.
 
-  - sequence: 5
-    fragment_type: execution
-    content: |
-      ## Reducer + Context: the scaling-up pattern
+    ```tsx
+    import { createContext, useContext, useReducer, type Dispatch } from 'react';
 
-      The React docs' "scaling up with reducer and context" pattern combines `useReducer` with two contexts: one carrying state, one carrying `dispatch`. Deeply nested children call `dispatch` without prop-drilling, and components that only need to dispatch (not read state) avoid re-rendering when state changes.
+    // (reducer + types from the TaskList example above)
+    const TasksContext = createContext<State | null>(null);
+    const TasksDispatchContext = createContext<Dispatch<Action> | null>(null);
 
-      ```tsx
-      import { createContext, useContext, useReducer, type Dispatch } from 'react';
+    function TasksProvider({ children }: { children: React.ReactNode }) {
+      const [state, dispatch] = useReducer(reducer, { tasks: [], filter: 'all' });
+      return (
+        <TasksContext.Provider value={state}>
+          <TasksDispatchContext.Provider value={dispatch}>
+            {children}
+          </TasksDispatchContext.Provider>
+        </TasksContext.Provider>
+      );
+    }
 
-      // (reducer + types from the TaskList example above)
-      const TasksContext = createContext<State | null>(null);
-      const TasksDispatchContext = createContext<Dispatch<Action> | null>(null);
+    function useTasks() {
+      const v = useContext(TasksContext);
+      if (v === null) throw new Error('useTasks must be used inside TasksProvider');
+      return v;
+    }
+    function useTasksDispatch() {
+      const v = useContext(TasksDispatchContext);
+      if (v === null) throw new Error('useTasksDispatch must be used inside TasksProvider');
+      return v;
+    }
+    ```
 
-      function TasksProvider({ children }: { children: React.ReactNode }) {
-        const [state, dispatch] = useReducer(reducer, { tasks: [], filter: 'all' });
-        return (
-          <TasksContext.Provider value={state}>
-            <TasksDispatchContext.Provider value={dispatch}>
-              {children}
-            </TasksDispatchContext.Provider>
-          </TasksContext.Provider>
-        );
-      }
+    The dispatch identity from `useReducer` is stable across renders, so consumers of `TasksDispatchContext` never re-render due to context changes. State consumers still re-render on every state change — which is correct, because they read state.
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## When to leave React state: external stores
 
-      function useTasks() {
-        const v = useContext(TasksContext);
-        if (v === null) throw new Error('useTasks must be used inside TasksProvider');
-        return v;
-      }
-      function useTasksDispatch() {
-        const v = useContext(TasksDispatchContext);
-        if (v === null) throw new Error('useTasksDispatch must be used inside TasksProvider');
-        return v;
-      }
-      ```
+    React state is for state owned by the component tree. Reach for an external store when:
 
-      The dispatch identity from `useReducer` is stable across renders, so consumers of `TasksDispatchContext` never re-render due to context changes. State consumers still re-render on every state change — which is correct, because they read state.
+    - **Server state** (data fetched from a backend, with caching/refetch/mutations): use TanStack Query, SWR, or RTK Query. `useState` plus `useEffect` to fetch is a known anti-pattern — you will reinvent caching, dedup, refetch-on-focus, and mutation invalidation badly.
+    - **Cross-tree state outside React's lifecycle** (a global app store you want decoupled from the React tree, or shared with non-React code): use Zustand, Jotai, or Redux Toolkit.
+    - **Subscriptions to external sources** (browser APIs, WebSockets, third-party stores): use `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` (React 18+, March 2022; current in React 19+, verified 2026-05-06). It guarantees a consistent snapshot during concurrent rendering and is what every store integration library uses under the hood.
 
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## When to leave React state: external stores
+    ```tsx
+    import { useSyncExternalStore } from 'react';
 
-      React state is for state owned by the component tree. Reach for an external store when:
+    function useStore<T>(store: { subscribe: (cb: () => void) => () => void; getSnapshot: () => T }): T {
+      return useSyncExternalStore(store.subscribe, store.getSnapshot);
+    }
+    ```
 
-      - **Server state** (data fetched from a backend, with caching/refetch/mutations): use TanStack Query, SWR, or RTK Query. `useState` plus `useEffect` to fetch is a known anti-pattern — you will reinvent caching, dedup, refetch-on-focus, and mutation invalidation badly.
-      - **Cross-tree state outside React's lifecycle** (a global app store you want decoupled from the React tree, or shared with non-React code): use Zustand, Jotai, or Redux Toolkit.
-      - **Subscriptions to external sources** (browser APIs, WebSockets, third-party stores): use `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot?)` (React 18+, March 2022; current in React 19+, verified 2026-05-06). It guarantees a consistent snapshot during concurrent rendering and is what every store integration library uses under the hood.
+    Trying to put server state into context plus `useState` re-derives a worse version of TanStack Query; trying to put global UI state into a hand-rolled event emitter re-derives a worse version of Zustand. The decision boundary is explicit: if your state has cache semantics, mutation flows, or lives outside the component tree, use a store.
+- sequence: 8
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
 
-      ```tsx
-      import { useSyncExternalStore } from 'react';
-
-      function useStore<T>(store: { subscribe: (cb: () => void) => () => void; getSnapshot: () => T }): T {
-        return useSyncExternalStore(store.subscribe, store.getSnapshot);
-      }
-      ```
-
-      Trying to put server state into context plus `useState` re-derives a worse version of TanStack Query; trying to put global UI state into a hand-rolled event emitter re-derives a worse version of Zustand. The decision boundary is explicit: if your state has cache semantics, mutation flows, or lives outside the component tree, use a store.
-
-  - sequence: 7
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Lifting state too far up.** Hoisting state to the root when only two leaves need it makes every component in the path re-render on every change. Hoist to the *nearest* common ancestor.
-      - **Putting everything in context.** Context is a value-passing primitive, not a state library. Putting frequently-changing state in a single root-level context re-renders the entire tree on every change.
-      - **Provider `value={{ ... }}` without memoization.** Every parent render produces a new object identity, re-rendering every consumer. Wrap in `useMemo`, or split state and dispatch into separate contexts.
-      - **`useReducer` for a single boolean toggle.** Overkill. `useState(false)` plus `setX(prev => !prev)` is shorter, clearer, and indistinguishable in performance.
-      - **`setState` inside `useEffect` to "derive" state from props or other state.** Compute the derived value inline during render. The effect runs after commit, causing a second render and a flash of the pre-derived UI.
-      - **Server state in `useState` plus `useEffect` fetch.** No caching, no dedup, no refetch-on-focus, no mutation invalidation. Use TanStack Query / SWR.
-      - **Mutating reducer state.** Reducers must return a new state object. `state.tasks.push(t); return state;` skips the identity change React uses to detect updates — components do not re-render.
-      - **Reading context outside a Provider with a real default.** A "real" default (e.g. `createContext({ mode: 'light' })`) silently masks missing-Provider bugs. Use a sentinel (`null`) and a hook that throws.
-
-  - sequence: 8
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `grep -rnE 'setState\([a-zA-Z_]+ \+ 1\)' src/` (and similar increment-on-stale patterns) returns no matches; updates that depend on prior state use the functional form.
-      - [ ] ESLint `react-hooks/exhaustive-deps` is enabled and `npx eslint src/` exits 0 — catches stale-closure dependency bugs that motivate functional `setState`.
-      - [ ] `grep -rn 'createContext' src/` — every Provider site supplying an object/array `value` either passes a stable reference (state from `useState`/`useReducer`) or wraps in `useMemo`. React DevTools Profiler confirms consumers do not re-render on unrelated parent renders.
-      - [ ] `grep -rn 'useReducer' src/` — every reducer is a pure function returning a new object, no `state.x =` mutations. ESLint plugin `eslint-plugin-react` plus a custom `no-param-reassign` rule on the `state` argument catches mutations.
-      - [ ] No `useEffect` whose body is `setX(deriveFrom(props))` with `[props.x]` deps. `grep -rn 'useEffect' src/` and audit each — derived state belongs inline in render.
-      - [ ] Server data is fetched via TanStack Query / SWR / RTK Query, not `useState` + `useEffect`. `grep -rnE 'fetch\(|axios' src/` returns matches only inside query-fn definitions, not inside components or effects.
-      - [ ] Every `createContext(null)` is paired with a `use<Name>()` hook that throws when the value is `null`. `grep -rn 'createContext' src/` and confirm each context export has a guarded consumer hook.
-      - [ ] Every external-store subscription uses `useSyncExternalStore`. `grep -rn 'addEventListener\|subscribe' src/` returns no in-component subscription wiring outside `useSyncExternalStore` callbacks (or framework-provided hooks that wrap it).
+    - **Lifting state too far up.** Hoisting state to the root when only two leaves need it makes every component in the path re-render on every change. Hoist to the *nearest* common ancestor.
+    - **Putting everything in context.** Context is a value-passing primitive, not a state library. Putting frequently-changing state in a single root-level context re-renders the entire tree on every change.
+    - **Provider `value={{ ... }}` without memoization.** Every parent render produces a new object identity, re-rendering every consumer. Wrap in `useMemo`, or split state and dispatch into separate contexts.
+    - **`useReducer` for a single boolean toggle.** Overkill. `useState(false)` plus `setX(prev => !prev)` is shorter, clearer, and indistinguishable in performance.
+    - **`setState` inside `useEffect` to "derive" state from props or other state.** Compute the derived value inline during render. The effect runs after commit, causing a second render and a flash of the pre-derived UI.
+    - **Server state in `useState` plus `useEffect` fetch.** No caching, no dedup, no refetch-on-focus, no mutation invalidation. Use TanStack Query / SWR.
+    - **Mutating reducer state.** Reducers must return a new state object. `state.tasks.push(t); return state;` skips the identity change React uses to detect updates — components do not re-render.
+    - **Reading context outside a Provider with a real default.** A "real" default (e.g. `createContext({ mode: 'light' })`) silently masks missing-Provider bugs. Use a sentinel (`null`) and a hook that throws.
+- fragment_type: verification
+  sequence: 9
+  content: '- [ ] `grep -rnE ''setState\([a-zA-Z_]+ \+ 1\)'' src/` (and similar increment-on-stale patterns) returns no matches; updates that depend on prior state use the functional form. - [ ] ESLint `react-hooks/exhaustive-deps` is enabled and `npx eslint src/` exits 0 — catches stale-closure dependency bugs that motivate functional `setState`. - [ ] `grep -rn ''createContext'' src/` — every Provider site supplying an object/array `value` either passes a stable reference (state from `useState`/`useReducer`) or wraps in `useMemo`. React DevTools Profiler confirms consumers do not re-render on unrelated parent renders. - [ ] `grep -rn ''useReducer'' src/` — every reducer is a pure function returning a new object, no `state.x =` mutations. ESLint plugin `eslint-plugin-react` plus a custom `no-param-reassign` rule on the `state` argument catches mutations. - [ ] No `useEffect` whose body is `setX(deriveFrom(props))` with `[props.x]` deps. `grep -rn ''useEffect'' src/` and audit each — derived state belongs inline in render. - [ ] Server data is fetched via TanStack Query / SWR / RTK Query, not `useState` + `useEffect`. `grep -rnE ''fetch\(|axios'' src/` returns matches only inside query-fn definitions, not inside components or effects. - [ ] Every `createContext(null)` is paired with a `use<Name>()` hook that throws when the value is `null`.'
+- fragment_type: verification
+  sequence: 10
+  content: '`grep -rn ''createContext'' src/` and confirm each context export has a guarded consumer hook. - [ ] Every external-store subscription uses `useSyncExternalStore`. `grep -rn ''addEventListener\|subscribe'' src/` returns no in-component subscription wiring outside `useSyncExternalStore` callbacks (or framework-provided hooks that wrap it).'

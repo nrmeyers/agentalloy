@@ -137,7 +137,9 @@ def dedup_candidates(
 
     labels = [label for label, _ in labeled_contents]
     contents = [content for _, content in labeled_contents]
-    vectors = embedder.embed(model=embedding_model, texts=contents)
+    vectors = embedder.embed(
+        model=embedding_model, texts=[f"search_document: {c}" for c in contents]
+    )
 
     per_fragment: list[DedupClassification] = []
     hardest: SimilarityHit | None = None

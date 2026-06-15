@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: java-virtual-threads-and-concurrency
 canonical_name: Java Virtual Threads and Concurrency (Thread Builder, StructuredTaskScope, CompletableFuture)
-description: "Speed up Java apps that wait on databases, APIs, or files: spawn lightweight virtual threads for I/O-bound tasks, group related work with StructuredTaskScope, chain async results with CompletableFuture, and avoid blocking locks that pin threads."
+description: 'Speed up Java apps that wait on databases, APIs, or files: spawn lightweight virtual threads for I/O-bound tasks, group related work with StructuredTaskScope, chain async results with CompletableFuture, and avoid blocking locks that pin threads.'
 category: engineering
 skill_class: domain
-domain_tags: [jdk-tracepinnedthreads, structured-task-scope, pinning-and-yielding, completablefuture-composition, executors-newvirtualthreadpertaskexecutor, java]
+domain_tags:
+- jdk-tracepinnedthreads
+- structured-task-scope
+- pinning-and-yielding
+- completablefuture-composition
+- executors-newvirtualthreadpertaskexecutor
+- java
 related:
 - csharp-async-and-tasks
 - java-exceptions-and-try-with-resources
 - java-spring-webflux
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-06. Sources — java.util.concurrent package summary https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html, java.lang.Thread API https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.html, JEP 444 Virtual Threads https://openjdk.org/jeps/444, JEP 453 Structured Concurrency (Preview) https://openjdk.org/jeps/453 (all verified 2026-05-06 against fixtures/upstream/curated/java.yaml topic `concurrency_and_async`). Skill scope: virtual threads via `Thread.ofVirtual()`, `Thread.startVirtualThread`, and `Executors.newVirtualThreadPerTaskExecutor()`; carrier-thread pinning under `synchronized` and JNI and the `ReentrantLock` fix; `StructuredTaskScope.ShutdownOnFailure` / `ShutdownOnSuccess` (preview in Java 21, requires `--enable-preview`); `CompletableFuture` composition (`thenApply`, `thenCompose`, `thenCombine`, `allOf`, `anyOf`, `orTimeout`, `exceptionally`); `ExecutorService` as `AutoCloseable` (Java 19+, verified 2026-05-06) with try-with-resources; `InterruptedException` handling and interrupt-flag restoration. Known gap per R6: structured concurrency is preview-status in Java 21 — readers must compile and run with `--enable-preview` and the API is subject to change before finalization. Out of scope: `ForkJoinPool` work-stealing internals, `VarHandle`, `Phaser` deep usage, project Loom continuations API.
-
 raw_prose: |
   # Java Virtual Threads and Concurrency
 
@@ -165,180 +171,165 @@ raw_prose: |
   - [ ] `grep -rnE 'catch\s*\(\s*InterruptedException' src/main/java/` is reviewed — every match either rethrows or calls `Thread.currentThread().interrupt()`. Bare-swallow patterns fail review.
   - [ ] `grep -rn 'Channel\|newFixedThreadPool\|newVirtualThreadPerTaskExecutor' src/main/java/` is inventoried — each `ExecutorService` allocation is inside try-with-resources or has an explicit `shutdown` / `awaitTermination` pair.
   - [ ] SpotBugs (or Error Prone) is enabled in CI with concurrency rules active (`SE_BAD_FIELD`, `IS2_INCONSISTENT_SYNC`, `UnsynchronizedOverridesSynchronized`). Build fails on new findings.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Java Virtual Threads and Concurrency
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Java Virtual Threads and Concurrency
 
-      Java 21 LTS shipped virtual threads (JEP 444) as a stable feature and structured concurrency (JEP 453) as preview. Together with the long-standing `java.util.concurrent` toolkit and `CompletableFuture`, the modern Java concurrency story is: spawn cheap virtual threads for IO-bound work, scope task lifetimes with `StructuredTaskScope`, compose async computations with `CompletableFuture`, and avoid `synchronized` on hot paths inside virtual threads because it pins the carrier. The four production traps are pinning under `synchronized`, sharing `ForkJoinPool.commonPool()` between CPU-bound and IO-bound futures, swallowing `InterruptedException`, and assuming virtual threads remove every concurrency limit when the downstream resource (a 16-connection JDBC pool) still bottlenecks throughput.
+    Java 21 LTS shipped virtual threads (JEP 444) as a stable feature and structured concurrency (JEP 453) as preview. Together with the long-standing `java.util.concurrent` toolkit and `CompletableFuture`, the modern Java concurrency story is: spawn cheap virtual threads for IO-bound work, scope task lifetimes with `StructuredTaskScope`, compose async computations with `CompletableFuture`, and avoid `synchronized` on hot paths inside virtual threads because it pins the carrier. The four production traps are pinning under `synchronized`, sharing `ForkJoinPool.commonPool()` between CPU-bound and IO-bound futures, swallowing `InterruptedException`, and assuming virtual threads remove every concurrency limit when the downstream resource (a 16-connection JDBC pool) still bottlenecks throughput.
+- sequence: 2
+  fragment_type: setup
+  content: |
+    ## Virtual threads: `Thread.ofVirtual` and `newVirtualThreadPerTaskExecutor`
 
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## Virtual threads: `Thread.ofVirtual` and `newVirtualThreadPerTaskExecutor`
+    A virtual thread is a `java.lang.Thread` instance scheduled by the JDK onto a small pool of *carrier* platform threads. Stack footprint is on the order of a few KB rather than the ~1 MB default of a platform thread, so the JVM can run millions of them. They are designed for IO-bound, blocking-call-heavy code — `HttpClient.send`, JDBC, `Files.readAllBytes` — where the thread spends most of its life parked.
 
-      A virtual thread is a `java.lang.Thread` instance scheduled by the JDK onto a small pool of *carrier* platform threads. Stack footprint is on the order of a few KB rather than the ~1 MB default of a platform thread, so the JVM can run millions of them. They are designed for IO-bound, blocking-call-heavy code — `HttpClient.send`, JDBC, `Files.readAllBytes` — where the thread spends most of its life parked.
+    ```java
+    import java.util.concurrent.ExecutorService;
+    import java.util.concurrent.Executors;
 
-      ```java
-      import java.util.concurrent.ExecutorService;
-      import java.util.concurrent.Executors;
+    // one-off
+    Thread t = Thread.ofVirtual().name("order-worker").start(() -> processRequest(id));
+    // or: Thread.startVirtualThread(() -> processRequest(id));
 
-      // one-off
-      Thread t = Thread.ofVirtual().name("order-worker").start(() -> processRequest(id));
-      // or: Thread.startVirtualThread(() -> processRequest(id));
+    // server-style: one virtual thread per task, no pool sizing decision
+    try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
+        exec.submit(() -> processRequest(req));
+        // try-with-resources calls close() which awaits termination — Java 19+
+    }
+    ```
 
-      // server-style: one virtual thread per task, no pool sizing decision
-      try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
-          exec.submit(() -> processRequest(req));
-          // try-with-resources calls close() which awaits termination — Java 19+
-      }
-      ```
+    `ExecutorService` extends `AutoCloseable` since Java 19 (verified 2026-05-06), so the try-with-resources block above replaces the old `shutdown` / `awaitTermination` boilerplate.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## Pinning: `synchronized` blocks the carrier
 
-      `ExecutorService` extends `AutoCloseable` since Java 19 (verified 2026-05-06), so the try-with-resources block above replaces the old `shutdown` / `awaitTermination` boilerplate.
+    When a virtual thread enters a `synchronized` block (or method) and then performs a blocking operation, it *pins* itself to its carrier platform thread until the block exits. The carrier cannot be reused for another virtual thread during that time. Under contention this regresses to platform-thread scheduling — worse, it can starve the carrier pool. JNI calls also pin. The fix is to replace `synchronized` with `java.util.concurrent.locks.ReentrantLock`, which yields the carrier on contention.
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Pinning: `synchronized` blocks the carrier
+    ```java
+    import java.util.concurrent.locks.ReentrantLock;
 
-      When a virtual thread enters a `synchronized` block (or method) and then performs a blocking operation, it *pins* itself to its carrier platform thread until the block exits. The carrier cannot be reused for another virtual thread during that time. Under contention this regresses to platform-thread scheduling — worse, it can starve the carrier pool. JNI calls also pin. The fix is to replace `synchronized` with `java.util.concurrent.locks.ReentrantLock`, which yields the carrier on contention.
+    // BAD — pins the carrier across the IO call
+    synchronized (this) {
+        result = httpClient.send(req, BodyHandlers.ofString()); // blocks while pinned
+    }
 
-      ```java
-      import java.util.concurrent.locks.ReentrantLock;
+    // GOOD — yields the carrier while parked
+    private final ReentrantLock lock = new ReentrantLock();
+    lock.lock();
+    try {
+        result = httpClient.send(req, BodyHandlers.ofString());
+    } finally {
+        lock.unlock();
+    }
+    ```
 
-      // BAD — pins the carrier across the IO call
-      synchronized (this) {
-          result = httpClient.send(req, BodyHandlers.ofString()); // blocks while pinned
-      }
+    Diagnose pinning at runtime with `-Djdk.tracePinnedThreads=full` — the JVM prints a stack trace each time a virtual thread pins. Walked: a virtual thread enters `synchronized (cache)` and calls `db.query(...)`. The query blocks 200 ms. The carrier is held the entire 200 ms; another 1000 virtual threads queued for that same carrier wait. With `ReentrantLock`, the carrier returns to the pool the moment the JDBC driver parks, and the next ready virtual thread runs.
+- sequence: 4
+  fragment_type: execution
+  content: |
+    ## Structured concurrency (preview): `StructuredTaskScope`
 
-      // GOOD — yields the carrier while parked
-      private final ReentrantLock lock = new ReentrantLock();
-      lock.lock();
-      try {
-          result = httpClient.send(req, BodyHandlers.ofString());
-      } finally {
-          lock.unlock();
-      }
-      ```
+    `StructuredTaskScope` (JEP 453, preview in Java 21 — requires `--enable-preview` on `javac` and `java`) makes a group of tasks a tree: the parent scope owns its forked subtasks, cancellation propagates, and the scope's `try`-block delimits their lifetimes. Two built-in policies:
 
-      Diagnose pinning at runtime with `-Djdk.tracePinnedThreads=full` — the JVM prints a stack trace each time a virtual thread pins. Walked: a virtual thread enters `synchronized (cache)` and calls `db.query(...)`. The query blocks 200 ms. The carrier is held the entire 200 ms; another 1000 virtual threads queued for that same carrier wait. With `ReentrantLock`, the carrier returns to the pool the moment the JDBC driver parks, and the next ready virtual thread runs.
+    - `ShutdownOnFailure` — first failure cancels the rest; `throwIfFailed()` rethrows.
+    - `ShutdownOnSuccess<T>` — first success cancels the rest; `result()` returns it.
 
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## Structured concurrency (preview): `StructuredTaskScope`
+    ```java
+    import java.util.concurrent.StructuredTaskScope; // preview API, java.util.concurrent
+    import java.util.concurrent.Future;
 
-      `StructuredTaskScope` (JEP 453, preview in Java 21 — requires `--enable-preview` on `javac` and `java`) makes a group of tasks a tree: the parent scope owns its forked subtasks, cancellation propagates, and the scope's `try`-block delimits their lifetimes. Two built-in policies:
+    Order fetchOrder(long id) throws Exception {
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            Future<Customer> customer = scope.fork(() -> customerService.find(id));
+            Future<Inventory> inventory = scope.fork(() -> inventoryService.check(id));
+            scope.join();              // wait for all
+            scope.throwIfFailed();     // rethrow first failure
+            return assemble(customer.resultNow(), inventory.resultNow());
+        }
+    }
+    ```
 
-      - `ShutdownOnFailure` — first failure cancels the rest; `throwIfFailed()` rethrows.
-      - `ShutdownOnSuccess<T>` — first success cancels the rest; `result()` returns it.
+    Compile and run: `javac --release 21 --enable-preview ...` and `java --enable-preview ...`. Because the API is preview, expect signature shifts before finalization — pin the JDK version and re-verify against current JEP 453 status before promoting code that depends on it.
+- fragment_type: example
+  sequence: 5
+  content: |-
+    ## `CompletableFuture` composition
 
-      ```java
-      import java.util.concurrent.StructuredTaskScope; // preview API, java.util.concurrent
-      import java.util.concurrent.Future;
+    `CompletableFuture<T>` (`java.util.concurrent`) is the Java equivalent of a promise — chainable, composable, with explicit error handling. Core operators:
 
-      Order fetchOrder(long id) throws Exception {
-          try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
-              Future<Customer> customer = scope.fork(() -> customerService.find(id));
-              Future<Inventory> inventory = scope.fork(() -> inventoryService.check(id));
-              scope.join();              // wait for all
-              scope.throwIfFailed();     // rethrow first failure
-              return assemble(customer.resultNow(), inventory.resultNow());
-          }
-      }
-      ```
+    - `thenApply(Function)` — transform the value (sync continuation).
+    - `thenCompose(Function)` — flatMap into another `CompletableFuture` — use this when the function itself is async, otherwise you get `CompletableFuture<CompletableFuture<T>>`.
+    - `thenCombine(other, BiFunction)` — combine two independent futures.
+    - `allOf(futures...)` / `anyOf(futures...)` — fan-in.
+    - `orTimeout(duration, unit)` / `completeOnTimeout(value, duration, unit)` — bound the wait.
+    - `exceptionally(Function<Throwable,T>)` / `handle(BiFunction)` — recover.
+- fragment_type: example
+  sequence: 6
+  content: |-
+    ```java
+    import java.util.concurrent.CompletableFuture;
+    import java.util.concurrent.Executors;
+    import java.util.concurrent.ExecutorService;
+    import java.util.concurrent.TimeUnit;
 
-      Compile and run: `javac --release 21 --enable-preview ...` and `java --enable-preview ...`. Because the API is preview, expect signature shifts before finalization — pin the JDK version and re-verify against current JEP 453 status before promoting code that depends on it.
+    ExecutorService io = Executors.newVirtualThreadPerTaskExecutor();
 
-  - sequence: 5
-    fragment_type: example
-    content: |
-      ## `CompletableFuture` composition
+    CompletableFuture<String> result = CompletableFuture
+        .supplyAsync(() -> orderService.lookup(id), io)
+        .thenCompose(order -> CompletableFuture.supplyAsync(() -> render(order), io))
+        .orTimeout(5, TimeUnit.SECONDS)
+        .exceptionally(ex -> "fallback");
+    ```
 
-      `CompletableFuture<T>` (`java.util.concurrent`) is the Java equivalent of a promise — chainable, composable, with explicit error handling. Core operators:
+    Executor choice matters. Without an explicit executor, the `*Async` operators run on `ForkJoinPool.commonPool()` — sized to `Runtime.availableProcessors() - 1` and intended for CPU-bound work. Submitting blocking IO there starves CPU-bound futures system-wide. Pass a virtual-thread-per-task executor explicitly for IO-heavy chains.
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## `java.util.concurrent` primitives
 
-      - `thenApply(Function)` — transform the value (sync continuation).
-      - `thenCompose(Function)` — flatMap into another `CompletableFuture` — use this when the function itself is async, otherwise you get `CompletableFuture<CompletableFuture<T>>`.
-      - `thenCombine(other, BiFunction)` — combine two independent futures.
-      - `allOf(futures...)` / `anyOf(futures...)` — fan-in.
-      - `orTimeout(duration, unit)` / `completeOnTimeout(value, duration, unit)` — bound the wait.
-      - `exceptionally(Function<Throwable,T>)` / `handle(BiFunction)` — recover.
+    Beyond virtual threads, the toolkit you reach for daily:
 
-      ```java
-      import java.util.concurrent.CompletableFuture;
-      import java.util.concurrent.Executors;
-      import java.util.concurrent.ExecutorService;
-      import java.util.concurrent.TimeUnit;
+    - `ExecutorService` — task submission. Now `AutoCloseable` (Java 19+). `Executors.newFixedThreadPool(n)` for bounded CPU pools; `newVirtualThreadPerTaskExecutor()` for IO fan-out.
+    - `BlockingQueue<T>` (`ArrayBlockingQueue`, `LinkedBlockingQueue`) — bounded producer-consumer with `put`/`take`.
+    - `ConcurrentHashMap<K,V>` — the default concurrent map; `compute`, `computeIfAbsent`, `merge` are atomic. Do not synchronize externally on it.
+    - `Semaphore(permits)` — bound concurrency to a fixed resource (downstream API rate, connection pool).
+    - `CountDownLatch` — one-shot barrier for "wait for N events."
+    - `Phaser` — reusable multi-phase barrier; rare in app code, common in test harnesses.
+- sequence: 8
+  fragment_type: example
+  content: |
+    ## `InterruptedException` and cancellation
 
-      ExecutorService io = Executors.newVirtualThreadPerTaskExecutor();
+    Blocking calls (`Thread.sleep`, `BlockingQueue.take`, `Future.get`) throw `InterruptedException` when the thread is interrupted. The interrupt flag is *cleared* by the throw — if you catch and do not re-interrupt, callers up the stack lose the signal.
 
-      CompletableFuture<String> result = CompletableFuture
-          .supplyAsync(() -> orderService.lookup(id), io)
-          .thenCompose(order -> CompletableFuture.supplyAsync(() -> render(order), io))
-          .orTimeout(5, TimeUnit.SECONDS)
-          .exceptionally(ex -> "fallback");
-      ```
+    ```java
+    try {
+        queue.take();
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt(); // restore the flag
+        throw new CancellationException("worker interrupted");
+    }
+    ```
 
-      Executor choice matters. Without an explicit executor, the `*Async` operators run on `ForkJoinPool.commonPool()` — sized to `Runtime.availableProcessors() - 1` and intended for CPU-bound work. Submitting blocking IO there starves CPU-bound futures system-wide. Pass a virtual-thread-per-task executor explicitly for IO-heavy chains.
+    Structured concurrency removes most manual interrupt plumbing because `scope.join()` and `scope.shutdown()` propagate cancellation through the scope tree. Outside a scope, the rule for any catch-block on `InterruptedException` in Java concurrency code is two lines: restore the interrupt flag, then either rethrow or convert to a domain-specific cancellation exception. A worker-thread loop that swallows the exception silently becomes uninterruptible — the executor's `shutdownNow()` cannot stop it, and the JVM hangs at process exit.
+- sequence: 9
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
 
-  - sequence: 6
-    fragment_type: rationale
-    content: |
-      ## `java.util.concurrent` primitives
-
-      Beyond virtual threads, the toolkit you reach for daily:
-
-      - `ExecutorService` — task submission. Now `AutoCloseable` (Java 19+). `Executors.newFixedThreadPool(n)` for bounded CPU pools; `newVirtualThreadPerTaskExecutor()` for IO fan-out.
-      - `BlockingQueue<T>` (`ArrayBlockingQueue`, `LinkedBlockingQueue`) — bounded producer-consumer with `put`/`take`.
-      - `ConcurrentHashMap<K,V>` — the default concurrent map; `compute`, `computeIfAbsent`, `merge` are atomic. Do not synchronize externally on it.
-      - `Semaphore(permits)` — bound concurrency to a fixed resource (downstream API rate, connection pool).
-      - `CountDownLatch` — one-shot barrier for "wait for N events."
-      - `Phaser` — reusable multi-phase barrier; rare in app code, common in test harnesses.
-
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## `InterruptedException` and cancellation
-
-      Blocking calls (`Thread.sleep`, `BlockingQueue.take`, `Future.get`) throw `InterruptedException` when the thread is interrupted. The interrupt flag is *cleared* by the throw — if you catch and do not re-interrupt, callers up the stack lose the signal.
-
-      ```java
-      try {
-          queue.take();
-      } catch (InterruptedException e) {
-          Thread.currentThread().interrupt(); // restore the flag
-          throw new CancellationException("worker interrupted");
-      }
-      ```
-
-      Structured concurrency removes most manual interrupt plumbing because `scope.join()` and `scope.shutdown()` propagate cancellation through the scope tree. Outside a scope, the rule for any catch-block on `InterruptedException` in Java concurrency code is two lines: restore the interrupt flag, then either rethrow or convert to a domain-specific cancellation exception. A worker-thread loop that swallows the exception silently becomes uninterruptible — the executor's `shutdownNow()` cannot stop it, and the JVM hangs at process exit.
-
-  - sequence: 8
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **`synchronized` on hot paths in virtual-thread code.** Pins the carrier; under load the carrier pool starves. Replace with `ReentrantLock` from `java.util.concurrent.locks`.
-      - **Spawning unbounded virtual threads when the downstream is a bounded resource.** Virtual threads are cheap, but a JDBC pool sized at 16 still bounds throughput. Gate with a `Semaphore(16)` upstream of the database call instead of relying on virtual-thread scheduling to magically queue.
-      - **Defaulting `CompletableFuture.*Async` to `ForkJoinPool.commonPool()` for IO work.** Starves CPU-bound work elsewhere in the JVM. Pass a virtual-thread executor explicitly.
-      - **Manual `new Thread(runnable).start()`.** Modern Java prefers `Executors` or `Thread.ofVirtual()`. Direct `new Thread` skips lifecycle management and pool reuse.
-      - **Swallowing `InterruptedException`.** Either rethrow or call `Thread.currentThread().interrupt()` to restore the flag. A bare `catch (InterruptedException ignored) {}` in a worker loop renders it uninterruptible.
-      - **`Thread.sleep` as rate limiter.** Use `Semaphore` for concurrency limits or a proper rate limiter (Resilience4j, Bucket4j); `sleep` is per-thread and does not coordinate.
-      - **Forgetting `--enable-preview` for `StructuredTaskScope`.** Code using JEP 453 fails to compile or run on Java 21 without the flag, and the API may change in a future LTS — pin and re-verify.
-
-  - sequence: 9
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `javac --release 21 --enable-preview -Xlint:all` exits 0 — confirms code compiles cleanly under Java 21 with preview APIs enabled and all lints on.
-      - [ ] `mvn -B compile` (or `gradle compileJava`) exits 0 with `--enable-preview` configured in the build (Maven `<compilerArgs>` or Gradle `options.compilerArgs`).
-      - [ ] `grep -rn 'synchronized' src/main/java/` is reviewed — every match in code that runs on a virtual thread either guards a non-blocking critical section or has a comment justifying the pin. Convert IO-blocking critical sections to `ReentrantLock`.
-      - [ ] Runtime smoke test with `-Djdk.tracePinnedThreads=full` on a representative workload prints zero pinning stacks for hot paths. Any printed stack maps to a known-and-justified `synchronized` block.
-      - [ ] `grep -rn 'commonPool\|ForkJoinPool.commonPool' src/main/java/` returns no matches in IO-bound `CompletableFuture` chains. Each `*Async` call passes an explicit `Executor`.
-      - [ ] `grep -rn 'new Thread(' src/main/java/` returns no matches outside framework integration points. Standard spawning goes through `Thread.ofVirtual()` or an `ExecutorService`.
-      - [ ] `grep -rnE 'catch\s*\(\s*InterruptedException' src/main/java/` is reviewed — every match either rethrows or calls `Thread.currentThread().interrupt()`. Bare-swallow patterns fail review.
-      - [ ] `grep -rn 'Channel\|newFixedThreadPool\|newVirtualThreadPerTaskExecutor' src/main/java/` is inventoried — each `ExecutorService` allocation is inside try-with-resources or has an explicit `shutdown` / `awaitTermination` pair.
-      - [ ] SpotBugs (or Error Prone) is enabled in CI with concurrency rules active (`SE_BAD_FIELD`, `IS2_INCONSISTENT_SYNC`, `UnsynchronizedOverridesSynchronized`). Build fails on new findings.
+    - **`synchronized` on hot paths in virtual-thread code.** Pins the carrier; under load the carrier pool starves. Replace with `ReentrantLock` from `java.util.concurrent.locks`.
+    - **Spawning unbounded virtual threads when the downstream is a bounded resource.** Virtual threads are cheap, but a JDBC pool sized at 16 still bounds throughput. Gate with a `Semaphore(16)` upstream of the database call instead of relying on virtual-thread scheduling to magically queue.
+    - **Defaulting `CompletableFuture.*Async` to `ForkJoinPool.commonPool()` for IO work.** Starves CPU-bound work elsewhere in the JVM. Pass a virtual-thread executor explicitly.
+    - **Manual `new Thread(runnable).start()`.** Modern Java prefers `Executors` or `Thread.ofVirtual()`. Direct `new Thread` skips lifecycle management and pool reuse.
+    - **Swallowing `InterruptedException`.** Either rethrow or call `Thread.currentThread().interrupt()` to restore the flag. A bare `catch (InterruptedException ignored) {}` in a worker loop renders it uninterruptible.
+    - **`Thread.sleep` as rate limiter.** Use `Semaphore` for concurrency limits or a proper rate limiter (Resilience4j, Bucket4j); `sleep` is per-thread and does not coordinate.
+    - **Forgetting `--enable-preview` for `StructuredTaskScope`.** Code using JEP 453 fails to compile or run on Java 21 without the flag, and the API may change in a future LTS — pin and re-verify.
+- fragment_type: verification
+  sequence: 10
+  content: '- [ ] `javac --release 21 --enable-preview -Xlint:all` exits 0 — confirms code compiles cleanly under Java 21 with preview APIs enabled and all lints on. - [ ] `mvn -B compile` (or `gradle compileJava`) exits 0 with `--enable-preview` configured in the build (Maven `<compilerArgs>` or Gradle `options.compilerArgs`). - [ ] `grep -rn ''synchronized'' src/main/java/` is reviewed — every match in code that runs on a virtual thread either guards a non-blocking critical section or has a comment justifying the pin. Convert IO-blocking critical sections to `ReentrantLock`. - [ ] Runtime smoke test with `-Djdk.tracePinnedThreads=full` on a representative workload prints zero pinning stacks for hot paths. Any printed stack maps to a known-and-justified `synchronized` block. - [ ] `grep -rn ''commonPool\|ForkJoinPool.commonPool'' src/main/java/` returns no matches in IO-bound `CompletableFuture` chains. Each `*Async` call passes an explicit `Executor`. - [ ] `grep -rn ''new Thread('' src/main/java/` returns no matches outside framework integration points. Standard spawning goes through `Thread.ofVirtual()` or an `ExecutorService`. - [ ] `grep -rnE ''catch\s*\(\s*InterruptedException'' src/main/java/` is reviewed — every match either rethrows or calls `Thread.currentThread().interrupt()`. Bare-swallow patterns fail review.'
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] `grep -rn ''Channel\|newFixedThreadPool\|newVirtualThreadPerTaskExecutor'' src/main/java/` is inventoried — each `ExecutorService` allocation is inside try-with-resources or has an explicit `shutdown` / `awaitTermination` pair. - [ ] SpotBugs (or Error Prone) is enabled in CI with concurrency rules active (`SE_BAD_FIELD`, `IS2_INCONSISTENT_SYNC`, `UnsynchronizedOverridesSynchronized`). Build fails on new findings.'

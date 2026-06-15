@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: csharp-async-and-tasks
 canonical_name: C# Async and Tasks (Task, async/await, CancellationToken, Channels)
-description: "Write responsive C# apps that handle I/O, APIs, and background jobs without freezing: use async/await for clean code, Task for results, CancellationToken for graceful shutdown, and Channels for safe producer-consumer data flow."
+description: 'Write responsive C# apps that handle I/O, APIs, and background jobs without freezing: use async/await for clean code, Task for results, CancellationToken for graceful shutdown, and Channels for safe producer-consumer data flow.'
 category: engineering
 skill_class: domain
-domain_tags: [task-composition, cancellation-token-flow, valuetask-allocation, configureawait-context, channel-bounded, csharp-dotnet]
+domain_tags:
+- task-composition
+- cancellation-token-flow
+- valuetask-allocation
+- configureawait-context
+- channel-bounded
+- csharp-dotnet
 related:
 - csharp-mstest-testing
 - python-async-patterns
 - python-asyncio-tasks
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-05. Sources — C# asynchronous programming guide https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/, Task Parallel Library https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/task-parallel-library-tpl, System.Threading.Channels https://learn.microsoft.com/en-us/dotnet/api/system.threading.channels?view=net-9.0, System.Threading.CancellationToken https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtoken?view=net-9.0 (all verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `concurrency_and_async`). Per the curated yaml's known_gaps, the `view=net-9.0` query parameter was confirmed on each versioned API URL because learn.microsoft.com versioned subtrees can silently redirect to older .NET versions. Skill scope: `Task`/`Task<T>` and `async`/`await` desugaring, `ValueTask<T>` allocation tradeoffs on hot paths, `CancellationToken` propagation and `CancellationTokenSource.CreateLinkedTokenSource`, `Task.WaitAsync(ct)` for adding cancellation to non-cancellable tasks, `ConfigureAwait(false)` semantics in library code (and the post-net6 ASP.NET Core sync-context absence), `Task.WhenAll`/`Task.WhenAny` and the WhenAll-only-throws-the-first-exception edge, `System.Threading.Channels` bounded vs unbounded, `Parallel.ForEachAsync` (.NET 6+), and the standard async anti-patterns (`async void`, `.Result`/`.Wait()`, `await Task.Run` to "make it async"). Out of scope: TaskScheduler internals, custom awaitable types, AsyncLocal, IAsyncEnumerable beyond a passing reference.
-
 raw_prose: |
   # C# Async and Tasks
 
@@ -178,224 +184,202 @@ raw_prose: |
   - [ ] Every `public` async method in the library exposes a `CancellationToken` parameter (default `default` permitted). Inventory with `grep -rnE 'public.*async (Task|ValueTask)' src/` and confirm each signature.
   - [ ] Every `Channel.Writer` has a corresponding `Writer.Complete()` (or `TryComplete()`) on the producer-shutdown path. `grep -rn 'Channel.Create' src/` to inventory; trace each to a `Complete` call.
   - [ ] `Parallel.ForEachAsync` calls pin `MaxDegreeOfParallelism` explicitly. `grep -rn 'Parallel.ForEachAsync' src/` and confirm each `ParallelOptions` sets the field.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # C# Async and Tasks
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # C# Async and Tasks
 
-      C#'s asynchronous model is built on three pillars: the `Task` and `Task<T>` types in `System.Threading.Tasks` representing in-flight work, the `async`/`await` keywords that let you write straight-line code that compiles to a state machine, and `CancellationToken` for cooperative cancellation. The rule is one sentence: every async API takes a `CancellationToken` and returns a `Task` (or `ValueTask` on hot paths), `await` consumes those tasks, library code uses `ConfigureAwait(false)`, and you never call `.Result` or `.Wait()` to bridge sync-to-async. Most production C# async bugs in .NET are one of four things: `async void` swallowing exceptions outside event handlers, `.Result` on an unstarted task deadlocking under a sync context, ignoring the `CancellationToken` parameter, or using unbounded `Channel` and OOMing the process under load.
+    C#'s asynchronous model is built on three pillars: the `Task` and `Task<T>` types in `System.Threading.Tasks` representing in-flight work, the `async`/`await` keywords that let you write straight-line code that compiles to a state machine, and `CancellationToken` for cooperative cancellation. The rule is one sentence: every async API takes a `CancellationToken` and returns a `Task` (or `ValueTask` on hot paths), `await` consumes those tasks, library code uses `ConfigureAwait(false)`, and you never call `.Result` or `.Wait()` to bridge sync-to-async. Most production C# async bugs in .NET are one of four things: `async void` swallowing exceptions outside event handlers, `.Result` on an unstarted task deadlocking under a sync context, ignoring the `CancellationToken` parameter, or using unbounded `Channel` and OOMing the process under load.
+- sequence: 2
+  fragment_type: rationale
+  content: |
+    ## `Task`, `Task<T>`, and the `async`/`await` desugaring
 
-  - sequence: 2
-    fragment_type: rationale
-    content: |
-      ## `Task`, `Task<T>`, and the `async`/`await` desugaring
+    `Task` represents an asynchronous operation in C# that may complete with no result or with a `T`. `async Task<T> FooAsync()` is a method whose body the compiler rewrites into a state machine: each `await` becomes a suspension point where the method registers a continuation with the awaited task and returns control. Awaiting a `Task<T>` unwraps it to `T`; awaiting a `Task` yields nothing but observes completion (or rethrows the captured exception).
 
-      `Task` represents an asynchronous operation in C# that may complete with no result or with a `T`. `async Task<T> FooAsync()` is a method whose body the compiler rewrites into a state machine: each `await` becomes a suspension point where the method registers a continuation with the awaited task and returns control. Awaiting a `Task<T>` unwraps it to `T`; awaiting a `Task` yields nothing but observes completion (or rethrows the captured exception).
+    ```csharp
+    using System.Threading;
+    using System.Threading.Tasks;
 
-      ```csharp
-      using System.Threading;
-      using System.Threading.Tasks;
+    public async Task<Order> ProcessOrderAsync(int id, CancellationToken ct)
+    {
+        Order order = await _repo.GetAsync(id, ct).ConfigureAwait(false);
+        await _audit.RecordAsync(order, ct).ConfigureAwait(false);
+        return order;
+    }
+    ```
 
-      public async Task<Order> ProcessOrderAsync(int id, CancellationToken ct)
-      {
-          Order order = await _repo.GetAsync(id, ct).ConfigureAwait(false);
-          await _audit.RecordAsync(order, ct).ConfigureAwait(false);
-          return order;
-      }
-      ```
+    Tasks returned from `async` methods are *hot* — already started — unlike Rust futures or `Task` objects you construct with `new Task(...)` (which is almost never what you want; use `Task.Run` or just call the async method). Awaiting the same `Task<T>` twice is allowed and yields the same result; the second await is essentially free.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## `ValueTask<T>` and the allocation tradeoff
 
-      Tasks returned from `async` methods are *hot* — already started — unlike Rust futures or `Task` objects you construct with `new Task(...)` (which is almost never what you want; use `Task.Run` or just call the async method). Awaiting the same `Task<T>` twice is allowed and yields the same result; the second await is essentially free.
+    `Task<T>` is a class — every async method that returns one allocates on the heap. For hot paths that often complete *synchronously* (cache hits, buffered reads), `ValueTask<T>` is a struct that wraps either an immediate `T` or an underlying `Task<T>` — no allocation in the synchronous-completion case.
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## `ValueTask<T>` and the allocation tradeoff
+    ```csharp
+    using System.Threading.Tasks;
 
-      `Task<T>` is a class — every async method that returns one allocates on the heap. For hot paths that often complete *synchronously* (cache hits, buffered reads), `ValueTask<T>` is a struct that wraps either an immediate `T` or an underlying `Task<T>` — no allocation in the synchronous-completion case.
+    public ValueTask<byte[]> ReadAsync(int key)
+    {
+        if (_cache.TryGetValue(key, out var bytes))
+            return new ValueTask<byte[]>(bytes); // sync, no alloc
+        return new ValueTask<byte[]>(LoadAsync(key)); // async path
+    }
 
-      ```csharp
-      using System.Threading.Tasks;
+    private Task<byte[]> LoadAsync(int key) => Task.FromResult(new byte[0]);
+    ```
 
-      public ValueTask<byte[]> ReadAsync(int key)
-      {
-          if (_cache.TryGetValue(key, out var bytes))
-              return new ValueTask<byte[]>(bytes); // sync, no alloc
-          return new ValueTask<byte[]>(LoadAsync(key)); // async path
-      }
+    The contract is stricter than `Task<T>`: a `ValueTask<T>` must be awaited *at most once*, and you must not block on it (`.Result` is permitted only after completion). Default to `Task<T>`; reach for `ValueTask<T>` only when profiling shows the per-call allocation matters — typically tight inner loops, high-throughput pipelines, or library APIs called millions of times per second. `IValueTaskSource` for pooled, reusable backing is an advanced pattern — out of scope here. The mental model: `Task<T>` is the default; `ValueTask<T>` is an optimization with restrictions.
+- sequence: 4
+  fragment_type: setup
+  content: |
+    ## `CancellationToken`: propagation and linking
 
-      private Task<byte[]> LoadAsync(int key) => Task.FromResult(new byte[0]);
-      ```
+    Every async API in modern .NET takes a `CancellationToken`, and you forward it down the call chain unchanged. The token is created from a `CancellationTokenSource`; `cts.Cancel()` flips the token, all observers see `IsCancellationRequested == true`, and any `await` on a cancellation-aware operation throws `OperationCanceledException` (specifically `TaskCanceledException`, which inherits from it).
 
-      The contract is stricter than `Task<T>`: a `ValueTask<T>` must be awaited *at most once*, and you must not block on it (`.Result` is permitted only after completion). Default to `Task<T>`; reach for `ValueTask<T>` only when profiling shows the per-call allocation matters — typically tight inner loops, high-throughput pipelines, or library APIs called millions of times per second. `IValueTaskSource` for pooled, reusable backing is an advanced pattern — out of scope here. The mental model: `Task<T>` is the default; `ValueTask<T>` is an optimization with restrictions.
+    ```csharp
+    using System;
+    using System.Threading;
+    using System.Threading.Tasks;
 
-  - sequence: 4
-    fragment_type: setup
-    content: |
-      ## `CancellationToken`: propagation and linking
+    public async Task RunAsync(CancellationToken ct)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        await DoWorkAsync(linked.Token).ConfigureAwait(false);
+    }
 
-      Every async API in modern .NET takes a `CancellationToken`, and you forward it down the call chain unchanged. The token is created from a `CancellationTokenSource`; `cts.Cancel()` flips the token, all observers see `IsCancellationRequested == true`, and any `await` on a cancellation-aware operation throws `OperationCanceledException` (specifically `TaskCanceledException`, which inherits from it).
+    private Task DoWorkAsync(CancellationToken ct) => Task.CompletedTask;
+    ```
 
-      ```csharp
-      using System;
-      using System.Threading;
-      using System.Threading.Tasks;
+    `CreateLinkedTokenSource` produces a token that fires when *any* source token fires — perfect for combining a request-scoped cancellation with a per-operation timeout. For a `Task` that does not natively accept a `CancellationToken` (a third-party API, a `Task.Delay` you've already started), wrap it with `Task.WaitAsync(ct)` (.NET 6+, verified 2026-05-05) — this returns a new task that throws `OperationCanceledException` when the token fires, leaving the original task running but unobserved. When throwing `OperationCanceledException` yourself, pass the token: `throw new OperationCanceledException(ct)` — the token-bearing constructor is what callers need to distinguish "we were cancelled" from "the operation failed."
+- sequence: 5
+  fragment_type: rationale
+  content: |
+    ## `ConfigureAwait(false)` and the sync-context rule
 
-      public async Task RunAsync(CancellationToken ct)
-      {
-          using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-          using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-          await DoWorkAsync(linked.Token).ConfigureAwait(false);
-      }
+    By default, `await` in C# captures the current `SynchronizationContext` (or `TaskScheduler`) and resumes the continuation on it. WPF, WinForms, and pre-net6 ASP.NET captured a UI/request context, so awaiting in a library forced the continuation back onto that thread — a classic deadlock when callers also block on `.Result`. `ConfigureAwait(false)` tells the awaiter not to capture, resuming on whatever thread the Task completed on.
 
-      private Task DoWorkAsync(CancellationToken ct) => Task.CompletedTask;
-      ```
+    Rules of thumb (verified 2026-05-05):
 
-      `CreateLinkedTokenSource` produces a token that fires when *any* source token fires — perfect for combining a request-scoped cancellation with a per-operation timeout. For a `Task` that does not natively accept a `CancellationToken` (a third-party API, a `Task.Delay` you've already started), wrap it with `Task.WaitAsync(ct)` (.NET 6+, verified 2026-05-05) — this returns a new task that throws `OperationCanceledException` when the token fires, leaving the original task running but unobserved. When throwing `OperationCanceledException` yourself, pass the token: `throw new OperationCanceledException(ct)` — the token-bearing constructor is what callers need to distinguish "we were cancelled" from "the operation failed."
+    - **Library code:** always `ConfigureAwait(false)` on every `await`. You do not know your caller's context. Roslyn analyzer rule **CA2007** flags missing `ConfigureAwait` in libraries.
+    - **ASP.NET Core (.NET 6+):** has *no* `SynchronizationContext`. `ConfigureAwait(false)` is a no-op there but harmless. Web app code authored against ASP.NET Core can omit it; libraries the app consumes still should not.
+    - **WPF/WinForms:** application code awaits *without* `ConfigureAwait(false)` when it needs to touch UI after the await. Library code servicing them still uses `false`.
 
-  - sequence: 5
-    fragment_type: rationale
-    content: |
-      ## `ConfigureAwait(false)` and the sync-context rule
+    The Roslyn analyzer suppresses CA2007 in projects that opt out (typically web apps). Use a `.editorconfig` rule or project-level suppression rather than littering `#pragma` directives across the codebase.
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ## `Task.WhenAll`, `Task.WhenAny`, and exception aggregation
 
-      By default, `await` in C# captures the current `SynchronizationContext` (or `TaskScheduler`) and resumes the continuation on it. WPF, WinForms, and pre-net6 ASP.NET captured a UI/request context, so awaiting in a library forced the continuation back onto that thread — a classic deadlock when callers also block on `.Result`. `ConfigureAwait(false)` tells the awaiter not to capture, resuming on whatever thread the Task completed on.
+    `Task.WhenAll(tasks)` returns a task that completes when every input completes. `Task.WhenAny(tasks)` completes when the first one finishes — it returns the *task that finished*, not its result. The aggregation edge that bites people: if multiple tasks in `WhenAll` fail, `await` rethrows *only the first* exception. The full set lives on `whenAllTask.Exception` (an `AggregateException`).
 
-      Rules of thumb (verified 2026-05-05):
+    ```csharp
+    using System;
+    using System.Threading.Tasks;
+    using Microsoft.Extensions.Logging;
 
-      - **Library code:** always `ConfigureAwait(false)` on every `await`. You do not know your caller's context. Roslyn analyzer rule **CA2007** flags missing `ConfigureAwait` in libraries.
-      - **ASP.NET Core (.NET 6+):** has *no* `SynchronizationContext`. `ConfigureAwait(false)` is a no-op there but harmless. Web app code authored against ASP.NET Core can omit it; libraries the app consumes still should not.
-      - **WPF/WinForms:** application code awaits *without* `ConfigureAwait(false)` when it needs to touch UI after the await. Library code servicing them still uses `false`.
+    async Task RunAsync(ILogger log)
+    {
+        Task[] tasks = new[] { FailAAsync(), FailBAsync() };
+        Task all = Task.WhenAll(tasks);
+        try
+        {
+            await all.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // 'all.Exception' is the AggregateException with BOTH inner exceptions.
+            // The 'catch' here only sees the first one because await unwraps.
+            foreach (var inner in all.Exception!.InnerExceptions)
+                log.LogError(inner, "task failed");
+        }
+    }
 
-      The Roslyn analyzer suppresses CA2007 in projects that opt out (typically web apps). Use a `.editorconfig` rule or project-level suppression rather than littering `#pragma` directives across the codebase.
+    Task FailAAsync() => Task.FromException(new InvalidOperationException("A"));
+    Task FailBAsync() => Task.FromException(new InvalidOperationException("B"));
+    ```
+- fragment_type: execution
+  sequence: 7
+  content: 'Walked: tasks A and B both throw. `await all` rethrows A''s exception (or whichever the runtime ordered first). B''s exception is *not* lost — it is on `all.Exception.InnerExceptions` — but a naive `catch` that does not consult the task object will silently drop it. If you need every failure observed (audit logging, retry decisions, partial-failure reporting), check `task.Exception` after the await rather than relying on the catch alone. `Task.WhenAny` has no aggregation issue because exactly one task completes; you await that returned inner task to surface its result or exception.'
+- fragment_type: example
+  sequence: 8
+  content: |-
+    ## `System.Threading.Channels` for bounded producer-consumer
 
-  - sequence: 6
-    fragment_type: execution
-    content: |
-      ## `Task.WhenAll`, `Task.WhenAny`, and exception aggregation
+    `System.Threading.Channels` (since .NET Core 3.0, fully featured in .NET 9, verified 2026-05-05) is the canonical async producer-consumer queue. Two flavors:
 
-      `Task.WhenAll(tasks)` returns a task that completes when every input completes. `Task.WhenAny(tasks)` completes when the first one finishes — it returns the *task that finished*, not its result. The aggregation edge that bites people: if multiple tasks in `WhenAll` fail, `await` rethrows *only the first* exception. The full set lives on `whenAllTask.Exception` (an `AggregateException`).
+    - **`Channel.CreateBounded<T>(BoundedChannelOptions)`** — fixed capacity, applies backpressure. `WriteAsync` awaits when full.
+    - **`Channel.CreateUnbounded<T>()`** — no capacity limit. Producers never block. **Do not use in production for inputs you don't fully control** — a fast producer OOMs the process.
+- fragment_type: example
+  sequence: 9
+  content: |-
+    ```csharp
+    using System.Threading;
+    using System.Threading.Channels;
+    using System.Threading.Tasks;
 
-      ```csharp
-      using System;
-      using System.Threading.Tasks;
-      using Microsoft.Extensions.Logging;
+    var channel = Channel.CreateBounded<Order>(new BoundedChannelOptions(capacity: 100)
+    {
+        FullMode = BoundedChannelFullMode.Wait,
+        SingleReader = true,
+        SingleWriter = false,
+    });
 
-      async Task RunAsync(ILogger log)
-      {
-          Task[] tasks = new[] { FailAAsync(), FailBAsync() };
-          Task all = Task.WhenAll(tasks);
-          try
-          {
-              await all.ConfigureAwait(false);
-          }
-          catch (Exception)
-          {
-              // 'all.Exception' is the AggregateException with BOTH inner exceptions.
-              // The 'catch' here only sees the first one because await unwraps.
-              foreach (var inner in all.Exception!.InnerExceptions)
-                  log.LogError(inner, "task failed");
-          }
-      }
+    // producer
+    async Task ProduceAsync(Order order, CancellationToken ct)
+    {
+        await channel.Writer.WriteAsync(order, ct).ConfigureAwait(false);
+    }
 
-      Task FailAAsync() => Task.FromException(new InvalidOperationException("A"));
-      Task FailBAsync() => Task.FromException(new InvalidOperationException("B"));
-      ```
+    // consumer
+    async Task ConsumeAsync(CancellationToken ct)
+    {
+        await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+        {
+            await HandleAsync(item, ct).ConfigureAwait(false);
+        }
+    }
 
-      Walked: tasks A and B both throw. `await all` rethrows A's exception (or whichever the runtime ordered first). B's exception is *not* lost — it is on `all.Exception.InnerExceptions` — but a naive `catch` that does not consult the task object will silently drop it. If you need every failure observed (audit logging, retry decisions, partial-failure reporting), check `task.Exception` after the await rather than relying on the catch alone. `Task.WhenAny` has no aggregation issue because exactly one task completes; you await that returned inner task to surface its result or exception.
+    Task HandleAsync(Order o, CancellationToken ct) => Task.CompletedTask;
+    ```
 
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## `System.Threading.Channels` for bounded producer-consumer
+    `BoundedChannelFullMode` choices: `Wait` (default — backpressure), `DropNewest`, `DropOldest`, `DropWrite` (silently discard new items). Pick deliberately. `SingleReader`/`SingleWriter` enable internal optimizations but are *contracts* — violate them and behavior is undefined. Producers must call `channel.Writer.Complete()` when done so consumers awaiting `ReadAllAsync` see end-of-stream and exit the `await foreach`; forgetting this hangs the consumer forever.
+- sequence: 10
+  fragment_type: example
+  content: |
+    ## `Parallel.ForEachAsync` for CPU-bound work over async sources
 
-      `System.Threading.Channels` (since .NET Core 3.0, fully featured in .NET 9, verified 2026-05-05) is the canonical async producer-consumer queue. Two flavors:
+    `Parallel.ForEachAsync` (.NET 6+, verified 2026-05-05) iterates a sequence, dispatching async work with bounded parallelism — the async cousin of `Parallel.ForEach`.
 
-      - **`Channel.CreateBounded<T>(BoundedChannelOptions)`** — fixed capacity, applies backpressure. `WriteAsync` awaits when full.
-      - **`Channel.CreateUnbounded<T>()`** — no capacity limit. Producers never block. **Do not use in production for inputs you don't fully control** — a fast producer OOMs the process.
+    ```csharp
+    using System.Collections.Generic;
+    using System.Threading;
+    using System.Threading.Tasks;
 
-      ```csharp
-      using System.Threading;
-      using System.Threading.Channels;
-      using System.Threading.Tasks;
+    async Task ProcessBatchAsync(IEnumerable<int> ids, CancellationToken ct)
+    {
+        await Parallel.ForEachAsync(
+            ids,
+            new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
+            async (id, token) => await ProcessAsync(id, token).ConfigureAwait(false));
+    }
 
-      var channel = Channel.CreateBounded<Order>(new BoundedChannelOptions(capacity: 100)
-      {
-          FullMode = BoundedChannelFullMode.Wait,
-          SingleReader = true,
-          SingleWriter = false,
-      });
+    Task ProcessAsync(int id, CancellationToken ct) => Task.CompletedTask;
+    ```
 
-      // producer
-      async Task ProduceAsync(Order order, CancellationToken ct)
-      {
-          await channel.Writer.WriteAsync(order, ct).ConfigureAwait(false);
-      }
-
-      // consumer
-      async Task ConsumeAsync(CancellationToken ct)
-      {
-          await foreach (var item in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-          {
-              await HandleAsync(item, ct).ConfigureAwait(false);
-          }
-      }
-
-      Task HandleAsync(Order o, CancellationToken ct) => Task.CompletedTask;
-      ```
-
-      `BoundedChannelFullMode` choices: `Wait` (default — backpressure), `DropNewest`, `DropOldest`, `DropWrite` (silently discard new items). Pick deliberately. `SingleReader`/`SingleWriter` enable internal optimizations but are *contracts* — violate them and behavior is undefined. Producers must call `channel.Writer.Complete()` when done so consumers awaiting `ReadAllAsync` see end-of-stream and exit the `await foreach`; forgetting this hangs the consumer forever.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## `Parallel.ForEachAsync` for CPU-bound work over async sources
-
-      `Parallel.ForEachAsync` (.NET 6+, verified 2026-05-05) iterates a sequence, dispatching async work with bounded parallelism — the async cousin of `Parallel.ForEach`.
-
-      ```csharp
-      using System.Collections.Generic;
-      using System.Threading;
-      using System.Threading.Tasks;
-
-      async Task ProcessBatchAsync(IEnumerable<int> ids, CancellationToken ct)
-      {
-          await Parallel.ForEachAsync(
-              ids,
-              new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
-              async (id, token) => await ProcessAsync(id, token).ConfigureAwait(false));
-      }
-
-      Task ProcessAsync(int id, CancellationToken ct) => Task.CompletedTask;
-      ```
-
-      Use it for fan-out where you would otherwise hand-roll a `SemaphoreSlim` plus `Task.WhenAll`. Default `MaxDegreeOfParallelism` is `Environment.ProcessorCount` — pin it explicitly when the work hits a downstream service that has its own concurrency limit (a database connection pool sized at 16, an external API allowing 4 concurrent calls). `CancellationToken` on `ParallelOptions` is observed at iteration boundaries; long-running per-item work must also accept and check the token argument the body lambda receives.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **`async void`.** Reserved for event handlers (subscribed to `EventHandler` delegates) where the framework cannot await a `Task`. Anywhere else, exceptions escape to the `SynchronizationContext` and crash the process. Use `async Task` and let callers await.
-      - **`.Result` and `.Wait()` to bridge sync-to-async.** Blocks the calling thread on a Task it expects to complete on the same thread under a sync context — classic deadlock in WPF/WinForms/old ASP.NET. In ASP.NET Core (no sync context) it merely wastes a thread-pool thread. Either propagate `async` upward or use `GetAwaiter().GetResult()` *only* at the true sync-async boundary (`Main`, console entry).
-      - **`ConfigureAwait(true)` (the default) in library code.** Always `false` in libraries. Roslyn analyzer CA2007 catches missing calls.
-      - **Ignoring the `CancellationToken` parameter.** A long-running API that does not pass `ct` down to its awaits is uncancellable — the caller's `cts.Cancel()` does nothing. Forward the token to every async call you make.
-      - **`await Task.Run(() => syncMethod())` to "make it async".** This shifts work to the thread pool but the underlying work is still synchronous and consumes a thread. For true I/O, use the async API. `Task.Run` is for CPU-bound work, not for hiding sync code.
-      - **Throwing `OperationCanceledException` without checking `ct.IsCancellationRequested` first.** The token-bearing constructor `new OperationCanceledException(ct)` is required for callers to distinguish cancellation from failure. Better: call `ct.ThrowIfCancellationRequested()` at suitable yield points.
-      - **`Channel.CreateUnbounded<T>()` in production.** No backpressure. Use bounded with a deliberate capacity.
-      - **Forgetting to call `Writer.Complete()` on a Channel.** Consumers awaiting `ReadAllAsync` hang forever waiting for an end-of-stream signal that never arrives.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `dotnet build /warnaserror` exits 0 — promotes async-related warnings (CS1998 "async method lacks await", CS4014 "call not awaited") to errors.
-      - [ ] `dotnet format --verify-no-changes` exits 0 — confirms style/whitespace conformance.
-      - [ ] `grep -rn 'async void' src/` returns no matches outside files that subscribe to `EventHandler` delegates. Each remaining match has a comment justifying the event-handler use.
-      - [ ] `grep -rnE '\.Result|\.Wait\(\)' src/` returns no matches inside async call paths. Matches in `Main`/console entry points are acceptable; flag any inside `async` methods.
-      - [ ] Roslyn analyzer **CA2007** ("Consider calling ConfigureAwait on the awaited task") is enabled at warning-or-error level for library projects via `.editorconfig` (`dotnet_diagnostic.CA2007.severity = warning`). `dotnet build /warnaserror` then fails the build on missing `ConfigureAwait(false)`.
-      - [ ] `grep -rn 'CreateUnbounded' src/` returns no matches in production paths, or each match has a comment justifying unbounded use and bounding the producer upstream.
-      - [ ] Every `public` async method in the library exposes a `CancellationToken` parameter (default `default` permitted). Inventory with `grep -rnE 'public.*async (Task|ValueTask)' src/` and confirm each signature.
-      - [ ] Every `Channel.Writer` has a corresponding `Writer.Complete()` (or `TryComplete()`) on the producer-shutdown path. `grep -rn 'Channel.Create' src/` to inventory; trace each to a `Complete` call.
-      - [ ] `Parallel.ForEachAsync` calls pin `MaxDegreeOfParallelism` explicitly. `grep -rn 'Parallel.ForEachAsync' src/` and confirm each `ParallelOptions` sets the field.
+    Use it for fan-out where you would otherwise hand-roll a `SemaphoreSlim` plus `Task.WhenAll`. Default `MaxDegreeOfParallelism` is `Environment.ProcessorCount` — pin it explicitly when the work hits a downstream service that has its own concurrency limit (a database connection pool sized at 16, an external API allowing 4 concurrent calls). `CancellationToken` on `ParallelOptions` is observed at iteration boundaries; long-running per-item work must also accept and check the token argument the body lambda receives.
+- fragment_type: guardrail
+  sequence: 11
+  content: '- **`async void`.** Reserved for event handlers (subscribed to `EventHandler` delegates) where the framework cannot await a `Task`. Anywhere else, exceptions escape to the `SynchronizationContext` and crash the process. Use `async Task` and let callers await. - **`.Result` and `.Wait()` to bridge sync-to-async.** Blocks the calling thread on a Task it expects to complete on the same thread under a sync context — classic deadlock in WPF/WinForms/old ASP.NET. In ASP.NET Core (no sync context) it merely wastes a thread-pool thread. Either propagate `async` upward or use `GetAwaiter().GetResult()` *only* at the true sync-async boundary (`Main`, console entry). - **`ConfigureAwait(true)` (the default) in library code.** Always `false` in libraries. Roslyn analyzer CA2007 catches missing calls. - **Ignoring the `CancellationToken` parameter.** A long-running API that does not pass `ct` down to its awaits is uncancellable — the caller''s `cts.Cancel()` does nothing. Forward the token to every async call you make. - **`await Task.Run(() => syncMethod())` to "make it async".** This shifts work to the thread pool but the underlying work is still synchronous and consumes a thread. For true I/O, use the async API. `Task.Run` is for CPU-bound work, not for hiding sync code.'
+- fragment_type: guardrail
+  sequence: 12
+  content: '- **Throwing `OperationCanceledException` without checking `ct.IsCancellationRequested` first.** The token-bearing constructor `new OperationCanceledException(ct)` is required for callers to distinguish cancellation from failure. Better: call `ct.ThrowIfCancellationRequested()` at suitable yield points. - **`Channel.CreateUnbounded<T>()` in production.** No backpressure. Use bounded with a deliberate capacity. - **Forgetting to call `Writer.Complete()` on a Channel.** Consumers awaiting `ReadAllAsync` hang forever waiting for an end-of-stream signal that never arrives.'
+- fragment_type: verification
+  sequence: 13
+  content: '- [ ] `dotnet build /warnaserror` exits 0 — promotes async-related warnings (CS1998 "async method lacks await", CS4014 "call not awaited") to errors. - [ ] `dotnet format --verify-no-changes` exits 0 — confirms style/whitespace conformance. - [ ] `grep -rn ''async void'' src/` returns no matches outside files that subscribe to `EventHandler` delegates. Each remaining match has a comment justifying the event-handler use. - [ ] `grep -rnE ''\.Result|\.Wait\(\)'' src/` returns no matches inside async call paths. Matches in `Main`/console entry points are acceptable; flag any inside `async` methods. - [ ] Roslyn analyzer **CA2007** ("Consider calling ConfigureAwait on the awaited task") is enabled at warning-or-error level for library projects via `.editorconfig` (`dotnet_diagnostic.CA2007.severity = warning`). `dotnet build /warnaserror` then fails the build on missing `ConfigureAwait(false)`. - [ ] `grep -rn ''CreateUnbounded'' src/` returns no matches in production paths, or each match has a comment justifying unbounded use and bounding the producer upstream. - [ ] Every `public` async method in the library exposes a `CancellationToken` parameter (default `default` permitted). Inventory with `grep -rnE ''public.*async (Task|ValueTask)'' src/` and confirm each signature.'
+- fragment_type: verification
+  sequence: 14
+  content: '- [ ] Every `Channel.Writer` has a corresponding `Writer.Complete()` (or `TryComplete()`) on the producer-shutdown path. `grep -rn ''Channel.Create'' src/` to inventory; trace each to a `Complete` call. - [ ] `Parallel.ForEachAsync` calls pin `MaxDegreeOfParallelism` explicitly. `grep -rn ''Parallel.ForEachAsync'' src/` and confirm each `ParallelOptions` sets the field.'

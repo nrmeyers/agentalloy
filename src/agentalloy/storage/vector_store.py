@@ -34,10 +34,10 @@ import duckdb
 
 from agentalloy.storage.card_index import CARD_FRAGMENT_TYPE
 
-EMBEDDING_DIM = 1024
-"""Vector dimensionality. Tied to ``qwen3-embedding:0.6b`` (1024-dim default).
+EMBEDDING_DIM = 768
+"""Vector dimensionality. Tied to ``nomic-embed-text-v1.5`` (768-dim default).
 Changing the model requires a schema migration and full corpus reindex —
-DuckDB's ``FLOAT[1024]`` column type is dimension-fixed."""
+DuckDB's ``FLOAT[768]`` column type is dimension-fixed."""
 
 
 # ---------------------------------------------------------------------------
@@ -948,7 +948,7 @@ def open_or_create(path: str | Path) -> VectorStore:
         vs.close()  # release DuckDB file lock before raising — callers may catch and reopen
         raise EmbeddingDimMismatch(
             f"Corpus was built with {stored_dim}-dim embeddings but the runtime "
-            f"expects {EMBEDDING_DIM}-dim (qwen3-embedding:0.6b). "
+            f"expects {EMBEDDING_DIM}-dim (nomic-embed-text-v1.5). "
             f"Run `agentalloy reembed --force` to rebuild with the correct model. "
             f"WARNING: --force deletes all existing embeddings; re-run install-packs afterward."
         )

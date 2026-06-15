@@ -1,345 +1,78 @@
 skill_type: domain
 skill_id: redshift-spectrum-and-iceberg
 canonical_name: Amazon Redshift Spectrum and Iceberg Integration
-description: "Query large datasets stored in S3 directly from Amazon Redshift using SQL: set up external tables with Spectrum, leverage Iceberg for schema evolution and time travel, and optimize performance for analytics on cloud data lakes."
+description: 'Query large datasets stored in S3 directly from Amazon Redshift using SQL: set up external tables with Spectrum, leverage Iceberg for schema evolution and time travel, and optimize performance for analytics on cloud data lakes.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - redshift
-  - spectrum
-  - iceberg
-  - s3
-  - aws
+- redshift
+- spectrum
+- iceberg
+- s3
+- aws
 related:
 - data-engineering-iceberg-lakehouse
 - redshift-loading-data
 - redshift-table-design
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: authoring-agent
 change_summary: initial authoring draft
-raw_prose: |
-  # Amazon Redshift Spectrum and Iceberg Integration
-
-  ## Overview
-
-  Redshift Spectrum extends SQL queries to data in S3 via external tables registered in Glue / Hive Metastore / Lake Formation. Iceberg integration adds schema-evolution + time-travel semantics on top. This skill covers both surfaces — registration, query patterns, performance.
-
-  Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c-getting-started-using-spectrum.html and https://docs.aws.amazon.com/redshift/latest/dg/iceberg-integration-querying.html.
-
-  ---
-
-
-  # Getting started with Amazon Redshift Spectrum
-
-
-  In this tutorial, you learn how to use Amazon Redshift Spectrum to query data directly from files on Amazon S3. If you already have a cluster and a SQL client, you can complete this tutorial with minimal setup. 
-
-  **Note**  
-  Redshift Spectrum queries incur additional charges. The cost of running the sample queries in this tutorial is nominal. For more information about pricing, see [ Amazon Redshift Spectrum pricing](https://aws.amazon.com/redshift/pricing/#redshift-spectrum-pricing).
-
-  ## Prerequisites
-
-
-  To use Redshift Spectrum, you need an Amazon Redshift cluster and a SQL client that's connected to your cluster so that you can run SQL commands. The cluster and the data files in Amazon S3 must be in the same AWS Region. 
-
-  For information about how to create an Amazon Redshift cluster, see [Get started with Amazon Redshift provisioned data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/new-user.html) in the *Amazon Redshift Getting Started Guide*. For information about ways to connect to a cluster, see [Connecting to Amazon Redshift data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/database-tasks.html) in the *Amazon Redshift Getting Started Guide*.
-
-  In some of the examples that follow, the sample data is in the US East (N. Virginia) Region (`us-east-1`), so you need a cluster that is also in `us-east-1`. Or, you can use Amazon S3 to copy data objects from the following buckets and folders to your bucket in the AWS Region where your cluster is located: 
-  + `s3://redshift-downloads/tickit/spectrum/customers/*`
-  + `s3://redshift-downloads/tickit/spectrum/sales_partition/*`
-  + `s3://redshift-downloads/tickit/spectrum/sales/*`
-  + `s3://redshift-downloads/tickit/spectrum/salesevent/*`
-
-  Run an Amazon S3 command similar to the following to copy sample data that is located in the US East (N. Virginia) to your AWS Region. Before running the command create your bucket and folders in your bucket to match your Amazon S3 copy command. The output of the Amazon S3 copy command confirms that the files are copied to the *bucket-name* in your desired AWS Region.
-
-  ```
-  aws s3 cp s3://redshift-downloads/tickit/spectrum/ s3://bucket-name/tickit/spectrum/ --copy-props none --recursive
-  ```
-
-  ## Getting started with Redshift Spectrum using AWS CloudFormation
-
-
-  As an alternative to the following steps, you can access the Redshift Spectrum DataLake AWS CloudFormation template to create a stack with an Amazon S3 bucket that you can query. For more information, see [Launch your AWS CloudFormation stack and then query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data-cfn).
-
-  ## Getting started with Redshift Spectrum step by step
-
-
-  To get started using Amazon Redshift Spectrum, follow these steps:
-  + [Step 1. Create an IAM role for Amazon Redshift](#c-getting-started-using-spectrum-create-role) 
-  + [Step 2: Associate the IAM role with your cluster](#c-getting-started-using-spectrum-add-role) 
-  + [Step 3: Create an external schema and an external table](#c-getting-started-using-spectrum-create-external-table) 
-  + [Step 4: Query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data) 
-
-  ## Step 1. Create an IAM role for Amazon Redshift
-
-
-  Your cluster needs authorization to access your external Data Catalog in AWS Glue or Amazon Athena and your data files in Amazon S3. To provide that authorization, you reference an AWS Identity and Access Management (IAM) role that is attached to your cluster. For more information about using roles with Amazon Redshift, see [Authorizing COPY and UNLOAD Operations Using IAM Roles](https://docs.aws.amazon.com/redshift/latest/mgmt/copy-unload-iam-role.html).
-
-  **Note**  
-  In certain cases, you can migrate your Athena Data Catalog to an AWS Glue Data Catalog. You can do this if your cluster is in an AWS Region where AWS Glue is supported and you have Redshift Spectrum external tables in the Athena Data Catalog. To use the AWS Glue Data Catalog with Redshift Spectrum, you might need to change your IAM policies. For more information, see [Upgrading to the AWS Glue Data Catalog](https://docs.aws.amazon.com/athena/latest/ug/glue-athena.html#glue-upgrade) in the *Athena User Guide*.
-
-  When you create a role for Amazon Redshift, choose one of the following approaches:
-  + If you are using Redshift Spectrum with either an Athena Data Catalog or AWS Glue Data Catalog, follow the steps outlined in [To create an IAM role for Amazon Redshift](#spectrum-get-started-create-role). 
-  + If you are using Redshift Spectrum with an AWS Glue Data Catalog that is enabled for AWS Lake Formation, follow the steps outlined in these procedures:
-    +  [To create an IAM role for Amazon Redshift using an AWS Glue Data Catalog enabled for AWS Lake Formation](#spectrum-get-started-create-role-lake-formation) 
-    +  [To grant SELECT permissions on the table to query in the Lake Formation database](#spectrum-get-started-grant-lake-formation-table) 
-
-  **To create an IAM role for Amazon Redshift**
-
-  1. Open the [IAM console](https://console.aws.amazon.com/iam/home?#home).
-
-  1. In the navigation pane, choose **Roles**.
-
-  1. Choose **Create role**.
-
-  1. Choose **AWS service** as the trusted entity, and then choose **Redshift** as the use case.
-
-  1. Under **Use case for other AWS services**, choose **Redshift - Customizable** and then choose **Next**.
-
-  1. The **Add permissions policy** page appears. Choose `AmazonS3ReadOnlyAccess` and `AWSGlueConsoleFullAccess`, if you're using the AWS Glue Data Catalog. Or choose `AmazonAthenaFullAccess` if you're using the Athena Data Catalog. Choose **Next**.
-  **Note**  
-  The `AmazonS3ReadOnlyAccess` policy gives your cluster read-only access to all Amazon S3 buckets. To grant access to only the AWS sample data bucket, create a new policy and add the following permissions.  
-
-  ****  
-
-     ```
-     {
-         "Version":"2012-10-17",		 	 	 
-         "Statement": [
-             {
-                 "Effect": "Allow",
-                 "Action": [
-                     "s3:Get*",
-                     "s3:List*"
-                 ],
-                 "Resource": "arn:aws:s3:::redshift-downloads/*"
-             }
-         ]
-     }
-     ```
-
-  1. For **Role name**, enter a name for your role, for example **myspectrum\$1role**.
-
-  1. Review the information, and then choose **Create role**.
-
-  1. In the navigation pane, choose **Roles**. Choose the name of your new role to view the summary, and then copy the **Role ARN** to your clipboard. T
-
-  ---
-
-
-  # Amazon Redshift Spectrum query performance
-
-
-  This topic describes how to improve Redshift Spectrum query performance.
-
-  Look at the query plan to find what steps have been pushed to the Amazon Redshift Spectrum layer. 
-
-  The following steps are related to the Redshift Spectrum query:
-  + S3 Seq Scan 
-  + S3 HashAggregate 
-  + S3 Query Scan
-  + Seq Scan PartitionInfo
-  + Partition Loop 
-
-  The following example shows the query plan for a query that joins an external table with a local table. Note the S3 Seq Scan and S3 HashAggregate steps that were run against the data on Amazon S3.
-
-  ```
-  explain
-  select top 10 spectrum.sales.eventid, sum(spectrum.sales.pricepaid) 
-  from spectrum.sales, event
-  where spectrum.sales.eventid = event.eventid
-  and spectrum.sales.pricepaid > 30
-  group by spectrum.sales.eventid
-  order by 2 desc;
-  ```
-
-  ```
-  QUERY PLAN                                                                                                                                                                                
-  -----------------------------------------------------------------------------
-  XN Limit  (cost=1001055770628.63..1001055770628.65 rows=10 width=31)                                                                                                                      
-    ->  XN Merge  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                               
-          Merge Key: sum(sales.derived_col2)                                                                                                                                                
-          ->  XN Network  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                       
-                Send to leader
-
-  ---
-
-
-  # Querying catalogs registered in the AWS Glue Data Catalog
-
-
-  After you register an Amazon Redshift data warehouse to the AWS Glue Data Catalog and set permissions for the resulting catalog in AWS Lake Formation, the catalog is automatically mounted in all Amazon Redshift instances with access to the source data warehouse in the same account and AWS Region. You can then query that catalog as you would a local cluster or workgroup. You can also query catalogs registered to the AWS Glue Data Catalog using any SQL engine that supports the Apache Iceberg REST Open API. For more information on querying catalogs in the AWS Glue Data Catalog using the Apache Iceberg REST API, see [Accessing the Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/access_catalog.html) in the *AWS Glue Developer Guide*. For information on the Apache Iceberg REST API, see the [ Apache Iceberg REST Open API specification](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml).
-
-  To query a catalog, you must first set the permissions for the catalog using AWS Lake Formation. For more information on setting permissions for catalogs in AWS Lake Formation, see [ Setting up permissions for Amazon Redshift datashares](https://docs.aws.amazon.com/lake-formation/latest/dg/setup-ds-perms.html) in the *AWS Lake Formation Developer Guide*. You also need an IAM role with the `AmazonRedshiftServiceLinkedRolePolicy` managed policy attached. For information on service-linked roles, see [ Using service-linked roles for Amazon Redshift](https://docs.aws.amazon.com/redshift/latest/mgmt/using-service-linked-roles.html) in the *Amazon Redshift Management Guide*.
-
-   Note that queries against catalogs must follow the following three-part syntax for accessing tables:
-
-  ```
-  database@namespace.
+raw_prose: "# Amazon Redshift Spectrum and Iceberg Integration\n\n## Overview\n\nRedshift Spectrum extends SQL queries to data in S3 via external tables registered in Glue / Hive Metastore / Lake Formation. Iceberg integration adds schema-evolution + time-travel semantics on top. This skill covers both surfaces — registration, query patterns, performance.\n\nSourced from https://docs.aws.amazon.com/redshift/latest/dg/c-getting-started-using-spectrum.html and https://docs.aws.amazon.com/redshift/latest/dg/iceberg-integration-querying.html.\n\n---\n\n\n# Getting started with Amazon Redshift Spectrum\n\n\nIn this tutorial, you learn how to use Amazon Redshift Spectrum to query data directly from files on Amazon S3. If you already have a cluster and a SQL client, you can complete this tutorial with minimal setup. \n\n**Note**  \nRedshift Spectrum queries incur additional charges. The cost of running the sample queries in this tutorial is nominal. For more information about pricing, see [ Amazon Redshift Spectrum pricing](https://aws.amazon.com/redshift/pricing/#redshift-spectrum-pricing).\n\n## Prerequisites\n\n\nTo use Redshift Spectrum, you need an Amazon Redshift cluster and a SQL client that's connected to your cluster so that you can run SQL commands. The cluster and the data files in Amazon S3 must be in the same AWS Region. \n\nFor information about how to create an Amazon Redshift cluster, see [Get started with Amazon Redshift provisioned data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/new-user.html) in the *Amazon Redshift Getting Started Guide*. For information about ways to connect to a cluster, see [Connecting to Amazon Redshift data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/database-tasks.html) in the *Amazon Redshift Getting Started Guide*.\n\nIn some of the examples that follow, the sample data is in the US East (N. Virginia) Region (`us-east-1`), so you need a cluster that is also in `us-east-1`. Or, you can use Amazon S3 to copy data objects from the following buckets and folders to your bucket in the AWS Region where your cluster is located: \n+ `s3://redshift-downloads/tickit/spectrum/customers/*`\n+ `s3://redshift-downloads/tickit/spectrum/sales_partition/*`\n+ `s3://redshift-downloads/tickit/spectrum/sales/*`\n+ `s3://redshift-downloads/tickit/spectrum/salesevent/*`\n\nRun an Amazon S3 command similar to the following to copy sample data that is located in the US East (N. Virginia) to your AWS Region. Before running the command create your bucket and folders in your bucket to match your Amazon S3 copy command. The output of the Amazon S3 copy command confirms that the files are copied to the *bucket-name* in your desired AWS Region.\n\n```\naws s3 cp s3://redshift-downloads/tickit/spectrum/ s3://bucket-name/tickit/spectrum/ --copy-props none --recursive\n```\n\n## Getting started with Redshift Spectrum using AWS CloudFormation\n\n\nAs an alternative to the following steps, you can access the Redshift Spectrum DataLake AWS CloudFormation template to create a stack with an Amazon S3 bucket that you can query. For more information, see [Launch your AWS CloudFormation stack and then query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data-cfn).\n\n## Getting started with Redshift Spectrum step by step\n\n\nTo get started using Amazon Redshift Spectrum, follow these steps:\n+ [Step 1. Create an IAM role for Amazon Redshift](#c-getting-started-using-spectrum-create-role) \n+ [Step 2: Associate the IAM role with your cluster](#c-getting-started-using-spectrum-add-role) \n+ [Step 3: Create an external schema and an external table](#c-getting-started-using-spectrum-create-external-table) \n+ [Step 4: Query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data) \n\n## Step 1. Create an IAM role for Amazon Redshift\n\n\nYour cluster needs authorization to access your external Data Catalog in AWS Glue or Amazon Athena and your data files in Amazon S3. To provide that authorization, you reference an AWS Identity and Access Management (IAM) role that is attached to your cluster. For more information about using roles with Amazon Redshift, see [Authorizing COPY and UNLOAD Operations Using IAM Roles](https://docs.aws.amazon.com/redshift/latest/mgmt/copy-unload-iam-role.html).\n\n**Note**  \nIn certain cases, you can migrate your Athena Data Catalog to an AWS Glue Data Catalog. You can do this if your cluster is in an AWS Region where AWS Glue is supported and you have Redshift Spectrum external tables in the Athena Data Catalog. To use the AWS Glue Data Catalog with Redshift Spectrum, you might need to change your IAM policies. For more information, see [Upgrading to the AWS Glue Data Catalog](https://docs.aws.amazon.com/athena/latest/ug/glue-athena.html#glue-upgrade) in the *Athena User Guide*.\n\nWhen you create a role for Amazon Redshift, choose one of the following approaches:\n+ If you are using Redshift Spectrum with either an Athena Data Catalog or AWS Glue Data Catalog, follow the steps outlined in [To create an IAM role for Amazon Redshift](#spectrum-get-started-create-role). \n+ If you are using Redshift Spectrum with an AWS Glue Data Catalog that is enabled for AWS Lake Formation, follow the steps outlined in these procedures:\n  +  [To create an IAM role for Amazon Redshift using an AWS Glue Data Catalog enabled for AWS Lake Formation](#spectrum-get-started-create-role-lake-formation) \n  +  [To grant SELECT permissions on the table to query in the Lake Formation database](#spectrum-get-started-grant-lake-formation-table) \n\n**To create an IAM role for Amazon Redshift**\n\n1. Open the [IAM console](https://console.aws.amazon.com/iam/home?#home).\n\n1. In the navigation pane, choose **Roles**.\n\n1. Choose **Create role**.\n\n1. Choose **AWS service** as the trusted entity, and then choose **Redshift** as the use case.\n\n1. Under **Use case for other AWS services**, choose **Redshift - Customizable** and then choose **Next**.\n\n1. The **Add permissions policy** page appears. Choose `AmazonS3ReadOnlyAccess` and `AWSGlueConsoleFullAccess`, if you're using the AWS Glue Data Catalog. Or choose `AmazonAthenaFullAccess` if you're using the Athena Data Catalog. Choose **Next**.\n**Note**  \nThe `AmazonS3ReadOnlyAccess` policy gives your cluster read-only access to all Amazon S3 buckets. To grant access to only the AWS sample data bucket, create a new policy and add the following permissions.  \n\n****  \n\n   ```\n   {\n       \"Version\":\"2012-10-17\",\t\t \t \t \n       \"Statement\": [\n           {\n               \"Effect\": \"Allow\",\n               \"Action\": [\n                   \"s3:Get*\",\n                   \"s3:List*\"\n               ],\n               \"Resource\": \"arn:aws:s3:::redshift-downloads/*\"\n           }\n       ]\n   }\n   ```\n\n1. For **Role name**, enter a name for your role, for example **myspectrum\\$1role**.\n\n1. Review the information, and then choose **Create role**.\n\n1. In the navigation pane, choose **Roles**. Choose the name of your new role to view the summary, and then copy the **Role ARN** to your clipboard. T\n\n---\n\n\n# Amazon Redshift Spectrum query performance\n\n\nThis topic describes how to improve Redshift Spectrum query performance.\n\nLook at the query plan to find what steps have been pushed to the Amazon Redshift Spectrum layer. \n\nThe following steps are related to the Redshift Spectrum query:\n+ S3 Seq Scan \n+ S3 HashAggregate \n+ S3 Query Scan\n+ Seq Scan PartitionInfo\n+ Partition Loop \n\nThe following example shows the query plan for a query that joins an external table with a local table. Note the S3 Seq Scan and S3 HashAggregate steps that were run against the data on Amazon S3.\n\n```\nexplain\nselect top 10 spectrum.sales.eventid, sum(spectrum.sales.pricepaid) \nfrom spectrum.sales, event\nwhere spectrum.sales.eventid = event.eventid\nand spectrum.sales.pricepaid > 30\ngroup by spectrum.sales.eventid\norder by 2 desc;\n```\n\n```\nQUERY PLAN                                                                                                                                                                                \n-----------------------------------------------------------------------------\nXN Limit  (cost=1001055770628.63..1001055770628.65 rows=10 width=31)                                                                                                                      \n  ->  XN Merge  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                               \n        Merge Key: sum(sales.derived_col2)                                                                                                                                                \n        ->  XN Network  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                       \n              Send to leader\n\n---\n\n\n# Querying catalogs registered in the AWS Glue Data Catalog\n\n\nAfter you register an Amazon Redshift data warehouse to the AWS Glue Data Catalog and set permissions for the resulting catalog in AWS Lake Formation, the catalog is automatically mounted in all Amazon Redshift instances with access to the source data warehouse in the same account and AWS Region. You can then query that catalog as you would a local cluster or workgroup. You can also query catalogs registered to the AWS Glue Data Catalog using any SQL engine that supports the Apache Iceberg REST Open API. For more information on querying catalogs in the AWS Glue Data Catalog using the Apache Iceberg REST API, see [Accessing the Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/access_catalog.html) in the *AWS Glue Developer Guide*. For information on the Apache Iceberg REST API, see the [ Apache Iceberg REST Open API specification](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml).\n\nTo query a catalog, you must first set the permissions for the catalog using AWS Lake Formation. For more information on setting permissions for catalogs in AWS Lake Formation, see [ Setting up permissions for Amazon Redshift datashares](https://docs.aws.amazon.com/lake-formation/latest/dg/setup-ds-perms.html) in the *AWS Lake Formation Developer Guide*. You also need an IAM role with the `AmazonRedshiftServiceLinkedRolePolicy` managed policy attached. For information on service-linked roles, see [ Using service-linked roles for Amazon Redshift](https://docs.aws.amazon.com/redshift/latest/mgmt/using-service-linked-roles.html) in the *Amazon Redshift Management Guide*.\n\n Note that queries against catalogs must follow the following three-part syntax for accessing tables:\n\n```\ndatabase@namespace.\n"
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      Redshift Spectrum extends SQL queries to data in S3 via external tables registered in Glue / Hive Metastore / Lake Formation. Iceberg integration adds schema-evolution + time-travel semantics on top. This skill covers both surfaces — registration, query patterns, performance.
+    Redshift Spectrum extends SQL queries to data in S3 via external tables registered in Glue / Hive Metastore / Lake Formation. Iceberg integration adds schema-evolution + time-travel semantics on top. This skill covers both surfaces — registration, query patterns, performance.
 
-      Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c-getting-started-using-spectrum.html and https://docs.aws.amazon.com/redshift/latest/dg/iceberg-integration-querying.html.
-  - fragment_type: setup
-    sequence: 2
-    content: |
-      ## Getting started with Amazon Redshift Spectrum
-
-
-      In this tutorial, you learn how to use Amazon Redshift Spectrum to query data directly from files on Amazon S3. If you already have a cluster and a SQL client, you can complete this tutorial with minimal setup. 
-
-      **Note**  
-      Redshift Spectrum queries incur additional charges. The cost of running the sample queries in this tutorial is nominal. For more information about pricing, see [ Amazon Redshift Spectrum pricing](https://aws.amazon.com/redshift/pricing/#redshift-spectrum-pricing).
-  - fragment_type: setup
-    sequence: 3
-    content: |
-      ## Prerequisites
-
-
-      To use Redshift Spectrum, you need an Amazon Redshift cluster and a SQL client that's connected to your cluster so that you can run SQL commands. The cluster and the data files in Amazon S3 must be in the same AWS Region. 
-
-      For information about how to create an Amazon Redshift cluster, see [Get started with Amazon Redshift provisioned data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/new-user.html) in the *Amazon Redshift Getting Started Guide*. For information about ways to connect to a cluster, see [Connecting to Amazon Redshift data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/database-tasks.html) in the *Amazon Redshift Getting Started Guide*.
-
-      In some of the examples that follow, the sample data is in the US East (N. Virginia) Region (`us-east-1`), so you need a cluster that is also in `us-east-1`. Or, you can use Amazon S3 to copy data objects from the following buckets and folders to your bucket in the AWS Region where your cluster is located: 
-      + `s3://redshift-downloads/tickit/spectrum/customers/*`
-      + `s3://redshift-downloads/tickit/spectrum/sales_partition/*`
-      + `s3://redshift-downloads/tickit/spectrum/sales/*`
-      + `s3://redshift-downloads/tickit/spectrum/salesevent/*`
-
-      Run an Amazon S3 command similar to the following to copy sample data that is located in the US East (N. Virginia) to your AWS Region. Before running the command create your bucket and folders in your bucket to match your Amazon S3 copy command. The output of the Amazon S3 copy command confirms that the files are copied to the *bucket-name* in your desired AWS Region.
-
-      ```
-      aws s3 cp s3://redshift-downloads/tickit/spectrum/ s3://bucket-name/tickit/spectrum/ --copy-props none --recursive
-      ```
-  - fragment_type: setup
-    sequence: 4
-    content: |
-      ## Getting started with Redshift Spectrum using AWS CloudFormation
+    Sourced from https://docs.aws.amazon.com/redshift/latest/dg/c-getting-started-using-spectrum.html and https://docs.aws.amazon.com/redshift/latest/dg/iceberg-integration-querying.html.
+- fragment_type: setup
+  sequence: 2
+  content: "## Getting started with Amazon Redshift Spectrum\n\n\nIn this tutorial, you learn how to use Amazon Redshift Spectrum to query data directly from files on Amazon S3. If you already have a cluster and a SQL client, you can complete this tutorial with minimal setup. \n\n**Note**  \nRedshift Spectrum queries incur additional charges. The cost of running the sample queries in this tutorial is nominal. For more information about pricing, see [ Amazon Redshift Spectrum pricing](https://aws.amazon.com/redshift/pricing/#redshift-spectrum-pricing).\n"
+- fragment_type: setup
+  sequence: 3
+  content: "## Prerequisites\n\nTo use Redshift Spectrum, you need an Amazon Redshift cluster and a SQL client that's connected to your cluster so that you can run SQL commands. The cluster and the data files in Amazon S3 must be in the same AWS Region. \n\nFor information about how to create an Amazon Redshift cluster, see [Get started with Amazon Redshift provisioned data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/new-user.html) in the *Amazon Redshift Getting Started Guide*. For information about ways to connect to a cluster, see [Connecting to Amazon Redshift data warehouses](https://docs.aws.amazon.com/redshift/latest/gsg/database-tasks.html) in the *Amazon Redshift Getting Started Guide*."
+- fragment_type: setup
+  sequence: 4
+  content: "In some of the examples that follow, the sample data is in the US East (N. Virginia) Region (`us-east-1`), so you need a cluster that is also in `us-east-1`. Or, you can use Amazon S3 to copy data objects from the following buckets and folders to your bucket in the AWS Region where your cluster is located: \n+ `s3://redshift-downloads/tickit/spectrum/customers/*`\n+ `s3://redshift-downloads/tickit/spectrum/sales_partition/*`\n+ `s3://redshift-downloads/tickit/spectrum/sales/*`\n+ `s3://redshift-downloads/tickit/spectrum/salesevent/*`\n\nRun an Amazon S3 command similar to the following to copy sample data that is located in the US East (N. Virginia) to your AWS Region. Before running the command create your bucket and folders in your bucket to match your Amazon S3 copy command. The output of the Amazon S3 copy command confirms that the files are copied to the *bucket-name* in your desired AWS Region.\n\n```\naws s3 cp s3://redshift-downloads/tickit/spectrum/ s3://bucket-name/tickit/spectrum/ --copy-props none --recursive\n```"
+- fragment_type: setup
+  sequence: 5
+  content: |
+    ## Getting started with Redshift Spectrum using AWS CloudFormation
 
 
-      As an alternative to the following steps, you can access the Redshift Spectrum DataLake AWS CloudFormation template to create a stack with an Amazon S3 bucket that you can query. For more information, see [Launch your AWS CloudFormation stack and then query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data-cfn).
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ## Getting started with Redshift Spectrum step by step
+    As an alternative to the following steps, you can access the Redshift Spectrum DataLake AWS CloudFormation template to create a stack with an Amazon S3 bucket that you can query. For more information, see [Launch your AWS CloudFormation stack and then query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data-cfn).
+- fragment_type: execution
+  sequence: 6
+  content: "## Getting started with Redshift Spectrum step by step\n\n\nTo get started using Amazon Redshift Spectrum, follow these steps:\n+ [Step 1. Create an IAM role for Amazon Redshift](#c-getting-started-using-spectrum-create-role) \n+ [Step 2: Associate the IAM role with your cluster](#c-getting-started-using-spectrum-add-role) \n+ [Step 3: Create an external schema and an external table](#c-getting-started-using-spectrum-create-external-table) \n+ [Step 4: Query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data) \n"
+- fragment_type: execution
+  sequence: 7
+  content: "## Step 1. Create an IAM role for Amazon Redshift\n\nYour cluster needs authorization to access your external Data Catalog in AWS Glue or Amazon Athena and your data files in Amazon S3. To provide that authorization, you reference an AWS Identity and Access Management (IAM) role that is attached to your cluster. For more information about using roles with Amazon Redshift, see [Authorizing COPY and UNLOAD Operations Using IAM Roles](https://docs.aws.amazon.com/redshift/latest/mgmt/copy-unload-iam-role.html).\n\n**Note**  \nIn certain cases, you can migrate your Athena Data Catalog to an AWS Glue Data Catalog. You can do this if your cluster is in an AWS Region where AWS Glue is supported and you have Redshift Spectrum external tables in the Athena Data Catalog. To use the AWS Glue Data Catalog with Redshift Spectrum, you might need to change your IAM policies. For more information, see [Upgrading to the AWS Glue Data Catalog](https://docs.aws.amazon.com/athena/latest/ug/glue-athena.html#glue-upgrade) in the *Athena User Guide*."
+- fragment_type: execution
+  sequence: 8
+  content: "When you create a role for Amazon Redshift, choose one of the following approaches:\n+ If you are using Redshift Spectrum with either an Athena Data Catalog or AWS Glue Data Catalog, follow the steps outlined in [To create an IAM role for Amazon Redshift](#spectrum-get-started-create-role). \n+ If you are using Redshift Spectrum with an AWS Glue Data Catalog that is enabled for AWS Lake Formation, follow the steps outlined in these procedures:\n  +  [To create an IAM role for Amazon Redshift using an AWS Glue Data Catalog enabled for AWS Lake Formation](#spectrum-get-started-create-role-lake-formation) \n  +  [To grant SELECT permissions on the table to query in the Lake Formation database](#spectrum-get-started-grant-lake-formation-table) \n\n**To create an IAM role for Amazon Redshift**\n\n1. Open the [IAM console](https://console.aws.amazon.com/iam/home?#home).\n\n1. In the navigation pane, choose **Roles**.\n\n1. Choose **Create role**.\n\n1. Choose **AWS service** as the trusted entity, and then choose **Redshift** as the use case.\n\n1. Under **Use case for other AWS services**, choose **Redshift - Customizable** and then choose **Next**."
+- fragment_type: execution
+  sequence: 9
+  content: "1. The **Add permissions policy** page appears. Choose `AmazonS3ReadOnlyAccess` and `AWSGlueConsoleFullAccess`, if you're using the AWS Glue Data Catalog. Or choose `AmazonAthenaFullAccess` if you're using the Athena Data Catalog. Choose **Next**.\n**Note**  \nThe `AmazonS3ReadOnlyAccess` policy gives your cluster read-only access to all Amazon S3 buckets. To grant access to only the AWS sample data bucket, create a new policy and add the following permissions.  \n\n****  \n\n   ```\n   {\n       \"Version\":\"2012-10-17\",\t\t \t \t \n       \"Statement\": [\n           {\n               \"Effect\": \"Allow\",\n               \"Action\": [\n                   \"s3:Get*\",\n                   \"s3:List*\"\n               ],\n               \"Resource\": \"arn:aws:s3:::redshift-downloads/*\"\n           }\n       ]\n   }\n   ```\n\n1. For **Role name**, enter a name for your role, for example **myspectrum\\$1role**.\n\n1. Review the information, and then choose **Create role**.\n\n1. In the navigation pane, choose **Roles**. Choose the name of your new role to view the summary, and then copy the **Role ARN** to your clipboard. T"
+- fragment_type: verification
+  sequence: 10
+  content: "# Amazon Redshift Spectrum query performance\n\n\nThis topic describes how to improve Redshift Spectrum query performance.\n\nLook at the query plan to find what steps have been pushed to the Amazon Redshift Spectrum layer. \n\nThe following steps are related to the Redshift Spectrum query:\n+ S3 Seq Scan \n+ S3 HashAggregate \n+ S3 Query Scan\n+ Seq Scan PartitionInfo\n+ Partition Loop \n\nThe following example shows the query plan for a query that joins an external table with a local table. Note the S3 Seq Scan and S3 HashAggregate steps that were run against the data on Amazon S3.\n\n```\nexplain\nselect top 10 spectrum.sales.eventid, sum(spectrum.sales.pricepaid) \nfrom spectrum.sales, event\nwhere spectrum.sales.eventid = event.eventid\nand spectrum.sales.pricepaid > 30\ngroup by spectrum.sales.eventid\norder by 2 desc;\n```\n\n```\nQUERY PLAN                                                                                                                                                                                \n-----------------------------------------------------------------------------\nXN Limit  (cost=1001055770628.63..1001055770628.65 rows=10 width=31)                                                                                                                      \n  ->  XN Merge  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                               \n        Merge Key: sum(sales.derived_col2)                                                                                                                                                \n        ->  XN Network  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                       \n              Send to leader\n"
+- fragment_type: example
+  sequence: 11
+  content: |-
+    # Querying catalogs registered in the AWS Glue Data Catalog
 
 
-      To get started using Amazon Redshift Spectrum, follow these steps:
-      + [Step 1. Create an IAM role for Amazon Redshift](#c-getting-started-using-spectrum-create-role) 
-      + [Step 2: Associate the IAM role with your cluster](#c-getting-started-using-spectrum-add-role) 
-      + [Step 3: Create an external schema and an external table](#c-getting-started-using-spectrum-create-external-table) 
-      + [Step 4: Query your data in Amazon S3](#c-getting-started-using-spectrum-query-s3-data) 
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ## Step 1. Create an IAM role for Amazon Redshift
+    After you register an Amazon Redshift data warehouse to the AWS Glue Data Catalog and set permissions for the resulting catalog in AWS Lake Formation, the catalog is automatically mounted in all Amazon Redshift instances with access to the source data warehouse in the same account and AWS Region. You can then query that catalog as you would a local cluster or workgroup. You can also query catalogs registered to the AWS Glue Data Catalog using any SQL engine that supports the Apache Iceberg REST Open API. For more information on querying catalogs in the AWS Glue Data Catalog using the Apache Iceberg REST API, see [Accessing the Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/access_catalog.html) in the *AWS Glue Developer Guide*. For information on the Apache Iceberg REST API, see the [ Apache Iceberg REST Open API specification](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml).
 
+    To query a catalog, you must first set the permissions for the catalog using AWS Lake Formation. For more information on setting permissions for catalogs in AWS Lake Formation, see [ Setting up permissions for Amazon Redshift datashares](https://docs.aws.amazon.com/lake-formation/latest/dg/setup-ds-perms.html) in the *AWS Lake Formation Developer Guide*. You also need an IAM role with the `AmazonRedshiftServiceLinkedRolePolicy` managed policy attached. For information on service-linked roles, see [ Using service-linked roles for Amazon Redshift](https://docs.aws.amazon.com/redshift/latest/mgmt/using-service-linked-roles.html) in the *Amazon Redshift Management Guide*.
 
-      Your cluster needs authorization to access your external Data Catalog in AWS Glue or Amazon Athena and your data files in Amazon S3. To provide that authorization, you reference an AWS Identity and Access Management (IAM) role that is attached to your cluster. For more information about using roles with Amazon Redshift, see [Authorizing COPY and UNLOAD Operations Using IAM Roles](https://docs.aws.amazon.com/redshift/latest/mgmt/copy-unload-iam-role.html).
+     Note that queries against catalogs must follow the following three-part syntax for accessing tables:
 
-      **Note**  
-      In certain cases, you can migrate your Athena Data Catalog to an AWS Glue Data Catalog. You can do this if your cluster is in an AWS Region where AWS Glue is supported and you have Redshift Spectrum external tables in the Athena Data Catalog. To use the AWS Glue Data Catalog with Redshift Spectrum, you might need to change your IAM policies. For more information, see [Upgrading to the AWS Glue Data Catalog](https://docs.aws.amazon.com/athena/latest/ug/glue-athena.html#glue-upgrade) in the *Athena User Guide*.
-
-      When you create a role for Amazon Redshift, choose one of the following approaches:
-      + If you are using Redshift Spectrum with either an Athena Data Catalog or AWS Glue Data Catalog, follow the steps outlined in [To create an IAM role for Amazon Redshift](#spectrum-get-started-create-role). 
-      + If you are using Redshift Spectrum with an AWS Glue Data Catalog that is enabled for AWS Lake Formation, follow the steps outlined in these procedures:
-        +  [To create an IAM role for Amazon Redshift using an AWS Glue Data Catalog enabled for AWS Lake Formation](#spectrum-get-started-create-role-lake-formation) 
-        +  [To grant SELECT permissions on the table to query in the Lake Formation database](#spectrum-get-started-grant-lake-formation-table) 
-
-      **To create an IAM role for Amazon Redshift**
-
-      1. Open the [IAM console](https://console.aws.amazon.com/iam/home?#home).
-
-      1. In the navigation pane, choose **Roles**.
-
-      1. Choose **Create role**.
-
-      1. Choose **AWS service** as the trusted entity, and then choose **Redshift** as the use case.
-
-      1. Under **Use case for other AWS services**, choose **Redshift - Customizable** and then choose **Next**.
-
-      1. The **Add permissions policy** page appears. Choose `AmazonS3ReadOnlyAccess` and `AWSGlueConsoleFullAccess`, if you're using the AWS Glue Data Catalog. Or choose `AmazonAthenaFullAccess` if you're using the Athena Data Catalog. Choose **Next**.
-      **Note**  
-      The `AmazonS3ReadOnlyAccess` policy gives your cluster read-only access to all Amazon S3 buckets. To grant access to only the AWS sample data bucket, create a new policy and add the following permissions.  
-
-      ****  
-
-         ```
-         {
-             "Version":"2012-10-17",		 	 	 
-             "Statement": [
-                 {
-                     "Effect": "Allow",
-                     "Action": [
-                         "s3:Get*",
-                         "s3:List*"
-                     ],
-                     "Resource": "arn:aws:s3:::redshift-downloads/*"
-                 }
-             ]
-         }
-         ```
-
-      1. For **Role name**, enter a name for your role, for example **myspectrum\$1role**.
-
-      1. Review the information, and then choose **Create role**.
-
-      1. In the navigation pane, choose **Roles**. Choose the name of your new role to view the summary, and then copy the **Role ARN** to your clipboard. T
-  - fragment_type: verification
-    sequence: 7
-    content: |
-      # Amazon Redshift Spectrum query performance
-
-
-      This topic describes how to improve Redshift Spectrum query performance.
-
-      Look at the query plan to find what steps have been pushed to the Amazon Redshift Spectrum layer. 
-
-      The following steps are related to the Redshift Spectrum query:
-      + S3 Seq Scan 
-      + S3 HashAggregate 
-      + S3 Query Scan
-      + Seq Scan PartitionInfo
-      + Partition Loop 
-
-      The following example shows the query plan for a query that joins an external table with a local table. Note the S3 Seq Scan and S3 HashAggregate steps that were run against the data on Amazon S3.
-
-      ```
-      explain
-      select top 10 spectrum.sales.eventid, sum(spectrum.sales.pricepaid) 
-      from spectrum.sales, event
-      where spectrum.sales.eventid = event.eventid
-      and spectrum.sales.pricepaid > 30
-      group by spectrum.sales.eventid
-      order by 2 desc;
-      ```
-
-      ```
-      QUERY PLAN                                                                                                                                                                                
-      -----------------------------------------------------------------------------
-      XN Limit  (cost=1001055770628.63..1001055770628.65 rows=10 width=31)                                                                                                                      
-        ->  XN Merge  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                               
-              Merge Key: sum(sales.derived_col2)                                                                                                                                                
-              ->  XN Network  (cost=1001055770628.63..1001055770629.13 rows=200 width=31)                                                                                                       
-                    Send to leader
-  - fragment_type: example
-    sequence: 8
-    content: |
-      # Querying catalogs registered in the AWS Glue Data Catalog
-
-
-      After you register an Amazon Redshift data warehouse to the AWS Glue Data Catalog and set permissions for the resulting catalog in AWS Lake Formation, the catalog is automatically mounted in all Amazon Redshift instances with access to the source data warehouse in the same account and AWS Region. You can then query that catalog as you would a local cluster or workgroup. You can also query catalogs registered to the AWS Glue Data Catalog using any SQL engine that supports the Apache Iceberg REST Open API. For more information on querying catalogs in the AWS Glue Data Catalog using the Apache Iceberg REST API, see [Accessing the Data Catalog](https://docs.aws.amazon.com/glue/latest/dg/access_catalog.html) in the *AWS Glue Developer Guide*. For information on the Apache Iceberg REST API, see the [ Apache Iceberg REST Open API specification](https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml).
-
-      To query a catalog, you must first set the permissions for the catalog using AWS Lake Formation. For more information on setting permissions for catalogs in AWS Lake Formation, see [ Setting up permissions for Amazon Redshift datashares](https://docs.aws.amazon.com/lake-formation/latest/dg/setup-ds-perms.html) in the *AWS Lake Formation Developer Guide*. You also need an IAM role with the `AmazonRedshiftServiceLinkedRolePolicy` managed policy attached. For information on service-linked roles, see [ Using service-linked roles for Amazon Redshift](https://docs.aws.amazon.com/redshift/latest/mgmt/using-service-linked-roles.html) in the *Amazon Redshift Management Guide*.
-
-       Note that queries against catalogs must follow the following three-part syntax for accessing tables:
-
-      ```
-      database@namespace.
+    ```
+    database@namespace.

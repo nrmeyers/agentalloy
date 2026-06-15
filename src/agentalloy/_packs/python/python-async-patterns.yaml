@@ -1,10 +1,19 @@
 skill_type: domain
 skill_id: python-async-patterns
 canonical_name: Python Async Patterns (asyncio, TaskGroup, Cancellation)
-description: "Run background jobs, web servers, and data pipelines in Python without blocking: manage concurrent tasks with asyncio TaskGroup, handle cancellations cleanly, and offload slow CPU or I/O work to threads so your app stays responsive."
+description: 'Run background jobs, web servers, and data pipelines in Python without blocking: manage concurrent tasks with asyncio TaskGroup, handle cancellations cleanly, and offload slow CPU or I/O work to threads so your app stays responsive.'
 category: engineering
 skill_class: domain
-domain_tags: [create-task, gather, timeout, shield, exception-group, event-loop, structured-concurrency, run-in-executor, python]
+domain_tags:
+- create-task
+- gather
+- timeout
+- shield
+- exception-group
+- event-loop
+- structured-concurrency
+- run-in-executor
+- python
 requires:
 - python-async-and-asyncio
 related:
@@ -12,8 +21,10 @@ related:
 - python-asyncio-streams
 - python-asyncio-tasks
 always_apply: false
-phase_scope: [build]
-category_scope: [language]
+phase_scope:
+- build
+category_scope:
+- language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-01 for the skill-tax pilot (experiments/skill-tax/skills/). Python 3.11+ asyncio patterns: structured concurrency via `asyncio.TaskGroup`, cancellation handling, timeouts via `asyncio.timeout`, bridging blocking work via `asyncio.to_thread` / `run_in_executor`, and the `ExceptionGroup` / `except*` machinery introduced by PEP 654. Intended as a clean replacement candidate for the canonical `src/agentalloy/_packs/python/async-python-patterns.yaml` post-pilot if methodology validates — supersession contingent on pilot result, canonical untouched in the meantime. See experiments/skill-tax/skills/AUTHORING_LOG.md for primary sources, supersession intent, and pilot context.
@@ -174,183 +185,172 @@ raw_prose: |
   - Never use `time.sleep` in async code. It blocks the event loop. `await asyncio.sleep(seconds)` yields cooperatively. The two are not interchangeable.
   - Never assume `asyncio.shield(coro)` makes a task safe forever. Shield prevents outer cancellation from propagating to the inner await, but the inner task still runs on the loop and still needs a bounded lifetime (its own timeout, an external deadline). Without bounded lifetime, shielded tasks become the fire-and-forget leaks structured concurrency was designed to prevent.
   - Never share a single `aiohttp.ClientSession` or `httpx.AsyncClient` across event loops. They bind to the loop they were created on; passing them to a different loop (e.g., reusing a module-level instance across `asyncio.run` calls) raises confusing runtime errors. Construct them inside the coroutine that uses them, or attach them to `app.state` in a FastAPI lifespan.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      ## Why this skill exists
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    ## Why this skill exists
 
-      Python async patterns center on three procedures: structured concurrency (running multiple coroutines with cleanly bounded lifetimes via `asyncio.TaskGroup`), explicit cancellation handling (treating `CancelledError` as a control-flow signal, not a generic error), and disciplined bridging to blocking work (never running CPU- or syscall-blocking code on the event loop directly; always offload via `to_thread` or `run_in_executor`). Skip any of the three and the symptom is the same — async code that "works" until it deadlocks, leaks tasks, or silently swallows partial failures.
+    Python async patterns center on three procedures: structured concurrency (running multiple coroutines with cleanly bounded lifetimes via `asyncio.TaskGroup`), explicit cancellation handling (treating `CancelledError` as a control-flow signal, not a generic error), and disciplined bridging to blocking work (never running CPU- or syscall-blocking code on the event loop directly; always offload via `to_thread` or `run_in_executor`). Skip any of the three and the symptom is the same — async code that "works" until it deadlocks, leaks tasks, or silently swallows partial failures.
 
-      This skill targets Python 3.11+ because `asyncio.TaskGroup`, `asyncio.timeout`, `ExceptionGroup`, and `except*` all stabilized in 3.11 (PEP 654, verified 2026-05-01 against peps.python.org and docs.python.org/3). Pre-3.11 patterns (raw `gather` with `return_exceptions=True`, manual cancellation chaining) still work but require more discipline; this skill teaches the modern surface.
+    This skill targets Python 3.11+ because `asyncio.TaskGroup`, `asyncio.timeout`, `ExceptionGroup`, and `except*` all stabilized in 3.11 (PEP 654, verified 2026-05-01 against peps.python.org and docs.python.org/3). Pre-3.11 patterns (raw `gather` with `return_exceptions=True`, manual cancellation chaining) still work but require more discipline; this skill teaches the modern surface.
 
-      Use this skill when writing new asyncio code (FastAPI handlers, background workers, fan-out fetchers); reviewing existing async code for cancellation correctness or blocking-call leaks; or migrating a pre-3.11 codebase from `asyncio.gather` to `TaskGroup`.
+    Use this skill when writing new asyncio code (FastAPI handlers, background workers, fan-out fetchers); reviewing existing async code for cancellation correctness or blocking-call leaks; or migrating a pre-3.11 codebase from `asyncio.gather` to `TaskGroup`.
 
-      The skill covers the language-level async primitives. Framework integrations (FastAPI, anyio, trio compatibility shims) live in their own skills; this skill teaches what every async Python author must know regardless of framework.
+    The skill covers the language-level async primitives. Framework integrations (FastAPI, anyio, trio compatibility shims) live in their own skills; this skill teaches what every async Python author must know regardless of framework.
+- sequence: 2
+  fragment_type: setup
+  content: |
+    ## Setup: entry point, imports, Python version
 
-  - sequence: 2
-    fragment_type: setup
-    content: |
-      ## Setup: entry point, imports, Python version
+    asyncio code starts at one entry point — `asyncio.run(coro)` — which creates the event loop, runs the coroutine, finalizes async generators, and closes the loop on exit. Per docs.python.org/3/library/asyncio-runner.html (verified 2026-05-01), `asyncio.run` cannot be called when another event loop is already running in the same thread, and should be called exactly once at program top level.
 
-      asyncio code starts at one entry point — `asyncio.run(coro)` — which creates the event loop, runs the coroutine, finalizes async generators, and closes the loop on exit. Per docs.python.org/3/library/asyncio-runner.html (verified 2026-05-01), `asyncio.run` cannot be called when another event loop is already running in the same thread, and should be called exactly once at program top level.
+    ```python
+    import asyncio
+    from asyncio import TaskGroup, timeout, CancelledError, to_thread
+    from contextlib import asynccontextmanager
+    ```
 
-      ```python
-      import asyncio
-      from asyncio import TaskGroup, timeout, CancelledError, to_thread
-      from contextlib import asynccontextmanager
-      ```
+    Python version requirement: 3.11 or later for `TaskGroup`, `timeout`, and `ExceptionGroup` syntax. Check with `python --version` before authoring against this skill; pre-3.11 code paths need different shapes (see compatibility note below).
 
-      Python version requirement: 3.11 or later for `TaskGroup`, `timeout`, and `ExceptionGroup` syntax. Check with `python --version` before authoring against this skill; pre-3.11 code paths need different shapes (see compatibility note below).
+    Inside any coroutine, prefer `asyncio.get_running_loop()` over `asyncio.get_event_loop()` (the latter is deprecated for coroutine use as of 3.10 and emits a `DeprecationWarning` when no loop is running, per docs.python.org/3/library/asyncio-eventloop.html, verified 2026-05-01). The running-loop function raises `RuntimeError` if called outside a running loop, which surfaces accidental sync-context calls immediately rather than silently allocating a fresh loop.
 
-      Inside any coroutine, prefer `asyncio.get_running_loop()` over `asyncio.get_event_loop()` (the latter is deprecated for coroutine use as of 3.10 and emits a `DeprecationWarning` when no loop is running, per docs.python.org/3/library/asyncio-eventloop.html, verified 2026-05-01). The running-loop function raises `RuntimeError` if called outside a running loop, which surfaces accidental sync-context calls immediately rather than silently allocating a fresh loop.
+    Compatibility note for pre-3.11 codebases: `TaskGroup` does not exist; use `asyncio.gather(*coros, return_exceptions=True)` and inspect each result for exception instances. `asyncio.timeout` does not exist; use `asyncio.wait_for(coro, timeout=N)` which raises `TimeoutError` on expiry. `ExceptionGroup` does not exist; collect exceptions into a list and raise the first or wrap manually.
+- sequence: 3
+  fragment_type: execution
+  content: |
+    ## Structured concurrency with TaskGroup
 
-      Compatibility note for pre-3.11 codebases: `TaskGroup` does not exist; use `asyncio.gather(*coros, return_exceptions=True)` and inspect each result for exception instances. `asyncio.timeout` does not exist; use `asyncio.wait_for(coro, timeout=N)` which raises `TimeoutError` on expiry. `ExceptionGroup` does not exist; collect exceptions into a list and raise the first or wrap manually.
+    `asyncio.TaskGroup` (Python 3.11+, verified 2026-05-01 against docs.python.org/3/library/asyncio-task.html) is the modern replacement for `asyncio.gather` when you need bounded concurrency with predictable error behavior. The `async with TaskGroup() as tg:` block creates tasks via `tg.create_task(coro)`; the block does not exit until every task either completes or raises. If any task raises, all sibling tasks are cancelled, and the group raises an `ExceptionGroup` containing every non-`CancelledError` exception that occurred.
 
-  - sequence: 3
-    fragment_type: execution
-    content: |
-      ## Structured concurrency with TaskGroup
+    ```python
+    async def fetch_all(urls: list[str]) -> list[bytes]:
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(fetch(url)) for url in urls]
+        # all tasks are done here — completed OR raised; the group enforces it
+        return [t.result() for t in tasks]
+    ```
 
-      `asyncio.TaskGroup` (Python 3.11+, verified 2026-05-01 against docs.python.org/3/library/asyncio-task.html) is the modern replacement for `asyncio.gather` when you need bounded concurrency with predictable error behavior. The `async with TaskGroup() as tg:` block creates tasks via `tg.create_task(coro)`; the block does not exit until every task either completes or raises. If any task raises, all sibling tasks are cancelled, and the group raises an `ExceptionGroup` containing every non-`CancelledError` exception that occurred.
+    This pattern is structured concurrency: tasks created in the group cannot outlive the `async with` block. They cannot leak as fire-and-forget background work, they cannot escape into a parent scope. Compared to `gather(*, return_exceptions=True)` — where you must remember to inspect every result and raise manually — the TaskGroup default is correct: one task failing fails the group, the rest are cancelled, and the caller sees an `ExceptionGroup` they can dispatch on with `except*`.
 
-      ```python
-      async def fetch_all(urls: list[str]) -> list[bytes]:
-          async with asyncio.TaskGroup() as tg:
-              tasks = [tg.create_task(fetch(url)) for url in urls]
-          # all tasks are done here — completed OR raised; the group enforces it
-          return [t.result() for t in tasks]
-      ```
+    The `except*` syntax (PEP 654, verified 2026-05-01) lets you handle subsets of an `ExceptionGroup` independently. Each `except*` clause matches by exception type and runs against the matching subgroup; unmatched exceptions re-raise as a residual group. `CancelledError` is excluded from `ExceptionGroup` automatically by `TaskGroup` — when the group cancels its members, those cancellations are bookkeeping, not failure signal.
+- sequence: 4
+  fragment_type: execution
+  content: |
+    ## Cancellation, timeouts, and shield
 
-      This pattern is structured concurrency: tasks created in the group cannot outlive the `async with` block. They cannot leak as fire-and-forget background work, they cannot escape into a parent scope. Compared to `gather(*, return_exceptions=True)` — where you must remember to inspect every result and raise manually — the TaskGroup default is correct: one task failing fails the group, the rest are cancelled, and the caller sees an `ExceptionGroup` they can dispatch on with `except*`.
+    Cancellation in asyncio is cooperative: `task.cancel()` schedules a `CancelledError` to be raised inside the task at its next `await` point. Code that doesn't `await` cannot be cancelled. Code that catches `Exception` will catch `CancelledError` too (it inherits from `BaseException` since 3.8 specifically to avoid this) — but if you write `except Exception:` and forget to re-raise, you suppress cancellation and the task continues running past the cancel point. Always either let `CancelledError` propagate, or catch it explicitly with `except CancelledError: cleanup; raise`.
 
-      The `except*` syntax (PEP 654, verified 2026-05-01) lets you handle subsets of an `ExceptionGroup` independently. Each `except*` clause matches by exception type and runs against the matching subgroup; unmatched exceptions re-raise as a residual group. `CancelledError` is excluded from `ExceptionGroup` automatically by `TaskGroup` — when the group cancels its members, those cancellations are bookkeeping, not failure signal.
+    ```python
+    async def long_op() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            # cleanup that must run even on cancellation
+            await release_resources()
+            raise   # re-raise — never swallow
+    ```
 
-  - sequence: 4
-    fragment_type: execution
-    content: |
-      ## Cancellation, timeouts, and shield
+    Timeouts use `asyncio.timeout(n)` (3.11+), an async context manager that cancels the wrapped block when n seconds elapse. The timeout cancellation surfaces as `TimeoutError` (since 3.11; was `asyncio.TimeoutError` previously, now an alias for the builtin) at the `async with` exit. Wrap the operation in `async with asyncio.timeout(5.0):` and catch `TimeoutError` at the surrounding boundary; convert it to a domain-specific exception type if your callers benefit from disambiguating timeouts from other failure modes. The end-to-end example below shows the full pattern.
 
-      Cancellation in asyncio is cooperative: `task.cancel()` schedules a `CancelledError` to be raised inside the task at its next `await` point. Code that doesn't `await` cannot be cancelled. Code that catches `Exception` will catch `CancelledError` too (it inherits from `BaseException` since 3.8 specifically to avoid this) — but if you write `except Exception:` and forget to re-raise, you suppress cancellation and the task continues running past the cancel point. Always either let `CancelledError` propagate, or catch it explicitly with `except CancelledError: cleanup; raise`.
+    `asyncio.shield(awaitable)` protects an inner operation from outer cancellation — useful when an HTTP write must complete even if the request handler times out. Use sparingly: shielded operations can outlive their parent and need their own bounded lifetime, otherwise you have created the fire-and-forget task you were trying to avoid.
+- sequence: 5
+  fragment_type: execution
+  content: |
+    ## Bridging sync and async: to_thread and run_in_executor
 
-      ```python
-      async def long_op() -> None:
-          try:
-              await asyncio.sleep(60)
-          except asyncio.CancelledError:
-              # cleanup that must run even on cancellation
-              await release_resources()
-              raise   # re-raise — never swallow
-      ```
+    Blocking calls — `requests.get`, `psycopg2.execute`, `time.sleep`, file IO, CPU-bound math — run on the event loop thread by default and freeze the loop for their duration. The fix is to offload to a thread pool. Per docs.python.org/3/library/asyncio-eventloop.html (verified 2026-05-01), the modern shape is `asyncio.to_thread(func, *args)`, added in 3.9, which uses the default thread executor and returns an awaitable result. For non-default executors (a process pool for CPU-bound work, a custom-sized thread pool for high-concurrency IO), use `loop.run_in_executor(executor, func, *args)`.
 
-      Timeouts use `asyncio.timeout(n)` (3.11+), an async context manager that cancels the wrapped block when n seconds elapse. The timeout cancellation surfaces as `TimeoutError` (since 3.11; was `asyncio.TimeoutError` previously, now an alias for the builtin) at the `async with` exit. Wrap the operation in `async with asyncio.timeout(5.0):` and catch `TimeoutError` at the surrounding boundary; convert it to a domain-specific exception type if your callers benefit from disambiguating timeouts from other failure modes. The end-to-end example below shows the full pattern.
+    ```python
+    import asyncio
+    import time
 
-      `asyncio.shield(awaitable)` protects an inner operation from outer cancellation — useful when an HTTP write must complete even if the request handler times out. Use sparingly: shielded operations can outlive their parent and need their own bounded lifetime, otherwise you have created the fire-and-forget task you were trying to avoid.
+    def cpu_heavy(n: int) -> int:
+        return sum(i * i for i in range(n))
 
-  - sequence: 5
-    fragment_type: execution
-    content: |
-      ## Bridging sync and async: to_thread and run_in_executor
+    async def safe_call() -> int:
+        # offload — event loop stays responsive for other tasks
+        return await asyncio.to_thread(cpu_heavy, 10_000_000)
 
-      Blocking calls — `requests.get`, `psycopg2.execute`, `time.sleep`, file IO, CPU-bound math — run on the event loop thread by default and freeze the loop for their duration. The fix is to offload to a thread pool. Per docs.python.org/3/library/asyncio-eventloop.html (verified 2026-05-01), the modern shape is `asyncio.to_thread(func, *args)`, added in 3.9, which uses the default thread executor and returns an awaitable result. For non-default executors (a process pool for CPU-bound work, a custom-sized thread pool for high-concurrency IO), use `loop.run_in_executor(executor, func, *args)`.
+    async def with_process_pool() -> int:
+        loop = asyncio.get_running_loop()
+        with concurrent.futures.ProcessPoolExecutor() as pool:
+            return await loop.run_in_executor(pool, cpu_heavy, 10_000_000)
+    ```
 
-      ```python
-      import asyncio
-      import time
+    Rule of thumb: any function that blocks for more than a few milliseconds — file IO, network IO via a sync library, CPU work, database calls via a sync driver — must be wrapped. The cost of forgetting is one slow request taking down the entire event loop's concurrency budget.
+- fragment_type: example
+  sequence: 6
+  content: |-
+    ## End-to-end example: bounded fan-out with timeout, cancellation, and exception groups
 
-      def cpu_heavy(n: int) -> int:
-          return sum(i * i for i in range(n))
+    The case-space coverage: a successful fan-out across N URLs, a per-call timeout that fires for one URL, and a hard error from a sibling that cancels the rest — all three behaviors composing in one TaskGroup-driven function.
+- fragment_type: example
+  sequence: 7
+  content: |-
+    ```python
+    import asyncio
+    import logging
 
-      async def safe_call() -> int:
-          # offload — event loop stays responsive for other tasks
-          return await asyncio.to_thread(cpu_heavy, 10_000_000)
+    log = logging.getLogger(__name__)
 
-      async def with_process_pool() -> int:
-          loop = asyncio.get_running_loop()
-          with concurrent.futures.ProcessPoolExecutor() as pool:
-              return await loop.run_in_executor(pool, cpu_heavy, 10_000_000)
-      ```
+    class FetchAborted(Exception):
+        """A fetch was cancelled by deadline or by sibling failure."""
 
-      Rule of thumb: any function that blocks for more than a few milliseconds — file IO, network IO via a sync library, CPU work, database calls via a sync driver — must be wrapped. The cost of forgetting is one slow request taking down the entire event loop's concurrency budget.
+    async def fetch_with_deadline(url: str, deadline_s: float) -> bytes:
+        try:
+            async with asyncio.timeout(deadline_s):
+                # imagined HTTP client; replace with httpx, aiohttp, etc.
+                return await http_get(url)
+        except TimeoutError as e:
+            raise FetchAborted(f"deadline exceeded fetching {url}") from e
 
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## End-to-end example: bounded fan-out with timeout, cancellation, and exception groups
+    async def fan_out(urls: list[str], deadline_s: float = 5.0) -> dict[str, bytes]:
+        results: dict[str, bytes] = {}
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tasks = {url: tg.create_task(fetch_with_deadline(url, deadline_s)) for url in urls}
+        # PATH B: any task raises a non-CancelledError → the group cancels siblings and raises ExceptionGroup
+        except* FetchAborted as eg:
+            for sub in eg.exceptions:
+                log.warning("fetch aborted: %s", sub)
+            raise
+        except* Exception as eg:
+            for sub in eg.exceptions:
+                log.error("fetch failed: %s", sub, exc_info=sub)
+            raise
+        # PATH A: every task completed → collect results
+        for url, task in tasks.items():
+            results[url] = task.result()
+        return results
+    ```
+- fragment_type: example
+  sequence: 8
+  content: 'Three behaviors: PATH A is happy fan-out where every URL returns within the deadline; PATH B is the per-URL timeout, where one task raises `FetchAborted` and the TaskGroup cancels the rest, then surfaces as an `ExceptionGroup[FetchAborted]` to the caller''s `except* FetchAborted`; the unmatched-exception path raises a residual group of any non-`FetchAborted` exceptions (for example, a DNS error from one URL while others were still in flight).'
+- fragment_type: verification
+  sequence: 9
+  content: |-
+    ## Verification checklist
 
-      The case-space coverage: a successful fan-out across N URLs, a per-call timeout that fires for one URL, and a hard error from a sibling that cancels the rest — all three behaviors composing in one TaskGroup-driven function.
+    Mechanical checks for any asyncio Python codebase:
+- fragment_type: verification
+  sequence: 10
+  content: '- [ ] No bare `except Exception:` or `except:` catches around `await` points without re-raising `CancelledError`. `grep -B2 -A10 ''except Exception\|except\s*:'' src/` — for each match, the body either re-raises, or catches `CancelledError` separately and re-raises it. - [ ] No `asyncio.gather(*, return_exceptions=True)` results are ignored. `grep -nB2 -A10 ''asyncio.gather'' src/` — every gather result is iterated and exceptions are inspected or re-raised. Prefer `TaskGroup` over `gather` for new code. - [ ] Timeouts are bounded. Every long-running coroutine that hits the network or a slow IO path is wrapped in `asyncio.timeout(...)` or `asyncio.wait_for(...)` at some level. `grep -rn ''asyncio.timeout\|asyncio.wait_for'' src/` returns at least one hit per network-touching module. - [ ] Blocking calls run via `asyncio.to_thread` or `run_in_executor`, never directly on the event loop. `grep -rn ''requests.get\|requests.post\|time.sleep\|os.system'' src/` — every match in async code is inside `to_thread` or `run_in_executor`. `time.sleep` in async code is always a bug; use `await asyncio.sleep`. - [ ] Tasks created with `asyncio.create_task(coro)` outside a TaskGroup are stored in a reference somewhere (variable, list, app state).'
+- fragment_type: verification
+  sequence: 11
+  content: Per docs.python.org/3/library/asyncio-task.html (verified 2026-05-01), the loop holds only weak references to tasks, so a task whose only reference is its own scheduling can be garbage-collected mid-run. - [ ] No `asyncio.get_event_loop()` calls inside coroutines. `grep -rn 'asyncio.get_event_loop\(\)' src/` returns nothing in async code; use `asyncio.get_running_loop()` which raises if there is no running loop. - [ ] `asyncio.run(main())` is called exactly once at program top level, not nested. `grep -rn 'asyncio.run' src/` shows the entry point in `__main__` or a top-level CLI handler. - [ ] `CancelledError` is not silently swallowed. `grep -rnB2 -A6 'except.*CancelledError' src/` — every handler either re-raises or chains a clear cleanup-then-raise pattern. - [ ] `asyncio.shield` usage has a bounded lifetime. Each shielded operation runs inside its own timeout or has an external mechanism that ensures it cannot leak indefinitely.
+- fragment_type: guardrail
+  sequence: 12
+  content: |-
+    ## Guardrails: never do these
 
-      ```python
-      import asyncio
-      import logging
-
-      log = logging.getLogger(__name__)
-
-      class FetchAborted(Exception):
-          """A fetch was cancelled by deadline or by sibling failure."""
-
-      async def fetch_with_deadline(url: str, deadline_s: float) -> bytes:
-          try:
-              async with asyncio.timeout(deadline_s):
-                  # imagined HTTP client; replace with httpx, aiohttp, etc.
-                  return await http_get(url)
-          except TimeoutError as e:
-              raise FetchAborted(f"deadline exceeded fetching {url}") from e
-
-      async def fan_out(urls: list[str], deadline_s: float = 5.0) -> dict[str, bytes]:
-          results: dict[str, bytes] = {}
-          try:
-              async with asyncio.TaskGroup() as tg:
-                  tasks = {url: tg.create_task(fetch_with_deadline(url, deadline_s)) for url in urls}
-          # PATH B: any task raises a non-CancelledError → the group cancels siblings and raises ExceptionGroup
-          except* FetchAborted as eg:
-              for sub in eg.exceptions:
-                  log.warning("fetch aborted: %s", sub)
-              raise
-          except* Exception as eg:
-              for sub in eg.exceptions:
-                  log.error("fetch failed: %s", sub, exc_info=sub)
-              raise
-          # PATH A: every task completed → collect results
-          for url, task in tasks.items():
-              results[url] = task.result()
-          return results
-      ```
-
-      Three behaviors: PATH A is happy fan-out where every URL returns within the deadline; PATH B is the per-URL timeout, where one task raises `FetchAborted` and the TaskGroup cancels the rest, then surfaces as an `ExceptionGroup[FetchAborted]` to the caller's `except* FetchAborted`; the unmatched-exception path raises a residual group of any non-`FetchAborted` exceptions (for example, a DNS error from one URL while others were still in flight).
-
-  - sequence: 7
-    fragment_type: verification
-    content: |
-      ## Verification checklist
-
-      Mechanical checks for any asyncio Python codebase:
-
-      - [ ] No bare `except Exception:` or `except:` catches around `await` points without re-raising `CancelledError`. `grep -B2 -A10 'except Exception\|except\s*:' src/` — for each match, the body either re-raises, or catches `CancelledError` separately and re-raises it.
-      - [ ] No `asyncio.gather(*, return_exceptions=True)` results are ignored. `grep -nB2 -A10 'asyncio.gather' src/` — every gather result is iterated and exceptions are inspected or re-raised. Prefer `TaskGroup` over `gather` for new code.
-      - [ ] Timeouts are bounded. Every long-running coroutine that hits the network or a slow IO path is wrapped in `asyncio.timeout(...)` or `asyncio.wait_for(...)` at some level. `grep -rn 'asyncio.timeout\|asyncio.wait_for' src/` returns at least one hit per network-touching module.
-      - [ ] Blocking calls run via `asyncio.to_thread` or `run_in_executor`, never directly on the event loop. `grep -rn 'requests.get\|requests.post\|time.sleep\|os.system' src/` — every match in async code is inside `to_thread` or `run_in_executor`. `time.sleep` in async code is always a bug; use `await asyncio.sleep`.
-      - [ ] Tasks created with `asyncio.create_task(coro)` outside a TaskGroup are stored in a reference somewhere (variable, list, app state). Per docs.python.org/3/library/asyncio-task.html (verified 2026-05-01), the loop holds only weak references to tasks, so a task whose only reference is its own scheduling can be garbage-collected mid-run.
-      - [ ] No `asyncio.get_event_loop()` calls inside coroutines. `grep -rn 'asyncio.get_event_loop\(\)' src/` returns nothing in async code; use `asyncio.get_running_loop()` which raises if there is no running loop.
-      - [ ] `asyncio.run(main())` is called exactly once at program top level, not nested. `grep -rn 'asyncio.run' src/` shows the entry point in `__main__` or a top-level CLI handler.
-      - [ ] `CancelledError` is not silently swallowed. `grep -rnB2 -A6 'except.*CancelledError' src/` — every handler either re-raises or chains a clear cleanup-then-raise pattern.
-      - [ ] `asyncio.shield` usage has a bounded lifetime. Each shielded operation runs inside its own timeout or has an external mechanism that ensures it cannot leak indefinitely.
-
-  - sequence: 8
-    fragment_type: guardrail
-    content: |
-      ## Guardrails: never do these
-
-      These are the lines you do not cross when writing asyncio code. Each item below has bitten production systems; the execution and example sections show the right shape.
-
-      - Never call a blocking function directly inside a coroutine. `requests.get`, `time.sleep`, `psycopg2.execute`, sync file IO, NumPy multi-second math — all freeze the event loop for their duration, which means every other coroutine in flight stops making progress. Wrap with `asyncio.to_thread(...)` (or use an async-native library).
-      - Never write `except Exception:` without re-raising `CancelledError`. `CancelledError` inherits from `BaseException` since Python 3.8 specifically so a typical `except Exception` does not catch it — but `except:` (bare) does, and `except BaseException:` does. Suppressing cancellation means a cancelled task keeps running past the cancel point.
-      - Never call `asyncio.gather` and ignore the returned list. With `return_exceptions=False` (default) the first exception cancels siblings and propagates; with `return_exceptions=True` the result list contains exception instances mixed with values, and discarding it silently swallows every error. Prefer `TaskGroup` for new code.
-      - Never `asyncio.create_task(coro)` without keeping a reference. The event loop holds a weak reference to the task; if the only reference is the local you discarded, garbage collection can finalize the task at any point — usually mid-network-call. Either store the task or use `TaskGroup` which holds references for its members.
-      - Never call `asyncio.run` inside a coroutine. `asyncio.run` creates a new loop; if one is already running, it raises `RuntimeError`. The error message blames the caller; the cause is "called from a coroutine when one was already running." Inside a coroutine, just `await` the inner coroutine directly.
-      - Never use `asyncio.get_event_loop()` inside a coroutine. It is deprecated for coroutine use as of 3.10 and removed in 3.16. Use `asyncio.get_running_loop()` which raises if there is no running loop, surfacing the bug rather than silently allocating a fresh loop.
-      - Never run `asyncio.run(main())` more than once in a process. The first call creates a loop, runs to completion, and closes it. The second call attempts to run on a closed loop and raises. If you need a long-lived event loop, build the loop yourself with `asyncio.new_event_loop()` and manage it explicitly — but `asyncio.run` is correct for the typical case.
-      - Never use `time.sleep` in async code. It blocks the event loop. `await asyncio.sleep(seconds)` yields cooperatively. The two are not interchangeable.
-      - Never assume `asyncio.shield(coro)` makes a task safe forever. Shield prevents outer cancellation from propagating to the inner await, but the inner task still runs on the loop and still needs a bounded lifetime (its own timeout, an external deadline). Without bounded lifetime, shielded tasks become the fire-and-forget leaks structured concurrency was designed to prevent.
-      - Never share a single `aiohttp.ClientSession` or `httpx.AsyncClient` across event loops. They bind to the loop they were created on; passing them to a different loop (e.g., reusing a module-level instance across `asyncio.run` calls) raises confusing runtime errors. Construct them inside the coroutine that uses them, or attach them to `app.state` in a FastAPI lifespan.
+    These are the lines you do not cross when writing asyncio code. Each item below has bitten production systems; the execution and example sections show the right shape.
+- fragment_type: guardrail
+  sequence: 13
+  content: '- Never call a blocking function directly inside a coroutine. `requests.get`, `time.sleep`, `psycopg2.execute`, sync file IO, NumPy multi-second math — all freeze the event loop for their duration, which means every other coroutine in flight stops making progress. Wrap with `asyncio.to_thread(...)` (or use an async-native library). - Never write `except Exception:` without re-raising `CancelledError`. `CancelledError` inherits from `BaseException` since Python 3.8 specifically so a typical `except Exception` does not catch it — but `except:` (bare) does, and `except BaseException:` does. Suppressing cancellation means a cancelled task keeps running past the cancel point. - Never call `asyncio.gather` and ignore the returned list. With `return_exceptions=False` (default) the first exception cancels siblings and propagates; with `return_exceptions=True` the result list contains exception instances mixed with values, and discarding it silently swallows every error. Prefer `TaskGroup` for new code. - Never `asyncio.create_task(coro)` without keeping a reference. The event loop holds a weak reference to the task; if the only reference is the local you discarded, garbage collection can finalize the task at any point — usually mid-network-call. Either store the task or use `TaskGroup` which holds references for its members. - Never call `asyncio.run` inside a coroutine.'
+- fragment_type: guardrail
+  sequence: 14
+  content: '`asyncio.run` creates a new loop; if one is already running, it raises `RuntimeError`. The error message blames the caller; the cause is "called from a coroutine when one was already running." Inside a coroutine, just `await` the inner coroutine directly. - Never use `asyncio.get_event_loop()` inside a coroutine. It is deprecated for coroutine use as of 3.10 and removed in 3.16. Use `asyncio.get_running_loop()` which raises if there is no running loop, surfacing the bug rather than silently allocating a fresh loop. - Never run `asyncio.run(main())` more than once in a process. The first call creates a loop, runs to completion, and closes it. The second call attempts to run on a closed loop and raises. If you need a long-lived event loop, build the loop yourself with `asyncio.new_event_loop()` and manage it explicitly — but `asyncio.run` is correct for the typical case. - Never use `time.sleep` in async code. It blocks the event loop. `await asyncio.sleep(seconds)` yields cooperatively. The two are not interchangeable. - Never assume `asyncio.shield(coro)` makes a task safe forever. Shield prevents outer cancellation from propagating to the inner await, but the inner task still runs on the loop and still needs a bounded lifetime (its own timeout, an external deadline).'
+- fragment_type: guardrail
+  sequence: 15
+  content: Without bounded lifetime, shielded tasks become the fire-and-forget leaks structured concurrency was designed to prevent. - Never share a single `aiohttp.ClientSession` or `httpx.AsyncClient` across event loops. They bind to the loop they were created on; passing them to a different loop (e.g., reusing a module-level instance across `asyncio.run` calls) raises confusing runtime errors. Construct them inside the coroutine that uses them, or attach them to `app.state` in a FastAPI lifespan.

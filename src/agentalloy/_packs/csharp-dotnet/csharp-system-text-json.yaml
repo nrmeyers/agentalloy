@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: csharp-system-text-json
 canonical_name: C# JSON with System.Text.Json (Serializer Options, Source Generation, Polymorphism)
-description: "Serialize and deserialize JSON in C# and .NET apps: configure naming policies, handle polymorphic types, and use source generation for high-performance, AOT-compatible data exchange with minimal allocations."
+description: 'Serialize and deserialize JSON in C# and .NET apps: configure naming policies, handle polymorphic types, and use source generation for high-performance, AOT-compatible data exchange with minimal allocations.'
 category: engineering
 skill_class: domain
-domain_tags: [serializer-options, source-generation-jsonserializer, polymorphic-deserialization, property-naming-policy, utf8-byte-pipeline, csharp-dotnet]
+domain_tags:
+- serializer-options
+- source-generation-jsonserializer
+- polymorphic-deserialization
+- property-naming-policy
+- utf8-byte-pipeline
+- csharp-dotnet
 related:
 - csharp-async-and-tasks
 - csharp-error-handling
 - csharp-nullable-and-pattern-matching
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-05. Sources — System.Text.Json API reference https://learn.microsoft.com/en-us/dotnet/api/system.text.json?view=net-9.0 (verified 2026-05-05 against fixtures/upstream/curated/csharp.yaml topic `serialization_json_binary`); System.Text.Json overview https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/overview; source-generation https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/source-generation?view=net-9.0; polymorphism https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/polymorphism?view=net-9.0; converters https://learn.microsoft.com/en-us/dotnet/standard/serialization/system-text-json/converters-how-to?view=net-9.0. Known gap (per curated csharp.yaml) — learn.microsoft.com versioned subtrees can redirect to a different .NET version; verify the `view=net-9.0` query parameter resolves to the .NET 9 page and not a redirect to net-8.0/net-7.0. Skill scope: System.Text.Json on .NET 9 / C# 13 — JsonSerializer entry points, JsonSerializerOptions caching, source-generated serializers, attribute model, polymorphic (de)serialization, custom JsonConverter, Utf8JsonWriter/Reader hot paths, anti-patterns. Out of scope: Newtonsoft.Json migration matrix (mentioned only at boundary), ASP.NET Core integration, XML/binary serializers.
-
 raw_prose: |
   # C# JSON with System.Text.Json
 
@@ -201,219 +207,202 @@ raw_prose: |
   - [ ] Polymorphic base types declare `[JsonPolymorphic]` with an explicit `TypeDiscriminatorPropertyName` and a closed list of `[JsonDerivedType]` attributes — no open-set type-name handling.
   - [ ] Public-facing deserialize paths set a non-default `MaxDepth` (≤ 32) — `grep -rn 'MaxDepth' src/` returns hits proportional to public endpoints.
   - [ ] No project references both `Newtonsoft.Json` and `System.Text.Json` on the same DTO type — `grep -rn 'JsonProperty\|JsonConvert' src/` (Newtonsoft) and `grep -rn 'JsonPropertyName\|JsonSerializer' src/` (STJ) do not overlap on file paths.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # C# JSON with System.Text.Json
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # C# JSON with System.Text.Json
 
-      `System.Text.Json` is the canonical built-in JSON serializer for .NET (since .NET Core 3.0, default in ASP.NET Core since .NET 5). On .NET 9 / C# 13 it covers the full happy path — `JsonSerializer.Serialize` / `Deserialize`, async stream variants, source-generated serializers for AOT and trimming, polymorphic types via `[JsonDerivedType]`, and a low-allocation UTF-8 byte pipeline (`Utf8JsonWriter` / `Utf8JsonReader`). The two rules that matter in production: (1) cache one `JsonSerializerOptions` instance for the lifetime of the process — every call with a fresh `Options` recomputes reflection-based metadata and tanks throughput; (2) prefer source-generated serializers for hot paths and for any application that will be trimmed or AOT-compiled. Most production bugs come from re-instantiating `JsonSerializerOptions` in a hot path, mixing Newtonsoft.Json and System.Text.Json on the same DTO, deserializing untrusted JSON without `MaxDepth`, or accepting numeric enum payloads from clients because `JsonStringEnumConverter` was not registered.
+    `System.Text.Json` is the canonical built-in JSON serializer for .NET (since .NET Core 3.0, default in ASP.NET Core since .NET 5). On .NET 9 / C# 13 it covers the full happy path — `JsonSerializer.Serialize` / `Deserialize`, async stream variants, source-generated serializers for AOT and trimming, polymorphic types via `[JsonDerivedType]`, and a low-allocation UTF-8 byte pipeline (`Utf8JsonWriter` / `Utf8JsonReader`). The two rules that matter in production: (1) cache one `JsonSerializerOptions` instance for the lifetime of the process — every call with a fresh `Options` recomputes reflection-based metadata and tanks throughput; (2) prefer source-generated serializers for hot paths and for any application that will be trimmed or AOT-compiled. Most production bugs come from re-instantiating `JsonSerializerOptions` in a hot path, mixing Newtonsoft.Json and System.Text.Json on the same DTO, deserializing untrusted JSON without `MaxDepth`, or accepting numeric enum payloads from clients because `JsonStringEnumConverter` was not registered.
+- sequence: 2
+  fragment_type: example
+  content: |
+    ## Entry points: `JsonSerializer.Serialize` / `Deserialize`
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## Entry points: `JsonSerializer.Serialize` / `Deserialize`
+    `JsonSerializer` is the static facade. Imports:
 
-      `JsonSerializer` is the static facade. Imports:
+    ```csharp
+    using System.Text.Json;
+    using System.Text.Json.Serialization;
+    ```
 
-      ```csharp
-      using System.Text.Json;
-      using System.Text.Json.Serialization;
-      ```
+    Synchronous string round-trip:
 
-      Synchronous string round-trip:
+    ```csharp
+    public sealed record User(int Id, string Name, string Email);
 
-      ```csharp
-      public sealed record User(int Id, string Name, string Email);
+    string json = JsonSerializer.Serialize(new User(1, "Ada", "ada@example.com"));
+    User? back  = JsonSerializer.Deserialize<User>(json);
+    ```
 
-      string json = JsonSerializer.Serialize(new User(1, "Ada", "ada@example.com"));
-      User? back  = JsonSerializer.Deserialize<User>(json);
-      ```
+    For streams (HTTP request bodies, file IO), use the async variants which read/write UTF-8 bytes directly without an intermediate `string`:
 
-      For streams (HTTP request bodies, file IO), use the async variants which read/write UTF-8 bytes directly without an intermediate `string`:
+    ```csharp
+    await using FileStream fs = File.OpenRead("user.json");
+    User? user = await JsonSerializer.DeserializeAsync<User>(fs);
 
-      ```csharp
-      await using FileStream fs = File.OpenRead("user.json");
-      User? user = await JsonSerializer.DeserializeAsync<User>(fs);
+    await using FileStream outFs = File.Create("out.json");
+    await JsonSerializer.SerializeAsync(outFs, user);
+    ```
 
-      await using FileStream outFs = File.Create("out.json");
-      await JsonSerializer.SerializeAsync(outFs, user);
-      ```
+    `Deserialize<T>(string)` allocates a UTF-16 string and then transcodes back to UTF-8 internally; `DeserializeAsync<T>(Stream)` skips the round-trip and is the right choice for any IO-backed payload.
+- sequence: 3
+  fragment_type: example
+  content: |
+    ## `JsonSerializerOptions` — cache one instance
 
-      `Deserialize<T>(string)` allocates a UTF-16 string and then transcodes back to UTF-8 internally; `DeserializeAsync<T>(Stream)` skips the round-trip and is the right choice for any IO-backed payload.
+    Every `JsonSerializerOptions` instance owns a metadata cache keyed by `Type`. The first serialize/deserialize call for a given type populates the cache via reflection. A *second* `Options` instance has its own cache and pays the cost again. Allocating `new JsonSerializerOptions { ... }` inside a request handler or per-call helper is the single most common throughput bug.
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## `JsonSerializerOptions` — cache one instance
+    Bad — re-instantiates on every call:
 
-      Every `JsonSerializerOptions` instance owns a metadata cache keyed by `Type`. The first serialize/deserialize call for a given type populates the cache via reflection. A *second* `Options` instance has its own cache and pays the cost again. Allocating `new JsonSerializerOptions { ... }` inside a request handler or per-call helper is the single most common throughput bug.
+    ```csharp
+    // ANTI-PATTERN
+    public string ToJson(User u) =>
+        JsonSerializer.Serialize(u, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+    ```
 
-      Bad — re-instantiates on every call:
+    Good — one static instance per configuration:
 
-      ```csharp
-      // ANTI-PATTERN
-      public string ToJson(User u) =>
-          JsonSerializer.Serialize(u, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
-      ```
+    ```csharp
+    private static readonly JsonSerializerOptions WebOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
-      Good — one static instance per configuration:
+    public string ToJson(User u) => JsonSerializer.Serialize(u, WebOptions);
+    ```
 
-      ```csharp
-      private static readonly JsonSerializerOptions WebOptions = new(JsonSerializerDefaults.Web)
-      {
-          WriteIndented = false,
-          DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-          Converters = { new JsonStringEnumConverter() },
-      };
+    `JsonSerializerDefaults.Web` (and the equivalent `JsonSerializerOptions.Web` static singleton, available since .NET 9 — verified 2026-05-05) preconfigures `PropertyNameCaseInsensitive = true`, `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, and `NumberHandling = AllowReadingFromString`. It is the right starting point for any HTTP-shaped JSON. Once an `Options` instance has been used to (de)serialize, it is frozen — further mutation throws `InvalidOperationException`. Configure fully at construction.
+- sequence: 4
+  fragment_type: example
+  content: |
+    ## Attribute model
 
-      public string ToJson(User u) => JsonSerializer.Serialize(u, WebOptions);
-      ```
+    Per-property and per-type knobs live in attributes from `System.Text.Json.Serialization`:
 
-      `JsonSerializerDefaults.Web` (and the equivalent `JsonSerializerOptions.Web` static singleton, available since .NET 9 — verified 2026-05-05) preconfigures `PropertyNameCaseInsensitive = true`, `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, and `NumberHandling = AllowReadingFromString`. It is the right starting point for any HTTP-shaped JSON. Once an `Options` instance has been used to (de)serialize, it is frozen — further mutation throws `InvalidOperationException`. Configure fully at construction.
+    ```csharp
+    using System.Text.Json.Serialization;
 
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Attribute model
+    public sealed record Order(
+        [property: JsonPropertyName("order_id")] int Id,
+        [property: JsonPropertyName("total")]    decimal Total,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] string? Notes
+    )
+    {
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? Extra { get; init; }
+    }
+    ```
 
-      Per-property and per-type knobs live in attributes from `System.Text.Json.Serialization`:
+    - `[JsonPropertyName("...")]` overrides the wire name regardless of `PropertyNamingPolicy`.
+    - `[JsonIgnore]` skips the member; `Condition = WhenWritingNull|WhenWritingDefault|Never|Always` controls when.
+    - `[JsonInclude]` opts a non-public or read-only field into serialization.
+    - `[JsonConverter(typeof(MyConverter))]` attaches a per-property converter.
+    - `[JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]` accepts `"42"` for an `int`.
+    - `[JsonExtensionData]` collects unknown properties into a dictionary — useful for forward-compatible payloads.
+- sequence: 5
+  fragment_type: execution
+  content: |
+    ## Source-generated serializers (AOT, trimming, cold-start)
 
-      ```csharp
-      using System.Text.Json.Serialization;
+    Reflection-based serialization fights the trimmer and is unsupported under Native AOT. Source generation moves metadata to compile time:
 
-      public sealed record Order(
-          [property: JsonPropertyName("order_id")] int Id,
-          [property: JsonPropertyName("total")]    decimal Total,
-          [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] string? Notes
-      )
-      {
-          [JsonExtensionData]
-          public Dictionary<string, JsonElement>? Extra { get; init; }
-      }
-      ```
+    ```csharp
+    using System.Text.Json.Serialization;
 
-      - `[JsonPropertyName("...")]` overrides the wire name regardless of `PropertyNamingPolicy`.
-      - `[JsonIgnore]` skips the member; `Condition = WhenWritingNull|WhenWritingDefault|Never|Always` controls when.
-      - `[JsonInclude]` opts a non-public or read-only field into serialization.
-      - `[JsonConverter(typeof(MyConverter))]` attaches a per-property converter.
-      - `[JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]` accepts `"42"` for an `int`.
-      - `[JsonExtensionData]` collects unknown properties into a dictionary — useful for forward-compatible payloads.
+    [JsonSerializable(typeof(User))]
+    [JsonSerializable(typeof(Order))]
+    [JsonSourceGenerationOptions(
+        PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    public partial class AppJsonContext : JsonSerializerContext { }
+    ```
 
-  - sequence: 5
-    fragment_type: execution
-    content: |
-      ## Source-generated serializers (AOT, trimming, cold-start)
+    Use it via the typed accessor (no reflection at runtime):
 
-      Reflection-based serialization fights the trimmer and is unsupported under Native AOT. Source generation moves metadata to compile time:
+    ```csharp
+    string json = JsonSerializer.Serialize(user, AppJsonContext.Default.User);
+    User? back  = JsonSerializer.Deserialize(json, AppJsonContext.Default.User);
+    ```
 
-      ```csharp
-      using System.Text.Json.Serialization;
+    Source generation is required for trimmed and AOT applications, faster on cold start, smaller in code size, and produces analyzer diagnostics (`SYSLIB1037` and friends) when a member shape is not supported by the generator. Reach for it whenever you control the DTO types at compile time.
+- sequence: 6
+  fragment_type: example
+  content: |
+    ## Polymorphic (de)serialization
 
-      [JsonSerializable(typeof(User))]
-      [JsonSerializable(typeof(Order))]
-      [JsonSourceGenerationOptions(
-          PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-          DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-      public partial class AppJsonContext : JsonSerializerContext { }
-      ```
+    Since .NET 7, polymorphism is declared on the base type with `[JsonPolymorphic]` plus `[JsonDerivedType]`:
 
-      Use it via the typed accessor (no reflection at runtime):
+    ```csharp
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+    [JsonDerivedType(typeof(CardPayment),   typeDiscriminator: "card")]
+    [JsonDerivedType(typeof(BankTransfer),  typeDiscriminator: "bank")]
+    public abstract record Payment(decimal Amount);
 
-      ```csharp
-      string json = JsonSerializer.Serialize(user, AppJsonContext.Default.User);
-      User? back  = JsonSerializer.Deserialize(json, AppJsonContext.Default.User);
-      ```
+    public sealed record CardPayment(decimal Amount, string Last4)        : Payment(Amount);
+    public sealed record BankTransfer(decimal Amount, string AccountHash) : Payment(Amount);
 
-      Source generation is required for trimmed and AOT applications, faster on cold start, smaller in code size, and produces analyzer diagnostics (`SYSLIB1037` and friends) when a member shape is not supported by the generator. Reach for it whenever you control the DTO types at compile time.
+    // Wire shape: {"$type":"card","Amount":19.99,"Last4":"4242"}
+    Payment? p = JsonSerializer.Deserialize<Payment>(json);
+    ```
 
-  - sequence: 6
-    fragment_type: example
-    content: |
-      ## Polymorphic (de)serialization
+    Walk the edge case: an attacker sends `{"$type":"card","Amount":...}` for a discriminator value not listed in any `[JsonDerivedType]` attribute. System.Text.Json throws `JsonException` rather than instantiating an arbitrary type — unlike Newtonsoft's `TypeNameHandling.All`, the System.Text.Json discriminator is closed-set by design, which is the right default for untrusted input. If you need an open-set scheme, write a custom converter; do not reach for reflection-based type loading.
+- sequence: 7
+  fragment_type: example
+  content: |
+    ## Custom `JsonConverter<T>`
 
-      Since .NET 7, polymorphism is declared on the base type with `[JsonPolymorphic]` plus `[JsonDerivedType]`:
+    When the type is not natively supported, or the wire shape disagrees with the .NET shape, subclass `JsonConverter<T>`:
 
-      ```csharp
-      [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
-      [JsonDerivedType(typeof(CardPayment),   typeDiscriminator: "card")]
-      [JsonDerivedType(typeof(BankTransfer),  typeDiscriminator: "bank")]
-      public abstract record Payment(decimal Amount);
+    ```csharp
+    public sealed class UnixSecondsConverter : JsonConverter<DateTimeOffset>
+    {
+        public override DateTimeOffset Read(ref Utf8JsonReader reader, Type t, JsonSerializerOptions o) =>
+            DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64());
 
-      public sealed record CardPayment(decimal Amount, string Last4)        : Payment(Amount);
-      public sealed record BankTransfer(decimal Amount, string AccountHash) : Payment(Amount);
+        public override void Write(Utf8JsonWriter writer, DateTimeOffset v, JsonSerializerOptions o) =>
+            writer.WriteNumberValue(v.ToUnixTimeSeconds());
+    }
+    ```
 
-      // Wire shape: {"$type":"card","Amount":19.99,"Last4":"4242"}
-      Payment? p = JsonSerializer.Deserialize<Payment>(json);
-      ```
+    Register globally (`Options.Converters.Add(...)`) or per-property (`[JsonConverter(typeof(UnixSecondsConverter))]`). The most common shipped converter is `JsonStringEnumConverter` — without it, enums round-trip as integers, which both leaks ordinal stability and accepts any in-range integer as valid input.
+- sequence: 8
+  fragment_type: example
+  content: |
+    ## UTF-8 byte pipeline (hot paths)
 
-      Walk the edge case: an attacker sends `{"$type":"card","Amount":...}` for a discriminator value not listed in any `[JsonDerivedType]` attribute. System.Text.Json throws `JsonException` rather than instantiating an arbitrary type — unlike Newtonsoft's `TypeNameHandling.All`, the System.Text.Json discriminator is closed-set by design, which is the right default for untrusted input. If you need an open-set scheme, write a custom converter; do not reach for reflection-based type loading.
+    For maximum throughput — high-RPS HTTP handlers, log shippers, message-bus serializers — bypass the serializer entirely with `Utf8JsonWriter` and `Utf8JsonReader`. They write/read directly against `IBufferWriter<byte>` / `ReadOnlySpan<byte>`:
 
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## Custom `JsonConverter<T>`
+    ```csharp
+    var buffer = new ArrayBufferWriter<byte>();
+    using (var writer = new Utf8JsonWriter(buffer))
+    {
+        writer.WriteStartObject();
+        writer.WriteNumber("id", user.Id);
+        writer.WriteString("name", user.Name);
+        writer.WriteEndObject();
+    }
+    ReadOnlyMemory<byte> utf8 = buffer.WrittenMemory;
+    ```
 
-      When the type is not natively supported, or the wire shape disagrees with the .NET shape, subclass `JsonConverter<T>`:
+    For parse-without-mapping (extract one field, validate shape, route on a discriminator without binding to a DTO) use `JsonDocument` or `JsonNode`. `JsonDocument` is read-only and pooled; dispose it. `JsonNode` is mutable.
+- sequence: 9
+  fragment_type: guardrail
+  content: |
+    ## Anti-patterns
 
-      ```csharp
-      public sealed class UnixSecondsConverter : JsonConverter<DateTimeOffset>
-      {
-          public override DateTimeOffset Read(ref Utf8JsonReader reader, Type t, JsonSerializerOptions o) =>
-              DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64());
-
-          public override void Write(Utf8JsonWriter writer, DateTimeOffset v, JsonSerializerOptions o) =>
-              writer.WriteNumberValue(v.ToUnixTimeSeconds());
-      }
-      ```
-
-      Register globally (`Options.Converters.Add(...)`) or per-property (`[JsonConverter(typeof(UnixSecondsConverter))]`). The most common shipped converter is `JsonStringEnumConverter` — without it, enums round-trip as integers, which both leaks ordinal stability and accepts any in-range integer as valid input.
-
-  - sequence: 8
-    fragment_type: example
-    content: |
-      ## UTF-8 byte pipeline (hot paths)
-
-      For maximum throughput — high-RPS HTTP handlers, log shippers, message-bus serializers — bypass the serializer entirely with `Utf8JsonWriter` and `Utf8JsonReader`. They write/read directly against `IBufferWriter<byte>` / `ReadOnlySpan<byte>`:
-
-      ```csharp
-      var buffer = new ArrayBufferWriter<byte>();
-      using (var writer = new Utf8JsonWriter(buffer))
-      {
-          writer.WriteStartObject();
-          writer.WriteNumber("id", user.Id);
-          writer.WriteString("name", user.Name);
-          writer.WriteEndObject();
-      }
-      ReadOnlyMemory<byte> utf8 = buffer.WrittenMemory;
-      ```
-
-      For parse-without-mapping (extract one field, validate shape, route on a discriminator without binding to a DTO) use `JsonDocument` or `JsonNode`. `JsonDocument` is read-only and pooled; dispose it. `JsonNode` is mutable.
-
-  - sequence: 9
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **`new JsonSerializerOptions { ... }` in a hot path.** Every call rebuilds the metadata cache. Hoist to a `static readonly` field configured once at startup.
-      - **No `JsonStringEnumConverter` on a public API.** Numeric enum payloads couple the wire format to declaration order; renaming or reordering enum members silently changes the contract.
-      - **Mixing Newtonsoft.Json and System.Text.Json on the same DTO.** Defaults differ: Newtonsoft serializes private setters by default, accepts `$type` with `TypeNameHandling`, and uses different null-handling semantics. Pick one library per DTO and convert at the boundary.
-      - **Deserializing untrusted JSON without `MaxDepth`.** The default is 64, which is generous; set it lower (e.g. 16) for public endpoints to bound stack usage on adversarial nesting.
-      - **`[JsonIgnore]` for a property needed in one direction.** Use `JsonIgnoreCondition.WhenWritingNull` / `WhenWritingDefault` (write-only ignore) or a converter (read-only ignore) instead of dropping the property entirely.
-      - **Mutating an `Options` instance after first use.** Throws `InvalidOperationException`. Configure once at construction; do not bolt on a converter on the first call site.
-      - **Returning `JsonElement` from a public API.** `JsonElement` is tied to the lifetime of its parent `JsonDocument` — once disposed, the element is invalid. Materialize into a typed record before crossing the API boundary.
-
-  - sequence: 10
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] No `new JsonSerializerOptions` constructor calls inside per-request code paths — `grep -rn 'new JsonSerializerOptions' src/` results are all in `static readonly` field initializers, startup configuration, or test fixtures.
-      - [ ] Every `JsonSerializer.(De)Serialize*` call site either uses a cached `Options` instance or passes `JsonSerializerContext.Default.<Type>` from a source-generated context — `grep -rnE 'JsonSerializer\.(Serialize|Deserialize)' src/` audited.
-      - [ ] At least one `JsonSerializerContext` partial declaration exists for AOT/trimmed projects — `grep -rn 'JsonSerializerContext' src/` returns a hit; `dotnet build` emits no `SYSLIB1037` warnings.
-      - [ ] `dotnet build -warnaserror` passes — confirms source-generation analyzer diagnostics are clean.
-      - [ ] Public DTOs that expose enums register `JsonStringEnumConverter` either globally on `Options.Converters` or per-property via `[JsonConverter(typeof(JsonStringEnumConverter))]` — `grep -rn 'JsonStringEnumConverter' src/` returns ≥1 hit per project that exposes enums on the wire.
-      - [ ] Polymorphic base types declare `[JsonPolymorphic]` with an explicit `TypeDiscriminatorPropertyName` and a closed list of `[JsonDerivedType]` attributes — no open-set type-name handling.
-      - [ ] Public-facing deserialize paths set a non-default `MaxDepth` (≤ 32) — `grep -rn 'MaxDepth' src/` returns hits proportional to public endpoints.
-      - [ ] No project references both `Newtonsoft.Json` and `System.Text.Json` on the same DTO type — `grep -rn 'JsonProperty\|JsonConvert' src/` (Newtonsoft) and `grep -rn 'JsonPropertyName\|JsonSerializer' src/` (STJ) do not overlap on file paths.
+    - **`new JsonSerializerOptions { ... }` in a hot path.** Every call rebuilds the metadata cache. Hoist to a `static readonly` field configured once at startup.
+    - **No `JsonStringEnumConverter` on a public API.** Numeric enum payloads couple the wire format to declaration order; renaming or reordering enum members silently changes the contract.
+    - **Mixing Newtonsoft.Json and System.Text.Json on the same DTO.** Defaults differ: Newtonsoft serializes private setters by default, accepts `$type` with `TypeNameHandling`, and uses different null-handling semantics. Pick one library per DTO and convert at the boundary.
+    - **Deserializing untrusted JSON without `MaxDepth`.** The default is 64, which is generous; set it lower (e.g. 16) for public endpoints to bound stack usage on adversarial nesting.
+    - **`[JsonIgnore]` for a property needed in one direction.** Use `JsonIgnoreCondition.WhenWritingNull` / `WhenWritingDefault` (write-only ignore) or a converter (read-only ignore) instead of dropping the property entirely.
+    - **Mutating an `Options` instance after first use.** Throws `InvalidOperationException`. Configure once at construction; do not bolt on a converter on the first call site.
+    - **Returning `JsonElement` from a public API.** `JsonElement` is tied to the lifetime of its parent `JsonDocument` — once disposed, the element is invalid. Materialize into a typed record before crossing the API boundary.
+- fragment_type: verification
+  sequence: 10
+  content: '- [ ] No `new JsonSerializerOptions` constructor calls inside per-request code paths — `grep -rn ''new JsonSerializerOptions'' src/` results are all in `static readonly` field initializers, startup configuration, or test fixtures. - [ ] Every `JsonSerializer.(De)Serialize*` call site either uses a cached `Options` instance or passes `JsonSerializerContext.Default.<Type>` from a source-generated context — `grep -rnE ''JsonSerializer\.(Serialize|Deserialize)'' src/` audited. - [ ] At least one `JsonSerializerContext` partial declaration exists for AOT/trimmed projects — `grep -rn ''JsonSerializerContext'' src/` returns a hit; `dotnet build` emits no `SYSLIB1037` warnings. - [ ] `dotnet build -warnaserror` passes — confirms source-generation analyzer diagnostics are clean. - [ ] Public DTOs that expose enums register `JsonStringEnumConverter` either globally on `Options.Converters` or per-property via `[JsonConverter(typeof(JsonStringEnumConverter))]` — `grep -rn ''JsonStringEnumConverter'' src/` returns ≥1 hit per project that exposes enums on the wire. - [ ] Polymorphic base types declare `[JsonPolymorphic]` with an explicit `TypeDiscriminatorPropertyName` and a closed list of `[JsonDerivedType]` attributes — no open-set type-name handling. - [ ] Public-facing deserialize paths set a non-default `MaxDepth` (≤ 32) — `grep -rn ''MaxDepth'' src/` returns hits proportional to public endpoints.'
+- fragment_type: verification
+  sequence: 11
+  content: '- [ ] No project references both `Newtonsoft.Json` and `System.Text.Json` on the same DTO type — `grep -rn ''JsonProperty\|JsonConvert'' src/` (Newtonsoft) and `grep -rn ''JsonPropertyName\|JsonSerializer'' src/` (STJ) do not overlap on file paths.'

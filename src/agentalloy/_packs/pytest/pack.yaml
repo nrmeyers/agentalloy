@@ -1,11 +1,11 @@
 name: pytest
-version: 1.0.2
+version: 1.0.3
 tier: tooling
 description: |
   Pytest test framework patterns — fixtures with scope/autouse/yield teardown, parametrize for table-driven tests, marks and conditional skip/xfail, monkeypatch for safe attribute/env mutation, and tmp_path + assertion introspection. Precision-favored tooling tier; sourced from pytest-dev/pytest GitHub repo per R1 tier-3 procedure.
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -25,7 +25,7 @@ skills:
   fragment_count: 6
 - skill_id: pytest-parametrize
   file: pytest-parametrize.yaml
-  fragment_count: 7
+  fragment_count: 8
 - skill_id: pytest-tmp-path-and-assert
   file: pytest-tmp-path-and-assert.yaml
-  fragment_count: 11
+  fragment_count: 13

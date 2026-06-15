@@ -1,11 +1,11 @@
 name: redis
-version: 1.0.3
+version: 1.0.4
 tier: store
 description: |
   Redis patterns — strings + key management (TTL, eviction policies, INCR/DECR atomic ops) and Pub/Sub messaging + client library wiring (connection pooling, async clients). Initial 2-skill release; hashes-and-sets, lists-and-sorted-sets, and streams skills currently in skill-source/needs-human/ pending hand-author or richer-source re-attempt (the 14B over-fragmented dense Redis command-reference pages). Sourced from redis.io/llms.txt per R1 tier-2 procedure (curated URL list, fetch indexed pages).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -15,10 +15,10 @@ depends_on:
 skills:
 - skill_id: redis-pubsub-and-clients
   file: redis-pubsub-and-clients.yaml
-  fragment_count: 8
+  fragment_count: 12
 - skill_id: redis-strings-and-key-management
   file: redis-strings-and-key-management.yaml
-  fragment_count: 3
+  fragment_count: 5
 - skill_id: redis-hashes-and-sets
   file: redis-hashes-and-sets.yaml
   fragment_count: 7
@@ -39,10 +39,10 @@ skills:
   fragment_count: 8
 - skill_id: redis-lua-functions
   file: redis-lua-functions.yaml
-  fragment_count: 7
+  fragment_count: 11
 - skill_id: redis-lua-scripting
   file: redis-lua-scripting.yaml
-  fragment_count: 4
+  fragment_count: 6
 - skill_id: redis-persistence
   file: redis-persistence.yaml
   fragment_count: 9
@@ -51,7 +51,7 @@ skills:
   fragment_count: 10
 - skill_id: redis-replication
   file: redis-replication.yaml
-  fragment_count: 6
+  fragment_count: 7
 - skill_id: redis-sentinel
   file: redis-sentinel.yaml
   fragment_count: 9

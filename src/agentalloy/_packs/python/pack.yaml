@@ -1,10 +1,10 @@
 name: python
-version: 1.0.3
+version: 1.0.4
 tier: language
 description: Python language patterns — typing, async, error handling, packaging, idioms. Precision-favored language tier; sourced from python.org docs and PEPs per R1 tiered sourcing (fixtures/upstream/curated/python.yaml, version_anchor 3.13).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -29,7 +29,7 @@ skills:
   fragment_count: 10
 - skill_id: python-async-patterns
   file: python-async-patterns.yaml
-  fragment_count: 8
+  fragment_count: 15
 - skill_id: python-asyncio-streams
   file: python-asyncio-streams.yaml
   fragment_count: 8
@@ -38,7 +38,7 @@ skills:
   fragment_count: 13
 - skill_id: python-dataclasses
   file: python-dataclasses.yaml
-  fragment_count: 10
+  fragment_count: 11
 - skill_id: python-enum
   file: python-enum.yaml
   fragment_count: 9
@@ -59,4 +59,4 @@ skills:
   fragment_count: 9
 - skill_id: python-uv-package-management
   file: python-uv-package-management.yaml
-  fragment_count: 7
+  fragment_count: 9

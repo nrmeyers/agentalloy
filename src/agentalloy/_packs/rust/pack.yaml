@@ -1,27 +1,29 @@
 name: rust
-version: 1.0.3
+version: 1.0.4
 tier: language
-description: Rust language patterns — ownership and borrowing, Result/Option error handling, async/await + Send/Sync concurrency with tokio, Cargo manifests and feature flags, #[test] / integration / doc tests. Precision-favored language tier; sourced from doc.rust-lang.org Rust stable 1.83+ docs per R1 tiered sourcing (fixtures/upstream/curated/rust.yaml).
+description: Rust language patterns — ownership and borrowing, Result/Option error handling, async/await + Send/Sync concurrency with tokio, Cargo manifests and feature flags,
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
-depends_on: [core, engineering]
+depends_on:
+- core
+- engineering
 skills:
-  - skill_id: rust-ownership-and-borrowing
-    file: rust-ownership-and-borrowing.yaml
-    fragment_count: 8
-  - skill_id: rust-error-handling
-    file: rust-error-handling.yaml
-    fragment_count: 9
-  - skill_id: rust-async-and-concurrency
-    file: rust-async-and-concurrency.yaml
-    fragment_count: 10
-  - skill_id: rust-cargo-and-features
-    file: rust-cargo-and-features.yaml
-    fragment_count: 9
-  - skill_id: rust-testing-idioms
-    file: rust-testing-idioms.yaml
-    fragment_count: 11
+- skill_id: rust-ownership-and-borrowing
+  file: rust-ownership-and-borrowing.yaml
+  fragment_count: 8
+- skill_id: rust-error-handling
+  file: rust-error-handling.yaml
+  fragment_count: 10
+- skill_id: rust-async-and-concurrency
+  file: rust-async-and-concurrency.yaml
+  fragment_count: 13
+- skill_id: rust-cargo-and-features
+  file: rust-cargo-and-features.yaml
+  fragment_count: 12
+- skill_id: rust-testing-idioms
+  file: rust-testing-idioms.yaml
+  fragment_count: 11

@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: snowflake-tables-and-clustering
 canonical_name: Snowflake Tables and Clustering Keys
-description: "Store and query large datasets in Snowflake: choose between permanent, transient, and temporary tables based on retention needs, and add clustering keys to speed up queries that filter on specific columns."
+description: 'Store and query large datasets in Snowflake: choose between permanent, transient, and temporary tables based on retention needs, and add clustering keys to speed up queries that filter on specific columns.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - snowflake
-  - tables
-  - clustering
-  - permanent
-  - transient
+- snowflake
+- tables
+- clustering
+- permanent
+- transient
 related:
 - snowflake-data-loading
 - snowflake-dynamic-tables
 - snowflake-time-travel-and-streams
 always_apply: false
-phase_scope: [build]
-category_scope: [infrastructure]
+phase_scope:
+- build
+category_scope:
+- infrastructure
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -149,156 +151,158 @@ raw_prose: |
   >
   > After you define a clustering key for a table, the rows are not necessarily updated immediately. Snowflake only performs automated maintenance if the table will benefit from the operation. For more details, see Reclustering (in this topic) and [Automatic Clustering](tables-auto-reclustering.md).
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |
+    ## Overview
 
-      Snowflake stores tables in immutable micro-partitions (~16MB compressed). Permanent tables incur full storage; transient tables drop fail-safe; temporary tables drop on session end. Clustering keys reorder micro-partitions for predicate pruning on commonly-filtered columns. This skill covers table types + clustering tradeoffs.
+    Snowflake stores tables in immutable micro-partitions (~16MB compressed). Permanent tables incur full storage; transient tables drop fail-safe; temporary tables drop on session end. Clustering keys reorder micro-partitions for predicate pruning on commonly-filtered columns. This skill covers table types + clustering tradeoffs.
 
-      Sourced from https://docs.snowflake.com/en/user-guide/tables-temp-transient.html and https://docs.snowflake.com/en/user-guide/tables-clustering-keys.html.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ## Working with Temporary and Transient Tables
+    Sourced from https://docs.snowflake.com/en/user-guide/tables-temp-transient.html and https://docs.snowflake.com/en/user-guide/tables-clustering-keys.html.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    ## Working with Temporary and Transient Tables
 
-      In addition to permanent tables, which is the default table type when creating tables, Snowflake supports defining tables as either temporary or transient. These types of tables are especially useful for storing data that does not need to be maintained for extended periods of time (i.e. transitory data).
+    In addition to permanent tables, which is the default table type when creating tables, Snowflake supports defining tables as either temporary or transient. These types of tables are especially useful for storing data that does not need to be maintained for extended periods of time (i.e. transitory data).
 
-      > **Note:**
-      >
-      > You cannot create [hybrid tables](tables-hybrid.md) that are temporary or transient. In turn, you cannot create hybrid tables within transient schemas or databases.
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Temporary Tables
+    > **Note:**
+    >
+    > You cannot create [hybrid tables](tables-hybrid.md) that are temporary or transient. In turn, you cannot create hybrid tables within transient schemas or databases.
+- fragment_type: execution
+  sequence: 3
+  content: |
+    ## Temporary Tables
 
-      Snowflake supports creating temporary tables for storing non-permanent, transitory data (e.g. ETL data, session-specific data). Temporary tables only exist within the session in which they were created and persist only for the remainder of the session. As such, they are not visible to other users or sessions. Once the session ends, data stored in the table is purged completely from the system and, therefore, is not recoverable, either by the user who created the table or Snowflake.
+    Snowflake supports creating temporary tables for storing non-permanent, transitory data (e.g. ETL data, session-specific data). Temporary tables only exist within the session in which they were created and persist only for the remainder of the session. As such, they are not visible to other users or sessions. Once the session ends, data stored in the table is purged completely from the system and, therefore, is not recoverable, either by the user who created the table or Snowflake.
 
-      > **Note:**
-      >
-      > In addition to tables, Snowflake supports creating certain other database objects as temporary (e.g. stages). These objects follow the same semantics (i.e. they are session-based, persisting only for the remainder of the session).
-  - fragment_type: verification
-    sequence: 4
-    content: |
-      ### Data Storage Usage for Temporary Tables
+    > **Note:**
+    >
+    > In addition to tables, Snowflake supports creating certain other database objects as temporary (e.g. stages). These objects follow the same semantics (i.e. they are session-based, persisting only for the remainder of the session).
+- fragment_type: verification
+  sequence: 4
+  content: |
+    ### Data Storage Usage for Temporary Tables
 
-      For the duration of the existence of a temporary table, the data stored in the table contributes to the overall storage charges that Snowflake bills your account. To prevent any unexpected storage changes, particularly if you create large temporary tables in sessions that you maintain for periods longer than 24 hours, Snowflake recommends explicitly dropping these tables once they are no longer needed. You can also explicitly exit the session in which the table was created to ensure no additional charges are accrued.
+    For the duration of the existence of a temporary table, the data stored in the table contributes to the overall storage charges that Snowflake bills your account. To prevent any unexpected storage changes, particularly if you create large temporary tables in sessions that you maintain for periods longer than 24 hours, Snowflake recommends explicitly dropping these tables once they are no longer needed. You can also explicitly exit the session in which the table was created to ensure no additional charges are accrued.
 
-      For more information, see Comparison of Table Types (in this topic).
-  - fragment_type: verification
-    sequence: 5
-    content: |
-      ### Maintenance of Temporary Tables
+    For more information, see Comparison of Table Types (in this topic).
+- fragment_type: verification
+  sequence: 5
+  content: |
+    ### Maintenance of Temporary Tables
 
-      If your workload generates high volumes of temporary tables, you are very likely to experience degraded performance when you query the [COLUMNS view](../sql-reference/info-schema/columns.md) or [TABLES view](../sql-reference/info-schema/tables.md) in the Information Schema.
+    If your workload generates high volumes of temporary tables, you are very likely to experience degraded performance when you query the [COLUMNS view](../sql-reference/info-schema/columns.md) or [TABLES view](../sql-reference/info-schema/tables.md) in the Information Schema.
 
-      Snowflake recommends the following best practices:
+    Snowflake recommends the following best practices:
 
-      * [Drop temporary tables](../sql-reference/sql/drop-table.md) explicitly before sessions end.
-      * Make sure that users explicitly log out of sessions that are inactive. See [Snowflake sessions and session policies](session-policies.md).
+    * [Drop temporary tables](../sql-reference/sql/drop-table.md) explicitly before sessions end.
+    * Make sure that users explicitly log out of sessions that are inactive. See [Snowflake sessions and session policies](session-policies.md).
 
-      Taking these actions consistently will help you avoid query performance degradation that is related to the presence of temporary tables.
+    Taking these actions consistently will help you avoid query performance degradation that is related to the presence of temporary tables.
 
-      ### Potential Naming Conflicts with Other Table Types
+    ### Potential Naming Conflicts with Other Table Types
 
-      Similar to the other table types (transient and permanent), temporary tables belong to a specified database and schema; however, because they are session-based, they aren’t bound by the same uniqueness requirements. This means you can create temporary and non-temporary tables with the same name within the same schema.
+    Similar to the other table types (transient and permanent), temporary tables belong to a specified database and schema; however, because they are session-based, they aren’t bound by the same uniqueness requirements. This means you can create temporary and non-temporary tables with the same name within the same schema.
 
-      However, note that the temporary table takes precedence in the session over any other table with the same name in the same schema. This can lead to potential conflicts and unexpected behavior, particularly when performing DDL on both temporary and non-temporary tables. For example:
+    However, note that the temporary table takes precedence in the session over any other table with the same name in the same schema. This can lead to potential conflicts and unexpected behavior, particularly when performing DDL on both temporary and non-temporary tables. For example:
 
-      * You can create a temporary table that has the same name as an existing table in the same schema, effectively hiding the existing table.
-      * You can create a table that has the same name as an existing temporary table in the same schema; however, the newly-created table is hidden by the temporary table.
+    * You can create a temporary table that has the same name as an existing table in the same schema, effectively hiding the existing table.
+    * You can create a table that has the same name as an existing temporary table in the same schema; however, the newly-created table is hidden by the temporary table.
 
-      Subsequently, all queries and other operations performed in the session on the table affect only the temporary table.
+    Subsequently, all queries and other operations performed in the session on the table affect only the temporary table.
 
-      > **Important:**
-      >
-      > This behavior is particularly important to note when dropping a table in a session and then using Time Travel to restore the table. It is also important to note this behavior when using CREATE OR REPLACE to create a table because this essentially drops a table (if it exists) and creates a new table with the specified definition.
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      ### Creating a Temporary Table
+    > **Important:**
+    >
+    > This behavior is particularly important to note when dropping a table in a session and then using Time Travel to restore the table. It is also important to note this behavior when using CREATE OR REPLACE to create a table because this essentially drops a table (if it exists) and creates a new table with the specified definition.
+- fragment_type: execution
+  sequence: 6
+  content: |
+    ### Creating a Temporary Table
 
-      To create a temporary table, simply specify the TEMPORARY keyword (or TEMP abbreviation) in [CREATE TABLE](../sql-reference/sql/create-table.md). You can also use the [Tab
-  - fragment_type: setup
-    sequence: 7
-    content: |
-      > ## Documentation Index
-      > Fetch the complete documentation index at: https://docs.snowflake.com/llms.txt
-      > Use this file to discover all available pages before exploring further.
-  - fragment_type: execution
-    sequence: 8
-    content: |
-      # Clustering Keys & Clustered Tables
+    To create a temporary table, simply specify the TEMPORARY keyword (or TEMP abbreviation) in [CREATE TABLE](../sql-reference/sql/create-table.md). You can also use the [Tab
+- fragment_type: setup
+  sequence: 7
+  content: |
+    > ## Documentation Index
+    > Fetch the complete documentation index at: https://docs.snowflake.com/llms.txt
+    > Use this file to discover all available pages before exploring further.
+- fragment_type: execution
+  sequence: 8
+  content: |
+    # Clustering Keys & Clustered Tables
 
-      In general, Snowflake produces well-clustered data in tables; however, over time, particularly as DML occurs on very large tables (as defined by the amount of data in the table, not the number of rows), the data in some table rows might no longer cluster optimally on desired dimensions.
+    In general, Snowflake produces well-clustered data in tables; however, over time, particularly as DML occurs on very large tables (as defined by the amount of data in the table, not the number of rows), the data in some table rows might no longer cluster optimally on desired dimensions.
 
-      To improve the clustering of the underlying table micro-partitions, you can always manually sort rows on key table columns and re-insert them into the table; however, performing these tasks could be cumbersome and expensive.
-  - fragment_type: rationale
-    sequence: 9
-    content: |
-      Instead, Snowflake supports automating these tasks by designating one or more table columns/expressions as a *clustering key* for the table. A table with a clustering key defined is considered to be *clustered*.
-  - fragment_type: rationale
-    sequence: 10
-    content: |
-      You can cluster [materialized views](views-materialized.md), as well as tables. The rules for clustering tables and materialized views are generally the same. For a few additional tips specific to materialized views, see [Materialized Views and Clustering](views-materialized.md) and [Best Practices for Materialized Views](views-materialized.md).
-  - fragment_type: rationale
-    sequence: 11
-    content: |
-      > **Attention:**
-      >
-      > Clustering keys are not intended for all tables due to the costs of initially clustering the data and maintaining the clustering. Clustering is optimal when either:
-      >
-      > * You require the fastest possible response times, regardless of cost.
-      > * Your improved query performance offsets the credits required to cluster and maintain the table.
-      >
-      > For more information about choosing which tables to cluster, see: Considerations for Choosing Clustering for a Table.
-  - fragment_type: execution
-    sequence: 12
-    content: |
-      ## What is a Clustering Key?
+    To improve the clustering of the underlying table micro-partitions, you can always manually sort rows on key table columns and re-insert them into the table; however, performing these tasks could be cumbersome and expensive.
+- fragment_type: rationale
+  sequence: 9
+  content: |
+    Instead, Snowflake supports automating these tasks by designating one or more table columns/expressions as a *clustering key* for the table. A table with a clustering key defined is considered to be *clustered*.
+- fragment_type: rationale
+  sequence: 10
+  content: |
+    You can cluster [materialized views](views-materialized.md), as well as tables. The rules for clustering tables and materialized views are generally the same. For a few additional tips specific to materialized views, see [Materialized Views and Clustering](views-materialized.md) and [Best Practices for Materialized Views](views-materialized.md).
+- fragment_type: rationale
+  sequence: 11
+  content: |
+    > **Attention:**
+    >
+    > Clustering keys are not intended for all tables due to the costs of initially clustering the data and maintaining the clustering. Clustering is optimal when either:
+    >
+    > * You require the fastest possible response times, regardless of cost.
+    > * Your improved query performance offsets the credits required to cluster and maintain the table.
+    >
+    > For more information about choosing which tables to cluster, see: Considerations for Choosing Clustering for a Table.
+- fragment_type: execution
+  sequence: 12
+  content: |
+    ## What is a Clustering Key?
 
-      A clustering key is a subset of columns in a table (or expressions on a table) that are explicitly designated to co-locate the data in the table in the same [micro-partitions](tables-clustering-micropartitions.md). This is useful for very large tables where the ordering was not ideal (at the time the data was inserted/loaded) or extensive DML has caused the table’s natural clustering to degrade.
-  - fragment_type: rationale
-    sequence: 13
-    content: |
-      Some general indicators that can help determine whether to define a clustering key for a table include:
+    A clustering key is a subset of columns in a table (or expressions on a table) that are explicitly designated to co-locate the data in the table in the same [micro-partitions](tables-clustering-micropartitions.md). This is useful for very large tables where the ordering was not ideal (at the time the data was inserted/loaded) or extensive DML has caused the table’s natural clustering to degrade.
+- fragment_type: rationale
+  sequence: 13
+  content: |
+    Some general indicators that can help determine whether to define a clustering key for a table include:
 
-      * Queries on the table are running slower than expected or have noticeably degraded over time.
-      * The [clustering depth](tables-clustering-micropartitions.md) for the table is large.
+    * Queries on the table are running slower than expected or have noticeably degraded over time.
+    * The [clustering depth](tables-clustering-micropartitions.md) for the table is large.
 
-      A clustering key can be defined at table creation (using the [CREATE TABLE](../sql-reference/sql/create-table.md) command) or afterward (using the [ALTER TABLE](../sql-reference/sql/alter-table.md) command). The clustering key for a table can also be altered or dropped at any time.
-  - fragment_type: rationale
-    sequence: 14
-    content: |
-      > **Attention:**
-      >
-      > Clustering keys cannot be defined for [hybrid tables](tables-hybrid.md). In hybrid tables, data is always ordered by primary key.
-  - fragment_type: verification
-    sequence: 15
-    content: |
-      ## Benefits of Defining Clustering Keys (for Very Large Tables)
+    A clustering key can be defined at table creation (using the [CREATE TABLE](../sql-reference/sql/create-table.md) command) or afterward (using the [ALTER TABLE](../sql-reference/sql/alter-table.md) command). The clustering key for a table can also be altered or dropped at any time.
+- fragment_type: rationale
+  sequence: 14
+  content: |
+    > **Attention:**
+    >
+    > Clustering keys cannot be defined for [hybrid tables](tables-hybrid.md). In hybrid tables, data is always ordered by primary key.
+- fragment_type: verification
+  sequence: 15
+  content: |-
+    ## Benefits of Defining Clustering Keys (for Very Large Tables)
 
-      Using a clustering key to co-locate similar rows in the same micro-partitions enables several benefits for very large tables, including:
+    Using a clustering key to co-locate similar rows in the same micro-partitions enables several benefits for very large tables, including:
 
-      * Improved scan efficiency in queries by skipping data that does not match filtering predicates.
-      * Better column compression than in tables with no clustering. This is especially true when other columns are strongly correlated with the columns that comprise the clustering key.
-      * After a key has been defined on a table, no additional administration is required, unless you chose to drop or modify the key. All future maintenance on the rows in the table (to ensure optimal clustering) is performed automatically by Snowflake.
+    * Improved scan efficiency in queries by skipping data that does not match filtering predicates.
+    * Better column compression than in tables with no clustering. This is especially true when other columns are strongly correlated with the columns that comprise the clustering key.
+    * After a key has been defined on a table, no additional administration is required, unless you chose to drop or modify the key. All future maintenance on the rows in the table (to ensure optimal clustering) is performed automatically by Snowflake.
 
-      Although clustering can substantially improve the performance and reduce the cost of some queries, the compute resources used to perform clustering consume credits. As such, you should cluster only when queries will benefit substantially from the clustering.
+    Although clustering can substantially improve the performance and reduce the cost of some queries, the compute resources used to perform clustering consume credits. As such, you should cluster only when queries will benefit substantially from the clustering.
 
-      Typically, queries benefit from clustering when the queries filter or sort on the clustering key for the table. Sorting is commonly done for `ORDER BY` operations, for `GROUP BY` operations, and for some joins. For example, the following join would likely cause Snowflake to perform a sort operation:
+    Typically, queries benefit from clustering when the queries filter or sort on the clustering key for the table. Sorting is commonly done for `ORDER BY` operations, for `GROUP BY` operations, and for some joins. For example, the following join would likely cause Snowflake to perform a sort operation:
 
-      > ```sqlexample
-      > SELECT ...
-      >     FROM my_table INNER JOIN my_materialized_view
-      >         ON my_materialized_view.col1 = my_table.col1
-      >     ...
-      > ```
+    > ```sqlexample
+    > SELECT ...
+    >     FROM my_table INNER JOIN my_materialized_view
+    >         ON my_materialized_view.col1 = my_table.col1
+    >     ...
+    > ```
+- fragment_type: verification
+  sequence: 16
+  content: |-
+    In this pseudo-example, Snowflake is likely to sort the values in either `my_materialized_view.col1` or `my_table.col1`. For example, if the values in `my_table.col1` are sorted, then as the materialized view is being scanned, Snowflake can quickly find the corresponding row in `my_table`.
 
-      In this pseudo-example, Snowflake is likely to sort the values in either `my_materialized_view.col1` or `my_table.col1`. For example, if the values in `my_table.col1` are sorted, then as the materialized view is being scanned, Snowflake can quickly find the corresponding row in `my_table`.
+    The more frequently a table is queried, the more benefit clustering provides. However, the more frequently a table changes, the more expensive it will be to keep it clustered. Therefore, clustering is generally most cost-effective for tables that are queried frequently and do not change frequently.
 
-      The more frequently a table is queried, the more benefit clustering provides. However, the more frequently a table changes, the more expensive it will be to keep it clustered. Therefore, clustering is generally most cost-effective for tables that are queried frequently and do not change frequently.
-
-      > **Note:**
-      >
-      > After you define a clustering key for a table, the rows are not necessarily updated immediately. Snowflake only performs automated maintenance if the table will benefit from the operation. For more details, see Reclustering (in this topic) and [Automatic Clustering](tables-auto-reclustering.md).
+    > **Note:**
+    >
+    > After you define a clustering key for a table, the rows are not necessarily updated immediately. Snowflake only performs automated maintenance if the table will benefit from the operation. For more details, see Reclustering (in this topic) and [Automatic Clustering](tables-auto-reclustering.md).

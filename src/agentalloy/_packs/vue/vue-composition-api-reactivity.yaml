@@ -1,23 +1,25 @@
 skill_type: domain
 skill_id: vue-composition-api-reactivity
 canonical_name: Vue Composition API and Reactivity
-description: "Build interactive UIs with Vue 3: manage state with ref and reactive, derive values with computed, and run side effects with watch to keep your interface in sync with data changes."
+description: 'Build interactive UIs with Vue 3: manage state with ref and reactive, derive values with computed, and run side effects with watch to keep your interface in sync with data changes.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - vue3
-  - composition-api
-  - reactivity
-  - ref
-  - reactive
-  - vue
+- vue3
+- composition-api
+- reactivity
+- ref
+- reactive
+- vue
 related:
 - vue-lifecycle-and-async-components
 - vue-pinia-state-management
 - vue-script-setup-and-components
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: navistone
 change_summary: machine authoring contract for pending-qa pipeline
 raw_prose: |
@@ -491,483 +493,502 @@ raw_prose: |
   )
   ```
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      ## Overview
+- fragment_type: setup
+  sequence: 1
+  content: |-
+    ## Overview
 
-      Vue 3's Composition API provides reactivity primitives for declaring and tracking state. `ref` and `reactive` create reactive sources; `computed` derives cached values; `watch` and `watchEffect` run side effects when dependencies change. This skill covers the core reactivity surface used inside `<script setup>` components.
+    Vue 3's Composition API provides reactivity primitives for declaring and tracking state. `ref` and `reactive` create reactive sources; `computed` derives cached values; `watch` and `watchEffect` run side effects when dependencies change. This skill covers the core reactivity surface used inside `<script setup>` components.
 
-      Sourced from https://vuejs.org/guide/essentials/reactivity-fundamentals.html, https://vuejs.org/guide/essentials/computed.html, and https://vuejs.org/guide/essentials/watchers.html (Vue 3.5+).
+    Sourced from https://vuejs.org/guide/essentials/reactivity-fundamentals.html, https://vuejs.org/guide/essentials/computed.html, and https://vuejs.org/guide/essentials/watchers.html (Vue 3.5+).
 
-      ## Reactivity Fundamentals
+    ## Reactivity Fundamentals
 
-      :::tip API Preference
-      This page and many other chapters later in the guide contain different content for the Options API and the Composition API. Your current preference is Options APIComposition API. You can toggle between the API styles using the "API Preference" switches at the top of the left sidebar.
-      :::
+    :::tip API Preference
+    This page and many other chapters later in the guide contain different content for the Options API and the Composition API. Your current preference is Options APIComposition API. You can toggle between the API styles using the "API Preference" switches at the top of the left sidebar.
+    :::
 
-      ## Declaring Reactive State \*
+    ## Declaring Reactive State \*
 
-      With the Options API, we use the `data` option to declare reactive state of a component. The option value should be a function that returns an object. Vue will call the function when creating a new component instance, and wrap the returned object in its reactivity system. Any top-level properties of this object are proxied on the component instance (`this` in methods and lifecycle hooks):
+    With the Options API, we use the `data` option to declare reactive state of a component. The option value should be a function that returns an object. Vue will call the function when creating a new component instance, and wrap the returned object in its reactivity system. Any top-level properties of this object are proxied on the component instance (`this` in methods and lifecycle hooks):
+- fragment_type: setup
+  sequence: 2
+  content: |-
+    ```js{2-6}
+    export default {
+      data() {
+        return {
+          count: 1
+        }
+      },
 
-      ```js{2-6}
-      export default {
-        data() {
-          return {
-            count: 1
-          }
-        },
+      // `mounted` is a lifecycle hook which we will explain later
+      mounted() {
+        // `this` refers to the component instance.
+        console.log(this.count) // => 1
 
-        // `mounted` is a lifecycle hook which we will explain later
-        mounted() {
-          // `this` refers to the component instance.
-          console.log(this.count) // => 1
+        // data can be mutated as well
+        this.count = 2
+      }
+    }
+    ```
 
-          // data can be mutated as well
-          this.count = 2
+    [Try it in the Playground](https://play.vuejs.org/#eNpFUNFqhDAQ/JXBpzsoHu2j3B2U/oYPpnGtoetGkrW2iP/eRFsPApthd2Zndilex7H8mqioimu0wY16r4W+Rx8ULXVmYsVSC9AaNafz/gcC6RTkHwHWT6IVnne85rI+1ZLr5YJmyG1qG7gIA3Yd2R/LhN77T8y9sz1mwuyYkXazcQI2SiHz/7iP3VlQexeb5KKjEKEe2lPyMIxeSBROohqxVO4E6yV6ppL9xykTy83tOQvd7tnzoZtDwhrBO2GYNFloYWLyxrzPPOi44WWLWUt618txvASUhhRCKSHgbZt2scKy7HfCujGOqWL9BVfOgyI=)
+- fragment_type: setup
+  sequence: 3
+  content: |-
+    These instance properties are only added when the instance is first created, so you need to ensure they are all present in the object returned by the `data` function. Where necessary, use `null`, `undefined` or some other placeholder value for properties where the desired value isn't yet available.
+
+    It is possible to add a new property directly to `this` without including it in `data`. However, properties added this way will not be able to trigger reactive updates.
+
+    Vue uses a `$` prefix when exposing its own built-in APIs via the component instance. It also reserves the prefix `_` for internal properties. You should avoid using names for top-level `data` properties that start with either of these characters.
+- fragment_type: execution
+  sequence: 4
+  content: |
+    ### Reactive Proxy vs. Original \*
+
+    In Vue 3, data is made reactive by leveraging [JavaScript Proxies](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy). Users coming from Vue 2 should be aware of the following edge case:
+
+    ```js
+    export default {
+      data() {
+        return {
+          someObject: {}
+        }
+      },
+      mounted() {
+        const newObject = {}
+        this.someObject = newObject
+
+        console.log(newObject === this.someObject) // false
+      }
+    }
+    ```
+
+    When you access `this.someObject` after assigning it, the value is a reactive proxy of the original `newObject`. **Unlike in Vue 2, the original `newObject` is left intact and will not be made reactive: make sure to always access reactive state as a property of `this`.**
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    ## Declaring Reactive State \*\*
+
+    ### `ref()` \*\*
+
+    In Composition API, the recommended way to declare reactive state is using the [`ref()`](/api/reactivity-core#ref) function:
+
+    ```js
+    import { ref } from 'vue'
+
+    const count = ref(0)
+    ```
+
+    `ref()` takes the argument and returns it wrapped within a ref object with a `.value` property:
+
+    ```js
+    const count = ref(0)
+
+    console.log(count) // { value: 0 }
+    console.log(count.value) // 0
+
+    count.value++
+    console.log(count.value) // 1
+    ```
+
+    > See also: [Typing Refs](/guide/typescript/composition-api#typing-ref)&#x20;
+
+    To access refs in a component's template, declare and return them from a component's `setup()` function:
+
+    ```js{5,9-11}
+    import { ref } from 'vue'
+
+    export default {
+      // `setup` is a special hook dedicated for the Composition API.
+      setup() {
+        const count = ref(0)
+
+        // expose the ref to the template
+        return {
+          count
         }
       }
-      ```
+    }
+    ```
 
-      [Try it in the Playground](https://play.vuejs.org/#eNpFUNFqhDAQ/JXBpzsoHu2j3B2U/oYPpnGtoetGkrW2iP/eRFsPApthd2Zndilex7H8mqioimu0wY16r4W+Rx8ULXVmYsVSC9AaNafz/gcC6RTkHwHWT6IVnne85rI+1ZLr5YJmyG1qG7gIA3Yd2R/LhN77T8y9sz1mwuyYkXazcQI2SiHz/7iP3VlQexeb5KKjEKEe2lPyMIxeSBROohqxVO4E6yV6ppL9xykTy83tOQvd7tnzoZtDwhrBO2GYNFloYWLyxrzPPOi44WWLWUt618txvASUhhRCKSHgbZt2scKy7HfCujGOqWL9BVfOgyI=)
+    ```vue-html
+    <div>{{ count }}</div>
+    ```
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    Notice that we did **not** need to append `.value` when using the ref in the template. For convenience, refs are automatically unwrapped when used inside templates (with a few [caveats](#caveat-when-unwrapping-in-templates)).
 
-      These instance properties are only added when the instance is first created, so you need to ensure they are all present in the object returned by the `data` function. Where necessary, use `null`, `undefined` or some other placeholder value for properties where the desired value isn't yet available.
+    You can also mutate a ref directly in event handlers:
 
-      It is possible to add a new property directly to `this` without including it in `data`. However, properties added this way will not be able to trigger reactive updates.
+    ```vue-html{1}
+    <button @click="count++">
+      {{ count }}
+    </button>
+    ```
 
-      Vue uses a `$` prefix when exposing its own built-in APIs via the component instance. It also reserves the prefix `_` for internal properties. You should avoid using names for top-level `data` properties that start with either of these characters.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      ### Reactive Proxy vs. Original \*
+    For more complex logic, we can declare functions that mutate refs in the same scope and expose them as methods alongside the state:
 
-      In Vue 3, data is made reactive by leveraging [JavaScript Proxies](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy). Users coming from Vue 2 should be aware of the following edge case:
+    ```js{7-10,15}
+    import { ref } from 'vue'
 
-      ```js
-      export default {
-        data() {
-          return {
-            someObject: {}
-          }
-        },
-        mounted() {
-          const newObject = {}
-          this.someObject = newObject
+    export default {
+      setup() {
+        const count = ref(0)
 
-          console.log(newObject === this.someObject) // false
+        function increment() {
+          // .value is needed in JavaScript
+          count.value++
+        }
+
+        // don't forget to expose the function as well.
+        return {
+          count,
+          increment
         }
       }
-      ```
+    }
+    ```
 
-      When you access `this.someObject` after assigning it, the value is a reactive proxy of the original `newObject`. **Unlike in Vue 2, the original `newObject` is left intact and will not be made reactive: make sure to always access reactive state as a property of `this`.**
-  - fragment_type: execution
-    sequence: 3
-    content: |
-      ## Declaring Reactive State \*\*
+    Exposed methods can then be used as event handlers:
 
-      ### `ref()` \*\*
+    ```vue-html{1}
+    <button @click="increment">
+      {{ count }}
+    </button>
+    ```
 
-      In Composition API, the recommended way to declare reactive state is using the [`ref()`](/api/reactivity-core#ref) function:
+    Here's the example live on [Codepen](https://codepen.io/vuejs-examples/pen/WNYbaqo), without using any build tools.
+- fragment_type: execution
+  sequence: 7
+  content: |
+    ### `<script setup>` \*\*
 
-      ```js
-      import { ref } from 'vue'
+    Manually exposing state and methods via `setup()` can be verbose. Luckily, it can be avoided when using [Single-File Components (SFCs)](/guide/scaling-up/sfc). We can simplify the usage with `<script setup>`:
 
-      const count = ref(0)
-      ```
+    ```vue{1}
+    <script setup>
+    import { ref } from 'vue'
 
-      `ref()` takes the argument and returns it wrapped within a ref object with a `.value` property:
+    const count = ref(0)
 
-      ```js
-      const count = ref(0)
-
-      console.log(count) // { value: 0 }
-      console.log(count.value) // 0
-
+    function increment() {
       count.value++
-      console.log(count.value) // 1
-      ```
+    }
+    </script>
 
-      > See also: [Typing Refs](/guide/typescript/composition-api#typing-ref)&#x20;
-
-      To access refs in a component's template, declare and return them from a component's `setup()` function:
-
-      ```js{5,9-11}
-      import { ref } from 'vue'
-
-      export default {
-        // `setup` is a special hook dedicated for the Composition API.
-        setup() {
-          const count = ref(0)
-
-          // expose the ref to the template
-          return {
-            count
-          }
-        }
-      }
-      ```
-
-      ```vue-html
-      <div>{{ count }}</div>
-      ```
-
-      Notice that we did **not** need to append `.value` when using the ref in the template. For convenience, refs are automatically unwrapped when used inside templates (with a few [caveats](#caveat-when-unwrapping-in-templates)).
-
-      You can also mutate a ref directly in event handlers:
-
-      ```vue-html{1}
-      <button @click="count++">
-        {{ count }}
-      </button>
-      ```
-
-      For more complex logic, we can declare functions that mutate refs in the same scope and expose them as methods alongside the state:
-
-      ```js{7-10,15}
-      import { ref } from 'vue'
-
-      export default {
-        setup() {
-          const count = ref(0)
-
-          function increment() {
-            // .value is needed in JavaScript
-            count.value++
-          }
-
-          // don't forget to expose the function as well.
-          return {
-            count,
-            increment
-          }
-        }
-      }
-      ```
-
-      Exposed methods can then be used as event handlers:
-
-      ```vue-html{1}
+    <template>
       <button @click="increment">
         {{ count }}
       </button>
-      ```
+    </template>
+    ```
 
-      Here's the example live on [Codepen](https://codepen.io/vuejs-examples/pen/WNYbaqo), without using any build tools.
-  - fragment_type: execution
-    sequence: 4
-    content: |
-      ### `<script setup>` \*\*
+    [Try it in the Playground](https://play.vuejs.org/#eNo9jUEKgzAQRa8yZKMiaNcllvYe2dgwQqiZhDhxE3L3jrW4/DPvv1/UK8Zhz6juSm82uciwIef4MOR8DImhQMIFKiwpeGgEbQwZsoE2BhsyMUwH0d66475ksuwCgSOb0CNx20ExBCc77POase8NVUN6PBdlSwKjj+vMKAlAvzOzWJ52dfYzGXXpjPoBAKX856uopDGeFfnq8XKp+gWq4FAi)
 
-      Manually exposing state and methods via `setup()` can be verbose. Luckily, it can be avoided when using [Single-File Components (SFCs)](/guide/scaling-up/sfc). We can simplify the usage with `<script setup>`:
+    Top-level imports, variables and functions declared in `<script setup>` are automatically usable in the template of the same component. Think of the template as a JavaScript function declared in the same scope - it naturally has access to everything declared alongside it.
 
-      ```vue{1}
-      <script setup>
-      import { ref } from 'vue'
+    :::tip
+    For the rest of the guide, we will be primarily using SFC + `<script setup>` syntax for the Composition API code examples, as that is the most common usage for Vue developers.
 
-      const count = ref(0)
+    If you are not using SFC, you can still use Composition API with the [`setup()`](/api/composition-api-setup) option.
+    :::
+- fragment_type: execution
+  sequence: 8
+  content: |
+    ### Why Refs? \*\*
 
-      function increment() {
-        count.value++
-      }
-      </script>
+    You might be wondering why we need refs with the `.value` instead of plain variables. To explain that, we will need to briefly discuss how Vue's reactivity system works.
 
-      <template>
-        <button @click="increment">
-          {{ count }}
-        </button>
-      </template>
-      ```
+    When you use a ref in a template, and change the ref's value later, Vue automatically detects the change and updates the DOM accordingly. This is made possible with a dependency-tracking based reactivity system. When a component is rendered for the first time, Vue **tracks** every ref that was used during the render. Later on, when a ref is mutated, it will **trigger** a re-render for components that are tracking it.
 
-      [Try it in the Playground](https://play.vuejs.org/#eNo9jUEKgzAQRa8yZKMiaNcllvYe2dgwQqiZhDhxE3L3jrW4/DPvv1/UK8Zhz6juSm82uciwIef4MOR8DImhQMIFKiwpeGgEbQwZsoE2BhsyMUwH0d66475ksuwCgSOb0CNx20ExBCc77POase8NVUN6PBdlSwKjj+vMKAlAvzOzWJ52dfYzGXXpjPoBAKX856uopDGeFfnq8XKp+gWq4FAi)
+    In standard JavaScript, there is no way to detect the access or mutation of plain variables.
+- fragment_type: example
+  sequence: 9
+  content: |-
+    ## Basic Example
 
-      Top-level imports, variables and functions declared in `<script setup>` are automatically usable in the template of the same component. Think of the template as a JavaScript function declared in the same scope - it naturally has access to everything declared alongside it.
+    In-template expressions are very convenient, but they are meant for simple operations. Putting too much logic in your templates can make them bloated and hard to maintain. For example, if we have an object with a nested array:
 
-      :::tip
-      For the rest of the guide, we will be primarily using SFC + `<script setup>` syntax for the Composition API code examples, as that is the most common usage for Vue developers.
-
-      If you are not using SFC, you can still use Composition API with the [`setup()`](/api/composition-api-setup) option.
-      :::
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      ### Why Refs? \*\*
-
-      You might be wondering why we need refs with the `.value` instead of plain variables. To explain that, we will need to briefly discuss how Vue's reactivity system works.
-
-      When you use a ref in a template, and change the ref's value later, Vue automatically detects the change and updates the DOM accordingly. This is made possible with a dependency-tracking based reactivity system. When a component is rendered for the first time, Vue **tracks** every ref that was used during the render. Later on, when a ref is mutated, it will **trigger** a re-render for components that are tracking it.
-
-      In standard JavaScript, there is no way to detect the access or mutation of plain variables.
-  - fragment_type: example
-    sequence: 6
-    content: |
-      ## Basic Example
-
-      In-template expressions are very convenient, but they are meant for simple operations. Putting too much logic in your templates can make them bloated and hard to maintain. For example, if we have an object with a nested array:
-
-      ```js
-      export default {
-        data() {
-          return {
-            author: {
-              name: 'John Doe',
-              books: [
-                'Vue 2 - Advanced Guide',
-                'Vue 3 - Basic Guide',
-                'Vue 4 - The Mystery'
-              ]
-            }
+    ```js
+    export default {
+      data() {
+        return {
+          author: {
+            name: 'John Doe',
+            books: [
+              'Vue 2 - Advanced Guide',
+              'Vue 3 - Basic Guide',
+              'Vue 4 - The Mystery'
+            ]
           }
         }
       }
-      ```
+    }
+    ```
 
-      ```js
-      const author = reactive({
-        name: 'John Doe',
-        books: [
-          'Vue 2 - Advanced Guide',
-          'Vue 3 - Basic Guide',
-          'Vue 4 - The Mystery'
-        ]
-      })
-      ```
+    ```js
+    const author = reactive({
+      name: 'John Doe',
+      books: [
+        'Vue 2 - Advanced Guide',
+        'Vue 3 - Basic Guide',
+        'Vue 4 - The Mystery'
+      ]
+    })
+    ```
 
-      And we want to display different messages depending on if `author` already has some books or not:
+    And we want to display different messages depending on if `author` already has some books or not:
 
-      ```vue-html
-      <p>Has published books:</p>
-      <span>{{ author.books.length > 0 ? 'Yes' : 'No' }}</span>
-      ```
+    ```vue-html
+    <p>Has published books:</p>
+    <span>{{ author.books.length > 0 ? 'Yes' : 'No' }}</span>
+    ```
 
-      At this point, the template is getting a bit cluttered. We have to look at it for a second before realizing that it performs a calculation depending on `author.books`. More importantly, we probably don't want to repeat ourselves if we need to include this calculation in the template more than once.
+    At this point, the template is getting a bit cluttered. We have to look at it for a second before realizing that it performs a calculation depending on `author.books`. More importantly, we probably don't want to repeat ourselves if we need to include this calculation in the template more than once.
 
-      That's why for complex logic that includes reactive data, it is recommended to use a **computed property**. Here's the same example, refactored:
-
-      ```js
-      export default {
-        data() {
-          return {
-            author: {
-              name: 'John Doe',
-              books: [
-                'Vue 2 - Advanced Guide',
-                'Vue 3 - Basic Guide',
-                'Vue 4 - The Mystery'
-              ]
-            }
-          }
-        },
-        computed: {
-          // a computed getter
-          publishedBooksMessage() {
-            // `this` points to the component instance
-            return this.author.books.length > 0 ? 'Yes' : 'No'
+    That's why for complex logic that includes reactive data, it is recommended to use a **computed property**. Here's the same example, refactored:
+- fragment_type: example
+  sequence: 10
+  content: |-
+    ```js
+    export default {
+      data() {
+        return {
+          author: {
+            name: 'John Doe',
+            books: [
+              'Vue 2 - Advanced Guide',
+              'Vue 3 - Basic Guide',
+              'Vue 4 - The Mystery'
+            ]
           }
         }
+      },
+      computed: {
+        // a computed getter
+        publishedBooksMessage() {
+          // `this` points to the component instance
+          return this.author.books.length > 0 ? 'Yes' : 'No'
+        }
       }
-      ```
+    }
+    ```
 
-      ```vue-html
+    ```vue-html
+    <p>Has published books:</p>
+    <span>{{ publishedBooksMessage }}</span>
+    ```
+- fragment_type: example
+  sequence: 11
+  content: |-
+    [Try it in the Playground](https://play.vuejs.org/#eNqFkN1KxDAQhV/l0JsqaFfUq1IquwiKsF6JINaLbDNui20S8rO4lL676c82eCFCIDOZMzkzXxetlUoOjqI0ykypa2XzQtC3ktqC0ydzjUVXCIAzy87OpxjQZJ0WpwxgzlZSp+EBEKylFPGTrATuJcUXobST8sukeA8vQPzqCNe4xJofmCiJ48HV/FfbLLrxog0zdfmn4tYrXirC9mgs6WMcBB+nsJ+C8erHH0rZKmeJL0sot2tqUxHfDONuyRi2p4BggWCr2iQTgGTcLGlI7G2FHFe4Q/xGJoYn8SznQSbTQviTrRboPrHUqoZZ8hmQqfyRmTDFTC1bqalsFBN5183o/3NG33uvoWUwXYyi/gdTEpwK)
+
+    Here we have declared a computed property `publishedBooksMessage`.
+
+    Try to change the value of the `books` array in the application `data` and you will see how `publishedBooksMessage` is changing accordingly.
+- fragment_type: example
+  sequence: 12
+  content: |-
+    You can data-bind to computed properties in templates just like a normal property. Vue is aware that `this.publishedBooksMessage` depends on `this.author.books`, so it will update any bindings that depend on `this.publishedBooksMessage` when `this.author.books` changes.
+
+    See also: [Typing Computed Properties](/guide/typescript/options-api#typing-computed-properties)&#x20;
+- fragment_type: example
+  sequence: 13
+  content: |-
+    ```vue
+    <script setup>
+    import { reactive, computed } from 'vue'
+
+    const author = reactive({
+      name: 'John Doe',
+      books: [
+        'Vue 2 - Advanced Guide',
+        'Vue 3 - Basic Guide',
+        'Vue 4 - The Mystery'
+      ]
+    })
+
+    // a computed ref
+    const publishedBooksMessage = computed(() => {
+      return author.books.length > 0 ? 'Yes' : 'No'
+    })
+    </script>
+
+    <template>
       <p>Has published books:</p>
       <span>{{ publishedBooksMessage }}</span>
-      ```
+    </template>
+    ```
+- fragment_type: example
+  sequence: 14
+  content: '[Try it in the Playground](https://play.vuejs.org/#eNp1kE9Lw0AQxb/KI5dtoTainkoaaREUoZ5EEONhm0ybYLO77J9CCfnuzta0vdjbzr6Zeb95XbIwZroPlMySzJW2MR6OfDB5oZrWaOvRwZIsfbOnCUrdmuCpQo+N1S0ET4pCFarUynnI4GttMT9PjLpCAUq2NIN41bXCkyYxiZ9rrX/cDF/xDYiPQLjDDRbVXqqSHZ5DUw2tg3zP8lK6pvxHe2DtvSasDs6TPTAT8F2ofhzh0hTygm5pc+I1Yb1rXE3VMsKsyDm5JcY/9Y5GY8xzHI+wnIpVw4nTI/10R2rra+S4xSPEJzkBvvNNs310ztK/RDlLLjy1Zic9cQVkJn+R7gIwxJGlMXiWnZEq77orhH3Pq2NH9DjvTfpfSBSbmA==)'
+- fragment_type: example
+  sequence: 15
+  content: |-
+    Here we have declared a computed property `publishedBooksMessage`. The `computed()` function expects to be passed a [getter function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#description), and the returned value is a **computed ref**. Similar to normal refs, you can access the computed result as `publishedBooksMessage.value`. Computed refs are also auto-unwrapped in templates so you can reference them without `.value` in template expressions.
 
-      [Try it in the Playground](https://play.vuejs.org/#eNqFkN1KxDAQhV/l0JsqaFfUq1IquwiKsF6JINaLbDNui20S8rO4lL676c82eCFCIDOZMzkzXxetlUoOjqI0ykypa2XzQtC3ktqC0ydzjUVXCIAzy87OpxjQZJ0WpwxgzlZSp+EBEKylFPGTrATuJcUXobST8sukeA8vQPzqCNe4xJofmCiJ48HV/FfbLLrxog0zdfmn4tYrXirC9mgs6WMcBB+nsJ+C8erHH0rZKmeJL0sot2tqUxHfDONuyRi2p4BggWCr2iQTgGTcLGlI7G2FHFe4Q/xGJoYn8SznQSbTQviTrRboPrHUqoZZ8hmQqfyRmTDFTC1bqalsFBN5183o/3NG33uvoWUwXYyi/gdTEpwK)
+    A computed property automatically tracks its reactive dependencies. Vue is aware that the computation of `publishedBooksMessage` depends on `author.books`, so it will update any bindings that depend on `publishedBooksMessage` when `author.books` changes.
 
-      Here we have declared a computed property `publishedBooksMessage`.
+    See also: [Typing Computed](/guide/typescript/composition-api#typing-computed)&#x20;
+- fragment_type: example
+  sequence: 16
+  content: |-
+    ## Basic Example
 
-      Try to change the value of the `books` array in the application `data` and you will see how `publishedBooksMessage` is changing accordingly.
+    Computed properties allow us to declaratively compute derived values. However, there are cases where we need to perform "side effects" in reaction to state changes - for example, mutating the DOM, or changing another piece of state based on the result of an async operation.
 
-      You can data-bind to computed properties in templates just like a normal property. Vue is aware that `this.publishedBooksMessage` depends on `this.author.books`, so it will update any bindings that depend on `this.publishedBooksMessage` when `this.author.books` changes.
+    With the Options API, we can use the [`watch` option](/api/options-state#watch) to trigger a function whenever a reactive property changes:
 
-      See also: [Typing Computed Properties](/guide/typescript/options-api#typing-computed-properties)&#x20;
-  - fragment_type: example
-    sequence: 7
-    content: |
-      ```vue
-      <script setup>
-      import { reactive, computed } from 'vue'
-
-      const author = reactive({
-        name: 'John Doe',
-        books: [
-          'Vue 2 - Advanced Guide',
-          'Vue 3 - Basic Guide',
-          'Vue 4 - The Mystery'
-        ]
-      })
-
-      // a computed ref
-      const publishedBooksMessage = computed(() => {
-        return author.books.length > 0 ? 'Yes' : 'No'
-      })
-      </script>
-
-      <template>
-        <p>Has published books:</p>
-        <span>{{ publishedBooksMessage }}</span>
-      </template>
-      ```
-
-      [Try it in the Playground](https://play.vuejs.org/#eNp1kE9Lw0AQxb/KI5dtoTainkoaaREUoZ5EEONhm0ybYLO77J9CCfnuzta0vdjbzr6Zeb95XbIwZroPlMySzJW2MR6OfDB5oZrWaOvRwZIsfbOnCUrdmuCpQo+N1S0ET4pCFarUynnI4GttMT9PjLpCAUq2NIN41bXCkyYxiZ9rrX/cDF/xDYiPQLjDDRbVXqqSHZ5DUw2tg3zP8lK6pvxHe2DtvSasDs6TPTAT8F2ofhzh0hTygm5pc+I1Yb1rXE3VMsKsyDm5JcY/9Y5GY8xzHI+wnIpVw4nTI/10R2rra+S4xSPEJzkBvvNNs310ztK/RDlLLjy1Zic9cQVkJn+R7gIwxJGlMXiWnZEq77orhH3Pq2NH9DjvTfpfSBSbmA==)
-
-      Here we have declared a computed property `publishedBooksMessage`. The `computed()` function expects to be passed a [getter function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#description), and the returned value is a **computed ref**. Similar to normal refs, you can access the computed result as `publishedBooksMessage.value`. Computed refs are also auto-unwrapped in templates so you can reference them without `.value` in template expressions.
-
-      A computed property automatically tracks its reactive dependencies. Vue is aware that the computation of `publishedBooksMessage` depends on `author.books`, so it will update any bindings that depend on `publishedBooksMessage` when `author.books` changes.
-
-      See also: [Typing Computed](/guide/typescript/composition-api#typing-computed)&#x20;
-  - fragment_type: example
-    sequence: 8
-    content: |
-      ## Basic Example
-
-      Computed properties allow us to declaratively compute derived values. However, there are cases where we need to perform "side effects" in reaction to state changes - for example, mutating the DOM, or changing another piece of state based on the result of an async operation.
-
-      With the Options API, we can use the [`watch` option](/api/options-state#watch) to trigger a function whenever a reactive property changes:
-
-      ```js
-      export default {
-        data() {
-          return {
-            question: '',
-            answer: 'Questions usually contain a question mark. ;-)',
-            loading: false
+    ```js
+    export default {
+      data() {
+        return {
+          question: '',
+          answer: 'Questions usually contain a question mark. ;-)',
+          loading: false
+        }
+      },
+      watch: {
+        // whenever question changes, this function will run
+        question(newQuestion, oldQuestion) {
+          if (newQuestion.includes('?')) {
+            this.getAnswer()
           }
-        },
-        watch: {
-          // whenever question changes, this function will run
-          question(newQuestion, oldQuestion) {
-            if (newQuestion.includes('?')) {
-              this.getAnswer()
-            }
-          }
-        },
-        methods: {
-          async getAnswer() {
-            this.loading = true
-            this.answer = 'Thinking...'
-            try {
-              const res = await fetch('https://yesno.wtf/api')
-              this.answer = (await res.json()).answer
-            } catch (error) {
-              this.answer = 'Error! Could not reach the API. ' + error
-            } finally {
-              this.loading = false
-            }
+        }
+      },
+      methods: {
+        async getAnswer() {
+          this.loading = true
+          this.answer = 'Thinking...'
+          try {
+            const res = await fetch('https://yesno.wtf/api')
+            this.answer = (await res.json()).answer
+          } catch (error) {
+            this.answer = 'Error! Could not reach the API. ' + error
+          } finally {
+            this.loading = false
           }
         }
       }
-      ```
+    }
+    ```
 
-      ```vue-html
+    ```vue-html
+    <p>
+      Ask a yes/no question:
+      <input v-model="question" :disabled="loading" />
+    </p>
+    <p>{{ answer }}</p>
+    ```
+- fragment_type: example
+  sequence: 17
+  content: '[Try it in the Playground](https://play.vuejs.org/#eNp9VE1v2zAM/SucLnaw1D70lqUbsiKH7rB1W4++aDYdq5ElTx9xgiD/fbT8lXZFAQO2+Mgn8pH0mW2aJjl4ZCu2trkRjfucKTw22jgosOReOjhnCqDgjseL/hvAoPNGjSeAvx6tE1qtIIqWo5Er26Ih088BteCt51KeINfKcaGAT5FQc7NP4NPNYiaQmhdC7VZQcmlxMF+61yUcWu7yajVmkabQVqjwgGZmzSuudmiX4CphofQqD+ZWSAnGqz5y9I4VtmOuS9CyGA9T3QCihGu3RKhc+gJtHH2JFld+EG5Mdug2QYZ4MSKhgBd11OgqXdipEm5PKoer0Jk2kA66wB044/EF1GtOSPRUCbUnryRJosnFnK4zpC5YR7205M9bLhyUSIrGUeVcY1dpekKrdNK6MuWNiKYKXt8V98FElDxbknGxGLCpZMi7VkGMxmjzv0pz1tvO4QPcay8LULoj5RToKoTN40MCEXyEQDJTl0KFmXpNOqsUxudN+TNFzzqdJp8ODutGcod0Alg34QWwsXsaVtIjVXqe9h5bC9V4B4ebWhco7zI24hmDVSEs/yOxIPOQEFnTnjzt2emS83nYFrhcevM6nRJhS+Ys9aoUu6Av7WqoNWO5rhsh0fxownplbBqhjJEmuv0WbN2UDNtDMRXm+zfsz/bY2TL2SH1Ec8CMTZjjhqaxh7e/v+ORvieQqvaSvN8Bf6HV0veSdG5fvSoo7Su/kO1D3f13SKInuz06VHYsahzzfl0yRj+s+3dKn9O9TW7HPrPLP624lFU=)'
+- fragment_type: example
+  sequence: 18
+  content: |-
+    The `watch` option also supports a dot-delimited path as the key:
+
+    ```js
+    export default {
+      watch: {
+        // Note: only simple paths. Expressions are not supported.
+        'some.nested.key'(newValue) {
+          // ...
+        }
+      }
+    }
+    ```
+
+    With Composition API, we can use the [`watch` function](/api/reactivity-core#watch) to trigger a callback whenever a piece of reactive state changes:
+
+    ```vue
+    <script setup>
+    import { ref, watch } from 'vue'
+
+    const question = ref('')
+    const answer = ref('Questions usually contain a question mark. ;-)')
+    const loading = ref(false)
+
+    // watch works directly on a ref
+    watch(question, async (newQuestion, oldQuestion) => {
+      if (newQuestion.includes('?')) {
+        loading.value = true
+        answer.value = 'Thinking...'
+        try {
+          const res = await fetch('https://yesno.wtf/api')
+          answer.value = (await res.json()).answer
+        } catch (error) {
+          answer.value = 'Error! Could not reach the API. ' + error
+        } finally {
+          loading.value = false
+        }
+      }
+    })
+    </script>
+
+    <template>
       <p>
         Ask a yes/no question:
         <input v-model="question" :disabled="loading" />
       </p>
       <p>{{ answer }}</p>
-      ```
+    </template>
+    ```
+- fragment_type: example
+  sequence: 19
+  content: '[Try it in the Playground](https://play.vuejs.org/#eNp9U8Fy0zAQ/ZVFF9tDah96C2mZ0umhHKBAj7oIe52oUSQjyXEyGf87KytyoDC9JPa+p+e3b1cndtd15b5HtmQrV1vZeXDo++6Wa7nrjPVwAovtAgbh6w2M0Fqzg4xOZFxzXRvtPPzq0XlpNNwEbp5lRUKEdgPaVP925jnoXS+UOgKxvJAaxEVjJ+y2hA9XxUVFGdFIvT7LtEI5JIzrqjrbGozdOmikxdqTKqmIQOV6gvOkvQDhjrqGXOOQvCzAqCa9FHBzCyeuAWT7F6uUulZ9gy7PPmZFETmQjJV7oXoke972GJHY+Axkzxupt4FalhRcYHh7TDIQcqA+LTriikFIDy0G59nG+84tq+qITpty8G0lOhmSiedefSaPZ0mnfHFG50VRRkbkj1BPceVorbFzF/+6fQj4O7g3vWpAm6Ao6JzfINw9PZaQwXuYNJJuK/U0z1nxdTLT0M7s8Ec/I3WxquLS0brRi8ddp4RHegNYhR0M/Du3pXFSAJU285osI7aSuus97K92pkF1w1nCOYNlI534qbCh8tkOVasoXkV1+sjplLZ0HGN5Vc1G2IJ5R8Np5XpKlK7J1CJntdl1UqH92k0bzdkyNc8ZRWGGz1MtbMQi1esN1tv/1F/cIdQ4e6LJod0jZzPmhV2jj/DDjy94oOcZpK57Rew3wO/ojOpjJIH2qdcN2f6DN7l9nC47RfTsHg4etUtNpZUeJz5ndPPv32j9Yve6vE6DZuNvu1R2Tg==)'
+- fragment_type: example
+  sequence: 20
+  content: |-
+    ### Watch Source Types
 
-      [Try it in the Playground](https://play.vuejs.org/#eNp9VE1v2zAM/SucLnaw1D70lqUbsiKH7rB1W4++aDYdq5ElTx9xgiD/fbT8lXZFAQO2+Mgn8pH0mW2aJjl4ZCu2trkRjfucKTw22jgosOReOjhnCqDgjseL/hvAoPNGjSeAvx6tE1qtIIqWo5Er26Ih088BteCt51KeINfKcaGAT5FQc7NP4NPNYiaQmhdC7VZQcmlxMF+61yUcWu7yajVmkabQVqjwgGZmzSuudmiX4CphofQqD+ZWSAnGqz5y9I4VtmOuS9CyGA9T3QCihGu3RKhc+gJtHH2JFld+EG5Mdug2QYZ4MSKhgBd11OgqXdipEm5PKoer0Jk2kA66wB044/EF1GtOSPRUCbUnryRJosnFnK4zpC5YR7205M9bLhyUSIrGUeVcY1dpekKrdNK6MuWNiKYKXt8V98FElDxbknGxGLCpZMi7VkGMxmjzv0pz1tvO4QPcay8LULoj5RToKoTN40MCEXyEQDJTl0KFmXpNOqsUxudN+TNFzzqdJp8ODutGcod0Alg34QWwsXsaVtIjVXqe9h5bC9V4B4ebWhco7zI24hmDVSEs/yOxIPOQEFnTnjzt2emS83nYFrhcevM6nRJhS+Ys9aoUu6Av7WqoNWO5rhsh0fxownplbBqhjJEmuv0WbN2UDNtDMRXm+zfsz/bY2TL2SH1Ec8CMTZjjhqaxh7e/v+ORvieQqvaSvN8Bf6HV0veSdG5fvSoo7Su/kO1D3f13SKInuz06VHYsahzzfl0yRj+s+3dKn9O9TW7HPrPLP624lFU=)
+    `watch`'s first argument can be different types of reactive "sources": it can be a ref (including computed refs), a reactive object, a [getter function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#description), or an array of multiple sources:
 
-      The `watch` option also supports a dot-delimited path as the key:
+    ```js
+    const x = ref(0)
+    const y = ref(0)
 
-      ```js
-      export default {
-        watch: {
-          // Note: only simple paths. Expressions are not supported.
-          'some.nested.key'(newValue) {
-            // ...
-          }
-        }
+    // single ref
+    watch(x, (newX) => {
+      console.log(`x is ${newX}`)
+    })
+
+    // getter
+    watch(
+      () => x.value + y.value,
+      (sum) => {
+        console.log(`sum of x + y is: ${sum}`)
       }
-      ```
+    )
 
-      With Composition API, we can use the [`watch` function](/api/reactivity-core#watch) to trigger a callback whenever a piece of reactive state changes:
+    // array of multiple sources
+    watch([x, () => y.value], ([newX, newY]) => {
+      console.log(`x is ${newX} and y is ${newY}`)
+    })
+    ```
 
-      ```vue
-      <script setup>
-      import { ref, watch } from 'vue'
+    Do note that you can't watch a property of a reactive object like this:
 
-      const question = ref('')
-      const answer = ref('Questions usually contain a question mark. ;-)')
-      const loading = ref(false)
+    ```js
+    const obj = reactive({ count: 0 })
 
-      // watch works directly on a ref
-      watch(question, async (newQuestion, oldQuestion) => {
-        if (newQuestion.includes('?')) {
-          loading.value = true
-          answer.value = 'Thinking...'
-          try {
-            const res = await fetch('https://yesno.wtf/api')
-            answer.value = (await res.json()).answer
-          } catch (error) {
-            answer.value = 'Error! Could not reach the API. ' + error
-          } finally {
-            loading.value = false
-          }
-        }
-      })
-      </script>
+    // this won't work because we are passing a number to watch()
+    watch(obj.count, (count) => {
+      console.log(`Count is: ${count}`)
+    })
+    ```
 
-      <template>
-        <p>
-          Ask a yes/no question:
-          <input v-model="question" :disabled="loading" />
-        </p>
-        <p>{{ answer }}</p>
-      </template>
-      ```
+    Instead, use a getter:
 
-      [Try it in the Playground](https://play.vuejs.org/#eNp9U8Fy0zAQ/ZVFF9tDah96C2mZ0umhHKBAj7oIe52oUSQjyXEyGf87KytyoDC9JPa+p+e3b1cndtd15b5HtmQrV1vZeXDo++6Wa7nrjPVwAovtAgbh6w2M0Fqzg4xOZFxzXRvtPPzq0XlpNNwEbp5lRUKEdgPaVP925jnoXS+UOgKxvJAaxEVjJ+y2hA9XxUVFGdFIvT7LtEI5JIzrqjrbGozdOmikxdqTKqmIQOV6gvOkvQDhjrqGXOOQvCzAqCa9FHBzCyeuAWT7F6uUulZ9gy7PPmZFETmQjJV7oXoke972GJHY+Axkzxupt4FalhRcYHh7TDIQcqA+LTriikFIDy0G59nG+84tq+qITpty8G0lOhmSiedefSaPZ0mnfHFG50VRRkbkj1BPceVorbFzF/+6fQj4O7g3vWpAm6Ao6JzfINw9PZaQwXuYNJJuK/U0z1nxdTLT0M7s8Ec/I3WxquLS0brRi8ddp4RHegNYhR0M/Du3pXFSAJU285osI7aSuus97K92pkF1w1nCOYNlI534qbCh8tkOVasoXkV1+sjplLZ0HGN5Vc1G2IJ5R8Np5XpKlK7J1CJntdl1UqH92k0bzdkyNc8ZRWGGz1MtbMQi1esN1tv/1F/cIdQ4e6LJod0jZzPmhV2jj/DDjy94oOcZpK57Rew3wO/ojOpjJIH2qdcN2f6DN7l9nC47RfTsHg4etUtNpZUeJz5ndPPv32j9Yve6vE6DZuNvu1R2Tg==)
-  - fragment_type: example
-    sequence: 9
-    content: |
-      ### Watch Source Types
-
-      `watch`'s first argument can be different types of reactive "sources": it can be a ref (including computed refs), a reactive object, a [getter function](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get#description), or an array of multiple sources:
-
-      ```js
-      const x = ref(0)
-      const y = ref(0)
-
-      // single ref
-      watch(x, (newX) => {
-        console.log(`x is ${newX}`)
-      })
-
-      // getter
-      watch(
-        () => x.value + y.value,
-        (sum) => {
-          console.log(`sum of x + y is: ${sum}`)
-        }
-      )
-
-      // array of multiple sources
-      watch([x, () => y.value], ([newX, newY]) => {
-        console.log(`x is ${newX} and y is ${newY}`)
-      })
-      ```
-
-      Do note that you can't watch a property of a reactive object like this:
-
-      ```js
-      const obj = reactive({ count: 0 })
-
-      // this won't work because we are passing a number to watch()
-      watch(obj.count, (count) => {
+    ```js
+    // instead, use a getter:
+    watch(
+      () => obj.count,
+      (count) => {
         console.log(`Count is: ${count}`)
-      })
-      ```
-
-      Instead, use a getter:
-
-      ```js
-      // instead, use a getter:
-      watch(
-        () => obj.count,
-        (count) => {
-          console.log(`Count is: ${count}`)
-        }
-      )
-      ```
+      }
+    )
+    ```

@@ -1,11 +1,11 @@
 name: github-actions
-version: 1.0.2
+version: 1.0.3
 tier: platform
 description: |
   GitHub Actions CI/CD patterns — workflow YAML syntax, trigger events (push/pull_request/schedule/etc.), expression language + contexts (${{ }}), reusable workflows + composite actions, and dependency caching + artifact passing. Precision-favored platform tier; sourced from github/docs GitHub repo per R1 tier-2 procedure (registry github entry, content/actions/* markdown).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -21,16 +21,16 @@ skills:
   fragment_count: 9
 - skill_id: github-actions-reusable-workflows
   file: github-actions-reusable-workflows.yaml
-  fragment_count: 11
+  fragment_count: 12
 - skill_id: github-actions-workflow-syntax
   file: github-actions-workflow-syntax.yaml
-  fragment_count: 9
+  fragment_count: 12
 - skill_id: github-actions-expressions-and-contexts
   file: github-actions-expressions-and-contexts.yaml
   fragment_count: 9
 - skill_id: github-actions-composite-actions
   file: github-actions-composite-actions.yaml
-  fragment_count: 4
+  fragment_count: 6
 - skill_id: github-actions-concurrency
   file: github-actions-concurrency.yaml
   fragment_count: 10
@@ -42,10 +42,10 @@ skills:
   fragment_count: 7
 - skill_id: github-actions-oidc-providers
   file: github-actions-oidc-providers.yaml
-  fragment_count: 4
+  fragment_count: 7
 - skill_id: github-actions-release-and-publish
   file: github-actions-release-and-publish.yaml
-  fragment_count: 5
+  fragment_count: 6
 - skill_id: github-actions-secrets
   file: github-actions-secrets.yaml
   fragment_count: 6

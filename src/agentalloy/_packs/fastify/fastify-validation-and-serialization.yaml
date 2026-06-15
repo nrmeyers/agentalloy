@@ -1,22 +1,24 @@
 skill_type: domain
 skill_id: fastify-validation-and-serialization
 canonical_name: Fastify Validation and Serialization
-description: "Validate incoming request data and format outgoing responses in Fastify APIs using JSON Schema: define rules for inputs like query params and body, then serialize return values into efficient JSON, ensuring type safety and performance."
+description: 'Validate incoming request data and format outgoing responses in Fastify APIs using JSON Schema: define rules for inputs like query params and body, then serialize return values into efficient JSON, ensuring type safety and performance.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - fastify
-  - validation
-  - serialization
-  - json-schema
-  - ajv
+- fastify
+- validation
+- serialization
+- json-schema
+- ajv
 related:
 - fastify-error-handling-deep
 - fastify-performance-tuning
 - fastify-schema-typebox
 always_apply: false
-phase_scope: [build]
-category_scope: [framework]
+phase_scope:
+- build
+category_scope:
+- framework
 author: authoring-agent
 change_summary: initial authoring draft
 raw_prose: |
@@ -395,375 +397,377 @@ raw_prose: |
   >
   > fastify.
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Fastify uses JSON Schema for input validation (Ajv) and for response serialization (fast-json-stringify). Validation runs before the handler; serialization runs after, transforming the handler's return value into the wire response. Schemas can be inlined or shared via `addSchema()` and `$ref`. This skill covers validation + serialization end-to-end.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      Fastify uses a schema-based approach. We recommend using [JSON Schema](https://json-schema.org/) to validate routes and serialize outputs. Fastify compiles the schema into a highly performant function.
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Fastify uses JSON Schema for input validation (Ajv) and for response serialization (fast-json-stringify). Validation runs before the handler; serialization runs after, transforming the handler's return value into the wire response. Schemas can be inlined or shared via `addSchema()` and `$ref`. This skill covers validation + serialization end-to-end.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    Fastify uses a schema-based approach. We recommend using [JSON Schema](https://json-schema.org/) to validate routes and serialize outputs. Fastify compiles the schema into a highly performant function.
 
-      Validation is only attempted if the content type is `application/json`, unless the body schema uses the [`content`](#body-content-type-validation) property to specify validation per content type. When the body schema defines a `content` field, it must enumerate all possible content types the application expects to handle with the associated handler.
+    Validation is only attempted if the content type is `application/json`, unless the body schema uses the [`content`](#body-content-type-validation) property to specify validation per content type. When the body schema defines a `content` field, it must enumerate all possible content types the application expects to handle with the associated handler.
 
-      All examples use the [JSON Schema Draft 7](https://json-schema.org/draft-07) specification.
-  - fragment_type: guardrail
-    sequence: 3
-    content: |
-      > ⚠ Warning: Treat schema definitions as application code. Validation and serialization features use `new Function()`, which is unsafe with user-provided schemas. See [Ajv](https://www.npmjs.com/package/ajv) and [fast-json-stringify](https://www.npmjs.com/package/fast-json-stringify) for details.
-      >
-      > Whilst Fastify supports the [`$async` Ajv feature](https://ajv.js.org/guide/async-validation.html), it should not be used for initial validation. Accessing databases during validation may lead to Denial of Service attacks. Use [Fastify's hooks](/docs/v5.8.x/Reference/Hooks/.md) like `preHandler` for `async` tasks after validation.
-      >
-      > When using custom validators with async `preValidation` hooks, validators **must return** `{error}` objects instead of throwing errors. Throwing errors from custom validators will cause unhandled promise rejections that crash the application when combined with async hooks. See the [custom validator examples](#using-other-validation-libraries) below for the correct pattern.
-  - fragment_type: setup
-    sequence: 4
-    content: |
-      Validation and serialization are handled by two customizable dependencies:
+    All examples use the [JSON Schema Draft 7](https://json-schema.org/draft-07) specification.
+- fragment_type: guardrail
+  sequence: 3
+  content: |
+    > ⚠ Warning: Treat schema definitions as application code. Validation and serialization features use `new Function()`, which is unsafe with user-provided schemas. See [Ajv](https://www.npmjs.com/package/ajv) and [fast-json-stringify](https://www.npmjs.com/package/fast-json-stringify) for details.
+    >
+    > Whilst Fastify supports the [`$async` Ajv feature](https://ajv.js.org/guide/async-validation.html), it should not be used for initial validation. Accessing databases during validation may lead to Denial of Service attacks. Use [Fastify's hooks](/docs/v5.8.x/Reference/Hooks/.md) like `preHandler` for `async` tasks after validation.
+    >
+    > When using custom validators with async `preValidation` hooks, validators **must return** `{error}` objects instead of throwing errors. Throwing errors from custom validators will cause unhandled promise rejections that crash the application when combined with async hooks. See the [custom validator examples](#using-other-validation-libraries) below for the correct pattern.
+- fragment_type: setup
+  sequence: 4
+  content: |
+    Validation and serialization are handled by two customizable dependencies:
 
-      * [Ajv v8](https://www.npmjs.com/package/ajv) for request validation
-      * [fast-json-stringify](https://www.npmjs.com/package/fast-json-stringify) for response body serialization
+    * [Ajv v8](https://www.npmjs.com/package/ajv) for request validation
+    * [fast-json-stringify](https://www.npmjs.com/package/fast-json-stringify) for response body serialization
 
-      These dependencies share only the JSON schemas added to Fastify's instance via `.addSchema(schema)`.
-  - fragment_type: execution
-    sequence: 5
-    content: |
-      The `addSchema` API allows adding multiple schemas to the Fastify instance for reuse throughout the application. This API is encapsulated.
+    These dependencies share only the JSON schemas added to Fastify's instance via `.addSchema(schema)`.
+- fragment_type: execution
+  sequence: 5
+  content: |-
+    The `addSchema` API allows adding multiple schemas to the Fastify instance for reuse throughout the application. This API is encapsulated.
 
-      Shared schemas can be reused with the JSON Schema [**`$ref`**](https://datatracker.ietf.org/doc/html/draft-handrews-json-schema-01#section-8) keyword. Here is an overview of how references work:
+    Shared schemas can be reused with the JSON Schema [**`$ref`**](https://datatracker.ietf.org/doc/html/draft-handrews-json-schema-01#section-8) keyword. Here is an overview of how references work:
 
-      * `myField: { $ref: '#foo' }` searches for `$id: '#foo'` in the current schema
-      * `myField: { $ref: '#/definitions/foo' }` searches for `definitions.foo` in the current schema
-      * `myField: { $ref: 'http://url.com/sh.json#' }` searches for a shared schema with `$id: 'http://url.com/sh.json'`
-      * `myField: { $ref: 'http://url.com/sh.json#/definitions/foo' }` searches for a shared schema with `$id: 'http://url.com/sh.json'` and uses `definitions.foo`
-      * `myField: { $ref: 'http://url.com/sh.json#foo' }` searches for a shared schema with `$id: 'http://url.com/sh.json'` and looks for `$id: '#foo'` within it
+    * `myField: { $ref: '#foo' }` searches for `$id: '#foo'` in the current schema
+    * `myField: { $ref: '#/definitions/foo' }` searches for `definitions.foo` in the current schema
+    * `myField: { $ref: 'http://url.com/sh.json#' }` searches for a shared schema with `$id: 'http://url.com/sh.json'`
+    * `myField: { $ref: 'http://url.com/sh.json#/definitions/foo' }` searches for a shared schema with `$id: 'http://url.com/sh.json'` and uses `definitions.foo`
+    * `myField: { $ref: 'http://url.com/sh.json#foo' }` searches for a shared schema with `$id: 'http://url.com/sh.json'` and looks for `$id: '#foo'` within it
 
-      **Simple usage:**
+    **Simple usage:**
+- fragment_type: execution
+  sequence: 6
+  content: |-
+    ```
+    fastify.addSchema({
 
-      ```
-      fastify.addSchema({
+      $id: 'http://fastify.example/',
 
-        $id: 'http://fastify.example/',
+      type: 'object',
 
-        type: 'object',
+      properties: {
 
-        properties: {
+        hello: { type: 'string' }
 
-          hello: { type: 'string' }
+      }
 
-        }
-
-      })
+    })
 
 
 
-      fastify.post('/', {
+    fastify.post('/', {
 
-        handler () {},
+      handler () {},
 
-        schema: {
+      schema: {
 
-          body: {
+        body: {
 
-            type: 'array',
+          type: 'array',
 
-            items: { $ref: 'http://fastify.example#/properties/hello' }
-
-          }
-
-        }
-
-      })
-      ```
-
-      **`$ref` as root reference:**
-
-      ```
-      fastify.addSchema({
-
-        $id: 'commonSchema',
-
-        type: 'object',
-
-        properties: {
-
-          hello: { type: 'string' }
+          items: { $ref: 'http://fastify.example#/properties/hello' }
 
         }
 
-      })
+      }
+
+    })
+    ```
+
+    **`$ref` as root reference:**
+
+    ```
+    fastify.addSchema({
+
+      $id: 'commonSchema',
+
+      type: 'object',
+
+      properties: {
+
+        hello: { type: 'string' }
+
+      }
+
+    })
 
 
 
-      fastify.post('/', {
+    fastify.post('/', {
 
-        handler () {},
+      handler () {},
 
-        schema: {
+      schema: {
 
-          body: { $ref: 'commonSchema#' },
+        body: { $ref: 'commonSchema#' },
 
-          headers: { $ref: 'commonSchema#' }
+        headers: { $ref: 'commonSchema#' }
 
-        }
+      }
 
-      })
-      ```
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      If the validator and serializer are customized, `.addSchema` is not useful since Fastify no longer controls them. To access schemas added to the Fastify instance, use `.getSchemas()`:
+    })
+    ```
+- fragment_type: execution
+  sequence: 7
+  content: |
+    If the validator and serializer are customized, `.addSchema` is not useful since Fastify no longer controls them. To access schemas added to the Fastify instance, use `.getSchemas()`:
 
-      ```
-      fastify.addSchema({
+    ```
+    fastify.addSchema({
 
-        $id: 'schemaId',
+      $id: 'schemaId',
 
-        type: 'object',
+      type: 'object',
 
-        properties: {
+      properties: {
 
-          hello: { type: 'string' }
+        hello: { type: 'string' }
 
-        }
+      }
 
-      })
-
-
-
-      const mySchemas = fastify.getSchemas()
-
-      const mySchema = fastify.getSchema('schemaId')
-      ```
-
-      The `getSchemas` function is encapsulated and returns shared schemas available in the selected scope:
-
-      ```
-      fastify.addSchema({ $id: 'one', my: 'hello' })
-
-      // will return only `one` schema
-
-      fastify.get('/', (request, reply) => { reply.send(fastify.getSchemas()) })
+    })
 
 
 
-      fastify.register((instance, opts, done) => {
+    const mySchemas = fastify.getSchemas()
 
-        instance.addSchema({ $id: 'two', my: 'ciao' })
+    const mySchema = fastify.getSchema('schemaId')
+    ```
 
-        // will return `one` and `two` schemas
+    The `getSchemas` function is encapsulated and returns shared schemas available in the selected scope:
 
-        instance.get('/sub', (request, reply) => { reply.send(instance.getSchemas()) })
+    ```
+    fastify.addSchema({ $id: 'one', my: 'hello' })
+
+    // will return only `one` schema
+
+    fastify.get('/', (request, reply) => { reply.send(fastify.getSchemas()) })
 
 
 
-        instance.register((subinstance, opts, done) => {
+    fastify.register((instance, opts, done) => {
 
-          subinstance.addSchema({ $id: 'three', my: 'hola' })
+      instance.addSchema({ $id: 'two', my: 'ciao' })
 
-          // will return `one`, `two` and `three`
+      // will return `one` and `two` schemas
 
-          subinstance.get('/deep', (request, reply) => { reply.send(subinstance.getSchemas()) })
+      instance.get('/sub', (request, reply) => { reply.send(instance.getSchemas()) })
 
-          done()
 
-        })
+
+      instance.register((subinstance, opts, done) => {
+
+        subinstance.addSchema({ $id: 'three', my: 'hola' })
+
+        // will return `one`, `two` and `three`
+
+        subinstance.get('/deep', (request, reply) => { reply.send(subinstance.getSchemas()) })
 
         done()
 
       })
-      ```
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      Route validation relies on [Ajv v8](https://www.npmjs.com/package/ajv), a high-performance JSON Schema validator. To validate input, add the required fields to the route schema.
 
-      Supported validations include:
+      done()
 
-      * `body`: validates the request body for POST, PUT, or PATCH methods.
-      * `querystring` or `query`: validates the query string.
-      * `params`: validates the route parameters.
-      * `headers`: validates the request headers.
+    })
+    ```
+- fragment_type: execution
+  sequence: 8
+  content: |
+    Route validation relies on [Ajv v8](https://www.npmjs.com/package/ajv), a high-performance JSON Schema validator. To validate input, add the required fields to the route schema.
 
-      Validations can be a complete JSON Schema object with a `type` of `'object'` and a `'properties'` object containing parameters, or a simpler variation listing parameters at the top level.
+    Supported validations include:
 
-      > ℹ For using the latest Ajv (v8), refer to the [`schemaController`](/docs/v5.8.x/Reference/Server/.md#schema-controller) section.
-  - fragment_type: example
-    sequence: 8
-    content: |
-      ```
-      const bodyJsonSchema = {
+    * `body`: validates the request body for POST, PUT, or PATCH methods.
+    * `querystring` or `query`: validates the query string.
+    * `params`: validates the route parameters.
+    * `headers`: validates the request headers.
 
-        type: 'object',
+    Validations can be a complete JSON Schema object with a `type` of `'object'` and a `'properties'` object containing parameters, or a simpler variation listing parameters at the top level.
 
-        required: ['requiredKey'],
+    > ℹ For using the latest Ajv (v8), refer to the [`schemaController`](/docs/v5.8.x/Reference/Server/.md#schema-controller) section.
+- fragment_type: example
+  sequence: 9
+  content: |
+    ```
+    const bodyJsonSchema = {
 
-        properties: {
+      type: 'object',
 
-          someKey: { type: 'string' },
+      required: ['requiredKey'],
 
-          someOtherKey: { type: 'number' },
+      properties: {
 
-          requiredKey: {
+        someKey: { type: 'string' },
 
-            type: 'array',
+        someOtherKey: { type: 'number' },
 
-            maxItems: 3,
+        requiredKey: {
 
-            items: { type: 'integer' }
+          type: 'array',
 
-          },
+          maxItems: 3,
 
-          nullableKey: { type: ['number', 'null'] }, // or { type: 'number', nullable: true }
-
-          multipleTypesKey: { type: ['boolean', 'number'] },
-
-          multipleRestrictedTypesKey: {
-
-            oneOf: [
-
-              { type: 'string', maxLength: 5 },
-
-              { type: 'number', minimum: 10 }
-
-            ]
-
-          },
-
-          enumKey: {
-
-            type: 'string',
-
-            enum: ['John', 'Foo']
-
-          },
-
-          notTypeKey: {
-
-            not: { type: 'array' }
-
-          }
-
-        }
-
-      }
-
-
-
-      const queryStringJsonSchema = {
-
-        type: 'object',
-
-        properties: {
-
-          name: { type: 'string' },
-
-          excitement: { type: 'integer' }
-
-        }
-
-      }
-
-
-
-      const paramsJsonSchema = {
-
-        type: 'object',
-
-        properties: {
-
-          par1: { type: 'string' },
-
-          par2: { type: 'number' }
-
-        }
-
-      }
-
-
-
-      const headersJsonSchema = {
-
-        type: 'object',
-
-        properties: {
-
-          'x-foo': { type: 'string' }
+          items: { type: 'integer' }
 
         },
 
-        required: ['x-foo']
+        nullableKey: { type: ['number', 'null'] }, // or { type: 'number', nullable: true }
+
+        multipleTypesKey: { type: ['boolean', 'number'] },
+
+        multipleRestrictedTypesKey: {
+
+          oneOf: [
+
+            { type: 'string', maxLength: 5 },
+
+            { type: 'number', minimum: 10 }
+
+          ]
+
+        },
+
+        enumKey: {
+
+          type: 'string',
+
+          enum: ['John', 'Foo']
+
+        },
+
+        notTypeKey: {
+
+          not: { type: 'array' }
+
+        }
 
       }
 
+    }
 
 
-      const schema = {
 
-        body: bodyJsonSchema,
+    const queryStringJsonSchema = {
 
-        querystring: queryStringJsonSchema,
+      type: 'object',
 
-        params: paramsJsonSchema,
+      properties: {
 
-        headers: headersJsonSchema
+        name: { type: 'string' },
+
+        excitement: { type: 'integer' }
 
       }
 
+    }
 
 
-      fastify.post('/the/url', { schema }, handler)
-      ```
-  - fragment_type: execution
-    sequence: 9
-    content: |
-      For `body` schema, it is further possible to differentiate the schema per content type by nesting the schemas inside `content` property. The schema validation will be applied based on the `Content-Type` header in the request.
 
-      ```
-      fastify.post('/the/url', {
+    const paramsJsonSchema = {
 
-        schema: {
+      type: 'object',
 
-          body: {
+      properties: {
 
-            content: {
+        par1: { type: 'string' },
 
-              'application/json': {
+        par2: { type: 'number' }
 
-                schema: { type: 'object' }
+      }
 
-              },
+    }
 
-              'text/plain': {
 
-                schema: { type: 'string' }
 
-              }
+    const headersJsonSchema = {
 
-              // Other content types will not be validated
+      type: 'object',
+
+      properties: {
+
+        'x-foo': { type: 'string' }
+
+      },
+
+      required: ['x-foo']
+
+    }
+
+
+
+    const schema = {
+
+      body: bodyJsonSchema,
+
+      querystring: queryStringJsonSchema,
+
+      params: paramsJsonSchema,
+
+      headers: headersJsonSchema
+
+    }
+
+
+
+    fastify.post('/the/url', { schema }, handler)
+    ```
+- fragment_type: execution
+  sequence: 10
+  content: |
+    For `body` schema, it is further possible to differentiate the schema per content type by nesting the schemas inside `content` property. The schema validation will be applied based on the `Content-Type` header in the request.
+
+    ```
+    fastify.post('/the/url', {
+
+      schema: {
+
+        body: {
+
+          content: {
+
+            'application/json': {
+
+              schema: { type: 'object' }
+
+            },
+
+            'text/plain': {
+
+              schema: { type: 'string' }
 
             }
+
+            // Other content types will not be validated
 
           }
 
         }
 
-      }, handler)
-      ```
+      }
 
-      > ⚠ Warning: When using [custom content type parsers](/docs/v5.8.x/Reference/ContentTypeParser/.md), the parsed body is validated **only** when the request content type matches a key in the schema `content` map.
-      >
-      > Schema selection uses an exact match on the request's [essence MIME type](https://mimesniff.spec.whatwg.org/#mime-type-miscellaneous) (for example, `application/json`). If a parser is registered with a regular expression (for example, `/^application\/.*json$/`), the parser can accept more content types than the `content` map covers. Requests in that gap are parsed but **not validated**.
-      >
-      > Ensure every content type accepted by the parser has a corresponding key in the `content` map, or use a catch-all body schema without `content` when strict per-content-type discrimination is not required.
-  - fragment_type: example
-    sequence: 10
-    content: |
-      ```
-      // Add a custom parser for YAML
+    }, handler)
+    ```
 
-      fastify.addContentTypeParser('application/yaml', { parseAs: 'string' }, (req, body, done) => {
+    > ⚠ Warning: When using [custom content type parsers](/docs/v5.8.x/Reference/ContentTypeParser/.md), the parsed body is validated **only** when the request content type matches a key in the schema `content` map.
+    >
+    > Schema selection uses an exact match on the request's [essence MIME type](https://mimesniff.spec.whatwg.org/#mime-type-miscellaneous) (for example, `application/json`). If a parser is registered with a regular expression (for example, `/^application\/.*json$/`), the parser can accept more content types than the `content` map covers. Requests in that gap are parsed but **not validated**.
+    >
+    > Ensure every content type accepted by the parser has a corresponding key in the `content` map, or use a catch-all body schema without `content` when strict per-content-type discrimination is not required.
+- fragment_type: example
+  sequence: 11
+  content: |-
+    ```
+    // Add a custom parser for YAML
 
-        done(null, YAML.parse(body))
+    fastify.addContentTypeParser('application/yaml', { parseAs: 'string' }, (req, body, done) => {
 
-      })
-      ```
+      done(null, YAML.parse(body))
+
+    })
+    ```

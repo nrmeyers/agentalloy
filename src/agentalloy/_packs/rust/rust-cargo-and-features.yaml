@@ -1,21 +1,27 @@
 skill_type: domain
 skill_id: rust-cargo-and-features
 canonical_name: Rust Cargo and Features (Cargo.toml, Feature Flags, Workspaces, crates.io)
-description: "Manage Rust project dependencies, build configurations, and workspace structures: define packages in Cargo.toml, enable optional functionality with feature flags, and publish to crates.io while handling dependency resolution and version constraints."
+description: 'Manage Rust project dependencies, build configurations, and workspace structures: define packages in Cargo.toml, enable optional functionality with feature flags, and publish to crates.io while handling dependency resolution and version constraints.'
 category: tooling
 skill_class: domain
-domain_tags: [cargo-manifest, feature-unification, workspace-members, dev-dependencies, lockfile-policy, rust]
+domain_tags:
+- cargo-manifest
+- feature-unification
+- workspace-members
+- dev-dependencies
+- lockfile-policy
+- rust
 related:
 - github-actions-caching-and-artifacts
 - rust-ownership-and-borrowing
 - rust-testing-idioms
 always_apply: false
-phase_scope: [build]
+phase_scope:
+- build
 category_scope: language
 author: navistone
 change_summary: |
   Initial authoring 2026-05-05. Sources — Cargo Book https://doc.rust-lang.org/cargo/index.html (verified 2026-05-05 against fixtures/upstream/curated/rust.yaml topic `packaging_and_dependency_management`); Manifest reference https://doc.rust-lang.org/cargo/reference/manifest.html; Features reference https://doc.rust-lang.org/cargo/reference/features.html; Workspaces reference https://doc.rust-lang.org/cargo/reference/workspaces.html; SemVer compatibility https://doc.rust-lang.org/cargo/reference/semver.html; Cargo team blog post on the lockfile question (2023). Skill scope: how `Cargo.toml` is structured, how features compose under cargo's unification rule, how workspaces share a lockfile and inherit metadata, what the modern lockfile-commit guidance is for binaries vs libraries, and how SemVer interacts with version-requirement operators on crates.io. Out of scope: the build-script (`build.rs`) protocol beyond a brief mention, custom registries, and `cargo` plugin authoring.
-
 raw_prose: |
   # Rust Cargo and Features
 
@@ -209,228 +215,218 @@ raw_prose: |
   - [ ] Workspaces use `resolver = "2"` (`grep -n 'resolver' Cargo.toml` shows `"2"`).
   - [ ] Workspace members consume shared deps via `serde.workspace = true` style inheritance; no duplicated version strings across member manifests.
   - [ ] No feature *removes* behavior — review every feature's `#[cfg(feature = ...)]` blocks; each must only add code paths.
-
 fragments:
-  - sequence: 1
-    fragment_type: rationale
-    content: |
-      # Rust Cargo and Features
+- sequence: 1
+  fragment_type: rationale
+  content: |
+    # Rust Cargo and Features
 
-      Cargo is the package manager, build driver, and publishing tool for Rust. The rule is one sentence: every Rust project is a crate (or a workspace of crates), every crate has a `Cargo.toml` that declares its dependencies and features, and cargo guarantees a single resolved dependency graph by *unifying* features across the graph — so features must be designed to be additive or you will break consumers in ways that are very hard to debug. Most production cargo friction comes from non-additive features (turning something *off* via a feature), wildcard version requirements, ignoring `Cargo.lock` for libraries, and mixing two crates that re-export the same dependency at incompatible major versions.
+    Cargo is the package manager, build driver, and publishing tool for Rust. The rule is one sentence: every Rust project is a crate (or a workspace of crates), every crate has a `Cargo.toml` that declares its dependencies and features, and cargo guarantees a single resolved dependency graph by *unifying* features across the graph — so features must be designed to be additive or you will break consumers in ways that are very hard to debug. Most production cargo friction comes from non-additive features (turning something *off* via a feature), wildcard version requirements, ignoring `Cargo.lock` for libraries, and mixing two crates that re-export the same dependency at incompatible major versions.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## `Cargo.toml` structure
 
-  - sequence: 2
-    fragment_type: example
-    content: |
-      ## `Cargo.toml` structure
+    A typical manifest:
 
-      A typical manifest:
+    ```toml
+    [package]
+    name = "my_crate"
+    version = "0.3.1"
+    edition = "2021"
+    rust-version = "1.74"
 
-      ```toml
-      [package]
-      name = "my_crate"
-      version = "0.3.1"
-      edition = "2021"
-      rust-version = "1.74"
+    [dependencies]
+    serde = { version = "1.0", features = ["derive"] }
+    tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 
-      [dependencies]
-      serde = { version = "1.0", features = ["derive"] }
-      tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+    [dev-dependencies]
+    proptest = "1"
 
-      [dev-dependencies]
-      proptest = "1"
+    [build-dependencies]
+    cc = "1"
 
-      [build-dependencies]
-      cc = "1"
+    [features]
+    default = ["std"]
+    std = []
+    async = ["dep:tokio"]
 
-      [features]
-      default = ["std"]
-      std = []
-      async = ["dep:tokio"]
+    [[bin]]
+    name = "my_tool"
+    path = "src/bin/my_tool.rs"
 
-      [[bin]]
-      name = "my_tool"
-      path = "src/bin/my_tool.rs"
+    [lib]
+    name = "my_crate"
+    crate-type = ["rlib"]
 
-      [lib]
-      name = "my_crate"
-      crate-type = ["rlib"]
+    [profile.release]
+    lto = "thin"
+    codegen-units = 1
+    ```
 
-      [profile.release]
-      lto = "thin"
-      codegen-units = 1
-      ```
+    Key tables:
+- fragment_type: example
+  sequence: 3
+  content: |-
+    - **`[package]`** — identity (`name`, `version`), `edition` (the language edition: 2015, 2018, 2021, 2024), and `rust-version` (the minimum supported toolchain — MSRV). Cargo refuses to build with an older toolchain than `rust-version`.
+    - **`[dependencies]`** — runtime deps. Each entry is either a version string (`"1.0"`) or a table with `version`, `features`, `optional`, `default-features`, `path`, `git`, etc.
+    - **`[dev-dependencies]`** — only built for `cargo test`, `cargo bench`, and examples. NOT seen by downstream consumers. Putting a test-only crate here keeps it out of the dependency graph for everyone who depends on you.
+    - **`[build-dependencies]`** — only for `build.rs`.
+    - **`[features]`** — feature flags (see below).
+    - **`[[bin]]`, `[lib]`** — binary and library targets. `crate-type = ["rlib"]` is the default for libs; `["cdylib"]` for FFI; `["staticlib"]` for static C linking.
+    - **`[profile.dev]`, `[profile.release]`, `[profile.test]`, `[profile.bench]`** — compiler tuning per build mode. `[profile.release.package."*"]` overrides apply to all transitive deps.
+- fragment_type: example
+  sequence: 4
+  content: |-
+    ## Feature flags and the unification rule
 
-      Key tables:
+    Features are named opt-in switches that conditionally compile code. They are declared under `[features]` and consumed via `#[cfg(feature = "foo")]`.
 
-      - **`[package]`** — identity (`name`, `version`), `edition` (the language edition: 2015, 2018, 2021, 2024), and `rust-version` (the minimum supported toolchain — MSRV). Cargo refuses to build with an older toolchain than `rust-version`.
-      - **`[dependencies]`** — runtime deps. Each entry is either a version string (`"1.0"`) or a table with `version`, `features`, `optional`, `default-features`, `path`, `git`, etc.
-      - **`[dev-dependencies]`** — only built for `cargo test`, `cargo bench`, and examples. NOT seen by downstream consumers. Putting a test-only crate here keeps it out of the dependency graph for everyone who depends on you.
-      - **`[build-dependencies]`** — only for `build.rs`.
-      - **`[features]`** — feature flags (see below).
-      - **`[[bin]]`, `[lib]`** — binary and library targets. `crate-type = ["rlib"]` is the default for libs; `["cdylib"]` for FFI; `["staticlib"]` for static C linking.
-      - **`[profile.dev]`, `[profile.release]`, `[profile.test]`, `[profile.bench]`** — compiler tuning per build mode. `[profile.release.package."*"]` overrides apply to all transitive deps.
+    ```toml
+    [features]
+    default = ["std", "json"]
+    std = []
+    json = ["dep:serde_json"]
+    full = ["std", "json", "async"]
+    async = ["dep:tokio", "tokio?/rt-multi-thread"]
+    ```
 
-  - sequence: 3
-    fragment_type: example
-    content: |
-      ## Feature flags and the unification rule
+    Three syntaxes inside the feature value list (verified 2026-05-05 against doc.rust-lang.org/cargo/reference/features.html):
 
-      Features are named opt-in switches that conditionally compile code. They are declared under `[features]` and consumed via `#[cfg(feature = "foo")]`.
+    - `"std"` — enables another feature in this same crate.
+    - `"dep:tokio"` — activates an optional dependency (one declared with `optional = true`). Without `dep:`, the feature name and the dep name collide and the dep is implicitly turned into a feature, which leaks the dep name to consumers.
+    - `"tokio?/rt-multi-thread"` — if `tokio` is enabled (by some other feature), also enable its `rt-multi-thread` feature. Without the `?`, this would force `tokio` on.
+- fragment_type: example
+  sequence: 5
+  content: |-
+    **The unification rule.** Cargo resolves the dependency graph once for the whole build. If crate A depends on `serde` with `features = ["std"]` and crate B depends on `serde` with `features = ["derive"]`, the resolved set is `{"std", "derive"}` — the union. Features can only be turned *on*, never off. This is why features must be **additive**: enabling a feature can only add behavior, never remove or change existing behavior.
 
-      ```toml
-      [features]
-      default = ["std", "json"]
-      std = []
-      json = ["dep:serde_json"]
-      full = ["std", "json", "async"]
-      async = ["dep:tokio", "tokio?/rt-multi-thread"]
-      ```
+    Example of the failure mode: crate A enables `serde/std`, expecting allocation and the standard library. Crate B is `no_std` and expects `serde` without `std`. They are both in the same build. Cargo unifies, `std` is on, B's `no_std` build breaks at compile time with cryptic errors about missing `core` symbols. A non-additive feature ("turn off allocation") is the bug — there is no way to design around it once shipped.
 
-      Three syntaxes inside the feature value list (verified 2026-05-05 against doc.rust-lang.org/cargo/reference/features.html):
+    Practical rules for feature design: features are *additive only* — if you want "X turns off Y", invert it and make Y opt-in. Default features should be a sensible baseline, since consumers who want a leaner build will pass `default-features = false`. Document every feature in your README — consumers cannot guess what `full` enables. Avoid feature names that look like dep names unless you use `dep:` syntax.
+- sequence: 6
+  fragment_type: example
+  content: |
+    ## Workspaces
 
-      - `"std"` — enables another feature in this same crate.
-      - `"dep:tokio"` — activates an optional dependency (one declared with `optional = true`). Without `dep:`, the feature name and the dep name collide and the dep is implicitly turned into a feature, which leaks the dep name to consumers.
-      - `"tokio?/rt-multi-thread"` — if `tokio` is enabled (by some other feature), also enable its `rt-multi-thread` feature. Without the `?`, this would force `tokio` on.
+    A workspace is a top-level directory with one `Cargo.toml` containing `[workspace]` and N member crates underneath. All members share a single `Cargo.lock`, a single `target/` directory, and (since Rust 1.64+, verified 2026-05-05) can inherit common metadata from `[workspace.package]` and `[workspace.dependencies]`.
 
-      **The unification rule.** Cargo resolves the dependency graph once for the whole build. If crate A depends on `serde` with `features = ["std"]` and crate B depends on `serde` with `features = ["derive"]`, the resolved set is `{"std", "derive"}` — the union. Features can only be turned *on*, never off. This is why features must be **additive**: enabling a feature can only add behavior, never remove or change existing behavior.
+    ```toml
+    # ./Cargo.toml at the workspace root
+    [workspace]
+    resolver = "2"
+    members = ["crates/*"]
 
-      Example of the failure mode: crate A enables `serde/std`, expecting allocation and the standard library. Crate B is `no_std` and expects `serde` without `std`. They are both in the same build. Cargo unifies, `std` is on, B's `no_std` build breaks at compile time with cryptic errors about missing `core` symbols. A non-additive feature ("turn off allocation") is the bug — there is no way to design around it once shipped.
+    [workspace.package]
+    version = "0.1.0"
+    edition = "2021"
+    rust-version = "1.74"
+    license = "Apache-2.0"
 
-      Practical rules for feature design: features are *additive only* — if you want "X turns off Y", invert it and make Y opt-in. Default features should be a sensible baseline, since consumers who want a leaner build will pass `default-features = false`. Document every feature in your README — consumers cannot guess what `full` enables. Avoid feature names that look like dep names unless you use `dep:` syntax.
+    [workspace.dependencies]
+    serde = { version = "1.0", features = ["derive"] }
+    tokio = { version = "1", features = ["rt-multi-thread"] }
+    ```
 
-  - sequence: 4
-    fragment_type: example
-    content: |
-      ## Workspaces
+    ```toml
+    # ./crates/foo/Cargo.toml
+    [package]
+    name = "foo"
+    version.workspace = true
+    edition.workspace = true
+    rust-version.workspace = true
+    license.workspace = true
 
-      A workspace is a top-level directory with one `Cargo.toml` containing `[workspace]` and N member crates underneath. All members share a single `Cargo.lock`, a single `target/` directory, and (since Rust 1.64+, verified 2026-05-05) can inherit common metadata from `[workspace.package]` and `[workspace.dependencies]`.
+    [dependencies]
+    serde.workspace = true
+    ```
 
-      ```toml
-      # ./Cargo.toml at the workspace root
-      [workspace]
-      resolver = "2"
-      members = ["crates/*"]
+    Why this matters: in a multi-crate repo, you want every crate to use the *same* version of every shared dep, with the *same* features, so the unification rule stays predictable. `[workspace.dependencies]` is the canonical way to enforce that. Without it, drift sneaks in and breaks unification at the worst time.
 
-      [workspace.package]
-      version = "0.1.0"
-      edition = "2021"
-      rust-version = "1.74"
-      license = "Apache-2.0"
+    `resolver = "2"` is required for the modern feature resolver, which (a) does not unify features between dev-dependencies and normal deps, and (b) does not unify across target-platform-conditional deps. Always use it for new workspaces. Single-crate 2021 and 2024 edition projects get resolver 2 automatically.
+- sequence: 7
+  fragment_type: rationale
+  content: |
+    ## Lockfile policy
 
-      [workspace.dependencies]
-      serde = { version = "1.0", features = ["derive"] }
-      tokio = { version = "1", features = ["rt-multi-thread"] }
-      ```
+    `Cargo.lock` records the exact resolved version of every direct and transitive dependency. The historic guidance was "commit it for binaries, ignore it for libraries." Since 2023, the Cargo team's published guidance is to **commit `Cargo.lock` for libraries too** (verified 2026-05-05 against the Cargo team's blog). Reasons: it makes CI reproducible against a known-good resolution, it lets `cargo audit` and Dependabot operate against a real lockfile, and it does not affect downstream consumers (they ignore your lockfile and produce their own at build time). The only case where ignoring it makes sense is a workspace of pure libraries where every CI run intentionally tests against the latest resolution — and even then, most projects commit it and run a separate "freshest deps" job with `cargo update`.
 
-      ```toml
-      # ./crates/foo/Cargo.toml
-      [package]
-      name = "foo"
-      version.workspace = true
-      edition.workspace = true
-      rust-version.workspace = true
-      license.workspace = true
+    Run `cargo update` deliberately, not as a habit. `cargo update -p crate_name` updates a single crate. `cargo update --precise X.Y.Z -p crate_name` pins exactly. CI should NOT run `cargo update` automatically — that defeats the point of having a lockfile. The pattern that works: developer commits a Cargo.lock, CI builds against it, periodic separate job runs `cargo update` and opens a PR with the diff for human review.
+- sequence: 8
+  fragment_type: execution
+  content: |
+    ## crates.io, SemVer, and version requirements
 
-      [dependencies]
-      serde.workspace = true
-      ```
+    Cargo follows SemVer with one well-known wrinkle: pre-1.0 versions treat the *minor* component as the breaking-change axis. So:
 
-      Why this matters: in a multi-crate repo, you want every crate to use the *same* version of every shared dep, with the *same* features, so the unification rule stays predictable. `[workspace.dependencies]` is the canonical way to enforce that. Without it, drift sneaks in and breaks unification at the worst time.
+    - `0.2.5 → 0.2.6` is a non-breaking patch.
+    - `0.2.5 → 0.3.0` is breaking.
+    - `1.2.5 → 1.3.0` is non-breaking; `1.2.5 → 2.0.0` is breaking.
 
-      `resolver = "2"` is required for the modern feature resolver, which (a) does not unify features between dev-dependencies and normal deps, and (b) does not unify across target-platform-conditional deps. Always use it for new workspaces. Single-crate 2021 and 2024 edition projects get resolver 2 automatically.
+    Version requirements in `Cargo.toml` (verified 2026-05-05 against doc.rust-lang.org/cargo/reference/specifying-dependencies.html):
 
-  - sequence: 5
-    fragment_type: rationale
-    content: |
-      ## Lockfile policy
+    - `"1.2.3"` is shorthand for `"^1.2.3"` — the **caret** requirement, the default. Means `>=1.2.3, <2.0.0` for 1.x; `>=0.2.3, <0.3.0` for 0.2.x; `>=0.0.3, <0.0.4` for 0.0.x.
+    - `"~1.2.3"` — **tilde**: `>=1.2.3, <1.3.0`.
+    - `"=1.2.3"` — exact pin. Avoid except for tightly-coupled internal crates.
+    - `">=1.2, <1.5"` — explicit range.
+    - `"*"` — any version. **Crates.io rejects publish of crates with a `*` requirement on a registry dep.** Treat `*` as a bug.
 
-      `Cargo.lock` records the exact resolved version of every direct and transitive dependency. The historic guidance was "commit it for binaries, ignore it for libraries." Since 2023, the Cargo team's published guidance is to **commit `Cargo.lock` for libraries too** (verified 2026-05-05 against the Cargo team's blog). Reasons: it makes CI reproducible against a known-good resolution, it lets `cargo audit` and Dependabot operate against a real lockfile, and it does not affect downstream consumers (they ignore your lockfile and produce their own at build time). The only case where ignoring it makes sense is a workspace of pure libraries where every CI run intentionally tests against the latest resolution — and even then, most projects commit it and run a separate "freshest deps" job with `cargo update`.
+    Publishing flow:
 
-      Run `cargo update` deliberately, not as a habit. `cargo update -p crate_name` updates a single crate. `cargo update --precise X.Y.Z -p crate_name` pins exactly. CI should NOT run `cargo update` automatically — that defeats the point of having a lockfile. The pattern that works: developer commits a Cargo.lock, CI builds against it, periodic separate job runs `cargo update` and opens a PR with the diff for human review.
+    ```bash
+    cargo publish --dry-run            # validate manifest, packaging, deps
+    cargo publish                      # upload to crates.io
+    cargo yank --version 0.3.1 my_crate # mark a broken release un-resolvable
+    cargo yank --undo --version 0.3.1 my_crate  # reverse a yank
+    ```
 
-  - sequence: 6
-    fragment_type: execution
-    content: |
-      ## crates.io, SemVer, and version requirements
+    Yank is not a delete — the tarball stays available so existing users do not break, but new resolutions skip the yanked version. `cargo yank` is the right response to "I just published a broken version"; deletion is not available.
+- sequence: 9
+  fragment_type: example
+  content: |
+    ## Build profiles
 
-      Cargo follows SemVer with one well-known wrinkle: pre-1.0 versions treat the *minor* component as the breaking-change axis. So:
+    Profiles tune the compiler for different goals.
 
-      - `0.2.5 → 0.2.6` is a non-breaking patch.
-      - `0.2.5 → 0.3.0` is breaking.
-      - `1.2.5 → 1.3.0` is non-breaking; `1.2.5 → 2.0.0` is breaking.
+    ```toml
+    [profile.dev]
+    opt-level = 0
+    debug = true
 
-      Version requirements in `Cargo.toml` (verified 2026-05-05 against doc.rust-lang.org/cargo/reference/specifying-dependencies.html):
+    [profile.release]
+    opt-level = 3
+    lto = "thin"          # or "fat" for maximum link-time optimization
+    codegen-units = 1     # fewer units = better optimization, slower compile
+    panic = "abort"       # smaller binary, no unwinding
+    strip = "symbols"
 
-      - `"1.2.3"` is shorthand for `"^1.2.3"` — the **caret** requirement, the default. Means `>=1.2.3, <2.0.0` for 1.x; `>=0.2.3, <0.3.0` for 0.2.x; `>=0.0.3, <0.0.4` for 0.0.x.
-      - `"~1.2.3"` — **tilde**: `>=1.2.3, <1.3.0`.
-      - `"=1.2.3"` — exact pin. Avoid except for tightly-coupled internal crates.
-      - `">=1.2, <1.5"` — explicit range.
-      - `"*"` — any version. **Crates.io rejects publish of crates with a `*` requirement on a registry dep.** Treat `*` as a bug.
+    [profile.release.package."*"]
+    opt-level = 3
+    ```
 
-      Publishing flow:
+    `panic = "abort"` is appropriate for binaries that should crash hard on panics; libraries should not set it because consumers may rely on unwinding. `lto = "thin"` is a good default — significant gains, modest compile-time cost. `codegen-units = 1` plus `lto = "fat"` is the smallest/fastest binary, but compile times grow significantly. The `[profile.release.package."*"]` table applies to all transitive dependencies, useful when you want aggressive optimization on deps even in profiles where your own code is less optimized (e.g., a fast-iterate dev profile that still compiles deps with `opt-level = 3`).
+- fragment_type: guardrail
+  sequence: 10
+  content: |-
+    ## Anti-patterns
 
-      ```bash
-      cargo publish --dry-run            # validate manifest, packaging, deps
-      cargo publish                      # upload to crates.io
-      cargo yank --version 0.3.1 my_crate # mark a broken release un-resolvable
-      cargo yank --undo --version 0.3.1 my_crate  # reverse a yank
-      ```
+    - **Non-additive features.** A feature that turns something *off* (e.g., a `no_std` feature, when the default is `std`). Invert: make `std` opt-in, `default-features = false` is `no_std`. This is the single most common cargo footgun. - **`"*"` version requirements.** Bypasses SemVer entirely; crates.io rejects them on publish. Even for path/git deps, `*` is a smell. - **Ignoring `Cargo.lock` in libraries.** Modern guidance is to commit it. Reproducible CI matters more than the historic argument that "consumers ignore it anyway."
+    - **`cargo update` in CI without intent.** Updates the lockfile every build, defeats reproducibility, hides regressions until production. - **Re-exporting a dependency at two incompatible major versions.** If your public API exposes `serde::Serialize`, and a consumer has a different major version of `serde` in scope, type-checking fails with `expected serde::Serialize, found serde::Serialize` (same name, different crate). Pin one major version per public API surface. - **Test-only deps in `[dependencies]`.** Bloats the dependency graph for every consumer. Move to `[dev-dependencies]`. - **Hand-editing `Cargo.lock`.** Use `cargo update --precise` instead.
+- fragment_type: guardrail
+  sequence: 11
+  content: '- **Mixing `optional = true` deps without `dep:` feature syntax.** Implicitly creates a feature with the same name as the dep, which leaks dep names into your public feature surface and makes them impossible to rename. - **`default = ["full"]` where `full` is a kitchen-sink alias.** Forces every consumer to compile every feature. Default to a small set; let consumers opt in. - **Workspace members with drifting dep versions.** Same crate at two versions inside one workspace defeats unification. Use `[workspace.dependencies]` and `serde.workspace = true`.'
+- sequence: 12
+  fragment_type: verification
+  content: |
+    ## Verification
 
-      Yank is not a delete — the tarball stays available so existing users do not break, but new resolutions skip the yanked version. `cargo yank` is the right response to "I just published a broken version"; deletion is not available.
-
-  - sequence: 7
-    fragment_type: example
-    content: |
-      ## Build profiles
-
-      Profiles tune the compiler for different goals.
-
-      ```toml
-      [profile.dev]
-      opt-level = 0
-      debug = true
-
-      [profile.release]
-      opt-level = 3
-      lto = "thin"          # or "fat" for maximum link-time optimization
-      codegen-units = 1     # fewer units = better optimization, slower compile
-      panic = "abort"       # smaller binary, no unwinding
-      strip = "symbols"
-
-      [profile.release.package."*"]
-      opt-level = 3
-      ```
-
-      `panic = "abort"` is appropriate for binaries that should crash hard on panics; libraries should not set it because consumers may rely on unwinding. `lto = "thin"` is a good default — significant gains, modest compile-time cost. `codegen-units = 1` plus `lto = "fat"` is the smallest/fastest binary, but compile times grow significantly. The `[profile.release.package."*"]` table applies to all transitive dependencies, useful when you want aggressive optimization on deps even in profiles where your own code is less optimized (e.g., a fast-iterate dev profile that still compiles deps with `opt-level = 3`).
-
-  - sequence: 8
-    fragment_type: guardrail
-    content: |
-      ## Anti-patterns
-
-      - **Non-additive features.** A feature that turns something *off* (e.g., a `no_std` feature, when the default is `std`). Invert: make `std` opt-in, `default-features = false` is `no_std`. This is the single most common cargo footgun.
-      - **`"*"` version requirements.** Bypasses SemVer entirely; crates.io rejects them on publish. Even for path/git deps, `*` is a smell.
-      - **Ignoring `Cargo.lock` in libraries.** Modern guidance is to commit it. Reproducible CI matters more than the historic argument that "consumers ignore it anyway."
-      - **`cargo update` in CI without intent.** Updates the lockfile every build, defeats reproducibility, hides regressions until production.
-      - **Re-exporting a dependency at two incompatible major versions.** If your public API exposes `serde::Serialize`, and a consumer has a different major version of `serde` in scope, type-checking fails with `expected serde::Serialize, found serde::Serialize` (same name, different crate). Pin one major version per public API surface.
-      - **Test-only deps in `[dependencies]`.** Bloats the dependency graph for every consumer. Move to `[dev-dependencies]`.
-      - **Hand-editing `Cargo.lock`.** Use `cargo update --precise` instead.
-      - **Mixing `optional = true` deps without `dep:` feature syntax.** Implicitly creates a feature with the same name as the dep, which leaks dep names into your public feature surface and makes them impossible to rename.
-      - **`default = ["full"]` where `full` is a kitchen-sink alias.** Forces every consumer to compile every feature. Default to a small set; let consumers opt in.
-      - **Workspace members with drifting dep versions.** Same crate at two versions inside one workspace defeats unification. Use `[workspace.dependencies]` and `serde.workspace = true`.
-
-  - sequence: 9
-    fragment_type: verification
-    content: |
-      ## Verification
-
-      - [ ] `cargo build` and `cargo test` both succeed; `cargo build --no-default-features` also succeeds (proves `default` is not load-bearing for compile correctness).
-      - [ ] `grep -nE '"\*"' Cargo.toml` returns no matches (no wildcard version requirements).
-      - [ ] `cargo tree --duplicates` reports no unintended duplicate crate versions; any duplicates listed are documented in a `DEPENDENCIES.md` or commit message.
-      - [ ] `Cargo.lock` is committed (run `git ls-files Cargo.lock` and confirm output non-empty).
-      - [ ] `cargo deny check` (or `cargo audit`) exits 0; advisories and license violations are addressed before merge.
-      - [ ] Every optional dependency is gated by a feature using `dep:` syntax (`grep -nE 'dep:' Cargo.toml` non-empty when `optional = true` is present).
-      - [ ] `cargo publish --dry-run` succeeds for any crate intended for crates.io.
-      - [ ] Workspaces use `resolver = "2"` (`grep -n 'resolver' Cargo.toml` shows `"2"`).
-      - [ ] Workspace members consume shared deps via `serde.workspace = true` style inheritance; no duplicated version strings across member manifests.
-      - [ ] No feature *removes* behavior — review every feature's `#[cfg(feature = ...)]` blocks; each must only add code paths.
+    - [ ] `cargo build` and `cargo test` both succeed; `cargo build --no-default-features` also succeeds (proves `default` is not load-bearing for compile correctness).
+    - [ ] `grep -nE '"\*"' Cargo.toml` returns no matches (no wildcard version requirements).
+    - [ ] `cargo tree --duplicates` reports no unintended duplicate crate versions; any duplicates listed are documented in a `DEPENDENCIES.md` or commit message.
+    - [ ] `Cargo.lock` is committed (run `git ls-files Cargo.lock` and confirm output non-empty).
+    - [ ] `cargo deny check` (or `cargo audit`) exits 0; advisories and license violations are addressed before merge.
+    - [ ] Every optional dependency is gated by a feature using `dep:` syntax (`grep -nE 'dep:' Cargo.toml` non-empty when `optional = true` is present).
+    - [ ] `cargo publish --dry-run` succeeds for any crate intended for crates.io.
+    - [ ] Workspaces use `resolver = "2"` (`grep -n 'resolver' Cargo.toml` shows `"2"`).
+    - [ ] Workspace members consume shared deps via `serde.workspace = true` style inheritance; no duplicated version strings across member manifests.
+    - [ ] No feature *removes* behavior — review every feature's `#[cfg(feature = ...)]` blocks; each must only add code paths.

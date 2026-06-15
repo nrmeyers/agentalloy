@@ -1,10 +1,10 @@
 name: typescript
-version: 1.0.3
+version: 1.0.4
 tier: language
 description: TypeScript language patterns — strict tsconfig, types vs interfaces, narrowing, generics, modules. Precision-favored language tier; sourced from typescriptlang.org docs per R1 tiered sourcing (fixtures/upstream/curated/typescript.yaml, version_anchor 5.7).
 author: navistone
-embed_model: qwen3-embedding:0.6b
-embedding_dim: 1024
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
 license: MIT
 homepage: https://github.com/nrmeyers/agentalloy
 always_install: false
@@ -29,7 +29,7 @@ skills:
   fragment_count: 11
 - skill_id: typescript-conditional-types
   file: typescript-conditional-types.yaml
-  fragment_count: 9
+  fragment_count: 11
 - skill_id: typescript-decorators-stage-3
   file: typescript-decorators-stage-3.yaml
   fragment_count: 15
@@ -38,13 +38,13 @@ skills:
   fragment_count: 13
 - skill_id: typescript-mapped-and-template-literal-types
   file: typescript-mapped-and-template-literal-types.yaml
-  fragment_count: 7
+  fragment_count: 9
 - skill_id: typescript-modules-and-imports
   file: typescript-modules-and-imports.yaml
   fragment_count: 15
 - skill_id: typescript-narrowing-and-control-flow
   file: typescript-narrowing-and-control-flow.yaml
-  fragment_count: 4
+  fragment_count: 9
 - skill_id: typescript-project-references
   file: typescript-project-references.yaml
   fragment_count: 14

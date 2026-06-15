@@ -1,20 +1,23 @@
 skill_type: domain
 skill_id: nodejs-native-test-runner
 canonical_name: Node.js Native Test Runner
-description: "Write and run unit tests for Node.js apps without installing Jest or Mocha: use the built-in test runner to define describe/it blocks, add setup and teardown hooks, and mock dependencies directly in your codebase."
+description: 'Write and run unit tests for Node.js apps without installing Jest or Mocha: use the built-in test runner to define describe/it blocks, add setup and teardown hooks, and mock dependencies directly in your codebase.'
 category: engineering
 skill_class: domain
 domain_tags:
-  - nodejs
-  - testing
-  - native
-  - describe/it
-  - test-hooks
+- nodejs
+- testing
+- native
+- describe/it
+- test-hooks
 deprecated: true
 superseded_by: node-built-in-test-runner
 always_apply: false
-phase_scope: [build, review]
-category_scope: [language]
+phase_scope:
+- build
+- review
+category_scope:
+- language
 author: authoring-agent
 change_summary: Merged into node-built-in-test-runner (2026-06-03). Original authoring by authoring-agent.
 raw_prose: |
@@ -277,252 +280,255 @@ raw_prose: |
     throw new Error('this does not fail the test');
   };
   ```
-
 fragments:
-  - fragment_type: setup
-    sequence: 1
-    content: |
-      Node 20+ ships a native test runner. The API mirrors describe/it conventions, supports mocking, and works without a build step. This skill covers the runner end-to-end.
-  - fragment_type: execution
-    sequence: 2
-    content: |
-      To access the `node:test` module:
+- fragment_type: setup
+  sequence: 1
+  content: |
+    Node 20+ ships a native test runner. The API mirrors describe/it conventions, supports mocking, and works without a build step. This skill covers the runner end-to-end.
+- fragment_type: execution
+  sequence: 2
+  content: |
+    To access the `node:test` module:
 
-      ```mjs
-      import test from 'node:test';
-      ```
+    ```mjs
+    import test from 'node:test';
+    ```
 
-      ```cjs
-      const test = require('node:test');
-      ```
+    ```cjs
+    const test = require('node:test');
+    ```
 
-      This module is only available under the `node:` scheme.
+    This module is only available under the `node:` scheme.
 
-      Tests created via the `test` module consist of a single function that is
-      processed in one of three ways:
+    Tests created via the `test` module consist of a single function that is
+    processed in one of three ways:
 
-      1. A synchronous function that is considered failing if it throws an exception,
-         and is considered passing otherwise.
-      2. A function that returns a `Promise` that is considered failing if the
-         `Promise` rejects, and is considered passing if the `Promise` fulfills.
-      3. A function that receives a callback function. If the callback receives any
-         truthy value as its first argument, the test is considered failing. If a
-         falsy value is passed as the first argument to the callback, the test is
-         considered passing. If the test function receives a callback function and
-         also returns a `Promise`, the test will fail.
-  - fragment_type: example
-    sequence: 3
-    content: |
-      The following example illustrates how tests are written using the
-      `test` module.
+    1. A synchronous function that is considered failing if it throws an exception,
+       and is considered passing otherwise.
+    2. A function that returns a `Promise` that is considered failing if the
+       `Promise` rejects, and is considered passing if the `Promise` fulfills.
+    3. A function that receives a callback function. If the callback receives any
+       truthy value as its first argument, the test is considered failing. If a
+       falsy value is passed as the first argument to the callback, the test is
+       considered passing. If the test function receives a callback function and
+       also returns a `Promise`, the test will fail.
+- fragment_type: example
+  sequence: 3
+  content: |
+    The following example illustrates how tests are written using the
+    `test` module.
 
-      ```js
-      test('synchronous passing test', (t) => {
-        // This test passes because it does not throw an exception.
-        assert.strictEqual(1, 1);
-      });
+    ```js
+    test('synchronous passing test', (t) => {
+      // This test passes because it does not throw an exception.
+      assert.strictEqual(1, 1);
+    });
 
-      test('synchronous failing test', (t) => {
-        // This test fails because it throws an exception.
-        assert.strictEqual(1, 2);
-      });
+    test('synchronous failing test', (t) => {
+      // This test fails because it throws an exception.
+      assert.strictEqual(1, 2);
+    });
 
-      test('asynchronous passing test', async (t) => {
-        // This test passes because the Promise returned by the async
-        // function is settled and not rejected.
-        assert.strictEqual(1, 1);
-      });
+    test('asynchronous passing test', async (t) => {
+      // This test passes because the Promise returned by the async
+      // function is settled and not rejected.
+      assert.strictEqual(1, 1);
+    });
 
-      test('asynchronous failing test', async (t) => {
-        // This test fails because the Promise returned by the async
-        // function is rejected.
-        assert.strictEqual(1, 2);
-      });
+    test('asynchronous failing test', async (t) => {
+      // This test fails because the Promise returned by the async
+      // function is rejected.
+      assert.strictEqual(1, 2);
+    });
 
-      test('failing test using Promises', (t) => {
-        // Promises can be used directly as well.
-        return new Promise((resolve, reject) => {
-          setImmediate(() => {
-            reject(new Error('this will cause the test to fail'));
-          });
-        });
-      });
-
-      test('callback passing test', (t, done) => {
-        // done() is the callback function. When the setImmediate() runs, it invokes
-        // done() with no arguments.
-        setImmediate(done);
-      });
-
-      test('callback failing test', (t, done) => {
-        // When the setImmediate() runs, done() is invoked with an Error object and
-        // the test fails.
+    test('failing test using Promises', (t) => {
+      // Promises can be used directly as well.
+      return new Promise((resolve, reject) => {
         setImmediate(() => {
-          done(new Error('callback failure'));
-        });
-      };
-      ```
-  - fragment_type: verification
-    sequence: 4
-    content: |
-      If any tests fail, the process exit code is set to `1`.
-
-      The test context's `test()` method allows subtests to be created.
-      It allows you to structure your tests in a hierarchical manner,
-      where you can create nested tests within a larger test.
-      This method behaves identically to the top level `test()` function.
-      The following example demonstrates the creation of a
-      top level test with two subtests.
-
-      ```js
-      test('top level test', async (t) => {
-        await t.test('subtest 1', (t) => {
-          assert.strictEqual(1, 1);
-        });
-
-        await t.test('subtest 2', (t) => {
-          assert.strictEqual(2, 2);
+          reject(new Error('this will cause the test to fail'));
         });
       });
-      ```
+    });
 
-      > **Note:** `beforeEach` and `afterEach` hooks are triggered
-      > between each subtest execution.
+    test('callback passing test', (t, done) => {
+      // done() is the callback function. When the setImmediate() runs, it invokes
+      // done() with no arguments.
+      setImmediate(done);
+    });
 
-      In this example, `await` is used to ensure that both subtests have completed.
-      This is necessary because tests do not wait for their subtests to
-      complete, unlike tests created within suites.
-      Any subtests that are still outstanding when their parent finishes
-      are cancelled and treated as failures. Any subtest failures cause the parent
-      test to fail.
+    test('callback failing test', (t, done) => {
+      // When the setImmediate() runs, done() is invoked with an Error object and
+      // the test fails.
+      setImmediate(() => {
+        done(new Error('callback failure'));
+      });
+    };
+    ```
+- fragment_type: verification
+  sequence: 4
+  content: |-
+    If any tests fail, the process exit code is set to `1`.
 
-      The test runner supports persisting the state of the run to a file, allowing
-      the test runner to rerun failed tests without having to re-run the entire test suite.
-      Use the [`--test-rerun-failures`][] command-line option to specify a file path where the
-      state of the run is stored. if the state file does not exist, the test runner will
-      create it.
-      the state file is a JSON file that contains an array of run attempts.
-      Each run attempt is an object mapping successful tests to the attempt they have passed in.
-      The key identifying a test in this map is the test file path, with the line and column where the test is defined.
-      in a case where a test defined in a specific location is run multiple times,
-      for example within a function or a loop,
-      a counter will be appended to the key, to disambiguate the test runs.
-      note changing the order of test execution or the location of a test can lead the test runner
-      to consider tests as passed on a previous attempt,
-      meaning `--test-rerun-failures` should be used when tests run in a deterministic order.
+    The test context's `test()` method allows subtests to be created.
+    It allows you to structure your tests in a hierarchical manner,
+    where you can create nested tests within a larger test.
+    This method behaves identically to the top level `test()` function.
+    The following example demonstrates the creation of a
+    top level test with two subtests.
 
-      example of a state file:
+    ```js
+    test('top level test', async (t) => {
+      await t.test('subtest 1', (t) => {
+        assert.strictEqual(1, 1);
+      });
 
-      ```json
-      [
-        {
-          "test.js:10:5": { "passed_on_attempt": 0, "name": "test 1" }
-        },
-        {
-          "test.js:10:5": { "passed_on_attempt": 0, "name": "test 1" },
-          "test.js:20:5": { "passed_on_attempt": 1, "name": "test 2" }
-        }
-      ]
-      ```
+      await t.test('subtest 2', (t) => {
+        assert.strictEqual(2, 2);
+      });
+    });
+    ```
 
-      in this example, there are two run attempts, with two tests defined in `test.js`,
-      the first test succeeded on the first attempt, and the second test succeeded on the second attempt.
+    > **Note:** `beforeEach` and `afterEach` hooks are triggered
+    > between each subtest execution.
 
-      When the `--test-rerun-failures` option is used, the test runner will only run tests that have not yet passed.
+    In this example, `await` is used to ensure that both subtests have completed.
+    This is necessary because tests do not wait for their subtests to
+    complete, unlike tests created within suites.
+    Any subtests that are still outstanding when their parent finishes
+    are cancelled and treated as failures. Any subtest failures cause the parent
+    test to fail.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    The test runner supports persisting the state of the run to a file, allowing
+    the test runner to rerun failed tests without having to re-run the entire test suite.
+    Use the [`--test-rerun-failures`][] command-line option to specify a file path where the
+    state of the run is stored. if the state file does not exist, the test runner will
+    create it.
+    the state file is a JSON file that contains an array of run attempts.
+    Each run attempt is an object mapping successful tests to the attempt they have passed in.
+    The key identifying a test in this map is the test file path, with the line and column where the test is defined.
+    in a case where a test defined in a specific location is run multiple times,
+    for example within a function or a loop,
+    a counter will be appended to the key, to disambiguate the test runs.
+    note changing the order of test execution or the location of a test can lead the test runner
+    to consider tests as passed on a previous attempt,
+    meaning `--test-rerun-failures` should be used when tests run in a deterministic order.
 
-      ```bash
-      node --test-rerun-failures /path/to/state/file
-      ```
-  - fragment_type: example
-    sequence: 5
-    content: |
-      Suites and tests can also be written using the `describe()` and `it()`
-      functions. [`describe()`][] is an alias for [`suite()`][], and [`it()`][] is an
-      alias for [`test()`][].
+    example of a state file:
 
-      ```js
-      describe('A thing', () => {
+    ```json
+    [
+      {
+        "test.js:10:5": { "passed_on_attempt": 0, "name": "test 1" }
+      },
+      {
+        "test.js:10:5": { "passed_on_attempt": 0, "name": "test 1" },
+        "test.js:20:5": { "passed_on_attempt": 1, "name": "test 2" }
+      }
+    ]
+    ```
+- fragment_type: verification
+  sequence: 6
+  content: |-
+    in this example, there are two run attempts, with two tests defined in `test.js`,
+    the first test succeeded on the first attempt, and the second test succeeded on the second attempt.
+
+    When the `--test-rerun-failures` option is used, the test runner will only run tests that have not yet passed.
+
+    ```bash
+    node --test-rerun-failures /path/to/state/file
+    ```
+- fragment_type: example
+  sequence: 7
+  content: |
+    Suites and tests can also be written using the `describe()` and `it()`
+    functions. [`describe()`][] is an alias for [`suite()`][], and [`it()`][] is an
+    alias for [`test()`][].
+
+    ```js
+    describe('A thing', () => {
+      it('should work', () => {
+        assert.strictEqual(1, 1);
+      });
+
+      it('should be ok', () => {
+        assert.strictEqual(2, 2);
+      });
+
+      describe('a nested thing', () => {
         it('should work', () => {
-          assert.strictEqual(1, 1);
-        });
-
-        it('should be ok', () => {
-          assert.strictEqual(2, 2);
-        });
-
-        describe('a nested thing', () => {
-          it('should work', () => {
-            assert.strictEqual(3, 3);
-          });
+          assert.strictEqual(3, 3);
         });
       });
-      ```
+    });
+    ```
 
-      `describe()` and `it()` are imported from the `node:test` module.
+    `describe()` and `it()` are imported from the `node:test` module.
 
-      ```mjs
-      import { describe, it } from 'node:test';
-      ```
+    ```mjs
+    import { describe, it } from 'node:test';
+    ```
 
-      ```cjs
-      const { describe, it } = require('node:test');
-      ```
-  - fragment_type: execution
-    sequence: 6
-    content: |
-      Individual tests can be skipped by passing the `skip` option to the test, or by
-      calling the test context's `skip()` method as shown in the
-      following example.
+    ```cjs
+    const { describe, it } = require('node:test');
+    ```
+- fragment_type: execution
+  sequence: 8
+  content: |
+    Individual tests can be skipped by passing the `skip` option to the test, or by
+    calling the test context's `skip()` method as shown in the
+    following example.
 
-      ```js
-      // The skip option is used, but no message is provided.
-      test('skip option', { skip: true }, (t) => {
-        // This code is never executed.
-      });
+    ```js
+    // The skip option is used, but no message is provided.
+    test('skip option', { skip: true }, (t) => {
+      // This code is never executed.
+    });
 
-      // The skip option is used, and a message is provided.
-      test('skip option with message', { skip: 'this is skipped' }, (t) => {
-        // This code is never executed.
-      });
+    // The skip option is used, and a message is provided.
+    test('skip option with message', { skip: 'this is skipped' }, (t) => {
+      // This code is never executed.
+    });
 
-      test('skip() method', (t) => {
-        // Make sure to return here as well if the test contains additional logic.
-        t.skip();
-      });
+    test('skip() method', (t) => {
+      // Make sure to return here as well if the test contains additional logic.
+      t.skip();
+    });
 
-      test('skip() method with message', (t) => {
-        // Make sure to return here as well if the test contains additional logic.
-        t.skip('this is skipped');
-      });
-      ```
-  - fragment_type: execution
-    sequence: 7
-    content: |
-      Individual tests can be marked as flaky or incomplete by passing the `todo`
-      option to the test, or by calling the test context's `todo()` method, as shown
-      in the following example. These tests represent a pending implementation or bug
-      that needs to be fixed. TODO tests are executed, but are not treated as test
-      failures, and therefore do not affect the process exit code. If a test is marked
-      as both TODO and skipped, the TODO option is ignored.
+    test('skip() method with message', (t) => {
+      // Make sure to return here as well if the test contains additional logic.
+      t.skip('this is skipped');
+    });
+    ```
+- fragment_type: execution
+  sequence: 9
+  content: |-
+    Individual tests can be marked as flaky or incomplete by passing the `todo`
+    option to the test, or by calling the test context's `todo()` method, as shown
+    in the following example. These tests represent a pending implementation or bug
+    that needs to be fixed. TODO tests are executed, but are not treated as test
+    failures, and therefore do not affect the process exit code. If a test is marked
+    as both TODO and skipped, the TODO option is ignored.
 
-      ```js
-      // The todo option is used, but no message is provided.
-      test('todo option', { todo: true }, (t) => {
-        // This code is executed, but not treated as a failure.
-        throw new Error('this does not fail the test');
-      });
+    ```js
+    // The todo option is used, but no message is provided.
+    test('todo option', { todo: true }, (t) => {
+      // This code is executed, but not treated as a failure.
+      throw new Error('this does not fail the test');
+    });
 
-      // The todo option is used, and a message is provided.
-      test('todo option with message', { todo: 'this is a todo test' }, (t) => {
-        // This code is executed.
-      });
+    // The todo option is used, and a message is provided.
+    test('todo option with message', { todo: 'this is a todo test' }, (t) => {
+      // This code is executed.
+    });
 
-      test('todo() method', (t) => {
-        t.todo();
-      });
+    test('todo() method', (t) => {
+      t.todo();
+    });
 
-      test('todo() method with message', (t) => {
-        t.todo('this is a todo test and is not treated as a failure');
-        throw new Error('this does not fail the test');
-      };
-      ```
+    test('todo() method with message', (t) => {
+      t.todo('this is a todo test and is not treated as a failure');
+      throw new Error('this does not fail the test');
+    };
+    ```
