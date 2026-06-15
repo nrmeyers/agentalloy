@@ -318,7 +318,10 @@ class TestEntrypointLlamaServers:
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert 'llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"' in script
+        assert (
+            'llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF"'
+            in script
+        )
         assert "EMBED_PID=$!" in script
 
     def test_entrypoint_starts_reranker_server_no_embeddings(self):
