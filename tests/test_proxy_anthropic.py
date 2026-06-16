@@ -254,6 +254,54 @@ class TestAnthropicToolCallsToOpenAI:
         assert result.role == "tool"
         assert result.content == "Results: 42 degrees"
 
+    def test_tool_result_blocks_become_tool_messages(self):
+        """A user message of tool_result blocks → role='tool' messages with tool_call_id."""
+        request = AnthropicRequest(
+            model="claude-3",
+            max_tokens=512,
+            messages=[
+                AnthropicMessage(role="user", content="weather?"),
+                AnthropicMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=[{"id": "toolu_1", "name": "get_weather", "input": {"city": "SF"}}],
+                ),
+                AnthropicMessage(
+                    role="user",
+                    content=[
+                        AnthropicContentBlock(
+                            type="tool_result", tool_use_id="toolu_1", content="72F"
+                        ),
+                    ],
+                ),
+            ],
+        )
+        result = _anthropic_to_openai(request)
+        tool_msgs = [m for m in result.messages if m.role == "tool"]
+        assert len(tool_msgs) == 1
+        assert tool_msgs[0].tool_call_id == "toolu_1"
+        assert tool_msgs[0].content == "72F"
+
+    def test_multiple_tool_results_each_become_a_message(self):
+        """Multiple tool_result blocks in one message expand to multiple tool messages."""
+        request = AnthropicRequest(
+            model="claude-3",
+            max_tokens=512,
+            messages=[
+                AnthropicMessage(
+                    role="user",
+                    content=[
+                        AnthropicContentBlock(type="tool_result", tool_use_id="a", content="ra"),
+                        AnthropicContentBlock(type="tool_result", tool_use_id="b", content="rb"),
+                    ],
+                ),
+            ],
+        )
+        result = _anthropic_to_openai(request)
+        tool_msgs = [m for m in result.messages if m.role == "tool"]
+        assert [m.tool_call_id for m in tool_msgs] == ["a", "b"]
+        assert [m.content for m in tool_msgs] == ["ra", "rb"]
+
     def test_content_block_array_with_tool_use(self):
         msg = AnthropicMessage(
             role="assistant",

@@ -184,7 +184,8 @@ def _llama_unit_path(name: str) -> Path:
     return unit_dir / name
 
 
-def _render_llama_embed_unit(llama_bin: str, model_path: Path) -> str:
+def _render_llama_embed_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> str:
+    ngl_flag = f" -ngl {ngl}" if ngl > 0 else ""
     return (
         "[Unit]\n"
         "Description=AgentAlloy embedding server (llama-server)\n"
@@ -193,7 +194,7 @@ def _render_llama_embed_unit(llama_bin: str, model_path: Path) -> str:
         "[Service]\n"
         "Type=simple\n"
         f"ExecStart={llama_bin} --embeddings --pooling mean --port {_LLAMA_EMBED_PORT} "
-        f"--ubatch-size 2048 -m {model_path}\n"
+        f"--ubatch-size 2048{ngl_flag} -m {model_path}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"
@@ -202,8 +203,9 @@ def _render_llama_embed_unit(llama_bin: str, model_path: Path) -> str:
     )
 
 
-def _render_llama_rerank_unit(llama_bin: str, model_path: Path) -> str:
+def _render_llama_rerank_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> str:
     # Completions mode — NO --embeddings — so /v1/completions logprobs are served.
+    ngl_flag = f" -ngl {ngl}" if ngl > 0 else ""
     return (
         "[Unit]\n"
         "Description=AgentAlloy reranker server (llama-server)\n"
@@ -211,7 +213,7 @@ def _render_llama_rerank_unit(llama_bin: str, model_path: Path) -> str:
         "\n"
         "[Service]\n"
         "Type=simple\n"
-        f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT} -m {model_path}\n"
+        f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT}{ngl_flag} -m {model_path}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"
@@ -220,31 +222,50 @@ def _render_llama_rerank_unit(llama_bin: str, model_path: Path) -> str:
     )
 
 
+def _ngl_for_target(target: str | None) -> int:
+    """GPU-offload layer count for a hardware target (0 = CPU, no offload).
+
+    Shares start_rerank_server's mapping so persistent units match the
+    setup-time launch flags.
+    """
+    from agentalloy.install.subcommands.start_rerank_server import (
+        _DEFAULT_NGL,
+        _NGL_BY_TARGET,
+    )
+
+    return _NGL_BY_TARGET.get(target or "cpu", _DEFAULT_NGL)
+
+
 def _model_path(model_file: str) -> Path:
     return install_state.user_data_dir() / "models" / model_file
 
 
-def _write_llama_units() -> list[str]:
+def _write_llama_units(target: str | None = None) -> list[str]:
     """Write + enable the embed (47951) and reranker (47952) llama-server units.
 
     Returns the list of unit paths written (empty if llama-server is absent).
     Best-effort: a single unit's enable failure is logged, not fatal — the
-    agentalloy.service unit is the only hard requirement.
+    agentalloy.service unit is the only hard requirement. ``target`` is the
+    hardware preset (cpu/nvidia/radeon/apple-silicon) — it selects ``-ngl`` so
+    the persistent units offload to the GPU like the setup-time launch did.
     """
     llama_bin = shutil.which("llama-server")
     if not llama_bin:
         logger.warning("llama-server not on PATH; skipping embed/reranker units")
         return []
 
+    ngl = _ngl_for_target(target)
     written: list[str] = []
     units = [
         (
             "agentalloy-embed.service",
-            _render_llama_embed_unit(llama_bin, _model_path("nomic-embed-text-v1.5.Q8_0.gguf")),
+            _render_llama_embed_unit(
+                llama_bin, _model_path("nomic-embed-text-v1.5.Q8_0.gguf"), ngl
+            ),
         ),
         (
             "agentalloy-rerank.service",
-            _render_llama_rerank_unit(llama_bin, _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")),
+            _render_llama_rerank_unit(llama_bin, _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf"), ngl),
         ),
     ]
     # Pass 1: write all unit files BEFORE enabling any of them.
@@ -277,14 +298,14 @@ def _enable_native_linux(
     uv_bin: str,
     repo_root: Path,
     port: int,
-    preset: str | None,  # noqa: ARG001 — preset retained for signature compat
+    preset: str | None,
 ) -> dict[str, Any]:
     env_path = _sanitize_env_for_systemd(install_state.env_path())
     unit_path = _systemd_unit_path()
     content = _render_systemd_unit(uv_bin, repo_root, port, env_path)
     install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
 
-    llama_units = _write_llama_units()
+    llama_units = _write_llama_units(preset)
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     result = subprocess.run(
@@ -424,13 +445,14 @@ def _render_llama_launchd_plist(label: str, program_args: list[str]) -> str:
     )
 
 
-def _write_llama_launchd_agents() -> list[str]:
+def _write_llama_launchd_agents(target: str | None = None) -> list[str]:
     """Write + load LaunchAgent plists for the embed (47951) and reranker (47952)
     llama-servers — the macOS mirror of ``_write_llama_units``.
 
     Returns the list of plist paths written (empty if llama-server is absent).
     Best-effort: skipped gracefully (logged, non-fatal) when llama-server is
-    not on PATH, matching the systemd path.
+    not on PATH, matching the systemd path. ``target`` selects ``-ngl`` so the
+    persistent agents Metal-offload like the setup-time launch did.
     """
     llama_bin = shutil.which("llama-server")
     if not llama_bin:
@@ -439,6 +461,8 @@ def _write_llama_launchd_agents() -> list[str]:
 
     embed_model = _model_path("nomic-embed-text-v1.5.Q8_0.gguf")
     rerank_model = _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")
+    ngl = _ngl_for_target(target)
+    ngl_args = ["-ngl", str(ngl)] if ngl > 0 else []
 
     written: list[str] = []
     agents = [
@@ -454,6 +478,7 @@ def _write_llama_launchd_agents() -> list[str]:
                 str(_LLAMA_EMBED_PORT),
                 "--ubatch-size",
                 "2048",
+                *ngl_args,
                 "-m",
                 str(embed_model),
             ],
@@ -461,7 +486,7 @@ def _write_llama_launchd_agents() -> list[str]:
         # Reranker: completions mode on 47952 — NO --embeddings.
         (
             "ai.agentalloy.rerank",
-            [llama_bin, "--port", str(_LLAMA_RERANK_PORT), "-m", str(rerank_model)],
+            [llama_bin, "--port", str(_LLAMA_RERANK_PORT), *ngl_args, "-m", str(rerank_model)],
         ),
     ]
     for label, program_args in agents:
@@ -491,7 +516,7 @@ def _enable_native_macos(
     uv_bin: str,
     repo_root: Path,
     port: int,
-    preset: str | None,  # noqa: ARG001 — preset retained for signature compat
+    preset: str | None,
 ) -> dict[str, Any]:
     env_vars = _read_env_file(install_state.env_path())
     plist_path = _launchd_plist_path()
@@ -506,7 +531,7 @@ def _enable_native_macos(
     # Register the embed (47951) and reranker (47952) llama-servers as
     # LaunchAgents so they auto-start at login and restart on crash — the
     # macOS mirror of the systemd units written on Linux.
-    llama_agents = _write_llama_launchd_agents()
+    llama_agents = _write_llama_launchd_agents(preset)
 
     return {
         "unit_path": str(plist_path),

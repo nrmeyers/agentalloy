@@ -252,14 +252,48 @@ def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
     }
 
 
+def _read_stored_dim(duckdb_path: str) -> int | None:
+    """Read the stored embedding dim directly, bypassing open_or_create's guard."""
+    try:
+        import duckdb
+
+        con = duckdb.connect(duckdb_path, read_only=True)
+        try:
+            row = con.execute("SELECT len(embedding) FROM fragment_embeddings LIMIT 1").fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _check_embedding_dim(duckdb_path: str) -> dict[str, Any]:
     """Check 6: stored DuckDB embedding dim matches EMBEDDING_DIM constant."""
     t0 = time.monotonic()
-    from agentalloy.storage.vector_store import EMBEDDING_DIM, open_or_create
+    from agentalloy.storage.vector_store import (
+        EMBEDDING_DIM,
+        EmbeddingDimMismatch,
+        open_or_create,
+    )
 
     try:
         vs = open_or_create(Path(duckdb_path))
         stored_dim = vs.embedding_dim()
+    except EmbeddingDimMismatch:
+        # open_or_create's startup guard raises for exactly the mismatch case, so
+        # surface the tailored remediation (read the real stored dim directly,
+        # bypassing the guard) instead of the generic "cannot read" error.
+        stored = _read_stored_dim(duckdb_path)
+        return {
+            "name": "embedding_dim",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Stored dim {stored} != expected {EMBEDDING_DIM}",
+            "remediation": (
+                "Embedding model changed. Run `agentalloy reembed --force` "
+                "to rebuild the vector store at the current dimension."
+            ),
+        }
     except Exception as exc:  # noqa: BLE001
         return {
             "name": "embedding_dim",

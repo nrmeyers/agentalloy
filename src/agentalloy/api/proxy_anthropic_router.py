@@ -141,6 +141,53 @@ def _anthropic_message_to_openai(
     return ProxyMessage(role=role, content=content)
 
 
+def _tool_result_to_str(content: object) -> str:
+    """Flatten an Anthropic tool_result's content to an OpenAI tool-message string."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text":
+                parts.append(str(b.get("text", "")))
+            elif isinstance(b, dict):
+                parts.append(json.dumps(b))
+            else:
+                parts.append(str(b))
+        return "".join(parts)
+    return json.dumps(content) if content is not None else ""
+
+
+def _expand_tool_results(msg_dict: dict[str, Any]) -> list[ProxyMessage] | None:
+    """Expand tool_result blocks into OpenAI tool-role messages (one per result).
+
+    An Anthropic user message carries tool outputs as
+    ``content=[{type:'tool_result', tool_use_id, content}, ...]``. Each becomes a
+    ``role='tool'`` message; sibling text blocks are preserved as a user message.
+    Returns None when the message has no tool_result blocks (normal path).
+    """
+    content = msg_dict.get("content")
+    if not isinstance(content, list):
+        return None
+    results = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"]
+    if not results:
+        return None
+    out: list[ProxyMessage] = [
+        ProxyMessage(
+            role="tool",
+            tool_call_id=b.get("tool_use_id"),
+            content=_tool_result_to_str(b.get("content")),
+        )
+        for b in results
+    ]
+    text = "".join(
+        str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text"
+    )
+    if text:
+        out.append(ProxyMessage(role="user", content=text))
+    return out
+
+
 def _anthropic_to_openai(request: AnthropicRequest) -> ProxyRequest:
     """Convert an Anthropic Messages request to an OpenAI ProxyRequest.
 
@@ -171,7 +218,11 @@ def _anthropic_to_openai(request: AnthropicRequest) -> ProxyRequest:
     # User / assistant / tool messages
     for m in request.messages:
         msg_dict = m.model_dump(mode="json", exclude_none=True)
-        messages.append(_anthropic_message_to_openai(msg_dict))
+        tool_msgs = _expand_tool_results(msg_dict)
+        if tool_msgs is not None:
+            messages.extend(tool_msgs)
+        else:
+            messages.append(_anthropic_message_to_openai(msg_dict))
 
     # Tools
     tools: list[dict[str, Any]] | None = None

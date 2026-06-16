@@ -418,6 +418,40 @@ class TestClaudeCodeProvider:
         assert "localhost:7070" in ups
         assert "/v1/hook/user-prompt-submit" in ups
 
+    def test_unwire_settings_json_preserves_user_hooks(
+        self, fake_home: Path, reset_hook_cache, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unwire removes only AgentAlloy hooks — never the user's whole hooks block."""
+        from agentalloy.install.subcommands.claude_code import (
+            _settings_json_path,
+            _unwire_claude_code_settings_json,
+        )
+
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        settings_path = _settings_json_path()
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": {
+                            "command": "/x/agentalloy-hook-claude-code.sh",
+                            "env": {"AGENTALLOY_HOOK_URL": "http://localhost:47950/v1/hook/x"},
+                        },
+                        "MyCustomHook": {"command": "/usr/bin/my-hook.sh"},
+                    },
+                    "otherSetting": True,
+                }
+            )
+        )
+
+        _unwire_claude_code_settings_json()
+
+        data = json.loads(settings_path.read_text())
+        assert "UserPromptSubmit" not in data.get("hooks", {})  # AgentAlloy hook removed
+        assert "MyCustomHook" in data["hooks"]  # user's hook preserved
+        assert data["otherSetting"] is True
+
     def test_wire_claude_code_hooks_is_idempotent(
         self, fake_home: Path, reset_hook_cache, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -363,14 +363,13 @@ def _check_ladybug_present(
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        import ladybug
+        from agentalloy.storage.ladybug import LadybugStore
 
-        db = ladybug.Database(str(p))
-        conn = ladybug.Connection(db)
-        result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
-        count = 0
-        if result.has_next():
-            count = result.get_next()[0]
+        # Use the context manager so the Kuzu connection (and its exclusive lock)
+        # is always closed — raw ladybug.Database/Connection here leaked the lock.
+        with LadybugStore(str(p)) as store:
+            rows = store.execute("MATCH (s:Skill) RETURN count(s) AS c")
+        count = int(rows[0][0]) if rows and rows[0] else 0
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "ladybug_present",
@@ -437,14 +436,13 @@ def _check_skill_count(
             ),
         }
     try:
-        import ladybug
+        from agentalloy.storage.ladybug import LadybugStore
 
-        db = ladybug.Database(str(ladybug_path))
-        conn = ladybug.Connection(db)
-        result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
-        count = 0
-        if result.has_next():
-            count = result.get_next()[0]
+        # Context manager closes the Kuzu connection + exclusive lock (raw
+        # ladybug.Database/Connection here leaked the lock on every fallback).
+        with LadybugStore(str(ladybug_path)) as store:
+            rows = store.execute("MATCH (s:Skill) RETURN count(s) AS c")
+        count = int(rows[0][0]) if rows and rows[0] else 0
         duration = int((time.monotonic() - t0) * 1000)
         if count >= MIN_SKILL_COUNT:
             return {

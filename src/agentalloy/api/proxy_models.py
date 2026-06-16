@@ -23,6 +23,9 @@ class ProxyMessage(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
     tool_call: dict[str, Any] | None = None
     tool: dict[str, Any] | None = None
+    # Correlates a role="tool" result message with the assistant tool_call it
+    # answers (OpenAI requires it on tool messages).
+    tool_call_id: str | None = None
 
 
 class ProxyRequest(BaseModel):

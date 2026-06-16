@@ -34,6 +34,7 @@ import logging
 import math
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass
@@ -274,11 +275,16 @@ class FragmentScorer:
             return ScoreResult(LMAssistOutcome.DISABLED, [])
 
         batch_budget_s = self._config.timeout_ms / 1000.0
+        # Single deadline for the whole batch — decrement the per-future timeout
+        # against it so total wall-clock is bounded by timeout_ms regardless of
+        # future ordering (a fixed per-future timeout let a late hang push total
+        # toward ~2x the documented ceiling).
+        deadline = time.monotonic() + batch_budget_s
         futures = [self._pool.submit(self._score_one, task, doc) for doc in documents]
         scores: list[float] = []
         try:
             for fut in futures:
-                scores.append(fut.result(timeout=batch_budget_s))
+                scores.append(fut.result(timeout=max(0.0, deadline - time.monotonic())))
         except FuturesTimeout:
             for fut in futures:
                 fut.cancel()

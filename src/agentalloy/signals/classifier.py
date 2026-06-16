@@ -298,6 +298,20 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _cosine_with_qnorm(a: list[float], norm_a: float, b: list[float]) -> float:
+    """``_cosine(a, b)`` with ``a``'s norm precomputed (loop-invariant hoist).
+
+    Bit-identical to ``_cosine``: same dot / norm_b float ops and the same
+    zero-norm short-circuit. Lets the similarity loops compute the query norm
+    once instead of once per reference phrase.
+    """
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 def _intent_similarity(
     text: str,
     intent: str,
@@ -319,7 +333,8 @@ def _intent_similarity(
         _log.debug("embed call failed: %s", exc)
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
-    best = max(_cosine(query_vec, r) for r in vecs[1:])
+    qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant
+    best = max(_cosine_with_qnorm(query_vec, qn, r) for r in vecs[1:])
     _log.debug("intent=%r best_similarity=%.3f threshold=%.3f", intent, best, threshold)
     return PredicateResult.MET if best >= threshold else PredicateResult.NOT_MET
 
@@ -343,7 +358,8 @@ def _topic_similarity(
         _log.debug("embed call failed: %s", exc)
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
-    best = max(_cosine(query_vec, r) for r in vecs[1:])
+    qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant
+    best = max(_cosine_with_qnorm(query_vec, qn, r) for r in vecs[1:])
     _log.debug("topics=%r best_similarity=%.3f threshold=%.3f", topics, best, threshold)
     return PredicateResult.MET if best >= threshold else PredicateResult.NOT_MET
 

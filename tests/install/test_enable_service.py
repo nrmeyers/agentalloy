@@ -120,6 +120,20 @@ class TestRenderLlamaUnits:
         assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in content
         assert "WantedBy=default.target" in content
 
+    def test_units_add_ngl_for_gpu_target(self) -> None:
+        """GPU targets (ngl > 0) append -ngl so persistent units offload like setup did."""
+        embed = _render_llama_embed_unit("/usr/bin/llama-server", Path("/m/e.gguf"), 999)
+        rerank = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"), 999)
+        assert "-ngl 999" in embed
+        assert "-ngl 999" in rerank
+
+    def test_units_omit_ngl_for_cpu(self) -> None:
+        """CPU (ngl=0, the default) omits -ngl entirely."""
+        embed = _render_llama_embed_unit("/usr/bin/llama-server", Path("/m/e.gguf"), 0)
+        rerank = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"))
+        assert "-ngl" not in embed
+        assert "-ngl" not in rerank
+
 
 class TestRenderLaunchdPlist:
     def test_valid_xml_structure(self) -> None:

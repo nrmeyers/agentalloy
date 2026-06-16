@@ -259,6 +259,25 @@ class TestCheckEmbeddingDim:
             result = _check_embedding_dim(str(tmp_path / "skills.duck"))
         assert result["passed"] is True
 
+    def test_dim_mismatch_via_guard_surfaces_tailored_message(self, tmp_path: Path) -> None:
+        """When open_or_create's guard itself raises, show the tailored dim-mismatch."""
+        from agentalloy.storage.vector_store import EmbeddingDimMismatch
+
+        with (
+            patch(
+                "agentalloy.storage.vector_store.open_or_create",
+                side_effect=EmbeddingDimMismatch("corpus 1024 vs 768"),
+            ),
+            patch(
+                "agentalloy.install.subcommands.doctor._read_stored_dim",
+                return_value=1024,
+            ),
+        ):
+            result = _check_embedding_dim(str(tmp_path / "skills.duck"))
+        assert result["passed"] is False
+        assert "Stored dim 1024" in result["error"]
+        assert "reembed --force" in result["remediation"]
+
 
 # ---------------------------------------------------------------------------
 # Check 7: service

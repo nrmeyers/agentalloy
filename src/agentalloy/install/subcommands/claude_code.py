@@ -26,6 +26,16 @@ def _hook_script_path() -> Path:
     return Path(__file__).resolve().parent.parent / "agentalloy-hook-claude-code.sh"
 
 
+def _is_agentalloy_hook(cfg: object) -> bool:
+    """True if a hook config was authored by AgentAlloy (so unwire can scope to it)."""
+    if not isinstance(cfg, dict):
+        return False
+    if "agentalloy-hook-claude-code.sh" in str(cfg.get("command", "")):
+        return True
+    env = cfg.get("env", {})
+    return isinstance(env, dict) and any(str(k).startswith("AGENTALLOY_HOOK_URL") for k in env)
+
+
 def _hooks_config_path() -> Path:
     """Return the path to ~/.claude/claude-code-hooks.json."""
     return Path.home() / ".claude" / "claude-code-hooks.json"
@@ -194,23 +204,24 @@ def _unwire_claude_code_settings_json() -> list[dict[str, Any]]:
             }
         )
 
-    # Remove hook-related entries that may have been written by the legacy path
-    keys_to_remove: list[str] = []
-    for key in data:
-        if key.startswith("hooks.") or key == "hooks":
-            keys_to_remove.append(key)
-
-    for key in keys_to_remove:
+    # Remove ONLY AgentAlloy-authored hook entries — Claude Code stores ALL the
+    # user's hooks under the single top-level "hooks" object, so deleting the
+    # whole key would wipe the user's unrelated hooks too.
+    hooks_obj = data.get("hooks")
+    if isinstance(hooks_obj, dict):
+        for event in [ev for ev, cfg in hooks_obj.items() if _is_agentalloy_hook(cfg)]:
+            del hooks_obj[event]
+            removed.append({"path": str(settings_path), "action": "removed_hook", "event": event})
+        if not hooks_obj:  # only our hooks were present — drop the now-empty key
+            del data["hooks"]
+    # Legacy flat "hooks.<event>" keys — remove only the AgentAlloy ones.
+    for key in [
+        k
+        for k in list(data)
+        if isinstance(k, str) and k.startswith("hooks.") and _is_agentalloy_hook(data.get(k))
+    ]:
         del data[key]  # pyright: ignore[reportUnknownMemberType]
-        removed.append(
-            {
-                "path": str(settings_path),
-                "action": "removed_key",
-                "key": key,
-            }
-        )
-    # (The top-level "hooks" key is already covered by the loop above via the
-    # `key == "hooks"` condition, so no separate removal is needed.)
+        removed.append({"path": str(settings_path), "action": "removed_key", "key": key})
 
     if removed:
         # Write back the cleaned settings.json
