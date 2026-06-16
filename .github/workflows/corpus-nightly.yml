@@ -91,7 +91,7 @@ jobs:
           cat > recommend-models.json <<'JSON'
           {"schema_version": 1, "preset": "cpu", "selected_runner": "llama-server",
            "options": [{"default": true,
-             "embed_model": "Qwen3-Embedding-0.6B-Q8_0.gguf", "embed_runner": "llama-server",
+             "embed_model": "nomic-embed-text-v1.5.Q8_0.gguf", "embed_runner": "llama-server",
              "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf", "rerank_runner": "llama-server"}]}
           JSON
           uv run agentalloy pull-models --models recommend-models.json --runner llama-server
