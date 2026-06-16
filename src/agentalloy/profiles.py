@@ -237,11 +237,28 @@ def detect_profile(cwd: Path | None = None) -> Profile:
     for name, rules in config.profiles.items():
         match_path = rules.get("match_path", []) or []  # type: ignore[union-attr]
         for pattern in match_path:
-            # Expand ~ in the pattern
+            # Expand ~, then strip a trailing "/*" or "/**" "everything-under"
+            # glob so the documented PATH-PREFIX semantics actually hold: a
+            # pattern matches when cwd equals its directory or is nested beneath
+            # it. (Path.match alone is anchored at the right, so "<dir>/*" only
+            # matched direct children and a bare "<dir>" matched nothing.)
             expanded_pattern = Path(str(pattern)).expanduser()  # type: ignore[arg-type]
+            parts = expanded_pattern.parts
+            while len(parts) > 1 and parts[-1] in ("*", "**"):
+                parts = parts[:-1]
+            base = Path(*parts)
+            if any(ch in str(base) for ch in "*?["):
+                # Still glob-y after stripping the trailing wildcard (e.g. a
+                # mid-path "*") — fall back to fnmatch-style anchored matching.
+                try:
+                    if cwd_abs.match(str(base)):
+                        return _load_profile(name, config)
+                except ValueError:
+                    pass
+                continue
             try:
-                if cwd_abs.match(str(expanded_pattern)):
-                    return _load_profile(name, config)
+                cwd_abs.relative_to(base.resolve())
+                return _load_profile(name, config)
             except ValueError:
                 pass
 

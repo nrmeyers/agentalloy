@@ -92,6 +92,8 @@ def dedup_fragment(
     k: int = 20,
     categories: list[str] | None = None,
     fragment_types: list[str] | None = None,
+    exclude_fragment_id: str | None = None,
+    exclude_skill_ids: set[str] | None = None,
 ) -> tuple[SimilarityHit | None, list[SimilarityHit]]:
     """Search DuckDB for top-k matches to *query_vec* and classify them.
 
@@ -108,9 +110,17 @@ def dedup_fragment(
         categories=categories,
         fragment_types=fragment_types,
     )
+    skip_skills = exclude_skill_ids or set()
     hard_match: SimilarityHit | None = None
     soft_matches: list[SimilarityHit] = []
     for hit in hits:
+        # Exclude the fragment's own row and same-batch/same-pack hits BEFORE
+        # picking the closest hard match. Dedup runs after the new fragments are
+        # inserted, so the ~0-distance self-match would otherwise always win the
+        # hard race and shadow a genuine cross-pack duplicate (which is then
+        # filtered out downstream, silently dropping a real hard hit).
+        if hit.fragment_id == exclude_fragment_id or hit.skill_id in skip_skills:
+            continue
         verdict = classify_hit(
             hit, hard_similarity=hard_similarity, soft_similarity=soft_similarity
         )
@@ -176,9 +186,12 @@ def run_dedup_gate(
             hard_similarity=hard_similarity,
             soft_similarity=soft_similarity,
             k=k,
+            exclude_fragment_id=fragment_id,
+            exclude_skill_ids=new_skill_ids,
         )
 
-        # Skip self-match (same fragment_id after insertion) and same-pack matches.
+        # Self/same-pack hits are already excluded inside dedup_fragment; this
+        # guard stays as defense-in-depth (and documents the same-pack rule).
         if (
             hard_hit is not None
             and hard_hit.fragment_id != fragment_id

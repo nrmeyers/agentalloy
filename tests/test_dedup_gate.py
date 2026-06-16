@@ -209,6 +209,33 @@ def test_gate_hard_cross_pack(seeded_store: VectorStore) -> None:
     assert hard_match.similarity >= _HARD
 
 
+def test_gate_self_match_does_not_shadow_cross_pack_hard(seeded_store: VectorStore) -> None:
+    """A ~0-distance self-match must not hide a slightly-farther cross-pack hard dup.
+
+    The new fragment is a hard duplicate of existing-skill-a (cosine 0.95) but not
+    identical, so after insertion its OWN row (distance 0) is the closest hit. The
+    gate must still report the cross-pack hard match rather than picking the
+    self-match as the single closest hard hit and then filtering it away.
+    """
+    new_frag_id = "new-eps-f1"
+    new_skill_id = "new-skill-eps"
+    vec = _mixed_vec(0, 5, 0.95)  # hard (≥ _HARD) vs existing-skill-a, not identical
+
+    seeded_store.insert_embeddings([_mk_fragment(new_frag_id, skill_id=new_skill_id, vec=vec)])
+
+    result = run_dedup_gate(
+        new_skill_ids={new_skill_id},
+        new_fragment_vecs={new_frag_id: (new_skill_id, vec)},
+        vector_store=seeded_store,
+        hard_similarity=_HARD,
+        soft_similarity=_SOFT,
+    )
+
+    assert result.has_hard
+    assert result.hard[0].existing_skill_id == "existing-skill-a"
+    assert result.hard[0].incoming_skill_id == new_skill_id
+
+
 def test_gate_hard_cross_pack_allow_duplicates(
     seeded_store: VectorStore, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -114,6 +114,57 @@ def test_detect_profile_path_match(profiles_tmp: Path, tmp_path: Path):
     assert p.name == "workprofile"
 
 
+def test_detect_profile_path_match_deep(profiles_tmp: Path, tmp_path: Path):
+    """A '<dir>/*' pattern matches repos nested deeper than one level (prefix)."""
+    from agentalloy.profiles import detect_profile, init_profile
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    init_profile("workprofile", match_path=[str(work_dir / "*")])
+
+    deep = work_dir / "team" / "myrepo" / "sub"
+    deep.mkdir(parents=True)
+
+    with patch("agentalloy.profiles._git_remote_url", return_value=None):
+        p = detect_profile(deep)
+
+    assert p.name == "workprofile"
+
+
+def test_detect_profile_path_prefix_no_glob(profiles_tmp: Path, tmp_path: Path):
+    """A bare '<dir>' prefix pattern (no glob) matches a repo nested under it."""
+    from agentalloy.profiles import detect_profile, init_profile
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    init_profile("workprofile", match_path=[str(work_dir)])
+
+    project = work_dir / "myrepo"
+    project.mkdir()
+
+    with patch("agentalloy.profiles._git_remote_url", return_value=None):
+        p = detect_profile(project)
+
+    assert p.name == "workprofile"
+
+
+def test_detect_profile_path_no_false_match(profiles_tmp: Path, tmp_path: Path):
+    """A sibling dir sharing a string prefix must NOT match (path-component aware)."""
+    from agentalloy.profiles import detect_profile, init_profile
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    init_profile("workprofile", match_path=[str(work_dir)])
+
+    sibling = tmp_path / "work2" / "repo"
+    sibling.mkdir(parents=True)
+
+    with patch("agentalloy.profiles._git_remote_url", return_value=None):
+        p = detect_profile(sibling)
+
+    assert p.name != "workprofile"
+
+
 def test_detect_profile_fallback_to_default(profiles_tmp: Path, tmp_path: Path):
     from agentalloy.profiles import detect_profile
 
