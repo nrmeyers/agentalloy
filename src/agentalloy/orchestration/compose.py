@@ -215,7 +215,9 @@ class ComposeOrchestrator:
             latency_ms=LatencyBreakdown(
                 retrieval_ms=retrieval.retrieval_ms,
                 assembly_ms=0,
-                total_ms=retrieval.retrieval_ms,
+                # Full wall-time (matches the telemetry record's latency_total_ms),
+                # not retrieval-only — which excluded system retrieval + assembly.
+                total_ms=elapsed_ms,
             ),
             recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
         )

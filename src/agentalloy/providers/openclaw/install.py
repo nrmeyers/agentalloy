@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +31,19 @@ def _load_plugins(path: Path) -> dict[str, Any]:
     """Load existing plugins.json or return empty structure."""
     if path.exists():
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, ValueError):
-            return {}
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError) as exc:
+            # Fail loud instead of returning {} — otherwise _save_plugins would
+            # overwrite the user's existing (but unparseable) config with a fresh
+            # structure, silently destroying it. Matches the cline adapter.
+            print(f"ERROR: {path} is not valid JSON", file=sys.stderr)
+            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
+            raise SystemExit(1) from exc
+        if not isinstance(data, dict):
+            print(f"ERROR: {path} is not a JSON object", file=sys.stderr)
+            print("FIX:   Fix the file (expected an object) or remove it.", file=sys.stderr)
+            raise SystemExit(1)
+        return data
     return {}
 
 

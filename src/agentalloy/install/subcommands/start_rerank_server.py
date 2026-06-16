@@ -21,6 +21,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -198,7 +200,7 @@ def _start_llama_server(model: str, ngl: int, timeout: float, args: argparse.Nam
     )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _port_open(RERANK_HOST, LLAMA_RERANK_PORT):
+        if _health_ready(RERANK_HOST, LLAMA_RERANK_PORT):
             break
         time.sleep(2)
     else:
@@ -239,6 +241,17 @@ def _port_open(host: str, port: int) -> bool:
         with socket.create_connection((host, port), timeout=1):
             return True
     except OSError:
+        return False
+
+
+def _health_ready(host: str, port: int) -> bool:
+    # llama-server binds its listen socket before the GGUF finishes loading, so a
+    # bare TCP connect reports "ready" while the model is still warming. Gate on
+    # /health (200 only) so the next pipeline step doesn't hit a loading model.
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=2) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, OSError):
         return False
 
 

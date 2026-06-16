@@ -12,6 +12,7 @@ _load_workflow_skill_from_packs, _build_predicate_context, _write_telemetry
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -68,9 +69,17 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
     """
     phase_file = project_root / ".agentalloy" / "phase"
     phase_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = phase_file.with_suffix(".tmp")
-    tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
-    os.replace(tmp, phase_file)
+    # Unique tmp per writer: the watcher and the async proxy both call this with
+    # no shared lock, so a fixed tmp name lets two writers race on the same file
+    # and defeat the os.replace atomicity. A per-writer tmp keeps it atomic.
+    tmp = phase_file.with_name(f"phase.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
+        os.replace(tmp, phase_file)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
 
 
 # ---------------------------------------------------------------------------

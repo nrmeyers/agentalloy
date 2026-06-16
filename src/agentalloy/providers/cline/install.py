@@ -52,6 +52,10 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             print(f"ERROR: {settings_path} is not valid JSON", file=sys.stderr)
             print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
             raise SystemExit(1) from exc
+        if not isinstance(settings, dict):
+            print(f"ERROR: {settings_path} is not a JSON object", file=sys.stderr)
+            print("FIX:   Fix the file (expected an object) or remove it.", file=sys.stderr)
+            raise SystemExit(1)
     else:
         settings = {}
 

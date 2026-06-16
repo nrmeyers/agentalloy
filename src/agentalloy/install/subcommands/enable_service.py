@@ -247,10 +247,17 @@ def _write_llama_units() -> list[str]:
             _render_llama_rerank_unit(llama_bin, _model_path("Qwen3-Reranker-0.6B-Q8_0.gguf")),
         ),
     ]
+    # Pass 1: write all unit files BEFORE enabling any of them.
     for unit_name, content in units:
         unit_path = _llama_unit_path(unit_name)
         install_state._atomic_write(unit_path, content)  # pyright: ignore[reportPrivateUsage]
         written.append(str(unit_path))
+    # systemd does not see freshly written unit files until a daemon-reload, so
+    # reload here — between writing and enabling — or first-install `enable --now`
+    # fails with "Unit ... not found" and the embed/rerank servers never start.
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+    # Pass 2: enable + start the now-visible units.
+    for unit_name, _content in units:
         result = subprocess.run(
             ["systemctl", "--user", "enable", "--now", unit_name],
             capture_output=True,

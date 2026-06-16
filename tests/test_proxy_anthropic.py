@@ -646,6 +646,22 @@ class TestOpenAIStreamToAnthropic:
         assert text_deltas[0]["delta"]["text"] == "Hello"
         assert text_deltas[1]["delta"]["text"] == " world!"
 
+        # Anthropic protocol: a text content_block_start must open index 0 before
+        # any content_block_delta for it, and exactly once per text run.
+        text_starts = [
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "content_block_start"
+            and e.get("content_block", {}).get("type") == "text"
+        ]
+        first_text_delta = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "content_block_delta" and e.get("delta", {}).get("type") == "text_delta"
+        )
+        assert len(text_starts) == 1
+        assert text_starts[0] < first_text_delta
+
         # Should have stop_reason = end_turn
         msg_deltas = [e for e in events if e["type"] == "message_delta"]
         assert msg_deltas[-1]["delta"]["stop_reason"] == "end_turn"
@@ -1320,6 +1336,22 @@ class TestInterleavedStreamToAnthropic:
         assert text_deltas[0]["delta"]["text"] == "Hello"
         assert text_deltas[1]["delta"]["text"] == " world!"
 
+        # Anthropic protocol: a text content_block_start must open index 0 before
+        # any content_block_delta for it, and exactly once per text run.
+        text_starts = [
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "content_block_start"
+            and e.get("content_block", {}).get("type") == "text"
+        ]
+        first_text_delta = next(
+            i
+            for i, e in enumerate(events)
+            if e["type"] == "content_block_delta" and e.get("delta", {}).get("type") == "text_delta"
+        )
+        assert len(text_starts) == 1
+        assert text_starts[0] < first_text_delta
+
         msg_deltas = [e for e in events if e["type"] == "message_delta"]
         assert msg_deltas[-1]["delta"]["stop_reason"] == "end_turn"
 
@@ -1491,55 +1523,48 @@ class TestInterleavedStreamToAnthropic:
             )
         ]
 
-        # Verify sequential order:
-        # text_delta -> text_stop -> tool0_start -> tool0_delta -> tool0_stop ->
-        # text_delta -> text_stop -> tool1_start -> tool1_delta -> tool1_stop
+        # Verify sequential order. Each block opens with content_block_start
+        # before its delta (Anthropic protocol), so each text run is start ->
+        # delta -> stop, same as the tool runs:
+        # text(start,delta,stop) -> tool0(start,delta,stop) ->
+        # text(start,delta,stop) -> tool1(start,delta,stop)
 
-        # 0: text delta
-        assert content_events[0]["type"] == "content_block_delta"
+        # 0-2: first text block at index 0
+        assert content_events[0]["type"] == "content_block_start"
         assert content_events[0]["index"] == 0
-        assert content_events[0]["delta"]["type"] == "text_delta"
-
-        # 1: text stop (emitted when tool_use arrives)
-        assert content_events[1]["type"] == "content_block_stop"
+        assert content_events[0]["content_block"]["type"] == "text"
+        assert content_events[1]["type"] == "content_block_delta"
         assert content_events[1]["index"] == 0
+        assert content_events[1]["delta"]["type"] == "text_delta"
+        assert content_events[2]["type"] == "content_block_stop"
+        assert content_events[2]["index"] == 0
 
-        # 2: tool0 start at index 1
-        assert content_events[2]["type"] == "content_block_start"
-        assert content_events[2]["index"] == 1
-        assert content_events[2]["content_block"]["name"] == "tool_a"
-
-        # 3: tool0 delta
-        assert content_events[3]["type"] == "content_block_delta"
+        # 3-5: tool0 at index 1
+        assert content_events[3]["type"] == "content_block_start"
         assert content_events[3]["index"] == 1
-        assert content_events[3]["delta"]["type"] == "input_json_delta"
-
-        # 4: tool0 stop (emitted when text arrives)
-        assert content_events[4]["type"] == "content_block_stop"
+        assert content_events[3]["content_block"]["name"] == "tool_a"
+        assert content_events[4]["type"] == "content_block_delta"
         assert content_events[4]["index"] == 1
+        assert content_events[4]["delta"]["type"] == "input_json_delta"
+        assert content_events[5]["type"] == "content_block_stop"
+        assert content_events[5]["index"] == 1
 
-        # 5: text delta (second text block)
-        assert content_events[5]["type"] == "content_block_delta"
-        assert content_events[5]["index"] == 0
-        assert content_events[5]["delta"]["type"] == "text_delta"
-
-        # 6: text stop (emitted when tool1 arrives)
-        assert content_events[6]["type"] == "content_block_stop"
+        # 6-8: second text block, reopened at index 0
+        assert content_events[6]["type"] == "content_block_start"
         assert content_events[6]["index"] == 0
+        assert content_events[6]["content_block"]["type"] == "text"
+        assert content_events[7]["type"] == "content_block_delta"
+        assert content_events[7]["index"] == 0
+        assert content_events[7]["delta"]["type"] == "text_delta"
+        assert content_events[8]["type"] == "content_block_stop"
+        assert content_events[8]["index"] == 0
 
-        # 7: tool1 start at index 2
-        assert content_events[7]["type"] == "content_block_start"
-        assert content_events[7]["index"] == 2
-        assert content_events[7]["content_block"]["name"] == "tool_b"
-
-        # 8: tool1 delta
-        assert content_events[8]["type"] == "content_block_delta"
-        assert content_events[8]["index"] == 2
-        assert content_events[8]["delta"]["type"] == "input_json_delta"
-
-        # 9: tool1 stop (emitted at end of stream)
-        assert content_events[9]["type"] == "content_block_stop"
+        # 9-11: tool1 at index 2
+        assert content_events[9]["type"] == "content_block_start"
         assert content_events[9]["index"] == 2
-
-        # Final text_stop is deferred to end-of-stream cleanup
-        # (index 0 stop is already emitted at step 6)
+        assert content_events[9]["content_block"]["name"] == "tool_b"
+        assert content_events[10]["type"] == "content_block_delta"
+        assert content_events[10]["index"] == 2
+        assert content_events[10]["delta"]["type"] == "input_json_delta"
+        assert content_events[11]["type"] == "content_block_stop"
+        assert content_events[11]["index"] == 2

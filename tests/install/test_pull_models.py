@@ -299,7 +299,15 @@ class TestPullModels:
         def always_true(m: str) -> bool:
             return True
 
-        with patch.dict(_PRESENCE_CHECKS, {"llama-server": always_true}):
+        # "Already present" for llama-server now requires both the GGUF (presence
+        # check) and the runner binary on PATH, so mock shutil.which too.
+        with (
+            patch.dict(_PRESENCE_CHECKS, {"llama-server": always_true}),
+            patch(
+                "agentalloy.install.subcommands.pull_models.shutil.which",
+                return_value="/usr/bin/llama-server",
+            ),
+        ):
             result = pull_models(models, root=repo_root)
         assert len(result["skipped_already_present"]) == 1
         assert result["auto_pulled"] == []

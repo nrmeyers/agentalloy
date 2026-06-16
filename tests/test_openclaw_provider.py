@@ -164,8 +164,8 @@ class TestOpenclawInstall(TestCase):
                     "http://localhost:7070/v1",
                 )
 
-    def test_apply_persistent_config_handles_corrupt_json(self):
-        """apply_persistent_config handles corrupt JSON gracefully."""
+    def test_apply_persistent_config_rejects_corrupt_json(self):
+        """apply_persistent_config fails loud on corrupt JSON rather than clobbering it."""
         from agentalloy.providers.openclaw import install
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -178,15 +178,12 @@ class TestOpenclawInstall(TestCase):
                 config_path.parent.mkdir(parents=True, exist_ok=True)
                 config_path.write_text("not valid json{{{", encoding="utf-8")
 
-                # Run install — should not crash
-                result = install.apply_persistent_config(7070, fake_home)
+                # Must refuse rather than silently overwrite the user's config.
+                with self.assertRaises(SystemExit):
+                    install.apply_persistent_config(7070, fake_home)
 
-                # Should have created valid JSON
-                plugins = json.loads(config_path.read_text())
-                self.assertIn("agentalloy", plugins["plugins"])
-
-                # Action should be injected_block since file existed
-                self.assertEqual(result[0].action, "injected_block")
+                # The corrupt file is preserved untouched, not clobbered with {}.
+                self.assertEqual(config_path.read_text(encoding="utf-8"), "not valid json{{{")
 
     def test_apply_persistent_config_new_file_action(self):
         """First run returns wrote_new_file action."""

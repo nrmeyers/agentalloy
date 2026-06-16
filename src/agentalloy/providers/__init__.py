@@ -12,8 +12,8 @@ populates ``REGISTRY`` with its ``HarnessSpec``.
 
 from __future__ import annotations
 
-import contextlib
 import importlib
+import logging
 import pkgutil
 from pathlib import Path
 
@@ -24,6 +24,8 @@ from agentalloy.providers.base import (
     WireRecord,
 )
 
+logger = logging.getLogger(__name__)
+
 REGISTRY: dict[str, HarnessSpec] = {}
 
 # Auto-discover and import all provider subpackages so they register themselves.
@@ -33,8 +35,13 @@ for _mod_info in pkgutil.iter_modules([str(_PROVIDERS_DIR)]):
     # Skip non-package modules (e.g. base.py) and the package itself.
     if _mod_info.name in ("base",):
         continue
-    with contextlib.suppress(Exception):
+    try:
         importlib.import_module(f".{_mod_info.name}", package=__name__)
+    except Exception as _exc:  # noqa: BLE001 — keep discovering other providers
+        # Surface the failure instead of swallowing it: a provider that fails to
+        # import is silently absent from REGISTRY and only shows up later as an
+        # opaque "unknown harness" at wire time.
+        logger.warning("provider %r failed to load: %s", _mod_info.name, _exc)
 
 __all__ = [
     "Capability",
