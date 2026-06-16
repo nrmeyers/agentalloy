@@ -211,7 +211,9 @@ class RetrievalResult:
     candidates: list[ActiveFragment]
     eligible_count: int
     retrieval_ms: int
-    # cosine similarity per fragment_id (in [0, 1]); 1 = identical direction.
+    # Relevance score per fragment_id in (0, 1], descending with final fused
+    # (RRF + card-boost) rank — 1.0 = top-ranked. Reflects both retrieval legs,
+    # not dense cosine alone (which collapsed BM25-only hits to 0.0).
     scores_by_id: dict[str, float] = field(default_factory=lambda: {})
     bm25_source: str = "rule-extracted"  # "rule-extracted" | "contract" | "union"
     # Skill IDs ordered by rank (first fragment appearance) — observability for Stage B.
@@ -540,17 +542,21 @@ def retrieve_domain_candidates(
     # card-free (off/prefix) index — preserves today's order exactly.
     fused_ids = _apply_card_boost(fused_ids, {fid: f.skill_id for fid, f in by_id.items()})
 
-    # Build dense score lookup for observability.
-    dense_score_by_id = {h.fragment_id: 1.0 - h.distance for h in dense_hits}
+    # Score each fragment by its position in the final (RRF + card-boost) order.
+    # Using dense distance alone scored every BM25-only fragment 0.0 — so
+    # lexical-only hits lost their fused rank in the per-skill dedup/sort in
+    # orchestration/retrieve.py. A descending fused-rank score keeps every hit's
+    # authoritative position and reproduces the card-boost reordering downstream.
+    n_fused = len(fused_ids)
 
     ranked: list[ActiveFragment] = []
     scores_by_id: dict[str, float] = {}
-    for fid in fused_ids:
+    for i, fid in enumerate(fused_ids):
         frag = by_id.get(fid)
         if frag is None:
             continue
         ranked.append(frag)
-        scores_by_id[fid] = dense_score_by_id.get(fid, 0.0)
+        scores_by_id[fid] = 1.0 - (i / n_fused) if n_fused else 0.0
 
     # domain_tags is a post-retrieval filter per the API contract: it narrows
     # the fused candidate set and may legitimately empty it. It cannot recruit
