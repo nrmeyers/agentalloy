@@ -1,8 +1,8 @@
 """DuckDB-backed vector store for fragment embeddings + composition telemetry.
 
 Single file per scope (``skills.duck``) holding both tables. Uses DuckDB's
-built-in ``array_cosine_distance`` over ``FLOAT[1024]`` columns — not the
-experimental VSS extension. Linear scan is <10ms at current corpus scale.
+built-in ``array_cosine_distance`` over ``FLOAT[EMBEDDING_DIM]`` columns — not
+the experimental VSS extension. Linear scan is <10ms at current corpus scale.
 
 L2-normalization is enforced at write time so ``array_cosine_distance``
 reduces to an inner product at query time. Callers pass raw embeddings;
@@ -575,17 +575,17 @@ class VectorStore:
         re-embedding a single skill (``--skill-id``), so other skills' cards
         survive a scoped pass instead of being wiped and never reinserted.
         """
-        before = self.count_embeddings()
         if skill_id is None:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "DELETE FROM fragment_embeddings WHERE fragment_type = ?", [CARD_FRAGMENT_TYPE]
             )
         else:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "DELETE FROM fragment_embeddings WHERE fragment_type = ? AND skill_id = ?",
                 [CARD_FRAGMENT_TYPE, skill_id],
             )
-        return before - self.count_embeddings()
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
 
     def embedding_dim(self) -> int | None:
         """Return the dimension of stored embeddings, or None if the corpus is empty.
@@ -613,9 +613,9 @@ class VectorStore:
 
     def delete_skill(self, skill_id: str) -> int:
         """Remove all fragment embeddings for a skill. Returns rows deleted."""
-        before = self.count_embeddings()
-        self._conn.execute("DELETE FROM fragment_embeddings WHERE skill_id = ?", [skill_id])
-        return before - self.count_embeddings()
+        cur = self._conn.execute("DELETE FROM fragment_embeddings WHERE skill_id = ?", [skill_id])
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
 
     # -- telemetry -----------------------------------------------------------
 
@@ -930,28 +930,34 @@ def open_or_create(path: str | Path) -> VectorStore:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(p))
-    conn.execute(_SCHEMA_DDL)
-    _apply_migrations(conn)
-
-    try:
-        conn.execute(_FTS_SETUP_SQL)
-        if not _fts_index_exists(conn):
-            conn.execute(_FTS_CREATE_SQL)
-    except Exception:  # noqa: BLE001 — FTS extension unavailable; BM25 leg silently degrades
-        pass
-
-    # D2: construct vs before return so embedding_dim() is accessible for the guard.
+    # D2: construct vs immediately so any failure below can release the DuckDB
+    # file lock before the exception propagates (callers may catch and reopen).
     vs = VectorStore(conn)
-    stored_dim = vs.embedding_dim()  # int | None — None means corpus is empty
-    assert stored_dim is None or stored_dim > 0, "stored embedding dim must be positive"  # P10-R5
-    if stored_dim is not None and stored_dim != EMBEDDING_DIM:
+    try:
+        conn.execute(_SCHEMA_DDL)
+        _apply_migrations(conn)
+
+        try:
+            conn.execute(_FTS_SETUP_SQL)
+            if not _fts_index_exists(conn):
+                conn.execute(_FTS_CREATE_SQL)
+        except Exception:  # noqa: BLE001 — FTS extension unavailable; BM25 leg silently degrades
+            pass
+
+        stored_dim = vs.embedding_dim()  # int | None — None means corpus is empty
+        assert stored_dim is None or stored_dim > 0, (
+            "stored embedding dim must be positive"
+        )  # P10-R5
+        if stored_dim is not None and stored_dim != EMBEDDING_DIM:
+            raise EmbeddingDimMismatch(
+                f"Corpus was built with {stored_dim}-dim embeddings but the runtime "
+                f"expects {EMBEDDING_DIM}-dim (nomic-embed-text-v1.5). "
+                f"Run `agentalloy reembed --force` to rebuild with the correct model. "
+                f"WARNING: --force deletes all existing embeddings; re-run install-packs afterward."
+            )
+    except BaseException:
         vs.close()  # release DuckDB file lock before raising — callers may catch and reopen
-        raise EmbeddingDimMismatch(
-            f"Corpus was built with {stored_dim}-dim embeddings but the runtime "
-            f"expects {EMBEDDING_DIM}-dim (nomic-embed-text-v1.5). "
-            f"Run `agentalloy reembed --force` to rebuild with the correct model. "
-            f"WARNING: --force deletes all existing embeddings; re-run install-packs afterward."
-        )
+        raise
     return vs
 
 

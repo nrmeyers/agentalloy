@@ -89,10 +89,11 @@ class DiagnosticsChecker:
         self._health_checker = health_checker
 
     async def check(self) -> RuntimeDiagnosticsResponse:
-        # Run store read and dependency probes concurrently.
-        store_skills_future = asyncio.to_thread(self._read_store_state)
-        health_future = self._health_checker.check()
-        store_skills, health = await asyncio.gather(store_skills_future, health_future)
+        # _read_store_state and health_checker.check() both touch the same
+        # (non-thread-safe) LadybugStore connection, so run them sequentially
+        # rather than concurrently to avoid interleaved execute() on one conn.
+        store_skills = await asyncio.to_thread(self._read_store_state)
+        health = await self._health_checker.check()
 
         # Build store_state list.
         store_entries = [

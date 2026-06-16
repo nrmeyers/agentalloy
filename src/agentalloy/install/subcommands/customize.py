@@ -536,6 +536,7 @@ def _update_skill(args: argparse.Namespace) -> int:
                 result = {
                     "status": "reverted_to_inherited",
                     "skill_id": skill_id,
+                    "layer": layer_name,
                 }
                 write_result(result, args, human_fn=_render_update)
                 return 0
@@ -673,9 +674,8 @@ def _reset_skill(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if yes or not sys.stdin.isatty():
-        pass  # --yes provided or non-interactive: skip confirmation
-    else:
+    # Reaching here with not yes guarantees a TTY (the non-TTY case returned above).
+    if not yes:
         confirm = input(f"  Delete override for '{name}'? (yes/n): ").strip()
         if confirm.lower() != "yes":
             print("  Cancelled.")

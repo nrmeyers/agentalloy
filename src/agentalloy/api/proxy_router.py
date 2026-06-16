@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from agentalloy.api.proxy_context import read_phase, resolve_working_dir
 from agentalloy.api.proxy_injection import compose_and_inject
@@ -495,9 +495,12 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             source_skill_ids=source_skill_ids,
         )
-        return JSONResponse(
-            status_code=resp.status_code,
+        # Raw passthrough: Response does not re-encode, so a non-JSON upstream
+        # body is forwarded verbatim with its original Content-Type (JSONResponse
+        # would json.dumps() the text, double-encoding it).
+        return Response(
             content=resp.text,
+            status_code=resp.status_code,
             media_type=resp.headers.get("content-type", "text/plain"),
         )
 
@@ -578,7 +581,17 @@ async def proxy_embeddings(
             },
         )
 
+    try:
+        body = resp.json()
+    except ValueError:
+        # Non-JSON body (e.g. an HTML 502 from a reverse proxy) — pass through
+        # verbatim instead of raising an unhandled JSONDecodeError -> bare 500.
+        return Response(
+            content=resp.text,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("content-type", "text/plain"),
+        )
     return JSONResponse(
         status_code=resp.status_code,
-        content=resp.json(),
+        content=body,
     )

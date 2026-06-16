@@ -5,6 +5,7 @@ Pre-filters are deterministic and fast (<5ms). A miss skips Qwen entirely.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from dataclasses import dataclass
 from typing import Any, cast
@@ -77,18 +78,18 @@ def check_prefilter(
     # Artifact event: any gate path glob intersects file_events_since
     if ctx.file_events_since and gate_spec:
         gate_paths = _extract_gate_paths(gate_spec)
+        # Patterns depend only on gp, not on the event path — build them once.
+        patterns = [(gp, str(ctx.project_root / gp), gp.split("/")[-1]) for gp in gate_paths]
         for event_path in ctx.file_events_since:
-            for gp in gate_paths:
+            for gp, full_pat, name_pat in patterns:
                 try:
-                    import fnmatch
-
-                    if fnmatch.fnmatch(str(event_path), str(ctx.project_root / gp)):
+                    if fnmatch.fnmatch(str(event_path), full_pat):
                         return PreFilterMatch(
                             name="artifact_event",
                             detail=f"path={event_path} matched gate pattern={gp}",
                         )
                     # Also match just the filename part
-                    if fnmatch.fnmatch(event_path.name, gp.split("/")[-1]):
+                    if fnmatch.fnmatch(event_path.name, name_pat):
                         return PreFilterMatch(
                             name="artifact_event",
                             detail=f"path={event_path} matched gate pattern={gp}",

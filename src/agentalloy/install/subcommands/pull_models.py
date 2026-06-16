@@ -528,6 +528,11 @@ def _download_gguf_once(url: str, dest_path: Path) -> int:
                         file=sys.stderr,
                     )
         print("", file=sys.stderr)  # newline after progress
+    # A clean mid-stream EOF (server flushes a partial body then closes without
+    # error) yields a short read that would otherwise be saved as a "successful"
+    # but truncated file. Raise so _download_with_retry re-attempts / fails loud.
+    if total and downloaded != total:
+        raise IncompleteRead(partial=b"", expected=total - downloaded)
     return downloaded
 
 

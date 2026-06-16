@@ -977,8 +977,8 @@ def main(argv: list[str] | None = None) -> int:
                         "with `agentalloy reembed --rebuild-fts`.",
                         exc,
                     )
-            if stats.failed > 0:
-                return EXIT_LLM
+            # reembed_fragments raises on any failure (see its handlers), so
+            # stats.failed is always 0 here — no EXIT_LLM branch is reachable.
             return dedup_exit
     except Exception as exc:
         # LadybugDB enforces a single writer; a running service (including a

@@ -115,21 +115,20 @@ def remove_sentinel_block(
 
     sentinel_begin_raw = sentinel_begin
     sentinel_end_raw = sentinel_end
-    # For commented variants, also check for "# " prefix
-    sentinel_begin_commented = "# " + sentinel_begin_raw
-    sentinel_end_commented = "# " + sentinel_end_raw
+    # A commented marker ("# " + raw) is a superstring of the raw marker, so the
+    # raw substring test already matches both raw and commented lines.
 
     i = 0
     while i < len(lines):
         line = lines[i]
         # Check for begin sentinel (raw or commented)
-        if sentinel_begin_raw in line or sentinel_begin_commented in line:
+        if sentinel_begin_raw in line:
             skip = True
             found_sentinel = True
             i += 1
             continue
         # Check for end sentinel (raw or commented)
-        if skip and (sentinel_end_raw in line or sentinel_end_commented in line):
+        if skip and sentinel_end_raw in line:
             skip = False
             i += 1
             # Skip trailing blank line after end sentinel

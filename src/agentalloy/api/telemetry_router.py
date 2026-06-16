@@ -87,10 +87,12 @@ class TelemetryQuerier:
         offset: int,
     ) -> TracesResponse:
         kwargs: dict[str, Any] = dict(phase=phase, status=status, since=since, until=until)
-        traces, total = await asyncio.gather(
-            asyncio.to_thread(self._store.query_traces, **kwargs, limit=limit, offset=offset),
-            asyncio.to_thread(self._store.count_traces_filtered, **kwargs),
+        # Both reads share one DuckDB connection, which is not thread-safe
+        # (see VectorStore docstring) — run them sequentially, not via gather.
+        traces = await asyncio.to_thread(
+            self._store.query_traces, **kwargs, limit=limit, offset=offset
         )
+        total = await asyncio.to_thread(self._store.count_traces_filtered, **kwargs)
         return TracesResponse(
             total=total,
             offset=offset,

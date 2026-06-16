@@ -18,6 +18,7 @@ called on every retrieval and every hook fire.
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import shutil
@@ -486,6 +487,6 @@ def _atomic_yaml_write(target: Path, data: dict[str, Any]) -> None:
         )
         os.replace(str(tmp), str(target))
     except BaseException:
-        with __builtins__.__import__("contextlib").suppress(FileNotFoundError, OSError):
+        with contextlib.suppress(FileNotFoundError, OSError):
             tmp.unlink()
         raise

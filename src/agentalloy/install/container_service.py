@@ -248,7 +248,7 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
             try:
                 proc.terminate()
                 proc.wait(timeout=5)
-            except (subprocess.TimeoutExpired, Exception):
+            except Exception:  # noqa: BLE001 — includes TimeoutExpired; force-kill below
                 with contextlib.suppress(OSError):
                     proc.kill()
     return False

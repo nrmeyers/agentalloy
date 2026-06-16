@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -213,7 +212,3 @@ def _run(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps(result, indent=2))
     return 0
-
-
-# Suppress unused import
-_ = shutil

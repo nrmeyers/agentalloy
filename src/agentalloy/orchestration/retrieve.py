@@ -99,7 +99,7 @@ class RetrieveOrchestrator:
                 task=task,
                 phase=phase,
                 domain_tags=domain_tags,
-                k=max(k * 2, k),  # overfetch so dedup-to-skills has room to produce k
+                k=k * 2,  # overfetch so dedup-to-skills has room to produce k
                 embedding_model=self._embedding_model,
             )
         except LMModelNotLoaded as e:
@@ -112,17 +112,17 @@ class RetrieveOrchestrator:
 
         # Dedup fragments to best-scoring-per-skill. Scores already computed
         # during retrieval (see ``RetrievalResult.scores_by_id``).
-        per_skill: dict[str, tuple[str, float, str]] = {}
+        per_skill: dict[str, tuple[str, float]] = {}
         for f in result.candidates:
             score = result.scores_by_id.get(f.fragment_id, 0.0)
             prev = per_skill.get(f.skill_id)
             if prev is None or score > prev[1]:
-                per_skill[f.skill_id] = (f.version_id, score, f.skill_id)
+                per_skill[f.skill_id] = (f.version_id, score)
 
         # Fetch raw prose + canonical_name per skill; cap to k.
-        top_skills = sorted(per_skill.values(), key=lambda x: x[1], reverse=True)[:k]
+        top_skills = sorted(per_skill.items(), key=lambda kv: kv[1][1], reverse=True)[:k]
         hits: list[RetrieveQueryHit] = []
-        for version_id, score, skill_id in top_skills:
+        for skill_id, (version_id, score) in top_skills:
             _, raw_prose = await asyncio.to_thread(self._fetch_version_meta_and_prose, version_id)
             skill = await asyncio.to_thread(self._get_skill_by_id, skill_id)
             if skill is None:

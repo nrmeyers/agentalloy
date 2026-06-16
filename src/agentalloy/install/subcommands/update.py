@@ -63,7 +63,9 @@ def _git_status(repo_root: Path) -> dict[str, Any]:
     try:
         rev = run("rev-list", "--left-right", "--count", "origin/main...HEAD")
         if rev:
-            ahead, behind = rev.split()
+            # `--left-right --count origin/main...HEAD` emits "<left> <right>":
+            # left = commits in origin/main not in HEAD (behind), right = ahead.
+            behind, ahead = rev.split()
             info["behind_origin"] = int(behind)
             info["ahead_origin"] = int(ahead)
     except (ValueError, subprocess.SubprocessError):

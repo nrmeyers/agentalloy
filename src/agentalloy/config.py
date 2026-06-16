@@ -148,8 +148,9 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Load settings and log which values came from defaults."""
     s = Settings()
+    env_keys = _env_keys()
     for field in Settings.model_fields:
-        source = "env" if field.upper() in _env_keys() else "default"
+        source = "env" if field.upper() in env_keys else "default"
         logger.debug("config %s=%r source=%s", field, getattr(s, field), source)
     return s
 

@@ -209,17 +209,8 @@ def _unwire_claude_code_settings_json() -> list[dict[str, Any]]:
                 "key": key,
             }
         )
-
-    # Also remove any "hooks" top-level key
-    if "hooks" in data:
-        del data["hooks"]
-        removed.append(
-            {
-                "path": str(settings_path),
-                "action": "removed_key",
-                "key": "hooks",
-            }
-        )
+    # (The top-level "hooks" key is already covered by the loop above via the
+    # `key == "hooks"` condition, so no separate removal is needed.)
 
     if removed:
         # Write back the cleaned settings.json
