@@ -574,12 +574,11 @@ def install_local_pack(
         for r in ingest_results:
             if r["outcome"] == "ingested" and r["yaml"] not in failed_yaml_names:
                 # Extract skill_id from the YAML file
+                # r["yaml"] is the basename only (set by _ingest_yaml), so compare
+                # against the manifest entry's basename — a subpath like
+                # "skills/foo.yaml" must still match "foo.yaml" or it won't roll back.
                 yaml_entry = next(
-                    (
-                        e
-                        for e in skills_entries
-                        if pack_dir / str(e["file"]) == pack_dir / r["yaml"]
-                    ),
+                    (e for e in skills_entries if Path(str(e["file"])).name == r["yaml"]),
                     None,
                 )
                 if yaml_entry:

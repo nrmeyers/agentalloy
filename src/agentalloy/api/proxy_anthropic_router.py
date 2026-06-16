@@ -296,6 +296,7 @@ def _openai_stream_to_anthropic(
     output_tokens: int = 0
     input_tokens: int = 0
     first = True
+    text_started = False
     stop_reason = "end_turn"
     # Accumulate tool-call deltas keyed by index
     tool_call_deltas: dict[int, dict[str, Any]] = {}
@@ -349,6 +350,17 @@ def _openai_stream_to_anthropic(
                 tool_call_deltas[idx] = base
 
         if text:
+            # Open the text block before its first delta (Anthropic protocol
+            # requires content_block_start before any content_block_delta).
+            if not text_started:
+                events.append(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    }
+                )
+                text_started = True
             events.append(
                 {
                     "type": "content_block_delta",
@@ -578,6 +590,16 @@ def _openai_stream_to_anthropic_interleaved(
                 if tool_states[tc_idx].get("emitted_start"):
                     _emit_tool_stop(tc_idx)
 
+            # Open the text block before its first delta (Anthropic protocol
+            # requires content_block_start before any content_block_delta).
+            if not pending_text:
+                events.append(
+                    {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    }
+                )
             events.append(
                 {
                     "type": "content_block_delta",
@@ -848,6 +870,21 @@ def _stream_anthropic_response(
                                     {"type": "content_block_stop", "index": tc_idx + 1},
                                 )
                                 tool_states[tc_idx]["emitted_start"] = False
+
+                        # Open the text block before its first delta — the Anthropic
+                        # streaming protocol requires a content_block_start for the
+                        # index before any content_block_delta. pending_text (already
+                        # used to emit the matching content_block_stop) ensures we
+                        # open it exactly once per text run.
+                        if not pending_text:
+                            yield _sse_event(
+                                "content_block_start",
+                                {
+                                    "type": "content_block_start",
+                                    "index": 0,
+                                    "content_block": {"type": "text", "text": ""},
+                                },
+                            )
 
                         yield _sse_event(
                             "content_block_delta",

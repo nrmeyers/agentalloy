@@ -824,9 +824,14 @@ def pull_models(
     interactive = sys.stdin.isatty()
 
     for model, runner in pairs:
-        # Check presence — includes GGUF file check for llama-server.
+        # Check presence — includes GGUF file check for llama-server. For
+        # llama-server, the GGUF file alone is not enough: the runner binary must
+        # also be on PATH, else we'd skip provisioning and leave a model with no
+        # runtime. Fall through to _handle_llama_server (which re-provisions the
+        # binary and short-circuits the GGUF download) when the binary is absent.
         presence_fn = _PRESENCE_CHECKS.get(runner)
-        if presence_fn and presence_fn(model):
+        binary_ok = runner != "llama-server" or shutil.which("llama-server") is not None
+        if presence_fn and presence_fn(model) and binary_ok:
             skipped.append({"runner": runner, "model": model})
             continue
 

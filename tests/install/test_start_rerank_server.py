@@ -129,12 +129,12 @@ class TestLaunch:
         gguf_dir.mkdir()
         (gguf_dir / "Qwen3-Reranker-0.6B-Q8_0.gguf").write_text("stub")
 
-        # First _port_open call (idempotency) → False; subsequent (health poll) → True.
-        port_states = iter([False, True])
-
+        # Idempotency _port_open → False (not already running); readiness now polls
+        # /health, so mock _health_ready → True.
         with (
             patch.object(srs.install_state, "user_data_dir", return_value=tmp_path),
-            patch.object(srs, "_port_open", side_effect=lambda *a, **k: next(port_states, True)),
+            patch.object(srs, "_port_open", return_value=False),
+            patch.object(srs, "_health_ready", return_value=True),
             patch.object(srs, "_save"),
             patch("subprocess.Popen") as popen,
         ):

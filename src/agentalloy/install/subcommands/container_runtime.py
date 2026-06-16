@@ -974,10 +974,14 @@ def _wait_for_readiness(
         if stream_logs and runtime is not None:
             new_tail = _tail_container_logs(runtime, container_name)
             if new_tail and new_tail != last_tail:
-                new_lines = (
-                    new_tail[len(last_tail) :] if new_tail.startswith(last_tail) else new_tail
-                )
-                _print(new_lines.rstrip())
+                # _tail_container_logs returns a fixed `--tail N` sliding window,
+                # not append-from-zero output, so a string-prefix diff re-prints
+                # the whole window once logs exceed N lines. Diff by line
+                # membership instead and emit only lines not already shown.
+                prev_lines = set(last_tail.splitlines())
+                fresh = [ln for ln in new_tail.splitlines() if ln not in prev_lines]
+                if fresh:
+                    _print("\n".join(fresh).rstrip())
                 last_tail = new_tail
 
         status = body.get("status") if body is not None else None

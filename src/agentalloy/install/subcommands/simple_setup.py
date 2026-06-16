@@ -114,7 +114,9 @@ def _check_network_speed() -> tuple[str, int]:
         with urllib.request.urlopen("https://ollama.ai/", timeout=5) as resp:
             body = resp.read()
         elapsed = time.monotonic() - t0
-        speed_mbps = (len(body) * 8) / (elapsed * 1024)
+        # bits / seconds / 1e6 = Mbps. (Was /1024 → kbit/s mislabeled as Mbps,
+        # which made the <1 / <5 Mbps thresholds and the warning unreachable.)
+        speed_mbps = (len(body) * 8) / (elapsed * 1_000_000)
 
         if speed_mbps < 1:
             est_minutes = 600 / (speed_mbps * 60 / 8)

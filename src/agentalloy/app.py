@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -154,14 +154,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
-        if embed_async_client is not None:
-            await embed_async_client.aclose()
-        if upstream_client is not None:
-            await upstream_client.aclose()
-        telemetry.close()
-        embed_client.close()
-        vector_store.close()
-        store.close()
+        # Guard each close independently: a failure in one (e.g. an in-flight
+        # passthrough request at shutdown) must not skip the rest and leak the
+        # DuckDB / LadybugDB connections.
+        for aclient in (embed_async_client, upstream_client):
+            if aclient is not None:
+                with suppress(Exception):
+                    await aclient.aclose()
+        for closeable in (telemetry, embed_client, vector_store, store):
+            with suppress(Exception):
+                closeable.close()
 
 
 def _stage_error_response(stage: str, err: object) -> JSONResponse:
