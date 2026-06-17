@@ -417,9 +417,7 @@ The corpus is **packs** — opt-in groups of related skills. `main` ships **35+ 
 <tr><td><b>store</b></td><td><code>redis</code> · <code>redshift</code> · <code>snowflake</code> · <code>temporal</code></td></tr>
 </table>
 
-Every skill is sourced from authoritative upstream docs and validated against the **R1–R8 quality contract** in `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`. (The authoring/QA pipeline that emits per-pack Critic reports is being redesigned.)
-
-Pack authoring uses a local-first author-critic pipeline (currently being redesigned) that produces validated YAML packs; nothing about authoring is required to *use* AgentAlloy at runtime.
+Every skill is sourced from authoritative upstream docs and validated against the **R1–R8 quality contract** (`src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`) via a local-first author-critic pipeline (currently being redesigned). Nothing about authoring is required to *use* AgentAlloy at runtime.
 
 ---
 
@@ -431,7 +429,7 @@ AgentAlloy is a three-layer system:
 2. **Composition engine** — hybrid BM25 + dense retrieval over LadybugDB (skill graph) and DuckDB (vector index), fused via phase-tuned Reciprocal Rank Fusion.
 3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 
-The composition runtime path is deterministic by default — the optional fragment re-ranker (`LM_ASSIST=arbitrate`) is off, having measured no lift. The signals-layer intent backend defaults to a small local reranker (a measured win) and fails open to cosine. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
+Both runtime paths are **deterministic by default** — the only optional LM stages (the composition re-ranker and the signal-layer intent reranker) fail safe to deterministic scoring. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
 
 ---
 
