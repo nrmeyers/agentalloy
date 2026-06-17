@@ -56,15 +56,42 @@ fi
 # CPU embedding to seconds. llama-server setup stays unconditional:
 # query embedding at compose time still needs the model at runtime.
 SEED_DIR="${SEED_DIR:-/app/corpus-seed}"
+VOL_STAMP="$APP_DIR/data/corpus-stamp.json"
 CORPUS_SEEDED=false
-if [ "$BOOTSTRAP_NEEDED" = "true" ] \
-   && [ -f "$SEED_DIR/corpus-stamp.json" ] \
-   && [ ! -f "$APP_DIR/data/skills.duck" ]; then
+
+# stamp_value <file> <key> — pull a string/number value out of corpus-stamp.json
+# without a JSON parser (the controlled stamp is flat key:value).
+stamp_value() {
+    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$1" 2>/dev/null | head -1
+}
+
+# Decide whether to (re-)seed the corpus from the image. Seed when the volume
+# has no corpus (first run) OR the image's corpus differs from the volume's —
+# a different packs_hash / embedding_dim means an upgrade brought a newer
+# corpus, so `agentalloy upgrade` self-heals it from the fast prebuilt seed
+# (seconds) instead of leaving a stale or dim-mismatched corpus behind. Runs on
+# every boot (not just bootstrap) so upgrades, which keep .bootstrap-complete,
+# still refresh.
+NEED_SEED=false
+if [ -f "$SEED_DIR/corpus-stamp.json" ]; then
+    if [ ! -f "$APP_DIR/data/skills.duck" ]; then
+        NEED_SEED=true
+    elif [ -f "$VOL_STAMP" ]; then
+        if [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" packs_hash)" != "$(stamp_value "$VOL_STAMP" packs_hash)" ] \
+           || [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" embedding_dim)" != "$(stamp_value "$VOL_STAMP" embedding_dim)" ]; then
+            NEED_SEED=true
+            echo ">> Image corpus differs from volume (upgrade) - re-seeding"
+        fi
+    fi
+fi
+
+if [ "$NEED_SEED" = "true" ]; then
     echo ">> Seeding prebuilt corpus from image (skipping pack ingest + re-embed)"
     mkdir -p "$APP_DIR/data"
+    rm -rf "$APP_DIR/data/ladybug" "$APP_DIR/data/skills.duck"
     cp -a "$SEED_DIR/ladybug" "$APP_DIR/data/ladybug"
     cp "$SEED_DIR/skills.duck" "$APP_DIR/data/skills.duck"
-    cp "$SEED_DIR/corpus-stamp.json" "$APP_DIR/data/corpus-stamp.json"
+    cp "$SEED_DIR/corpus-stamp.json" "$VOL_STAMP"
     CORPUS_SEEDED=true
     # Surface the seed to host-side readiness polling (same atomic
     # tmp+mv pattern as the model_pull phase).

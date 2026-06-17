@@ -50,6 +50,7 @@ from agentalloy.install.subcommands import (
     uninstall,
     unwire,
     update,
+    upgrade,
     verify,
     verify_pack,
     wire,
@@ -108,6 +109,7 @@ _SUBCOMMANDS = [
     uninstall,
     reset_step,
     update,
+    upgrade,
     install_pack,
     install_packs,
     reembed,
@@ -127,6 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Suppress non-error output (silent mode).",
+    )
+    from agentalloy import __version__
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"agentalloy {__version__}",
+        help="Print the installed agentalloy version and exit.",
     )
     subparsers = parser.add_subparsers(dest="subcommand")
     for mod in _SUBCOMMANDS:

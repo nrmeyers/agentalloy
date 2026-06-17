@@ -49,6 +49,24 @@ If you want to walk the user through this carefully (recommended for first insta
 
 ---
 
+## Upgrading
+
+Once installed, move an existing install to the latest tagged release with one command:
+
+```bash
+agentalloy upgrade            # detects native vs container; swaps, refreshes corpus if needed, restarts, verifies
+agentalloy upgrade --check    # report current vs latest release, change nothing
+agentalloy upgrade --ref v2.2.0   # pin a specific release (rollback/testing)
+```
+
+- **Native**: stops the service, re-installs from the release tag (`uv tool install --force git+…@<tag>`), re-ingests changed packs, restarts, and verifies. If the embedding model/dimension changed (a major version), it prompts before the full re-embed (`--yes` auto-confirms; `~30–40 min` on CPU).
+- **Container**: pulls the matching image and recreates the container. The image entrypoint re-seeds the corpus from its prebuilt seed when `corpus-stamp.json` differs (`packs_hash` / `embedding_dim`) — seconds, no re-embed.
+- A source/editable checkout is left alone — update it with `git pull` (then `uv sync`).
+
+`agentalloy --version` reports the installed version.
+
+---
+
 ## Prerequisites
 
 You need:

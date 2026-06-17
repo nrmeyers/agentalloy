@@ -94,6 +94,18 @@ agentalloy setup -n --hardware nvidia --packs all --harness cursor
 
 Just want to see it work first? [Run the demo](#demo).
 
+### Upgrading
+
+Already installed? Move to the latest release in one command — it detects your deployment, swaps the package (native) or image (container), refreshes the corpus only if it changed, restarts, and verifies:
+
+```bash
+agentalloy upgrade            # native or container — auto-detected
+agentalloy upgrade --check    # report current vs latest, change nothing
+agentalloy --version          # what you're on now
+```
+
+Native installs re-install from the newest tagged release; container installs pull the matching image and recreate (the corpus self-heals from the image's prebuilt seed). A major-version embedding change triggers a one-time re-embed — you're prompted first (`--yes` to auto-confirm, `--ref vX.Y.Z` to pin a specific release).
+
 ---
 
 ## Contents
