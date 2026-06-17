@@ -59,18 +59,15 @@ SEED_DIR="${SEED_DIR:-/app/corpus-seed}"
 VOL_STAMP="$APP_DIR/data/corpus-stamp.json"
 CORPUS_SEEDED=false
 
-# stamp_value <file> <key> — pull a string/number value out of corpus-stamp.json
-# without a JSON parser (the controlled stamp is flat key:value).
+# stamp_value <file> <key> - read a value from the flat corpus-stamp.json.
 stamp_value() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$1" 2>/dev/null | head -1
 }
 
-# Decide whether to (re-)seed the corpus from the image. Seed when the volume
-# has no corpus (first run) OR the image's corpus differs from the volume's —
-# a different packs_hash / embedding_dim means an upgrade brought a newer
-# corpus, so `agentalloy upgrade` self-heals it from the fast prebuilt seed
-# (seconds) instead of leaving a stale or dim-mismatched corpus behind. Runs on
-# every boot (not just bootstrap) so upgrades, which keep .bootstrap-complete,
+# (Re-)seed the corpus from the image: on an empty volume (first run) or
+# when the image corpus differs (packs_hash / embedding_dim) so that
+# `agentalloy upgrade` self-heals from the fast prebuilt seed. Runs every
+# boot (not just bootstrap) so upgrades, which keep .bootstrap-complete,
 # still refresh.
 NEED_SEED=false
 if [ -f "$SEED_DIR/corpus-stamp.json" ]; then
