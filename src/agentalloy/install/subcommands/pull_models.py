@@ -252,6 +252,33 @@ def _probe_gpu_devices(binary: Path) -> list[str]:
     return devices
 
 
+def _llama_server_runs(binary: Path) -> bool:
+    """Return True if ``binary`` actually executes (``--version`` exits 0).
+
+    A bare ``shutil.which`` hit is not proof the runner works: the on-PATH
+    ``llama-server`` is usually a thin wrapper that ``exec``s an extracted binary
+    under the data dir. If that target was wiped (e.g. a ``--remove-data`` reset
+    that left the wrapper in ``~/.local/bin`` behind), ``which`` still resolves
+    but every call dies with ``exec: .../llama-server: not found``. Verify it runs
+    so callers re-provision instead of trusting a corpse — and so the GPU-device
+    probe's empty result isn't misread as "CPU-only build".
+    """
+    try:
+        env = dict(os.environ)
+        lib = str(binary.parent)
+        env["LD_LIBRARY_PATH"] = f"{lib}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+        proc = subprocess.run(
+            [str(binary), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
 def _extract_archive(archive_path: Path, dest_dir: Path) -> None:
     """Extract a ``.tar.gz`` or ``.zip`` archive into ``dest_dir``.
 
@@ -475,7 +502,7 @@ def _build_llama_server() -> dict[str, Any]:
     """
     # Fast path: binary already on PATH.
     existing = shutil.which("llama-server")
-    if existing:
+    if existing and _llama_server_runs(Path(existing)):
         return {"success": True, "binary_path": existing, "error": None, "duration_ms": 0}
 
     # Check prereqs before doing anything expensive.
@@ -760,9 +787,10 @@ def _ensure_llama_server_binary(interactive: bool, hardware: str = "cpu") -> dic
     Returns ``{success, binary_path, error, hint}``.
     """
     existing = shutil.which("llama-server")
-    if existing:
+    if existing and _llama_server_runs(Path(existing)):
         result: dict[str, Any] = {"success": True, "binary_path": existing, "error": None}
-        # An existing on-PATH binary may be CPU-only; warn if a GPU target won't offload.
+        # An existing, *working* binary may still be CPU-only; warn if a GPU target
+        # won't offload. (The probe is only trustworthy because we know it runs.)
         if hardware in _GPU_HARDWARE_TARGETS and not _probe_gpu_devices(Path(existing)):
             result["warning"] = (
                 "An existing llama-server is on PATH but exposes no GPU device — likely a "
@@ -771,6 +799,17 @@ def _ensure_llama_server_binary(interactive: bool, hardware: str = "cpu") -> dic
             )
             print(f"  WARNING: {result['warning']}", file=sys.stderr)
         return result
+
+    if existing:
+        # On PATH but non-functional — almost always a thin wrapper whose extracted
+        # target was wiped (e.g. a data-dir reset that left ~/.local/bin/llama-server
+        # behind). Re-provision rather than hand the next step a binary that dies with
+        # "exec: .../llama-server: not found".
+        print(
+            f"  WARNING: llama-server on PATH ({existing}) does not execute "
+            "(stale wrapper / missing runtime) — re-provisioning.",
+            file=sys.stderr,
+        )
 
     prebuilt = _download_prebuilt_llama_server(hardware)
     if prebuilt["success"]:
@@ -984,11 +1023,16 @@ def pull_models(
     for model, runner in pairs:
         # Check presence — includes GGUF file check for llama-server. For
         # llama-server, the GGUF file alone is not enough: the runner binary must
-        # also be on PATH, else we'd skip provisioning and leave a model with no
-        # runtime. Fall through to _handle_llama_server (which re-provisions the
-        # binary and short-circuits the GGUF download) when the binary is absent.
+        # also be on PATH *and actually run* (a stale wrapper whose extracted target
+        # was wiped resolves via `which` but can't exec), else we'd skip provisioning
+        # and leave a model with no working runtime. Fall through to
+        # _handle_llama_server (which re-provisions the binary and short-circuits the
+        # GGUF download) when the binary is absent or broken.
         presence_fn = _PRESENCE_CHECKS.get(runner)
-        binary_ok = runner != "llama-server" or shutil.which("llama-server") is not None
+        existing_runner = shutil.which("llama-server")
+        binary_ok = runner != "llama-server" or (
+            existing_runner is not None and _llama_server_runs(Path(existing_runner))
+        )
         if presence_fn and presence_fn(model) and binary_ok:
             skipped.append({"runner": runner, "model": model})
             continue

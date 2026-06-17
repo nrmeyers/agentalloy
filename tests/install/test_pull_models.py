@@ -299,13 +299,18 @@ class TestPullModels:
         def always_true(m: str) -> bool:
             return True
 
-        # "Already present" for llama-server now requires both the GGUF (presence
-        # check) and the runner binary on PATH, so mock shutil.which too.
+        # "Already present" for llama-server now requires the GGUF (presence check)
+        # AND a runner binary that's on PATH *and actually runs* (a stale wrapper
+        # doesn't count), so mock shutil.which + _llama_server_runs.
         with (
             patch.dict(_PRESENCE_CHECKS, {"llama-server": always_true}),
             patch(
                 "agentalloy.install.subcommands.pull_models.shutil.which",
                 return_value="/usr/bin/llama-server",
+            ),
+            patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
             ),
         ):
             result = pull_models(models, root=repo_root)
@@ -529,6 +534,10 @@ class TestEnsureLlamaServerBinary:
     def test_uses_binary_on_path(self) -> None:
         with (
             patch("shutil.which", return_value="/usr/bin/llama-server"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
+            ),
             patch(
                 "agentalloy.install.subcommands.pull_models._download_prebuilt_llama_server"
             ) as prebuilt,
@@ -1007,3 +1016,64 @@ class TestGpuProvisioning:
         assert out["success"] is True
         # "cuda" preset normalizes to the "nvidia" asset target before delegating.
         ensure.assert_called_once_with(False, "nvidia")
+
+
+class TestStaleWrapperReprovision:
+    """A broken on-PATH llama-server (wrapper whose target was wiped) must trigger
+    re-provisioning, not be trusted as present."""
+
+    def test_llama_server_runs_true_on_zero_exit(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(pm.subprocess, "run", return_value=MagicMock(returncode=0)):
+            assert pm._llama_server_runs(tmp_path / "llama-server") is True
+
+    def test_llama_server_runs_false_on_nonzero_exit(self, tmp_path: Path) -> None:
+        # A wrapper whose `exec` target is missing: /bin/sh exits 127, not an exception.
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(pm.subprocess, "run", return_value=MagicMock(returncode=127)):
+            assert pm._llama_server_runs(tmp_path / "llama-server") is False
+
+    def test_llama_server_runs_false_on_oserror(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(pm.subprocess, "run", side_effect=OSError("boom")):
+            assert pm._llama_server_runs(tmp_path / "llama-server") is False
+
+    def test_ensure_uses_existing_when_it_runs(self) -> None:
+        """A working on-PATH binary is used as-is; no download."""
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with (
+            patch.object(pm.shutil, "which", return_value="/usr/bin/llama-server"),
+            patch.object(pm, "_llama_server_runs", return_value=True),
+            patch.object(pm, "_probe_gpu_devices", return_value=["CUDA0: RTX"]),
+            patch.object(pm, "_download_prebuilt_llama_server") as dl,
+        ):
+            out = pm._ensure_llama_server_binary(interactive=False, hardware="nvidia")
+        assert out["success"] is True
+        assert out["binary_path"] == "/usr/bin/llama-server"
+        dl.assert_not_called()
+
+    def test_ensure_reprovisions_when_existing_is_broken(self) -> None:
+        """A stale wrapper that resolves but won't exec triggers a re-download."""
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with (
+            patch.object(pm.shutil, "which", return_value="/home/u/.local/bin/llama-server"),
+            patch.object(pm, "_llama_server_runs", return_value=False),
+            patch.object(
+                pm,
+                "_download_prebuilt_llama_server",
+                return_value={"success": True, "binary_path": "/runtime/llama-server"},
+            ) as dl,
+        ):
+            out = pm._ensure_llama_server_binary(interactive=False, hardware="cpu")
+        assert out["success"] is True
+        assert out["binary_path"] == "/runtime/llama-server"
+        dl.assert_called_once_with("cpu")
