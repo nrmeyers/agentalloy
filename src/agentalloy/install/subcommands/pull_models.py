@@ -803,6 +803,19 @@ def _ensure_llama_server_binary(interactive: bool, hardware: str = "cpu") -> dic
     return _build_llama_server()
 
 
+def ensure_runner_binary(*, interactive: bool, preset: str = "cpu") -> dict[str, Any]:
+    """Ensure ``llama-server`` is on PATH, downloading a prebuilt if it isn't.
+
+    Public entry over the internal provisioning ``pull-models`` performs, so the
+    setup wizard can offer to provision the runner at the preflight gate — where
+    a fresh host has no binary yet — instead of dead-ending. ``preset`` is the
+    hardware preset (e.g. ``"nvidia"``/``"strix-point"``/``"cpu"``); it's
+    normalized to a GPU/CPU asset target internally. Returns
+    ``{success, binary_path, error, hint, warning?}`` (the internal shape).
+    """
+    return _ensure_llama_server_binary(interactive, _normalize_hardware(preset))
+
+
 def _handle_llama_server(
     model: str, interactive: bool, hardware: str = "cpu"
 ) -> tuple[

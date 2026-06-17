@@ -993,3 +993,17 @@ class TestGpuProvisioning:
         ) as ensure:
             pm._handle_llama_server("nomic-embed-text-v1.5.Q8_0.gguf", False, "nvidia")
         ensure.assert_called_once_with(False, "nvidia")
+
+    def test_ensure_runner_binary_normalizes_preset_and_delegates(self) -> None:
+        """Public entry normalizes the preset, then delegates to the provisioner."""
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(
+            pm,
+            "_ensure_llama_server_binary",
+            return_value={"success": True, "binary_path": "/x/llama-server", "error": None},
+        ) as ensure:
+            out = pm.ensure_runner_binary(interactive=False, preset="cuda")
+        assert out["success"] is True
+        # "cuda" preset normalizes to the "nvidia" asset target before delegating.
+        ensure.assert_called_once_with(False, "nvidia")

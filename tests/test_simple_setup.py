@@ -301,6 +301,61 @@ class TestSimpleSetupExecution:
         # write_env should NOT be called after runner preflight failure
         self.mock.mocks["write_env"].assert_not_called()
 
+    def test_run_setup_provisions_missing_runner_and_continues(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """A missing llama-server at the runner gate is provisioned, not fatal."""
+        self.mock.mocks["preflight"].side_effect = [
+            {"checks": [], "fatal_failures": [], "warn_failures": []},  # early
+            {  # runner: binary missing
+                "checks": [
+                    {
+                        "name": "llama_server_present",
+                        "passed": False,
+                        "severity": "fatal",
+                        "error": "llama-server not found on PATH",
+                    }
+                ],
+                "fatal_failures": ["llama_server_present"],
+            },
+            {"checks": [], "fatal_failures": [], "warn_failures": []},  # runner re-check passes
+        ]
+        setup_config, run_setup = self._import_run_setup()
+        with patch(
+            "agentalloy.install.subcommands.pull_models.ensure_runner_binary",
+            return_value={"success": True, "binary_path": "/home/u/.local/bin/llama-server"},
+        ) as ensure:
+            rc = run_setup(setup_config(runner="llama-server", non_interactive=True))
+        assert rc == 0
+        ensure.assert_called_once()
+        # provisioning recovered the gate, so the install proceeds
+        self.mock.mocks["write_env"].assert_called_once()
+
+    def test_run_setup_aborts_when_runner_provision_fails(self, tmp_state_dir: tuple[Path, Path]):
+        """If provisioning the missing runner fails, setup still aborts cleanly."""
+        self.mock.mocks["preflight"].side_effect = [
+            {"checks": [], "fatal_failures": [], "warn_failures": []},  # early
+            {
+                "checks": [
+                    {
+                        "name": "llama_server_present",
+                        "passed": False,
+                        "severity": "fatal",
+                        "error": "llama-server not found on PATH",
+                    }
+                ],
+                "fatal_failures": ["llama_server_present"],
+            },  # runner
+        ]
+        setup_config, run_setup = self._import_run_setup()
+        with patch(
+            "agentalloy.install.subcommands.pull_models.ensure_runner_binary",
+            return_value={"success": False, "error": "prebuilt download failed"},
+        ):
+            rc = run_setup(setup_config(runner="llama-server", non_interactive=True))
+        assert rc == 1
+        self.mock.mocks["write_env"].assert_not_called()
+
     def test_run_setup_writes_env_with_correct_preset(self, tmp_state_dir: tuple[Path, Path]):
         """Setup writes .env with preset resolved from the hardware target."""
         setup_config, run_setup = self._import_run_setup()

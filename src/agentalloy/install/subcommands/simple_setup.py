@@ -1494,6 +1494,42 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     return 0
 
 
+def _offer_provision_runner(cfg: SetupConfig, preset: str) -> bool:
+    """Offer to provision llama-server when it's missing at the runner gate.
+
+    The runner binary is normally downloaded by the later 'Pulling models' step,
+    so a missing llama-server at preflight is recoverable, not fatal: download a
+    prebuilt now (for the chosen hardware), then let the caller re-check. Returns
+    True if a binary is now on PATH. Non-interactive installs provision
+    automatically (matching pull-models' own headless behavior).
+    """
+    _print(
+        "  [yellow]llama-server is not on PATH yet[/yellow] — it's normally "
+        "downloaded during 'Pulling models'."
+    )
+    if not cfg.non_interactive:
+        try:
+            ans = input("  Download a prebuilt llama-server now? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = "n"
+        if ans in ("n", "no"):
+            _print("  [dim]Skipped — install llama-server manually, then re-run setup.[/dim]")
+            return False
+    else:
+        _print("  [dim]non-interactive: provisioning a prebuilt automatically.[/dim]")
+
+    result = pull_models.ensure_runner_binary(interactive=not cfg.non_interactive, preset=preset)
+    if result.get("success"):
+        _print(f"  [green]  llama-server ready at {result.get('binary_path', '?')}.[/green]")
+        if result.get("warning"):
+            _print(f"  [yellow]  {result['warning']}[/yellow]")
+        return True
+    _print(f"  [red]  Could not provision llama-server: {result.get('error', 'unknown')}[/red]")
+    if result.get("hint"):
+        _print(f"  [dim]  {result['hint']}[/dim]")
+    return False
+
+
 def run_setup(cfg: SetupConfig) -> int:
     """Execute the simple interactive setup flow.
 
@@ -1789,6 +1825,22 @@ def run_setup(cfg: SetupConfig) -> int:
         for c in runner_preflight.get("checks", [])
         if not c["passed"] and c.get("severity") == "fatal"
     ]
+
+    # A missing llama-server here is recoverable: the binary is provisioned by
+    # the later 'Pulling models' step, so rather than dead-end a fresh host that
+    # has no runner on PATH yet, offer to download a prebuilt now and re-check.
+    if (
+        runner_fatal == ["llama_server_present"]
+        and cfg.runner == "llama-server"
+        and _offer_provision_runner(cfg, preset)
+    ):
+        runner_preflight = preflight.run_preflight(phase="runner", runner=cfg.runner, port=cfg.port)
+        runner_fatal = [
+            c["name"]
+            for c in runner_preflight.get("checks", [])
+            if not c["passed"] and c.get("severity") == "fatal"
+        ]
+
     if runner_fatal:
         _print("  [red]Runner preflight failed:[/red]")
         for name in runner_fatal:
