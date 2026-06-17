@@ -5,12 +5,13 @@ cloud judge (:mod:`eval.judge`) against the same rubric (see
 :mod:`eval.judge_common`), but instead of the Anthropic Batches API it calls a
 local ``llama-server`` exposing the OpenAI ``/v1/chat/completions`` endpoint.
 
-Target model: **AceReason-Nemotron-14B** (alias ``acereason-nemotron-14b``,
-``http://127.0.0.1:60002``). Constraints baked in here, from its model card and
-our serving setup:
+Target model: **Qwen3.6-27B** (alias ``qwen3.6-27b``,
+``http://192.168.4.26:60000``). Constraints baked in here, from our serving
+setup:
 
-* **No system prompt.** The model is trained without one, so the entire
-  persona + rubric + task + candidate output go in a single user message.
+* **Single user turn.** Qwen3.6 supports a system role, but we fold the entire
+  persona + rubric + task + candidate output into one user message — keeping the
+  prompt identical to how prior runs were graded and to the cloud judge's content.
 * **Sampling is pinned server-side** (temp 0.6, top_p 0.95). We do *not* send
   those params — the server owns them.
 * **R1-style reasoner.** The server runs ``--reasoning-format deepseek``, so
@@ -42,8 +43,8 @@ restart, point ``run`` at the same ``--verdicts`` file (or let it pick the
 latest) and already-judged ``(run_dir, task, condition, run)`` keys are skipped.
 A multi-hour pass survives Ctrl-C, an OOM, or a server bounce.
 
-Env overrides: ``JUDGE_URL`` (default ``http://127.0.0.1:60002``),
-``JUDGE_MODEL`` (default ``acereason-nemotron-14b``).
+Env overrides: ``JUDGE_URL`` (default ``http://192.168.4.26:60000``),
+``JUDGE_MODEL`` (default ``qwen3.6-27b``).
 """
 
 from __future__ import annotations
@@ -73,8 +74,8 @@ from eval.judge_common import (
 )
 
 LOCAL_DIR = EVAL_ROOT / "runs" / "judge-local"
-DEFAULT_JUDGE_URL = "http://127.0.0.1:60002"
-DEFAULT_JUDGE_MODEL = "acereason-nemotron-14b"
+DEFAULT_JUDGE_URL = "http://192.168.4.26:60000"
+DEFAULT_JUDGE_MODEL = "qwen3.6-27b"
 DEFAULT_TIMEOUT_S = 180.0
 
 # Rough per-judgment wall-time (thinking trace dominates). Used only for the

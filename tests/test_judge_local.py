@@ -3,7 +3,7 @@
 Everything here is offline. The model server is faked with an
 ``httpx.MockTransport`` that returns canned ``/v1/chat/completions`` payloads,
 so we exercise the real client + parsing + retry + checkpoint code paths
-without a GPU. (Live behaviour — actual AceReason-Nemotron output, latency — is
+without a GPU. (Live behaviour — actual Qwen3.6-27B output, latency — is
 deferred to a post-download smoke test; see the PR.)
 """
 

@@ -1,8 +1,8 @@
 """Pairwise LLM-as-judge for code tasks, running against the *local* server.
 
 This is a sibling to the scalar judge (:mod:`eval.judge_local`). It scores the
-same ``run-N.txt`` artifacts with the same local server (AceReason-Nemotron-14B,
-``JUDGE_URL`` default ``http://127.0.0.1:60002``) and reuses every transport,
+same ``run-N.txt`` artifacts with the same local server (Qwen3.6-27B,
+``JUDGE_URL`` default ``http://192.168.4.26:60000``) and reuses every transport,
 checkpointing, and JSON-extraction primitive from
 :mod:`eval.judge_local` / :mod:`eval.judge_common`. Only the *unit of judgment*
 and the *aggregation* differ.

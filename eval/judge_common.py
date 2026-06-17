@@ -25,8 +25,8 @@ EVAL_ROOT = Path(__file__).resolve().parent
 # --- Rubric -----------------------------------------------------------------
 # The *content* of the rubric is identical across judges. The cloud judge puts
 # the persona/length-control instruction in a system prompt; the local judge
-# (AceReason-Nemotron, trained without a system prompt) folds it into the user
-# turn. Keep both halves here so the wording stays in lockstep.
+# folds it into the user turn (a single-user-turn prompt kept stable across
+# runs). Keep both halves here so the wording stays in lockstep.
 
 JUDGE_PERSONA = (
     "You are an impartial evaluator of responses to software-engineering "
