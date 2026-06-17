@@ -14,7 +14,9 @@ with `search_document: `.
 
 The `llama-server` binary is not installed or not on your PATH. On a native
 install, `agentalloy pull-models` (run by the setup wizard) auto-downloads a
-prebuilt CPU build from the [ggml-org GitHub releases](https://github.com/ggml-org/llama.cpp/releases)
+prebuilt `llama-server` matched to your hardware (a GPU build on NVIDIA/AMD via
+Vulkan/CUDA/ROCm, Metal on Apple Silicon, or CPU otherwise) from the
+[ggml-org GitHub releases](https://github.com/ggml-org/llama.cpp/releases)
 into `~/.local/share/agentalloy/runtime/llama.cpp/` and installs a launcher at
 `~/.local/bin/llama-server`. So the usual fix is:
 

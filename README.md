@@ -374,6 +374,8 @@ agentalloy serve                          # Run the service
 agentalloy phase get|set|clear            # Manage project phase
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy doctor                         # Diagnose install issues
+agentalloy upgrade                        # Upgrade to the latest release (--check to preview)
+agentalloy --version                      # Print the installed version
 ```
 
 Full command reference: [docs/operator.md](docs/operator.md).
