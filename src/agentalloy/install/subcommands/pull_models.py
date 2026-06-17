@@ -109,6 +109,51 @@ _PREBUILT_ASSET_SUFFIX: dict[tuple[str, str], str] = {
     ("win", "arm64"): "win-cpu-arm64.zip",
 }
 
+# (hardware, os_key, arch_key) -> GPU-capable asset suffix. On Linux the Vulkan
+# build offloads to NVIDIA *and* AMD with only the GPU driver present (no CUDA
+# toolkit / ROCm runtime), so it's the portable default for both vendors.
+# Windows uses the vendor-native CUDA / HIP builds. Apple Silicon needs no entry:
+# the macos-arm64 asset already bundles Metal, so `-ngl` alone offloads.
+_GPU_PREBUILT_ASSET_SUFFIX: dict[tuple[str, str, str], str] = {
+    ("nvidia", "linux", "x64"): "ubuntu-vulkan-x64.tar.gz",
+    ("nvidia", "linux", "arm64"): "ubuntu-vulkan-arm64.tar.gz",
+    ("radeon", "linux", "x64"): "ubuntu-vulkan-x64.tar.gz",
+    ("radeon", "linux", "arm64"): "ubuntu-vulkan-arm64.tar.gz",
+    ("nvidia", "win", "x64"): "win-cuda-13.3-x64.zip",
+    ("radeon", "win", "x64"): "win-hip-radeon-x64.zip",
+}
+
+# Windows CUDA ships its runtime DLLs as a separate "cudart" asset that must be
+# extracted alongside the server binary.
+_WIN_CUDART_ASSET = "cudart-llama-bin-win-cuda-13.3-x64.zip"
+
+# Hardware targets that should provision a GPU-offload build.
+_GPU_HARDWARE_TARGETS = frozenset({"nvidia", "radeon"})
+
+
+def _normalize_hardware(value: object) -> str:
+    """Normalize a recommend-models preset / hardware string to a known target.
+
+    Returns one of: ``nvidia``, ``radeon``, ``apple-silicon``, ``cpu`` (default).
+    """
+    s = str(value or "").strip().lower()
+    if s in ("nvidia", "cuda"):
+        return "nvidia"
+    if s in ("radeon", "amd", "rocm", "hip"):
+        return "radeon"
+    if s in ("apple-silicon", "apple", "metal", "mps", "darwin"):
+        return "apple-silicon"
+    return "cpu"
+
+
+def _asset_backend(asset: str) -> str:
+    """Infer the offload backend from a prebuilt asset filename."""
+    for token in ("vulkan", "cuda", "rocm", "hip", "sycl"):
+        if token in asset:
+            return token
+    return "cpu"
+
+
 # The extracted toolchain (binary + co-located shared libs) lives here; a thin
 # wrapper placed on PATH points at it with LD_LIBRARY_PATH set. This mirrors the
 # container/CI provisioning: the prebuilt binary is NOT built with an $ORIGIN
@@ -154,20 +199,57 @@ def _detect_prebuilt_platform() -> tuple[str, str] | None:
     return (os_key, arch_key)
 
 
-def _prebuilt_asset() -> tuple[str, str, str] | None:
+def _prebuilt_asset(hardware: str = "cpu") -> tuple[str, str, str] | None:
     """Resolve ``(os_key, asset_filename, download_url)`` for this platform.
 
-    Returns None when no plain-CPU asset is published for the OS/arch.
+    For a GPU ``hardware`` target (``nvidia``/``radeon``) returns the GPU-offload
+    asset where one is published (Linux Vulkan, Windows CUDA/HIP); otherwise the
+    plain-CPU asset. ``apple-silicon`` needs no GPU asset — the macos-arm64 build
+    already bundles Metal. Returns None when no asset is published for the OS/arch.
     """
     plat = _detect_prebuilt_platform()
     if plat is None:
         return None
+    build = _LLAMA_CPP_PREBUILT_BUILD
+    if hardware in _GPU_HARDWARE_TARGETS:
+        gpu_suffix = _GPU_PREBUILT_ASSET_SUFFIX.get((hardware, plat[0], plat[1]))
+        if gpu_suffix is not None:
+            asset = f"llama-{build}-bin-{gpu_suffix}"
+            return plat[0], asset, f"{_LLAMA_CPP_RELEASE_BASE}/{build}/{asset}"
+        # No GPU asset for this OS/arch — fall through to the CPU build.
     suffix = _PREBUILT_ASSET_SUFFIX.get(plat)
     if suffix is None:
         return None
-    build = _LLAMA_CPP_PREBUILT_BUILD
     asset = f"llama-{build}-bin-{suffix}"
     return plat[0], asset, f"{_LLAMA_CPP_RELEASE_BASE}/{build}/{asset}"
+
+
+def _probe_gpu_devices(binary: Path) -> list[str]:
+    """Return the GPU devices ``llama-server --list-devices`` can see.
+
+    Used to verify a GPU build actually has a usable device (driver present)
+    before we trust ``-ngl`` to offload — otherwise the install would silently
+    run on CPU. Returns the matching device lines (e.g. ``Vulkan0: ...``), or [].
+    """
+    try:
+        env = dict(os.environ)
+        lib = str(binary.parent)
+        env["LD_LIBRARY_PATH"] = f"{lib}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
+        proc = subprocess.run(
+            [str(binary), "--list-devices"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = f"{proc.stdout or ''}\n{proc.stderr or ''}"
+    devices: list[str] = []
+    for line in out.splitlines():
+        if re.match(r"\s*(?:Vulkan|CUDA|ROCm|HIP|Metal|SYCL)\d+\s*:", line):
+            devices.append(line.strip())
+    return devices
 
 
 def _extract_archive(archive_path: Path, dest_dir: Path) -> None:
@@ -223,16 +305,19 @@ def _write_llama_server_wrapper(os_key: str, runtime_dir: Path, bin_dir: Path) -
     return wrapper
 
 
-def _download_prebuilt_llama_server() -> dict[str, Any]:
-    """Download + install a prebuilt CPU llama-server from ggml-org releases.
+def _download_prebuilt_llama_server(hardware: str = "cpu") -> dict[str, Any]:
+    """Download + install a prebuilt llama-server from ggml-org releases.
 
-    Resolves this platform's exact plain-CPU asset, downloads it with the same
-    retry/backoff as the GGUFs, extracts the toolchain (binary + co-located
-    shared libs) into a permanent runtime dir, and installs a wrapper on PATH.
+    Resolves this platform + hardware target's asset — a GPU-offload build for
+    ``nvidia``/``radeon`` where one is published (Linux Vulkan, Windows CUDA/HIP;
+    apple-silicon's Metal ships in the macos-arm64 build), else the plain-CPU
+    build — downloads it with the GGUF retry/backoff, extracts the toolchain into
+    a permanent runtime dir, installs a wrapper on PATH, and (for GPU targets)
+    verifies a GPU device is actually visible so ``-ngl`` won't silently no-op.
 
-    Returns ``{success, binary_path, error, hint, duration_ms}``.
+    Returns ``{success, binary_path, backend, warning, error, hint, duration_ms}``.
     """
-    resolved = _prebuilt_asset()
+    resolved = _prebuilt_asset(hardware)
     if resolved is None:
         return {
             "success": False,
@@ -245,6 +330,7 @@ def _download_prebuilt_llama_server() -> dict[str, Any]:
         }
 
     os_key, asset, url = resolved
+    backend = "metal" if hardware == "apple-silicon" else _asset_backend(asset)
     runtime_dir = _LLAMA_CPP_RUNTIME_DIR
     bin_dir = _LLAMA_SERVER_BIN_DIR
     runtime_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +377,31 @@ def _download_prebuilt_llama_server() -> dict[str, Any]:
                 shutil.copy2(item, dest)
         (runtime_dir / binary.name).chmod(0o755)
 
+        # Windows CUDA ships its runtime DLLs in a separate "cudart" asset; the
+        # server won't start without them, so co-locate them with the binary.
+        if backend == "cuda" and os_key == "win":
+            cudart_url = (
+                f"{_LLAMA_CPP_RELEASE_BASE}/{_LLAMA_CPP_PREBUILT_BUILD}/{_WIN_CUDART_ASSET}"
+            )
+            cudart_archive = runtime_dir.parent / _WIN_CUDART_ASSET
+            cudart_staging = runtime_dir.parent / f"{_WIN_CUDART_ASSET}.extract"
+            cd = _download_with_retry(cudart_url, cudart_archive, label="cudart")
+            if cd["success"]:
+                shutil.rmtree(cudart_staging, ignore_errors=True)
+                cudart_staging.mkdir(parents=True)
+                _extract_archive(cudart_archive, cudart_staging)
+                for dll in cudart_staging.rglob("*.dll"):
+                    shutil.copy2(dll, runtime_dir / dll.name)
+                shutil.rmtree(cudart_staging, ignore_errors=True)
+                with contextlib.suppress(OSError):
+                    cudart_archive.unlink()
+            else:
+                print(
+                    f"  WARNING: CUDA runtime ({_WIN_CUDART_ASSET}) download failed; the "
+                    "server may not start. Install the CUDA runtime manually.",
+                    file=sys.stderr,
+                )
+
         wrapper = _write_llama_server_wrapper(os_key, runtime_dir, bin_dir)
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return {
@@ -313,9 +424,30 @@ def _download_prebuilt_llama_server() -> dict[str, Any]:
             file=sys.stderr,
         )
 
+    # For a GPU target, confirm a device is actually visible — otherwise the
+    # -ngl flags the install writes would silently no-op (run on CPU).
+    gpu_warning: str | None = None
+    if hardware in _GPU_HARDWARE_TARGETS or hardware == "apple-silicon":
+        devices = _probe_gpu_devices(Path(wrapper))
+        if devices:
+            print(
+                f"  llama-server: {backend} offload ready — {len(devices)} GPU device(s) "
+                f"visible (e.g. {devices[0]}).",
+                file=sys.stderr,
+            )
+        else:
+            gpu_warning = (
+                f"Installed the {backend} GPU build, but llama-server sees no GPU device "
+                "(driver missing or unsupported). It will run on CPU and `-ngl` offload "
+                "stays inert until a working GPU driver is present."
+            )
+            print(f"  WARNING: {gpu_warning}", file=sys.stderr)
+
     return {
         "success": True,
         "binary_path": str(wrapper),
+        "backend": backend,
+        "warning": gpu_warning,
         "error": None,
         "duration_ms": duration_ms,
     }
@@ -614,7 +746,7 @@ def _download_gguf(model_name: str) -> dict[str, Any]:
     return {"success": False, "error": result["error"]}
 
 
-def _ensure_llama_server_binary(interactive: bool) -> dict[str, Any]:
+def _ensure_llama_server_binary(interactive: bool, hardware: str = "cpu") -> dict[str, Any]:
     """Make ``llama-server`` available, downloading a prebuilt if it isn't.
 
     Order of preference (user decision 2026-06-14):
@@ -629,9 +761,18 @@ def _ensure_llama_server_binary(interactive: bool) -> dict[str, Any]:
     """
     existing = shutil.which("llama-server")
     if existing:
-        return {"success": True, "binary_path": existing, "error": None}
+        result: dict[str, Any] = {"success": True, "binary_path": existing, "error": None}
+        # An existing on-PATH binary may be CPU-only; warn if a GPU target won't offload.
+        if hardware in _GPU_HARDWARE_TARGETS and not _probe_gpu_devices(Path(existing)):
+            result["warning"] = (
+                "An existing llama-server is on PATH but exposes no GPU device — likely a "
+                "CPU-only build, so `-ngl` offload will not work. Remove it (or reinstall "
+                "with a GPU build) to use the GPU."
+            )
+            print(f"  WARNING: {result['warning']}", file=sys.stderr)
+        return result
 
-    prebuilt = _download_prebuilt_llama_server()
+    prebuilt = _download_prebuilt_llama_server(hardware)
     if prebuilt["success"]:
         return prebuilt
 
@@ -663,7 +804,7 @@ def _ensure_llama_server_binary(interactive: bool) -> dict[str, Any]:
 
 
 def _handle_llama_server(
-    model: str, interactive: bool
+    model: str, interactive: bool, hardware: str = "cpu"
 ) -> tuple[
     list[dict[str, Any]],  # auto_pulled entries
     list[dict[str, Any]],  # error entries
@@ -676,7 +817,7 @@ def _handle_llama_server(
     errors: list[dict[str, Any]] = []
 
     # ---- 1. Binary ----------------------------------------------------------
-    bin_result = _ensure_llama_server_binary(interactive)
+    bin_result = _ensure_llama_server_binary(interactive, hardware)
     if not bin_result["success"]:
         errors.append(
             {
@@ -823,6 +964,10 @@ def pull_models(
     # Detect interactivity once for the whole pull loop.
     interactive = sys.stdin.isatty()
 
+    # Hardware target (from the recommend-models preset) selects the GPU-offload
+    # llama-server build — nvidia/radeon get a Vulkan/CUDA/HIP build, else CPU.
+    hardware = _normalize_hardware(models_json.get("preset") or option.get("preset"))
+
     for model, runner in pairs:
         # Check presence — includes GGUF file check for llama-server. For
         # llama-server, the GGUF file alone is not enough: the runner binary must
@@ -837,7 +982,7 @@ def pull_models(
 
         if runner == "llama-server":
             # llama-server has its own build + download flow.
-            ls_pulled, ls_errors = _handle_llama_server(model, interactive)
+            ls_pulled, ls_errors = _handle_llama_server(model, interactive, hardware)
             auto_pulled.extend(ls_pulled)
             errors.extend(ls_errors)
         else:

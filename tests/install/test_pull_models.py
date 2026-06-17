@@ -876,3 +876,120 @@ class TestDownloadGgufRetry:
             result = pm._download_gguf("does-not-exist.gguf")
         assert result["success"] is False
         once.assert_not_called()
+
+
+class TestGpuProvisioning:
+    """GPU-capable llama-server asset selection + device probe."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("nvidia", "nvidia"),
+            ("CUDA", "nvidia"),
+            ("radeon", "radeon"),
+            ("amd", "radeon"),
+            ("rocm", "radeon"),
+            ("apple-silicon", "apple-silicon"),
+            ("metal", "apple-silicon"),
+            ("cpu", "cpu"),
+            ("", "cpu"),
+            ("nonsense", "cpu"),
+            (None, "cpu"),
+        ],
+    )
+    def test_normalize_hardware(self, value: object, expected: str) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        assert pm._normalize_hardware(value) == expected
+
+    @pytest.mark.parametrize(
+        "asset,backend",
+        [
+            ("llama-b9631-bin-ubuntu-vulkan-x64.tar.gz", "vulkan"),
+            ("llama-b9631-bin-win-cuda-13.3-x64.zip", "cuda"),
+            ("llama-b9631-bin-win-hip-radeon-x64.zip", "hip"),
+            ("llama-b9631-bin-ubuntu-rocm-7.2-x64.tar.gz", "rocm"),
+            ("llama-b9631-bin-ubuntu-x64.tar.gz", "cpu"),
+        ],
+    )
+    def test_asset_backend(self, asset: str, backend: str) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        assert pm._asset_backend(asset) == backend
+
+    @pytest.mark.parametrize(
+        "hardware,sysplat,machine,must_contain,must_not_contain",
+        [
+            # Linux nvidia/radeon -> Vulkan (cross-vendor, driver-only).
+            ("nvidia", "linux", "x86_64", "ubuntu-vulkan-x64", "cpu"),
+            ("radeon", "linux", "x86_64", "ubuntu-vulkan-x64", "cpu"),
+            ("nvidia", "linux", "aarch64", "ubuntu-vulkan-arm64", "x64"),
+            # Windows nvidia -> CUDA, radeon -> HIP.
+            ("nvidia", "win32", "AMD64", "win-cuda", "vulkan"),
+            ("radeon", "win32", "AMD64", "win-hip", "cuda"),
+            # CPU and apple-silicon take the plain asset (Metal ships in macos-arm64).
+            ("cpu", "linux", "x86_64", "ubuntu-x64", "vulkan"),
+            ("apple-silicon", "darwin", "arm64", "macos-arm64", "vulkan"),
+            # GPU target with no GPU asset for the OS/arch -> CPU fallback.
+            ("nvidia", "win32", "ARM64", "win-cpu-arm64", "cuda"),
+        ],
+    )
+    def test_prebuilt_asset_gpu_selection(
+        self,
+        hardware: str,
+        sysplat: str,
+        machine: str,
+        must_contain: str,
+        must_not_contain: str,
+    ) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with (
+            patch("agentalloy.install.subcommands.pull_models.sys.platform", sysplat),
+            patch(
+                "agentalloy.install.subcommands.pull_models.platform.machine",
+                return_value=machine,
+            ),
+        ):
+            resolved = pm._prebuilt_asset(hardware)
+        assert resolved is not None
+        _os, asset, url = resolved
+        assert must_contain in asset
+        assert must_not_contain not in asset
+        assert url.endswith(asset)
+
+    def test_probe_gpu_devices_parses_list(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        out = (
+            "Available devices:\n"
+            "  Vulkan0: NVIDIA GeForce RTX 3090 (24822 MiB, 2154 MiB free)\n"
+            "  Vulkan1: NVIDIA GeForce RTX 3060 (12534 MiB, 3688 MiB free)\n"
+        )
+        with patch.object(pm.subprocess, "run", return_value=MagicMock(stdout=out, stderr="")):
+            devices = pm._probe_gpu_devices(tmp_path / "llama-server")
+        assert len(devices) == 2
+        assert devices[0].startswith("Vulkan0:")
+
+    def test_probe_gpu_devices_empty_on_cpu_only(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(
+            pm.subprocess,
+            "run",
+            return_value=MagicMock(stdout="Available devices:\n  (none)\n", stderr=""),
+        ):
+            assert pm._probe_gpu_devices(tmp_path / "llama-server") == []
+
+    def test_handle_llama_server_threads_hardware(self) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        with patch.object(
+            pm, "_ensure_llama_server_binary", return_value={"success": False, "error": "x"}
+        ) as ensure:
+            pm._handle_llama_server("nomic-embed-text-v1.5.Q8_0.gguf", False, "nvidia")
+        ensure.assert_called_once_with(False, "nvidia")

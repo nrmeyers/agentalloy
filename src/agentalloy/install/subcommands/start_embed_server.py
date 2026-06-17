@@ -100,7 +100,9 @@ def _run(args: argparse.Namespace) -> int:
         write_result(result, args, human_fn=_render_embed_server)
         return 0
 
-    return _start_llama_server(model, args.timeout, args)
+    # Hardware target (from the recommend-models preset) selects GPU offload.
+    hardware = str(models_json.get("preset") or "cpu").strip().lower()
+    return _start_llama_server(model, args.timeout, args, hardware)
 
 
 def _render_embed_server(result: dict[str, Any]) -> None:
@@ -130,7 +132,9 @@ def _render_embed_server(result: dict[str, Any]) -> None:
     print_rich()
 
 
-def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) -> int:
+def _start_llama_server(
+    model: str, timeout: float, args: argparse.Namespace, hardware: str = "cpu"
+) -> int:
     model_path = install_state.user_data_dir() / "models" / model
     if not model_path.exists():
         print(
@@ -140,6 +144,11 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
         print("FIX:   Re-run `agentalloy install pull-models` to download it.", file=sys.stderr)
         return 1
 
+    # GPU offload: -ngl from the hardware target (0 on CPU). Requires a GPU-capable
+    # llama-server build (provisioned by pull-models for nvidia/radeon/apple-silicon).
+    from agentalloy.install.subcommands.start_rerank_server import _DEFAULT_NGL, _NGL_BY_TARGET
+
+    ngl = _NGL_BY_TARGET.get(hardware, _DEFAULT_NGL)
     cmd = [
         "llama-server",
         "--embeddings",
@@ -149,9 +158,10 @@ def _start_llama_server(model: str, timeout: float, args: argparse.Namespace) ->
         str(LLAMA_EMBED_PORT),
         "--ubatch-size",
         str(LLAMA_UBATCH_SIZE),
-        "-m",
-        str(model_path),
     ]
+    if ngl > 0:
+        cmd += ["-ngl", str(ngl)]
+    cmd += ["-m", str(model_path)]
     log_path = install_state.user_data_dir() / "logs" / "embed-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
