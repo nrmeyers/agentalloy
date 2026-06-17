@@ -20,9 +20,9 @@
   <img src="https://img.shields.io/badge/skills-300+-orange" alt="300+ skills" />
 </p>
 
-`AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt — and they're already breaking. They load once at session start, then suffer context rot as the conversation drags on and your agent drifts from the script. Reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, the rules your agent must follow and the skills it needs change dozens of times — and static files can't keep up. Leave them out and a smaller model flounders on tasks its training never covered; cram them all in and you pay the token tax on every turn, or pay it again redoing the work it got wrong.
+`AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session the rules and skills your agent needs change dozens of times, and static files can't keep up. Leave them out and a smaller model flounders on tasks its training never covered; cram them all in and you pay the token tax every turn — or pay it again redoing the work it got wrong.
 
-**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. When nothing has changed, nothing is injected — your agent keeps working with the context it already has. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt by fusing three instruction sets into the exact agent persona the moment calls for:
+**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`nomic-embed-text-v1.5`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. Nothing changed means nothing injected — your agent works uninterrupted. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt, fusing three instruction sets into the exact persona the moment calls for:
 
 - **System Governance** — hard boundaries and operational rules (Linear issue naming, PR branch conventions, CI/deployment gates).
 - **Workflow Directives** — process constraints (Spec-Driven Development rules, defining success criteria without solution wording).
@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, zero paid-LLM tokens spent on routing, and no remote calls. The composition path is **deterministic by default** — its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier defaults to a small local reranker — a measured win over cosine — and fails open to cosine when no reranker server is running. Everything runs on local models; nothing leaves your machine. No containers (unless you want them — `agentalloy setup --deployment container` gives you a single-container deployment). The whole loop runs locally on one small embed model (`nomic-embed-text-v1.5`, plus a 0.6B reranker for the intent gates) and embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB.
+Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -151,8 +151,6 @@ The setup wizard:
 3. **Creates** a named volume `agentalloy-data` for persistent corpus data.
 4. **Runs** the container with volume mounts, env vars, and port mapping.
 5. **Waits** for the readiness endpoint (`/readiness`) to respond.
-
-> **Note:** Container install pulls a pre-built image from GHCR — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
 
 ### Container architecture
 
