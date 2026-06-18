@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentalloy.signals.gates import (
+    _near_miss_candidates,
     aggregate,
     decide_transition,
     evaluate_node,
@@ -184,6 +185,45 @@ def test_decide_transition_no_advisory_at_terminal_phase(tmp_path: Path):
     decision = decide_transition("ship", gate_spec, ctx)
     assert decision.should_transition is False
     assert decision.advisories == []
+
+
+# --- near-miss deliverable detection ---------------------------------------
+
+
+def test_near_miss_candidates_finds_misplaced_spec(tmp_path: Path):
+    """A spec written to the repo root is a near-miss for `docs/spec/*.md`."""
+    (tmp_path / "linkvault-spec.md").write_text("# spec\n")
+    assert _near_miss_candidates(tmp_path, "docs/spec/*.md") == ["linkvault-spec.md"]
+
+
+def test_near_miss_candidates_excludes_strict_matches(tmp_path: Path):
+    """Files the strict glob already matches are not near-misses; misplaced ones are."""
+    (tmp_path / "docs" / "spec").mkdir(parents=True)
+    (tmp_path / "docs" / "spec" / "foo.md").write_text("# ok\n")
+    (tmp_path / "bar-spec.md").write_text("# misplaced\n")
+    assert _near_miss_candidates(tmp_path, "docs/spec/*.md") == ["bar-spec.md"]
+
+
+def test_near_miss_candidates_skips_directory_glob(tmp_path: Path):
+    """Directory-style globs (src/**, tests/**) have no meaningful 'wrong path'."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("x = 1\n")
+    assert _near_miss_candidates(tmp_path, "src/**") == []
+
+
+def test_decide_transition_near_miss_advisory(tmp_path: Path):
+    """Reproduces the laptop case: spec at repo root → no transition + a sharp,
+    actionable advisory naming the found file and where it belongs."""
+    ctx = _ctx(tmp_path, phase="spec")
+    (tmp_path / "linkvault2-spec.md").write_text("# spec\n")
+    gate_spec = {"artifact_exists": {"path": "docs/spec/*.md"}}
+    decision = decide_transition("spec", gate_spec, ctx)
+    assert decision.should_transition is False
+    advisory = "\n".join(decision.advisories)
+    assert "linkvault2-spec.md" in advisory
+    assert "docs/spec/*.md" in advisory
+    assert "design" in advisory  # names the target phase
+    assert "Move or rename" in advisory
 
 
 # ---------------------------------------------------------------------------

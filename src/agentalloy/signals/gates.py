@@ -6,6 +6,7 @@ SDD phase graph (linear): intake → spec → design → build → qa → ship
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast
 
 from agentalloy.embed_provider import EmbedClient
@@ -211,6 +212,46 @@ def aggregate(operator: str, children: list[PredicateResult]) -> PredicateResult
     return PredicateResult.UNKNOWN
 
 
+def _near_miss_candidates(root: Path, strict_glob: str) -> list[str]:
+    """Files that look like the gate's deliverable but landed at the wrong path.
+
+    For a *file-style* glob (final component is ``*.<ext>``), search the whole
+    tree for files carrying the glob's most-specific literal directory token and
+    matching extension — e.g. ``docs/spec/*.md`` searches ``**/*spec*.md`` and
+    finds a misplaced ``linkvault-spec.md`` at the repo root. Anything the strict
+    glob already matches is excluded. Returns project-root-relative paths, sorted.
+
+    Empty for directory-style globs (``src/**``, ``tests/**``) where "wrong path"
+    isn't meaningful, and when no literal directory token can be derived.
+    """
+    parts = [p for p in strict_glob.split("/") if p]
+    if not parts:
+        return []
+    leaf = parts[-1]
+    if "." not in leaf:  # bare ** or * — directory-style, skip
+        return []
+    ext = leaf.rsplit(".", 1)[-1]
+    if not ext or any(c in ext for c in "*?[]"):
+        return []
+    # Most-specific literal directory token (last dir component without a glob char).
+    token = ""
+    for comp in parts[:-1]:
+        if not any(c in comp for c in "*?[]"):
+            token = comp
+    if not token:
+        return []
+    strict_matches = {p.resolve() for p in _glob_files(root, strict_glob)}
+    candidates: list[str] = []
+    for p in _glob_files(root, f"**/*{token}*.{ext}"):
+        if p.resolve() in strict_matches:
+            continue
+        try:
+            candidates.append(str(p.relative_to(root)))
+        except ValueError:
+            candidates.append(str(p))
+    return sorted(candidates)
+
+
 def decide_transition(
     current_phase: str,
     gate_spec: dict[str, Any],
@@ -242,8 +283,24 @@ def decide_transition(
 
         required = dict.fromkeys(_extract_gate_paths(gate_spec))
         missing = [p for p in required if not _glob_files(ctx.project_root, p)]
-        if missing:
-            paths = ", ".join(f"`{p}`" for p in missing)
+        # Split missing paths into "wrote it somewhere wrong" vs "doesn't exist at
+        # all". A near-miss (the deliverable exists but at the wrong path — e.g.
+        # `linkvault-spec.md` at the repo root vs the gate's `docs/spec/*.md`) gets
+        # a sharper, actionable advisory naming where to move it.
+        generic: list[str] = []
+        for p in missing:
+            near = _near_miss_candidates(ctx.project_root, p)
+            if near:
+                found = ", ".join(f"`{c}`" for c in near[:3])
+                advisories.append(
+                    f"Found {found}, but phase '{current_phase}' expects its exit "
+                    f"artifact at `{p}`. Move or rename it there to advance to "
+                    f"'{to_phase}'."
+                )
+            else:
+                generic.append(p)
+        if generic:
+            paths = ", ".join(f"`{p}`" for p in generic)
             advisories.append(
                 f"Phase '{current_phase}' isn't complete yet, so staying in "
                 f"'{current_phase}'. To advance to '{to_phase}', produce its exit "

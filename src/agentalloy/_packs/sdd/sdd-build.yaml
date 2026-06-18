@@ -24,7 +24,7 @@ exit_gates:
     - artifact_exists:
         path: "src/**"
     - artifact_contains:
-        path: "tests/**"
+        path: "tests/**/*.py"
         sections: []
 signal_keywords:
   - done building
