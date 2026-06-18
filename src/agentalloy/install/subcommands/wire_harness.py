@@ -1522,7 +1522,15 @@ def _run(args: argparse.Namespace) -> int:
         scope=args.scope,
     )
     if not getattr(args, "quiet", False):
-        print(json.dumps(result, indent=2))
+        # Strip restore-only original_content (may hold secrets) from stdout; it's
+        # already persisted to install-state.json for unwire.
+        safe = dict(result)
+        for key in ("files_written", "files_modified"):
+            if isinstance(safe.get(key), list):
+                safe[key] = [
+                    {k: v for k, v in r.items() if k != "original_content"} for r in safe[key]
+                ]
+        print(json.dumps(safe, indent=2))
     return 0
 
 

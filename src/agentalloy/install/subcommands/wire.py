@@ -120,6 +120,24 @@ def add_parser(
     p.set_defaults(func=_run)
 
 
+def _redact_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return copies of *records* without ``original_content``.
+
+    ``original_content`` is the verbatim prior config (e.g. ``~/.claude/settings.json``,
+    which can hold secrets). It's persisted to ``install-state.json`` for
+    unwire-restore, but must never reach stdout / ``--json``. Copies, so the
+    on-disk state already saved by the wiring functions is untouched.
+    """
+    return [{k: v for k, v in r.items() if k != "original_content"} for r in records]
+
+
+def _describe(f: dict[str, Any]) -> str:
+    """One-line summary of a wired-file record (path + action) — never the raw dict."""
+    path = f.get("path", "?")
+    action = f.get("action")
+    return f"{path}  [dim]({action})[/dim]" if action else str(path)
+
+
 def _render_human(result: dict[str, Any]) -> None:
     """Render wire harness result in human-readable format."""
     harness = result.get("harness", "unknown")
@@ -132,9 +150,9 @@ def _render_human(result: dict[str, Any]) -> None:
     print_rich(f"  Files: {total}")
 
     for f in files_written:
-        print_rich(f"    [green]+[/green] {f}")
+        print_rich(f"    [green]+[/green] {_describe(f)}")
     for f in files_modified:
-        print_rich(f"    [yellow]~[/yellow] {f}")
+        print_rich(f"    [yellow]~[/yellow] {_describe(f)}")
 
     if not files_written and not files_modified:
         print_rich("  [dim]No files to wire.[/dim]")
@@ -167,6 +185,14 @@ def _run(args: argparse.Namespace) -> int:
         result = apply_hook_wiring(harness, port=port, root=cwd)
     else:
         result = wire_harness(harness, port=port, root=cwd, force=args.force)
+
+    # Restore data (original_content) is already persisted to install-state.json
+    # by the wiring functions above; strip it from the command output so a prior
+    # config holding secrets is never printed to stdout / emitted via --json.
+    for key in ("files_written", "files_modified"):
+        if isinstance(result.get(key), list):
+            result[key] = _redact_records(result[key])
+
     write_result(result, args, human_fn=_render_human)
     return 0
 

@@ -1242,3 +1242,61 @@ class TestUninstallProxy:
         result = uninstall_proxy._remove_sentinel_block(content)
         # Should be identical — no reformatting
         assert result == content
+
+
+class TestWireOutputRedaction:
+    """`wire` output must never include original_content (the prior config, which can
+    hold secrets); it stays in install-state.json for unwire-restore."""
+
+    def test_redact_records_drops_original_content_only(self) -> None:
+        from agentalloy.install.subcommands import wire
+
+        recs = [
+            {
+                "path": "/x",
+                "action": "injected_block",
+                "original_content": "GITLAB_TOKEN=secret",
+                "content_sha256": "h",
+                "marker_key": "m",
+            }
+        ]
+        out = wire._redact_records(recs)
+        assert "original_content" not in out[0]
+        assert out[0]["path"] == "/x" and out[0]["content_sha256"] == "h"
+        # input is not mutated — persistence relies on the original list
+        assert recs[0]["original_content"] == "GITLAB_TOKEN=secret"
+
+    def test_describe_is_summary_not_raw_dict(self) -> None:
+        from agentalloy.install.subcommands import wire
+
+        s = wire._describe(
+            {"path": "/cfg.json", "action": "injected_block", "original_content": "SECRET"}
+        )
+        assert "/cfg.json" in s and "injected_block" in s
+        assert "SECRET" not in s and "original_content" not in s
+
+    def test_persists_original_content_but_strips_it_from_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: home)
+        secret = "glpat-TOPSECRET-must-not-print"
+        (home / ".claude" / "settings.json").write_text(
+            json.dumps({"env": {"GITLAB_TOKEN": secret}})
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        result = wire.apply_hook_wiring("claude-code", port=47950, root=repo)
+
+        # Restore data IS persisted to install-state.json for unwire.
+        st = install_state.load_state()
+        assert secret in json.dumps(st["harness_files_written"])
+
+        # ...but the redacted command output (stdout / --json) carries no secret.
+        safe = wire._redact_records(result["files_written"])
+        assert secret not in json.dumps(safe)
+        assert all("original_content" not in r for r in safe)
