@@ -398,6 +398,45 @@ def _read_pack_manifest(pack_dir: Path) -> tuple[dict[str, Any] | None, list[str
     return manifest, errors
 
 
+# Quantization + container suffix stripped when comparing a pack's declared
+# model NAME against the corpus's recorded GGUF FILENAME. The pack records the
+# bare model name (`nomic-embed-text-v1.5`) while the runtime records the GGUF
+# file it loaded (`nomic-embed-text-v1.5.Q8_0.gguf`) — same model, two strings.
+# We collapse only the trailing `.gguf` extension and an immediately-preceding
+# quantization tag (`.Q8_0`, `.Q4_K_M`, `.IQ4_XS`, `.f16`, `.BF16`, …) so a
+# genuinely different base model still compares unequal and still warns.
+_QUANT_SUFFIX_RE = re.compile(
+    r"\.(?:I?Q\d[\w]*|f\d+|bf\d+)$",
+    re.IGNORECASE,
+)
+
+
+def _canonical_model_name(s: str | None) -> str:
+    """Reduce a model name or GGUF filename to a canonical model identity.
+
+    Conservative: strips at most one trailing ``.gguf`` extension and one
+    immediately-preceding quantization tag, then lowercases. Does NOT touch the
+    base model name, so two different base models still differ.
+
+    Examples (all lowercased):
+      - ``nomic-embed-text-v1.5``                 -> ``nomic-embed-text-v1.5``
+      - ``nomic-embed-text-v1.5.Q8_0.gguf``       -> ``nomic-embed-text-v1.5``
+      - ``nomic-embed-text-v1.5.Q4_K_M.gguf``     -> ``nomic-embed-text-v1.5``
+      - ``nomic-embed-text-v1.5.IQ4_XS.gguf``     -> ``nomic-embed-text-v1.5``
+      - ``nomic-embed-text-v1.5.f16.gguf``        -> ``nomic-embed-text-v1.5``
+      - ``e5-base-v2``                            -> ``e5-base-v2``  (still != nomic)
+    """
+    if not s:
+        return ""
+    name = s.strip()
+    # Strip one trailing `.gguf` (case-insensitive).
+    if name.lower().endswith(".gguf"):
+        name = name[: -len(".gguf")]
+    # Strip one immediately-preceding quantization tag, if present.
+    name = _QUANT_SUFFIX_RE.sub("", name)
+    return name.lower()
+
+
 def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
     """Hard-block on dim mismatch with the running corpus. Returns error str or None.
 
@@ -425,9 +464,17 @@ def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
                     f"but corpus is {current_dim}-dim. Re-embed with a matching "
                     f"model or pick a pack with embedding_dim={current_dim}."
                 )
-            # Dims match. Soft-warn on model-name mismatch.
+            # Dims match. Soft-warn only on a GENUINE model mismatch. The pack
+            # records the bare model name while the runtime records the GGUF
+            # filename, so compare on canonical identity (quant + .gguf stripped)
+            # to avoid a false positive between e.g. `nomic-embed-text-v1.5` and
+            # `nomic-embed-text-v1.5.Q8_0.gguf`.
             current_model = settings.runtime_embedding_model
-            if pack_model and current_model and pack_model != current_model:
+            if (
+                pack_model
+                and current_model
+                and _canonical_model_name(pack_model) != _canonical_model_name(current_model)
+            ):
                 print(
                     f"WARN: pack was authored with embed_model='{pack_model}' "
                     f"but the running corpus uses '{current_model}'. The pack "

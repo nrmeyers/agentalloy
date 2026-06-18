@@ -43,6 +43,7 @@ from agentalloy.install.subcommands import (
     wire_harness,
     write_env,
 )
+from agentalloy.install.subcommands.wire import resolve_via
 from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
 
 try:
@@ -1750,24 +1751,32 @@ def run_setup(cfg: SetupConfig) -> int:
     preset = _resolve_preset(cfg)
     # Preset is an internal write-env detail; not shown to the user.
 
-    # 8. Upstream LLM
-    if (
-        not cfg.non_interactive
-        and cfg.harness not in PROXY_UNABLE_HARNESSES
-        and cfg.harness != "manual"
-    ):
-        _prompt_upstream(cfg)
+    # Resolve the integration vector the same way `wire`/`apply_hook_wiring` does:
+    # claude-code resolves to 'hook' (per-turn hook, never the proxy), sidecar
+    # harnesses to 'proxy' but can't actually be intercepted, everything else to
+    # 'proxy'. Only genuinely proxy-wired harnesses need an upstream LLM target.
+    via = resolve_via(cfg.harness, None) if cfg.harness != "manual" else "manual"
+    uses_proxy = via == "proxy" and cfg.harness not in PROXY_UNABLE_HARNESSES
+
+    # 8. Upstream LLM — only relevant when the harness actually routes through the
+    # proxy. Hook harnesses (claude-code) wire via the per-turn hook and sidecar
+    # harnesses fall back to a static rules file; neither forwards through the
+    # proxy, so prompting for an upstream target would be confusing and unused.
+    if uses_proxy:
+        if not cfg.non_interactive:
+            _prompt_upstream(cfg)
+        # In non-interactive mode, upstream_url/model/api_key come from SetupConfig
+        # defaults (which may be pre-set by the caller). We don't require them to be
+        # set — the proxy can be configured later via env vars.
+        _print(f"  Upstream URL:   {cfg.upstream_url or '(not set)'}")
+        _print(f"  Upstream model: {cfg.upstream_model or '(not set)'}")
     elif cfg.harness == "manual":
-        _print("  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]")
+        if not cfg.non_interactive:
+            _print("  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]")
     elif not cfg.non_interactive:
         _print(
-            f"  [dim]Harness '{cfg.harness}' is sidecar-only (no proxy wiring). Skipping upstream LLM prompt.[/dim]"
+            f"  [dim]Harness '{cfg.harness}' does not route through the proxy. Skipping upstream LLM prompt.[/dim]"
         )
-    # In non-interactive mode, upstream_url/model/api_key come from SetupConfig defaults
-    # (which may be pre-set by the caller). We don't require them to be set — the proxy
-    # can be configured later via env vars.
-    _print(f"  Upstream URL:   {cfg.upstream_url or '(not set)'}")
-    _print(f"  Upstream model: {cfg.upstream_model or '(not set)'}")
 
     # -- Phase 2: Summary confirmation --
 
@@ -1860,10 +1869,13 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step c2: Write upstream LLM vars to .env
-    _print("  [dim]-> Writing upstream LLM config[/dim]")
-    _write_upstream_env(cfg)
-    _print("  [green]  Done.[/green]")
+    # Step c2: Write upstream LLM vars to .env (only for proxy-wired harnesses;
+    # hook/sidecar harnesses never forward through the proxy, so an upstream
+    # target is meaningless for them).
+    if uses_proxy:
+        _print("  [dim]-> Writing upstream LLM config[/dim]")
+        _write_upstream_env(cfg)
+        _print("  [green]  Done.[/green]")
 
     # Step d: Pull models (embed + reranker GGUFs)
     _print("  [dim]-> Pulling models[/dim]")

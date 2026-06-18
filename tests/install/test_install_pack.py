@@ -207,3 +207,120 @@ class TestRenderHumanFailureDetail:
         out = capsys.readouterr().out
         assert "Another process holds the corpus DB lock" in out
         assert "agentalloy server-stop" in out
+
+
+class TestCanonicalModelName:
+    """The pack records the bare model NAME; the runtime records the GGUF
+    FILENAME. Canonicalization must collapse the quant + .gguf suffix so the
+    two compare equal — without merging genuinely different base models."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("nomic-embed-text-v1.5", "nomic-embed-text-v1.5"),
+            ("nomic-embed-text-v1.5.Q8_0.gguf", "nomic-embed-text-v1.5"),
+            ("nomic-embed-text-v1.5.Q4_K_M.gguf", "nomic-embed-text-v1.5"),
+            ("nomic-embed-text-v1.5.IQ4_XS.gguf", "nomic-embed-text-v1.5"),
+            ("nomic-embed-text-v1.5.f16.gguf", "nomic-embed-text-v1.5"),
+            ("nomic-embed-text-v1.5.BF16.gguf", "nomic-embed-text-v1.5"),
+            # Casing is normalized.
+            ("Nomic-Embed-Text-v1.5.Q8_0.GGUF", "nomic-embed-text-v1.5"),
+            # No quant tag, just the extension.
+            ("nomic-embed-text-v1.5.gguf", "nomic-embed-text-v1.5"),
+            # Empty / None inputs.
+            ("", ""),
+        ],
+    )
+    def test_canonicalizes(self, raw: str, expected: str) -> None:
+        assert ip._canonical_model_name(raw) == expected  # pyright: ignore[reportPrivateUsage]
+
+    def test_none_is_empty(self) -> None:
+        assert ip._canonical_model_name(None) == ""  # pyright: ignore[reportPrivateUsage]
+
+    def test_different_base_models_stay_distinct(self) -> None:
+        # A genuinely different base model must NOT collapse to nomic.
+        assert ip._canonical_model_name(  # pyright: ignore[reportPrivateUsage]
+            "e5-base-v2"
+        ) != ip._canonical_model_name(  # pyright: ignore[reportPrivateUsage]
+            "nomic-embed-text-v1.5.Q8_0.gguf"
+        )
+
+    def test_quant_tag_only_stripped_at_tail(self) -> None:
+        # A quant-looking token mid-name (not before .gguf) is preserved.
+        assert (
+            ip._canonical_model_name("my-q8-model")  # pyright: ignore[reportPrivateUsage]
+            == "my-q8-model"
+        )
+
+
+class TestEmbedModelSoftWarn:
+    """``_check_embedding_dim`` soft-warns on a model-name mismatch only when
+    the mismatch is genuine — not when comparing a bare name to its GGUF
+    filename (issue: false-positive WARN for every pack)."""
+
+    @staticmethod
+    def _run_check(
+        pack_model: str,
+        runtime_model: str,
+        *,
+        pack_dim: int = 768,
+        corpus_dim: int | None = 768,
+    ) -> str:
+        """Drive ``_check_embedding_dim`` with dims that AGREE so only the
+        soft model-name warning path can fire. Returns captured stderr."""
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        manifest = {"embedding_dim": pack_dim, "embed_model": pack_model}
+        fake_settings = SimpleNamespace(
+            duckdb_path="/tmp/unused.duck",
+            runtime_embedding_model=runtime_model,
+        )
+
+        vs = MagicMock()
+        vs.embedding_dim.return_value = corpus_dim
+
+        @contextmanager
+        def _fake_open_or_create(_path: object):
+            yield vs
+
+        import io
+
+        buf = io.StringIO()
+        with (
+            patch("agentalloy.config.get_settings", return_value=fake_settings),
+            patch(
+                "agentalloy.storage.vector_store.open_or_create",
+                _fake_open_or_create,
+            ),
+            patch("sys.stderr", buf),
+        ):
+            err = ip._check_embedding_dim(manifest, Path("/tmp"))  # pyright: ignore[reportPrivateUsage]
+        # Dims agree → no hard error returned.
+        assert err is None
+        return buf.getvalue()
+
+    @pytest.mark.parametrize(
+        "runtime_model",
+        [
+            "nomic-embed-text-v1.5.Q8_0.gguf",
+            "nomic-embed-text-v1.5.Q4_K_M.gguf",
+            "nomic-embed-text-v1.5.IQ4_XS.gguf",
+            "nomic-embed-text-v1.5.f16.gguf",
+            "nomic-embed-text-v1.5",  # identical bare name
+        ],
+    )
+    def test_no_warn_for_same_model_quant_variants(self, runtime_model: str) -> None:
+        err = self._run_check("nomic-embed-text-v1.5", runtime_model)
+        assert "WARN" not in err
+        assert err == ""
+
+    def test_real_model_mismatch_still_warns(self) -> None:
+        err = self._run_check("nomic-embed-text-v1.5", "e5-base-v2.Q8_0.gguf")
+        assert "WARN" in err
+        assert "embed_model" in err
+
+    def test_real_mismatch_against_bare_runtime_name_warns(self) -> None:
+        err = self._run_check("nomic-embed-text-v1.5", "bge-large-en-v1.5")
+        assert "WARN" in err
