@@ -558,6 +558,82 @@ class TestRunFromArgs:
         assert cfg.runner == "llama-server"
         assert cfg.port == 50000
 
+    def test_upstream_flags_flow_to_config(self):
+        import argparse
+
+        args = argparse.Namespace(
+            runner=None,
+            model=None,
+            port=None,
+            mode=None,
+            packs=None,
+            harness=None,
+            non_interactive=True,
+            image_tag="latest",
+            image_path=None,
+            upstream_url="http://up:8080/v1",
+            upstream_model="gpt-x",
+            upstream_api_key="sk-secret",
+        )
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
+            rc = _run_from_args(args)
+        assert rc == 0
+        cfg = mock.call_args[0][0]
+        assert cfg.upstream_url == "http://up:8080/v1"
+        assert cfg.upstream_model == "gpt-x"
+        assert cfg.upstream_api_key == "sk-secret"
+
+    def test_upstream_env_fallback_when_flags_absent(self, monkeypatch: pytest.MonkeyPatch):
+        import argparse
+
+        monkeypatch.setenv("UPSTREAM_URL", "http://env:9000/v1")
+        monkeypatch.setenv("UPSTREAM_MODEL", "env-model")
+        monkeypatch.setenv("UPSTREAM_API_KEY", "sk-env")
+        args = argparse.Namespace(
+            runner=None,
+            model=None,
+            port=None,
+            mode=None,
+            packs=None,
+            harness=None,
+            non_interactive=True,
+            image_tag="latest",
+            image_path=None,
+            upstream_url=None,
+            upstream_model=None,
+            upstream_api_key=None,
+        )
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
+            rc = _run_from_args(args)
+        assert rc == 0
+        cfg = mock.call_args[0][0]
+        assert cfg.upstream_url == "http://env:9000/v1"
+        assert cfg.upstream_model == "env-model"
+        assert cfg.upstream_api_key == "sk-env"
+
+    def test_upstream_flag_wins_over_env(self, monkeypatch: pytest.MonkeyPatch):
+        import argparse
+
+        monkeypatch.setenv("UPSTREAM_URL", "http://env:9000/v1")
+        args = argparse.Namespace(
+            runner=None,
+            model=None,
+            port=None,
+            mode=None,
+            packs=None,
+            harness=None,
+            non_interactive=True,
+            image_tag="latest",
+            image_path=None,
+            upstream_url="http://flag:1234/v1",
+            upstream_model=None,
+            upstream_api_key=None,
+        )
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
+            rc = _run_from_args(args)
+        assert rc == 0
+        assert mock.call_args[0][0].upstream_url == "http://flag:1234/v1"
+
 
 # ---------------------------------------------------------------------------
 # Image variant label tests

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -2104,6 +2105,27 @@ def add_parser(
         default="latest",
         help="Container image variant: 'latest' (~300 MB, no pre-pulled model) or 'full' (~975 MB, model pre-pulled for air-gapped/enterprise). Default: latest.",
     )
+    # Proxy upstream LLM (only needed for proxy-wired harnesses). Interactive
+    # setup prompts for these; these flags / env vars make them reachable in
+    # non-interactive mode.
+    p.add_argument(
+        "--upstream-url",
+        default=None,
+        help="Proxy upstream LLM base URL (non-interactive; falls back to $UPSTREAM_URL).",
+    )
+    p.add_argument(
+        "--upstream-model",
+        default=None,
+        help="Proxy upstream model name (non-interactive; falls back to $UPSTREAM_MODEL).",
+    )
+    p.add_argument(
+        "--upstream-api-key",
+        default=None,
+        help=(
+            "Proxy upstream API key (non-interactive; falls back to $UPSTREAM_API_KEY). "
+            "Prefer the env var — a CLI value is visible in process args and shell history."
+        ),
+    )
     p.set_defaults(func=_run_from_args)
 
 
@@ -2125,6 +2147,13 @@ def _run_from_args(args: argparse.Namespace) -> int:
         force=getattr(args, "force", False),
         acknowledge_sidecar=getattr(args, "acknowledge_sidecar", False),
         image_tag=image_ref,
+        # Proxy upstream: explicit flag wins, else env var (interactive setup
+        # overwrites these via its own prompts, using them as the defaults).
+        upstream_url=getattr(args, "upstream_url", None) or os.environ.get("UPSTREAM_URL", ""),
+        upstream_model=getattr(args, "upstream_model", None)
+        or os.environ.get("UPSTREAM_MODEL", ""),
+        upstream_api_key=getattr(args, "upstream_api_key", None)
+        or os.environ.get("UPSTREAM_API_KEY", ""),
     )
     # Model default is resolved inside run_setup() after cfg.runner is finalized.
     return run_setup(cfg)

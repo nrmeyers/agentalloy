@@ -89,8 +89,13 @@ See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [doc
 Skip the wizard entirely by passing flags:
 
 ```bash
-agentalloy setup -n --hardware nvidia --packs all --harness cursor
+agentalloy setup -n --hardware nvidia --packs all --harness claude-code
+# Sidecar harnesses (cursor, windsurf, github-copilot, gemini-cli) additionally
+# require --acknowledge-sidecar in non-interactive mode:
+agentalloy setup -n --hardware nvidia --packs all --harness cursor --acknowledge-sidecar
 ```
+
+For a proxy-wired harness, point it at your upstream LLM with `--upstream-url` / `--upstream-model` / `--upstream-api-key` (or the `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` env vars — preferred for the key, which is otherwise visible in process args).
 
 Just want to see it work first? [Run the demo](#demo).
 
