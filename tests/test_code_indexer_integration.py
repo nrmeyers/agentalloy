@@ -28,6 +28,18 @@ def _write_contract(path: Path, *, scope_touches: list[str] | None = None) -> Pa
     return path
 
 
+def _init_git_origin(path: Path, origin_url: str) -> None:
+    """Init a real git repo at ``path`` with a single ``origin`` remote."""
+    import subprocess
+
+    subprocess.run(["git", "-C", str(path), "init", "-q"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", origin_url],
+        check=True,
+        capture_output=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # code_indexer_query_params
 # ---------------------------------------------------------------------------
@@ -38,15 +50,12 @@ def test_query_params_from_full_contract(tmp_path: Path):
 
     f = _write_contract(tmp_path / "c.md")
     contract = parse_contract(f)
+    _init_git_origin(tmp_path, "git@github.com:nrmeyers/agentalloy.git")
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            stdout="git@github.com:nrmeyers/agentalloy.git\n",
-            returncode=0,
-        )
-        params = code_indexer_query_params(contract, tmp_path)
+    params = code_indexer_query_params(contract, tmp_path)
 
-    assert params.repo == "github.com/nrmeyers__agentalloy"
+    # Canonical slug — byte-identical to the key codebase-indexer stores under.
+    assert params.repo == "nrmeyers__agentalloy"
     assert params.semantic_q == "Add Auth Middleware"
     assert params.lexical_q == "NestJS JWT validation"
     assert "src/auth/**" in params.path_globs
@@ -70,15 +79,12 @@ def test_query_params_handles_non_github_remote(tmp_path: Path):
 
     f = _write_contract(tmp_path / "c.md")
     contract = parse_contract(f)
+    _init_git_origin(tmp_path, "https://gitlab.com/myorg/myrepo.git")
 
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            stdout="https://gitlab.com/myorg/myrepo.git\n",
-            returncode=0,
-        )
-        params = code_indexer_query_params(contract, tmp_path)
-
-    assert params.repo == "gitlab.com/myorg__myrepo"
+    # Non-GitHub host → fall back to the directory basename, matching
+    # codebase-indexer (so the slugs still agree off GitHub).
+    params = code_indexer_query_params(contract, tmp_path)
+    assert params.repo == tmp_path.name
 
 
 def test_query_params_falls_back_to_dir_name(tmp_path: Path):

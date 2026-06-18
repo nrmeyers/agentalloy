@@ -331,32 +331,16 @@ class CodeIndexerQuery:
 def code_indexer_query_params(contract: Contract, project_root: Path) -> CodeIndexerQuery:
     """Build code-indexer query parameters from a contract.
 
-    Derives the repo slug from `git remote get-url origin` (GitHub owner__repo form).
-    Falls back to the project directory name when git remote is unavailable.
+    Derives the repo slug with the *same* rule codebase-indexer uses to key its
+    index (single github.com origin → ``{org}__{repo}``, else the slugified
+    directory basename), so the resulting ``/search`` query resolves instead of
+    404ing. See ``code_indexer_slug``.
     """
-    import re
-    import subprocess
+    from agentalloy.code_indexer_slug import repo_slug
 
-    # Derive repo slug
-    repo = project_root.name
-    try:
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=project_root,
-        )
-        url = result.stdout.strip()
-        # github.com/owner/repo, git@github.com:owner/repo, or https://gitlab.com/owner/repo
-        # → hostname/owner__repo (preserves non-GitHub hostnames)
-        m = re.search(r"(?:https?://)?([^/:]+)/([^/]+)/([^/]+?)(?:\.git)?$", url)
-        if not m:
-            m = re.search(r"git@([^:]+):([^/]+)/([^/]+?)(?:\.git)?$", url)
-        if m:
-            repo = f"{m.group(1)}/{m.group(2)}__{m.group(3)}"
-    except Exception:
-        pass
+    # The repo slug MUST byte-match codebase-indexer's own derivation — it keys
+    # each index by this string, so any divergence 404s the lookup.
+    repo = repo_slug(project_root)
 
     body = (contract.body or "").strip()
     first_line = body.split("\n")[0].lstrip("# ").strip() if body else ""
