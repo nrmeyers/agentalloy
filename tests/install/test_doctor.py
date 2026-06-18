@@ -46,7 +46,7 @@ class TestCheckConfig:
         env_file = config_dir / ".env"
         env_file.write_text(
             "RUNTIME_EMBED_BASE_URL=http://localhost:11434\n"
-            "RUNTIME_EMBEDDING_MODEL=qwen3-embedding:0.6b\n"
+            "RUNTIME_EMBEDDING_MODEL=nomic-embed-text-v1.5\n"
         )
         result = _check_config()
         assert result["passed"] is True
@@ -73,7 +73,7 @@ class TestCheckEmbedServer:
         with patch(
             "agentalloy.install.subcommands.doctor.urlopen", side_effect=URLError("refused")
         ):
-            result = _check_embed_server("http://localhost:11434", "qwen3-embedding:0.6b")
+            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
         assert result["passed"] is False
         assert result["name"] == "embed_server"
         assert "remediation" in result
@@ -88,7 +88,7 @@ class TestCheckEmbedServer:
             "agentalloy.install.subcommands.doctor.urlopen",
             side_effect=[mock_resp, URLError("not found")],
         ):
-            result = _check_embed_server("http://localhost:11434", "qwen3-embedding:0.6b")
+            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
         assert result["passed"] is True
 
     def test_model_not_listed_warns(self) -> None:
@@ -104,7 +104,7 @@ class TestCheckEmbedServer:
             "agentalloy.install.subcommands.doctor.urlopen",
             side_effect=[root_resp, tags_resp],
         ):
-            result = _check_embed_server("http://localhost:11434", "qwen3-embedding:0.6b")
+            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
         assert result["passed"] is True
         assert result.get("severity") == "warn"
 
@@ -115,7 +115,7 @@ class TestCheckEmbedServer:
         root_resp.__exit__ = MagicMock(return_value=False)
         tags_resp = MagicMock()
         tags_resp.read.return_value = json.dumps(
-            {"models": [{"name": "qwen3-embedding:0.6b"}]}
+            {"models": [{"name": "nomic-embed-text-v1.5"}]}
         ).encode()
         tags_resp.__enter__ = MagicMock(return_value=tags_resp)
         tags_resp.__exit__ = MagicMock(return_value=False)
@@ -123,7 +123,7 @@ class TestCheckEmbedServer:
             "agentalloy.install.subcommands.doctor.urlopen",
             side_effect=[root_resp, tags_resp],
         ):
-            result = _check_embed_server("http://localhost:11434", "qwen3-embedding:0.6b")
+            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
         assert result["passed"] is True
         assert result.get("severity") != "warn"
 
@@ -341,8 +341,8 @@ class TestCheckPackManifests:
                 f"name: pack{i}\n"
                 "version: 1.0.0\n"
                 "tier: foundation\n"
-                "embed_model: qwen3-embedding:0.6b\n"
-                "embedding_dim: 1024\n"
+                "embed_model: nomic-embed-text-v1.5.Q8_0.gguf\n"
+                "embedding_dim: 768\n"
                 "skills:\n"
                 f"- skill_id: skill{i}\n"
                 f"  file: skill{i}.yaml\n"

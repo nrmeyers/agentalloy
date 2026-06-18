@@ -83,7 +83,7 @@ def seeded_store(store: VectorStore):
                 category="engineering",
                 fragment_type="execution" if i % 2 == 0 else "guardrail",
                 embedded_at=int(time.time()),
-                embedding_model="qwen3-embedding:0.6b",
+                embedding_model="nomic-embed-text-v1.5",
             )
             for i in range(5)
         ]

@@ -2,7 +2,7 @@
 
 Tests E2E-1 through E2E-4 covering:
   E2E-1: Full container setup with mocked runtime binary
-  E2E-2: Container bootstrap pulls qwen3-embedding:0.6b model
+  E2E-2: Container bootstrap pulls nomic-embed-text-v1.5.Q8_0.gguf model
   E2E-3: Container bootstrap idempotency - restart skips redundant operations
   E2E-4: Container bootstrap crash recovery - re-runs migrations and install-packs
 
@@ -410,7 +410,7 @@ class TestFullContainerSetup:
 
 
 # ---------------------------------------------------------------------------
-# E2E-2: Container bootstrap pulls qwen3-embedding:0.6b model
+# E2E-2: Container bootstrap pulls nomic-embed-text-v1.5.Q8_0.gguf model
 # ---------------------------------------------------------------------------
 
 

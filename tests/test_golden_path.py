@@ -42,7 +42,7 @@ from agentalloy.telemetry.writer import DuckDBTelemetryWriter
 pytestmark = pytest.mark.integration
 
 LM_BASE = "http://localhost:11434"
-EMBED_MODEL = "qwen3-embedding:0.6b"
+EMBED_MODEL = "nomic-embed-text-v1.5"
 
 GOLDEN_TASK = (
     "Design a Python FastAPI endpoint that validates a JSON request body "

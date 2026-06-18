@@ -14,7 +14,7 @@ def _make_cfg(harness: str, non_interactive: bool = False, acknowledge_sidecar: 
 
     return SetupConfig(
         runner="ollama",
-        model="qwen3-embedding:0.6b",
+        model="nomic-embed-text-v1.5",
         port=47950,
         mode="persistent",
         packs="",

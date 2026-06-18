@@ -124,7 +124,7 @@ class TestV2ToV3Migration:
                     {"step": "wire-harness", "completed_at": "2025-01-01T00:01:00"}
                 ],
                 "harness_files_written": [],
-                "models_pulled": ["ollama:qwen3-embedding:0.6b"],
+                "models_pulled": ["ollama:nomic-embed-text"],
                 "env_path": None,
                 "port": 50000,
                 "last_verify_passed_at": "2025-01-01T00:02:00",
@@ -140,7 +140,7 @@ class TestV2ToV3Migration:
             # Existing fields preserved
             assert st["port"] == 50000
             assert st["completed_steps"] == v2_state["completed_steps"]
-            assert st["models_pulled"] == ["ollama:qwen3-embedding:0.6b"]
+            assert st["models_pulled"] == ["ollama:nomic-embed-text"]
             assert st["pending_pack_selection"] == ["core"]
             assert st["last_verify_passed_at"] == "2025-01-01T00:02:00"
             # New fields added

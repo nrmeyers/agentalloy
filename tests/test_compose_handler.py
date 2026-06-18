@@ -157,7 +157,7 @@ def test_retrieval_store_unavailable(app: FastAPI, client: TestClient) -> None:
 def test_retrieval_embedding_model_unavailable(app: FastAPI, client: TestClient) -> None:
     def retrieve(_req: ComposeRequest) -> RetrievalResult:
         raise RetrievalStageError(
-            "embedding_model_unavailable", "qwen3-embedding not loaded", available=None
+            "embedding_model_unavailable", "nomic-embed-text-v1.5 not loaded", available=None
         )
 
     _install_orchestrator(app, _FakeOrchestrator(retrieve))

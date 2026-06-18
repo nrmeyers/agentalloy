@@ -5,7 +5,7 @@ For every pack skill (``src/agentalloy/_packs/*/<skill>.yaml``) this script:
 
 1. Builds a *skill card* (canonical_name + domain_tags + description) from the
    pack YAML — the same trio Stage 0 indexes.
-2. Pulls that skill's top-N embedding neighbors. Card embeddings (one 1024-dim
+2. Pulls that skill's top-N embedding neighbors. Card embeddings (one 768-dim
    vector per skill, ``fragment_type='card'``) live in the DuckDB corpus; we
    copy the DB file and open the copy ``read_only`` so a running service is
    never disturbed and no lock is contended.

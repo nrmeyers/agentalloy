@@ -51,7 +51,7 @@ def _mk_fragment(
         category=category,
         fragment_type=fragment_type,
         embedded_at=int(time.time()),
-        embedding_model="qwen3-embedding:0.6b",
+        embedding_model="nomic-embed-text-v1.5",
         prose=prose,
     )
 
@@ -129,7 +129,7 @@ def test_insert_rejects_wrong_dimension(store: VectorStore) -> None:
         category="engineering",
         fragment_type="execution",
         embedded_at=int(time.time()),
-        embedding_model="qwen3-embedding:0.6b",
+        embedding_model="nomic-embed-text-v1.5",
         prose="bad fragment",
     )
     with pytest.raises(EmbeddingDimMismatch):
@@ -448,7 +448,7 @@ class TestPhaseScopeUnion:
                 category="quality",
                 fragment_type="execution",
                 embedded_at=int(time.time()),
-                embedding_model="qwen3-embedding:0.6b",
+                embedding_model="nomic-embed-text-v1.5",
                 prose="flaky test isolation retry budget",
                 phase_scope=("build",),
             ),
@@ -459,7 +459,7 @@ class TestPhaseScopeUnion:
                 category="quality",
                 fragment_type="execution",
                 embedded_at=int(time.time()),
-                embedding_model="qwen3-embedding:0.6b",
+                embedding_model="nomic-embed-text-v1.5",
                 prose="quality skill without authored scope",
             ),
             FragmentEmbedding(
@@ -469,7 +469,7 @@ class TestPhaseScopeUnion:
                 category="engineering",
                 fragment_type="execution",
                 embedded_at=int(time.time()),
-                embedding_model="qwen3-embedding:0.6b",
+                embedding_model="nomic-embed-text-v1.5",
                 prose="engineering prose",
             ),
         ]

@@ -90,9 +90,9 @@ class TestPortRecording:
 class TestOverrides:
     def test_valid_override_applied(self, repo_root: Path) -> None:
         result = write_env(
-            "cpu", overrides={"RUNTIME_EMBEDDING_MODEL": "qwen3-embedding:0.6b"}, root=repo_root
+            "cpu", overrides={"RUNTIME_EMBEDDING_MODEL": "nomic-embed-text-v1.5"}, root=repo_root
         )
-        assert result["values_written"]["RUNTIME_EMBEDDING_MODEL"] == "qwen3-embedding:0.6b"
+        assert result["values_written"]["RUNTIME_EMBEDDING_MODEL"] == "nomic-embed-text-v1.5"
 
     def test_unknown_key_rejected(self) -> None:
         with pytest.raises(SystemExit):

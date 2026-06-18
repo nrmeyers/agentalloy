@@ -75,8 +75,8 @@ def _write_pack_manifest(
     skills: list[dict[str, Any]],
     *,
     version: str = "1.0.0",
-    embed_model: str = "qwen3-embedding:0.6b",
-    embedding_dim: int = 1024,
+    embed_model: str = "nomic-embed-text-v1.5.Q8_0.gguf",
+    embedding_dim: int = 768,
 ) -> Path:
     manifest: dict[str, Any] = {
         "name": name,

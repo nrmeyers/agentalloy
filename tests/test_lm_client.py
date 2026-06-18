@@ -42,7 +42,7 @@ def test_list_models_returns_ids() -> None:
                 "data": [
                     {"id": "qwen/qwen3.6-35b-a3b", "object": "model"},
                     {"id": "qwen/qwen2.5-coder-14b", "object": "model"},
-                    {"id": "qwen3-embedding:0.6b", "object": "model"},
+                    {"id": "nomic-embed-text-v1.5", "object": "model"},
                 ],
             },
         )
@@ -56,7 +56,7 @@ def test_list_models_returns_ids() -> None:
     assert ids == [
         "qwen/qwen3.6-35b-a3b",
         "qwen/qwen2.5-coder-14b",
-        "qwen3-embedding:0.6b",
+        "nomic-embed-text-v1.5",
     ]
 
 
@@ -156,7 +156,7 @@ def test_ensure_model_loaded_raises_with_loaded_list() -> None:
             json={
                 "data": [
                     {"id": "qwen/qwen2.5-coder-14b"},
-                    {"id": "qwen3-embedding:0.6b"},
+                    {"id": "nomic-embed-text-v1.5"},
                 ]
             },
         )

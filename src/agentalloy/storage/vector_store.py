@@ -924,7 +924,7 @@ def open_or_create(path: str | Path) -> VectorStore:
     T7B: Startup dimension guard — raises ``EmbeddingDimMismatch`` if an
     existing corpus was built at a different dimension than ``EMBEDDING_DIM``.
     Fail-fast here prevents silent mid-request crashes when a user upgrades
-    their embedding model (e.g. embeddinggemma 768-dim → qwen3-embedding 1024-dim).
+    their embedding model (e.g. qwen3-embedding 1024-dim → nomic-embed-text-v1.5 768-dim).
     """
     assert isinstance(path, (str, Path)), "path must be str or Path"  # P10-R5
     p = Path(path)

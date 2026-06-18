@@ -809,7 +809,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
         if wc < _FRAG_WORDS_WARN_MIN and wc >= _FRAG_WORDS_HARD_MIN:
             warnings.append(
                 f"fragment sequence {frag.sequence} is {wc} words; below the "
-                f"{_FRAG_WORDS_WARN_MIN}-word floor — qwen3-embedding:0.6b "
+                f"{_FRAG_WORDS_WARN_MIN}-word floor — nomic-embed-text-v1.5 "
                 f"produces under-discriminative vectors at this size"
             )
         elif wc < _FRAG_WORDS_HARD_MIN:

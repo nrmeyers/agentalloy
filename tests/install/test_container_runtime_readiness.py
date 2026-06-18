@@ -300,7 +300,7 @@ class TestWaitForReadiness:
             urllib.error.URLError("refused"),
             _FakeResp({"status": "ready"}),
         ]
-        progress = {"phase": "model_pull", "model": "qwen3-embedding:0.6b"}
+        progress = {"phase": "model_pull", "model": "nomic-embed-text-v1.5.Q8_0.gguf"}
         with (
             patch("urllib.request.urlopen", side_effect=responses),
             patch.object(cr, "_container_state", return_value="running"),

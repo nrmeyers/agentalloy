@@ -278,8 +278,8 @@ PACK_METADATA = {
 }
 
 PACK_VERSION = "1.0.0"
-EMBED_MODEL = "qwen3-embedding:0.6b"
-EMBED_DIM = 1024
+EMBED_MODEL = "nomic-embed-text-v1.5"
+EMBED_DIM = 768
 
 # Pack tier — see install_pack._VALID_PACK_TIERS and docs/PACK-AUTHORING.md.
 PACK_TIERS: dict[str, str] = {

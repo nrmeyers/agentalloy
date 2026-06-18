@@ -48,7 +48,7 @@ pytestmark = pytest.mark.integration
 
 LM_STUDIO_BASE_URL = "http://localhost:11434"
 LM_STUDIO_MODELS_URL = f"{LM_STUDIO_BASE_URL}/v1/models"
-EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+EMBEDDING_MODEL = "nomic-embed-text-v1.5"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # seeds/*.yaml are review-YAML-shaped (matches what ingest consumes). The

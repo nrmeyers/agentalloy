@@ -123,10 +123,13 @@ class TestModelDrift:
         st["completed_steps"] = [
             {
                 "step": "recommend-models",
-                "selected": {"embed_model": "qwen3-embedding:0.6b", "ingest_model": "qwen3.5:0.8b"},
+                "selected": {
+                    "embed_model": "nomic-embed-text-v1.5.Q8_0.gguf",
+                    "ingest_model": "qwen3.5:0.8b",
+                },
             }
         ]
-        st["models_pulled"] = ["fastflowlm:qwen3-embedding:0.6b"]  # ingest_model missing
+        st["models_pulled"] = ["fastflowlm:nomic-embed-text-v1.5.Q8_0.gguf"]  # ingest_model missing
         install_state.save_state(st, repo_root)
         result = upd.update(root=repo_root)
         assert result["models"]["checked"] is True
@@ -139,10 +142,13 @@ class TestModelDrift:
         st["completed_steps"] = [
             {
                 "step": "recommend-models",
-                "selected": {"embed_model": "qwen3-embedding:0.6b", "ingest_model": "qwen2.5:7b"},
+                "selected": {
+                    "embed_model": "nomic-embed-text-v1.5.Q8_0.gguf",
+                    "ingest_model": "qwen2.5:7b",
+                },
             }
         ]
-        st["models_pulled"] = ["ollama:qwen3-embedding:0.6b", "ollama:qwen2.5:7b"]
+        st["models_pulled"] = ["ollama:nomic-embed-text-v1.5.Q8_0.gguf", "ollama:qwen2.5:7b"]
         install_state.save_state(st, repo_root)
         result = upd.update(root=repo_root)
         assert result["models"]["drifted_models"] == []

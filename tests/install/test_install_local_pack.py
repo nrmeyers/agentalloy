@@ -66,8 +66,8 @@ def _write_pack_manifest(
     name: str,
     skills: list[dict[str, Any]],
     *,
-    embed_model: str = "qwen3-embedding:0.6b",
-    embedding_dim: int = 1024,
+    embed_model: str = "nomic-embed-text-v1.5.Q8_0.gguf",
+    embedding_dim: int = 768,
     extra: dict[str, Any] | None = None,
 ) -> Path:
     manifest = {
@@ -108,7 +108,7 @@ class TestPackManifestValidation:
                 {
                     "name": "x",
                     "version": "1.0.0",
-                    "embedding_dim": 1024,
+                    "embedding_dim": 768,
                     "skills": [],
                 }
             )
