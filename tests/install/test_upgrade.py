@@ -233,6 +233,74 @@ def test_native_swap_failure_aborts():
     assert any("package install failed" in w for w in warnings)
 
 
+def test_new_version_read_from_swapped_binary():
+    # Regression: after the package swap the in-process __version__ is frozen at the
+    # pre-upgrade value. `new_version` must come from the freshly-installed binary
+    # (shelled `agentalloy --version`), not from _current_version().
+    def cli(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if args == ["--version"]:
+            return _proc(0, stdout="agentalloy 2.4.0\n")
+        return _proc(0)
+
+    with (
+        patch.object(up, "_current_version", return_value="2.3.5"),
+        patch.object(up, "_latest_release_tag", return_value="v2.4.0"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_upgrade_native", return_value=([], [])),
+        patch.object(up, "_run_cli", side_effect=cli),
+    ):
+        result = up.upgrade(force=True)
+
+    assert result["current_version"] == "2.3.5"  # captured before the swap
+    assert result["new_version"] == "2.4.0"  # NOT the stale in-process 2.3.5
+
+
+def test_swap_output_is_captured_not_spilled():
+    # Regression: the `uv tool install` swap must capture its output so the raw
+    # Resolved/Built/Installed lines do not spill into the upgrade stdout.
+    captured: dict[str, Any] = {}
+
+    def rec_run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        captured.update(kw)
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", side_effect=rec_run),
+    ):
+        up._upgrade_native("v2.4.0", {"installed_packs": ["core"]}, assume_yes=True)
+
+    assert captured.get("capture_output") is True
+
+
+def test_update_warnings_folded_not_dumped():
+    # Regression: the `update` step emits a JSON blob; we capture it (no terminal
+    # spill) and surface only its warnings cleanly into the upgrade summary.
+    def cli(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if args[0] == "update":
+            assert kw.get("capture") is True  # must be captured, not printed
+            return _proc(0, stdout='{"warnings": ["corpus has no corpus_meta table"]}')
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", side_effect=cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+    ):
+        actions, warnings = up._upgrade_native(
+            "v2.4.0", {"installed_packs": ["core"]}, assume_yes=True
+        )
+
+    assert any("corpus_meta" in w for w in warnings)
+
+
 # --- container flow ---------------------------------------------------------
 
 

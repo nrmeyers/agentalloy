@@ -74,6 +74,23 @@ def _current_version() -> str:
     return __version__
 
 
+def _installed_version_via_cli() -> str | None:
+    """Read the version from the freshly-installed binary (out-of-process).
+
+    After a package swap the in-process ``agentalloy.__version__`` is still the
+    *old* version — the running interpreter imported it before the swap and
+    Python caches the module — so reading it in-process reports the pre-upgrade
+    version. Shell the new binary to learn what actually landed.
+    """
+    try:
+        proc = _run_cli(["--version"], capture=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # Output format: "agentalloy X.Y.Z"
+    parts = (proc.stdout or "").strip().split()
+    return parts[-1] if parts else None
+
+
 def _latest_release_tag(timeout: float = 10.0) -> str | None:
     """Return the newest release tag (e.g. ``v2.2.1``), or ``None`` if unreachable."""
     req = urllib.request.Request(
@@ -242,9 +259,13 @@ def _upgrade_native(
     swap = _swap_command(method, ref)
     print_rich(f"  [dim]-> {' '.join(swap)}[/dim]")
     try:
-        subprocess.run(swap, check=True, timeout=1800)
+        subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
-        warnings.append(f"package install failed (exit {exc.returncode}); service left stopped")
+        tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
+        detail = f": {' / '.join(line.strip() for line in tail)}" if tail else ""
+        warnings.append(
+            f"package install failed (exit {exc.returncode}); service left stopped{detail}"
+        )
         return actions, warnings
     except (OSError, subprocess.TimeoutExpired) as exc:
         warnings.append(f"package install failed: {exc}")
@@ -270,8 +291,17 @@ def _upgrade_native(
     else:
         actions.append("re-ingested packs")
 
-    _run_cli(["update"], check=False)  # corpus schema migrations + model-drift report
+    # corpus schema migrations + model-drift report. Capture the JSON output so it
+    # does not spill to the terminal; surface only its warnings, cleanly.
+    upd = _run_cli(["update"], check=False, capture=True)
     actions.append("ran corpus migrations")
+    try:
+        upd_payload: dict[str, Any] = json.loads(upd.stdout or "{}")
+        upd_warnings = upd_payload.get("warnings")
+        if isinstance(upd_warnings, list):
+            warnings.extend(w for w in upd_warnings if isinstance(w, str))  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+    except (json.JSONDecodeError, ValueError):
+        pass
 
     _start_service()
     actions.append("restarted service")
@@ -393,7 +423,9 @@ def upgrade(
 
     summary["actions"].extend(actions)
     summary["warnings"].extend(warnings)
-    summary["new_version"] = _current_version()
+    # Read the post-swap version from the new binary; the in-process __version__ is
+    # frozen at the pre-upgrade value (module imported before the swap).
+    summary["new_version"] = _installed_version_via_cli() or _current_version()
     summary["duration_ms"] = int((time.monotonic() - t0) * 1000)
     return summary
 
