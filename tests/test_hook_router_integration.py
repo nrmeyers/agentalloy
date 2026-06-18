@@ -774,3 +774,152 @@ class TestHookSelfGate:
         (project / ".agentalloy").mkdir(parents=True)
         (project / ".agentalloy" / "phase").write_text("phase: intake\n")
         assert self._run_with_curl_stub(project, tmp_path) is True
+
+
+class TestPostToolUseCompose:
+    """2.3.5: PostToolUse composes domain skills from a written contract."""
+
+    def _app(self) -> Any:
+        from fastapi import FastAPI
+
+        from agentalloy.api.hook_router import router
+
+        app = FastAPI()
+        app.include_router(router)
+        return app
+
+    def _post(self, client: TestClient, file_path: str) -> dict[str, Any]:
+        resp = client.post(
+            "/v1/hook/post-tool-use",
+            json={
+                "tool_name": "Write",
+                "tool_input": {"file_path": file_path},
+                "cwd": "/x",
+            },
+        )
+        assert resp.status_code == 200
+        return resp.json()
+
+    def test_composes_domain_block_on_contract_write(self) -> None:
+        from agentalloy.api import hook_router as hr
+
+        result = type("R", (), {"output": "# Domain fragments\n## skill: fastapi-testing"})()
+
+        async def fake_compose(req: Any, orch: Any) -> Any:
+            return result
+
+        client = TestClient(self._app())
+        with (
+            patch.object(hr, "_get_compose_orchestrator", return_value=object()),
+            patch("agentalloy.api.compose_router.compose_from_contract", new=fake_compose),
+        ):
+            d = self._post(client, "/x/.agentalloy/contracts/build/t.md")
+        assert d["status"] == "composed"
+        assert "Domain fragments" in d["composed_block"]
+
+    def test_empty_result_is_no_action(self) -> None:
+        from agentalloy.api import hook_router as hr
+
+        async def fake_compose(req: Any, orch: Any) -> Any:
+            return type("R", (), {"output": ""})()
+
+        client = TestClient(self._app())
+        with (
+            patch.object(hr, "_get_compose_orchestrator", return_value=object()),
+            patch("agentalloy.api.compose_router.compose_from_contract", new=fake_compose),
+        ):
+            d = self._post(client, "/x/.agentalloy/contracts/build/t.md")
+        assert d["status"] == "no_action"
+        assert "composed_block" not in d
+
+    def test_no_orchestrator_is_no_action(self) -> None:
+        from agentalloy.api import hook_router as hr
+
+        client = TestClient(self._app())
+        with patch.object(hr, "_get_compose_orchestrator", return_value=None):
+            d = self._post(client, "/x/.agentalloy/contracts/build/t.md")
+        assert d["status"] == "no_action"
+
+    def test_path_outside_contracts_is_no_action(self) -> None:
+        from agentalloy.api import hook_router as hr
+
+        # _get_compose_orchestrator must never even be consulted for non-contract paths.
+        with patch.object(hr, "_get_compose_orchestrator", side_effect=AssertionError):
+            d = self._post(TestClient(self._app()), "/x/src/main.py")
+        assert d["status"] == "no_action"
+
+    def test_invalid_contract_is_no_action(self) -> None:
+        from fastapi import HTTPException
+
+        from agentalloy.api import hook_router as hr
+
+        async def fake_compose(req: Any, orch: Any) -> Any:
+            raise HTTPException(status_code=400, detail={"error": "contract_invalid"})
+
+        client = TestClient(self._app())
+        with (
+            patch.object(hr, "_get_compose_orchestrator", return_value=object()),
+            patch("agentalloy.api.compose_router.compose_from_contract", new=fake_compose),
+        ):
+            d = self._post(client, "/x/.agentalloy/contracts/build/t.md")
+        assert d["status"] == "contract_invalid"
+        assert "composed_block" not in d
+
+
+class TestHookScriptPostToolUseInject:
+    """2.3.5: the hook script wraps composed_block in a PostToolUse additionalContext envelope."""
+
+    def _script_path(self) -> Path:
+        return (
+            Path(__file__).resolve().parent.parent
+            / "src/agentalloy/install/agentalloy-hook-claude-code.sh"
+        )
+
+    def _run(self, tmp_path: Path, curl_stdout: str) -> str:
+        import os
+
+        project = tmp_path / "repo"
+        (project / ".agentalloy").mkdir(parents=True)
+        (project / ".agentalloy" / "phase").write_text("phase: build\n")  # pass self-gate
+
+        stub_bin = tmp_path / "bin"
+        stub_bin.mkdir(exist_ok=True)
+        curl_stub = stub_bin / "curl"
+        # Stub curl: ignore args, print the canned service response to stdout.
+        curl_stub.write_text("#!/bin/bash\ncat <<'JSON'\n" + curl_stdout + "\nJSON\n")
+        curl_stub.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = f"{stub_bin}:{env['PATH']}"
+        env["CLAUDE_PROJECT_DIR"] = str(project)
+        payload = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(project / ".agentalloy/contracts/build/t.md")},
+                "cwd": str(project),
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(self._script_path())],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(project),
+            timeout=10,
+        )
+        assert result.returncode == 0  # always fail-open
+        return result.stdout.strip()
+
+    def test_emits_additional_context_envelope(self, tmp_path: Path) -> None:
+        out = self._run(
+            tmp_path, '{"status":"composed","composed_block":"# Domain fragments\\n## skill: x"}'
+        )
+        d = json.loads(out)
+        assert d["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
+        assert "Domain fragments" in d["hookSpecificOutput"]["additionalContext"]
+
+    def test_no_block_emits_nothing(self, tmp_path: Path) -> None:
+        out = self._run(tmp_path, '{"status":"no_action"}')
+        assert out == ""

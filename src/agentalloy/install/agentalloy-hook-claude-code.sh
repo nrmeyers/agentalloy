@@ -53,6 +53,9 @@ PRE_TOOL_URL="${AGENTALLOY_HOOK_URL_PRE:-http://localhost:47950/v1/hook/pre-tool
 # total=1.0s caps the whole turn-blocking call.
 CONNECT_TIMEOUT="${AGENTALLOY_HOOK_CONNECT_TIMEOUT:-0.2}"
 MAX_TIME="${AGENTALLOY_HOOK_MAX_TIME:-1.0}"
+# PostToolUse triggers a domain-skill compose (embed retrieval), heavier than
+# the signal-eval paths — give it a longer budget, still under the 5s hook cap.
+POST_MAX_TIME="${AGENTALLOY_HOOK_POST_MAX_TIME:-4.0}"
 
 # A curl that cannot run at all (missing binary) must also fail open.
 if ! command -v curl >/dev/null 2>&1; then
@@ -142,7 +145,34 @@ except Exception:
         ;;
 
     PostToolUse)
-        "${_CURL[@]}" "$POST_TOOL_URL" >/dev/null 2>&1 || true
+        # Writing a contract triggers a domain-skill compose server-side; inject
+        # the result via PostToolUse additionalContext. Use a longer timeout than
+        # the shared curl (compose is heavier than signal-eval).
+        RESP="$(curl -sf \
+            --connect-timeout "$CONNECT_TIMEOUT" \
+            --max-time "$POST_MAX_TIME" \
+            -H "Content-Type: application/json" \
+            -d "$INPUT" \
+            "$POST_TOOL_URL" 2>/dev/null || echo "{}")"
+
+        # Plain stdout is NOT injected for PostToolUse (unlike UserPromptSubmit),
+        # so emit the hookSpecificOutput.additionalContext envelope. Only when a
+        # composed_block came back; json.dumps handles escaping.
+        printf '%s' "$RESP" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    block = d.get('composed_block', '')
+    if block:
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'PostToolUse',
+                'additionalContext': block,
+            }
+        }))
+except Exception:
+    pass
+" 2>/dev/null || true
         ;;
 
     *)

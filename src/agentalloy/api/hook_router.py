@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -465,52 +465,87 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
     )
 
 
+def _get_compose_orchestrator(request: Request) -> Any:
+    """Return the app's compose orchestrator instance, or None if unavailable.
+
+    Reuses the same orchestrator the ``/compose`` route uses (built in the
+    app.py lifespan and registered via ``dependency_overrides``), so its
+    telemetry writer records the composition trace automatically. Returns None
+    when the runtime didn't load — the caller fails open.
+    """
+    from agentalloy.api.compose_router import get_orchestrator
+
+    override = request.app.dependency_overrides.get(get_orchestrator)
+    if override is None:
+        return None
+    try:
+        return override()
+    except Exception:
+        return None
+
+
 @router.post("/v1/hook/post-tool-use")
 async def hook_post_tool_use(request: Request) -> JSONResponse:
     """Handle a PostToolUse hook event.
 
-    Validates contracts and triggers compose when relevant files are modified.
+    When the agent writes a contract, compose the domain skill fragments that
+    match the contract's ``domain_tags`` and return them as ``composed_block``,
+    so the hook script can inject them into Claude (PostToolUse additionalContext).
+    This is the contract -> domain-skill bridge: the workflow scaffold arrives on
+    the prompt, the matching domain skills arrive once the contract declares its
+    scope. Telemetry is recorded automatically by the orchestrator.
+
+    Fail-open everywhere: any error, an unsafe/invalid contract, or a missing
+    runtime returns a no-compose response — the hook never blocks the agent.
     """
     start = time.monotonic()
 
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "invalid JSON body"},
-        )
+        return JSONResponse(status_code=400, content={"error": "invalid JSON body"})
+
+    def _done(content: dict[str, Any]) -> JSONResponse:
+        content.setdefault("latency_ms", int((time.monotonic() - start) * 1000))
+        return JSONResponse(content=content)
 
     tool_name = body.get("tool_name", "")
-    tool_path = body.get("tool_path", "")
+    # Claude Code nests the edited path under tool_input.file_path; older/test
+    # payloads use a flat tool_path. Accept both.
+    tool_input = body.get("tool_input")
+    nested_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
+    tool_path = body.get("tool_path") or nested_path or ""
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
-    # Only fire on writes inside .agentalloy/contracts/
-    if tool_name in ("Edit", "Write", "MultiEdit") and ".agentalloy/contracts/" in tool_path:
-        try:
-            from agentalloy.contracts import parse_contract, validate_contract
+    # Only act on writes to a contract file.
+    if tool_name not in ("Edit", "Write", "MultiEdit") or ".agentalloy/contracts/" not in tool_path:
+        return _done({"status": "no_action"})
 
-            contract = parse_contract(Path(tool_path))
-            issues = validate_contract(contract, cwd)
-            if not issues:
-                return JSONResponse(
-                    content={
-                        "status": "contract_valid",
-                        "contract_phase": contract.phase,
-                        "latency_ms": int((time.monotonic() - start) * 1000),
-                    },
-                )
-        except Exception:
-            pass
+    tp = Path(tool_path)
+    contract_path = str(tp if tp.is_absolute() else (cwd / tp))
 
-    latency_ms = int((time.monotonic() - start) * 1000)
-    return JSONResponse(
-        content={
-            "status": "no_action",
-            "latency_ms": latency_ms,
-        },
-    )
+    orchestrator = _get_compose_orchestrator(request)
+    if orchestrator is None:
+        return _done({"status": "no_action"})  # runtime not loaded — fail open
+
+    try:
+        from agentalloy.api.compose_router import FromContractRequest, compose_from_contract
+
+        result = await compose_from_contract(
+            FromContractRequest(contract_path=contract_path), orchestrator
+        )
+    except HTTPException:
+        # unsafe / malformed / invalid contract — nothing to inject
+        return _done({"status": "contract_invalid"})
+    except Exception:
+        logger.warning("Hook post-tool-use compose failed", exc_info=True)
+        return _done({"status": "no_action"})
+
+    block = getattr(result, "output", "") or ""
+    if not block:
+        return _done({"status": "no_action"})  # empty domain result (e.g. no domain_tags)
+    return _done({"status": "composed", "composed_block": block})
 
 
 @router.get("/v1/hook/cache-status")
