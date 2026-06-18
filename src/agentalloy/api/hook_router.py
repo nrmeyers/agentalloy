@@ -387,7 +387,6 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
             content={"error": "invalid JSON body"},
         )
 
-    tool_name = body.get("tool_name", "")
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
@@ -410,55 +409,35 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
                 },
             )
 
-    # Evaluate system skills for this tool
+    # Evaluate applicable system skills for the current phase.
     system_skills: list[str] = []
     try:
-        from agentalloy.signals.gates import evaluate_node
-        from agentalloy.signals.predicates import PredicateResult
-        from agentalloy.signals.skill_loader import (
-            _build_predicate_context,
-            _read_phase,
-        )
+        from agentalloy.signals.skill_loader import _read_phase
 
         current_phase = _read_phase(cwd)
-        ctx = _build_predicate_context(
-            project_root=cwd,
-            phase=current_phase,
-            tool_name=tool_name,
-        )
 
-        # Query profile skills database
-        try:
-            import duckdb
+        # Retrieve applicable system skills from the corpus via the canonical
+        # scope-based applicability model (always_apply / phase_scope /
+        # category_scope) — the same path the /compose route uses. The previous
+        # profile_skills `applies_when` gate was never populated for shipped
+        # system skills (the scope fields were dropped on profile ingest), so
+        # system skills silently never injected through the hook.
+        store = _get_skill_store(request)
+        if store is not None:
+            from agentalloy.reads.models import ActiveFragment
+            from agentalloy.retrieval.system import retrieve_system_fragments
 
-            from agentalloy.profiles import detect_profile, profile_datastore_path
-
-            profile = detect_profile(cwd=cwd)
-            db_path = profile_datastore_path(profile.name if profile else "default")
-            if db_path.exists():
-                import yaml as _yaml
-
-                with duckdb.connect(str(db_path), read_only=True) as con:
-                    rows = con.execute(
-                        "SELECT skill_id, raw_prose, applies_when FROM profile_skills WHERE skill_class = 'system'"
-                    ).fetchall()
-
-                for skill_id, raw_prose, applies_when_raw in rows:
-                    if not applies_when_raw:
-                        continue
-                    try:
-                        gate_spec = _yaml.safe_load(applies_when_raw) or {}
-                    except Exception:
-                        continue
-                    qwen_calls: list[int] = [0]
-                    result, _ = evaluate_node(gate_spec, ctx, None, qwen_calls)
-                    if result == PredicateResult.MET:
-                        system_skills.append(
-                            f"[agentalloy-system:{skill_id}]\n{raw_prose}\n[/agentalloy-system]"
-                        )
-        except Exception:
-            pass
-
+            result = retrieve_system_fragments(store, phase=current_phase, category=None)
+            by_skill: dict[str, list[ActiveFragment]] = {}
+            for frag in result.candidates:
+                by_skill.setdefault(frag.skill_id, []).append(frag)
+            for skill_id in result.applied_skill_ids:
+                frags = sorted(by_skill.get(skill_id, []), key=lambda f: f.sequence)
+                prose = "\n".join(f.content for f in frags)
+                if prose:
+                    system_skills.append(
+                        f"[agentalloy-system:{skill_id}]\n{prose}\n[/agentalloy-system]"
+                    )
     except Exception:
         logger.warning("Hook pre-tool-use evaluation failed", exc_info=True)
 
@@ -484,6 +463,24 @@ def _get_compose_orchestrator(request: Request) -> Any:
     from agentalloy.api.compose_router import get_orchestrator
 
     override = request.app.dependency_overrides.get(get_orchestrator)
+    if override is None:
+        return None
+    try:
+        return override()
+    except Exception:
+        return None
+
+
+def _get_skill_store(request: Request) -> Any:
+    """Return the app's LadybugStore (registered via ``dependency_overrides``), or None.
+
+    Same store the inspection/compose routes use, so PreToolUse selects system
+    skills from the live corpus via the canonical scope-based applicability.
+    Returns None when the runtime didn't load — the caller fails open.
+    """
+    from agentalloy.api.skill_router import get_skill_store
+
+    override = request.app.dependency_overrides.get(get_skill_store)
     if override is None:
         return None
     try:

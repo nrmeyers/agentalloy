@@ -32,6 +32,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentalloy.api.compose_router import get_orchestrator
+from agentalloy.api.skill_router import get_skill_store
 from agentalloy.app import create_app
 from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.orchestration.compose import ComposeOrchestrator
@@ -161,6 +162,7 @@ def app_client(tmp_path: Path):
     )
     app = create_app(use_default_lifespan=False)
     app.dependency_overrides[get_orchestrator] = lambda: orch
+    app.dependency_overrides[get_skill_store] = lambda: lb  # PreToolUse system-skill source
     client = TestClient(app)
     try:
         yield client, vs
@@ -191,6 +193,15 @@ def _ptu(client: TestClient, project: ProjectDir, path: Path) -> dict[str, Any]:
             "tool_input": {"file_path": str(path)},
             "cwd": str(project.root),
         },
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def _pre(client: TestClient, project: ProjectDir) -> dict[str, Any]:
+    resp = client.post(
+        "/v1/hook/pre-tool-use",
+        json={"tool_name": "Write", "cwd": str(project.root)},
     )
     assert resp.status_code == 200
     return resp.json()
@@ -345,3 +356,40 @@ def test_wrong_path_spec_yields_near_miss_advisory(
     assert "linkvault2-spec.md" in block
     assert "docs/spec" in block
     assert project.read_phase() == "phase: spec"
+
+
+# ---------------------------------------------------------------------------
+# Stage 0 — system skills inject via the hook (PreToolUse)
+# ---------------------------------------------------------------------------
+
+
+def _system_ids(resp: dict[str, Any]) -> str:
+    return "\n".join(resp.get("system_skills") or [])
+
+
+def test_always_apply_system_skill_injects_at_pretooluse(app_client, project: ProjectDir) -> None:
+    """The harness bug: system skills never injected through the hook because the
+    PreToolUse path read a never-populated `applies_when` gate. With the corpus
+    scope-based path, an always_apply system skill injects at every phase."""
+    client, _vs = app_client
+    for phase in ("intake", "spec", "design", "build", "qa", "ship"):
+        project.set_phase(phase)
+        assert "sys-governance-always" in _system_ids(_pre(client, project)), phase
+
+
+def test_phase_scoped_system_skill_injects_only_in_its_phase(
+    app_client, project: ProjectDir
+) -> None:
+    """A `phase_scope: [build]` system skill injects at build alongside the
+    always-apply one; at spec, only the always-apply one is present."""
+    client, _vs = app_client
+
+    project.set_phase("build")
+    at_build = _system_ids(_pre(client, project))
+    assert "sys-governance-always" in at_build
+    assert "sys-governance-build-phase" in at_build
+
+    project.set_phase("spec")
+    at_spec = _system_ids(_pre(client, project))
+    assert "sys-governance-always" in at_spec
+    assert "sys-governance-build-phase" not in at_spec
