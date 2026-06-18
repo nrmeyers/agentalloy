@@ -15,7 +15,6 @@ from agentalloy.install.subcommands.uninstall import (
     _stop_container_stack,  # type: ignore[attr-defined]
     _remove_compose_volumes,  # type: ignore[attr-defined]
     _remove_container_image,  # type: ignore[attr-defined]
-    _remove_ollama_cache,  # type: ignore[attr-defined]
     _remove_agentalloy_cache,  # type: ignore[attr-defined]
     _COMPOSE_NAMED_VOLUMES,  # type: ignore[attr-defined]
 )
@@ -258,8 +257,7 @@ class TestContainerUninstall:
 
     def test_remove_compose_volumes_runs_volume_rm_per_named_volume(self):
         """`volume rm -f` runs for each named volume declared in compose.yaml.
-        Without this, fresh reinstalls silently reuse the prior corpus +
-        ollama model cache.
+        Without this, fresh reinstalls silently reuse the prior corpus.
         """
         state: dict[str, Any] = {
             "deployment": "container",
@@ -328,7 +326,6 @@ class TestContainerUninstall:
         assert actions == []
         assert len(warnings) == 1
         assert "agentalloy-data" in warnings[0]
-        assert "agentalloy-ollama-models" in warnings[0]
 
     def test_container_stop_invalid_label_warns(self, tmp_path: Path):
         """Empty runtime_binary label is rejected."""
@@ -470,30 +467,6 @@ class TestContainerUninstall:
         assert len(actions) == 1
         assert actions[0]["action"] == "image_removed"
         assert actions[0]["image"] == "ghcr.io/nrmeyers/agentalloy:latest"
-
-    def test_remove_ollama_cache_success(self, tmp_path: Path):
-        """Ollama cache directory is removed when it exists."""
-        warnings: list[str] = []
-        ollama_dir = tmp_path / ".ollama"
-        ollama_dir.mkdir()
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            actions = _remove_ollama_cache(warnings)
-
-        assert len(actions) == 1
-        assert actions[0]["action"] == "ollama_cache_removed"
-        assert not ollama_dir.exists()
-
-    def test_remove_ollama_cache_already_gone(self, tmp_path: Path):
-        """Missing Ollama cache returns 'already_gone' action."""
-        warnings: list[str] = []
-
-        with patch("pathlib.Path.home", return_value=tmp_path):
-            actions = _remove_ollama_cache(warnings)
-
-        assert len(actions) == 1
-        assert actions[0]["action"] == "ollama_cache_already_gone"
-        assert len(warnings) == 0
 
     def test_remove_agentalloy_cache_success(self, tmp_path: Path):
         """AgentAlloy cache directory is removed when it exists."""

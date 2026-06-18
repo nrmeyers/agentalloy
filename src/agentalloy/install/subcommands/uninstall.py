@@ -8,8 +8,7 @@ Full teardown for a agentalloy install. By default removes:
   suffix allowlist + sha256 tamper check, so a tampered state file
   can't redirect deletion. Pass ``--no-all-repos`` to limit cleanup
   to cwd (matching the legacy behavior).
-- Native systemd / launchd service units (agentalloy + the optional
-  ollama unit installed alongside on Linux).
+- Native systemd / launchd service units (agentalloy).
 - A manual-mode agentalloy server still listening on the configured
   port.
 - User-scope ``.env`` and ``install-state.json``.
@@ -21,8 +20,7 @@ Full teardown for a agentalloy install. By default removes:
 
 With ``--remove-data`` (or the ``full`` preset), also removes:
 
-- Container named volumes (``agentalloy-data``, ``agentalloy-ollama-models``).
-- Ollama model cache (``~/.ollama``).
+- Container named volumes (``agentalloy-data``).
 - AgentAlloy download cache (``~/.cache/agentalloy``).
 - Skills datastore (corpus DB) and the entire ``${XDG_DATA_HOME}/agentalloy/``
   directory.
@@ -115,12 +113,8 @@ def _prompt_uninstall_custom() -> dict[str, bool]:
     """
     print("", file=sys.stderr)
     return {
-        "stop_services": _prompt_yes_no(
-            "Stop running services (embed server, ollama daemon, llama-server)?"
-        ),
-        "remove_models": _prompt_yes_no(
-            "Remove pulled models (ollama models, llama-server GGUF cache)?"
-        ),
+        "stop_services": _prompt_yes_no("Stop running services (embed + reranker llama-server)?"),
+        "remove_models": _prompt_yes_no("Remove pulled models (llama-server GGUF cache)?"),
         "remove_datastore": _prompt_yes_no("Remove skills datastore (corpus DB)?"),
         "remove_wiring": _prompt_yes_no(
             "Remove harness wiring (CLAUDE.md, .cursorrules, MCP entries, etc.)?"
@@ -137,17 +131,15 @@ def _prompt_uninstall_custom() -> dict[str, bool]:
 def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
     """Remove every model recorded in ``state["models_pulled"]``.
 
-    Entries are ``"<runner>:<model>"``. Ollama models are removed via
-    ``ollama rm``; llama-server models are GGUF files under
-    ``${XDG_DATA_HOME}/agentalloy/models/``. Missing binaries / files
-    are warnings, not errors — the goal is best-effort cleanup.
+    Entries are ``"<runner>:<model>"``. llama-server models are GGUF files
+    under ``${XDG_DATA_HOME}/agentalloy/models/``. Missing files are warnings,
+    not errors — the goal is best-effort cleanup.
     """
     actions: list[dict[str, Any]] = []
     pulled: list[Any] = st.get("models_pulled") or []
     if not pulled:
         return actions
 
-    ollama_bin = shutil.which("ollama")
     models_dir = install_state.user_data_dir() / "models"
 
     for entry in pulled:
@@ -161,44 +153,7 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
             actions.append({"entry": entry, "action": "skipped_empty_fields"})
             continue
 
-        if runner == "ollama":
-            if not ollama_bin:
-                actions.append(
-                    {
-                        "runner": runner,
-                        "model": model,
-                        "action": "skipped_no_ollama_binary",
-                    }
-                )
-                continue
-            try:
-                result = subprocess.run(  # noqa: S603 — ollama_bin from shutil.which
-                    [ollama_bin, "rm", "--", model],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                if result.returncode == 0:
-                    actions.append({"runner": runner, "model": model, "action": "ollama_removed"})
-                else:
-                    actions.append(
-                        {
-                            "runner": runner,
-                            "model": model,
-                            "action": "ollama_remove_failed",
-                            "error": result.stderr.strip(),
-                        }
-                    )
-            except (subprocess.TimeoutExpired, OSError) as exc:
-                actions.append(
-                    {
-                        "runner": runner,
-                        "model": model,
-                        "action": "ollama_remove_error",
-                        "error": str(exc),
-                    }
-                )
-        elif runner == "llama-server":
+        if runner == "llama-server":
             gguf_path = models_dir / model
             if gguf_path.exists():
                 try:
@@ -254,11 +209,9 @@ def _remove_pulled_models(st: dict[str, Any]) -> list[dict[str, Any]]:
 
 # Named volumes the container deployment may have created. Stopping/removing
 # the container does NOT remove its named volumes — those survive uninstall by
-# default, which means a "fresh" reinstall reuses the prior corpus and Ollama
-# model cache. We remove them explicitly when the caller asks for --remove-data.
-# (``agentalloy-ollama-models`` is from the retired compose model; it's removed
-# best-effort for users upgrading and is a no-op when absent.)
-_COMPOSE_NAMED_VOLUMES: tuple[str, ...] = ("agentalloy-data", "agentalloy-ollama-models")
+# default, which means a "fresh" reinstall reuses the prior corpus. We remove
+# them explicitly when the caller asks for --remove-data.
+_COMPOSE_NAMED_VOLUMES: tuple[str, ...] = ("agentalloy-data",)
 
 
 def _resolve_compose_binary(st: dict[str, Any]) -> str | None:
@@ -397,31 +350,6 @@ def _remove_container_image(
             actions.append({"action": "image_rm_failed", "image": image_tag, "error": stderr})
 
     return actions
-
-
-# ---------------------------------------------------------------------------
-# Ollama cache teardown
-# ---------------------------------------------------------------------------
-
-
-def _remove_ollama_cache(warnings: list[str]) -> list[dict[str, Any]]:
-    """Remove the Ollama model cache (``~/.ollama``).
-
-    Only acts when the directory exists. Idempotent: missing directory
-    is logged but does not produce warnings.
-
-    Returns a list of action dicts (always one entry).
-    """
-    ollama_dir = Path.home() / ".ollama"
-    if not ollama_dir.exists():
-        return [{"action": "ollama_cache_already_gone", "path": str(ollama_dir)}]
-
-    try:
-        shutil.rmtree(ollama_dir)
-        return [{"action": "ollama_cache_removed", "path": str(ollama_dir)}]
-    except OSError as exc:
-        warnings.append(f"Failed to remove Ollama cache at {ollama_dir}: {exc}")
-        return [{"action": "ollama_cache_rm_failed", "path": str(ollama_dir), "error": str(exc)}]
 
 
 # ---------------------------------------------------------------------------
@@ -584,47 +512,6 @@ def _stop_container_stack(
     return actions
 
 
-def _stop_ollama_daemon(st: dict[str, Any]) -> dict[str, Any]:
-    """Stop the specific ``ollama serve`` process that pull-models spawned.
-
-    Only acts on a PID recorded in ``state["spawned_ollama_pid"]``. Native
-    systemd ollama units are handled by ``_stop_native_service``. This
-    deliberately does **not** ``pkill -f "ollama serve"`` — that would
-    terminate any ollama the user runs for other apps, which is rude.
-    If we never recorded a PID (no auto-spawn happened on this install)
-    the call is a no-op.
-    """
-    import os as _os
-    import signal as _signal
-
-    pid_raw = st.get("spawned_ollama_pid")
-    if not isinstance(pid_raw, int) or pid_raw <= 0:
-        return {"action": "skipped_no_spawned_pid"}
-
-    # Verify the PID is still an ollama process before signalling. PIDs are
-    # recycled by the kernel; if /proc/<pid> now belongs to someone else,
-    # we MUST NOT kill it. /proc is Linux-only; on macOS we fall through
-    # to the kill attempt and trust the user's session ownership.
-    try:
-        with open(f"/proc/{pid_raw}/cmdline", "rb") as f:
-            cmdline = f.read()
-        if b"ollama" not in cmdline:
-            return {"action": "skipped_pid_recycled", "pid": pid_raw}
-    except FileNotFoundError:
-        return {"action": "already_stopped", "pid": pid_raw}
-    except OSError:
-        # /proc not available (e.g. macOS) — proceed to kill attempt.
-        pass
-
-    try:
-        _os.kill(pid_raw, _signal.SIGTERM)
-    except ProcessLookupError:
-        return {"action": "already_stopped", "pid": pid_raw}
-    except OSError as exc:
-        return {"action": "kill_failed", "pid": pid_raw, "error": str(exc)}
-    return {"action": "ollama_daemon_stopped", "pid": pid_raw}
-
-
 def _extract_sentinel_content(text: str, begin: str, end: str) -> str | None:
     """Extract the content between sentinel markers, or None if not found."""
     if begin not in text or end not in text:
@@ -692,24 +579,6 @@ def _stop_native_service(st: dict[str, Any]) -> list[dict[str, Any]]:
         if sanitized.exists():
             sanitized.unlink()
             actions.append({"path": str(sanitized), "action": "deleted_systemd_env"})
-
-        # The companion ollama.service that enable_service writes when
-        # Ollama is the chosen runner. It lives in the same user-scope
-        # systemd dir as the agentalloy unit; we own it, so we clean it
-        # up. Skip silently if the user has a system-wide ollama unit at
-        # /etc/systemd/system/ollama.service — touching that is out of
-        # our lane (and we don't have permission anyway).
-        ollama_unit = unit_path.parent / "ollama.service"
-        if ollama_unit.exists():
-            for cmd in (
-                ["systemctl", "--user", "disable", "--now", "ollama.service"],
-                ["systemctl", "--user", "daemon-reload"],
-            ):
-                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-                    subprocess.run(cmd, capture_output=True, timeout=10)
-            with contextlib.suppress(OSError):
-                ollama_unit.unlink()
-                actions.append({"path": str(ollama_unit), "action": "deleted_ollama_unit"})
 
     elif os_name == "darwin" and unit_path.suffix == ".plist":
         with contextlib.suppress(OSError, subprocess.TimeoutExpired):
@@ -971,7 +840,6 @@ def uninstall(
     files_removed: list[dict[str, Any]] = []
     warnings: list[str] = []
     model_actions: list[dict[str, Any]] = []
-    daemon_actions: list[dict[str, Any]] = []
 
     # 0. Stop container stack (if deployment == "container" and stop_services)
     container_actions: list[dict[str, Any]] = []
@@ -979,10 +847,9 @@ def uninstall(
         container_actions = _stop_container_stack(st, warnings)
         # 0b. Remove named volumes when the caller asked for --remove-data.
         # Stopping/removing the container leaves its named volumes
-        # (agentalloy-data, and legacy agentalloy-ollama-models) in place;
-        # they silently carry old corpus state + cached model into the next
-        # reinstall. Volume rm must run after the container is stopped so it
-        # no longer holds them open.
+        # (agentalloy-data) in place; they silently carry old corpus state
+        # into the next reinstall. Volume rm must run after the container is
+        # stopped so it no longer holds them open.
         if remove_data:
             container_actions.extend(_remove_compose_volumes(st, warnings))
         # 0b. Remove the local container image — must run after container
@@ -997,7 +864,7 @@ def uninstall(
         # almost certainly expect a full wipe.
         warnings.append(
             "remove_data=True requested without stop_services — named "
-            "volumes (agentalloy-data, agentalloy-ollama-models) cannot "
+            "volumes (agentalloy-data) cannot "
             "be removed while the container still mounts them. Re-run with "
             "stop_services=True, or stop the container and remove the "
             "volumes manually with `<podman|docker> volume rm`."
@@ -1387,9 +1254,6 @@ def uninstall(
         # This holds cloned repos and downloaded assets that are no longer
         # needed once AgentAlloy is uninstalled.
         files_removed.extend(_remove_agentalloy_cache(warnings))
-        # 5b. Remove the Ollama model cache (~/.ollama). This is a full
-        # wipe — only triggered by --remove-data (full/custom preset).
-        files_removed.extend(_remove_ollama_cache(warnings))
     elif corpus.exists():
         data_kept.append(str(corpus))
 
@@ -1467,13 +1331,7 @@ def uninstall(
         service_actions = _stop_native_service(st)
         files_removed.extend(service_actions)
 
-    # 6b. Stop manually-spawned ollama daemon (pull-models may auto-start
-    # one even when no native unit was installed). Native ollama units
-    # have already been handled inside _stop_native_service above.
-    if stop_services:
-        daemon_actions.append(_stop_ollama_daemon(st))
-
-    # 6c. Remove pulled models from runner caches. Independent of
+    # 6b. Remove pulled models from runner caches. Independent of
     # stop_services — you may want models gone but services left running
     # for other tools.
     if remove_models:
@@ -1509,7 +1367,7 @@ def uninstall(
         "warnings": warnings,
         "cli_install": cli_install_result,
         "models_removed": model_actions,
-        "daemons_stopped": daemon_actions,
+        "daemons_stopped": [],
         "container_actions": container_actions,
         "install_mode": mode_info,
     }
@@ -1548,7 +1406,7 @@ def _print_uninstall_summary(result: dict[str, Any]) -> None:
 
     # Models removed
     models = result.get("models_removed", [])
-    removed_model_actions = {"ollama_removed", "gguf_removed"}
+    removed_model_actions = {"gguf_removed"}
     removed_models = [entry for entry in models if entry.get("action") in removed_model_actions]
     other_model_actions = [
         entry for entry in models if entry.get("action") not in removed_model_actions
