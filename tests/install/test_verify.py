@@ -6,6 +6,7 @@ Tests the individual check functions in isolation (mocked external deps).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -22,9 +23,58 @@ from agentalloy.install.subcommands.verify import (
     _check_harness_config_url,  # pyright: ignore[reportPrivateUsage]
     _check_ladybug_present,  # pyright: ignore[reportPrivateUsage]
     _check_port_available,  # pyright: ignore[reportPrivateUsage]
+    _check_reranker_reachable,  # pyright: ignore[reportPrivateUsage]
     _check_skill_count,  # pyright: ignore[reportPrivateUsage]
     run_checks,
 )
+
+
+class TestRerankerCheck:
+    """The reranker check is advisory — a down reranker WARNs, never FAILs (the
+    signal layer falls back to the cosine floor)."""
+
+    def test_cosine_backend_is_plain_pass(self) -> None:
+        with patch.dict(os.environ, {"SIGNAL_INTENT_BACKEND": "cosine"}, clear=False):
+            chk = _check_reranker_reachable({})
+        assert chk["passed"] is True
+        assert "severity" not in chk
+        assert "cosine" in chk["detail"]
+
+    def test_reachable_passes_without_warn(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SIGNAL_INTENT_BACKEND": "reranker",
+                    "SIGNAL_INTENT_RERANK_URL": "http://127.0.0.1:47952",
+                },
+                clear=False,
+            ),
+            patch("agentalloy.install.state.rerank_reachable", return_value=True),
+        ):
+            chk = _check_reranker_reachable({})
+        assert chk["passed"] is True
+        assert chk.get("severity") is None
+        assert "reachable" in chk["detail"]
+
+    def test_unreachable_warns_but_never_fails(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SIGNAL_INTENT_BACKEND": "reranker",
+                    "SIGNAL_INTENT_RERANK_URL": "http://127.0.0.1:47952",
+                },
+                clear=False,
+            ),
+            patch("agentalloy.install.state.rerank_reachable", return_value=False),
+        ):
+            chk = _check_reranker_reachable({})
+        assert chk["passed"] is True  # advisory — never fails the suite
+        assert chk["severity"] == "warn"
+        assert "cosine floor" in chk["detail"]
+        assert "remediation" in chk
+
 
 # ---------------------------------------------------------------------------
 # Check 1: embedding endpoint reachable
@@ -481,7 +531,7 @@ class TestRunChecks:
         assert result["schema_version"] == SCHEMA_VERSION
         assert "all_checks_passed" in result
         assert "checks" in result
-        assert len(result["checks"]) == 8
+        assert len(result["checks"]) == 9
 
     @patch("agentalloy.install.subcommands.verify.urlopen", side_effect=URLError("refused"))
     def test_all_checks_have_name_and_passed(self, mock_urlopen: MagicMock, tmp_path: Path) -> None:

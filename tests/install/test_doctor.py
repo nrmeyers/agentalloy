@@ -455,6 +455,7 @@ class TestRunDoctorAllGreen:
             "embedding_dim",
             "service",
             "pack_manifests",
+            "reranker",
         ]
 
     def test_all_checks_have_name_and_passed(self) -> None:
@@ -480,7 +481,7 @@ class TestRunDoctorJson:
         assert "schema_version" in parsed
         assert "all_checks_passed" in parsed
         assert isinstance(parsed["checks"], list)
-        assert len(parsed["checks"]) == 8
+        assert len(parsed["checks"]) == 9
 
 
 # ---------------------------------------------------------------------------

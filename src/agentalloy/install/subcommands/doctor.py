@@ -1,7 +1,7 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
 """``doctor`` subcommand — diagnose and optionally repair a broken install.
 
-Eight checks covering the full install surface:
+Nine checks covering the full install surface:
 
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
  2. embed_server    — GET {RUNTIME_EMBED_BASE_URL} reachable; model listed (warn, not fail)
@@ -11,6 +11,7 @@ Eight checks covering the full install surface:
  6. embedding_dim   — stored DuckDB dim matches EMBEDDING_DIM constant
  7. service         — port /health responding (down is ok; up-degraded is warned)
  8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
+ 9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
 
 ``--repair``:  migrate → install-packs → reembed → re-diagnose (in that order).
 Lock-held aborts repair immediately — repair must not kill processes.
@@ -371,6 +372,42 @@ def _check_service(port: int) -> dict[str, Any]:
         }
 
 
+def _check_reranker(env: dict[str, str]) -> dict[str, Any]:
+    """Check 9: signal-intent reranker reachable (soft warn, never fatal).
+
+    The reranker (Qwen3-Reranker on :47952) is the primary phase-transition
+    trigger; when it's down the signal layer falls back to the cosine floor, so
+    an absent reranker warns rather than fails (matching the service check).
+    ``SIGNAL_INTENT_BACKEND=cosine`` → plain pass (reranker not used)."""
+    t0 = time.monotonic()
+    backend, url = install_state.resolve_intent_reranker(env)
+    if backend == "cosine":
+        return {
+            "name": "reranker",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "SIGNAL_INTENT_BACKEND=cosine — reranker not used (embedder-based intent)",
+        }
+    if install_state.rerank_reachable(url):
+        return {
+            "name": "reranker",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Reranker reachable at {url} — intent-based phase detection active",
+        }
+    return {
+        "name": "reranker",
+        "passed": True,
+        "severity": "warn",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"Reranker not reachable at {url}; phase detection falls back to the cosine floor",
+        "remediation": (
+            "Start it with `agentalloy enable-service`, or set "
+            "SIGNAL_INTENT_BACKEND=cosine in .env to use the embedder-based floor."
+        ),
+    }
+
+
 def _check_pack_manifests() -> dict[str, Any]:
     """Check 8: every bundled pack manifest passes full drift validation."""
     t0 = time.monotonic()
@@ -467,6 +504,7 @@ def run_doctor() -> dict[str, Any]:
     port = install_state.validate_port(st.get("port", 47950))
     checks.append(_check_service(port))
     checks.append(_check_pack_manifests())
+    checks.append(_check_reranker(env))
 
     all_passed = all(c["passed"] for c in checks)
     return {

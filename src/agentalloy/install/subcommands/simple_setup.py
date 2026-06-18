@@ -2014,6 +2014,26 @@ def run_setup(cfg: SetupConfig) -> int:
     _print(f"  Config:  {install_state.user_config_dir()}")
     _print(f"  Data:    {install_state.user_data_dir()}")
 
+    # Reranker status — it's the primary phase-transition trigger (v2.4.0); make
+    # plain whether the install gets the sharp intent path or the cosine floor.
+    try:
+        _backend, _rerank_url = install_state.resolve_intent_reranker(
+            install_state.parse_env_file()
+        )
+        if _backend == "cosine":
+            _print("  Reranker: cosine backend (embedder-based intent; no reranker server)")
+        elif install_state.rerank_reachable(_rerank_url):
+            _print(
+                f"  Reranker: [green]live[/green] at {_rerank_url} (intent-based phase detection)"
+            )
+        else:
+            _print(
+                f"  Reranker: [yellow]not reachable[/yellow] at {_rerank_url} — phase detection "
+                "uses the cosine floor; run [bold]agentalloy enable-service[/bold] to start it"
+            )
+    except Exception:
+        pass
+
     # Profile-aware completion message
     try:
         from agentalloy.profiles import detect_profile  # noqa: PLC0415

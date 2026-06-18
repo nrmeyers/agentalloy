@@ -43,9 +43,13 @@ Things your agent gets composed-and-injected without you pasting them into the p
 
 ---
 
-## Quick Install
+## Getting started
 
-Install once, then pick a deployment in the setup wizard:
+Two doors — pick the one that's you:
+
+### New to AgentAlloy
+
+Install the CLI once, then run the wizard:
 
 ```bash
 # 1. install uv (Linux / macOS)
@@ -54,54 +58,37 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 2. install the agentalloy CLI
 uv tool install git+https://github.com/nrmeyers/agentalloy.git
 
-# 3. run the wizard and choose a deployment (see below)
+# 3. run the setup wizard
 agentalloy setup
 ```
 
-Both deployments run the same wizard — they differ only in the option you pick at the deployment prompt. Choose by what you're optimizing for:
+The wizard detects your hardware, downloads the GGUF models, starts the embed + reranker servers, lets you pick skill packs, wires your IDE harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**; both choices run the same wizard:
 
-### Option 1 — Native install (recommended)
+- **Native** *(recommended)* — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
+- **Container** — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly (`--image-path` for a local tarball), **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface.
 
-**Best performance.** Runs the `nomic-embed-text-v1.5.Q8_0.gguf` embed model directly on your host via llama-server, with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal — or CPU if you have no GPU). Fastest composition path, full control, IDE harness wiring. This is the default — **select option 1** at the deployment prompt.
+> **Already using Ollama?** Ollama was dropped as a runtime in v1.3.1 — AgentAlloy now uses `llama-server`. You can still point `RUNTIME_EMBED_BASE_URL` at any OpenAI-compatible 768-dim `nomic-embed-text-v1.5` endpoint you already run.
 
-The wizard handles the rest: hardware detection, GGUF model download, ports, service mode, **skill pack selection** (tier-grouped listing), IDE harness wiring, and hardware target. It executes every install step and validates the result — **3–5 minutes** on a warm machine.
+For the full step-by-step runbook (and air-gapped installs), see **[INSTALL.md](INSTALL.md)**. Just want to see it work first? [Run the demo](#demo).
 
-### Option 2 — Container install
+#### Scripted / non-interactive
 
-**Zero host dependencies, air-gapped friendly — CPU-only.** Runs agentalloy + two bundled `llama-server` instances in a single container, with the `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` GGUFs auto-downloaded on first start — **select option 2** at the deployment prompt. Published images ship a **prebuilt skill corpus**, so first run is ready in minutes (model download only, no CPU ingest/embed wait). Port 47950 is the only external surface. Container inference is **CPU-only on every host**; pick the native install above if you want GPU acceleration.
-
-> **Pulls a pre-built image from GHCR** (`ghcr.io/nrmeyers/agentalloy:latest`) — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball.
-
-### Runtime toggles (set by what they measured)
-
-Independent of deployment, composition is **deterministic by default**. Three runtime levers — env vars in `~/.config/agentalloy/.env`, not wizard prompts — tune how much optional assistance is in the loop. Each default is the one the benchmarks earned (see [BENCHMARKS.md](BENCHMARKS.md)); the two model-backed ones fail open to the deterministic path when their model is unavailable:
-
-- **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** The signals-layer phase-gate classifier. The `qwen3-reranker-0.6b` backend is the default because it measurably beats cosine on intent classification (per-intent macro-F1 0.24 → 0.69). It needs a reranker server (a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf`, default `127.0.0.1:47952`); set `SIGNAL_INTENT_BACKEND=cosine`, or simply leave that server unprovisioned, and the gates fall open to cosine byte-for-byte.
-- **`LM_ASSIST` — default `off`.** The composition fragment re-ranker (`=arbitrate` to enable). Off by default because it measured **no lift** over deterministic selection on the domain benchmark (it tied, and trailed slightly with a wider candidate pool).
-- **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off for the same reason: **no measured lift**.
-
-> The reranker default only delivers its win where a `qwen3-reranker-0.6b` server is reachable. The setup wizard does not yet provision one, so a fresh install fails open to cosine until you run it — safe, but the lift is latent until the server is up.
-
-See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [docs/operator.md](docs/operator.md) for the config reference.
-
-### Scripted / non-interactive
-
-Skip the wizard entirely by passing flags:
+Skip the wizard with flags:
 
 ```bash
+# native
 agentalloy setup -n --hardware nvidia --packs all --harness claude-code
-# Sidecar harnesses (cursor, windsurf, github-copilot, gemini-cli) additionally
-# require --acknowledge-sidecar in non-interactive mode:
+# container
+agentalloy setup -n --deployment container --harness claude-code
+# sidecar harnesses (cursor, windsurf, github-copilot, gemini-cli) also need --acknowledge-sidecar:
 agentalloy setup -n --hardware nvidia --packs all --harness cursor --acknowledge-sidecar
 ```
 
-For a proxy-wired harness, point it at your upstream LLM with `--upstream-url` / `--upstream-model` / `--upstream-api-key` (or the `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` env vars — preferred for the key, which is otherwise visible in process args).
+For a proxy-wired harness, point it at your upstream LLM with `--upstream-url` / `--upstream-model` / `--upstream-api-key` (or the matching env vars — preferred for the key, which is otherwise visible in process args).
 
-Just want to see it work first? [Run the demo](#demo).
+### Already running AgentAlloy
 
-### Upgrading
-
-Already installed? Move to the latest release in one command — it detects your deployment, swaps the package (native) or image (container), refreshes the corpus only if it changed, restarts, and verifies:
+Move to the latest release in one command — it detects your deployment, swaps the package (native) or image (container), refreshes the corpus only if it changed, restarts, and verifies:
 
 ```bash
 agentalloy upgrade            # native or container — auto-detected
@@ -111,11 +98,21 @@ agentalloy --version          # what you're on now
 
 Native installs re-install from the newest tagged release; container installs pull the matching image and recreate (the corpus self-heals from the image's prebuilt seed). A major-version embedding change triggers a one-time re-embed — you're prompted first (`--yes` to auto-confirm, `--ref vX.Y.Z` to pin a specific release).
 
+### Runtime toggles (set by what they measured)
+
+Independent of deployment, composition is **deterministic by default**. Three runtime levers — env vars in `~/.config/agentalloy/.env`, not wizard prompts — tune how much optional assistance is in the loop. Each default is the one the benchmarks earned (see [BENCHMARKS.md](BENCHMARKS.md)); the model-backed ones fail open to the deterministic path when their model is unavailable:
+
+- **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** Detects phase-transition intent from natural language — *"looks right, now the design"* advances `spec → design` with no rigid keyword. As of v2.4.0 this is the **primary phase-transition trigger** (the reranker beats cosine on intent: per-intent macro-F1 0.24 → 0.69). It needs a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (default `127.0.0.1:47952`) — **the setup wizard provisions and starts one for you**. If that server is down, the gates fall open to the cosine floor (functional, less precise); set `SIGNAL_INTENT_BACKEND=cosine` to opt out explicitly. `agentalloy verify` and `agentalloy doctor` report whether it's live.
+- **`LM_ASSIST` — default `off`.** The composition fragment re-ranker (`=arbitrate` to enable). Off by default because it measured **no lift** over deterministic selection on the domain benchmark (it tied, and trailed slightly with a wider candidate pool).
+- **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off for the same reason: **no measured lift**.
+
+See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [docs/operator.md](docs/operator.md) for the config reference.
+
 ---
 
 ## Contents
 
-- [Quick Install](#quick-install)
+- [Getting started](#getting-started)
 - [Demo](#demo)
 - [What makes the composition different](#what-makes-the-composition-different)
 - [How it works: phases, contracts, signal layer](#how-it-works-phases-contracts-signal-layer)

@@ -645,6 +645,48 @@ def _check_port_available(port: int) -> dict[str, Any]:
         }
 
 
+def _check_reranker_reachable(env: dict[str, str]) -> dict[str, Any]:
+    """Check 9: signal-intent reranker reachable (advisory — never fails the suite).
+
+    The reranker (Qwen3-Reranker on :47952) is the primary phase-transition
+    trigger as of v2.4.0, but it is NOT required: when unreachable the signal
+    layer falls back to the cosine floor (functional, less precise), so an
+    absent reranker is a soft warn (``passed: True``), not a failure — matching
+    how ``doctor`` treats a degraded service. When ``SIGNAL_INTENT_BACKEND=
+    cosine`` the reranker isn't used at all and this is a plain pass.
+    """
+    t0 = time.monotonic()
+    backend, url = install_state.resolve_intent_reranker(env)
+    if backend == "cosine":
+        return {
+            "name": "reranker_endpoint_reachable",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "SIGNAL_INTENT_BACKEND=cosine — reranker not used (embedder-based intent)",
+        }
+    if install_state.rerank_reachable(url):
+        return {
+            "name": "reranker_endpoint_reachable",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"reranker reachable at {url} — intent-based phase detection active",
+        }
+    return {
+        "name": "reranker_endpoint_reachable",
+        "passed": True,
+        "severity": "warn",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": (
+            f"reranker not reachable at {url}; phase detection falls back to the "
+            "cosine floor (functional, less precise)"
+        ),
+        "remediation": (
+            "Start the reranker (a second llama-server) with `agentalloy enable-service`, "
+            "or set SIGNAL_INTENT_BACKEND=cosine in .env to use the embedder-based floor."
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -780,6 +822,11 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
         _check_harness_config_url(st),
         _check_port_available(port),
     ]
+    # Reranker reachability is host-observable only for native installs (in
+    # container mode the reranker runs inside the container, unreachable from
+    # the host). Advisory: a down reranker warns, never fails.
+    if not is_container:
+        checks.append(_check_reranker_reachable(env))
 
     all_passed = all(c["passed"] for c in checks)
     return {

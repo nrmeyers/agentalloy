@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -93,6 +94,55 @@ def load_env_into_environ(path: Path | None = None) -> list[str]:
             os.environ[key] = val
             loaded.append(key)
     return loaded
+
+
+# ---------------------------------------------------------------------------
+# Signal-intent reranker resolution (shared by verify / doctor / setup)
+# ---------------------------------------------------------------------------
+
+# AgentAlloy's reranker (a second llama-server) listens here by default — the
+# signal-intent layer scores phase-transition intent against it. Keep in sync
+# with signals/classifier._DEFAULT_RERANK_URL and the install presets.
+DEFAULT_RERANK_URL = "http://127.0.0.1:47952"
+
+
+def resolve_intent_reranker(env: dict[str, str] | None = None) -> tuple[str, str]:
+    """Resolve the signal-intent backend and reranker URL.
+
+    Precedence (matches pydantic-settings): process ``os.environ`` >
+    the supplied ``.env`` dict > defaults. ``backend`` is ``"reranker"``
+    (default) or ``"cosine"``.
+    """
+    env = env or {}
+    backend = (
+        os.environ.get("SIGNAL_INTENT_BACKEND") or env.get("SIGNAL_INTENT_BACKEND") or "reranker"
+    ).strip().lower() or "reranker"
+    url = (
+        os.environ.get("SIGNAL_INTENT_RERANK_URL")
+        or env.get("SIGNAL_INTENT_RERANK_URL")
+        or DEFAULT_RERANK_URL
+    ).strip()
+    return backend, url
+
+
+def rerank_reachable(url: str, timeout_s: float = 2.0) -> bool:
+    """True if a TCP connection to the reranker URL's host:port succeeds.
+
+    A bare TCP probe (not an HTTP call) — enough to tell "the reranker
+    llama-server is listening" from "nothing is there". Raw socket so this
+    stays dependency-free (no import cycle with server_proc).
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 47952
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout_s)
+            return s.connect_ex((host, port)) == 0
+    except OSError:
+        return False
 
 
 def _is_real_corpus(p: Path) -> bool:
