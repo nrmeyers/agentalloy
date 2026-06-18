@@ -338,23 +338,27 @@ def _bm25_fallback_result(
     start_ns: int,
 ) -> EmbeddingErrorResult:
     """Run the lexical leg only and package the degraded retrieval result."""
-    categories = phase_to_categories(phase)
-    scope_terms = phase_to_scope_terms(phase)
+    # Phase-agnostic retrieval: the candidate pool is no longer gated by
+    # phase->category eligibility. An A/B (gold-hit 18/18 and audit topic 0.97
+    # identical with the gate on vs off, reranker off both arms) showed the hard
+    # category filter is performance-neutral on the current corpus — the embedder
+    # + BM25 + RRF already rank in-domain skills above cross-domain noise. phase
+    # still drives k and the RRF leg weights below; it just no longer hard-gates.
     pool_size = max(k * 2, 50)
     deprecated_ids = frag_src.get_deprecated_skill_ids()
     bm25_query, bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(
         bm25_query,
-        categories=categories,
-        phases=scope_terms or None,
+        categories=None,
+        phases=None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
 
     metadata = frag_src.get_active_fragments(
         skill_class=("domain", "workflow"),
-        categories=categories,
-        phases=scope_terms or None,
+        categories=None,
+        phases=None,
         domain_tags=domain_tags,
     )
     by_id = {f.fragment_id: f for f in metadata}
@@ -488,15 +492,19 @@ def retrieve_domain_candidates(
             start_ns=start_ns,
         )
 
-    categories = phase_to_categories(phase)
-    scope_terms = phase_to_scope_terms(phase)
+    # Phase-agnostic retrieval: the candidate pool is no longer gated by
+    # phase->category eligibility. An A/B (gold-hit 18/18 and audit topic 0.97
+    # identical with the gate on vs off, reranker off both arms) showed the hard
+    # category filter is performance-neutral on the current corpus — the embedder
+    # + BM25 + RRF already rank in-domain skills above cross-domain noise. phase
+    # still drives k and the RRF leg weights below; it just no longer hard-gates.
     pool_size = max(k * 2, 50)
     deprecated_ids = frag_src.get_deprecated_skill_ids()
 
     dense_hits = vector_store.search_similar(
         query_vec,
-        categories=categories,
-        phases=scope_terms or None,
+        categories=None,
+        phases=None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
@@ -508,8 +516,8 @@ def retrieve_domain_candidates(
     bm25_query, _bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(
         bm25_query,
-        categories=categories,
-        phases=scope_terms or None,
+        categories=None,
+        phases=None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
     )
@@ -531,8 +539,8 @@ def retrieve_domain_candidates(
     # for the eligible categories; intersect with the fused ids.
     metadata = frag_src.get_active_fragments(
         skill_class=("domain", "workflow"),
-        categories=categories,
-        phases=scope_terms or None,
+        categories=None,
+        phases=None,
         domain_tags=domain_tags,
     )
     by_id = {f.fragment_id: f for f in metadata}

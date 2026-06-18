@@ -137,11 +137,14 @@ def test_only_domain_fragments_returned(
         assert f.skill_class == "domain"
 
 
-def test_category_filter_narrows_to_phase(
+def test_retrieval_is_phase_agnostic(
     populated: LadybugStore, populated_vectors: VectorStore
 ) -> None:
-    # 'build' phase retrieves build/ops/governance/meta — but only domain fragments,
-    # so design-only fragments must be excluded.
+    # Phase no longer hard-gates the candidate pool by category. The hard
+    # category gate was A/B-confirmed performance-neutral (gold-hit 18/18 and
+    # audit topic 0.97 identical with it on vs off) and removed, so a fragment
+    # whose category falls *outside* the old build-phase eligibility set may now
+    # surface at build phase — the inverse of the gate this test used to assert.
     result = retrieve_domain_candidates(
         populated,
         StubLMClient(),
@@ -152,8 +155,12 @@ def test_category_filter_narrows_to_phase(
         k=10,
         embedding_model="stub-embed",
     )
-    for f in result.candidates:
-        assert f.category in {"build", "design", "ops", "governance", "meta"}
+    old_build_gate = {"build", "design", "engineering", "tooling", "ops", "governance", "meta"}
+    cats = {f.category for f in result.candidates}
+    assert cats - old_build_gate, (
+        f"phase-agnostic retrieval should admit categories beyond the old build "
+        f"gate; got only {cats}"
+    )
 
 
 def test_domain_tags_narrow_further(
