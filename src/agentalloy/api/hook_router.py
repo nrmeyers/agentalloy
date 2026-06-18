@@ -149,25 +149,12 @@ def _evaluate_sync(
         tool_name=None,  # UserPromptSubmit does not include tool_name
     )
 
+    from agentalloy.signals.classifier import check_transition_trigger
     from agentalloy.signals.gates import INTAKE_PHASE
-    from agentalloy.signals.prefilter import PreFilterMatch, check_prefilter
+    from agentalloy.signals.prefilter import PreFilterMatch
 
-    # Intake is the entry phase: it must compose on the very first prompt,
-    # before any signal keyword exists. Bypass the keyword/artifact pre-filter
-    # so the intent-interview workflow engages immediately; normal gating
-    # resumes once intake transitions to spec.
-    match: PreFilterMatch | None
-    if current_phase == INTAKE_PHASE:
-        match = PreFilterMatch(name="intake_entry", detail="intake phase composes unconditionally")
-    else:
-        match = check_prefilter(signal_keywords, gate_spec, ctx)
-    if match is None:
-        return {"composed_block": "", "phase": current_phase, "should_compose": False}
-
-    # Pre-filter matched — evaluate gates.
-    from agentalloy.signals.gates import decide_transition
-
-    # Try to get an embed client (soft-fail).
+    # Embed/reranker client (soft-fail). Built before the trigger because the
+    # reranker-primary trigger uses it for semantic intent scoring.
     lm_client = None
     try:
         from agentalloy.config import get_settings
@@ -177,6 +164,20 @@ def _evaluate_sync(
         lm_client = get_embed_client(cfg)
     except Exception:
         pass
+
+    # Intake is the entry phase: it must compose on the very first prompt,
+    # before any signal keyword exists. Bypass the trigger so the intent-interview
+    # workflow engages immediately; normal gating resumes once intake -> spec.
+    match: PreFilterMatch | None
+    if current_phase == INTAKE_PHASE:
+        match = PreFilterMatch(name="intake_entry", detail="intake phase composes unconditionally")
+    else:
+        match = check_transition_trigger(signal_keywords, gate_spec, ctx, lm_client)
+    if match is None:
+        return {"composed_block": "", "phase": current_phase, "should_compose": False}
+
+    # Trigger matched — evaluate gates.
+    from agentalloy.signals.gates import decide_transition
 
     decision = decide_transition(
         current_phase=current_phase,
@@ -197,9 +198,16 @@ def _evaluate_sync(
     next_skill = _load_workflow_skill_for_phase(current_phase, cwd)
     prose = (next_skill or {}).get("raw_prose", "")
 
-    composed_block = ""
+    blocks: list[str] = []
     if prose:
-        composed_block = f"[agentalloy-workflow]\n{prose}\n[/agentalloy-workflow]"
+        blocks.append(f"[agentalloy-workflow]\n{prose}\n[/agentalloy-workflow]")
+    # Surface gate advisories (e.g. "intent fired but the exit artifact is
+    # missing") so the agent knows what to produce to advance.
+    if decision.advisories:
+        advisory_text = "\n".join(decision.advisories)
+        blocks.append(f"[agentalloy-eval]\n{advisory_text}\n[/agentalloy-eval]")
+
+    composed_block = "\n\n".join(blocks)
 
     return {
         "composed_block": composed_block,

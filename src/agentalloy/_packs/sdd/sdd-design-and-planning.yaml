@@ -21,16 +21,21 @@ always_apply: false
 phase_scope: [design]
 category_scope: [process]
 author: authoring-agent
-change_summary: initial authoring draft
+change_summary: add explicit deliverable path (docs/design)
 raw_prose: |
   # SDD — Design and Planning (sdd-design + sdd-plan)
   
   ## Overview
   
   After `sdd-spec` ships, `sdd-design` produces the technical design — the *how* — and `sdd-plan` decomposes that into ordered tasks. Skipping either is the most common SDD failure mode (jump straight to coding, then thrash on architectural debt). This skill covers both phases.
-  
+
   Sourced from agent-skills/planning-and-task-breakdown.
-  
+
+  ## Deliverable to advance
+
+  Write the design to **`docs/design/<task_slug>.md`**. The phase advances to
+  `build` only once that file exists — until then you stay in `design`.
+
   ---
   
   # Planning and Task Breakdown

@@ -140,14 +140,13 @@ def parse_contract(path: Path) -> Contract:
             "Contract 'task_slug' field is required and must be a non-empty string"
         )
 
-    domain_tags_raw = data.get("domain_tags")
-    if not domain_tags_raw or not isinstance(domain_tags_raw, list):
-        raise ContractMalformed(
-            "Contract 'domain_tags' field is required and must be a non-empty list"
-        )
+    # domain_tags is optional: when empty/absent the compose engine retrieves
+    # from the contract body text (tags are only a soft BM25 boost, not a hard
+    # filter). A present value must still be a list, not e.g. a bare string.
+    domain_tags_raw = data.get("domain_tags") or []
+    if not isinstance(domain_tags_raw, list):
+        raise ContractMalformed("Contract 'domain_tags' must be a list when present")
     domain_tags = [str(t) for t in cast(list[Any], domain_tags_raw)]
-    if not domain_tags:
-        raise ContractMalformed("Contract 'domain_tags' must be non-empty")
 
     # Optional scope
     scope_raw: dict[str, Any] = data.get("scope") or {}
@@ -290,9 +289,8 @@ def validate_contract(contract: Contract, project_root: Path) -> list[str]:
         if not rp.exists():
             issues.append(f"Related contract not found: {rp}")
 
-    # domain_tags non-empty (already enforced by parse, but belt+suspenders)
-    if not contract.domain_tags:
-        issues.append("domain_tags must be non-empty")
+    # domain_tags is optional — empty is valid (compose falls back to body-text
+    # retrieval). Tags only refine/boost retrieval when present.
 
     # scope.touches globs valid syntax
     for pattern in contract.scope.touches + contract.scope.avoids:

@@ -104,10 +104,21 @@ def test_parse_contract_missing_frontmatter(tmp_path: Path):
 
 
 def test_parse_contract_empty_domain_tags(tmp_path: Path):
+    """Empty domain_tags is valid — compose falls back to body-text retrieval."""
+    from agentalloy.contracts import parse_contract
+
+    f = tmp_path / "ok.md"
+    f.write_text("---\nphase: build\ntask_slug: t\ndomain_tags: []\n---\n\nbody\n")
+    contract = parse_contract(f)
+    assert contract.domain_tags == []
+
+
+def test_parse_contract_domain_tags_must_be_list(tmp_path: Path):
+    """A present domain_tags that isn't a list is still rejected."""
     from agentalloy.contracts import ContractMalformed, parse_contract
 
     f = tmp_path / "bad.md"
-    f.write_text("---\nphase: build\ntask_slug: t\ndomain_tags: []\n---\n\nbody\n")
+    f.write_text("---\nphase: build\ntask_slug: t\ndomain_tags: nope\n---\n\nbody\n")
     with pytest.raises(ContractMalformed, match="domain_tags"):
         parse_contract(f)
 

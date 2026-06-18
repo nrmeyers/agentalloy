@@ -20,8 +20,9 @@ from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.embed_provider import EmbedClient
+from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
-from agentalloy.signals.prefilter import PreFilterMatch, check_prefilter
+from agentalloy.signals.prefilter import PreFilterMatch
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _build_predicate_context,
     _load_workflow_skill_for_phase,
@@ -46,6 +47,10 @@ class SignalResult:
     gates_met: list[str] = field(default_factory=lambda: list[str]())
     gates_unmet: list[str] = field(default_factory=lambda: list[str]())
     qwen_calls: int = 0
+
+    # Human-facing gate advisories (e.g. "intent fired but the exit artifact is
+    # missing"). Surfaced to the agent alongside composed skills.
+    advisories: list[str] = field(default_factory=lambda: list[str]())
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
@@ -115,15 +120,15 @@ async def evaluate_signal(
         # Proxy has no file/tool events — only prompt text
     )
 
-    # 4. Pre-filter (cheap, deterministic). Intake is the entry phase: it must
-    #    compose on the first prompt, before any signal keyword exists, so it
-    #    bypasses the pre-filter. Normal gating resumes once intake hands off
-    #    to spec.
+    # 4. Transition trigger (reranker-primary, deterministic fallback floor).
+    #    Intake is the entry phase: it must compose on the first prompt, before
+    #    any signal exists, so it bypasses the trigger. Normal gating resumes
+    #    once intake hands off to spec.
     match: PreFilterMatch | None
     if phase == INTAKE_PHASE:
         match = PreFilterMatch(name="intake_entry", detail="intake phase composes unconditionally")
     else:
-        match = check_prefilter(signal_keywords, exit_gates, ctx)
+        match = check_transition_trigger(signal_keywords, exit_gates, ctx, embed_client)
     if match is None:
         return SignalResult(
             should_compose=False,
@@ -131,7 +136,7 @@ async def evaluate_signal(
             task=task,
         )
 
-    # 5. Pre-filter matched — compose is warranted.
+    # 5. Trigger matched — compose is warranted.
     # Run gate evaluation in a thread to avoid blocking the event loop.
     gates_result: SignalResult | None = None
 
@@ -163,6 +168,7 @@ async def evaluate_signal(
             gates_met=gates_met,
             gates_unmet=gates_unmet,
             qwen_calls=decision.qwen_calls,
+            advisories=list(decision.advisories),
         )
 
     await asyncio.to_thread(_run_gates)

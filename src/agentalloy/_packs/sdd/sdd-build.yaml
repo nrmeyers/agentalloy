@@ -35,7 +35,7 @@ contract_template: |
   ---
   phase: build
   task_slug: {{task_slug}}
-  domain_tags: []
+  domain_tags: []  # optional: add domain keywords (e.g. fastapi, pytest) to sharpen skill retrieval
   scope:
     touches: []
     avoids: []
@@ -56,7 +56,7 @@ contract_template: |
 phase_scope: [build]
 category_scope: [process]
 author: navistone
-change_summary: initial build-phase workflow skill
+change_summary: add explicit deliverable path (src/ + tests/) + optional domain_tags hint
 raw_prose: |
   # SDD — Build (sdd-build)
 
@@ -66,6 +66,11 @@ raw_prose: |
   This workflow skill guides the paid LLM through implementation following SDD
   discipline: one concern at a time, with tests, and with a contract that declares
   intent and domain scope before writing code.
+
+  ## Deliverable to advance
+
+  Implement under **`src/`** with tests under **`tests/`**. The phase advances to
+  `qa` only once both exist — until then you stay in `build`.
 
   ## Entering the build phase
 

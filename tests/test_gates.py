@@ -166,6 +166,26 @@ def test_decide_transition_unknown_leaves_phase(tmp_path: Path):
     assert decision.should_transition is False
 
 
+def test_decide_transition_advises_missing_artifact(tmp_path: Path):
+    """Trigger fired but the exit artifact is missing → advisory names the path
+    and the target phase, so the agent knows what to produce to advance."""
+    ctx = _ctx(tmp_path, phase="build")
+    gate_spec = {"artifact_exists": {"path": "docs/spec/foo.md"}}
+    decision = decide_transition("build", gate_spec, ctx)
+    assert decision.should_transition is False
+    assert any("docs/spec/foo.md" in a for a in decision.advisories)
+    assert any("qa" in a for a in decision.advisories)  # _PHASE_GRAPH[build] == qa
+
+
+def test_decide_transition_no_advisory_at_terminal_phase(tmp_path: Path):
+    """The terminal phase (ship→ship) doesn't nag about a missing next artifact."""
+    ctx = _ctx(tmp_path, phase="ship")
+    gate_spec = {"artifact_exists": {"path": "never.md"}}
+    decision = decide_transition("ship", gate_spec, ctx)
+    assert decision.should_transition is False
+    assert decision.advisories == []
+
+
 # ---------------------------------------------------------------------------
 # evaluate_gates (REMOVED: dead code — LOW-3)
 # ---------------------------------------------------------------------------

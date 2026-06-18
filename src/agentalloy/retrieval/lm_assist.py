@@ -49,10 +49,13 @@ logger = logging.getLogger(__name__)
 # Config (env-driven). Read once per build; reset_lm_assist_cache() for tests.
 # ---------------------------------------------------------------------------
 
-_DEFAULT_URL = "http://127.0.0.1:60001"
+# AgentAlloy's reranker (llama-server) listens on 47952; the old 60001 default
+# pointed at an unrelated local service. Stage B is off by default (LM_ASSIST),
+# but when enabled it shares the same reranker as the signal intent scorer.
+_DEFAULT_URL = "http://127.0.0.1:47952"
 _DEFAULT_TIMEOUT_MS = 300
 _DEFAULT_KEEP_THRESHOLD = 0.05
-_DEFAULT_MODEL = "qwen3-reranker-0.6b"
+_DEFAULT_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 # Cap on fragments scored per composition — the design's "top ~12 fragments".
 _MAX_CANDIDATES = 12
 

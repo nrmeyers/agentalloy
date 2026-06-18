@@ -158,19 +158,29 @@ async def compose_and_inject(
         domain_tags=signal.domain_tags or None,
     )
 
+    # Gate advisories (e.g. "intent fired but the exit artifact is missing")
+    # are surfaced even when no domain fragments match, so the agent always
+    # learns what to produce to advance the phase.
+    advisory_block = ""
+    if signal.advisories:
+        advisory_block = (
+            "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
+        )
+
     try:
         result = await orchestrator.compose(compose_req)
+        domain_output = "" if isinstance(result, EmptyResult) else result.output
     except Exception:
         logger.warning("Composition failed -- passing through unchanged", exc_info=True)
+        domain_output = ""
+
+    parts = [p for p in (advisory_block, domain_output) if p]
+    if not parts:
+        # Nothing to inject (no domain fragments, no advisory) -- passthrough.
         return request
 
-    if isinstance(result, EmptyResult):
-        # No domain fragments matched -- passthrough with original request
-        return request
-
-    # result is ComposedResult with output
     try:
-        return inject_composed_output(request, result.output)
+        return inject_composed_output(request, "\n\n".join(parts))
     except Exception:
         logger.warning("Injection failed -- passing through unchanged", exc_info=True)
         return request

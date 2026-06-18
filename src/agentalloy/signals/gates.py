@@ -229,6 +229,27 @@ def decide_transition(
     should_transition = result == PredicateResult.MET
     to_phase = next_phase_hint or _PHASE_GRAPH.get(current_phase)
 
+    # The trigger fired (decide_transition is only called after a transition
+    # trigger matches), but the deterministic guard isn't satisfied. Tell the
+    # agent WHICH required exit artifact is missing rather than silently staying
+    # put. Only name paths that genuinely don't exist on disk — a block caused
+    # by a soft/semantic check on a file that already exists shouldn't read as
+    # "produce this file".
+    if not should_transition and current_phase != to_phase:
+        from agentalloy.signals.prefilter import (
+            _extract_gate_paths,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        required = dict.fromkeys(_extract_gate_paths(gate_spec))
+        missing = [p for p in required if not _glob_files(ctx.project_root, p)]
+        if missing:
+            paths = ", ".join(f"`{p}`" for p in missing)
+            advisories.append(
+                f"Phase '{current_phase}' isn't complete yet, so staying in "
+                f"'{current_phase}'. To advance to '{to_phase}', produce its exit "
+                f"artifact(s): {paths}."
+            )
+
     return PhaseTransitionDecision(
         should_transition=should_transition,
         from_phase=current_phase,

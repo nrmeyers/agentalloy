@@ -43,6 +43,7 @@ from typing import Any
 
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.predicates import PredicateContext, PredicateResult
+from agentalloy.signals.prefilter import PreFilterMatch, check_prefilter
 
 _log = logging.getLogger(__name__)
 
@@ -129,8 +130,12 @@ _INTENT_INSTRUCT = (
 # benchmark: macro-F1 peaks at ~0.45 (0.44–0.46 plateau). Env-overridable.
 _DEFAULT_RERANK_THRESHOLD = 0.45
 
-_DEFAULT_RERANK_URL = "http://127.0.0.1:60001"
-_DEFAULT_RERANK_MODEL = "qwen3-reranker-0.6b"
+# AgentAlloy's own reranker (llama-server) listens on 47952 — see
+# install/presets/*.yaml and install/subcommands/start_rerank_server.py. The
+# old default (60001) pointed at an unrelated local service; when nothing was
+# listening there the intent scorer silently fell through to the cosine floor.
+_DEFAULT_RERANK_URL = "http://127.0.0.1:47952"
+_DEFAULT_RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 _DEFAULT_RERANK_TIMEOUT_MS = 300
 
 # Negation / cancellation cues that contradict an apparent finished/approved/
@@ -287,6 +292,56 @@ def _classify_intent(
         if verdict is not None:
             return verdict
     return _intent_similarity(text, intent, lm_client, model)
+
+
+# Forward-transition intents: the user/agent signaling the current phase's work
+# is done ("completion") or approving recent output so we can advance ("approval").
+# "redirection" is deliberately excluded — it means abandon/change course, not
+# advance to the next phase.
+_TRANSITION_INTENTS: tuple[str, ...] = ("completion", "approval")
+
+
+def check_transition_trigger(
+    signal_keywords: list[str],
+    gate_spec: Any,
+    ctx: PredicateContext,
+    lm_client: EmbedClient | None,
+    model: str | None = None,
+) -> PreFilterMatch | None:
+    """Decide whether to evaluate phase-exit gates this turn (reranker-primary).
+
+    The semantic intent layer (reranker-backed, cosine floor — see
+    ``_classify_intent``) scores the prompt against the forward-transition
+    intents FIRST, so natural-language phrasing ("looks right, now the design")
+    engages the gates even when it matches none of the rigid ``signal_keywords``.
+
+    The deterministic :func:`check_prefilter` (keyword / artifact-event /
+    tool-use) remains the fallback floor: it still fires on explicit keywords and
+    file events, and it is the sole path when no embed/reranker client is
+    available. The semantic layer can only *add* positives — it never suppresses
+    a deterministic signal.
+    """
+    # Manual override stays authoritative (mirrors check_prefilter).
+    if os.environ.get("AGENTALLOY_FORCE_CHECK") == "1":
+        return PreFilterMatch(name="manual", detail="AGENTALLOY_FORCE_CHECK=1")
+
+    # Primary: semantic intent on the user's prompt.
+    text = (ctx.recent_prompt_text or "").strip()
+    if text and lm_client is not None:
+        if model is None:
+            try:
+                from agentalloy.config import get_settings
+
+                model = get_settings().runtime_embedding_model
+            except Exception:
+                model = None
+        if model:
+            for intent in _TRANSITION_INTENTS:
+                if _classify_intent(text, intent, lm_client, model) is PredicateResult.MET:
+                    return PreFilterMatch(name="intent", detail=f"intent={intent}")
+
+    # Fallback floor: deterministic keyword / artifact-event / tool-use match.
+    return check_prefilter(signal_keywords, gate_spec, ctx)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

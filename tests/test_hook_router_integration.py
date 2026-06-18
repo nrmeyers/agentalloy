@@ -626,7 +626,7 @@ class TestHookRouterToolNameFix:
                 "agentalloy.signals.skill_loader._load_workflow_skill_for_phase",
                 return_value=mock_skill,
             ),
-            patch("agentalloy.signals.prefilter.check_prefilter", return_value=None),
+            patch("agentalloy.signals.classifier.check_transition_trigger", return_value=None),
         ):
             # Should not raise — tool_name=None is valid
             result = _evaluate_sync(

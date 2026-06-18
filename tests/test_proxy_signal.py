@@ -76,7 +76,7 @@ class TestEvaluateSignal:
                 return_value=_skill(["deploy", "release"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=None,
             ),
         ):
@@ -93,7 +93,7 @@ class TestEvaluateSignal:
                 return_value=_skill(["test", "deploy"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=mock_match,
             ),
             mock.patch(
@@ -122,7 +122,7 @@ class TestEvaluateSignal:
                 return_value=_skill([], phases=["intake"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=None,
             ) as mock_prefilter,
             mock.patch(
@@ -154,7 +154,7 @@ class TestEvaluateSignal:
                 return_value=_skill(["deploy"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=mock_match,
             ),
             mock.patch(
@@ -184,7 +184,7 @@ class TestEvaluateSignal:
                 return_value=_skill(["deploy"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=mock_match,
             ),
             mock.patch(
@@ -208,7 +208,7 @@ class TestEvaluateSignal:
                 return_value=_skill([]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=mock_match,
             ),
             mock.patch(
@@ -246,7 +246,7 @@ class TestEvaluateSignal:
                 return_value=_skill(["test"], domain_tags=["auth", "payments"]),
             ),
             mock.patch(
-                "agentalloy.api.proxy_signal.check_prefilter",
+                "agentalloy.api.proxy_signal.check_transition_trigger",
                 return_value=mock_match,
             ),
             mock.patch(

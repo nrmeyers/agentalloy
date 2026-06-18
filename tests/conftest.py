@@ -64,10 +64,10 @@ def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the signals-layer intent backend to the deterministic cosine floor.
 
     The shipped default is ``reranker`` (a measured win — see BENCHMARKS.md), but
-    that backend pair-scores against a qwen3-reranker server (default :60001).
+    that backend pair-scores against a Qwen3-Reranker server (default :47952).
     Left unpinned, any test that drives intent classification would attempt a
     live call to that port — failing open to cosine on CI (a wasted syscall) but
-    silently using the *real* reranker on a dev box where :60001 is served,
+    silently using the *real* reranker on a dev box where :47952 is served,
     making verdicts environment-dependent. Pin cosine so the unit suite is
     hermetic, and reset the process-wide scorer cache so each test re-reads the
     backend from its env. The reranker backend is covered explicitly in

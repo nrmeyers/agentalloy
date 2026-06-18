@@ -59,10 +59,10 @@ def test_config_defaults_off() -> None:
     cfg = load_config()
     assert cfg.mode is LMAssistMode.OFF
     assert cfg.enabled is False
-    assert cfg.url == "http://127.0.0.1:60001"
+    assert cfg.url == "http://127.0.0.1:47952"
     assert cfg.timeout_ms == 300
     assert cfg.keep_threshold == pytest.approx(0.05)
-    assert cfg.model == "qwen3-reranker-0.6b"
+    assert cfg.model == "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 
 def test_config_arbitrate_and_overrides(monkeypatch: pytest.MonkeyPatch) -> None:

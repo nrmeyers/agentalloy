@@ -22,7 +22,7 @@ phase_scope:
 category_scope:
 - process
 author: authoring-agent
-change_summary: initial authoring draft
+change_summary: add explicit deliverable path (docs/spec) + optional domain_tags hint
 raw_prose: |
   # SDD — Spec and Scoping (sdd-spec)
 
@@ -31,6 +31,12 @@ raw_prose: |
   The SDD pipeline starts with `sdd-spec`: convert a fuzzy product ask into a precise spec with scope, success criteria, and explicit non-goals. This phase is the most leverage in the pipeline — bad specs cascade downstream into bad designs and bad code. This skill covers spec authoring patterns.
 
   Sourced from agent-skills/spec-driven-development and agent-skills/idea-refine.
+
+  ## Deliverable to advance
+
+  Write the spec to **`docs/spec/<task_slug>.md`** with `## Acceptance Criteria`
+  and `## Out of Scope` sections. The phase advances to `design` only once that
+  file exists with those sections — until then you stay in `spec`.
 
   ---
 
@@ -618,7 +624,7 @@ contract_template: |
   ---
   phase: spec
   task_slug: {{task_slug}}
-  domain_tags: []
+  domain_tags: []  # optional: add domain keywords (e.g. fastapi, sqlalchemy) to sharpen skill retrieval
   scope:
     touches: []
     avoids: []
