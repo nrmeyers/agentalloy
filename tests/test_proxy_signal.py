@@ -107,6 +107,35 @@ class TestEvaluateSignal:
         assert result.task == "run the test suite"
         assert result.pre_filter_matched == "keyword='test'"
 
+    def test_intake_phase_bypasses_prefilter(self, tmp_path: Path) -> None:
+        """Intake composes on the first prompt regardless of signal keywords.
+
+        The intake entry workflow must engage before any keyword exists, so the
+        pre-filter is bypassed entirely when phase == intake.
+        """
+        _set_phase(tmp_path, "intake")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                # Empty keywords + a non-matching prompt: check_prefilter would
+                # return None, yet intake must still compose.
+                return_value=_skill([], phases=["intake"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_prefilter",
+                return_value=None,
+            ) as mock_prefilter,
+            mock.patch(
+                "agentalloy.api.proxy_signal.decide_transition",
+                return_value=_no_transition(),
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("literally anything at all"), tmp_path))
+        assert result.should_compose is True
+        assert result.phase == "intake"
+        mock_prefilter.assert_not_called()  # bypassed, not consulted
+        assert result.pre_filter_matched == "intake phase composes unconditionally"
+
     def test_phase_transition_on_gates_met(self, tmp_path: Path) -> None:
         _set_phase(tmp_path, "build")
         mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='deploy'")

@@ -66,6 +66,22 @@ fi
 INPUT="$(cat)"
 
 # ---------------------------------------------------------------------------
+# Self-gate: do nothing unless THIS repo is activated (.agentalloy/phase)
+# ---------------------------------------------------------------------------
+# The hook is installed once, globally (a single entry in ~/.claude/settings.json),
+# so it fires in EVERY Claude Code session. A repo is "activated" only when it has
+# an .agentalloy/phase file — written by `agentalloy wire`. Without it, exit 0
+# immediately: no python3, no curl, no POST, and the prompt never leaves Claude
+# Code. This is what keeps one global hook inert-by-default and free in every
+# unwired repo; the service stays authoritative for activated repos (it re-reads
+# the phase from the request cwd). Pure-bash check on purpose — the whole point is
+# to spend nothing here when the repo isn't wired.
+_AA_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
+if [ ! -f "$_AA_DIR/.agentalloy/phase" ] && [ ! -f "$PWD/.agentalloy/phase" ]; then
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # Dispatch by event type
 # ---------------------------------------------------------------------------
 

@@ -237,7 +237,7 @@ class TestHookScriptRoundTrip:
         """
         from agentalloy.api import hook_router as hr
 
-        hr._cache = None  # type: ignore[assignment]
+        hr._cache.clear()  # cache is keyed by (cwd, phase); reset the dict, don't null it
 
         app = create_app(use_default_lifespan=False)
         with TestClient(app) as client:

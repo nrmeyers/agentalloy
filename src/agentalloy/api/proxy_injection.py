@@ -148,7 +148,7 @@ async def compose_and_inject(
     # unexpected; fall back to "build" as a safe default.
     compose_phase: Phase = (
         phase
-        if phase in ("spec", "design", "qa", "build", "ops", "meta", "governance", "ship")
+        if phase in ("intake", "spec", "design", "qa", "build", "ops", "meta", "governance", "ship")
         else "build"
     )
 

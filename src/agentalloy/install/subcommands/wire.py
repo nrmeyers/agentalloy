@@ -138,6 +138,46 @@ def _describe(f: dict[str, Any]) -> str:
     return f"{path}  [dim]({action})[/dim]" if action else str(path)
 
 
+def _git_exclude_agentalloy(root: Path) -> None:
+    """Append ``.agentalloy/`` to ``<root>/.git/info/exclude`` (idempotent).
+
+    Uses the local, never-committed exclude file rather than touching a shared
+    ``.gitignore``, so the per-repo phase/contract state can't be accidentally
+    committed. No-op when there's no git repo. Best-effort: wiring never fails
+    over this.
+    """
+    git_dir = root / ".git"
+    if not git_dir.is_dir():
+        return
+    exclude = git_dir / "info" / "exclude"
+    try:
+        existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if any(line.strip() == ".agentalloy/" for line in existing.splitlines()):
+            return
+        prefix = "" if (not existing or existing.endswith("\n")) else "\n"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text(existing + prefix + ".agentalloy/\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _seed_entry_phase(root: Path) -> str | None:
+    """Activate *root* by seeding the entry phase, returning the phase or None.
+
+    Composition short-circuits (hook and proxy paths alike) when ``.agentalloy/
+    phase`` is absent, so a wired-but-phaseless repo is inert. Seed ``intake``
+    so the intent-interview workflow composes on the next prompt. Create-only:
+    never clobber a repo already mid-lifecycle. Also git-excludes ``.agentalloy/``.
+    """
+    from agentalloy.install.subcommands.phase import _phase_path, run_phase_set  # noqa: PLC0415
+
+    if _phase_path(root).exists():
+        return None
+    result = run_phase_set("intake", root=root)
+    _git_exclude_agentalloy(root)
+    return result.get("phase")
+
+
 def _render_human(result: dict[str, Any]) -> None:
     """Render wire harness result in human-readable format."""
     harness = result.get("harness", "unknown")
@@ -156,6 +196,12 @@ def _render_human(result: dict[str, Any]) -> None:
 
     if not files_written and not files_modified:
         print_rich("  [dim]No files to wire.[/dim]")
+
+    phase_seeded = result.get("phase_seeded")
+    if phase_seeded:
+        print_rich(
+            f"  Phase: [bold]{phase_seeded}[/bold] [dim](repo activated; composes next prompt)[/dim]"
+        )
 
     print_rich()
 
@@ -185,6 +231,14 @@ def _run(args: argparse.Namespace) -> int:
         result = apply_hook_wiring(harness, port=port, root=cwd)
     else:
         result = wire_harness(harness, port=port, root=cwd, force=args.force)
+
+    # Activate this repo: seed the entry phase so composition engages on the
+    # next prompt. Without a phase file, both the hook and proxy paths
+    # short-circuit and the repo stays inert (the "wired but nothing happens"
+    # trap). Create-only — an already-phased repo is left untouched.
+    phase_seeded = _seed_entry_phase(cwd)
+    if phase_seeded:
+        result["phase_seeded"] = phase_seeded
 
     # Restore data (original_content) is already persisted to install-state.json
     # by the wiring functions above; strip it from the command output so a prior

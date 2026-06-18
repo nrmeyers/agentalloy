@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Phase = Literal["spec", "design", "qa", "build", "ops", "meta", "governance", "ship"]
+Phase = Literal["intake", "spec", "design", "qa", "build", "ops", "meta", "governance", "ship"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
 # Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction
@@ -26,6 +26,7 @@ DEFAULT_K_BY_PHASE: dict[str, int] = {
     "design": 4,
     "meta": 4,
     "governance": 4,
+    "intake": 4,  # interview entry — wants anchor context for routing
 }
 
 # Recommended max_tokens hint surfaced in the response. Local-LLM callers

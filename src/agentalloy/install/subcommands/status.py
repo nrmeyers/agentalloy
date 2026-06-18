@@ -16,12 +16,51 @@ from __future__ import annotations
 import argparse
 import socket
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, write_result
 
 SCHEMA_VERSION = 1
+
+
+def _path_scope(path: str | None) -> str:
+    """Classify a wired-file path as 'global' (user-scope) or 'repo' (project).
+
+    The claude-code hook lives in the user-global ``~/.claude/settings.json``
+    (and ``~/.agentalloy/hooks/``), so it fires in every session — it is not a
+    per-repo file even though it was written *during* a per-repo `wire`. Flag
+    those so status stops implying the hook is repo-scoped.
+    """
+    if not path:
+        return "repo"
+    try:
+        p = Path(path).resolve()
+    except OSError:
+        return "repo"
+    home = Path.home().resolve()
+    global_roots = (home / ".claude", home / ".agentalloy")
+    return "global" if any(g == p or g in p.parents for g in global_roots) else "repo"
+
+
+def _repo_phase(repo_root: str) -> str | None:
+    """Return the activated phase for *repo_root*, or None if not activated.
+
+    A repo composes only when it has an ``.agentalloy/phase`` file (the real
+    per-repo activation gate). This is what makes status self-diagnosing: a
+    wired-but-unphased repo is exactly the "wired but nothing happens" case.
+    """
+    try:
+        root = Path(repo_root)
+        if not (root / ".agentalloy" / "phase").exists():
+            return None
+        from agentalloy.install.subcommands.phase import run_phase_get  # noqa: PLC0415
+
+        phase = run_phase_get(root=root).get("phase")
+        return phase if phase and phase != "none" else None
+    except Exception:
+        return None
 
 
 def add_parser(
@@ -74,11 +113,19 @@ def _render_human(snapshot: dict[str, Any]) -> None:
         for repo in repos:
             repo_root = repo.get("repo_root", "<unknown>")
             entries = repo.get("entries", [])
-            print_rich(f"    [bold]{repo_root}[/bold] ({len(entries)} file(s))")
+            if repo.get("activated"):
+                act = f"[green]✓ activated[/green] [dim](phase: {repo.get('phase')})[/dim]"
+            else:
+                act = (
+                    "[yellow]⚠ not activated[/yellow] "
+                    "[dim](no .agentalloy/phase — run `agentalloy wire` here)[/dim]"
+                )
+            print_rich(f"    [bold]{repo_root}[/bold] ({len(entries)} file(s)) — {act}")
             for entry in entries:
                 harness = entry.get("harness", "unknown")
                 path = entry.get("path", "")
-                print_rich(f"      {harness}: {path}")
+                scope_tag = " [dim](global hook)[/dim]" if entry.get("scope") == "global" else ""
+                print_rich(f"      {harness}: {path}{scope_tag}")
     else:
         print_rich("\n  Wired repos: none")
 
@@ -100,11 +147,13 @@ def _run(args: argparse.Namespace) -> int:
     repos: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entry in st.get("harness_files_written", []):
         repo_root = entry.get("repo_root") or "<unknown>"
+        path = entry.get("path")
         repos[repo_root].append(
             {
                 "harness": entry.get("harness"),
-                "path": entry.get("path"),
+                "path": path,
                 "action": entry.get("action"),
+                "scope": _path_scope(path),
             }
         )
 
@@ -138,6 +187,8 @@ def _run(args: argparse.Namespace) -> int:
             {
                 "repo_root": repo_root,
                 "entries": entries,
+                "phase": _repo_phase(repo_root),
+                "activated": _repo_phase(repo_root) is not None,
             }
             for repo_root, entries in sorted(repos.items())
         ],

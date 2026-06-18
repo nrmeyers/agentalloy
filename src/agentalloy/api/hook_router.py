@@ -54,29 +54,42 @@ class _CachedSignalResult:
     cache_ts: float  # monotonic time when this was cached
 
 
-# Module-level cache — process-local, thread-safe via a lock.
+# Module-level cache — process-local, thread-safe via a lock. Keyed by
+# (cwd, phase): a result computed for one repo/phase must never be served to
+# another within the SWR window. Crucially, keying on the *effective* phase
+# means a None->intake transition (phase file created after wiring) busts the
+# cache instead of serving a stale "should_compose=False".
+_CacheKey = tuple[str, str | None]
 _cache_lock = threading.Lock()
-_cache: _CachedSignalResult | None = None
+_cache: dict[_CacheKey, _CachedSignalResult] = {}
 
-# In-flight guard: prevents thundering herd when cache is stale.
-# Only one background revalidation runs at a time; concurrent requests
-# that see a stale cache while one is in-flight simply return the stale
-# value without spawning another background thread.
+# In-flight guard: prevents thundering herd when a cache entry is stale.
+# At most one background revalidation per cache key runs at a time; concurrent
+# requests for the same key that see a stale entry return the stale value
+# without spawning another background thread.
 _inflight_guard = threading.Lock()
-_inflight_active = False
+_inflight: set[_CacheKey] = set()
 
 
-def _get_cached() -> _CachedSignalResult | None:
-    """Return the current cache entry (may be stale)."""
+def _cache_key(cwd: Path, phase: str | None) -> _CacheKey:
+    """Canonical cache key: resolved cwd + effective phase."""
+    try:
+        cwd_key = str(cwd.resolve())
+    except OSError:
+        cwd_key = str(cwd)
+    return (cwd_key, phase)
+
+
+def _get_cached(key: _CacheKey) -> _CachedSignalResult | None:
+    """Return the cache entry for *key* (may be stale)."""
     with _cache_lock:
-        return _cache
+        return _cache.get(key)
 
 
-def _set_cached(result: _CachedSignalResult) -> None:
-    """Replace the cache entry."""
-    global _cache
+def _set_cached(key: _CacheKey, result: _CachedSignalResult) -> None:
+    """Store the cache entry for *key*."""
     with _cache_lock:
-        _cache = result
+        _cache[key] = result
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +149,18 @@ def _evaluate_sync(
         tool_name=None,  # UserPromptSubmit does not include tool_name
     )
 
-    from agentalloy.signals.prefilter import check_prefilter
+    from agentalloy.signals.gates import INTAKE_PHASE
+    from agentalloy.signals.prefilter import PreFilterMatch, check_prefilter
 
-    match = check_prefilter(signal_keywords, gate_spec, ctx)
+    # Intake is the entry phase: it must compose on the very first prompt,
+    # before any signal keyword exists. Bypass the keyword/artifact pre-filter
+    # so the intent-interview workflow engages immediately; normal gating
+    # resumes once intake transitions to spec.
+    match: PreFilterMatch | None
+    if current_phase == INTAKE_PHASE:
+        match = PreFilterMatch(name="intake_entry", detail="intake phase composes unconditionally")
+    else:
+        match = check_prefilter(signal_keywords, gate_spec, ctx)
     if match is None:
         return {"composed_block": "", "phase": current_phase, "should_compose": False}
 
@@ -199,24 +221,26 @@ def _revalidate_background(
     prompt: str,
     cwd: Path,
     phase: str | None,
+    key: _CacheKey,
 ) -> None:
-    """Run signal evaluation in the background and update the cache."""
+    """Run signal evaluation in the background and update the cache for *key*."""
     try:
         result = _evaluate_sync(prompt, cwd, phase)
         block = result.get("composed_block", "")
         _set_cached(
+            key,
             _CachedSignalResult(
                 composed_block=block,
                 phase=result.get("phase"),
                 should_compose=result.get("should_compose", False),
                 cache_ts=time.monotonic(),
-            )
+            ),
         )
     except Exception:
         logger.warning("Hook revalidation failed", exc_info=True)
     finally:
-        global _inflight_active
-        _inflight_active = False
+        with _inflight_guard:
+            _inflight.discard(key)
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +276,17 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
     # Resolve working directory
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
-    # Signal-first cache check
-    cached = _get_cached()
+    # Cache key is (cwd, effective phase). The hook script rarely passes
+    # `phase`, so read the phase file: this makes the key change (and the
+    # cache bust) the moment a phase file appears or transitions — fixing
+    # the stale "should_compose=False" served after wiring.
+    from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+    effective_phase = phase or _read_phase(cwd)
+    key = _cache_key(cwd, effective_phase)
+
+    # Signal-first cache check (per-key)
+    cached = _get_cached(key)
     if cached is not None:
         age_ms = (time.monotonic() - cached.cache_ts) * 1000
         if age_ms < SWR_TIMEOUT_MS:
@@ -270,21 +303,19 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
                 },
             )
         else:
-            # Cache stale — attempt to start background revalidation.
-            # In-flight guard: only one revalidator runs at a time to
-            # prevent thundering herd on cache miss.
-            global _inflight_active
-            if _inflight_guard.acquire(blocking=False):
-                try:
-                    if not _inflight_active:
-                        _inflight_active = True
-                        threading.Thread(
-                            target=_revalidate_background,
-                            args=(prompt, cwd, phase),
-                            daemon=True,
-                        ).start()
-                finally:
-                    _inflight_guard.release()
+            # Cache stale — start background revalidation for this key.
+            # In-flight guard: at most one revalidator per key runs at a
+            # time to prevent thundering herd on cache miss.
+            with _inflight_guard:
+                start_bg = key not in _inflight
+                if start_bg:
+                    _inflight.add(key)
+            if start_bg:
+                threading.Thread(
+                    target=_revalidate_background,
+                    args=(prompt, cwd, phase, key),
+                    daemon=True,
+                ).start()
             latency_ms = int((time.monotonic() - start) * 1000)
             return JSONResponse(
                 content={
@@ -302,14 +333,15 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
     result = _evaluate_sync(prompt, cwd, phase)
     block = result.get("composed_block", "")
 
-    # Update cache
+    # Update cache (per-key)
     _set_cached(
+        key,
         _CachedSignalResult(
             composed_block=block,
             phase=result.get("phase"),
             should_compose=result.get("should_compose", False),
             cache_ts=time.monotonic(),
-        )
+        ),
     )
 
     latency_ms = int((time.monotonic() - start) * 1000)
@@ -351,8 +383,12 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
-    # Check cache
-    cached = _get_cached()
+    # Check cache (same per-key cache as the prompt handler: keyed on
+    # (cwd, effective phase) so recent compose activity for THIS repo/phase
+    # short-circuits, never another repo's).
+    from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+    cached = _get_cached(_cache_key(cwd, _read_phase(cwd)))
     if cached is not None:
         age_ms = (time.monotonic() - cached.cache_ts) * 1000
         if age_ms < SWR_TIMEOUT_MS:
@@ -479,24 +515,32 @@ async def hook_post_tool_use(request: Request) -> JSONResponse:
 
 @router.get("/v1/hook/cache-status")
 async def hook_cache_status() -> JSONResponse:
-    """Return the current cache state for diagnostics."""
-    cached = _get_cached()
-    if cached is None:
+    """Return the current cache state for diagnostics.
+
+    The cache is now keyed by (cwd, phase), so report the entry count plus
+    the freshest entry's age (the SWR window is shared across keys).
+    """
+    with _cache_lock:
+        entries = list(_cache.values())
+    if not entries:
         return JSONResponse(
             content={
                 "cache_enabled": False,
+                "entries": 0,
                 "cached_at": None,
                 "age_ms": None,
             },
         )
-    age_ms = (time.monotonic() - cached.cache_ts) * 1000
+    freshest = max(entries, key=lambda c: c.cache_ts)
+    age_ms = (time.monotonic() - freshest.cache_ts) * 1000
     return JSONResponse(
         content={
             "cache_enabled": True,
-            "cached_at": cached.cache_ts,
+            "entries": len(entries),
+            "cached_at": freshest.cache_ts,
             "age_ms": age_ms,
             "stale": age_ms >= SWR_TIMEOUT_MS,
-            "phase": cached.phase,
-            "should_compose": cached.should_compose,
+            "phase": freshest.phase,
+            "should_compose": freshest.should_compose,
         },
     )

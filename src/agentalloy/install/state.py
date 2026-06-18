@@ -249,12 +249,22 @@ def _repo_root() -> Path:
     looking for a project marker (pyproject.toml, package.json, .git,
     etc.). Falls back to cwd.
 
+    ``$HOME`` is a hard boundary: the walk stops *before* reaching the
+    home directory, so a stray ``~/package.json`` (or any marker at/above
+    home) never makes home itself resolve as the repo root. Without this
+    guard, running a verb from a markerless project under home (e.g. a
+    fresh repo with no ``.git`` yet) would write ``.agentalloy/`` state to
+    ``$HOME`` instead of the project — see the phase-file misdirection bug.
+
     Note: this is *not* used to locate agentalloy state — state is
     user-scoped (see ``state_dir``, ``pack_source_dir``).
     """
     cwd = Path.cwd().resolve()
+    home = Path.home().resolve()
     markers = ("pyproject.toml", "package.json", ".git", "Cargo.toml", "go.mod")
     for ancestor in (cwd, *cwd.parents):
+        if ancestor == home:
+            break  # never treat $HOME or above as a repo root
         if any((ancestor / m).exists() for m in markers):
             return ancestor
     return cwd

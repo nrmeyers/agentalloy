@@ -24,7 +24,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentalloy.api.hook_router import (
+    _cache_key,
     _CachedSignalResult,
+    _get_cached,
     _set_cached,
 )
 from agentalloy.app import create_app
@@ -58,13 +60,16 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture()
 def reset_hook_cache() -> Any:
-    """Reset the hook router cache before and after each test."""
+    """Reset the (cwd, phase)-keyed hook router cache before and after each test."""
     from agentalloy.api import hook_router as hr
 
-    original_cache = hr._cache
-    hr._cache = None  # type: ignore[assignment]
+    saved = dict(hr._cache)
+    hr._cache.clear()
+    with hr._inflight_guard:
+        hr._inflight.clear()
     yield
-    hr._cache = original_cache  # type: ignore[assignment]
+    hr._cache.clear()
+    hr._cache.update(saved)
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +314,11 @@ class TestSignalFirstCaching:
             should_compose=True,
             cache_ts=time.monotonic() - (SWR_TIMEOUT_MS * 2 / 1000),  # type: ignore[arg-type]
         )
-        _set_cached(stale_cache)
+        # Inject under the exact (cwd, phase) key the request will compute
+        # (phase is supplied in the payload so it's deterministic).
+        _set_cached(_cache_key(Path.cwd(), "build"), stale_cache)
 
-        payload = {"prompt": "test", "cwd": str(Path.cwd())}
+        payload = {"prompt": "test", "cwd": str(Path.cwd()), "phase": "build"}
         response = client.post("/v1/hook/user-prompt-submit", json=payload)
         data = response.json()
 
@@ -356,7 +363,7 @@ class TestTimeout:
         self, client: TestClient, reset_hook_cache: Any
     ) -> None:
         """Background revalidation is capped and doesn't block the response."""
-        payload = {"prompt": "test", "cwd": str(Path.cwd())}
+        payload = {"prompt": "test", "cwd": str(Path.cwd()), "phase": "build"}
 
         # First request
         client.post("/v1/hook/user-prompt-submit", json=payload)
@@ -373,7 +380,7 @@ class TestTimeout:
             should_compose=False,
             cache_ts=time.monotonic() - (SWR_TIMEOUT_MS * 3 / 1000),  # type: ignore[arg-type]
         )
-        _set_cached(stale_cache)
+        _set_cached(_cache_key(Path.cwd(), "build"), stale_cache)
 
         # Second request should return stale value quickly (not blocked by revalidation)
         start = time.monotonic()
@@ -674,3 +681,96 @@ class TestHookRouterToolNameFix:
         data = response.json()
         assert "composed_block" in data
         assert "should_compose" in data
+
+
+class TestHookCacheKeying:
+    """Bug 2: the SWR cache is keyed by (cwd, phase), not a single slot."""
+
+    def test_distinct_cwd_and_phase_are_distinct_keys(self) -> None:
+        from agentalloy.api import hook_router as hr
+
+        hr._cache.clear()
+        ka = _cache_key(Path("/repo/a"), "intake")
+        kb = _cache_key(Path("/repo/b"), "intake")  # different cwd
+        k_none = _cache_key(Path("/repo/a"), None)  # different phase
+        entry = _CachedSignalResult(
+            composed_block="A", phase="intake", should_compose=True, cache_ts=time.monotonic()
+        )
+        _set_cached(ka, entry)
+        try:
+            assert _get_cached(ka) is entry
+            assert _get_cached(kb) is None  # not served across repos
+            assert _get_cached(k_none) is None  # not served across phases
+        finally:
+            hr._cache.clear()
+
+    def test_none_to_intake_transition_busts_cache(self) -> None:
+        """A 'no compose' cached before a phase exists is not served once it does."""
+        from agentalloy.api import hook_router as hr
+
+        hr._cache.clear()
+        cwd = Path("/repo/x")
+        no_compose = _CachedSignalResult(
+            composed_block="", phase=None, should_compose=False, cache_ts=time.monotonic()
+        )
+        _set_cached(_cache_key(cwd, None), no_compose)
+        try:
+            # After the phase file appears (None -> intake), the key changes -> miss.
+            assert _get_cached(_cache_key(cwd, "intake")) is None
+        finally:
+            hr._cache.clear()
+
+
+class TestHookSelfGate:
+    """Bug 3: the global hook script does nothing (no POST) without a phase file."""
+
+    def _script_path(self) -> Path:
+        return (
+            Path(__file__).resolve().parent.parent
+            / "src/agentalloy/install/agentalloy-hook-claude-code.sh"
+        )
+
+    def _run_with_curl_stub(self, project_dir: Path, tmp_path: Path) -> bool:
+        """Run the hook script with a curl stub; return whether curl was reached."""
+        import os
+
+        stub_bin = tmp_path / "bin"
+        stub_bin.mkdir(exist_ok=True)
+        marker = tmp_path / "curl_was_called"
+        curl_stub = stub_bin / "curl"
+        curl_stub.write_text(f'#!/bin/bash\ntouch "{marker}"\nexit 0\n')
+        curl_stub.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = f"{stub_bin}:{env['PATH']}"
+        env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+        payload = json.dumps(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "build a thing",
+                "cwd": str(project_dir),
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(self._script_path())],
+            input=payload,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(project_dir),
+            timeout=10,
+        )
+        assert result.returncode == 0  # always fail-open
+        return marker.exists()
+
+    def test_no_phase_file_means_no_post(self, tmp_path: Path) -> None:
+        project = tmp_path / "repo"
+        project.mkdir()
+        # No .agentalloy/phase -> gate must short-circuit before curl.
+        assert self._run_with_curl_stub(project, tmp_path) is False
+
+    def test_phase_file_present_reaches_post(self, tmp_path: Path) -> None:
+        project = tmp_path / "repo"
+        (project / ".agentalloy").mkdir(parents=True)
+        (project / ".agentalloy" / "phase").write_text("phase: intake\n")
+        assert self._run_with_curl_stub(project, tmp_path) is True

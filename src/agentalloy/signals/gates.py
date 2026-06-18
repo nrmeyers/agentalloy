@@ -1,6 +1,6 @@
 """Gate aggregation and phase-transition decisions.
 
-SDD phase graph (linear): spec → design → build → qa → ship
+SDD phase graph (linear): intake → spec → design → build → qa → ship
 """
 
 from __future__ import annotations
@@ -18,8 +18,15 @@ from agentalloy.signals.predicates import (
     evaluate_predicate,
 )
 
+# The entry phase. A freshly-wired repo starts here so the intake (intent
+# interview) workflow composes on the first prompt; it bypasses the
+# signal-keyword pre-filter (see api/hook_router and api/proxy_signal) and
+# hands off to "spec" via _PHASE_GRAPH.
+INTAKE_PHASE = "intake"
+
 # Linear SDD phase graph: phase → next phase
 _PHASE_GRAPH: dict[str, str] = {
+    "intake": "spec",  # entry phase: intent interview → hand off to spec
     "spec": "design",
     "design": "build",
     "build": "qa",

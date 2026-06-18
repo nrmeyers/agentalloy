@@ -1,0 +1,122 @@
+skill_type: system
+skill_id: sys-sdd-intake
+canonical_name: SDD — Intake (sdd-intake)
+description: "Turn a vague request into a scoped, deterministic starting point: run a short intent interview (what / kind of change / scope / urgency), confirm the route, and write a contract that hands off to the spec phase."
+category: operational
+skill_class: workflow
+domain_tags:
+  - spec-driven-development
+  - intake
+  - intent-interview
+  - scoping
+requires: []
+related:
+  - sdd-spec-and-scoping
+always_apply: false
+applies_to_phases:
+  - intake
+exit_gates:
+  artifact_exists:
+    path: ".agentalloy/contracts/**/*.md"
+signal_keywords:
+  - scope is clear
+  - ready to scope
+  - start spec
+  - begin work
+  - next phase
+contract_template: |
+  ---
+  phase: intake
+  task_slug: {{task_slug}}
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## What the user actually wants
+
+  <one-paragraph restatement of the request in concrete, checkable terms>
+
+  ## Intent signals
+
+  - intent: <new-build | change-existing | investigate | review | other>
+  - artifact_type: <feature | fix | refactor | doc | spike | ...>
+  - scope: <small | medium | large> — <what it touches / avoids>
+  - urgency: <now | soon | someday>
+
+  ## Proposed route
+
+  <which phase to start in and why — default is spec>
+# intake is not a valid phase_scope value (those are design/build/review);
+# this workflow is selected by applies_to_phases, scoped here via category.
+phase_scope: []
+category_scope: [process]
+author: navistone
+change_summary: initial intake-phase entry workflow (intent interview + routing handoff to spec)
+raw_prose: |
+  # SDD — Intake (sdd-intake)
+
+  ## Overview
+
+  Intake is the entry phase. A freshly-wired repo starts here so that the very
+  first thing you do is **understand the request before acting on it**. Your job
+  in this phase is not to build, design, or spec — it is to run a short intent
+  interview, agree on what the work actually is, and capture that as a contract.
+  Once a contract exists, the workflow hands off to the **spec** phase
+  automatically.
+
+  This exists because a vague request ("make the dashboard better", "add auth")
+  is probabilistic — many different deliverables would satisfy it. Intake
+  converts that into a deterministic starting point everything downstream can
+  rely on.
+
+  ## What to do
+
+  1. **Interview, briefly.** Ask only what you genuinely can't infer. Aim to pin
+     down four signals:
+     - **intent** — new build, change to existing behavior, an investigation, or
+       a review?
+     - **artifact_type** — feature, bug fix, refactor, doc, spike, …
+     - **scope** — roughly how big, and what it touches vs. explicitly avoids.
+     - **urgency** — needed now, soon, or someday (this affects how much process
+       is worth it).
+     Keep it to a couple of focused questions. If the request is already
+     unambiguous, say what you understood and move on — don't interrogate for
+     its own sake.
+
+  2. **Restate and confirm the route.** Reflect the request back in concrete
+     terms and propose where to start (default: **spec**). Let the user correct
+     you. This "propose → confirm" step is the point of intake — it's cheaper to
+     fix a misunderstanding here than three phases later.
+
+  3. **Write the contract.** Capture the agreed scope as a contract:
+
+         agentalloy contract init --phase intake --slug <task-slug>
+
+     Fill in `domain_tags` and `scope.touches` honestly — these focus domain
+     retrieval for the rest of the work. Writing the contract is what completes
+     intake.
+
+  ## Exit gate
+
+  Intake is done when a contract exists under `.agentalloy/contracts/`. At that
+  point the phase advances to **spec** and the spec-and-scoping workflow takes
+  over. You don't need to set the phase by hand — the signal layer transitions
+  it when it sees the contract.
+
+  If you already know the work is tiny and well-understood, you can still write a
+  minimal contract and move straight through; intake is meant to be light, not a
+  gate you fight.
+
+  ## What intake is NOT
+
+  - It is not the spec. Don't write acceptance criteria or a design here — just
+    enough to know *what* the work is and *where* to start.
+  - It is not ambient guidance. This workflow only applies in the intake phase;
+    once you hand off, normal phase-scoped composition resumes.
