@@ -72,9 +72,34 @@ class TracesResponse(BaseModel):
     traces: list[TraceRecord]
 
 
+class PhaseSavings(BaseModel):
+    phase: str
+    composes: int
+    tokens_returned: int
+    tokens_flat_equivalent: int
+    tokens_saved: int
+    savings_pct: float
+
+
+class SavingsResponse(BaseModel):
+    """Token-savings aggregation — mirrors ``VectorStore.aggregate_savings()``."""
+
+    total_composes: int
+    tokens_returned: int
+    tokens_flat_equivalent: int
+    tokens_saved: int
+    savings_pct: float
+    per_phase: list[PhaseSavings]
+
+
 class TelemetryQuerier:
     def __init__(self, store: VectorStore) -> None:
         self._store = store
+
+    async def savings(self) -> SavingsResponse:
+        # DuckDB connection is not thread-safe; run the read off the loop.
+        data = await asyncio.to_thread(self._store.aggregate_savings)
+        return SavingsResponse.model_validate(data)
 
     async def query(
         self,
@@ -130,3 +155,28 @@ async def list_traces(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/telemetry/savings",
+    response_model=SavingsResponse,
+    summary="Token-savings aggregation across compose traces",
+)
+async def get_savings(request: Request) -> SavingsResponse:
+    """Return token-savings totals + per-phase breakdown from the open store.
+
+    The CLI (`agentalloy telemetry savings`) calls this when the service is up,
+    rather than opening the DuckDB directly — the service holds the single
+    read-write lock, so a direct open would conflict.
+    """
+    querier: TelemetryQuerier | None = getattr(request.app.state, "telemetry_querier", None)
+    if querier is None:
+        return SavingsResponse(
+            total_composes=0,
+            tokens_returned=0,
+            tokens_flat_equivalent=0,
+            tokens_saved=0,
+            savings_pct=0.0,
+            per_phase=[],
+        )
+    return await querier.savings()

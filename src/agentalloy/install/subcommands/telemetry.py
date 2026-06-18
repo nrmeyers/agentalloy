@@ -83,6 +83,23 @@ def _run_clear(args: argparse.Namespace) -> int:
             print("Aborted.", file=sys.stderr)
             return 0
 
+    # clear() writes, so it needs the read-write lock. If the service is up it
+    # holds that lock — a direct open would throw a raw DuckDB IOException. Give
+    # actionable guidance instead.
+    from agentalloy.install import server_proc
+
+    if server_proc.port_reachable(_service_port()):
+        print(
+            "ERROR: the agentalloy service is running and holds the telemetry DB lock.",
+            file=sys.stderr,
+        )
+        print(
+            "FIX:   stop it first, then retry: `agentalloy server-stop` "
+            "(or `systemctl --user stop agentalloy`).",
+            file=sys.stderr,
+        )
+        return 1
+
     from agentalloy.config import get_settings
     from agentalloy.storage.vector_store import open_or_create
 
@@ -105,8 +122,64 @@ def _render_clear(result: dict[str, Any]) -> None:
     print_rich()
 
 
+def _service_port() -> int:
+    """Resolve the configured service port from user-scope state (fallback 47950)."""
+    from agentalloy.install import state as install_state
+
+    return install_state.validate_port(install_state.load_state().get("port", 47950))
+
+
+def _fetch_savings_via_api(port: int) -> dict[str, Any] | None:
+    """GET /telemetry/savings from the running service; None on any failure.
+
+    Returns the same dict shape as ``VectorStore.aggregate_savings()`` so the
+    existing renderer works unchanged.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/telemetry/savings"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def _run_savings(args: argparse.Namespace) -> int:
-    """Read composition_traces and print token-savings aggregation."""
+    """Print token-savings aggregation.
+
+    When the service is up it holds the single read-write DuckDB lock, so a
+    direct file open would conflict. Route through the service API in that case;
+    fall back to a direct read only when the service is down (offline diagnostics).
+    """
+    from agentalloy.install import server_proc
+
+    port = _service_port()
+    if server_proc.port_reachable(port):
+        result = _fetch_savings_via_api(port)
+        if result is not None:
+            write_result(result, args, human_fn=_render_savings)
+            return 0
+        # Port is open but the API didn't answer (e.g. an older service without
+        # this endpoint). Don't attempt a direct open — it would hit the lock.
+        print(
+            "ERROR: the agentalloy service is running but its /telemetry/savings API "
+            "did not respond (older version?).",
+            file=sys.stderr,
+        )
+        print(
+            "FIX:   restart it to pick up this endpoint: `agentalloy server-restart` "
+            "(or `systemctl --user restart agentalloy`).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Service is down — safe to open the corpus directly.
     from agentalloy.config import get_settings
     from agentalloy.storage.vector_store import open_or_create
 

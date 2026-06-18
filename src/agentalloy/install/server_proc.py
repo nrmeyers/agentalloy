@@ -10,6 +10,7 @@ manually-launched uvicorn on the configured port is still discoverable.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import signal
@@ -21,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agentalloy.install import state as install_state
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT_FALLBACK = 47950
@@ -86,6 +89,50 @@ def port_reachable(port: int, host: str = DEFAULT_HOST, timeout_s: float = 1.0) 
             return s.connect_ex((host, port)) == 0
     except OSError:
         return False
+
+
+def _read_cmdline(pid: int) -> str:
+    """Return ``/proc/<pid>/cmdline`` as a space-joined string ('' if unreadable).
+
+    The file is NUL-separated; we join args with spaces for substring matching.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+
+
+def reclaim_stale_port(
+    port: int, match_substrings: list[str], host: str = DEFAULT_HOST
+) -> int | None:
+    """Kill a STALE AgentAlloy/llama-server process squatting on ``host:port``.
+
+    Only kills the listener when its ``/proc`` cmdline contains *all* of
+    ``match_substrings`` — i.e. it is unambiguously one of our own processes
+    (e.g. ``llama-server`` running our embed model, or ``uvicorn agentalloy.app``).
+    A foreign process holding the port is left untouched. This is what lets
+    ``enable-service``/restart self-heal after ``uv tool install --force`` leaves
+    an old service or llama-server squatting a port — without ever killing an
+    unrelated process bound to it.
+
+    Returns the reclaimed PID, or None if the port is free or held by something
+    that does not match. Best-effort: a failed ``stop()`` returns None.
+    """
+    if not match_substrings:  # never kill an arbitrary holder
+        return None
+    pid = find_listening_pid(port, host=host)
+    if pid is None:
+        return None
+    cmdline = _read_cmdline(pid)
+    if not cmdline or not all(s in cmdline for s in match_substrings):
+        return None  # free, or a foreign holder — leave it alone
+    try:
+        stop(pid)
+    except ServerLifecycleError:
+        return None
+    logger.info("reclaimed stale port %d from pid %d (matched %s)", port, pid, match_substrings)
+    return pid
 
 
 def server_info(port: int | None = None, host: str = DEFAULT_HOST) -> ServerInfo:

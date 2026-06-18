@@ -252,7 +252,12 @@ def test_cli_savings_returns_zero_on_empty_db(tmp_path: Path) -> None:
     args.json = False
     args.quiet = False
 
-    with patch("agentalloy.config.get_settings", return_value=settings_mock):
+    # Force the direct-DB path (service down) so the test is independent of any
+    # agentalloy service actually listening on the box.
+    with (
+        patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+        patch("agentalloy.config.get_settings", return_value=settings_mock),
+    ):
         rc = _run_savings(args)
 
     assert rc == 0
@@ -274,7 +279,12 @@ def test_cli_savings_returns_zero_with_traces(tmp_path: Path) -> None:
     args.json = False
     args.quiet = False
 
-    with patch("agentalloy.config.get_settings", return_value=settings_mock):
+    # Force the direct-DB path (service down) so the test is independent of any
+    # agentalloy service actually listening on the box.
+    with (
+        patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+        patch("agentalloy.config.get_settings", return_value=settings_mock),
+    ):
         rc = _run_savings(args)
 
     assert rc == 0
@@ -298,7 +308,12 @@ def test_cli_savings_json_shape(tmp_path: Path, capsys: pytest.CaptureFixture[st
     args.json = True
     args.quiet = False
 
-    with patch("agentalloy.config.get_settings", return_value=settings_mock):
+    # Force the direct-DB path (service down) so the test is independent of any
+    # agentalloy service actually listening on the box.
+    with (
+        patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+        patch("agentalloy.config.get_settings", return_value=settings_mock),
+    ):
         rc = _run_savings(args)
 
     assert rc == 0

@@ -248,3 +248,64 @@ class TestServerStopAlreadyStopped:
         payload = json.loads(captured.out)
         assert payload["action"] == "already_stopped"
         assert payload["port"] == 47950
+
+
+# ---------------------------------------------------------------------------
+# reclaim_stale_port — only kills a holder whose /proc cmdline matches ours
+# ---------------------------------------------------------------------------
+
+
+class TestReclaimStalePort:
+    _EMBED_CMD = "/usr/bin/llama-server --embeddings --pooling mean --port 47951 -m /x/nomic-embed-text-v1.5.Q8_0.gguf"
+
+    def test_kills_on_matching_signature(self) -> None:
+        with (
+            patch("agentalloy.install.server_proc.find_listening_pid", return_value=999),
+            patch("agentalloy.install.server_proc._read_cmdline", return_value=self._EMBED_CMD),
+            patch("agentalloy.install.server_proc.stop", return_value="term") as mock_stop,
+        ):
+            pid = server_proc.reclaim_stale_port(47951, ["llama-server", "nomic-embed"])
+        assert pid == 999
+        mock_stop.assert_called_once_with(999)
+
+    def test_spares_foreign_holder(self) -> None:
+        with (
+            patch("agentalloy.install.server_proc.find_listening_pid", return_value=999),
+            patch(
+                "agentalloy.install.server_proc._read_cmdline",
+                return_value="/usr/bin/some-unrelated-server --port 47951",
+            ),
+            patch("agentalloy.install.server_proc.stop") as mock_stop,
+        ):
+            pid = server_proc.reclaim_stale_port(47951, ["llama-server", "nomic-embed"])
+        assert pid is None
+        mock_stop.assert_not_called()
+
+    def test_partial_match_does_not_kill(self) -> None:
+        # cmdline has llama-server but the WRONG model — not our embed server.
+        with (
+            patch("agentalloy.install.server_proc.find_listening_pid", return_value=999),
+            patch(
+                "agentalloy.install.server_proc._read_cmdline",
+                return_value="/usr/bin/llama-server --port 47951 -m /x/some-other-model.gguf",
+            ),
+            patch("agentalloy.install.server_proc.stop") as mock_stop,
+        ):
+            assert server_proc.reclaim_stale_port(47951, ["llama-server", "nomic-embed"]) is None
+        mock_stop.assert_not_called()
+
+    def test_no_holder_returns_none(self) -> None:
+        with (
+            patch("agentalloy.install.server_proc.find_listening_pid", return_value=None),
+            patch("agentalloy.install.server_proc.stop") as mock_stop,
+        ):
+            assert server_proc.reclaim_stale_port(47951, ["llama-server"]) is None
+        mock_stop.assert_not_called()
+
+    def test_empty_match_never_kills(self) -> None:
+        with (
+            patch("agentalloy.install.server_proc.find_listening_pid", return_value=999),
+            patch("agentalloy.install.server_proc.stop") as mock_stop,
+        ):
+            assert server_proc.reclaim_stale_port(47951, []) is None
+        mock_stop.assert_not_called()
