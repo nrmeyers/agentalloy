@@ -37,7 +37,7 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - "How do I write a failing pytest before the implementation?" — TDD workflow + framework idioms, composed from `pytest` + `testing` packs.
 - "How do I structure an incremental dbt model so it stays correct across re-runs?" — data-engineering governance + domain skills, composed from `data-engineering` + `engineering` packs.
 - "Wire OpenTelemetry into this FastAPI app." — observability rules + framework patterns, composed from `fastapi` + `analytics` packs.
-- "I'm reviewing this PR — what should I check?" — review heuristics, composed phase-aware from `code-review` packs.
+- "I'm reviewing this PR — what should I check?" — review heuristics, composed from `code-review` packs.
 
 **This is what zero-shot agentic development looks like.**
 
@@ -223,7 +223,7 @@ Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUD
 
 - **Composed per task, not loaded every turn.** A skill that's irrelevant to the current task isn't in the prompt at all — RRF + applicability filtering picks the right subset for each request.
 - **Three instruction sets, fused.** Governance, workflow, and domain skills are composed together into one persona — not three files the agent has to reconcile on its own.
-- **Phase-aware.** Build-phase skills weight differently than QA-phase or review-phase skills. The same task gets a different composition at different points in the lifecycle.
+- **Phase-aware.** Phase sets the candidate budget (`k`) and the dense-vs-lexical fusion weights — QA biases lexical, spec biases dense — so the same task composes differently across the lifecycle. Retrieval itself is phase-agnostic: there's no hard phase→category gate.
 - **Hybrid retrieval, not lexical-only.** Token-literal queries (`"JWT"`, `"Prisma"`) hit BM25; semantic queries ("the auth handler") hit a 768-dim dense leg. Phase-tuned Reciprocal Rank Fusion picks the better signal per query.
 - **No model variance by default.** Embeddings + lexical match + deterministic fusion mean the same task → same composition, regardless of which agent model you swap in tomorrow. (The optional composition fragment re-ranker is the only non-deterministic element in this path — off by default, fail-open.)
 - **Versioned & validated.** Every skill is sourced from authoritative upstream docs and validated against the R1–R8 quality contract (`src/agentalloy/_packs/meta/sys-skill-authoring-rules.md`).
@@ -242,7 +242,7 @@ Three small artifacts on disk drive everything AgentAlloy does. None of them bel
 .agentalloy/phase       →  phase: build
 ```
 
-A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `spec → design → build → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
+A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
 
 ### 2. Task contracts
 
@@ -288,7 +288,7 @@ A small Python module that wakes on three kinds of events: a user prompt arrives
         ┌───────────────────┐
         │  evaluate gates   │
         │  (deterministic + │
-        │   cosine sim)     │
+        │   reranker)       │
         └─────────┬─────────┘
                   ▼
    ┌──────────────┴──────────────┐
@@ -316,7 +316,7 @@ Run AgentAlloy on its own port; your agent (or your script, or your CI) calls `P
 
 ```bash
 python -m agentalloy                  # default :47950
-curl -s http://localhost:47950/health # {"status":"ok"}
+curl -s http://localhost:47950/health # {"status":"healthy", "dependencies": {...}}
 ```
 
 ### Wired into a proxy-wired harness (full integration)
@@ -358,7 +358,7 @@ See [profiles-and-overrides.md](docs/profiles-and-overrides.md) for full details
 
 Harnesses fall into two categories:
 
-- **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
+- **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, Codex, OpenClaw, OpenCode, Hermes Agent) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
 - **Sidecar** (Cursor, Windsurf, GitHub Copilot, Gemini CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
 
 Proxy-wired is the preferred mode. Full per-harness catalog: [docs/install/harness-catalog.md](docs/install/harness-catalog.md).
@@ -371,9 +371,9 @@ The `agentalloy` CLI handles install, service management, phase control, and com
 
 ```bash
 agentalloy setup                          # Interactive install wizard
-agentalloy wire --harness <name>          # Wire a harness (or --mcp-fallback)
+agentalloy wire --harness <name>          # Wire a harness (--via hook|proxy)
 agentalloy serve                          # Run the service
-agentalloy phase get|set|clear            # Manage project phase
+agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy doctor                         # Diagnose install issues
 agentalloy upgrade                        # Upgrade to the latest release (--check to preview)
@@ -409,7 +409,7 @@ The server is dependency-free (no MCP SDK) and runs via stdio JSON-RPC (MCP 2024
 
 ```bash
 # Wire with MCP fallback instead of proxy:
-agentalloy wire --harness cursor --mcp-fallback
+agentalloy wire-harness --harness cursor --mcp-fallback
 ```
 
 Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md) for per-harness configuration details.
@@ -453,7 +453,7 @@ Both runtime paths are **deterministic by default** — the only optional LM sta
 
 Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns — no async backlog, no dropped traces. Trace-write failures never propagate.
 
-Query via `GET /telemetry/traces` or `agentalloy telemetry`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
+Query via `GET /telemetry/traces`; the CLI exposes `agentalloy telemetry savings` (token-savings summary) and `agentalloy telemetry clear`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
 
 ---
 
