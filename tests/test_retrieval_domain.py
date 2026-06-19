@@ -12,7 +12,6 @@ from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
     _rrf_fuse,  # pyright: ignore[reportPrivateUsage]
     diversity_select,
-    phase_to_categories,
     retrieve_domain_candidates,
     skill_granular_select,
 )
@@ -44,50 +43,6 @@ def populated_vectors(corpus_dir: Path) -> VectorStore:
     are StubLMClient values for every active fragment — coherent with the
     retrieval path's stub embedder for cosine ranking."""
     return open_or_create(corpus_dir / "skills.duck")
-
-
-# -------- phase_to_categories --------
-
-
-def test_phase_to_categories_locked_mapping() -> None:
-    # v5.4: includes corpus-vocabulary categories alongside the legacy ones
-    assert phase_to_categories("spec") == ["spec", "design", "tooling", "governance", "meta"]
-    assert phase_to_categories("design") == [
-        "design",
-        "engineering",
-        "tooling",
-        "governance",
-        "meta",
-    ]
-    assert phase_to_categories("qa") == [
-        "qa",
-        "quality",
-        "review",
-        "design",
-        "engineering",
-        "tooling",
-        "governance",
-        "meta",
-    ]
-    assert phase_to_categories("build") == [
-        "build",
-        "design",
-        "engineering",
-        "tooling",
-        "ops",
-        "governance",
-        "meta",
-    ]
-    assert phase_to_categories("ops") == [
-        "ops",
-        "design",
-        "engineering",
-        "tooling",
-        "governance",
-        "meta",
-    ]
-    assert phase_to_categories("meta") == ["meta", "tooling", "governance"]
-    assert phase_to_categories("governance") == ["governance", "review", "quality", "meta"]
 
 
 # -------- AC-1: eligibility filter --------
@@ -603,18 +558,6 @@ def test_degradable_embedding_error_with_empty_bm25(
     assert result.bm25_only is True
     assert result.candidates == []
     assert result.retrieval_ms >= 0
-
-
-# -------- phase_to_scope_terms --------
-
-
-def test_phase_to_scope_terms_mapping() -> None:
-    from agentalloy.retrieval.domain import phase_to_scope_terms
-
-    assert phase_to_scope_terms("build") == ["build"]
-    assert phase_to_scope_terms("qa") == ["qa", "review"]  # authored vocab uses 'review'
-    assert phase_to_scope_terms("governance") == ["governance", "review"]
-    assert phase_to_scope_terms("meta") == []  # category map only
 
 
 # -------- Stage A: cross-encoder rerank --------

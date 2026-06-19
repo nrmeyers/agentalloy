@@ -17,13 +17,11 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from agentalloy.api.compose_models import Phase
 from agentalloy.reads.active import (
     get_active_fragments,
     get_active_skills,
 )
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
-from agentalloy.retrieval.domain import phase_to_categories
 from agentalloy.storage.ladybug import LadybugStore
 
 logger = logging.getLogger(__name__)
@@ -143,22 +141,6 @@ class RuntimeCache:
         return sorted(
             [f for f in self._fragments if f.skill_id == skill_id],
             key=lambda f: f.sequence,
-        )
-
-    def get_active_fragments_for_phase(
-        self,
-        phase: Phase,
-        *,
-        domain_tags: list[str] | None = None,
-    ) -> list[ActiveFragment]:
-        """Convenience: fragments eligible for a compose/retrieve phase."""
-        from agentalloy.retrieval.domain import phase_to_scope_terms
-
-        return self.get_active_fragments(
-            skill_class=("domain", "workflow"),
-            categories=phase_to_categories(phase),
-            phases=phase_to_scope_terms(phase) or None,
-            domain_tags=domain_tags,
         )
 
     # ---- version detail reads ----

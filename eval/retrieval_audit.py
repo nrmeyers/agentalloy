@@ -46,14 +46,11 @@ RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 _VALID_PHASES = {"spec", "design", "build", "qa", "ops"}
 
 
-def _ops_categories() -> frozenset[str]:
-    """Categories the runtime admits for the ops phase — from the live map."""
-    from agentalloy.retrieval.domain import phase_to_categories
-
-    return frozenset(phase_to_categories("ops"))
-
-
-_OPS_CATEGORIES = _ops_categories()
+# Categories the retrieval phase→category map used to admit for the ops phase.
+# That map has been retired (retrieval is now phase-agnostic), so this is a fixed
+# set: the audit still probes ops-category skills at the ops phase to preserve the
+# by-phase breakdown, though the probe phase no longer changes what's retrieved.
+_OPS_CATEGORIES = frozenset({"ops", "design", "engineering", "tooling", "governance", "meta"})
 
 
 @dataclass

@@ -143,67 +143,8 @@ class FragmentSource(Protocol):
     def get_deprecated_skill_ids(self) -> list[str]: ...
 
 
-# Phase -> eligible-category mapping. Aligned with the seeded corpus
-# vocabulary (design, engineering, quality, review, tooling, ops). The
-# legacy phase-as-category vocabulary (spec/qa/build/governance/meta) is
-# kept where it overlaps so existing fragments authored to that schema
-# remain reachable.
-_PHASE_TO_CATEGORIES: dict[Phase, list[str]] = {
-    "spec": ["spec", "design", "tooling", "governance", "meta"],
-    "design": ["design", "engineering", "tooling", "governance", "meta"],
-    # "design" in qa/ops for the same reason as build (below): protocol-
-    # convention packs (webhooks, REST, ...) are category=design, and
-    # review/incident tasks need them. Measured: qa-phase "review this
-    # webhook receiver" retrieved redis/nodejs noise instead of
-    # webhooks-signature-verification before this line.
-    "qa": ["qa", "quality", "review", "design", "engineering", "tooling", "governance", "meta"],
-    # "design" is included for build: domain packs author API/protocol
-    # convention skills (webhooks, REST, ...) as category=design with
-    # phase_scope=[build] — excluding the category made 494 fragments
-    # unreachable during the most common agent phase (measured via the
-    # domain benchmark: gold-skill retrieval missed on every build-phase
-    # webhook task, hit on every design-phase one).
-    "build": ["build", "design", "engineering", "tooling", "ops", "governance", "meta"],
-    "ops": ["ops", "design", "engineering", "tooling", "governance", "meta"],
-    "meta": ["meta", "tooling", "governance"],
-    "governance": ["governance", "review", "quality", "meta"],
-}
-
 # Order of preference for structural diversity during reshuffle.
 _DIVERSITY_PRIORITY: tuple[str, ...] = ("setup", "execution", "verification")
-
-
-def phase_to_categories(phase: Phase) -> list[str]:
-    """Return the ordered list of Skill.category values eligible for a given phase."""
-    return list(_PHASE_TO_CATEGORIES[phase])
-
-
-# Runtime phase -> authored phase_scope vocabulary. Authors write
-# phase_scope in {build, design, review}; "review" maps to the qa and
-# governance runtime phases. Phases with no authored vocabulary (meta)
-# rely on the category map alone.
-_PHASE_SCOPE_TERMS: dict[Phase, list[str]] = {
-    "spec": ["spec"],
-    "design": ["design"],
-    "build": ["build"],
-    "qa": ["qa", "review"],
-    "ops": ["ops"],
-    "meta": [],
-    "governance": ["governance", "review"],
-}
-
-
-def phase_to_scope_terms(phase: Phase) -> list[str]:
-    """Authored phase_scope values that admit a fragment for *phase*.
-
-    Eligibility is the UNION of this and ``phase_to_categories`` — the
-    authored scope can only widen what the category map admits (it never
-    narrows), so skills whose category/phase metadata disagree (e.g. the
-    testing pack: category=quality, phase_scope=[build]) stay reachable
-    in their authored phases. Measured by eval/retrieval_audit.py: the
-    category map alone stranded 48 skills (quality/review hit rate 0.00).
-    """
-    return list(_PHASE_SCOPE_TERMS.get(phase, []))
 
 
 @dataclass(frozen=True)
