@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: csharp-error-handling
 canonical_name: C# Error Handling (Exception Types, when/catch Filters, AggregateException, Throw Helpers)
 description: "Handle errors in C# apps by throwing specific exceptions, catching only what you can handle, using when filters for precise logic, and preserving stack traces with throw helpers to debug crashes and unexpected failures."

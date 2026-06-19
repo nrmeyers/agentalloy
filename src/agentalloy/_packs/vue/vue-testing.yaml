@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: vue-testing
 canonical_name: Vue 3 Testing — Vitest and vue-test-utils
 description: "Write unit tests for Vue 3 components using Vitest and vue-test-utils: mount components in a simulated browser, assert DOM output, and verify behavior like button clicks or data changes to ensure your UI works correctly."

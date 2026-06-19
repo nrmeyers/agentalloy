@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: github-actions-workflow-syntax
 canonical_name: GitHub Actions Workflow Syntax
 description: 'Automate your development workflow with GitHub Actions: write YAML files in .github/workflows/ to define triggers, jobs, steps, and permissions for CI/CD pipelines, matrix builds, and conditional execution.'

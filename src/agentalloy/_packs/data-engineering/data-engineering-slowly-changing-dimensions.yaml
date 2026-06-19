@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: data-engineering-slowly-changing-dimensions
 canonical_name: Slowly Changing Dimensions (SCD)
 description: "Track how customer attributes, product details, or account statuses change over time in data warehouses: implement Type 1 overwrites for corrections or Type 2 versioned rows to preserve history for accurate historical reporting and trend analysis."

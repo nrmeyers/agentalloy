@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: python-packaging-pyproject
 canonical_name: Python Packaging — pyproject.toml
 description: "Package and distribute Python libraries or CLI tools: define metadata, dependencies, and build settings in pyproject.toml to replace setup.py, enabling modern builds with tools like hatchling or setuptools."

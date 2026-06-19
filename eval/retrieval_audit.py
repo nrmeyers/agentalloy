@@ -93,8 +93,8 @@ def _load_skills(packs_filter: list[str] | None) -> list[SkillProbe]:
             if f.name == "pack.yaml":
                 continue
             doc: Any = yaml.safe_load(f.read_text())
-            if not isinstance(doc, dict) or doc.get("skill_type") not in ("domain", None):
-                continue  # system/workflow skills are signal-layer, not retrieval
+            if not isinstance(doc, dict) or doc.get("skill_class") != "domain":
+                continue  # only domain skills are retrievable; system/workflow are signal-layer
             if doc.get("deprecated") is True:
                 # Mirror production retrieval: deprecated skills are excluded
                 # from every retrieval path, so probing them only manufactures

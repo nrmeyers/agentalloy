@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nodejs-events-and-emitter
 canonical_name: Node.js EventEmitter and Async Iterators
 description: "Handle real-time data streams, server logs, or user actions in Node.js: listen for events with EventEmitter, iterate over them asynchronously, and wait for single occurrences with promises to build responsive, event-driven backends."

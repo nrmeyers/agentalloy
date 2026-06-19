@@ -297,7 +297,7 @@ def _bm25_fallback_result(
     )
 
     metadata = frag_src.get_active_fragments(
-        skill_class=("domain", "workflow"),
+        skill_class="domain",
         categories=None,
         phases=None,
         domain_tags=domain_tags,
@@ -479,7 +479,7 @@ def retrieve_domain_candidates(
     # Hydrate ActiveFragment metadata from the source. Pull domain fragments
     # for the eligible categories; intersect with the fused ids.
     metadata = frag_src.get_active_fragments(
-        skill_class=("domain", "workflow"),
+        skill_class="domain",
         categories=None,
         phases=None,
         domain_tags=domain_tags,

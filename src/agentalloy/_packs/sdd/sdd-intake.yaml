@@ -1,4 +1,3 @@
-skill_type: system
 skill_id: sys-sdd-intake
 canonical_name: SDD — Intake (sdd-intake)
 description: "Turn a vague request into a scoped, deterministic starting point: run a short intent interview (what / kind of change / scope / urgency), confirm the route, and write a contract that hands off to the spec phase."

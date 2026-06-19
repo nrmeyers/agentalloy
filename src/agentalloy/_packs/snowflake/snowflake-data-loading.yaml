@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: snowflake-data-loading
 canonical_name: Snowflake Data Loading — COPY INTO and Stages
 description: "Load large batches of CSV, JSON, or Parquet data into Snowflake tables from cloud storage: use COPY INTO with internal or external stages to ingest files efficiently, handling format parsing and bulk loading for analytics and reporting."

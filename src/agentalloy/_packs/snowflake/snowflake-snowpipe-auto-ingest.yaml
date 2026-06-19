@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: snowflake-snowpipe-auto-ingest
 canonical_name: Snowflake Snowpipe and Auto-Ingest
 description: "Ingest data from S3 into Snowflake with low latency: use Snowpipe for automatic, event-driven loading of new files, or schedule COPY INTO for bulk nightly loads to balance speed and cost."

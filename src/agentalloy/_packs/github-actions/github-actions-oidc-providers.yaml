@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: github-actions-oidc-providers
 canonical_name: GitHub Actions — OIDC for GCP, Vault, and Cloud Providers
 description: 'Deploy code to Google Cloud, HashiCorp Vault, or other cloud providers from GitHub Actions without storing long-lived secrets: configure OpenID Connect (OIDC) to exchange short-lived tokens for temporary access.'

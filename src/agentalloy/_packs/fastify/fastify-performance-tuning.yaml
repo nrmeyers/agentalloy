@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastify-performance-tuning
 canonical_name: Fastify Performance Tuning
 description: "Speed up Fastify APIs and microservices by defining JSON response schemas so Fastify pre-compiles serializers, cutting serialization time by 2-5x compared to standard JSON.stringify."

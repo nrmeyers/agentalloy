@@ -101,7 +101,6 @@ def emit_yaml(skill_id, canonical_name, category, tags, raw_prose, fragments, au
     tags_str = ", ".join(tags)
     indented_prose = textwrap.indent(raw_prose, "  ")
     lines = [
-        "skill_type: domain",
         f"skill_id: {skill_id}",
         f"canonical_name: {canonical_name}",
         f"category: {category}",

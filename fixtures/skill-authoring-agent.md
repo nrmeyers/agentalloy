@@ -52,11 +52,11 @@ all valid source-grounded structure.
 Return exactly one YAML document with a single top-level mapping.
 
 - For a domain skill, emit fields:
-  `skill_type`, `skill_id`, `canonical_name`, `category`, `skill_class`,
+  `skill_id`, `canonical_name`, `category`, `skill_class`,
   `domain_tags`, `always_apply`, `phase_scope`, `category_scope`, `author`,
   `change_summary`, `raw_prose`, `fragments`.
 - For a system skill, emit fields:
-  `skill_type`, `skill_id`, `canonical_name`, `category`, `skill_class`,
+  `skill_id`, `canonical_name`, `category`, `skill_class`,
   `domain_tags`, `always_apply`, `phase_scope`, `category_scope`, `author`,
   `change_summary`, `raw_prose`.
 
@@ -67,11 +67,11 @@ single guardrail fragment for system skills.
 
 Classify the source yourself. Do not ask an operator to choose.
 
-Choose `skill_type: domain` and `skill_class: domain` when the source is
+Choose `skill_class: domain` when the source is
 procedural guidance for how to perform a task. Domain skills usually contain
 steps, setup, checks, examples, trade-offs, or implementation guidance.
 
-Choose `skill_type: system` and `skill_class: system` when the source is a
+Choose `skill_class: system` when the source is a
 governance rule, safety rule, operational constraint, or policy that applies
 globally or by declared scope.
 

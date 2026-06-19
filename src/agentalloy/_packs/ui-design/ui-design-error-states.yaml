@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-error-states
 canonical_name: Error States and Recovery
 description: "Handle errors gracefully in web apps by showing clear messages at the right scope: inline for bad inputs, banners for form failures, or full-page states for crashes, always explaining what went wrong and how to fix it."

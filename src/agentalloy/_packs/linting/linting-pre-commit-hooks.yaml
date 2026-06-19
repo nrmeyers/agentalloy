@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: linting-pre-commit-hooks
 canonical_name: Pre-Commit Hooks — lint-staged and husky
 description: "Automatically fix code style and lint errors before committing to Git: use husky and lint-staged to run ESLint, Prettier, or Stylelint only on changed files, auto-fixing issues and restaging them so your repo stays clean without slowing down commits."

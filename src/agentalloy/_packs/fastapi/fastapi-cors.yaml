@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-cors
 canonical_name: FastAPI CORS
 description: 'Allow your frontend to call your FastAPI backend from a different domain by configuring CORS: specify allowed origins, methods, and headers to prevent browser security blocks while keeping credentials safe.'

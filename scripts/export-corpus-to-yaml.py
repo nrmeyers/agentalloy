@@ -100,7 +100,6 @@ def main() -> int:
                 )
 
             doc = {
-                "skill_type": "system" if str(klass) == "system" else "domain",
                 "skill_id": sid,
                 "canonical_name": str(name),
                 "category": str(cat) if cat else "engineering",
@@ -115,9 +114,9 @@ def main() -> int:
                 "fragments": fragments,
             }
 
-            # System skills don't carry fragments in the YAML schema (ingest
-            # generates one guardrail fragment from raw_prose); strip them.
-            if doc["skill_type"] == "system":
+            # Raw_prose-only skills (system guardrail, workflow) don't carry
+            # fragments in the YAML schema — ingest derives them — so strip.
+            if str(klass) in ("system", "workflow"):
                 doc["fragments"] = []
 
             out = EXPORT_DIR / f"{sid}.yaml"

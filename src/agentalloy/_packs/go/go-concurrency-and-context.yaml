@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: go-concurrency-and-context
 canonical_name: Go Concurrency and Context (Goroutines, Channels, Select, sync, context)
 description: "Write concurrent Go services that handle many requests at once without crashing: use goroutines and channels for parallel work, select for timeouts, and context to cancel long-running tasks when a user disconnects or a deadline passes."

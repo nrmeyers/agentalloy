@@ -33,7 +33,6 @@ from agentalloy.storage.ladybug import LadybugStore
 _FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 _SYSTEM_REVIEW_YAML = textwrap.dedent("""\
-    skill_type: system
     skill_id: sys-authoring-test-governance
     canonical_name: Authoring Test Governance Rule
     category: governance
@@ -49,7 +48,6 @@ _SYSTEM_REVIEW_YAML = textwrap.dedent("""\
 """)
 
 _DOMAIN_REVIEW_YAML = textwrap.dedent("""\
-    skill_type: domain
     skill_id: authoring-test-domain
     canonical_name: Authoring Test Domain Skill
     category: engineering
@@ -234,7 +232,6 @@ def test_invalid_review_yaml_blocked(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: domain
         skill_id: bad-no-exec
         canonical_name: No Execution Fragment
         category: engineering

@@ -323,7 +323,6 @@ def test_a1_python_packaging_keeper_sequences_contiguous() -> None:
 
 _VALID_FRAGMENT_TYPES = {"execution", "rationale", "example", "guardrail", "verification", "setup"}
 _REQUIRED_DOMAIN_FIELDS = {
-    "skill_type",
     "skill_id",
     "canonical_name",
     "category",
@@ -345,10 +344,6 @@ def _validate_skill_ingest(skill: dict, skill_id: str) -> list[str]:
     for field in _REQUIRED_DOMAIN_FIELDS:
         if field not in skill:
             errors.append(f"Missing required field: {field}")
-
-    # skill_type must be domain
-    if skill.get("skill_type") != "domain":
-        errors.append(f"skill_type must be 'domain', got '{skill.get('skill_type')}'")
 
     # skill_class must be domain
     if skill.get("skill_class") != "domain":

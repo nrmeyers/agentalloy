@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-loading-patterns
 canonical_name: Loading State Patterns
 description: "Improve perceived performance and user experience by showing loading indicators: use skeleton screens for predictable content layouts and spinners for button clicks or indeterminate waits to keep users engaged while data loads."

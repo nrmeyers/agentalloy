@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nodejs-perf-hooks
 canonical_name: Node.js perf_hooks
 description: "Measure how long Node.js code takes to run and spot bottlenecks: use high-resolution timers to track function execution, monitor event loop lag, and observe garbage collection pauses for performance tuning."

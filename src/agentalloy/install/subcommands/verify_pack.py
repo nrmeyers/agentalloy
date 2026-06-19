@@ -127,7 +127,7 @@ def _load_pack_skills(pack_dir: Path) -> list[dict[str, Any]]:
                 "canonical_name": str(data.get("canonical_name") or ""),
                 "raw_prose": str(data.get("raw_prose") or ""),
                 "phase_scope": data.get("phase_scope") or ["build"],
-                "skill_type": str(data.get("skill_type") or "domain"),
+                "skill_class": str(data.get("skill_class") or "domain"),
                 "deprecated": bool(data.get("deprecated", False)),
             }
         )

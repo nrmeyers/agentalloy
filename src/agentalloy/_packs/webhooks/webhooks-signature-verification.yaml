@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: webhooks-signature-verification
 canonical_name: Webhooks — Signature Verification
 description: Securely receive webhook events from third-party services by verifying the HMAC signature header against the raw request body and timestamp to reject forged or replayed requests before processing them.

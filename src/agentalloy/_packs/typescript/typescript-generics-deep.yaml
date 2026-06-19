@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: typescript-generics-deep
 canonical_name: TypeScript Generics — Constraints and Patterns
 description: "Write flexible, reusable TypeScript functions and classes that work with any data type while keeping full type safety: use generics with constraints to ensure inputs match expected shapes, enabling robust APIs for arrays, caches, and utilities."

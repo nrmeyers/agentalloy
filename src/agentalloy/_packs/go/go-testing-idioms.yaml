@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: go-testing-idioms
 canonical_name: Go Testing Idioms (Table-Driven Tests, Subtests, Benchmarks, Fuzzing)
 description: "Write reliable Go tests using table-driven cases for multiple inputs, subtests for isolated runs, benchmarks for performance, and fuzzing to find edge cases, ensuring clear failure reports and robust code coverage."

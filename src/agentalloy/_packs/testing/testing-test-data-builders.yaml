@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: testing-test-data-builders
 canonical_name: Test Data Builders Pattern
 description: "Write readable tests for complex objects like users, orders, or subscriptions: use fluent builders to construct test data step-by-step, encoding domain defaults and relationships so your test setup stays clear as your domain grows."

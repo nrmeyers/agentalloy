@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nextjs-server-actions-and-mutations
 canonical_name: Next.js Server Actions and Mutations ("use server", Form Actions, useActionState, revalidate)
 description: 'Handle form submissions and data mutations in Next.js apps without separate API routes: use server actions to process form data, manage pending states, and revalidate cached pages after updates like creating posts or updating profiles.'

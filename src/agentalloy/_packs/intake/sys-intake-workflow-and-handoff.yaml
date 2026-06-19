@@ -1,4 +1,3 @@
-skill_type: system
 skill_id: sys-intake-workflow-and-handoff
 canonical_name: Intake Workflow and Handoff
 description: "Gather project requirements and clarify intent before starting work: run an intake interview to capture scope, urgency, and artifact type, then hand off structured signals to the correct workflow for execution."

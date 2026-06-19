@@ -414,7 +414,6 @@ class _FakeSettings:
 
 
 _DOMAIN_YAML = textwrap.dedent("""\
-    skill_type: domain
     skill_id: test-domain-skill
     canonical_name: Test Domain Skill
     category: engineering

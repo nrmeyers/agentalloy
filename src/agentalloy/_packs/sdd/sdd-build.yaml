@@ -1,4 +1,3 @@
-skill_type: system
 skill_id: sys-sdd-build
 canonical_name: SDD — Build (sdd-build)
 description: "Implement features from a spec and design doc by writing code one concern at a time with tests: follow a strict build workflow that enforces a contract declaring intent and scope before coding begins."

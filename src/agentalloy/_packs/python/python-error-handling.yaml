@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: python-error-handling
 canonical_name: Python Error Handling (EAFP, Exception Hierarchy, Chaining)
 description: "Handle errors in Python scripts and apps by catching specific exceptions, chaining causes with raise from, and preferring try-except over pre-checks to avoid race conditions and silent failures."

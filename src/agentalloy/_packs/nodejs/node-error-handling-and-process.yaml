@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: node-error-handling-and-process
 canonical_name: Node.js Error Handling and Process (codes, uncaughtException, exit)
 description: "Handle crashes and shutdowns in Node.js apps: catch uncaught exceptions and unhandled promise rejections, check error codes for system failures, and listen for SIGTERM to exit gracefully during deployments or restarts."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-server-components-and-suspense
 canonical_name: React Server Components and Suspense (RSC, "use client", Streaming, use() for Promises)
 description: 'Build fast React apps that fetch data on the server and stream HTML to the browser: use Server Components for async data, Suspense for loading states, and the use hook to read promises during render.'

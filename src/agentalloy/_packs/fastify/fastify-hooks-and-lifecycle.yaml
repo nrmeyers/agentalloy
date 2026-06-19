@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastify-hooks-and-lifecycle
 canonical_name: Fastify Hooks and Request Lifecycle
 description: 'Run code at specific points in a Fastify request lifecycle: validate headers, authenticate users, modify responses, or manage resources using hooks like onRequest, preHandler, and onSend, with support for plugin-scoped encapsulation.'

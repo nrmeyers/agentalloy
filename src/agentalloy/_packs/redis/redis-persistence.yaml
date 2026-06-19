@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: redis-persistence
 canonical_name: Redis Persistence — RDB and AOF
 description: "Keep Redis data safe after restarts or crashes: configure RDB snapshots for periodic backups and AOF logs for every write, balancing durability with performance for production caches and session stores."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-motion-and-animation
 canonical_name: UI Motion and Animation Systems
 description: "Add smooth, natural motion to buttons, modals, and page transitions in your UI: choose appropriate durations and easing curves like ease-out for entering elements to make interactions feel responsive and polished."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: design-review-interface-contracts
 canonical_name: Design Review — Interface Contracts and API Design
 description: "Design APIs, module boundaries, and component props to prevent accidental dependencies: review interfaces for unintended contracts, plan deprecations early, and minimize the public surface area to avoid breaking changes later."

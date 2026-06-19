@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: redshift-query-tuning
 canonical_name: Amazon Redshift Query Performance Tuning
 description: 'Speed up slow analytics queries in Amazon Redshift: use EXPLAIN to find bottlenecks, run ANALYZE and VACUUM to keep data organized, and rewrite SQL for better performance.'

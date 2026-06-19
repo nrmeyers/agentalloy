@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-component-patterns
 canonical_name: UI Component Library Patterns
 description: "Build flexible, reusable UI components for dashboards and apps: use composition patterns like compound components to let developers structure modals, menus, and forms naturally instead of passing dozens of props."

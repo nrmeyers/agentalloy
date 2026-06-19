@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: python-async-patterns
 canonical_name: Python Async Patterns (asyncio, TaskGroup, Cancellation)
 description: 'Run background jobs, web servers, and data pipelines in Python without blocking: manage concurrent tasks with asyncio TaskGroup, handle cancellations cleanly, and offload slow CPU or I/O work to threads so your app stays responsive.'

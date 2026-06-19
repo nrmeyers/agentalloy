@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nodejs-fs-promises
 canonical_name: Node.js fs/promises Patterns
 description: "Read, write, list, and delete files and folders in Node.js using async/await: load text or binary data, create directories recursively, remove files safely, and check file stats without blocking the event loop."

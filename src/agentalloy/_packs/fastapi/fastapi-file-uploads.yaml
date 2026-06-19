@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-file-uploads
 canonical_name: FastAPI File Uploads
 description: "Accept file uploads in FastAPI endpoints for images, documents, or data files: use UploadFile for efficient streaming of large files and bytes for small payloads, handling multipart form data safely without overloading memory."

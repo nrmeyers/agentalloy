@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: redshift-spectrum-and-iceberg
 canonical_name: Amazon Redshift Spectrum and Iceberg Integration
 description: 'Query large datasets stored in S3 directly from Amazon Redshift using SQL: set up external tables with Spectrum, leverage Iceberg for schema evolution and time travel, and optimize performance for analytics on cloud data lakes.'

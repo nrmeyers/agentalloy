@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: vue-template-directives
 canonical_name: Vue Template Directives
 description: "Build interactive Vue interfaces by controlling what renders and how data flows: use v-if to show or hide elements, v-for to loop through lists, and other directives to bind values, handle clicks, and manage text content in your templates."

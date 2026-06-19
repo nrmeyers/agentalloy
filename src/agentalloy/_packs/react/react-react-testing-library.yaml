@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-react-testing-library
 canonical_name: React Testing Library — User-Centric Testing
 description: "Write tests that mimic how real users interact with your React app: click buttons, type into forms, and check visible text or accessibility labels instead of testing internal component state or implementation details."

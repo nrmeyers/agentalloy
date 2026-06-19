@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: csharp-mstest-testing
 canonical_name: C# Testing with MSTest v3 (TestClass, DataRow, Async Tests, TestContext)
 description: 'Write unit and integration tests for C# .NET code using MSTest v3: define test classes and methods, run parameterized tests with data rows, handle async assertions, and manage setup and teardown with TestContext.'

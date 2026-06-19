@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: design-review-rfc-and-adrs
 canonical_name: Design Review — RFCs and Architecture Decision Records
 description: "Document architectural choices and propose system changes using RFCs and ADRs: capture the rationale behind decisions, record trade-offs, and maintain an immutable history of why specific technical paths were chosen for future reference."

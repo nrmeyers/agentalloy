@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nestjs-exception-filters
 canonical_name: NestJS Exception Filters
 description: 'Handle errors in NestJS APIs by catching unhandled exceptions and returning clean JSON responses: use built-in HTTP exceptions for standard errors or create custom filters with @Catch to map specific errors to user-friendly messages.'

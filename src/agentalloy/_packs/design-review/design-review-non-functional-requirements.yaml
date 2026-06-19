@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: design-review-non-functional-requirements
 canonical_name: Design Review — Non-Functional Requirements
 description: "Review system designs for production readiness by checking security, performance, and observability: define latency budgets, plan metrics and logging, handle secrets safely, and prepare rollback strategies to prevent outages."

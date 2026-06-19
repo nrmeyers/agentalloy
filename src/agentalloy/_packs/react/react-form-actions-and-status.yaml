@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-form-actions-and-status
 canonical_name: React Form Actions — useActionState and useFormStatus
 description: "Build forms with React that handle submission state, loading indicators, and errors without external libraries: use useActionState to manage form results and useFormStatus to show pending UI while data processes."

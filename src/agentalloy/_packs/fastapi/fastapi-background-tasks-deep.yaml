@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-background-tasks-deep
 canonical_name: FastAPI Background Tasks (Deep)
 description: "Send emails, process images, or log data without slowing down the user response: queue background tasks in FastAPI that run after the HTTP reply is sent, keeping your API fast while handling heavy work asynchronously."

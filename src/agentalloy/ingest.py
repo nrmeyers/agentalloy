@@ -117,7 +117,6 @@ class FragmentRecord:
 
 @dataclass
 class ReviewRecord:
-    skill_type: str
     skill_id: str
     canonical_name: str
     category: str
@@ -395,8 +394,8 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
     if parsed:
         print("\n  Skills to load:")
         for _f, r in parsed:
-            frag_info = f"  {len(r.fragments)} fragment(s)" if r.skill_type == "domain" else ""
-            print(f"    {r.skill_id:<40} [{r.skill_type}]{frag_info}")
+            frag_info = f"  {len(r.fragments)} fragment(s)" if r.fragments else ""
+            print(f"    {r.skill_id:<40} [{r.skill_class}]{frag_info}")
 
     print()
 
@@ -570,9 +569,11 @@ def _load_yaml(path: Path) -> ReviewRecord:
             return [s.strip() for s in v.split(",") if s.strip()]
         return []
 
-    skill_type = _str("skill_type")
-    if skill_type not in ("domain", "system"):
-        raise IngestError(f"{path}: 'skill_type' must be 'domain' or 'system', got '{skill_type}'")
+    skill_class = _str("skill_class")
+    if skill_class not in ("domain", "system", "workflow"):
+        raise IngestError(
+            f"{path}: 'skill_class' must be 'domain', 'system', or 'workflow', got '{skill_class}'"
+        )
 
     raw_fragments: Any = data.get("fragments") or []
     if not isinstance(raw_fragments, list):
@@ -592,11 +593,10 @@ def _load_yaml(path: Path) -> ReviewRecord:
         )
 
     return ReviewRecord(
-        skill_type=skill_type,
         skill_id=_str("skill_id"),
         canonical_name=_str("canonical_name"),
         category=_str("category"),
-        skill_class=_str("skill_class", skill_type),
+        skill_class=skill_class,
         domain_tags=_strlist("domain_tags"),
         always_apply=_bool("always_apply"),
         phase_scope=_strlist("phase_scope"),
@@ -645,7 +645,7 @@ def _validate(record: ReviewRecord) -> list[str]:
                     f"{field_name} target '{target}' must be a kebab-case, lowercase ASCII skill_id"
                 )
 
-    if record.skill_type == "system":
+    if record.skill_class == "system":
         if not record.skill_id.startswith("sys-"):
             errors.append(f"system skill_id '{record.skill_id}' must start with 'sys-'")
         if record.category and record.category not in _VALID_SYSTEM_CATEGORIES:
@@ -673,7 +673,7 @@ def _validate(record: ReviewRecord) -> list[str]:
                 "a single guardrail fragment from raw_prose automatically"
             )
 
-    elif record.skill_type == "domain":
+    elif record.skill_class == "domain":
         if record.category and record.category not in _VALID_DOMAIN_CATEGORIES:
             errors.append(
                 f"category '{record.category}' is not valid for domain skills "
@@ -715,6 +715,30 @@ def _validate(record: ReviewRecord) -> list[str]:
                         f"fragment sequence {frag.sequence} is a heading-only stub "
                         f"({wc} words); merge with the next fragment or drop it"
                     )
+        if len(record.domain_tags) > _TAGS_VALIDATE_HARD_CAP:
+            errors.append(
+                f"domain_tags has {len(record.domain_tags)} entries; hard ceiling is "
+                f"{_TAGS_VALIDATE_HARD_CAP}"
+            )
+
+    elif record.skill_class == "workflow":
+        # Workflow skills are raw_prose-only: the SDD phase hook injects their
+        # prose verbatim, and they are deliberately excluded from domain
+        # retrieval, so they carry no fragments. Categories span both axes
+        # (e.g. 'operational', 'review'), so accept the union.
+        if record.fragments:
+            errors.append(
+                "workflow skills are raw_prose-only and must not declare fragments "
+                "(they are injected by the phase hook, not retrieved)"
+            )
+        if not record.raw_prose.strip():
+            errors.append("workflow skill requires non-empty raw_prose")
+        valid_workflow_cats = _VALID_DOMAIN_CATEGORIES | _VALID_SYSTEM_CATEGORIES
+        if record.category and record.category not in valid_workflow_cats:
+            errors.append(
+                f"category '{record.category}' is not valid for workflow skills "
+                f"(must be one of {sorted(valid_workflow_cats)})"
+            )
         if len(record.domain_tags) > _TAGS_VALIDATE_HARD_CAP:
             errors.append(
                 f"domain_tags has {len(record.domain_tags)} entries; hard ceiling is "
@@ -771,7 +795,7 @@ def _lint(record: ReviewRecord, yaml_path: Path | None = None) -> list[str]:
     for tv in tag_verdicts:
         warnings.append(f"tag lint [{tv.rule}] '{tv.tag}': {tv.verdict} — {tv.detail}")
 
-    if record.skill_type != "domain" or not record.fragments:
+    if record.skill_class != "domain" or not record.fragments:
         return warnings
 
     normalized_prose = _normalize_ws(record.raw_prose)
@@ -854,7 +878,7 @@ def _print_summary(record: ReviewRecord, *, existing: bool) -> None:
     action = "OVERWRITE" if existing else "INSERT"
     print(f"\n{'=' * 60}")
     print(f"  Action:         {action}")
-    print(f"  skill_type:     {record.skill_type}")
+    print(f"  skill_class:    {record.skill_class}")
     print(f"  skill_id:       {record.skill_id}")
     print(f"  canonical_name: {record.canonical_name}")
     print(f"  category:       {record.category}")
@@ -865,7 +889,7 @@ def _print_summary(record: ReviewRecord, *, existing: bool) -> None:
     print(f"  category_scope: {record.category_scope or '(none)'}")
     print(f"  author:         {record.author}")
     print(f"  prose length:   {len(record.raw_prose)} chars")
-    if record.skill_type == "domain":
+    if record.fragments:
         frag_types = ", ".join(f.fragment_type for f in record.fragments)
         print(f"  fragments:      {len(record.fragments)} ({frag_types})")
     print(f"{'=' * 60}\n")
@@ -954,7 +978,9 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[D
         {"skill_id": record.skill_id, "version_id": version_id},
     )
 
-    if record.skill_type == "system":
+    if record.skill_class == "system":
+        # System skills decompose to a single guardrail fragment carrying the
+        # whole prose; retrieved via the applicability-gated system path.
         fragment_id = f"{record.skill_id}-v1-f1"
         store.execute(
             """
@@ -977,7 +1003,10 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[D
             """,
             {"version_id": version_id, "fragment_id": fragment_id},
         )
-    else:
+    elif record.skill_class == "domain":
+        # Workflow skills (skill_class == "workflow") intentionally fall through
+        # here with no Fragment nodes: their raw_prose is injected by the SDD
+        # phase hook, never retrieved, so they carry zero fragments.
         for frag in record.fragments:
             fragment_id = f"{record.skill_id}-v1-f{frag.sequence}"
             store.execute(

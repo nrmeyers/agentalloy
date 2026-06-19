@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: node-event-loop-and-async
 canonical_name: Node.js Event Loop and Async (Phases, Microtasks, AsyncLocalStorage)
 description: "Fix slow Node.js servers and debug async bugs: understand the event loop phases, handle CPU-heavy tasks with worker threads, track request context with AsyncLocalStorage, and manage microtask timing to avoid blocking the main thread."

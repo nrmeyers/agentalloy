@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: vue-composition-api-reactivity
 canonical_name: Vue Composition API and Reactivity
 description: 'Build interactive UIs with Vue 3: manage state with ref and reactive, derive values with computed, and run side effects with watch to keep your interface in sync with data changes.'

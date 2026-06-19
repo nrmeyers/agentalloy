@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: go-generics-and-types
 canonical_name: Go Generics and Types (Type Parameters, Constraints, Inference, comparable)
 description: "Write reusable Go functions and types that work with multiple data types without code duplication or losing type safety: use type parameters and constraints to handle slices, maps, or custom structs generically while keeping compile-time checks."

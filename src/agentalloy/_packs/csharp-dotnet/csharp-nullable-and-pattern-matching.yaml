@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: csharp-nullable-and-pattern-matching
 canonical_name: C# Nullable Reference Types, Generics, and Pattern Matching
 description: "Write safer C# code that avoids null reference errors and handles complex data shapes: enable nullable reference types, use generic constraints for type safety, and apply pattern matching for clean conditional logic instead of manual casting."

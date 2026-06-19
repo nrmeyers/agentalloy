@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: testing-integration-patterns
 canonical_name: Integration Test Patterns
 description: "Write tests that verify how your code interacts with real databases, caches, and external APIs to catch wiring bugs unit tests miss, using containers and fixtures for isolation without the flakiness of full end-to-end tests."

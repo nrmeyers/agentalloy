@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: linting-format-vs-lint
 canonical_name: Format vs Lint — Separation of Concerns
 description: "Keep code consistent and bug-free by separating formatting from linting: use Prettier for automatic style rules like comma placement and line length, and ESLint to catch logical errors like accidental assignments in conditions."

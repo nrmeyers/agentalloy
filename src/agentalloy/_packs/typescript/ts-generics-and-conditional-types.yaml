@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ts-generics-and-conditional-types
 canonical_name: TypeScript Generics and Conditional Types (Type-Level Programming)
 description: "Write reusable TypeScript functions and components that work with multiple types while preserving type safety: use generics for related inputs and outputs, constrain them with extends."

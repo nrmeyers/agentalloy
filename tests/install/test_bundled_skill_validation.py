@@ -2,7 +2,7 @@
 
 The manifest-consistency test (test_bundled_pack_manifests) catches
 manifest drift; this catches skill files the ingester itself would
-reject (bad skill_type, invalid category for the type, missing required
+reject (bad skill_class, invalid category for the class, missing required
 fields). A bundled skill that fails ingest validation fails the whole
 pack install for every user, so it must fail CI first.
 """

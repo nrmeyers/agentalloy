@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: verification-before-completion
 canonical_name: Verification Before Completion (Evidence Before Assertions)
 description: "Stop guessing your code works and prove it before calling a task done: run tests and checks to get real evidence, because passing a type check doesn't mean the feature actually works at runtime."

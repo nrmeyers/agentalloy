@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: data-engineering-airflow-dags
 canonical_name: Airflow — DAGs, Tasks, and Operators
 description: "Schedule and orchestrate data pipelines, ETL jobs, and background workflows with Apache Airflow: define DAGs in Python, chain tasks using operators and sensors, and manage execution order with dependencies."

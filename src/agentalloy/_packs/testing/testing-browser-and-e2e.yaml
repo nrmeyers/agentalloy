@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: testing-browser-and-e2e
 canonical_name: Browser Testing with DevTools — Smoke and E2E
 description: "Debug UI bugs, verify layouts, and profile performance in the browser: use Chrome DevTools to inspect the DOM, check console errors, and run smoke or end-to-end tests to ensure your site works as expected."

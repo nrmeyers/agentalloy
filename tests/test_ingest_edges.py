@@ -33,7 +33,6 @@ class _FakeSettings:
 
 def _skill_yaml(skill_id: str, *, requires: str = "", related: str = "") -> str:
     body = textwrap.dedent(f"""\
-        skill_type: domain
         skill_id: {skill_id}
         canonical_name: Skill {skill_id}
         category: engineering
@@ -104,7 +103,6 @@ def test_load_yaml_defaults_edges_empty(tmp_path: Path) -> None:
 
 def _rec(skill_id: str, requires: list[str], related: list[str]) -> ReviewRecord:
     return ReviewRecord(
-        skill_type="domain",
         skill_id=skill_id,
         canonical_name="X",
         category="engineering",

@@ -20,7 +20,6 @@ from agentalloy.ingest import (
 from agentalloy.storage.ladybug import LadybugStore
 
 _DOMAIN_YAML = textwrap.dedent("""\
-    skill_type: domain
     skill_id: test-domain-skill
     canonical_name: Test Domain Skill
     category: engineering
@@ -57,7 +56,6 @@ _DOMAIN_YAML = textwrap.dedent("""\
 """)
 
 _SYSTEM_YAML = textwrap.dedent("""\
-    skill_type: system
     skill_id: sys-test-governance
     canonical_name: Test Governance Rule
     category: governance
@@ -138,6 +136,30 @@ def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]
     store.close()
 
 
+def test_insert_workflow_skill_creates_no_fragments(
+    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+) -> None:
+    """Workflow skills are raw_prose-only — ingest must persist zero fragments."""
+    db_path, store = seeded_db
+    yaml_file = tmp_path / "workflow.yaml"
+    yaml_file.write_text(_WORKFLOW_YAML)
+
+    with patch("agentalloy.ingest.get_settings", return_value=_make_settings(db_path)):
+        code = main([str(yaml_file), "--yes"])
+
+    assert code == EXIT_OK
+
+    store.open()
+    fragment_count = store.scalar(
+        """
+        MATCH (:Skill {skill_id: 'sdd-spec-authoring'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
+        RETURN count(f)
+        """
+    )
+    assert fragment_count == 0
+    store.close()
+
+
 def test_duplicate_skill_id_without_force_fails(
     tmp_path: Path, seeded_db: tuple[str, LadybugStore]
 ) -> None:
@@ -200,7 +222,6 @@ def test_missing_execution_fragment_is_validation_error(tmp_path: Path) -> None:
     bad = tmp_path / "no_exec.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: domain
         skill_id: test-no-exec
         canonical_name: No Exec
         category: engineering
@@ -222,7 +243,6 @@ def test_system_skill_with_fragments_is_validation_error(tmp_path: Path) -> None
     bad = tmp_path / "sys_with_frags.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: system
         skill_id: sys-bad
         canonical_name: Bad System
         category: governance
@@ -240,11 +260,32 @@ def test_system_skill_with_fragments_is_validation_error(tmp_path: Path) -> None
     assert code == EXIT_VALIDATION
 
 
+def test_workflow_skill_with_fragments_is_validation_error(tmp_path: Path) -> None:
+    """Workflow skills are raw_prose-only — declaring fragments must be rejected."""
+    bad = tmp_path / "wf_with_frags.yaml"
+    bad.write_text(
+        textwrap.dedent("""\
+        skill_id: sdd-bad-workflow
+        canonical_name: Bad Workflow
+        category: operational
+        skill_class: workflow
+        domain_tags: []
+        always_apply: false
+        raw_prose: The workflow prose.
+        fragments:
+          - sequence: 1
+            fragment_type: rationale
+            content: Extra fragment.
+    """)
+    )
+    code = main([str(bad), "--yes"])
+    assert code == EXIT_VALIDATION
+
+
 def test_system_skill_no_applicability_is_validation_error(tmp_path: Path) -> None:
     bad = tmp_path / "sys_no_apply.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: system
         skill_id: sys-no-apply
         canonical_name: No Applicability
         category: governance
@@ -264,7 +305,6 @@ def test_invalid_fragment_type_is_validation_error(tmp_path: Path) -> None:
     bad = tmp_path / "bad_frag.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: domain
         skill_id: test-bad-frag
         canonical_name: Bad Fragment
         category: engineering
@@ -289,7 +329,6 @@ def test_non_contiguous_sequences_is_validation_error(tmp_path: Path) -> None:
     bad = tmp_path / "gap.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: domain
         skill_id: test-gap
         canonical_name: Gap Sequences
         category: engineering
@@ -324,7 +363,6 @@ def _write_domain(path: Path, skill_id: str, canonical_name: str) -> None:
     )
     path.write_text(
         textwrap.dedent(f"""\
-        skill_type: domain
         skill_id: {skill_id}
         canonical_name: {canonical_name}
         category: engineering
@@ -380,7 +418,6 @@ def test_batch_skips_invalid_and_loads_valid(
     bad = batch_dir / "bad.yaml"
     bad.write_text(
         textwrap.dedent("""\
-        skill_type: domain
         skill_id: batch-bad
         canonical_name: Batch Bad
         category: engineering
@@ -447,10 +484,9 @@ def test_batch_force_overwrites_duplicates(
 # ---------------------------------------------------------------------------
 
 _WORKFLOW_YAML = textwrap.dedent("""\
-    skill_type: domain
     skill_id: sdd-spec-authoring
     canonical_name: SDD Spec Authoring
-    category: sdd
+    category: review
     skill_class: workflow
     domain_tags: [design, planning]
     always_apply: false
@@ -464,17 +500,6 @@ _WORKFLOW_YAML = textwrap.dedent("""\
       the single source of truth for what the feature should do, not how.
       Verification: spec document exists, stakeholder has reviewed it, no open
       questions remain unresolved.
-    fragments:
-      - sequence: 1
-        fragment_type: rationale
-        content: |
-          The spec phase captures user intent into a structured specification
-          document. Authors write the spec before any design or planning begins.
-      - sequence: 2
-        fragment_type: verification
-        content: |
-          Spec document exists, stakeholder has reviewed it, no open questions
-          remain unresolved.
 """)
 
 
@@ -488,7 +513,6 @@ def _parse_yaml_inline(content: str, tmp_path: Path) -> object:
 def test_system_skill_with_tags_warns_system_empty(tmp_path: Path) -> None:
     """system skills with non-empty domain_tags should get system-empty verdicts."""
     yaml_content = textwrap.dedent("""\
-        skill_type: system
         skill_id: sys-tagged
         canonical_name: Tagged System Skill
         category: governance
@@ -519,7 +543,6 @@ def test_domain_skill_title_overlapping_tags_do_not_warn(tmp_path: Path) -> None
     domain_tags=["prisma"] queries, not redundant.
     """
     yaml_content = textwrap.dedent("""\
-        skill_type: domain
         skill_id: prisma-schema-design
         canonical_name: Prisma Schema Design
         category: engineering

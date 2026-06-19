@@ -47,7 +47,6 @@ def _write_skill_yaml(
         for i in range(fragments)
     ]
     doc: dict[str, Any] = {
-        "skill_type": "domain",
         "skill_id": skill_id,
         "canonical_name": canonical_name or skill_id.replace("-", " ").title(),
         "category": category,
@@ -111,7 +110,6 @@ class TestSchemaGate:
     def test_missing_skill_id_fails(self, tmp_path: Path) -> None:
         """A skill YAML with no skill_id is rejected with an actionable message."""
         doc = {
-            "skill_type": "domain",
             "skill_id": "",
             "canonical_name": "Missing ID Skill",
             "category": "engineering",
@@ -168,7 +166,6 @@ class TestSchemaGate:
     def test_missing_execution_fragment_fails(self, tmp_path: Path) -> None:
         """A domain skill without an 'execution' fragment fails validation."""
         doc: dict[str, Any] = {
-            "skill_type": "domain",
             "skill_id": "no-exec",
             "canonical_name": "No Exec Skill",
             "category": "engineering",

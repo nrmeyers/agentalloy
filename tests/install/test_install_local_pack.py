@@ -42,7 +42,6 @@ def _write_skill_yaml(
         for i in range(fragments)
     ]
     doc = {
-        "skill_type": "domain",
         "skill_id": skill_id,
         "canonical_name": canonical_name or skill_id.replace("-", " ").title(),
         "category": "engineering",

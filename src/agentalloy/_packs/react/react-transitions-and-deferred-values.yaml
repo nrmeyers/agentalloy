@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-transitions-and-deferred-values
 canonical_name: React Transitions and Deferred Values
 description: "Keep your React app responsive during heavy updates like filtering lists or loading data: use useTransition to defer non-urgent state changes and useDeferredValue to delay rendering expensive components, preventing the UI from freezing."

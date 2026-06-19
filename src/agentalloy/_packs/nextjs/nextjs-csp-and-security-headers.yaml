@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nextjs-csp-and-security-headers
 canonical_name: Next.js Content-Security-Policy and Security Headers
 description: 'Protect your Next.js site from XSS and clickjacking by setting Content-Security-Policy and other security headers: use middleware to generate per-request nonces for scripts and styles, and configure directives to block unauthorized content sources.'

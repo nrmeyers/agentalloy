@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-layout-primitives
 canonical_name: Layout Primitives — Stack, Grid, Flow
 description: "Build responsive UIs for dashboards, blogs, and apps: arrange elements in vertical or horizontal stacks, create flexible grids for cards and lists, and use flow layouts to handle content that wraps naturally."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-context-patterns
 canonical_name: React Context — Patterns and Anti-Patterns
 description: "Share global data like theme, user, or locale across React components without prop drilling: create a context, wrap the app in a provider, and consume values in children while avoiding performance pitfalls from unstable object references."

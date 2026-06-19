@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-routing-and-path-operations
 canonical_name: "FastAPI Routing and Path Operations (Path/Query Params, APIRouter, Tags, Status Codes)"
 description: "Build REST APIs with Python and FastAPI: define endpoints using decorators, handle path and query parameters, group routes with APIRouter, set HTTP status codes, and auto-generate Swagger docs for easy testing and client integration."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: testing-mocks-and-spies
 canonical_name: Test Mocks, Spies, and Module Mocking
 description: "Write unit tests that isolate code from external dependencies like databases or APIs: use mocks to verify function calls, stubs to return fixed values, and spies to track interactions, ensuring your tests run fast and deterministically."

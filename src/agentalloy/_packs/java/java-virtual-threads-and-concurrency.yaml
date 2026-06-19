@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: java-virtual-threads-and-concurrency
 canonical_name: Java Virtual Threads and Concurrency (Thread Builder, StructuredTaskScope, CompletableFuture)
 description: 'Speed up Java apps that wait on databases, APIs, or files: spawn lightweight virtual threads for I/O-bound tasks, group related work with StructuredTaskScope, chain async results with CompletableFuture, and avoid blocking locks that pin threads.'

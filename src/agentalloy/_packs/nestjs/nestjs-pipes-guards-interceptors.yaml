@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nestjs-pipes-guards-interceptors
 canonical_name: NestJS Pipes, Guards, and Interceptors
 description: "Build secure, robust APIs with NestJS: validate and transform incoming data with pipes, enforce access control with guards, and wrap request/response logic with interceptors to handle logging, caching, or error handling globally or per-route."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nestjs-queues-bull
 canonical_name: NestJS Job Queues with BullMQ
 description: "Run background tasks like sending emails, generating reports, or processing images without blocking user requests: define queues, add jobs from your NestJS controllers, and process them in parallel workers using Redis."

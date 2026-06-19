@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: ui-design-tailwind-utility-classes
 canonical_name: Tailwind CSS Utility-First Styling
 description: 'Style websites, dashboards, and apps without writing custom CSS: compose layouts, colors, spacing, and responsive designs directly in your HTML using Tailwind’s utility classes for rapid, consistent UI development.'

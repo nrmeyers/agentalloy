@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: nestjs-caching
 canonical_name: NestJS Caching with @CacheKey
 description: "Speed up slow API endpoints and database queries in NestJS apps by caching responses with @CacheKey: configure Redis or memory stores, set time-to-live, and avoid redundant work for repeated requests."

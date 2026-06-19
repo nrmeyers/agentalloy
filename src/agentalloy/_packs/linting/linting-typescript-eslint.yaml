@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: linting-typescript-eslint
 canonical_name: typescript-eslint Setup and Type-Aware Linting
 description: 'Catch bugs and enforce code style in TypeScript projects: install and configure typescript-eslint to run type-aware linting that checks for errors and best practices using your tsconfig settings.'

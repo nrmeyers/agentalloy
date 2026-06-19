@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-streaming-and-sse
 canonical_name: FastAPI Streaming Responses and SSE
 description: "Stream real-time data like live scores, logs, or notifications to browsers using FastAPI: send chunks as they become available with StreamingResponse or use Server-Sent Events for one-way updates without waiting for the full response."

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: redis-lua-functions
 canonical_name: Redis Lua Functions (FUNCTION LOAD)
 description: 'Run custom logic inside Redis for atomic operations, caching, and real-time data processing: define, load, and manage Lua functions that persist across restarts and replicate to replicas, replacing fragile EVAL scripts.'

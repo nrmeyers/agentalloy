@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: react-effects-and-cleanup
 canonical_name: React Effects and Cleanup (useEffect Lifecycle, Race Conditions, AbortController, Strict Mode Double-Invoke)
 description: 'Sync React components with external systems like APIs, timers, or browser APIs: set up effects to start connections and return cleanup functions to stop them, preventing memory leaks, race conditions, and stale data updates.'

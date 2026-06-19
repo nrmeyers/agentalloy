@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: python-pattern-matching
 canonical_name: Python Structural Pattern Matching (match/case)
 description: "Write text adventures, parsers, or command handlers in Python: use match/case to cleanly route natural-language commands like \"get sword\" or \"go north\" by destructuring inputs and binding variables for complex logic."

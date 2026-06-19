@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: vue-built-in-components
 canonical_name: Vue Built-in Components
 description: 'Add animations, cache components, move UI to the body, or handle async data in Vue apps: use built-in components like Transition, KeepAlive, Teleport, and Suspense without extra setup.'

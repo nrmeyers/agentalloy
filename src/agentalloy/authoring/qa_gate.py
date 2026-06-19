@@ -139,12 +139,13 @@ def run_dedup(
     legacy ``DedupHit`` shape that the rest of the QA gate consumes.
     """
     fragments_to_check: list[tuple[str, str]] = []
-    if record.skill_type == "system":
-        # Ingest generates one guardrail fragment from raw_prose for system skills.
-        fragments_to_check.append(("raw_prose", record.raw_prose))
-    else:
+    if record.fragments:
         for frag in record.fragments:
             fragments_to_check.append((f"frag-{frag.sequence}", frag.content))
+    else:
+        # Raw_prose-only skills (system guardrail, workflow) dedup on the prose
+        # itself — ingest stores no separate fragments for them.
+        fragments_to_check.append(("raw_prose", record.raw_prose))
 
     if not fragments_to_check:
         return None, []

@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: fastapi-async-and-background-tasks
 canonical_name: FastAPI Async, Lifespan, and BackgroundTasks (when async def, sync runs in threadpool, not for slow work)
 description: "Build high-performance APIs with FastAPI: choose async def for non-blocking code or def for threadpool execution to avoid server freezes, run background tasks after responses, and manage startup/shutdown resources with lifespan context managers."

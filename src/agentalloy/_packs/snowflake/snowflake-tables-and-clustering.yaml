@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: snowflake-tables-and-clustering
 canonical_name: Snowflake Tables and Clustering Keys
 description: 'Store and query large datasets in Snowflake: choose between permanent, transient, and temporary tables based on retention needs, and add clustering keys to speed up queries that filter on specific columns.'

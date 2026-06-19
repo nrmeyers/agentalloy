@@ -1,4 +1,3 @@
-skill_type: domain
 skill_id: testing-flaky-tests
 canonical_name: Diagnosing and Fixing Flaky Tests
 description: "Stop tests that randomly pass or fail from breaking CI and hiding bugs: identify root causes like race conditions, async timing issues, or shared state, then fix the code to make tests deterministic instead of masking failures with retries."
