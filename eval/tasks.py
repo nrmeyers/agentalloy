@@ -92,7 +92,10 @@ TASKS: list[Task] = [
             "List the top 3 risks of deploying a database migration on Friday "
             "afternoon. Number them 1-3."
         ),
-        phase="ops",
+        # Deploy-risk reasoning lives in the ship phase (the ops *phase* was
+        # retired in Stage 1b; retrieval is phase-agnostic, so the gold
+        # ops-category skill is still eligible here).
+        phase="ship",
         gold_skills=("incident-response",),
     ),
     Task(

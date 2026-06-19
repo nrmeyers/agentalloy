@@ -95,9 +95,9 @@ def compare(
             )
 
     # --- per-phase hit-rate floors (optional baseline key) ---
-    # Added with ops-phase probing: phase-level regressions (e.g. an
-    # eligibility-map change stranding ops) can hide inside healthy overall
-    # probe rates, so each listed phase gets its own floor.
+    # Phase-level regressions (e.g. a k-default change depressing one phase's
+    # hit@k) can hide inside a healthy overall probe rate, so each listed phase
+    # gets its own floor. Generic over whatever phases the audit emits.
     phase_floors = baselines.get("phase_hit_rate_floors")
     if isinstance(phase_floors, dict):
         by_phase = audit.get("by_phase", {})

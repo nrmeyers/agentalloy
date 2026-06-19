@@ -43,14 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKS_ROOT = REPO_ROOT / "src" / "agentalloy" / "_packs"
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
 
-_VALID_PHASES = {"spec", "design", "build", "qa", "ops"}
-
-
-# Categories the retrieval phase→category map used to admit for the ops phase.
-# That map has been retired (retrieval is now phase-agnostic), so this is a fixed
-# set: the audit still probes ops-category skills at the ops phase to preserve the
-# by-phase breakdown, though the probe phase no longer changes what's retrieved.
-_OPS_CATEGORIES = frozenset({"ops", "design", "engineering", "tooling", "governance", "meta"})
+_VALID_PHASES = {"spec", "design", "build", "qa", "ship"}
 
 
 @dataclass
@@ -115,14 +108,11 @@ def _load_skills(packs_filter: list[str] | None) -> list[SkillProbe]:
                 continue
             raw_phases = doc.get("phase_scope") or ["build"]
             phases = {p if p in _VALID_PHASES else "build" for p in raw_phases}
-            # No skill authors phase_scope: [ops] (vocabulary is
-            # build/design/review), so ops-phase retrieval leans entirely on
-            # the runtime's phase→category map and authored phases alone never
-            # measure it. Probe at ops every skill the map admits there —
-            # the same eligibility the live /compose applies.
+            # Retrieval is phase-agnostic (the phase→category gate was retired
+            # in Stage 1b), so the probe phase no longer changes what's
+            # retrieved. The ops-category view comes from ``by_category`` below,
+            # not a synthetic ops phase.
             category = str(doc.get("category") or "?")
-            if category in _OPS_CATEGORIES:
-                phases.add("ops")
             probes = {"name": _name_probe(str(name))}
             topic = _topic_probe(sid, str(name), str(prose))
             if topic:

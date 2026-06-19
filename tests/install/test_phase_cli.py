@@ -53,7 +53,7 @@ class TestPhaseSet:
             run_phase_set("invalid", root=repo_root)
 
     def test_valid_phases_accepted(self, repo_root: Path) -> None:
-        for phase in ("spec", "design", "build", "qa", "ops"):
+        for phase in ("intake", "spec", "design", "build", "qa", "ship"):
             (repo_root / ".agentalloy" / "phase").unlink(missing_ok=True)
             result = run_phase_set(phase, root=repo_root)
             assert result["phase"] == phase

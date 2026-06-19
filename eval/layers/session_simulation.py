@@ -44,8 +44,8 @@ SESSION_TASKS = [
     {"task_id": "task_3_code_review_checklist", "phase": "qa"},
     {"task_id": "task_4_flaky_ci_debug", "phase": "qa"},
     {"task_id": "task_5_browser_test_plan", "phase": "qa"},
-    # Phase: ops
-    {"task_id": "task_7_friday_deploy_risks", "phase": "ops"},
+    # Phase: ship (deploy-risk reasoning; ops phase retired in Stage 1b)
+    {"task_id": "task_7_friday_deploy_risks", "phase": "ship"},
     # Phase: qa (postmortem)
     {"task_id": "task_8_postmortem", "phase": "qa"},
 ]

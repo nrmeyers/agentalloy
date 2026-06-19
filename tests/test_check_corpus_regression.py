@@ -208,19 +208,19 @@ def _baselines_with_floors(floors: dict[str, float]) -> dict:
 
 def test_phase_floor_regression_fails() -> None:
     failures, _ = compare(
-        _audit_with_phases({"build": 0.96, "ops": 0.85}),
+        _audit_with_phases({"build": 0.96, "ship": 0.85}),
         {"gold_hit": 8, "gold_hit_total": 8},
-        _baselines_with_floors({"build": 0.96, "ops": 0.96}),
+        _baselines_with_floors({"build": 0.96, "ship": 0.96}),
     )
-    assert any("'ops'" in f and "REGRESSED" in f for f in failures)
+    assert any("'ship'" in f and "REGRESSED" in f for f in failures)
     assert not any("'build'" in f for f in failures)
 
 
 def test_phase_floor_within_tolerance_passes() -> None:
     failures, _ = compare(
-        _audit_with_phases({"ops": 0.945}),
+        _audit_with_phases({"ship": 0.945}),
         {"gold_hit": 8, "gold_hit_total": 8},
-        _baselines_with_floors({"ops": 0.96}),
+        _baselines_with_floors({"ship": 0.96}),
     )
     assert failures == []
 
@@ -230,18 +230,18 @@ def test_phase_floor_missing_measurement_fails() -> None:
     failures, _ = compare(
         _audit_with_phases({"build": 0.96}),
         {"gold_hit": 8, "gold_hit_total": 8},
-        _baselines_with_floors({"ops": 0.96}),
+        _baselines_with_floors({"ship": 0.96}),
     )
-    assert any("'ops'" in f and "no audit measurement" in f for f in failures)
+    assert any("'ship'" in f and "no audit measurement" in f for f in failures)
 
 
 def test_phase_floor_improvement_notices() -> None:
     _, notices = compare(
-        _audit_with_phases({"ops": 0.99}),
+        _audit_with_phases({"ship": 0.99}),
         {"gold_hit": 8, "gold_hit_total": 8},
-        _baselines_with_floors({"ops": 0.96}),
+        _baselines_with_floors({"ship": 0.96}),
     )
-    assert any("phase_hit_rate_floors.ops" in n for n in notices)
+    assert any("phase_hit_rate_floors.ship" in n for n in notices)
 
 
 def test_no_floors_key_is_backward_compatible() -> None:

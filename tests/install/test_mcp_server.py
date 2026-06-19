@@ -39,7 +39,7 @@ class TestToolsList:
         assert tool["name"] == "get_skill_for"
         # Schema enumerates the lifecycle phases
         phase_enum = tool["inputSchema"]["properties"]["phase"]["enum"]
-        assert phase_enum == ["spec", "design", "qa", "build", "ops", "meta", "governance", "ship"]
+        assert phase_enum == ["spec", "design", "qa", "build", "ship"]
         assert tool["inputSchema"]["required"] == ["task"]
 
 
@@ -126,23 +126,40 @@ class TestToolsCallForward:
         assert resp is not None
         assert resp["error"]["code"] == mcp_server.INTERNAL_ERROR
 
-    def test_new_phases_accepted(self) -> None:
-        """meta, governance, ship phases are accepted (added in Task 0)."""
-        for phase in ("meta", "governance", "ship"):
-            with patch.object(mcp_server, "_call_compose", return_value=f"output for {phase}"):
-                msg = {
-                    "jsonrpc": "2.0",
-                    "id": 10,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_skill_for",
-                        "arguments": {"task": "x", "phase": phase},
-                    },
-                }
-                resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
-            assert resp is not None, f"Phase {phase} should be accepted"
-            assert "error" not in resp, f"Phase {phase} should not return an error"
-            assert resp["result"]["content"][0]["text"] == f"output for {phase}"
+    def test_ship_phase_accepted(self) -> None:
+        """ship is the terminal lifecycle phase and must compose."""
+        with patch.object(mcp_server, "_call_compose", return_value="output for ship"):
+            msg = {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_skill_for",
+                    "arguments": {"task": "x", "phase": "ship"},
+                },
+            }
+            resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
+        assert resp is not None
+        assert "error" not in resp
+        assert resp["result"]["content"][0]["text"] == "output for ship"
+
+    def test_retired_phases_rejected(self) -> None:
+        """ops/meta/governance were retired from the phase vocabulary (Stage 1b)."""
+        for phase in ("ops", "meta", "governance"):
+            msg = {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_skill_for",
+                    "arguments": {"task": "x", "phase": phase},
+                },
+            }
+            resp = mcp_server._process_message(msg, port=8000)  # pyright: ignore[reportPrivateUsage]
+            assert resp is not None
+            assert resp["error"]["code"] == mcp_server.INVALID_PARAMS, (
+                f"retired phase {phase!r} should be rejected"
+            )
 
 
 class TestUnknownMethod:

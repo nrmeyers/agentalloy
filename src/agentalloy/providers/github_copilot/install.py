@@ -67,7 +67,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         "```\n\n"
         "**Phase transitions.** If the user's activity clearly shifts to a different\n"
         "SDD phase, update `.agentalloy/phase` and call `/compose` with the new phase.\n\n"
-        "Phases: `spec`, `design`, `build`, `qa`, `ops`.\n"
+        "Phases: `spec`, `design`, `build`, `qa`, `ship`.\n"
     )
 
     original_content = _capture_original(target_path)

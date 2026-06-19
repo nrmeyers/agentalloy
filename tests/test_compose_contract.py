@@ -92,9 +92,10 @@ def test_request_minimal_valid() -> None:
 def test_request_resolves_phase_defaults() -> None:
     """Verify the phase-driven k defaults from POC §15.7."""
     assert ComposeRequest(task="t", phase="build").resolved_k() == 2
-    assert ComposeRequest(task="t", phase="ops").resolved_k() == 2
+    assert ComposeRequest(task="t", phase="ship").resolved_k() == 2
     assert ComposeRequest(task="t", phase="qa").resolved_k() == 4
     assert ComposeRequest(task="t", phase="design").resolved_k() == 4
+    assert ComposeRequest(task="t", phase="intake").resolved_k() == 4
     # explicit k overrides phase default
     assert ComposeRequest(task="t", phase="build", k=8).resolved_k() == 8
 
@@ -112,9 +113,16 @@ def test_request_all_fields() -> None:
     assert req.trace_id == "corr-1"
 
 
-@pytest.mark.parametrize("phase", ["spec", "design", "qa", "build", "ops", "meta", "governance"])
+@pytest.mark.parametrize("phase", ["intake", "spec", "design", "qa", "build", "ship"])
 def test_request_accepts_every_phase(phase: str) -> None:
     ComposeRequest(task="t", phase=phase)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("phase", ["ops", "meta", "governance"])
+def test_request_rejects_retired_phases(phase: str) -> None:
+    """ops/meta/governance were retired from the Phase Literal in Stage 1b."""
+    with pytest.raises(ValidationError):
+        ComposeRequest(task="t", phase=phase)  # type: ignore[arg-type]
 
 
 def test_request_rejects_unknown_phase() -> None:

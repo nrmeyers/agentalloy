@@ -11,37 +11,34 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Phase = Literal["intake", "spec", "design", "qa", "build", "ops", "meta", "governance", "ship"]
+Phase = Literal["intake", "spec", "design", "qa", "build", "ship"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
 # Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction
 # at parity quality. Long-form structured phases get k=4 — under-context
 # at k=2 caused output rambling on T8 postmortem (truncated at max_tokens).
+# Every value of the ``Phase`` Literal must appear here — ``resolved_k`` indexes
+# this dict directly.
 DEFAULT_K_BY_PHASE: dict[str, int] = {
     "build": 2,
-    "ops": 2,
     "ship": 2,
     "qa": 4,  # safer default; long-form qa (postmortem) needs anchor context
     "spec": 4,
     "design": 4,
-    "meta": 4,
-    "governance": 4,
     "intake": 4,  # interview entry — wants anchor context for routing
 }
 
 # Recommended max_tokens hint surfaced in the response. Local-LLM callers
 # tend to default to small caps and get truncated outputs (the T8 ramble
 # on flat). These hints are sized to the typical fragment payload at the
-# matching k.
+# matching k. Keyed by every ``Phase`` value (compose indexes it directly).
 DEFAULT_MAX_TOKENS_BY_PHASE: dict[str, int] = {
     "build": 2048,
-    "ops": 2048,
     "ship": 2048,
     "qa": 4096,
     "spec": 4096,
     "design": 4096,
-    "meta": 4096,
-    "governance": 4096,
+    "intake": 4096,
 }
 
 ErrorStage = Literal["retrieval", "assembly"]
@@ -68,7 +65,7 @@ class ComposeRequest(BaseModel):
             le=50,
             description=(
                 "Max domain candidates to assemble from. Omit to use the phase-driven "
-                "default (k=2 for build/ops, k=4 for qa/spec/design/meta/governance) — "
+                "default (k=2 for build/ship, k=4 for qa/spec/design/intake) — "
                 "see DEFAULT_K_BY_PHASE."
             ),
         ),

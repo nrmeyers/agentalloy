@@ -75,7 +75,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
         "  -H 'Content-Type: application/json' \\\n"
         '  -d \'{"task": "<task>", "phase": "<phase>"}\'\n'
         "```\n\n"
-        "Phases: `spec`, `design`, `build`, `qa`, `ops`.\n"
+        "Phases: `spec`, `design`, `build`, `qa`, `ship`.\n"
     )
 
     original_instructions = _capture_original(instructions_path)

@@ -186,7 +186,7 @@ class TestCopilotCliInstall(TestCase):
                 self.assertIn("design", content)
                 self.assertIn("build", content)
                 self.assertIn("qa", content)
-                self.assertIn("ops", content)
+                self.assertIn("ship", content)
 
     def test_apply_persistent_config_includes_health_check(self):
         """The injected content includes the health-gate check."""
