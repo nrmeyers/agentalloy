@@ -707,6 +707,54 @@ def _ordered_with_deps(
     return ordered
 
 
+def _reclaim_native_corpus_lock() -> bool:
+    """Free the corpus DB lock from our own running native service before ingest.
+
+    Stops the systemd ``--user`` unit (so it doesn't respawn) and kills any stale
+    ``uvicorn agentalloy.app`` still squatting the service port. Mirrors
+    ``enable_service._reclaim_port``. Returns True if a systemd unit was stopped
+    (the caller restarts it afterwards). No-op returning False when the port is
+    already free or held by a foreign process — so fresh installs and the
+    setup-managed path are unaffected.
+    """
+    import shutil
+
+    from agentalloy.install.server_proc import (
+        configured_port,
+        find_listening_pid,
+        reclaim_stale_port,
+    )
+
+    port = configured_port()
+    if find_listening_pid(port) is None:
+        return False  # nothing holding the port → lock is free
+    stopped_unit = False
+    if shutil.which("systemctl"):
+        rc = subprocess.run(  # noqa: S603,S607 — fixed argv, no shell
+            ["systemctl", "--user", "stop", "agentalloy.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        stopped_unit = rc.returncode == 0  # 0 = unit existed and is now stopped
+    # Clear any orphaned/manual holder the unit-stop didn't cover.
+    reclaim_stale_port(port, ["uvicorn", "agentalloy.app"])
+    return stopped_unit
+
+
+def _restart_native_service() -> None:
+    """Best-effort restart of the systemd ``--user`` unit after install-packs."""
+    import shutil
+
+    if shutil.which("systemctl"):
+        subprocess.run(  # noqa: S603,S607 — fixed argv, no shell
+            ["systemctl", "--user", "start", "agentalloy.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
 def _run_container_guard(
     args: argparse.Namespace,
     selected: list[str],
@@ -733,6 +781,7 @@ def _run_container_guard(
         raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
 
     container_stopped: bool = False
+    native_unit_stopped: bool = False
     if is_in_container() and not no_restart:
         container_stopped = stop_service_in_container()
         if not isinstance(container_stopped, bool):
@@ -742,6 +791,16 @@ def _run_container_guard(
         if container_stopped:
             print(
                 "[agentalloy] Service stopped; ingesting packs with --no-restart", file=sys.stderr
+            )
+    elif not no_restart:
+        # Native: free the corpus DB lock from our own running service before the
+        # ingest (else it spews per-skill lock WARNs and leaves a partial corpus).
+        native_unit_stopped = _reclaim_native_corpus_lock()
+        if native_unit_stopped:
+            print(
+                "[agentalloy] Stopped agentalloy.service to free the corpus lock; "
+                "will restart it after.",
+                file=sys.stderr,
             )
 
     # Schema guard (issue #84): a wiped-then-recreated corpus can have DB
@@ -773,6 +832,8 @@ def _run_container_guard(
                     "Run `podman restart agentalloy` manually.",
                     file=sys.stderr,
                 )
+        if native_unit_stopped:
+            _restart_native_service()
 
     return [r for _, r in named_results], named_results, reembed_rc
 

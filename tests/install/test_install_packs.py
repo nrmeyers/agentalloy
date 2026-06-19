@@ -19,6 +19,8 @@ from agentalloy.install.subcommands.install_packs import (
     _ensure_ladybug_schema,
     _installed_pack_names,
     _load_pending_pack_selection,
+    _reclaim_native_corpus_lock,
+    _restart_native_service,
     _select_packs,
     _summarize_install_result,
 )
@@ -321,3 +323,61 @@ class TestIsLockHeldError:
         assert is_lock_held_error("Lock is held by PID 4242")
         assert not is_lock_held_error("Binder exception: Table Skill does not exist.")
         assert not is_lock_held_error("")
+
+
+class TestNativeCorpusLockReclaim:
+    """install-packs frees the corpus DB lock from a running native service so a
+    direct invocation doesn't spew per-skill lock WARNs and build a partial corpus.
+    """
+
+    _SP = "agentalloy.install.server_proc"
+
+    def test_noop_when_port_free(self) -> None:
+        """Port free → lock is free → no systemctl, returns False (nothing to restart)."""
+        with (
+            patch(f"{self._SP}.configured_port", return_value=47950),
+            patch(f"{self._SP}.find_listening_pid", return_value=None),
+            patch(f"{self._SP}.reclaim_stale_port") as reclaim,
+            patch("shutil.which", return_value="/usr/bin/systemctl"),
+            patch("subprocess.run") as run,
+        ):
+            assert _reclaim_native_corpus_lock() is False
+            run.assert_not_called()
+            reclaim.assert_not_called()
+
+    def test_stops_unit_and_reclaims_when_held(self) -> None:
+        """Port held + systemctl present → stop the unit, reclaim the port, return True."""
+        from unittest.mock import MagicMock
+
+        with (
+            patch(f"{self._SP}.configured_port", return_value=47950),
+            patch(f"{self._SP}.find_listening_pid", return_value=648605),
+            patch(f"{self._SP}.reclaim_stale_port", return_value=648605) as reclaim,
+            patch("shutil.which", return_value="/usr/bin/systemctl"),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)) as run,
+        ):
+            assert _reclaim_native_corpus_lock() is True
+            stop_cmd = run.call_args.args[0]
+            assert stop_cmd == ["systemctl", "--user", "stop", "agentalloy.service"]
+            reclaim.assert_called_once_with(47950, ["uvicorn", "agentalloy.app"])
+
+    def test_manual_launch_not_marked_systemd(self) -> None:
+        """Port held but no systemctl (manual launch) → still reclaims, returns False."""
+        with (
+            patch(f"{self._SP}.configured_port", return_value=47950),
+            patch(f"{self._SP}.find_listening_pid", return_value=648605),
+            patch(f"{self._SP}.reclaim_stale_port", return_value=648605) as reclaim,
+            patch("shutil.which", return_value=None),
+            patch("subprocess.run") as run,
+        ):
+            assert _reclaim_native_corpus_lock() is False
+            run.assert_not_called()  # no systemctl to call
+            reclaim.assert_called_once()
+
+    def test_restart_invokes_systemctl_start(self) -> None:
+        with (
+            patch("shutil.which", return_value="/usr/bin/systemctl"),
+            patch("subprocess.run") as run,
+        ):
+            _restart_native_service()
+            assert run.call_args.args[0] == ["systemctl", "--user", "start", "agentalloy.service"]

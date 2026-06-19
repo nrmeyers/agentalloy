@@ -25,9 +25,10 @@ logger = logging.getLogger(__name__)
 # install-packs / reembed when an ingest or DB open trips the lock
 # (issue #84: the raw error never told users to stop the service).
 LOCK_HELD_REMEDIATION = (
-    "Another process holds the corpus DB lock (often the running agentalloy "
-    "service). Stop it (`agentalloy server-stop` or kill the uvicorn process) "
-    "and retry."
+    "Another process holds the corpus DB lock (usually the running agentalloy "
+    "service). Stop it first, then retry: `systemctl --user stop agentalloy` "
+    "(systemd install) or `agentalloy server-stop` (manual launch). A plain kill "
+    "won't stick for a systemd unit — systemd respawns it."
 )
 
 
