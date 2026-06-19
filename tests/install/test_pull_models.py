@@ -910,7 +910,7 @@ class TestDownloadGgufRetry:
         assert (tmp_path / "models" / self._MODEL).read_bytes() == b"complete"
 
     def test_exhausts_attempts_then_fails(self, tmp_path: Path) -> None:
-        """All attempts fail → 4 attempts, partial cleaned, error surfaced."""
+        """All attempts fail → _DOWNLOAD_MAX_ATTEMPTS tries, partial cleaned, error surfaced."""
         import urllib.error
 
         from agentalloy.install.subcommands import pull_models as pm
@@ -942,6 +942,61 @@ class TestDownloadGgufRetry:
             result = pm._download_gguf("does-not-exist.gguf")
         assert result["success"] is False
         once.assert_not_called()
+
+
+class TestDownloadHeaders:
+    """Header construction + Retry-After parsing for the shared download path."""
+
+    def test_user_agent_always_present(self) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        h = pm._download_headers("https://huggingface.co/nomic-ai/m.gguf")
+        assert "agentalloy" in h["User-Agent"]
+
+    def test_hf_token_only_on_huggingface_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        monkeypatch.setenv("HF_TOKEN", "secret-tok")
+        hf = pm._download_headers("https://huggingface.co/nomic-ai/m.gguf")
+        assert hf["Authorization"] == "Bearer secret-tok"
+        # Never leak the token to the GitHub-hosted binary/cudart archives.
+        gh = pm._download_headers("https://github.com/ggml-org/llama.cpp/releases/x.tar.gz")
+        assert "Authorization" not in gh
+
+    def test_no_auth_header_without_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+        h = pm._download_headers("https://huggingface.co/nomic-ai/m.gguf")
+        assert "Authorization" not in h
+
+    def test_retry_after_honored_and_capped(self) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        class _Exc(Exception):
+            headers = {"Retry-After": "12"}
+
+        assert pm._retry_after_seconds(_Exc(), default=5.0) == 12.0
+
+        class _Big(Exception):
+            headers = {"Retry-After": "9999"}
+
+        assert pm._retry_after_seconds(_Big(), default=5.0) == pm._RETRY_AFTER_CAP_S
+
+    def test_retry_after_falls_back_on_missing_or_date(self) -> None:
+        from agentalloy.install.subcommands import pull_models as pm
+
+        class _NoHeaders(Exception):
+            pass
+
+        assert pm._retry_after_seconds(_NoHeaders(), default=7.0) == 7.0
+
+        # HTTP-date form is intentionally not parsed — fall back to our backoff.
+        class _DateForm(Exception):
+            headers = {"Retry-After": "Wed, 21 Oct 2025 07:28:00 GMT"}
+
+        assert pm._retry_after_seconds(_DateForm(), default=7.0) == 7.0
 
 
 class TestGpuProvisioning:

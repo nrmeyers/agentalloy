@@ -18,6 +18,7 @@ import contextlib
 import json
 import os
 import platform
+import random
 import re
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ import sys
 import tarfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from http.client import IncompleteRead
@@ -654,9 +656,51 @@ _RETRYABLE_DOWNLOAD_ERRORS = (
 )
 
 # Number of download attempts and the exponential-ish backoff (seconds) applied
-# *between* attempts (after attempt 1 fails: 2s, then 4s, then 8s).
-_DOWNLOAD_MAX_ATTEMPTS = 4
-_DOWNLOAD_BACKOFFS = (2, 4, 8)
+# *between* attempts (after attempt 1 fails: 2s, 5s, 10s, 20s, 40s). Hugging Face
+# 429s are bursty and can take tens of seconds to clear, so the ceiling is well
+# past the old 8s — a transient rate-limit should be ridden out, not fail the run.
+_DOWNLOAD_MAX_ATTEMPTS = 6
+_DOWNLOAD_BACKOFFS = (2, 5, 10, 20, 40)
+# Cap on an honored ``Retry-After`` so a misbehaving header can't stall CI for
+# minutes.
+_RETRY_AFTER_CAP_S = 60.0
+
+# A descriptive, URL-bearing User-Agent is the price of civilized Hugging Face
+# access: the default ``Python-urllib/x.y`` UA is aggressively 429'd. An HF token
+# (``HF_TOKEN`` / ``HUGGING_FACE_HUB_TOKEN``) lifts the anonymous per-IP cap when
+# present; absent, the request stays anonymous but is at least UA-tagged.
+_DOWNLOAD_USER_AGENT = "agentalloy-pull-models (+https://github.com/nrmeyers/agentalloy)"
+
+
+def _download_headers(url: str) -> dict[str, str]:
+    """Headers for a download: UA always; HF bearer token only on Hugging Face URLs.
+
+    The token is scoped by host so it's never leaked to the GitHub-hosted
+    llama-server/cudart archives that share this download path.
+    """
+    headers = {"User-Agent": _DOWNLOAD_USER_AGENT}
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host == "huggingface.co" or host.endswith(".huggingface.co"):
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _retry_after_seconds(exc: BaseException, *, default: float) -> float:
+    """Honor a 429/503 ``Retry-After`` (delta-seconds form), capped; else ``default``.
+
+    HTTP-date ``Retry-After`` values aren't parsed — we fall back to ``default``
+    rather than pull in date math for a header HF sends as seconds anyway.
+    """
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    if not raw:
+        return default
+    try:
+        return min(float(raw), _RETRY_AFTER_CAP_S)
+    except (TypeError, ValueError):
+        return default
 
 
 def _download_gguf_once(url: str, dest_path: Path) -> int:
@@ -666,7 +710,8 @@ def _download_gguf_once(url: str, dest_path: Path) -> int:
     indicator on stderr. Raises on any network/IO error so the caller's retry
     loop can decide whether to try again.
     """
-    with urllib.request.urlopen(url, timeout=60) as resp:
+    request = urllib.request.Request(url, headers=_download_headers(url))  # noqa: S310 — https only
+    with urllib.request.urlopen(request, timeout=60) as resp:  # noqa: S310 — https only
         total = int(resp.headers.get("Content-Length", 0))
         downloaded = 0
         chunk = 1 << 20  # 1 MiB chunks
@@ -701,10 +746,12 @@ def _download_with_retry(
     """Stream ``url`` to ``dest_path``, retrying transient network failures.
 
     Shared by the GGUF downloads and the prebuilt-binary download. TLS resets,
-    ``IncompleteRead``, and timeouts are retried up to ``_DOWNLOAD_MAX_ATTEMPTS``
-    times with exponential-ish backoff (2/4/8s); the partial file is removed
-    between attempts so each retry starts clean. Returns ``{success, error,
-    duration_ms}`` — the caller owns ``dest_path`` and any path reporting.
+    ``IncompleteRead``, timeouts, and HTTP 429/5xx are retried up to
+    ``_DOWNLOAD_MAX_ATTEMPTS`` times with exponential-ish backoff (2/5/10/20/40s,
+    jittered), honoring a ``Retry-After`` header when the server sends one; the
+    partial file is removed between attempts so each retry starts clean. Returns
+    ``{success, error, duration_ms}`` — the caller owns ``dest_path`` and any
+    path reporting.
     """
     t0 = time.monotonic()
     last_error = "unknown download error"
@@ -722,10 +769,13 @@ def _download_with_retry(
             with contextlib.suppress(OSError):
                 dest_path.unlink()
             if attempt < _DOWNLOAD_MAX_ATTEMPTS:
-                backoff = _DOWNLOAD_BACKOFFS[min(attempt - 1, len(_DOWNLOAD_BACKOFFS) - 1)]
+                base = _DOWNLOAD_BACKOFFS[min(attempt - 1, len(_DOWNLOAD_BACKOFFS) - 1)]
+                # A 429/503 may carry Retry-After; respect it over our own curve.
+                # Jitter de-synchronizes parallel runners hammering the same IP.
+                backoff = _retry_after_seconds(exc, default=base) + random.uniform(0, 1.5)
                 print(
                     f"  {label}: download attempt {attempt}/{_DOWNLOAD_MAX_ATTEMPTS} "
-                    f"failed ({last_error}); retrying in {backoff}s ...",
+                    f"failed ({last_error}); retrying in {backoff:.1f}s ...",
                     file=sys.stderr,
                 )
                 time.sleep(backoff)
