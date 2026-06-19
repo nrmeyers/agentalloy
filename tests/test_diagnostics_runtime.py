@@ -15,7 +15,6 @@ from agentalloy.api.diagnostics_router import (
     compute_consistency,
 )
 from agentalloy.api.health_router import DependencyStatus, HealthChecker, HealthResponse
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.runtime_state import RuntimeCache, VersionDetail, load_runtime_cache
 from agentalloy.storage.ladybug import LadybugStore
@@ -26,11 +25,9 @@ from agentalloy.storage.ladybug import LadybugStore
 
 
 @pytest.fixture
-def populated_store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated_store(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 

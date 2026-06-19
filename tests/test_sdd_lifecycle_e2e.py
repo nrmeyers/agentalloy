@@ -34,9 +34,7 @@ from fastapi.testclient import TestClient
 from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.app import create_app
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.orchestration.compose import ComposeOrchestrator
-from agentalloy.reembed import discover_unembedded_fragments, reembed_fragments
 from agentalloy.runtime_state import load_runtime_cache
 from agentalloy.signals.predicates import PredicateResult
 from agentalloy.storage.ladybug import LadybugStore
@@ -142,20 +140,10 @@ def intent_oracle(monkeypatch: pytest.MonkeyPatch) -> _IntentOracle:
 
 
 @pytest.fixture
-def app_client(tmp_path: Path):
-    stub = StubLMClient()
-    lb = LadybugStore(str(tmp_path / "ladybug"))
+def app_client(corpus_dir: Path):
+    lb = LadybugStore(str(corpus_dir / "ladybug"))
     lb.open()
-    lb.migrate()
-    load_fixtures(lb)
-    vs = open_or_create(tmp_path / "skills.duck")
-    frags = discover_unembedded_fragments(lb, vs)
-    reembed_fragments(
-        frags,
-        embed_fn=lambda t: stub.embed(model=EMBED_MODEL, texts=[t])[0],
-        vector_store=vs,
-        embedding_model=EMBED_MODEL,
-    )
+    vs = open_or_create(corpus_dir / "skills.duck")
     runtime = load_runtime_cache(lb)
     orch = ComposeOrchestrator(
         runtime, StubLMClient(), vs, DuckDBTelemetryWriter(vs), embedding_model=EMBED_MODEL

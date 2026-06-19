@@ -6,17 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.retrieval.system import SystemRetrievalResult, retrieve_system_fragments
 from agentalloy.storage.ladybug import LadybugStore
 
 
 @pytest.fixture
-def populated(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 

@@ -151,6 +151,10 @@ class TestHandleLlamaServer:
         with (
             patch("shutil.which", return_value="/usr/local/bin/llama-server"),
             patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
+            ),
+            patch(
                 "agentalloy.install.subcommands.pull_models._is_model_present_llama_server",
                 return_value=True,
             ),
@@ -165,6 +169,10 @@ class TestHandleLlamaServer:
         """Binary on PATH + GGUF missing → download and record the pull."""
         with (
             patch("shutil.which", return_value="/usr/local/bin/llama-server"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
+            ),
             patch(
                 "agentalloy.install.subcommands.pull_models._is_model_present_llama_server",
                 return_value=False,
@@ -183,6 +191,10 @@ class TestHandleLlamaServer:
     def test_download_failure_surfaces_error(self) -> None:
         with (
             patch("shutil.which", return_value="/usr/local/bin/llama-server"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
+            ),
             patch(
                 "agentalloy.install.subcommands.pull_models._is_model_present_llama_server",
                 return_value=False,
@@ -534,6 +546,10 @@ class TestEnsureLlamaServerBinary:
     def test_uses_binary_on_path(self) -> None:
         with (
             patch("shutil.which", return_value="/usr/bin/llama-server"),
+            patch(
+                "agentalloy.install.subcommands.pull_models._llama_server_runs",
+                return_value=True,
+            ),
             patch(
                 "agentalloy.install.subcommands.pull_models._llama_server_runs",
                 return_value=True,

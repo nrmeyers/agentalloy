@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import get_active_fragments
 from agentalloy.retrieval.embedding_errors import (
@@ -34,11 +33,9 @@ class _SpyTelemetry:
 
 
 @pytest.fixture
-def populated_store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated_store(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 

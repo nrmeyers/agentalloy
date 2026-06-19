@@ -39,8 +39,11 @@ jobs:
       - name: Type check
         run: uv run pyright
 
-      - name: Test (excludes integration)
-        run: uv run pytest -m "not integration"
+      - name: Test (fast, parallel — excludes integration + container)
+        run: uv run pytest -m "not integration and not container"
+
+      - name: Container tests (real podman, serial)
+        run: uv run pytest -m "container and not integration" -n0
 
       - name: Pack version bump guard (pull_request only)
         if: github.event_name == 'pull_request'

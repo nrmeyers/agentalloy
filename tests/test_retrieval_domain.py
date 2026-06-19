@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
 
 import agentalloy.retrieval.domain as domain_module
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.lm_client import LMModelNotLoaded
-from agentalloy.reads import get_active_fragments
 from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
     _rrf_fuse,  # pyright: ignore[reportPrivateUsage]
@@ -27,7 +24,6 @@ from agentalloy.retrieval.embedding_errors import (
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import (
     BM25Hit,
-    FragmentEmbedding,
     SimilarityHit,
     VectorStore,
     open_or_create,
@@ -36,41 +32,18 @@ from tests.support import StubLMClient
 
 
 @pytest.fixture
-def populated(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 
 @pytest.fixture
-def populated_vectors(tmp_path: Path, populated: LadybugStore) -> VectorStore:
-    """Pre-populated DuckDB vector store with embeddings for every active
-    fragment in ``populated``. Embedding values come from ``StubLMClient`` —
-    the same deterministic stub used by the retrieval path's embedder
-    parameter, so query and corpus vectors are coherent for cosine ranking.
-    """
-    vs = open_or_create(tmp_path / "vectors.duck")
-    stub = StubLMClient()
-    fragments = get_active_fragments(populated)
-    now = int(time.time())
-    items = [
-        FragmentEmbedding(
-            fragment_id=f.fragment_id,
-            embedding=stub.embed(model="stub-embed", texts=[f.content])[0],
-            skill_id=f.skill_id,
-            category=f.category,
-            fragment_type=f.fragment_type,
-            embedded_at=now,
-            embedding_model="stub",
-            prose=f.content,
-        )
-        for f in fragments
-    ]
-    vs.insert_embeddings(items)
-    vs.rebuild_fts_index()
-    return vs
+def populated_vectors(corpus_dir: Path) -> VectorStore:
+    """Pre-embedded DuckDB vector store from the shared corpus template. Vectors
+    are StubLMClient values for every active fragment — coherent with the
+    retrieval path's stub embedder for cosine ranking."""
+    return open_or_create(corpus_dir / "skills.duck")
 
 
 # -------- phase_to_categories --------

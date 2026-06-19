@@ -154,33 +154,87 @@ def _kill_port(port: int) -> None:
             text=True,
             stderr=subprocess.DEVNULL,
         )
-        for line in out.splitlines():
-            if f":{port}" in line and "users:(" in line:
-                # Extract PID from "users:(\"<name>\",pid=<N>,fd=<M>)"
-                start = line.rfind("pid=")
-                if start == -1:
-                    continue
-                end = line.index(",", start)
-                pid = int(line[start + 4 : end])
-                started = _proc_start_epoch(pid)
-                if started is None or started < _SESSION_START_EPOCH:
-                    continue
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.kill(pid, signal.SIGTERM)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
+        return
+    killed = False
+    for line in out.splitlines():
+        if f":{port}" in line and "users:(" in line:
+            # Extract PID from "users:(\"<name>\",pid=<N>,fd=<M>)"
+            start = line.rfind("pid=")
+            if start == -1:
+                continue
+            end = line.index(",", start)
+            pid = int(line[start + 4 : end])
+            started = _proc_start_epoch(pid)
+            if started is None or started < _SESSION_START_EPOCH:
+                continue
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGTERM)
+                killed = True
+    if not killed:
+        return
+    # SIGTERM is async and podman's rootlessport lingers; wait (bounded) for the
+    # OS to actually release the port so the next port-binding test can't race it.
+    for _ in range(30):
+        try:
+            chk = subprocess.check_output(["ss", "-tln"], text=True, stderr=subprocess.DEVNULL)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return
+        if f":{port}" not in chk:
+            return
+        time.sleep(0.1)
 
 
 @pytest.fixture(autouse=True)
-def _free_default_port():
-    """Kill any process holding the default server port before and after each test.
+def _free_default_port(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Kill any process this session leaked onto the default server port, before
+    and after each *port-binding* test.
 
-    Prevents ``address already in use`` failures when tests leave background
-    servers (rootlessport, uvicorn, etc.) running.
+    Gated to tests marked ``xdist_group("port47950")`` (the real-port container/
+    server tests, pinned to a single worker by ``--dist loadgroup``). For every
+    other test this is a no-op — which both drops two ``ss`` subprocess calls per
+    test and, under ``-n auto``, prevents one worker from SIGTERM-ing a :47950
+    listener another worker just started.
     """
+    marker = request.node.get_closest_marker("xdist_group")
+    if not (marker and marker.args and marker.args[0] == "port47950"):
+        yield
+        return
     _kill_port(_DEFAULT_PORT)
     yield
     _kill_port(_DEFAULT_PORT)
+
+
+# Test files that bind the real :47950 (or start real servers/containers). Under
+# ``-n auto --dist loadgroup`` these are pinned to one worker so two binders never
+# run concurrently, and ``_free_default_port`` arms its cleanup only for them.
+_PORT47950_FILES = (
+    "test_container_edge_cases",
+    "test_container_service",
+    "test_container_e2e",
+    "test_server_proc",
+    "test_port_guard",
+    "test_wrap",
+    "test_simple_setup_container",
+    "test_backup_restore",
+)
+
+# Real-podman test files — slow + port-bound; flaky in a fast parallel run. The
+# ``container`` marker excludes them from the default suite (see pyproject
+# addopts); they run serially via ``pytest -m container -n0`` (CI + on demand).
+_CONTAINER_FILES = (
+    "test_container_edge_cases",
+    "test_container_service",
+    "test_container_e2e",
+)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    for item in items:
+        if any(name in item.nodeid for name in _PORT47950_FILES):
+            item.add_marker(pytest.mark.xdist_group("port47950"))
+        if any(name in item.nodeid for name in _CONTAINER_FILES):
+            item.add_marker(pytest.mark.container)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -253,3 +307,57 @@ def vector_store(tmp_path: Path) -> Iterator[VectorStore]:
     hits — fine for tests that mock retrieval results anyway."""
     with open_or_create(tmp_path / "test.duck") as vs:
         yield vs
+
+
+# ---------------------------------------------------------------------------
+# Shared corpus template — built once per session, copied per test.
+#
+# Rebuilding the 8-skill fixture corpus per test (LadybugStore.migrate() +
+# load_fixtures() + StubLMClient reembed, ~2-4s each) dominated suite wall time.
+# Build it ONCE into a session template; each test gets an isolated copytree
+# (copy << rebuild). Under xdist the session scope is per-worker, so it's built
+# once per process, not once per test.
+# ---------------------------------------------------------------------------
+
+_STUB_EMBED_MODEL = "stub-embed"
+
+
+@pytest.fixture(scope="session")
+def corpus_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build the fixture corpus (LadybugDB graph + embedded DuckDB) once per
+    session. Returns a directory holding ``ladybug/`` and ``skills.duck``."""
+    from agentalloy.fixtures.loader import load_fixtures
+    from agentalloy.reembed import discover_unembedded_fragments, reembed_fragments
+    from agentalloy.storage.ladybug import LadybugStore
+    from tests.support import StubLMClient
+
+    base = tmp_path_factory.mktemp("corpus_template")
+    lb = LadybugStore(str(base / "ladybug"))
+    lb.open()
+    lb.migrate()
+    load_fixtures(lb)
+    stub = StubLMClient()
+    with open_or_create(base / "skills.duck") as vs:
+        frags = discover_unembedded_fragments(lb, vs)
+        reembed_fragments(
+            frags,
+            embed_fn=lambda t: stub.embed(model=_STUB_EMBED_MODEL, texts=[t])[0],
+            vector_store=vs,
+            embedding_model=_STUB_EMBED_MODEL,
+        )
+        vs.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
+    lb.close()
+    return base
+
+
+@pytest.fixture
+def corpus_dir(corpus_template: Path, tmp_path: Path) -> Path:
+    """An isolated per-test copy of the session corpus template. Returns a dir
+    holding ``ladybug`` + ``skills.duck`` (whether Kùzu/DuckDB store as a file
+    or a directory). Cheap (copy, not rebuild), so tests that mutate the store
+    stay independent."""
+    import shutil
+
+    dst = tmp_path / "corpus"
+    shutil.copytree(corpus_template, dst)
+    return dst

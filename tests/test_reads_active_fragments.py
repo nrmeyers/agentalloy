@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.ingest import (
     FragmentRecord,
     ReviewRecord,
@@ -18,11 +17,9 @@ from agentalloy.storage.ladybug import LadybugStore
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def store(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 

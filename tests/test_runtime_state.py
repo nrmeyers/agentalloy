@@ -16,7 +16,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentalloy.api.health_router import HealthChecker, HealthResponse
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.runtime_state import load_runtime_cache
 from agentalloy.storage.ladybug import LadybugStore
 
@@ -26,11 +25,9 @@ from agentalloy.storage.ladybug import LadybugStore
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def store(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 
@@ -132,12 +129,10 @@ def test_cache_fragments_for_skill(store: LadybugStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_reload_reflects_new_active_data(tmp_path: Path) -> None:
+def test_reload_reflects_new_active_data(corpus_dir: Path) -> None:
     """AC-2: a new cache load (simulating restart) picks up re-seeded data."""
-    s = LadybugStore(str(tmp_path / "ladybug"))
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
 
     cache_v1 = load_runtime_cache(s)
     skill_ids_v1 = {sk.skill_id for sk in cache_v1.get_active_skills()}

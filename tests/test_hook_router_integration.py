@@ -258,6 +258,14 @@ class TestHookRouterEndpoint:
 class TestSignalFirstCaching:
     """Tests for signal-first short-circuit caching."""
 
+    @pytest.fixture(autouse=True)
+    def _unique_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Each test gets a unique cwd so its (cwd, phase) cache key cannot be
+        # polluted by another test's lingering SWR background-revalidation thread
+        # writing to the module-global cache after reset_hook_cache cleared it
+        # (observed deterministically under heavy -n auto load).
+        monkeypatch.chdir(tmp_path)
+
     def test_first_request_is_fresh(self, client: TestClient, reset_hook_cache) -> None:
         """First request runs the full pipeline and returns 'fresh'."""
         payload = {"prompt": "test", "cwd": str(Path.cwd())}
@@ -275,10 +283,13 @@ class TestSignalFirstCaching:
         data1 = response1.json()
         assert data1["status"] == "fresh"
 
-        # Second request (should be cached)
+        # Second request is served from cache. Under heavy parallel CPU load the
+        # gap between the two requests can exceed the SWR fresh window, so the hit
+        # may report "stale" rather than "cached" — both are cache hits (the point
+        # is it wasn't recomputed fresh). cache_hit is the load-robust assertion.
         response2 = client.post("/v1/hook/user-prompt-submit", json=payload)
         data2 = response2.json()
-        assert data2["status"] == "cached"
+        assert data2["status"] in ("cached", "stale")
         assert data2["cache_hit"] is True
         # Latency should be very low for a cache hit
         assert data2["latency_ms"] < 100

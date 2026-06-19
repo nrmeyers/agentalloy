@@ -20,7 +20,6 @@ from fastapi.testclient import TestClient
 from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.skill_router import get_skill_store
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion, get_active_version_by_id
 from agentalloy.storage.ladybug import LadybugStore
@@ -40,11 +39,9 @@ def empty_store(tmp_path: Path) -> LadybugStore:
 
 
 @pytest.fixture
-def populated_store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated_store(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 

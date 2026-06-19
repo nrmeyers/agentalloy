@@ -15,13 +15,11 @@ source, plus an end-to-end flag-parity check through ``retrieve_domain_candidate
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from agentalloy.fixtures.loader import load_fixtures
 from agentalloy.reads import get_active_fragments
 from agentalloy.reads.models import ActiveFragment
 from agentalloy.retrieval.domain import (
@@ -32,7 +30,6 @@ from agentalloy.retrieval.domain import (
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import (
-    FragmentEmbedding,
     VectorStore,
     open_or_create,
 )
@@ -206,36 +203,17 @@ def test_only_top_three_skills_expanded() -> None:
 
 
 @pytest.fixture
-def populated(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
+def populated(corpus_dir: Path) -> LadybugStore:
+    s = LadybugStore(str(corpus_dir / "ladybug"))
     s.open()
-    s.migrate()
-    load_fixtures(s)
     return s
 
 
 @pytest.fixture
-def vectors(tmp_path: Path, populated: LadybugStore) -> VectorStore:
-    vs = open_or_create(tmp_path / "vectors.duck")
-    stub = StubLMClient()
-    now = int(time.time())
-    vs.insert_embeddings(
-        [
-            FragmentEmbedding(
-                fragment_id=f.fragment_id,
-                embedding=stub.embed(model="stub-embed", texts=[f.content])[0],
-                skill_id=f.skill_id,
-                category=f.category,
-                fragment_type=f.fragment_type,
-                embedded_at=now,
-                embedding_model="stub",
-                prose=f.content,
-            )
-            for f in get_active_fragments(populated)
-        ]
-    )
-    vs.rebuild_fts_index()
-    return vs
+def vectors(corpus_dir: Path) -> VectorStore:
+    """Pre-embedded DuckDB vector store from the shared corpus template
+    (StubLMClient vectors + rebuilt FTS index)."""
+    return open_or_create(corpus_dir / "skills.duck")
 
 
 def _retrieve(cache: RuntimeCache, vectors: VectorStore) -> list[str]:
