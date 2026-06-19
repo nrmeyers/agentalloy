@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Phase = Literal["intake", "spec", "design", "qa", "build", "ship"]
+Phase = Literal["intake", "spec", "design", "build", "qa", "ship"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
 # Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction

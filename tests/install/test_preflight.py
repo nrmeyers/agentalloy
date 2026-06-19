@@ -18,7 +18,7 @@ from agentalloy.install.subcommands.preflight import (
 class TestBrewAutoInstall:
     """Test macOS brew auto-install behavior in runner-phase checks.
 
-    Brew auto-install is gated behind AGENTIALLOY_PREFLIGHT_AUTO_INSTALL=1
+    Brew auto-install is gated behind AGENTALLOY_PREFLIGHT_AUTO_INSTALL=1
     (opt-in). The autouse fixture below enables that opt-in for every test in
     this class; an explicit test verifies the gate is honored when the env
     var is unset.
@@ -44,7 +44,7 @@ class TestBrewAutoInstall:
         assert err == "brew not on PATH"
 
     def test_try_brew_install_disabled_without_optin(self, monkeypatch: pytest.MonkeyPatch):
-        """Without AGENTIALLOY_PREFLIGHT_AUTO_INSTALL=1, brew install is a no-op."""
+        """Without AGENTALLOY_PREFLIGHT_AUTO_INSTALL=1, brew install is a no-op."""
         monkeypatch.delenv("AGENTALLOY_PREFLIGHT_AUTO_INSTALL", raising=False)
         with (
             patch("sys.platform", "darwin"),

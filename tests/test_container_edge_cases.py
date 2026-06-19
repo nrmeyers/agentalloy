@@ -1538,14 +1538,12 @@ class TestBakedEntrypoint:
         )
 
     def test_baked_entrypoint_reads_packs_from_env(self):
-        """Baked entrypoint must honour AGENTIALLOY_PACKS env var so locally
+        """Baked entrypoint must honour AGENTALLOY_PACKS env var so locally
         built images (no corpus seed) can install specific packs at run time."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert "AGENTIALLOY_PACKS" in script, (
-            "Baked entrypoint must read AGENTIALLOY_PACKS from env"
-        )
+        assert "AGENTALLOY_PACKS" in script, "Baked entrypoint must read AGENTALLOY_PACKS from env"
 
 
 # ---------------------------------------------------------------------------

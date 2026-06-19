@@ -508,7 +508,7 @@ def _build_entrypoint_script(packs: str) -> str:
             ]
         )
     else:
-        # No explicit packs baked in — check the AGENTIALLOY_PACKS env var
+        # No explicit packs baked in — check the AGENTALLOY_PACKS env var
         # first (set this when running a locally built image without a corpus
         # seed). If the env var is non-empty, install those packs one-by-one
         # (same checkpointed loop as the has_packs path). If the env var is
@@ -518,8 +518,8 @@ def _build_entrypoint_script(packs: str) -> str:
         # non-TTY mode (see install_packs.py:400-401).
         lines.extend(
             [
-                '    if [ -n "${AGENTIALLOY_PACKS:-}" ]; then',
-                '        IFS="," read -ra PACK_LIST <<< "$AGENTIALLOY_PACKS"',
+                '    if [ -n "${AGENTALLOY_PACKS:-}" ]; then',
+                '        IFS="," read -ra PACK_LIST <<< "$AGENTALLOY_PACKS"',
                 "        TOTAL=${#PACK_LIST[@]}",
                 "        INGESTED=0",
                 '        if [ -f "$CHECKPOINTS" ]; then',

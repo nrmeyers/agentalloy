@@ -184,7 +184,7 @@ The setup wizard:
 │  ├── Touch .bootstrap-complete                   │
 │  ├── exec uvicorn (main service, :47950)         │
 │                                                  │
-│  ENV: AGENTIALLOY_PACKS, LADYBUG_DB_PATH         │
+│  ENV: AGENTALLOY_PACKS, LADYBUG_DB_PATH          │
 │      DUCKDB_PATH, LOG_LEVEL                       │
 └───────────┬──────────────────────────────────────┘
             │ -p 47950:47950

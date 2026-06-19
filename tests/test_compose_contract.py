@@ -113,7 +113,7 @@ def test_request_all_fields() -> None:
     assert req.trace_id == "corr-1"
 
 
-@pytest.mark.parametrize("phase", ["intake", "spec", "design", "qa", "build", "ship"])
+@pytest.mark.parametrize("phase", ["intake", "spec", "design", "build", "qa", "ship"])
 def test_request_accepts_every_phase(phase: str) -> None:
     ComposeRequest(task="t", phase=phase)  # type: ignore[arg-type]
 

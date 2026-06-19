@@ -171,8 +171,8 @@ trap 'kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' 
 
 # Pack ingest runs only when the corpus was not seeded from the image.
 if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]; then
-    if [ -n "${AGENTIALLOY_PACKS:-}" ]; then
-        IFS="," read -ra PACK_LIST <<< "$AGENTIALLOY_PACKS"
+    if [ -n "${AGENTALLOY_PACKS:-}" ]; then
+        IFS="," read -ra PACK_LIST <<< "$AGENTALLOY_PACKS"
         TOTAL=${#PACK_LIST[@]}
         INGESTED=0
         if [ -f "$CHECKPOINTS" ]; then

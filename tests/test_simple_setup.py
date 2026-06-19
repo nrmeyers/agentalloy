@@ -1764,7 +1764,7 @@ class TestContainerFlow:
             and c.args[0][1] == "run"
         ]
         assert len(run_calls) >= 1
-        # AGENTIALLOY_PACKS env var is no longer used — packs are baked into
+        # AGENTALLOY_PACKS env var is no longer used — packs are baked into
         # the entrypoint script via _generate_entrypoint(packs).  Verify the
         # entrypoint path is mounted (it contains the packs list).
         entrypoint_mounted = any(
@@ -1790,7 +1790,7 @@ class TestContainerFlow:
             rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
 
         assert rc == 0
-        # Verify no AGENTIALLOY_PACKS env var with packs was set
+        # Verify no AGENTALLOY_PACKS env var with packs was set
         run_calls = [
             c.args[0]
             for c in mock_run.call_args_list
@@ -1805,11 +1805,11 @@ class TestContainerFlow:
             for i, arg in enumerate(call_args):
                 if str(arg) == "-e" and i + 1 < len(call_args):
                     env_val = str(call_args[i + 1])
-                    if env_val.startswith("AGENTIALLOY_PACKS="):
+                    if env_val.startswith("AGENTALLOY_PACKS="):
                         # Should be empty or not contain pack names
                         packs_found = True
                         assert "rust" not in env_val and "go" not in env_val
-        # Either no AGENTIALLOY_PACKS env var, or it's empty
+        # Either no AGENTALLOY_PACKS env var, or it's empty
         if packs_found:
             pass  # Empty packs env var is OK
 
