@@ -160,7 +160,7 @@ class LadybugStore:
                 if "already has property" in msg or "already exists" in msg:
                     continue
                 raise RuntimeError(f"ladybug migration failed: {ddl!r}: {exc}") from exc
-        logger.info("ladybug_migrate ok tables=%s", created_tables)
+        logger.debug("ladybug_migrate ok tables=%s", created_tables)
 
 
 def _first_identifier_after(ddl: str, keyword: str) -> str:

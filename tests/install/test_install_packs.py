@@ -20,6 +20,7 @@ from agentalloy.install.subcommands.install_packs import (
     _installed_pack_names,
     _load_pending_pack_selection,
     _reclaim_native_corpus_lock,
+    _render_install_summary,
     _restart_native_service,
     _select_packs,
     _summarize_install_result,
@@ -381,3 +382,40 @@ class TestNativeCorpusLockReclaim:
         ):
             _restart_native_service()
             assert run.call_args.args[0] == ["systemctl", "--user", "start", "agentalloy.service"]
+
+
+class TestInstallSummaryRender:
+    """stdout gets a one-line digest by default; the full blob is --json / the file."""
+
+    def _summary(self) -> dict[str, object]:
+        return {
+            "action": "packs_installed",
+            "selected": ["core", "engineering", "sdd"],
+            "failed_packs": [],
+            "reembed_exit_code": 0,
+            "duration_ms": 2363,
+            "install_results": [
+                {"action": "already_installed", "skills_already_present": 12, "skills_ingested": 0},
+                {"action": "ingested", "skills_ingested": 5, "skills_deprecated": 1},
+                {"action": "ingested", "skills_ingested": 3, "ingest_failures": 0},
+            ],
+        }
+
+    def test_one_line_counts(self) -> None:
+        line = _render_install_summary(self._summary())
+        assert line.startswith("install-packs: 3 packs (2 ingested, 1 already present, 0 failed)")
+        assert "+8 ingested" in line  # 5 + 3
+        assert "12 present" in line
+        assert "1 deprecated" in line
+        assert "reembed: ok" in line
+        assert "install-packs.json" in line
+        assert "\n" not in line  # single line when nothing failed
+
+    def test_failed_packs_listed(self) -> None:
+        s = self._summary()
+        s["failed_packs"] = ["redis"]
+        s["reembed_exit_code"] = 2
+        line = _render_install_summary(s)
+        assert "1 failed" in line
+        assert "reembed: exit 2" in line
+        assert "failed packs: redis" in line

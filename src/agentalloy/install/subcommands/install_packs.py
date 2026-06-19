@@ -200,6 +200,12 @@ def add_parser(
         action="store_true",
         help="Do not restart the agentalloy service after bulk reembed",
     )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full result as JSON (default: a one-line summary; full detail "
+        "is always written to install-packs.json).",
+    )
     p.set_defaults(func=_run)
 
 
@@ -250,6 +256,35 @@ def _summarize_install_result(result: dict[str, Any]) -> dict[str, Any]:
     if failed:
         out["failed_ingest_results"] = failed[:10]
     return out
+
+
+def _render_install_summary(summary: dict[str, Any]) -> str:
+    """One-line human summary of a packs_installed result.
+
+    The full per-pack detail is always written to install-packs.json; stdout
+    gets this digest unless ``--json`` (full blob) or ``--quiet`` (silent).
+    """
+    results: list[dict[str, Any]] = summary.get("install_results") or []
+
+    def _total(key: str) -> int:
+        return sum(int(r.get(key) or 0) for r in results)
+
+    ingested = sum(1 for r in results if r.get("action") in ("ingested", "ingested_with_errors"))
+    already = sum(1 for r in results if r.get("action") == "already_installed")
+    failed = list(summary.get("failed_packs") or [])
+    reembed_rc = summary.get("reembed_exit_code")
+    reembed = "ok" if reembed_rc in (0, None) else f"exit {reembed_rc}"
+    secs = (summary.get("duration_ms") or 0) / 1000
+    line = (
+        f"install-packs: {len(summary.get('selected') or [])} packs "
+        f"({ingested} ingested, {already} already present, {len(failed)} failed) | "
+        f"skills: +{_total('skills_ingested')} ingested, {_total('skills_already_present')} present, "
+        f"{_total('skills_deprecated')} deprecated, {_total('ingest_failures')} failures | "
+        f"reembed: {reembed} | {secs:.1f}s — full detail in install-packs.json"
+    )
+    if failed:
+        line += f"\n  failed packs: {', '.join(failed)}"
+    return line
 
 
 def _packs_dir() -> Path:
@@ -358,9 +393,11 @@ def _run(args: argparse.Namespace) -> int:
         "duration_ms": duration_ms,
     }
     install_state.save_output_file(summary, "install-packs.json")
-    if not getattr(args, "quiet", False):
+    if getattr(args, "json", False):
         json.dump(summary, sys.stdout, indent=2)
         sys.stdout.write("\n")
+    elif not getattr(args, "quiet", False):
+        print(_render_install_summary(summary))
 
     if reembed_rc != 0:
         print(
