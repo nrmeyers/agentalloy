@@ -1,5 +1,5 @@
 name: vue
-version: 1.0.4
+version: 1.0.5
 tier: framework
 description: |
   Vue 3.5+ patterns — Composition API reactivity (ref/reactive/computed/watch), `<script setup>` SFC syntax with defineProps/Emits/Model/Expose, template directives (v-if/v-for/v-bind/v-on/v-model), lifecycle hooks and async components with Suspense, built-in components (Transition, KeepAlive, Teleport). Precision-favored framework tier; sourced from vuejs.org per R1 tier-1 procedure (registry llms_full_url https://vuejs.org/llms-full.txt).

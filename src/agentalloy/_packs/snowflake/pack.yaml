@@ -1,5 +1,5 @@
 name: snowflake
-version: 1.0.4
+version: 1.0.5
 tier: store
 description: |
   Snowflake data warehouse patterns — virtual warehouse sizing and cost, table types and clustering keys, Time Travel + Streams for change tracking, Tasks for scheduled automation, and data loading via COPY INTO + Snowpipe. Precision-favored store tier; sourced from docs.snowflake.com via the .md-suffix sub-page convention per R1 tier-1 procedure (registry llms_full_url https://docs.snowflake.com/llms-full.txt).

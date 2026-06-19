@@ -1,5 +1,5 @@
 name: refactoring
-version: 1.0.3
+version: 1.0.4
 tier: foundation
 description: Refactoring practices that span stacks — when to refactor, how to refactor safely, the most common moves, and when to stop. Always installed.
 author: navistone

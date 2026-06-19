@@ -1,5 +1,5 @@
 name: csharp-dotnet
-version: 1.0.4
+version: 1.0.5
 tier: language
 description: C# / .NET 9 patterns — async + Task with CancellationToken/Channels, exception design with when filters and AggregateException, nullable reference types and pattern matching, System.Text.Json with source generation, MSTest v3 testing idioms. Precision-favored language tier; sourced from learn.microsoft.com .NET 9 docs per R1 tiered sourcing (fixtures/upstream/curated/csharp.yaml).
 author: navistone

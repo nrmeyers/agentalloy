@@ -1,5 +1,5 @@
 name: pytest
-version: 1.0.3
+version: 1.0.4
 tier: tooling
 description: |
   Pytest test framework patterns — fixtures with scope/autouse/yield teardown, parametrize for table-driven tests, marks and conditional skip/xfail, monkeypatch for safe attribute/env mutation, and tmp_path + assertion introspection. Precision-favored tooling tier; sourced from pytest-dev/pytest GitHub repo per R1 tier-3 procedure.

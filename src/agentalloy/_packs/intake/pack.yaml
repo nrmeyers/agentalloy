@@ -1,5 +1,5 @@
 name: intake
-version: 1.0.4
+version: 1.0.5
 tier: workflow
 description: |
   AgentAlloy v2 intake workflow — boot-time interview that gathers structured signals (intent, artifact_type, scope, urgency) before routing to a domain workflow, Qwen-based router with confidence thresholds, post-route verification UX, and workflow-execution gates. Forward-looking v2 design; sourced from docs/agentalloy-architecture-spec_update.md §6 per R1 internal procedure.

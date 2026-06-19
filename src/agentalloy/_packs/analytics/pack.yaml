@@ -1,5 +1,5 @@
 name: analytics
-version: 1.0.4
+version: 1.0.5
 tier: domain
 description: |
   Analytics + observability patterns — product-analytics cohorts/sessions (PostHog reference), OpenTelemetry distributed tracing, and OTel metrics + logs. Precision-favored domain tier; sourced from posthog.com/llms.txt indexed pages and open-telemetry.io/docs concepts per R1 tier-2/tier-3 procedures.

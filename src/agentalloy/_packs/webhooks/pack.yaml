@@ -1,5 +1,5 @@
 name: webhooks
-version: 1.0.5
+version: 1.0.6
 tier: protocol
 description: |
   Webhook protocol patterns — HMAC signature verification (svix-id / svix-timestamp / svix-signature headers, replay protection), consumer idempotency for at-least-once delivery, event-type design and schemas, and consumer endpoint patterns (auth, scaling, polling fallbacks). Precision-favored protocol tier; sourced from svix/svix-docs GitHub repo per R1 tier-2 procedure (registry svix entry).
