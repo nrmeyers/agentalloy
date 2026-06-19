@@ -11,7 +11,7 @@ domain_tags:
 - architecture
 requires:
 - sdd-spec-and-scoping
-- sys-sdd-build
+- sdd-build
 always_apply: false
 phase_scope: [design]
 category_scope: [process]

@@ -1,5 +1,5 @@
 name: sdd
-version: 1.0.8
+version: 1.0.9
 tier: workflow
 description: |
   Spec-Driven Development pipeline phase patterns — sdd-spec (scoping a fuzzy ask into a precise spec), sdd-design + sdd-plan (technical design and ordered task breakdown), sdd-build (implementation with TDD), sdd-verify (test/lint/typecheck/review gate before delivery), and sdd-deliver (PR composition, changelogs, rollouts). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology skills per R1 tier-3 internal procedure.
@@ -25,9 +25,9 @@ skills:
 - skill_id: sdd-verify-and-review
   file: sdd-verify-and-review.yaml
   fragment_count: 0
-- skill_id: sys-sdd-build
+- skill_id: sdd-build
   file: sdd-build.yaml
   fragment_count: 0
-- skill_id: sys-sdd-intake
+- skill_id: sdd-intake
   file: sdd-intake.yaml
   fragment_count: 0

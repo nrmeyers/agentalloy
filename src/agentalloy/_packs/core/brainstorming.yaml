@@ -5,7 +5,7 @@ category: design
 skill_class: domain
 domain_tags: [user-intent, requirements-discovery, design-exploration, premature-implementation, divergent-then-convergent]
 requires:
-- sys-sdd-build
+- sdd-build
 always_apply: false
 phase_scope: [build, qa]
 category_scope: [process]
