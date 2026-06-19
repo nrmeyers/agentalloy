@@ -58,9 +58,8 @@ class FragmentEmbedding:
     embedded_at: int  # unix epoch seconds
     embedding_model: str
     prose: str = ""  # raw fragment text; indexed for BM25
-    # Authored phase eligibility (Skill.phase_scope, authored vocabulary —
-    # e.g. build/design/review). None = no authored scope; such fragments
-    # are eligible via the phase->category map only.
+    # Authored phase eligibility (Skill.phase_scope, SDD lifecycle vocabulary —
+    # e.g. build/design/qa). None = no authored scope.
     phase_scope: tuple[str, ...] | None = None
 
 

@@ -4,10 +4,6 @@ description: "Process large files, logs, or data feeds without crashing your ser
 category: engineering
 skill_class: domain
 domain_tags: [readable-stream, writable-stream, pipeline, fs-promises, backpressure, nodejs]
-related:
-- node-event-loop-and-async
-- nodejs-events-and-emitter
-- nodejs-fs-promises
 always_apply: false
 phase_scope: [build]
 category_scope: language

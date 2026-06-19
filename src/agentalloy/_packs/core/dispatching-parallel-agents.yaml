@@ -4,12 +4,8 @@ description: "Speed up complex tasks by running independent steps at the same ti
 category: design
 skill_class: domain
 domain_tags: [parallel-agent-dispatch, fan-out-fan-in, subagent-context-isolation, independent-tasks, shared-state-warning]
-related:
-- github-actions-concurrency
-- nodejs-worker-threads
-- planning-and-task-breakdown
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

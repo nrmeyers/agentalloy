@@ -4,10 +4,6 @@ description: "Understand a new codebase before making changes: find entry points
 category: design
 skill_class: domain
 domain_tags: [code-comprehension, entry-points, call-graph, runtime-tracing, breadth-first-then-depth]
-related:
-- code-review-debugging-and-defects
-- measure-before-optimizing
-- profiling-correctly
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

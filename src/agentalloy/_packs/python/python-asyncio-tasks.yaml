@@ -11,10 +11,6 @@ domain_tags:
   - python
 requires:
 - python-async-and-asyncio
-related:
-- csharp-async-and-tasks
-- python-async-patterns
-- python-asyncio-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

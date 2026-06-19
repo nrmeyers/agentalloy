@@ -1,5 +1,5 @@
 name: data-engineering
-version: 1.0.5
+version: 1.0.6
 tier: domain
 description: |
   Data-engineering patterns — dbt (models, materializations, tests, snapshots, incremental models) and Apache Airflow (DAGs, tasks, operators, best practices, custom timetables). Precision-favored domain tier; sourced from docs.getdbt.com via .md-suffix sub-pages (R1 tier-1) and apache/airflow GitHub docs (R1 tier-3).

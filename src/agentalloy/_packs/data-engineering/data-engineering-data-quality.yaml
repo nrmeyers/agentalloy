@@ -11,10 +11,6 @@ domain_tags:
 - validation
 requires:
 - data-engineering-dbt-models
-related:
-- data-engineering-dbt-tests-and-snapshots
-- data-engineering-iceberg-lakehouse
-- snowflake-snowpipe-auto-ingest
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

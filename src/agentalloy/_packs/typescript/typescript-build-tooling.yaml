@@ -10,10 +10,6 @@ domain_tags:
 - swc
 - tsx
 - tsc
-related:
-- linting-typescript-eslint
-- ts-strict-mode-and-tsconfig
-- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

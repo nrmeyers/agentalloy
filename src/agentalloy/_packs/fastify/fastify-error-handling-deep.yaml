@@ -9,10 +9,6 @@ domain_tags:
 - set-error-handler
 - validation-errors
 - uncaught
-related:
-- fastify-hooks-and-lifecycle
-- fastify-routes-and-handlers
-- fastify-validation-and-serialization
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

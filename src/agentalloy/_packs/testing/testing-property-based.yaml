@@ -9,12 +9,8 @@ domain_tags:
 - fuzzing
 - hypothesis
 - fast-check
-related:
-- debugging-systematic
-- go-testing-idioms
-- refactoring-safely-with-tests
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

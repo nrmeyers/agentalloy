@@ -29,7 +29,9 @@ EXIT_USAGE = 1
 EXIT_VALIDATION = 2
 EXIT_DB = 3
 
-_VALID_PHASES = {"design", "build", "review"}
+# Canonical SDD lifecycle (matches ingest._VALID_PHASES / gates._PHASE_GRAPH).
+# Reconciled from the old {design, build, review} in Stage 3b.
+_VALID_PHASES = {"intake", "spec", "design", "build", "qa", "ship"}
 _VALID_CATEGORIES = {"governance", "operational", "tooling", "safety", "quality", "observability"}
 
 

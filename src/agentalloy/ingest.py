@@ -59,7 +59,11 @@ _VALID_DOMAIN_CATEGORIES = frozenset(
 _VALID_FRAGMENT_TYPES = frozenset(
     {"setup", "execution", "verification", "example", "guardrail", "rationale"}
 )
-_VALID_PHASES = frozenset({"design", "build", "review"})
+# System-skill phase_scope vocabulary — the canonical SDD lifecycle (matches
+# gates._PHASE_GRAPH and the api.compose_models.Phase Literal). Previously the
+# alien {design, build, review} set, which couldn't scope to intake/spec/qa/ship
+# and whose "review" never matched runtime "qa". Reconciled in Stage 3b.
+_VALID_PHASES = frozenset({"intake", "spec", "design", "build", "qa", "ship"})
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
 # and fixtures/skill-authoring-agent.md "Hard fragmentation rules" / "Tag rules".
@@ -137,12 +141,16 @@ class ReviewRecord:
     description: str = ""
     # Skill-graph edges (optional, fully backward compatible — absent = no edges).
     # ``requires`` → REQUIRES_COMPOSITIONAL (hard dependency: this skill assumes
-    # the target's setup). ``related`` → REFERENCES_CONCEPTUAL (conceptual
-    # neighbor). Targets are skill_ids; cross-pack forward refs are tolerated
-    # (a target absent at insert time becomes a deferred-edge warning, not an
-    # error). Edges are replaced on re-ingest so version bumps stay idempotent.
+    # the target's setup). Targets are skill_ids; cross-pack forward refs are
+    # tolerated (a target absent after the batch becomes a deferred-edge warning,
+    # not an error — install-packs ingests pack-by-pack). Corpus-wide referential
+    # integrity is enforced at the complete-corpus level. Edges are replaced on
+    # re-ingest so version bumps stay idempotent.
     requires: list[str] = field(default_factory=lambda: cast(list[str], []))
-    related: list[str] = field(default_factory=lambda: cast(list[str], []))
+    # Workflow exit-gate spec (SDD phase transitions). Consumed by the signal
+    # layer at runtime; validated here at ingest for structure + known predicate
+    # names so a malformed gate is caught at authoring, not at phase-transition.
+    exit_gates: dict[str, Any] | None = None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -503,13 +511,17 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
 
         # Forward-ref retry pass: cross-pack edges whose target appeared later
         # in this same batch are now resolvable. Only run if the batch survived.
+        # A batch is a single pack (install-packs ingests pack-by-pack), so a
+        # still-missing target may be a legitimate cross-pack edge (including
+        # circular ones like python<->fastapi) — warn, don't fail. Corpus-wide
+        # referential integrity is enforced at the complete-corpus level (see
+        # tests/test_bundled_corpus_integrity.py).
         if failed == 0 and deferred_edges:
             still_missing = _resolve_deferred_edges(store, deferred_edges)
             for edge in still_missing:
                 print(
-                    f"warning: {edge.field_name} edge '{edge.source_id}' -> "
-                    f"'{edge.target_id}' skipped — target skill not in corpus or "
-                    f"batch (cross-pack forward ref)",
+                    f"warning: requires edge '{edge.source_id}' -> '{edge.target_id}' skipped — "
+                    f"target skill not in this pack (cross-pack forward ref)",
                     file=sys.stderr,
                 )
 
@@ -592,6 +604,10 @@ def _load_yaml(path: Path) -> ReviewRecord:
             )
         )
 
+    exit_gates_raw: Any = data.get("exit_gates")
+    if exit_gates_raw is not None and not isinstance(exit_gates_raw, dict):
+        raise IngestError(f"{path}: 'exit_gates' must be a mapping")
+
     return ReviewRecord(
         skill_id=_str("skill_id"),
         canonical_name=_str("canonical_name"),
@@ -609,7 +625,7 @@ def _load_yaml(path: Path) -> ReviewRecord:
         superseded_by=_str("superseded_by"),
         description=_str("description"),
         requires=_strlist("requires"),
-        related=_strlist("related"),
+        exit_gates=cast("dict[str, Any] | None", exit_gates_raw),
     )
 
 
@@ -635,15 +651,14 @@ def _validate(record: ReviewRecord) -> list[str]:
     if record.superseded_by and not re.match(r"^[a-z0-9-]+$", record.superseded_by):
         errors.append(f"superseded_by '{record.superseded_by}' must be kebab-case, lowercase ASCII")
 
-    # --- skill-graph edge validation (requires / related) ---
-    for field_name, targets in (("requires", record.requires), ("related", record.related)):
-        for target in targets:
-            if target == record.skill_id:
-                errors.append(f"{field_name} contains a self-edge to '{target}' — not allowed")
-            elif not re.match(r"^[a-z0-9-]+$", target):
-                errors.append(
-                    f"{field_name} target '{target}' must be a kebab-case, lowercase ASCII skill_id"
-                )
+    # --- skill-graph edge validation (requires) ---
+    for target in record.requires:
+        if target == record.skill_id:
+            errors.append(f"requires contains a self-edge to '{target}' — not allowed")
+        elif not re.match(r"^[a-z0-9-]+$", target):
+            errors.append(
+                f"requires target '{target}' must be a kebab-case, lowercase ASCII skill_id"
+            )
 
     if record.skill_class == "system":
         if not record.skill_id.startswith("sys-"):
@@ -745,7 +760,59 @@ def _validate(record: ReviewRecord) -> list[str]:
                 f"{_TAGS_VALIDATE_HARD_CAP}"
             )
 
+    # --- exit_gates spec validation (any skill that declares one) ---
+    if record.exit_gates is not None:
+        errors.extend(_validate_gate_spec(record.exit_gates))
+
     return errors
+
+
+def _known_gate_predicates() -> set[str]:
+    """Predicate names a gate spec may reference (deterministic + semantic)."""
+    from agentalloy.signals.classifier import SEMANTIC_PREDICATES
+    from agentalloy.signals.gates import PREDICATES
+
+    return set(PREDICATES) | set(SEMANTIC_PREDICATES)
+
+
+def _validate_gate_spec(spec: Any, *, path: str = "exit_gates") -> list[str]:
+    """Statically validate an exit_gates spec: composite structure + known predicates.
+
+    Mirrors the runtime walk in ``signals.gates.evaluate_node`` so an authoring
+    error (typo'd predicate, malformed composite) fails at ingest rather than at
+    a live phase transition.
+    """
+    if not isinstance(spec, dict):
+        return [f"{path} must be a mapping, got {type(spec).__name__}"]
+    spec_d = cast(dict[str, Any], spec)
+    composites = [k for k in ("all_of", "any_of", "not") if k in spec_d]
+    leaves = [k for k in spec_d if k not in ("all_of", "any_of", "not")]
+
+    if composites and leaves:
+        return [f"{path} mixes composite operator(s) {composites} with predicate key(s) {leaves}"]
+    if len(composites) > 1:
+        return [f"{path} has multiple composite operators {composites}; use exactly one"]
+
+    if "all_of" in spec_d or "any_of" in spec_d:
+        op = "all_of" if "all_of" in spec_d else "any_of"
+        children = spec_d[op]
+        if not isinstance(children, list) or not children:
+            return [f"{path}.{op} must be a non-empty list"]
+        errors: list[str] = []
+        for i, child in enumerate(cast("list[Any]", children)):
+            errors.extend(_validate_gate_spec(child, path=f"{path}.{op}[{i}]"))
+        return errors
+    if "not" in spec_d:
+        return _validate_gate_spec(spec_d["not"], path=f"{path}.not")
+
+    # Leaf predicate: exactly one {predicate_name: args}.
+    if len(leaves) != 1:
+        return [f"{path} leaf must declare exactly one predicate, got {sorted(leaves)}"]
+    name = leaves[0]
+    known = _known_gate_predicates()
+    if name not in known:
+        return [f"{path}: unknown predicate '{name}' (available: {sorted(known)})"]
+    return []
 
 
 def _word_count(text: str) -> int:
@@ -1037,20 +1104,19 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[D
     return _write_edges(store, record)
 
 
-_EDGE_REL_BY_FIELD: dict[str, str] = {
-    "requires": "REQUIRES_COMPOSITIONAL",
-    "related": "REFERENCES_CONCEPTUAL",
-}
+# The sole skill-graph edge type. (REFERENCES_CONCEPTUAL / `related` was removed
+# in Stage 3a — it was stored but never consumed at runtime.)
+_REQUIRES_REL = "REQUIRES_COMPOSITIONAL"
 
 
 @dataclass
 class DeferredEdge:
-    """An edge whose target skill did not exist in the graph at insert time.
+    """A ``requires`` edge whose target skill did not exist at insert time.
 
     Cross-pack forward references are legitimate (pack B requires a skill from
-    pack A which is ingested later in the same batch). These are retried at the
-    end of a batch; any still-missing target is then warned about — never an
-    error."""
+    pack A which is ingested in a different pack). These are retried at the end
+    of a batch; any still-missing target is then warned about — never an error,
+    since install-packs ingests pack-by-pack and edges may cross packs."""
 
     source_id: str
     target_id: str
@@ -1059,28 +1125,25 @@ class DeferredEdge:
 
 
 def _write_edges(store: LadybugStore, record: ReviewRecord) -> list[DeferredEdge]:
-    """(Re)write a skill's outgoing graph edges. Returns deferred (forward-ref) edges.
+    """(Re)write a skill's outgoing ``requires`` edges. Returns deferred (forward-ref) edges.
 
-    Idempotent across re-ingest: the skill's existing REQUIRES_COMPOSITIONAL and
-    REFERENCES_CONCEPTUAL out-edges are deleted first, so a version bump replaces
-    rather than duplicates them. Targets that do not yet exist in the graph are
-    returned as ``DeferredEdge``s for a batch-end retry pass instead of failing.
+    Idempotent across re-ingest: the skill's existing REQUIRES_COMPOSITIONAL
+    out-edges are deleted first, so a version bump replaces rather than
+    duplicates them. Targets that do not yet exist in the graph are returned as
+    ``DeferredEdge``s for a batch-end retry pass instead of failing.
     """
     # Delete this skill's existing outgoing edges so re-ingest is idempotent.
-    for rel in _EDGE_REL_BY_FIELD.values():
-        store.execute(
-            f"MATCH (s:Skill {{skill_id: $id}})-[r:{rel}]->() DELETE r",
-            {"id": record.skill_id},
-        )
+    store.execute(
+        f"MATCH (s:Skill {{skill_id: $id}})-[r:{_REQUIRES_REL}]->() DELETE r",
+        {"id": record.skill_id},
+    )
 
     deferred: list[DeferredEdge] = []
-    for field_name, rel in _EDGE_REL_BY_FIELD.items():
-        targets = record.requires if field_name == "requires" else record.related
-        # De-dup within a field while preserving order.
-        for target in dict.fromkeys(targets):
-            if _create_edge_if_target_exists(store, record.skill_id, target, rel):
-                continue
-            deferred.append(DeferredEdge(record.skill_id, target, rel, field_name))
+    # De-dup while preserving order.
+    for target in dict.fromkeys(record.requires):
+        if _create_edge_if_target_exists(store, record.skill_id, target, _REQUIRES_REL):
+            continue
+        deferred.append(DeferredEdge(record.skill_id, target, _REQUIRES_REL, "requires"))
     return deferred
 
 

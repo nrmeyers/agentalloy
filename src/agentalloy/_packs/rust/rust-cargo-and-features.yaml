@@ -10,10 +10,6 @@ domain_tags:
 - dev-dependencies
 - lockfile-policy
 - rust
-related:
-- github-actions-caching-and-artifacts
-- rust-ownership-and-borrowing
-- rust-testing-idioms
 always_apply: false
 phase_scope:
 - build

@@ -10,11 +10,7 @@ domain_tags:
   - operational-constraints
 requires:
 - performance-budgets
-related:
-- analytics-observability-primer
-- design-review-rfc-and-adrs
-- sdd-verify-and-review
-phase_scope: [design, review]
+phase_scope: [design, qa]
 category_scope: [process]
 author: navistone
 change_summary: initial authoring draft

@@ -11,10 +11,6 @@ domain_tags:
 - form-data
 requires:
 - fastapi-routing-and-path-operations
-related:
-- fastapi-auth-and-security
-- fastapi-pydantic-models-and-validation
-- fastapi-testing
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

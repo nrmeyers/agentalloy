@@ -12,10 +12,6 @@ domain_tags:
 - kafka
 requires:
 - nestjs-modules-and-providers
-related:
-- nestjs-controllers-and-routing
-- nestjs-pipes-guards-interceptors
-- nestjs-websockets
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

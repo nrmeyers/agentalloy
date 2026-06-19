@@ -15,6 +15,7 @@ from agentalloy.ingest import (
     EXIT_VALIDATION,
     _lint,  # type: ignore[reportPrivateUsage]
     _load_yaml,  # type: ignore[reportPrivateUsage]
+    _validate_gate_spec,  # type: ignore[reportPrivateUsage]
     main,
 )
 from agentalloy.storage.ladybug import LadybugStore
@@ -280,6 +281,58 @@ def test_workflow_skill_with_fragments_is_validation_error(tmp_path: Path) -> No
     )
     code = main([str(bad), "--yes"])
     assert code == EXIT_VALIDATION
+
+
+def test_validate_gate_spec_accepts_valid_composite() -> None:
+    spec = {
+        "all_of": [
+            {"artifact_exists": {"path": "src/**"}},
+            {"artifact_contains": {"path": "tests/**/*.py", "sections": []}},
+        ]
+    }
+    assert _validate_gate_spec(spec) == []
+
+
+def test_validate_gate_spec_rejects_unknown_predicate() -> None:
+    errs = _validate_gate_spec({"artifact_exits": {"path": "x"}})  # typo
+    assert any("unknown predicate" in e for e in errs)
+
+
+def test_validate_gate_spec_rejects_mixed_composite_and_leaf() -> None:
+    errs = _validate_gate_spec({"all_of": [], "artifact_exists": {"path": "x"}})
+    assert any("mixes composite" in e for e in errs)
+
+
+def test_validate_gate_spec_rejects_empty_all_of() -> None:
+    errs = _validate_gate_spec({"all_of": []})
+    assert any("non-empty list" in e for e in errs)
+
+
+def test_validate_gate_spec_rejects_nested_unknown() -> None:
+    spec = {"any_of": [{"artifact_exists": {"path": "x"}}, {"bogus_pred": {}}]}
+    errs = _validate_gate_spec(spec)
+    assert any("bogus_pred" in e for e in errs)
+
+
+def test_workflow_yaml_with_bad_gate_fails_ingest(tmp_path: Path) -> None:
+    """A workflow skill whose exit_gates names an unknown predicate is rejected."""
+    bad = tmp_path / "wf_bad_gate.yaml"
+    bad.write_text(
+        textwrap.dedent("""\
+        skill_id: sdd-bad-gate
+        canonical_name: Bad Gate Workflow
+        category: operational
+        skill_class: workflow
+        domain_tags: []
+        always_apply: false
+        raw_prose: The workflow prose for this phase.
+        exit_gates:
+          all_of:
+            - not_a_real_predicate:
+                path: "x"
+    """)
+    )
+    assert main([str(bad), "--yes"]) == EXIT_VALIDATION
 
 
 def test_system_skill_no_applicability_is_validation_error(tmp_path: Path) -> None:

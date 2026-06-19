@@ -17,10 +17,6 @@ domain_tags:
 requires:
 - nextjs-app-router-routing
 - react-server-components-and-suspense
-related:
-- nextjs-data-fetching-and-caching
-- nextjs-proxy-and-edge-runtime
-- react-react-router
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

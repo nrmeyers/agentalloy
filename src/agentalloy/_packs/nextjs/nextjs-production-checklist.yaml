@@ -11,10 +11,6 @@ domain_tags:
 - security
 requires:
 - nextjs-app-router-routing
-related:
-- nextjs-csp-and-security-headers
-- nextjs-data-security-patterns
-- nextjs-self-hosting
 always_apply: false
 phase_scope:
 - build

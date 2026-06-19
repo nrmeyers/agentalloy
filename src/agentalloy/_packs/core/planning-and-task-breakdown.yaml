@@ -4,12 +4,8 @@ description: "Break complex coding projects into small, verifiable steps: define
 category: design
 skill_class: domain
 domain_tags: [task-decomposition, dependency-mapping, plan-checkpoint, slice-by-deliverable, integration-cost]
-related:
-- brainstorming
-- intake-verification-and-workflow-execution
-- sdd-design-and-planning
 always_apply: false
-phase_scope: [build, design, review]
+phase_scope: [build, design, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

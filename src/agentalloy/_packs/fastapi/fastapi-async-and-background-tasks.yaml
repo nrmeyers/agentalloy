@@ -7,10 +7,6 @@ domain_tags: [async-def-handler, threadpool-sync-handler, backgroundtasks-after-
 requires:
 - fastapi-lifespan-events
 - python-async-and-asyncio
-related:
-- fastapi-dependency-injection
-- fastapi-testing
-- python-async-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: framework

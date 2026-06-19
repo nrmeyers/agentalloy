@@ -4,12 +4,8 @@ description: "Collaborate on code changes safely by creating feature branches, w
 category: tooling
 skill_class: domain
 domain_tags: [feature-branch, commit-hygiene, pr-gate, atomic-commits, never-force-push-main]
-related:
-- github-actions-events-and-triggers
-- incremental-implementation
-- linting-pre-commit-hooks
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

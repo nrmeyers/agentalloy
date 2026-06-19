@@ -10,10 +10,6 @@ domain_tags:
 - fork
 - AbortController
 - nodejs
-related:
-- node-error-handling-and-process
-- nodejs-process-and-signals
-- nodejs-worker-threads
 always_apply: false
 phase_scope:
 - build

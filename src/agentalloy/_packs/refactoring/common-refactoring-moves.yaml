@@ -4,12 +4,8 @@ description: "Clean up messy code by extracting functions, renaming variables, i
 category: design
 skill_class: domain
 domain_tags: [extract-function, inline-function, rename-symbol, replace-conditional, parameter-object]
-related:
-- code-simplification
-- refactoring-safely-with-tests
-- refactoring-when-and-why
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

@@ -9,10 +9,6 @@ domain_tags:
 - reactive
 - project-reactor
 - non-blocking
-related:
-- java-jpa-hibernate
-- java-junit5-mockito
-- java-spring-di
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

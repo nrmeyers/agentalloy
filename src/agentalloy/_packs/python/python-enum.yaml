@@ -9,10 +9,6 @@ domain_tags:
 - intenum
 - strenum
 - flag
-related:
-- python-dataclasses
-- python-pattern-matching
-- python-typing-and-generics
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

@@ -4,10 +4,6 @@ description: "Catch bugs before they reach users by configuring TypeScript's tsc
 category: engineering
 skill_class: domain
 domain_tags: [strict-mode, no-unchecked-indexed-access, target-es-version, module-resolution-bundler, project-references, typescript]
-related:
-- linting-typescript-eslint
-- linting-typescript-strict-mode
-- typescript-build-tooling
 always_apply: false
 phase_scope: [build]
 category_scope: language

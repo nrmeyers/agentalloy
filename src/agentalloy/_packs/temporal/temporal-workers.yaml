@@ -12,10 +12,6 @@ domain_tags:
 requires:
 - temporal-activity-basics
 - temporal-workflow-basics
-related:
-- fastapi-async-and-background-tasks
-- temporal-message-passing
-- temporal-schedules-and-timers
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

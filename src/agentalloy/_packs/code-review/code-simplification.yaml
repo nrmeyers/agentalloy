@@ -9,12 +9,8 @@ domain_tags:
 - clean-code
 - complexity-reduction
 - naming
-related:
-- common-refactoring-moves
-- refactoring-when-and-why
-- when-to-stop-refactoring
 always_apply: false
-phase_scope: [review]
+phase_scope: [qa]
 category_scope: [process]
 author: navistone
 change_summary: hand-authored Opus source after 14B failed structural authoring

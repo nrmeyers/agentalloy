@@ -4,10 +4,6 @@ description: "Track and reduce technical debt by logging shortcuts, prioritizing
 category: design
 skill_class: domain
 domain_tags: [tech-debt, fowler-quadrant, debt-ledger, prudent-vs-reckless, repayment-cadence]
-related:
-- performance-budgets
-- planning-and-task-breakdown
-- when-to-stop-refactoring
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

@@ -12,10 +12,6 @@ domain_tags:
 requires:
 - fastify-routes-and-handlers
 - fastify-validation-and-serialization
-related:
-- fastify-error-handling-deep
-- fastify-performance-tuning
-- fastify-typescript-integration
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

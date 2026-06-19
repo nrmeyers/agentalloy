@@ -9,12 +9,8 @@ domain_tags:
 - react-testing-library
 - user-event
 - vitest
-related:
-- testing-runner-fundamentals
-- testing-snapshots
-- vue-testing
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [framework]
 author: navistone
 change_summary: hand-authored Opus expansion (wave 2)

@@ -10,10 +10,6 @@ domain_tags:
   - GIL
   - Process
   - python
-related:
-- nodejs-worker-threads
-- python-async-and-asyncio
-- python-asyncio-tasks
 phase_scope: [build]
 category_scope: [language]
 author: navistone

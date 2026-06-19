@@ -1,5 +1,5 @@
 name: nestjs
-version: 1.0.4
+version: 1.0.5
 tier: framework
 description: |
   NestJS 10+ patterns — module system and dependency injection, controllers and HTTP routing decorators, request lifecycle hooks (pipes/guards/interceptors), exception filters with HttpException hierarchy, and Express-compatible middleware. Precision-favored framework tier; sourced from docs.nestjs.com markdown via the nestjs/docs.nestjs.com GitHub repo per R1 tier-3 procedure (registry tier corrected from 1 → 3 on 2026-05-06: published llms.txt URLs return SPA index HTML, not LLM text).

@@ -11,10 +11,6 @@ domain_tags:
   - reviewers
 requires:
 - github-actions-secrets
-related:
-- github-actions-events-and-triggers
-- github-actions-expressions-and-contexts
-- github-actions-reusable-workflows
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

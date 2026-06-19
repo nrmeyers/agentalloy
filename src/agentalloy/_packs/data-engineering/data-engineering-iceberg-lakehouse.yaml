@@ -9,10 +9,6 @@ domain_tags:
 - lakehouse
 - delta-lake
 - data-lake
-related:
-- data-engineering-spark-fundamentals
-- redshift-spectrum-and-iceberg
-- snowflake-snowpipe-auto-ingest
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -9,10 +9,6 @@ domain_tags:
 - docker
 - image-optimization
 - reverse-proxy
-related:
-- nextjs-data-fetching-and-caching
-- nextjs-instrumentation-and-otel
-- nextjs-production-checklist
 always_apply: false
 phase_scope:
 - build

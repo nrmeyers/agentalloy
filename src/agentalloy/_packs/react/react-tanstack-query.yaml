@@ -10,10 +10,6 @@ domain_tags:
   - data-fetching
   - mutations
   - react
-related:
-- react-server-components-and-suspense
-- react-state-and-context
-- typescript-jsx-types
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

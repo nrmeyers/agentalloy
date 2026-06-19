@@ -10,10 +10,6 @@ domain_tags:
   - performance observer
   - event loop utilization
   - nodejs
-related:
-- nextjs-instrumentation-and-otel
-- node-event-loop-and-async
-- nodejs-events-and-emitter
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

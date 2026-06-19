@@ -9,12 +9,8 @@ domain_tags:
   - error-recovery
   - defect-spotting
   - triage-checklist
-related:
-- code-review-practices
-- debugging-systematic
-- error-handling-patterns
 always_apply: false
-phase_scope: [review]
+phase_scope: [qa]
 category_scope: [process]
 author: authoring-agent
 change_summary: initial authoring draft

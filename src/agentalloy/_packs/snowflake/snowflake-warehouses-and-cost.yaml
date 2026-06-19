@@ -12,10 +12,6 @@ domain_tags:
   - snowflake
   - resource monitors
   - account usage
-related:
-- snowflake-cortex-ai-ml
-- snowflake-snowpipe-auto-ingest
-- snowflake-tasks-and-automation
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

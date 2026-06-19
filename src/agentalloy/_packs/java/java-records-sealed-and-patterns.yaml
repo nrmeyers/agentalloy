@@ -4,10 +4,6 @@ description: "Model data structures and handle complex logic in Java: use record
 category: engineering
 skill_class: domain
 domain_tags: [record-component, sealed-permits, switch-pattern-matching, deconstruction-patterns, algebraic-data-types, java]
-related:
-- error-handling-patterns
-- java-jpa-hibernate
-- python-pattern-matching
 always_apply: false
 phase_scope: [build]
 category_scope: language

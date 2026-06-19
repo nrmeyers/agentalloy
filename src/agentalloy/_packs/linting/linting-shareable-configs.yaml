@@ -11,12 +11,8 @@ domain_tags:
 - config-package
 requires:
 - linting-eslint-rules-and-plugins
-related:
-- linting-monorepo-strategies
-- linting-prettier-and-formatting
-- linting-typescript-eslint
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

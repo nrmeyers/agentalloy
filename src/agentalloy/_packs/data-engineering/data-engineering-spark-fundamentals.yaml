@@ -9,10 +9,6 @@ domain_tags:
 - pyspark
 - distributed-computing
 - dataframes
-related:
-- data-engineering-airflow-best-practices
-- data-engineering-airflow-dags
-- data-engineering-iceberg-lakehouse
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

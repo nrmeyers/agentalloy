@@ -9,10 +9,6 @@ domain_tags:
 - iceberg
 - s3
 - aws
-related:
-- data-engineering-iceberg-lakehouse
-- redshift-loading-data
-- redshift-table-design
 always_apply: false
 phase_scope:
 - build

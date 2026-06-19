@@ -9,12 +9,8 @@ domain_tags:
   - approval-testing
   - redacting-content
   - test-maintenance
-related:
-- refactoring-safely-with-tests
-- testing-runner-fundamentals
-- testing-snapshots
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: initial authoring draft

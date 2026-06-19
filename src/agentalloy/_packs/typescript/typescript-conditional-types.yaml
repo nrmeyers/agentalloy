@@ -12,10 +12,6 @@ domain_tags:
 requires:
 - ts-generics-and-conditional-types
 - typescript-generics-deep
-related:
-- typescript-mapped-and-template-literal-types
-- typescript-type-operators
-- typescript-utility-types
 always_apply: false
 phase_scope:
 - build

@@ -10,10 +10,6 @@ domain_tags:
   - annotated-injection
   - router-level-dependencies
   - fastapi
-related:
-- fastapi-middleware-patterns
-- fastapi-routing-and-path-operations
-- fastapi-testing
 always_apply: false
 phase_scope: [build]
 category_scope: framework

@@ -32,7 +32,6 @@ def test_migrate_creates_rel_tables(ladybug: LadybugStore) -> None:
         "CURRENT_VERSION",
         "DECOMPOSES_TO",
         "REQUIRES_COMPOSITIONAL",
-        "REFERENCES_CONCEPTUAL",
     }.issubset(names)
 
 

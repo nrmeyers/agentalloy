@@ -4,10 +4,6 @@ description: "Handle errors in your app by validating inputs at boundaries, prop
 category: design
 skill_class: domain
 domain_tags: [error-propagation, validation-boundary, fail-fast, swallow-anti-pattern, retry-policy]
-related:
-- fastify-error-handling-deep
-- go-error-handling
-- react-error-boundaries
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

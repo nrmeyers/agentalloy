@@ -11,10 +11,6 @@ domain_tags:
 - user-intent
 requires:
 - sdd-design-and-planning
-related:
-- brainstorming
-- sdd-deliver-and-ship
-- sys-sdd-build
 always_apply: false
 phase_scope:
 - design

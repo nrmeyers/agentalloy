@@ -12,14 +12,10 @@ domain_tags:
 - csharp-dotnet
 requires:
 - csharp-async-and-tasks
-related:
-- csharp-error-handling
-- testing-flaky-tests
-- testing-property-based
 always_apply: false
 phase_scope:
 - build
-- review
+- qa
 category_scope: language
 author: navistone
 change_summary: |

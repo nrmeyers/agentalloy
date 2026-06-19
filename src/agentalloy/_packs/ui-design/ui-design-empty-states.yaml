@@ -9,10 +9,6 @@ domain_tags:
 - onboarding
 - ux-writing
 - first-run
-related:
-- brainstorming
-- ui-design-error-states
-- ui-design-loading-patterns
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

@@ -10,10 +10,6 @@ domain_tags:
   - context propagation
   - trace events
   - analytics
-related:
-- analytics-observability-primer
-- analytics-otel-metrics-and-logs
-- nextjs-instrumentation-and-otel
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

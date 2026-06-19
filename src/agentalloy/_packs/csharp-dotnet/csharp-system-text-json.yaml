@@ -10,10 +10,6 @@ domain_tags:
 - property-naming-policy
 - utf8-byte-pipeline
 - csharp-dotnet
-related:
-- csharp-async-and-tasks
-- csharp-error-handling
-- csharp-nullable-and-pattern-matching
 always_apply: false
 phase_scope:
 - build

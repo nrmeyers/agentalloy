@@ -9,10 +9,6 @@ domain_tags:
 - design-tokens
 - component-library
 - theming
-related:
-- ui-design-color-systems
-- ui-design-component-patterns
-- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

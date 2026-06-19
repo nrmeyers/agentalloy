@@ -11,10 +11,6 @@ domain_tags:
 - request-handling
 requires:
 - nestjs-modules-and-providers
-related:
-- nestjs-exception-filters
-- nestjs-middleware
-- nestjs-pipes-guards-interceptors
 always_apply: false
 phase_scope:
 - build

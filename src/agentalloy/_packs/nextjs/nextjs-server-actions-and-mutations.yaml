@@ -17,10 +17,6 @@ domain_tags:
 requires:
 - react-form-actions-and-status
 - react-server-actions
-related:
-- nextjs-app-router-routing
-- nextjs-data-fetching-and-caching
-- nextjs-redirects-and-rewrites
 always_apply: false
 phase_scope:
 - build

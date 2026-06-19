@@ -9,12 +9,8 @@ domain_tags:
 - factories
 - builders
 - test-data
-related:
-- pytest-fixtures
-- testing-mocks-and-spies
-- testing-test-data-builders
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

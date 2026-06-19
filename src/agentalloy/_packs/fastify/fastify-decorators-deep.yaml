@@ -11,10 +11,6 @@ domain_tags:
 - encapsulation
 requires:
 - fastify-plugins-and-encapsulation
-related:
-- fastify-hooks-and-lifecycle
-- fastify-routes-and-handlers
-- fastify-typescript-integration
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

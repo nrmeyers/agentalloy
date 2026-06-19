@@ -14,14 +14,10 @@ domain_tags:
 - native
 - describe/it
 - test-hooks
-related:
-- node-event-loop-and-async
-- testing-mocks-and-spies
-- testing-runner-fundamentals
 always_apply: false
 phase_scope:
 - build
-- review
+- qa
 category_scope: language
 author: navistone
 change_summary: |

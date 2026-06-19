@@ -4,10 +4,6 @@ description: "Write reusable Go functions and types that work with multiple data
 category: engineering
 skill_class: domain
 domain_tags: [type-parameters, constraint-interface, type-inference, comparable-types, parametric-polymorphism, go]
-related:
-- ts-generics-and-conditional-types
-- typescript-conditional-types
-- typescript-generics-deep
 always_apply: false
 phase_scope: [build]
 category_scope: language

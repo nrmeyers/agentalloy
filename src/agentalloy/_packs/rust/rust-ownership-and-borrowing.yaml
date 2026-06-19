@@ -4,10 +4,6 @@ description: "Write safe, high-performance systems code in Rust without garbage 
 category: engineering
 skill_class: domain
 domain_tags: [move-semantics, borrow-checker, lifetime-elision, interior-mutability, rc-arc, rust]
-related:
-- rust-async-and-concurrency
-- rust-cargo-and-features
-- rust-error-handling
 always_apply: false
 phase_scope: [build]
 category_scope: language

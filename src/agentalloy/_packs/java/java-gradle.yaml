@@ -9,10 +9,6 @@ domain_tags:
 - kotlin-dsl
 - build
 - configuration-cache
-related:
-- github-actions-caching-and-artifacts
-- java-maven
-- java-spring-boot-config
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

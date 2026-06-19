@@ -15,10 +15,6 @@ domain_tags:
 - python
 requires:
 - python-async-and-asyncio
-related:
-- fastapi-async-and-background-tasks
-- python-asyncio-streams
-- python-asyncio-tasks
 always_apply: false
 phase_scope:
 - build

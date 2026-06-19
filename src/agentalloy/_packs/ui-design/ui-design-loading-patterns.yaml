@@ -9,10 +9,6 @@ domain_tags:
 - skeletons
 - spinners
 - progress-indicators
-related:
-- react-react-router
-- ui-design-empty-states
-- ui-design-error-states
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

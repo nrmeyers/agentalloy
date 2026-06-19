@@ -9,10 +9,6 @@ domain_tags:
 - server-components
 - data-access-layer
 - authorization
-related:
-- nextjs-app-router-routing
-- nextjs-csp-and-security-headers
-- nextjs-server-actions-and-mutations
 always_apply: false
 phase_scope:
 - build

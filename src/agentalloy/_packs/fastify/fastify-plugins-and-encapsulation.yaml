@@ -12,10 +12,6 @@ domain_tags:
   - fastify
 requires:
 - fastify-decorators-deep
-related:
-- fastify-error-handling-deep
-- fastify-hooks-and-lifecycle
-- fastify-routes-and-handlers
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

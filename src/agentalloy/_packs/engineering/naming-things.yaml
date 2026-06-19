@@ -4,10 +4,6 @@ description: "Write code that stays readable after months of changes: choose var
 category: design
 skill_class: domain
 domain_tags: [naming-conventions, domain-language, ubiquitous-language, rename-discipline, abbreviation-anti-pattern]
-related:
-- code-simplification
-- common-refactoring-moves
-- refactoring-when-and-why
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

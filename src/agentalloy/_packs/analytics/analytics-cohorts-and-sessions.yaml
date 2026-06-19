@@ -11,10 +11,6 @@ domain_tags:
   - session-boundaries
 requires:
 - analytics-event-tracking
-related:
-- analytics-observability-primer
-- analytics-otel-metrics-and-logs
-- webhooks-event-types-and-schemas
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

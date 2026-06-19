@@ -9,10 +9,6 @@ domain_tags:
 - dlq
 - dead-letter-queue
 - reliability
-related:
-- webhooks-fan-out-architectures
-- webhooks-idempotency
-- webhooks-signature-verification
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

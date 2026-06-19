@@ -11,10 +11,6 @@ domain_tags:
 - monitoring
 requires:
 - redis-replication
-related:
-- redis-cluster
-- redis-persistence
-- redis-strings-and-key-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

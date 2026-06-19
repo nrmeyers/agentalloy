@@ -7,10 +7,6 @@ domain_tags: [asyncio-event-loop, coroutines, async-await, taskgroup, gil-vs-asy
 requires:
 - fastapi-async-and-background-tasks
 - python-asyncio-tasks
-related:
-- python-async-patterns
-- python-asyncio-streams
-- python-multiprocessing
 always_apply: false
 phase_scope: [build]
 category_scope: language

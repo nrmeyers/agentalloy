@@ -10,10 +10,6 @@ domain_tags:
   - lifecycle-events
   - robust-cli-tools
   - nodejs
-related:
-- node-error-handling-and-process
-- nodejs-child-process
-- nodejs-events-and-emitter
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

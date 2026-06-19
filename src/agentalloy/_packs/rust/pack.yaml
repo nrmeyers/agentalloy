@@ -1,5 +1,5 @@
 name: rust
-version: 1.0.5
+version: 1.0.6
 tier: language
 description: Rust language patterns — ownership and borrowing, Result/Option error handling, async/await + Send/Sync concurrency with tokio, Cargo manifests and feature flags,
 author: navistone

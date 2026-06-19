@@ -12,10 +12,6 @@ domain_tags:
   - data-engineering
 requires:
 - data-engineering-airflow-dags
-related:
-- snowflake-snowpipe-auto-ingest
-- snowflake-tasks-and-automation
-- temporal-workflow-basics
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

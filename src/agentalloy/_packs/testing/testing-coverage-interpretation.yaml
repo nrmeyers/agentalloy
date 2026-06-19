@@ -9,12 +9,8 @@ domain_tags:
   - mutation testing
   - code quality
   - software development
-related:
-- code-review-debugging-and-defects
-- refactoring-safely-with-tests
-- testing-property-based
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: initial authoring draft

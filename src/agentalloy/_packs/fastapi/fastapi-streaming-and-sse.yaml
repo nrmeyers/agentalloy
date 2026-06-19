@@ -9,10 +9,6 @@ domain_tags:
   - fastapi
   - response
   - async
-related:
-- fastapi-async-and-background-tasks
-- fastapi-routing-and-path-operations
-- fastapi-websockets
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

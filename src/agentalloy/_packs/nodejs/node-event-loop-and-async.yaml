@@ -4,10 +4,6 @@ description: "Fix slow Node.js servers and debug async bugs: understand the even
 category: engineering
 skill_class: domain
 domain_tags: [event-loop-phases, microtask-queue, async-local-storage, worker-threads, single-threaded-runtime, nodejs]
-related:
-- nodejs-perf-hooks
-- nodejs-worker-threads
-- python-async-and-asyncio
 always_apply: false
 phase_scope: [build]
 category_scope: language

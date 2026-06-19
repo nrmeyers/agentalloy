@@ -4,12 +4,8 @@ description: "Stop guessing your code works and prove it before calling a task d
 category: engineering
 skill_class: domain
 domain_tags: [evidence-before-assertions, run-the-tests, ci-output, partial-pass, type-check-is-not-feature-check]
-related:
-- refactoring-safely-with-tests
-- rust-testing-idioms
-- testing-runner-fundamentals
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

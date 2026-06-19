@@ -9,12 +9,8 @@ domain_tags:
   - complex objects
   - factory pattern
   - domain knowledge
-related:
-- testing-fixture-libraries
-- testing-integration-patterns
-- testing-property-based
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: machine authoring contract for pending-qa pipeline

@@ -10,10 +10,6 @@ domain_tags:
 - completablefuture-composition
 - executors-newvirtualthreadpertaskexecutor
 - java
-related:
-- csharp-async-and-tasks
-- java-exceptions-and-try-with-resources
-- java-spring-webflux
 always_apply: false
 phase_scope:
 - build

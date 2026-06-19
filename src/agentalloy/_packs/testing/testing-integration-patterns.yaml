@@ -9,12 +9,8 @@ domain_tags:
   - database-isolation
   - fixture-data
   - mocking-external-apis
-related:
-- java-junit5-mockito
-- testing-contract-testing
-- testing-fixture-libraries
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: initial authoring draft

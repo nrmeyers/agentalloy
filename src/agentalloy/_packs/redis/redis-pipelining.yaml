@@ -9,10 +9,6 @@ domain_tags:
   - throughput
   - latency
   - transactions
-related:
-- redis-lists-and-sorted-sets
-- redis-strings-and-key-management
-- redis-transactions-multi-exec
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

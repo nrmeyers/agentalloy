@@ -6,12 +6,8 @@ skill_class: domain
 domain_tags: [amdahls-law, use-method, latency-breakdown, n-plus-one, lock-contention]
 requires:
 - profiling-correctly
-related:
-- linting-performance-optimization
-- measure-before-optimizing
-- performance-budgets
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [ops]
 author: navistone
 change_summary: |

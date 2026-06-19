@@ -11,12 +11,8 @@ domain_tags:
 - dependency-override
 requires:
 - fastapi-routing-and-path-operations
-related:
-- fastapi-auth-and-security
-- fastapi-dependency-injection
-- fastapi-pydantic-models-and-validation
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [framework]
 author: navistone
 change_summary: hand-authored Opus expansion

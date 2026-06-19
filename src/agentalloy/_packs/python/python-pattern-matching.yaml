@@ -10,10 +10,6 @@ domain_tags:
   - case-statement
   - structural-patterns
   - python
-related:
-- java-records-sealed-and-patterns
-- python-enum
-- python-typing-protocol
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

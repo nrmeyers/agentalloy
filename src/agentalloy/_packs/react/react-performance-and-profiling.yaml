@@ -12,10 +12,6 @@ domain_tags:
 - react
 requires:
 - react-rendering-keys-and-memoization
-related:
-- measure-before-optimizing
-- react-context-patterns
-- react-effects-and-cleanup
 always_apply: false
 phase_scope:
 - build

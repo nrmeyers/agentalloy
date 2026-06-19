@@ -11,10 +11,6 @@ domain_tags:
 - immutability
 requires:
 - python-typing-and-generics
-related:
-- python-enum
-- python-typing-protocol
-- testing-test-data-builders
 always_apply: false
 phase_scope:
 - build

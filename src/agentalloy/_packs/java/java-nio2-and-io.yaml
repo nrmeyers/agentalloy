@@ -4,10 +4,6 @@ description: "Read, write, and manage files in Java applications: use Path and F
 category: engineering
 skill_class: domain
 domain_tags: [path-resolution, files-readstring-writestring, directorystream-walk, filechannel-bytebuffer, watchservice-events, java]
-related:
-- java-exceptions-and-try-with-resources
-- java-spring-webflux
-- java-virtual-threads-and-concurrency
 always_apply: false
 phase_scope: [build]
 category_scope: language

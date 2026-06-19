@@ -9,10 +9,6 @@ domain_tags:
 - dependency-injection
 - ioc
 - constructor-injection
-related:
-- java-jpa-hibernate
-- java-junit5-mockito
-- java-spring-security
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

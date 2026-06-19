@@ -12,10 +12,6 @@ domain_tags:
 requires:
 - temporal-activity-basics
 - temporal-workers
-related:
-- data-engineering-airflow-best-practices
-- temporal-message-passing
-- temporal-schedules-and-timers
 always_apply: false
 phase_scope:
 - build

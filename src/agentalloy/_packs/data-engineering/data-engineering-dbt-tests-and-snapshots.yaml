@@ -12,10 +12,6 @@ domain_tags:
 - data-engineering
 requires:
 - data-engineering-dbt-models
-related:
-- data-engineering-data-quality
-- data-engineering-slowly-changing-dimensions
-- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope:
 - build

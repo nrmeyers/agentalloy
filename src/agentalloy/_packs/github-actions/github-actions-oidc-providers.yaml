@@ -8,10 +8,6 @@ domain_tags:
 - github-actions
 - gcp
 - vault
-related:
-- github-actions-deployment-environments
-- github-actions-events-and-triggers
-- github-actions-secrets
 always_apply: false
 phase_scope:
 - build

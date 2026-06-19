@@ -9,8 +9,6 @@ domain_tags:
   - intent-interview
   - scoping
 requires: []
-related:
-  - sdd-spec-and-scoping
 always_apply: false
 applies_to_phases:
   - intake
@@ -52,8 +50,8 @@ contract_template: |
   ## Proposed route
 
   <which phase to start in and why — default is spec>
-# intake is not a valid phase_scope value (those are design/build/review);
-# this workflow is selected by applies_to_phases, scoped here via category.
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: navistone

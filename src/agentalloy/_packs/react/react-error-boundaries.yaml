@@ -9,10 +9,6 @@ domain_tags:
 - class-components
 - componentDidCatch
 - getDerivedStateFromError
-related:
-- error-handling-patterns
-- react-effects-and-cleanup
-- react-server-components-and-suspense
 always_apply: false
 phase_scope:
 - build

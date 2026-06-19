@@ -9,10 +9,6 @@ domain_tags:
 - lifecycle
 - request-response
 - application-level
-related:
-- fastify-decorators-deep
-- fastify-plugins-and-encapsulation
-- fastify-routes-and-handlers
 always_apply: false
 phase_scope:
 - build

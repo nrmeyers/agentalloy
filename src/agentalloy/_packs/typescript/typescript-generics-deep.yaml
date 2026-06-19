@@ -9,10 +9,6 @@ domain_tags:
   - type-safety
   - reusable-apis
   - type-inference
-related:
-- ts-generics-and-conditional-types
-- typescript-conditional-types
-- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

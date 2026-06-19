@@ -9,10 +9,6 @@ domain_tags:
 - queues
 - scaling
 - kafka
-related:
-- webhooks-idempotency
-- webhooks-observability
-- webhooks-replay-and-dlq
 always_apply: false
 phase_scope: [build, design]
 category_scope: [ops]

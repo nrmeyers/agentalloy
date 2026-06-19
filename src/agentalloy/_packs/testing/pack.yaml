@@ -1,5 +1,5 @@
 name: testing
-version: 1.0.4
+version: 1.0.5
 tier: tooling
 description: |
   Generic testing strategy and Vitest reference patterns — runner fundamentals (describe/hooks/filtering), mocks/spies/module mocking (deferred to needs-human), snapshot testing, and browser/E2E testing with DevTools. Precision-favored tooling tier; cross-cutting strategy skills sit alongside language-specific testing packs (pytest already shipped). Sourced from vitest.dev/llms-full.txt (R1 tier-1) and agent-skills/ canonical testing methodology.

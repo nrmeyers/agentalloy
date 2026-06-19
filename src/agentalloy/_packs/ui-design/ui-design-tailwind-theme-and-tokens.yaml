@@ -10,10 +10,6 @@ domain_tags:
 - css
 - utility-classes
 - ui-design
-related:
-- ui-design-responsive-and-dark-mode
-- ui-design-systems-architecture
-- ui-design-tailwind-utility-classes
 always_apply: false
 phase_scope:
 - build

@@ -12,10 +12,6 @@ domain_tags:
 - rust
 requires:
 - rust-ownership-and-borrowing
-related:
-- python-async-patterns
-- rust-cargo-and-features
-- rust-error-handling
 always_apply: false
 phase_scope:
 - build

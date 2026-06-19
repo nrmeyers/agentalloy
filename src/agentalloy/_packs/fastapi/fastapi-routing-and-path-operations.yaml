@@ -10,10 +10,6 @@ domain_tags:
   - status-code-response
   - openapi-tags-summary
   - fastapi
-related:
-- fastapi-dependency-injection
-- fastapi-openapi-customization
-- fastapi-pydantic-models-and-validation
 always_apply: false
 phase_scope: [build]
 category_scope: framework

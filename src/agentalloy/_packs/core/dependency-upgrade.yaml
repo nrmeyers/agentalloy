@@ -4,12 +4,8 @@ description: "Update libraries and frameworks safely without breaking your app: 
 category: tooling
 skill_class: domain
 domain_tags: [semver, lockfile, breaking-changes, transitive-deps, upgrade-one-at-a-time]
-related:
-- github-actions-caching-and-artifacts
-- go-modules-and-dependencies
-- writing-changelogs
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

@@ -9,12 +9,8 @@ domain_tags:
 - spies
 - stubs
 - vitest
-related:
-- node-built-in-test-runner
-- pytest-monkeypatch
-- testing-runner-fundamentals
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus source after 14B failed structural authoring

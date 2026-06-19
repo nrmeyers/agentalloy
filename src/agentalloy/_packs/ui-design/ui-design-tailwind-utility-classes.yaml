@@ -10,10 +10,6 @@ domain_tags:
 - responsive-design
 - inline-styles
 - ui-design
-related:
-- ui-design-responsive-and-dark-mode
-- ui-design-states-and-variants
-- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope:
 - build

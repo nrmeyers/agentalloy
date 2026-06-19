@@ -9,10 +9,6 @@ domain_tags:
 - mockito
 - testcontainers
 - spring-boot-test
-related:
-- java-jpa-hibernate
-- java-spring-di
-- testing-integration-patterns
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

@@ -4,12 +4,8 @@ description: "Refactor legacy code or complex logic without breaking existing fe
 category: design
 skill_class: domain
 domain_tags: [characterization-tests, green-bar, golden-master, small-steps, bisect-on-failure]
-related:
-- common-refactoring-moves
-- test-driven-development
-- when-to-stop-refactoring
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

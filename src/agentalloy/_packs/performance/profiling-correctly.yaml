@@ -4,12 +4,8 @@ description: "Find and fix slow code by measuring where your program spends time
 category: design
 skill_class: domain
 domain_tags: [sampling-profiler, instrumented-tracing, flame-graph, observer-effect, production-profiling]
-related:
-- measure-before-optimizing
-- nodejs-perf-hooks
-- react-performance-and-profiling
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [ops]
 author: navistone
 change_summary: |

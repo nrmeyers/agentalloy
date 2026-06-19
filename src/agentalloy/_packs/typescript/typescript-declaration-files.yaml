@@ -9,10 +9,6 @@ domain_tags:
 - ambient-types
 - type-definitions
 - modules
-related:
-- ts-modules-and-declaration-files
-- ts-types-vs-interfaces
-- typescript-modules-and-imports
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

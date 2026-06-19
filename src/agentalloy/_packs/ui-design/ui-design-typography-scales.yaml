@@ -9,10 +9,6 @@ domain_tags:
 - type-scale
 - vertical-rhythm
 - fluid-typography
-related:
-- ui-design-layout-primitives
-- ui-design-systems-architecture
-- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

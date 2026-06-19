@@ -56,7 +56,6 @@ REL_TABLES: tuple[str, ...] = (
     "CREATE REL TABLE IF NOT EXISTS CURRENT_VERSION(FROM Skill TO SkillVersion)",
     "CREATE REL TABLE IF NOT EXISTS DECOMPOSES_TO(FROM SkillVersion TO Fragment)",
     "CREATE REL TABLE IF NOT EXISTS REQUIRES_COMPOSITIONAL(FROM Skill TO Skill)",
-    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONCEPTUAL(FROM Skill TO Skill)",
 )
 
 # Alter-table migrations for columns added after initial schema.

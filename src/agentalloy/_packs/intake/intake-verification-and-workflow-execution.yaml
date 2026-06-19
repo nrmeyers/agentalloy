@@ -9,11 +9,8 @@ domain_tags:
   - handoff-confirmations
   - routing-layer
   - v1-scope
-related:
-- planning-and-task-breakdown
-- temporal-workflow-basics
 always_apply: false
-phase_scope: [design, review]
+phase_scope: [design, qa]
 category_scope: [process]
 author: navistone
 change_summary: machine authoring contract for pending-qa pipeline

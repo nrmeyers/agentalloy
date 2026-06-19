@@ -9,10 +9,6 @@ domain_tags:
   - imports
   - esm
   - commonjs
-related:
-- node-esm-and-cjs-interop
-- ts-modules-and-declaration-files
-- ts-strict-mode-and-tsconfig
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

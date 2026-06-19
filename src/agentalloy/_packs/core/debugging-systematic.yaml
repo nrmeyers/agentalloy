@@ -4,12 +4,8 @@ description: "Fix mysterious bugs faster by reproducing the issue reliably, form
 category: engineering
 skill_class: domain
 domain_tags: [reproduce-the-bug, hypothesis-driven, git-bisect, log-analysis, root-cause]
-related:
-- code-review-debugging-and-defects
-- refactoring-safely-with-tests
-- testing-flaky-tests
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

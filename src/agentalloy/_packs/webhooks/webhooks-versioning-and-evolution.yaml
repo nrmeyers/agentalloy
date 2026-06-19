@@ -11,10 +11,6 @@ domain_tags:
 - deprecation
 requires:
 - webhooks-event-types-and-schemas
-related:
-- rest-versioning-and-compatibility
-- webhooks-documentation
-- webhooks-signature-verification
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

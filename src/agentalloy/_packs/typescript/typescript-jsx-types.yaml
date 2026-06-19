@@ -9,10 +9,6 @@ domain_tags:
 - react
 - components
 - hooks
-related:
-- react-hooks-rules-and-deps
-- react-server-components-and-suspense
-- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

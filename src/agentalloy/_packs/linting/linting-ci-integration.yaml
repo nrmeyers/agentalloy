@@ -11,12 +11,8 @@ domain_tags:
 - cache
 requires:
 - github-actions-caching-and-artifacts
-related:
-- github-actions-concurrency
-- linting-performance-optimization
-- linting-pre-commit-hooks
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

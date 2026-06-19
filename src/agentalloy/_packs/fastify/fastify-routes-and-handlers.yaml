@@ -9,10 +9,6 @@ domain_tags:
 - handlers
 - http-endpoints
 - route-options
-related:
-- fastify-error-handling-deep
-- fastify-hooks-and-lifecycle
-- fastify-performance-tuning
 always_apply: false
 phase_scope:
 - build

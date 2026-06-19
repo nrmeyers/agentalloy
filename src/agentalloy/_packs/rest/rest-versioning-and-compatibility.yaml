@@ -12,10 +12,6 @@ domain_tags:
 - rest
 requires:
 - rest-http-and-resource-design
-related:
-- rest-common-patterns
-- webhooks-versioning-and-evolution
-- writing-api-docs
 always_apply: false
 phase_scope:
 - build

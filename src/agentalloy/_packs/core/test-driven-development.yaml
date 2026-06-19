@@ -13,12 +13,8 @@ domain_tags:
 - tdd
 - test-driven-development
 - vitest
-related:
-- pytest-fixtures
-- refactoring-safely-with-tests
-- testing-runner-fundamentals
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: 'Initial authoring 2026-05-04. Sources — Kent Beck''s *Test-Driven

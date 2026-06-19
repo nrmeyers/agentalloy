@@ -11,10 +11,6 @@ domain_tags:
 - yaml
 requires:
 - github-actions-workflow-syntax
-related:
-- github-actions-events-and-triggers
-- github-actions-reusable-workflows
-- github-actions-secrets
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

@@ -4,10 +4,6 @@ description: "Handle crashes and shutdowns in Node.js apps: catch uncaught excep
 category: engineering
 skill_class: domain
 domain_tags: [error-codes, uncaught-exception, unhandled-rejection, abort-controller, signal-handling, nodejs]
-related:
-- nodejs-child-process
-- nodejs-events-and-emitter
-- nodejs-process-and-signals
 always_apply: false
 phase_scope: [build]
 category_scope: language

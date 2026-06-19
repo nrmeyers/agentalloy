@@ -4,10 +4,6 @@ description: "Manage Go project dependencies and versions: define modules in go.
 category: tooling
 skill_class: domain
 domain_tags: [module-path, semantic-import-versioning, replace-directive, vendor-mode, module-proxy, go]
-related:
-- dependency-upgrade
-- linting-golangci-lint
-- rust-cargo-and-features
 always_apply: false
 phase_scope: [build]
 category_scope: language

@@ -9,10 +9,6 @@ domain_tags:
 - providers
 - dependency-injection
 - application-structure
-related:
-- nestjs-controllers-and-routing
-- nestjs-pipes-guards-interceptors
-- nestjs-websockets
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

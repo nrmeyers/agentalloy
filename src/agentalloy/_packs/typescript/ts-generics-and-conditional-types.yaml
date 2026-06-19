@@ -6,10 +6,6 @@ skill_class: domain
 domain_tags: [generics, conditional-types, infer-clause, mapped-types, variance-modifiers, typescript]
 requires:
 - typescript-generics-deep
-related:
-- typescript-conditional-types
-- typescript-mapped-and-template-literal-types
-- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: language

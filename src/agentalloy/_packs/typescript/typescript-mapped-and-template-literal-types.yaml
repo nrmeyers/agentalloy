@@ -10,10 +10,6 @@ domain_tags:
 - type transformation
 - object manipulation
 - typescript
-related:
-- ts-generics-and-conditional-types
-- typescript-conditional-types
-- typescript-utility-types
 always_apply: false
 phase_scope:
 - build

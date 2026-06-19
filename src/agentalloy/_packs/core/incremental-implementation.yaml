@@ -4,12 +4,8 @@ description: "Ship features without breaking the app by committing small, workin
 category: engineering
 skill_class: domain
 domain_tags: [small-commits, working-tree-discipline, integration-frequency, stop-at-green, scope-creep]
-related:
-- code-review-practices
-- git-workflow
-- refactoring-safely-with-tests
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

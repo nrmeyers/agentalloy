@@ -9,10 +9,6 @@ domain_tags:
 - verification
 - architecture
 - security
-related:
-- code-review-debugging-and-defects
-- code-review-practices
-- sys-sdd-build
 always_apply: false
 phase_scope:
 - design

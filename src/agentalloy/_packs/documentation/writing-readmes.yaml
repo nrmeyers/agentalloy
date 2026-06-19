@@ -4,10 +4,6 @@ description: "Write clear READMEs that help users understand your project and ge
 category: design
 skill_class: domain
 domain_tags: [readme-structure, quickstart, install-instructions, project-pitch, audience-tiers]
-related:
-- inline-comments-and-docstrings
-- writing-api-docs
-- writing-changelogs
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

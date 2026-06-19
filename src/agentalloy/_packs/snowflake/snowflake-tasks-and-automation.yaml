@@ -9,10 +9,6 @@ domain_tags:
   - automation
   - scheduled-execution
   - dag
-related:
-- data-engineering-airflow-best-practices
-- data-engineering-airflow-dags
-- snowflake-dynamic-tables
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

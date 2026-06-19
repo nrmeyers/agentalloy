@@ -9,10 +9,6 @@ domain_tags:
 - svix
 - webhooks
 - at-least-once delivery
-related:
-- webhooks-event-types-and-schemas
-- webhooks-replay-and-dlq
-- webhooks-signature-verification
 always_apply: false
 phase_scope:
 - build

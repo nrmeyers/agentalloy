@@ -10,10 +10,6 @@ domain_tags:
 - model-config-strict
 - field-validator-decorator
 - fastapi
-related:
-- fastapi-dependency-injection
-- fastapi-routing-and-path-operations
-- fastapi-testing
 always_apply: false
 phase_scope:
 - build

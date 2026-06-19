@@ -9,10 +9,6 @@ domain_tags:
 - react-19
 - form-actions
 - next-actions
-related:
-- nextjs-server-actions-and-mutations
-- react-form-actions-and-status
-- react-server-components-and-suspense
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

@@ -9,12 +9,8 @@ domain_tags:
   - ui-testing
   - complex-objects
   - inline-snapshots
-related:
-- testing-runner-fundamentals
-- testing-snapshot-strategies
-- vue-testing
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: authoring-agent
 change_summary: initial authoring draft

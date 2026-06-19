@@ -16,10 +16,6 @@ domain_tags:
 - on-demand-rendering
 requires:
 - react-server-components-and-suspense
-related:
-- nextjs-app-router-routing
-- nextjs-ppr-cache-components
-- nextjs-server-actions-and-mutations
 always_apply: false
 phase_scope:
 - build

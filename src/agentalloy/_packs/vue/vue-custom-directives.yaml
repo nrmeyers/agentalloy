@@ -9,10 +9,6 @@ domain_tags:
 - v-directive
 - lifecycle-hooks
 - low-level-dom
-related:
-- vue-composition-api-reactivity
-- vue-lifecycle-and-async-components
-- vue-template-directives
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

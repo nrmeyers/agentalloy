@@ -9,10 +9,6 @@ domain_tags:
 - distribution style
 - sort key
 - automatic optimization
-related:
-- redshift-query-tuning
-- redshift-workload-management
-- snowflake-tables-and-clustering
 always_apply: false
 phase_scope:
 - build

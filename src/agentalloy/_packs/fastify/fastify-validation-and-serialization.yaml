@@ -9,10 +9,6 @@ domain_tags:
 - serialization
 - json-schema
 - ajv
-related:
-- fastify-error-handling-deep
-- fastify-performance-tuning
-- fastify-schema-typebox
 always_apply: false
 phase_scope:
 - build

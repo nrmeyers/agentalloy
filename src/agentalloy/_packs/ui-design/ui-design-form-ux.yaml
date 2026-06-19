@@ -9,10 +9,6 @@ domain_tags:
 - validation
 - input-design
 - form-flow
-related:
-- react-forms-and-controlled-inputs
-- ui-design-component-patterns
-- ui-design-error-states
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

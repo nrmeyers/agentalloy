@@ -9,10 +9,6 @@ domain_tags:
   - tasks
   - operators
   - data-engineering
-related:
-- data-engineering-airflow-best-practices
-- snowflake-snowpipe-auto-ingest
-- snowflake-tasks-and-automation
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

@@ -9,14 +9,10 @@ domain_tags:
 - javascript
 - typescript
 - linting
-related:
-- linting-eslint-rules-and-plugins
-- linting-prettier-and-formatting
-- linting-typescript-eslint
 always_apply: false
 phase_scope:
 - build
-- review
+- qa
 category_scope:
 - tooling
 author: navistone

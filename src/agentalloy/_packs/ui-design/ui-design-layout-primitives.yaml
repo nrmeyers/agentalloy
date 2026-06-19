@@ -10,10 +10,6 @@ domain_tags:
 - flexbox
 - stack
 - container-queries
-related:
-- ui-design-responsive-and-dark-mode
-- ui-design-tailwind-utility-classes
-- ui-design-typography-scales
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

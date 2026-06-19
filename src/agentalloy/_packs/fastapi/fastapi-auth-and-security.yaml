@@ -17,10 +17,6 @@ domain_tags:
 requires:
 - fastapi-dependency-injection
 - fastapi-routing-and-path-operations
-related:
-- fastapi-openapi-customization
-- fastapi-pydantic-models-and-validation
-- fastapi-testing
 always_apply: false
 phase_scope: [build]
 category_scope: framework

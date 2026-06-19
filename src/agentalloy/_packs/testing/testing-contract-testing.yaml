@@ -9,12 +9,8 @@ domain_tags:
   - openapi
   - json-schema
   - integration-tests
-related:
-- fastapi-openapi-customization
-- testing-integration-patterns
-- writing-api-docs
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: authoring-agent
 change_summary: initial authoring draft

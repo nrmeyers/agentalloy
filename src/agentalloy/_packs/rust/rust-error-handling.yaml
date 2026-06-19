@@ -10,10 +10,6 @@ domain_tags:
 - error-conversion-from
 - error-context-anyhow
 - rust
-related:
-- error-handling-patterns
-- rust-async-and-concurrency
-- rust-ownership-and-borrowing
 always_apply: false
 phase_scope:
 - build

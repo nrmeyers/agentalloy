@@ -9,10 +9,6 @@ domain_tags:
 - sorted-sets
 - queues
 - leaderboards
-related:
-- redis-hashes-and-sets
-- redis-streams
-- redis-strings-and-key-management
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

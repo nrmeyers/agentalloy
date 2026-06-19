@@ -11,10 +11,6 @@ domain_tags:
 requires:
 - temporal-workers
 - temporal-workflow-basics
-related:
-- python-async-patterns
-- temporal-activity-basics
-- temporal-message-passing
 always_apply: false
 phase_scope:
 - build

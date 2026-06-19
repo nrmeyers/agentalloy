@@ -9,12 +9,8 @@ domain_tags:
 - husky
 - lint-staged
 - pre-commit-framework
-related:
-- git-workflow
-- linting-eslint-rules-and-plugins
-- linting-prettier-and-formatting
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

@@ -10,12 +10,8 @@ domain_tags:
 - tooling-philosophy
 requires:
 - linting-prettier-and-formatting
-related:
-- linting-eslint-rules-and-plugins
-- linting-ruff-python
-- linting-stylelint
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

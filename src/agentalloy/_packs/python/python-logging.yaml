@@ -9,10 +9,6 @@ domain_tags:
   - structured logging
   - dictConfig
   - handlers
-related:
-- analytics-otel-metrics-and-logs
-- linting-ruff-python
-- python-error-handling
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

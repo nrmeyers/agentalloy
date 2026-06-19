@@ -11,10 +11,6 @@ domain_tags:
 - validation
 requires:
 - react-hooks-rules-and-deps
-related:
-- react-form-actions-and-status
-- react-server-actions
-- ui-design-form-ux
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

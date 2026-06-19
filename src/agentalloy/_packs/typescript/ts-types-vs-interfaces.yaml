@@ -4,10 +4,6 @@ description: "Define data shapes and object structures in TypeScript: choose bet
 category: engineering
 skill_class: domain
 domain_tags: [type-alias, interface, declaration-merging, structural-typing, readonly-modifier, typescript]
-related:
-- ts-generics-and-conditional-types
-- typescript-type-operators
-- typescript-utility-types
 always_apply: false
 phase_scope: [build]
 category_scope: language

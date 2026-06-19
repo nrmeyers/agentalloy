@@ -10,10 +10,6 @@ domain_tags:
 - loading-error-boundaries
 - route-groups-parens
 - nextjs
-related:
-- nextjs-data-fetching-and-caching
-- nextjs-ppr-cache-components
-- react-react-router
 always_apply: false
 phase_scope:
 - build

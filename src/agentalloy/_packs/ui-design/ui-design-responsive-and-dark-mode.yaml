@@ -10,10 +10,6 @@ domain_tags:
 - ui-design
 requires:
 - ui-design-tailwind-utility-classes
-related:
-- ui-design-component-patterns
-- ui-design-states-and-variants
-- ui-design-tailwind-theme-and-tokens
 always_apply: false
 phase_scope:
 - build

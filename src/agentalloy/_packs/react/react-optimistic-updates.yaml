@@ -9,10 +9,6 @@ domain_tags:
 - optimistic-ui
 - concurrent-updates
 - server-actions
-related:
-- nextjs-server-actions-and-mutations
-- react-server-actions
-- react-transitions-and-deferred-values
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

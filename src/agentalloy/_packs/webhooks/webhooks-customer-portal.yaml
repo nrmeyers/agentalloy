@@ -11,10 +11,6 @@ domain_tags:
 - ui-patterns
 requires:
 - webhooks-event-types-and-schemas
-related:
-- webhooks-consumer-patterns
-- webhooks-documentation
-- webhooks-observability
 always_apply: false
 phase_scope: [build]
 category_scope: [ops]

@@ -9,12 +9,8 @@ domain_tags:
 - golangci-lint
 - static-analysis
 - gofmt
-related:
-- go-modules-and-dependencies
-- go-testing-idioms
-- linting-shareable-configs
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [tooling]
 author: navistone
 change_summary: hand-authored Opus expansion

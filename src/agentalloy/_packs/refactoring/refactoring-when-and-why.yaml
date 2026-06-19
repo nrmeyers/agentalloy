@@ -4,12 +4,8 @@ description: "Improve code structure without breaking functionality: refactor on
 category: design
 skill_class: domain
 domain_tags: [behavior-preserving, rule-of-three, just-in-time-refactor, opportunistic-refactor, premature-abstraction]
-related:
-- common-refactoring-moves
-- refactoring-safely-with-tests
-- when-to-stop-refactoring
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

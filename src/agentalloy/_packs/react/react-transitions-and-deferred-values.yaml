@@ -8,10 +8,6 @@ domain_tags:
   - concurrent rendering
   - useTransition
   - useDeferredValue
-related:
-- react-optimistic-updates
-- react-rendering-keys-and-memoization
-- react-state-and-context
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

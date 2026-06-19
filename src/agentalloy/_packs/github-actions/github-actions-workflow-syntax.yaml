@@ -11,10 +11,6 @@ domain_tags:
 - ci/cd
 requires:
 - github-actions-events-and-triggers
-related:
-- github-actions-deployment-environments
-- github-actions-expressions-and-contexts
-- github-actions-reusable-workflows
 always_apply: false
 phase_scope:
 - build

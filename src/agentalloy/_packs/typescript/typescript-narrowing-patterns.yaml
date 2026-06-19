@@ -11,10 +11,6 @@ domain_tags:
 - assertions
 - control-flow-analysis
 - union-types
-related:
-- ts-generics-and-conditional-types
-- typescript-conditional-types
-- typescript-generics-deep
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

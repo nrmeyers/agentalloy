@@ -10,10 +10,6 @@ domain_tags:
 - lifting-state-up
 - external-store-decision
 - react
-related:
-- react-context-patterns
-- react-hooks-rules-and-deps
-- react-rendering-keys-and-memoization
 always_apply: false
 phase_scope:
 - build

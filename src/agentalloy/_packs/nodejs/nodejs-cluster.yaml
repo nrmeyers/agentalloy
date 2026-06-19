@@ -9,10 +9,6 @@ domain_tags:
 - multi-core
 - scaling
 - process-management
-related:
-- node-event-loop-and-async
-- nodejs-worker-threads
-- redis-cluster
 always_apply: false
 phase_scope:
 - build

@@ -9,10 +9,6 @@ domain_tags:
 - roles
 - data-masking
 - row-access-policies
-related:
-- redis-acl-and-security
-- snowflake-tables-and-clustering
-- snowflake-time-travel-and-streams
 always_apply: false
 phase_scope: [build]
 category_scope: [infrastructure]

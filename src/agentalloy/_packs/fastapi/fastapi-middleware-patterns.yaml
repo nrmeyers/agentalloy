@@ -16,10 +16,6 @@ domain_tags:
 - middleware
 - request-pipeline
 - cross-cutting
-related:
-- fastapi-async-and-background-tasks
-- fastapi-cors
-- fastapi-dependency-injection
 always_apply: false
 phase_scope:
 - build

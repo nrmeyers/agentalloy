@@ -9,10 +9,6 @@ domain_tags:
 - protocol
 - structural-typing
 - duck-typing
-related:
-- python-dataclasses
-- python-typing-and-generics
-- typescript-generics-deep
 always_apply: false
 phase_scope: [build]
 category_scope: [language]

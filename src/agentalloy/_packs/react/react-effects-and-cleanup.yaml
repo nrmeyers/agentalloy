@@ -12,10 +12,6 @@ domain_tags:
 - react
 requires:
 - react-hooks-rules-and-deps
-related:
-- react-rendering-keys-and-memoization
-- react-state-and-context
-- vue-lifecycle-and-async-components
 always_apply: false
 phase_scope:
 - build

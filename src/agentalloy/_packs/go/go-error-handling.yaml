@@ -4,10 +4,6 @@ description: "Handle failures in Go services by returning error values, wrapping
 category: engineering
 skill_class: domain
 domain_tags: [error-wrapping, sentinel-values, typed-errors, panic-recover, error-inspection, go]
-related:
-- error-handling-patterns
-- go-testing-idioms
-- linting-golangci-lint
 always_apply: false
 phase_scope: [build]
 category_scope: language

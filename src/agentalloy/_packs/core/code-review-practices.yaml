@@ -6,12 +6,8 @@ skill_class: domain
 domain_tags: [pr-review, blocking-vs-nit, review-comment-tone, change-list-size, reviewer-fatigue]
 requires:
 - git-workflow
-related:
-- code-review-debugging-and-defects
-- inline-comments-and-docstrings
-- sdd-verify-and-review
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

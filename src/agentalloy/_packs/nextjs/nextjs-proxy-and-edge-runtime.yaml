@@ -10,10 +10,6 @@ domain_tags:
 - edge-runtime-constraints
 - optimistic-permission-check
 - nextjs
-related:
-- nextjs-app-router-routing
-- nextjs-csp-and-security-headers
-- nextjs-redirects-and-rewrites
 always_apply: false
 phase_scope:
 - build

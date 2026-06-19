@@ -9,10 +9,6 @@ domain_tags:
 - express-compatible
 - request-processing
 - route-handlers
-related:
-- nestjs-controllers-and-routing
-- nestjs-modules-and-providers
-- nestjs-pipes-guards-interceptors
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

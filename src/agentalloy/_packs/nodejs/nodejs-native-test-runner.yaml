@@ -14,7 +14,7 @@ superseded_by: node-built-in-test-runner
 always_apply: false
 phase_scope:
 - build
-- review
+- qa
 category_scope:
 - language
 author: authoring-agent

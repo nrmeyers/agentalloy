@@ -12,10 +12,6 @@ domain_tags:
 requires:
 - temporal-workers
 - temporal-workflow-basics
-related:
-- temporal-activity-basics
-- temporal-schedules-and-timers
-- webhooks-event-types-and-schemas
 always_apply: false
 phase_scope:
 - build

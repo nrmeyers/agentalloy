@@ -13,12 +13,8 @@ domain_tags:
   - immutable-record
   - supersede-not-edit
   - nygard-template
-related:
-- design-review-interface-contracts
-- design-review-non-functional-requirements
-- inline-comments-and-docstrings
 always_apply: false
-phase_scope: [design, review]
+phase_scope: [design, qa]
 category_scope: [process]
 author: authoring-agent
 change_summary: |

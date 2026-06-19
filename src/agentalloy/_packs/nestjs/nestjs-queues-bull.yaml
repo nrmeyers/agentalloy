@@ -12,10 +12,6 @@ domain_tags:
 - background-jobs
 requires:
 - nestjs-modules-and-providers
-related:
-- nestjs-controllers-and-routing
-- nestjs-microservices
-- nestjs-pipes-guards-interceptors
 always_apply: false
 phase_scope: [build]
 category_scope: [framework]

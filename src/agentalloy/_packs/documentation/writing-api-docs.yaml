@@ -6,10 +6,6 @@ skill_class: domain
 domain_tags: [api-reference, openapi, code-examples, contract-documentation, generated-docs]
 requires:
 - rest-http-and-resource-design
-related:
-- fastapi-openapi-customization
-- testing-contract-testing
-- webhooks-documentation
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]

@@ -6,12 +6,8 @@ skill_class: domain
 domain_tags: [user-intent, requirements-discovery, design-exploration, premature-implementation, divergent-then-convergent]
 requires:
 - sys-sdd-build
-related:
-- planning-and-task-breakdown
-- sdd-design-and-planning
-- sdd-spec-and-scoping
 always_apply: false
-phase_scope: [build, review]
+phase_scope: [build, qa]
 category_scope: [process]
 author: navistone
 change_summary: |

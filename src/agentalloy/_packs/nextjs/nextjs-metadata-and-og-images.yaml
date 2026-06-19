@@ -12,10 +12,6 @@ domain_tags:
 - nextjs
 requires:
 - nextjs-app-router-routing
-related:
-- nextjs-csp-and-security-headers
-- nextjs-data-fetching-and-caching
-- nextjs-ppr-cache-components
 always_apply: false
 phase_scope:
 - build

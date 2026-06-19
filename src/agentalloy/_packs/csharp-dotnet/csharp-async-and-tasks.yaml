@@ -10,10 +10,6 @@ domain_tags:
 - configureawait-context
 - channel-bounded
 - csharp-dotnet
-related:
-- csharp-mstest-testing
-- python-async-patterns
-- python-asyncio-tasks
 always_apply: false
 phase_scope:
 - build

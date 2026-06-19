@@ -6,10 +6,6 @@ skill_class: domain
 domain_tags: [type-hints, protocol-class, typevar, pep-695-syntax, gradual-typing, python]
 requires:
 - python-typing-protocol
-related:
-- go-generics-and-types
-- ts-generics-and-conditional-types
-- typescript-generics-deep
 always_apply: false
 phase_scope: [build]
 category_scope: language

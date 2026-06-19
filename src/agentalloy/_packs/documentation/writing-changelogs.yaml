@@ -4,10 +4,6 @@ description: "Communicate product updates to users by writing clear, dated chang
 category: design
 skill_class: domain
 domain_tags: [keep-a-changelog, version-bump-mapping, breaking-changes, unreleased-section, audience-is-the-user]
-related:
-- dependency-upgrade
-- webhooks-versioning-and-evolution
-- writing-api-docs
 always_apply: false
 phase_scope: [build, design]
 category_scope: [process]
