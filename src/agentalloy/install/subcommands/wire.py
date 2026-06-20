@@ -16,6 +16,7 @@ from typing import Any
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES, wire_harness
+from agentalloy.signals.skill_loader import LIFECYCLE_MODES
 
 # Harnesses that default to hook wiring (graceful degradation) rather than
 # proxy wiring (a down service breaks the harness). Only claude-code today.
@@ -116,6 +117,18 @@ def add_parser(
         action="store_true",
         help="Overwrite an edited sentinel block (otherwise refuses).",
     )
+    p.add_argument(
+        "--lifecycle-mode",
+        choices=LIFECYCLE_MODES,
+        default=None,
+        help=(
+            "How AgentAlloy behaves in this repo. 'full' (default): intake + "
+            "phase lifecycle. 'assist': defer to your own workflow — no intake "
+            "front-door, keep skill suggestions. 'off': wire but inject nothing. "
+            "When omitted and the repo already defines its own agents/commands, "
+            "you're prompted (TTY only); non-interactive runs default to 'full'."
+        ),
+    )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
@@ -203,7 +216,93 @@ def _render_human(result: dict[str, Any]) -> None:
             f"  Phase: [bold]{phase_seeded}[/bold] [dim](repo activated; composes next prompt)[/dim]"
         )
 
+    detected = result.get("custom_workflow_detected")
+    if detected:
+        print_rich(f"  [dim]Detected your own workflow: {', '.join(detected)}[/dim]")
+
+    mode = result.get("lifecycle_mode")
+    if mode and mode != "full":
+        note = (
+            "defers to your workflow; keeps skill suggestions"
+            if mode == "assist"
+            else "wired, injection muted"
+        )
+        print_rich(f"  Lifecycle: [bold]{mode}[/bold] [dim]({note})[/dim]")
+
     print_rich()
+
+
+def _detect_custom_workflow(root: Path) -> list[str]:
+    """Return human-readable signals that *root* already defines its own agent
+    workflow, so wiring can offer to defer rather than impose the lifecycle.
+
+    Checks the Claude Code subagent/command locations plus the cross-harness
+    ``AGENTS.md`` convention. Glob-only and never raises — an empty list means
+    nothing was detected (wiring then defaults to ``full``).
+    """
+    signals: list[str] = []
+    try:
+        agents = sorted((root / ".claude" / "agents").glob("*.md"))
+        if agents:
+            signals.append(f".claude/agents/ ({len(agents)})")
+        commands = sorted((root / ".claude" / "commands").glob("*.md"))
+        if commands:
+            signals.append(f".claude/commands/ ({len(commands)})")
+        if (root / "AGENTS.md").is_file():
+            signals.append("AGENTS.md")
+    except OSError:
+        return []
+    return signals
+
+
+def _prompt_lifecycle_mode(detected: list[str]) -> str:
+    """Interactive numbered choice for the per-repo lifecycle mode.
+
+    Only invoked when custom-workflow signals are detected AND stdin is a TTY.
+    Mirrors the numbered-choice prompt pattern used elsewhere in the installer;
+    EOF/interrupt or a blank line takes the default (``assist``).
+    """
+    options: list[tuple[str, str]] = [
+        ("assist", "assist — defer to your workflow (no intake interview); keep skill suggestions"),
+        ("full", "full — run AgentAlloy's intake + phase lifecycle"),
+        ("off", "off — wire the proxy/hooks but inject nothing"),
+    ]
+    print(
+        f"\nThis repo already defines its own agent workflow ({', '.join(detected)}).",
+        file=sys.stderr,
+    )
+    print("How should AgentAlloy behave here?", file=sys.stderr)
+    for i, (_, label) in enumerate(options, 1):
+        print(f"  {i}. {label}", file=sys.stderr)
+    print(file=sys.stderr)
+    while True:
+        try:
+            raw = input(f"Choice [1-{len(options)}] (default 1): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            return options[0][0]
+        if raw == "":
+            return options[0][0]
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return options[int(raw) - 1][0]
+        print(f"  Please enter a number between 1 and {len(options)}.", file=sys.stderr)
+
+
+def _resolve_lifecycle_mode(args: argparse.Namespace, cwd: Path) -> tuple[str, list[str]]:
+    """Resolve the effective lifecycle mode and the detection signals.
+
+    Precedence: an explicit ``--lifecycle-mode`` flag always wins; otherwise,
+    if the repo has its own workflow AND we're on a TTY, prompt; otherwise
+    default ``full`` (preserving historical behavior for non-interactive runs
+    and repos with no detected customization).
+    """
+    flag = getattr(args, "lifecycle_mode", None)
+    detected = _detect_custom_workflow(cwd)
+    if flag is not None:
+        return flag, detected
+    if detected and sys.stdin.isatty():
+        return _prompt_lifecycle_mode(detected), detected
+    return "full", detected
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -232,13 +331,29 @@ def _run(args: argparse.Namespace) -> int:
     else:
         result = wire_harness(harness, port=port, root=cwd, force=args.force)
 
-    # Activate this repo: seed the entry phase so composition engages on the
-    # next prompt. Without a phase file, both the hook and proxy paths
-    # short-circuit and the repo stays inert (the "wired but nothing happens"
-    # trap). Create-only — an already-phased repo is left untouched.
-    phase_seeded = _seed_entry_phase(cwd)
-    if phase_seeded:
-        result["phase_seeded"] = phase_seeded
+    # Resolve and persist the per-repo lifecycle mode the hooks read on every
+    # event. `assist`/`off` let a repo with its own agents/workflows opt out of
+    # the intake front-door and phase forcing (the collision this guards).
+    from agentalloy.signals.skill_loader import _write_lifecycle_mode
+
+    mode, detected = _resolve_lifecycle_mode(args, cwd)
+    _write_lifecycle_mode(cwd, mode)
+    result["lifecycle_mode"] = mode
+    if detected:
+        result["custom_workflow_detected"] = detected
+
+    if mode == "full":
+        # Activate this repo: seed the entry phase so composition engages on the
+        # next prompt. Without a phase file, both the hook and proxy paths
+        # short-circuit and the repo stays inert (the "wired but nothing happens"
+        # trap). Create-only — an already-phased repo is left untouched.
+        phase_seeded = _seed_entry_phase(cwd)
+        if phase_seeded:
+            result["phase_seeded"] = phase_seeded
+    else:
+        # assist/off must NOT seed a phase (a seeded `intake` re-arms the front
+        # door). Still git-exclude `.agentalloy/` — the config file lives there.
+        _git_exclude_agentalloy(cwd)
 
     # Restore data (original_content) is already persisted to install-state.json
     # by the wiring functions above; strip it from the command output so a prior

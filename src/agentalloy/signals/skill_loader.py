@@ -24,13 +24,22 @@ if TYPE_CHECKING:
     from agentalloy.signals.predicates import PredicateContext
 
 __all__ = [
+    "LIFECYCLE_MODES",
     "_build_predicate_context",
     "_load_workflow_skill_for_phase",
     "_load_workflow_skill_from_packs",
+    "_read_lifecycle_mode",
     "_read_phase",
+    "_write_lifecycle_mode",
     "_write_phase_atomic",
     "_write_telemetry",
 ]
+
+# Per-repo lifecycle modes (see ``_read_lifecycle_mode``). ``full`` is the
+# historical default; ``assist``/``off`` let a repo with its own agents and
+# workflows opt out of AgentAlloy's intake front-door and phase forcing.
+LIFECYCLE_MODES = ("full", "assist", "off")
+_DEFAULT_LIFECYCLE_MODE = "full"
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +89,57 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle mode helpers (per-repo deferral)
+# ---------------------------------------------------------------------------
+
+
+def _read_lifecycle_mode(project_root: Path) -> str:
+    """Read the per-repo lifecycle mode from ``.agentalloy/config``.
+
+    Returns one of ``full`` | ``assist`` | ``off``. Defaults to ``full``
+    (historical behavior) whenever the file is absent, unreadable, malformed,
+    or holds an unrecognized value — a missing/garbled config must never
+    silently disable the lifecycle.
+
+    - ``full``   — intake front-door + phase machine + all skill injection.
+    - ``assist`` — no intake front-door, no phase forcing; keep the additive
+      system/domain skill injection (PreToolUse/PostToolUse).
+    - ``off``    — hooks stay wired but inject nothing.
+    """
+    config_file = project_root / ".agentalloy" / "config"
+    if not config_file.exists():
+        return _DEFAULT_LIFECYCLE_MODE
+    # Hand-parse the flat `key: value` file rather than yaml.safe_load — YAML 1.1
+    # coerces bare `off`/`on`/`no` to booleans, which would silently turn the
+    # `off` mode into `full`. Partition on the first colon, like ``_read_phase``.
+    try:
+        for line in config_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            if key.strip() == "lifecycle_mode":
+                mode = value.strip().strip('"').strip("'").lower()
+                return mode if mode in LIFECYCLE_MODES else _DEFAULT_LIFECYCLE_MODE
+    except OSError:
+        return _DEFAULT_LIFECYCLE_MODE
+    return _DEFAULT_LIFECYCLE_MODE
+
+
+def _write_lifecycle_mode(project_root: Path, mode: str) -> None:
+    """Persist *mode* to ``.agentalloy/config`` (creating the dir as needed).
+
+    Raises ``ValueError`` on an unrecognized mode so callers fail loudly
+    rather than writing a value the reader will silently ignore.
+    """
+    if mode not in LIFECYCLE_MODES:
+        raise ValueError(f"invalid lifecycle mode {mode!r}; expected one of {LIFECYCLE_MODES}")
+    config_file = project_root / ".agentalloy" / "config"
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(f"lifecycle_mode: {mode}\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

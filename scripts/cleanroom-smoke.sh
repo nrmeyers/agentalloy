@@ -122,6 +122,24 @@ for pair in "CLAUDE.md:claude-code" "GEMINI.md:gemini-cli" ".cursorrules:cursor"
   fi
 done
 
+echo "== per-repo lifecycle mode (assist defers: config written, no phase seeded) =="
+lrepo="$WORK/lifecycle-assist"
+mkdir -p "$lrepo/.claude/agents"
+git -C "$lrepo" init -q
+: >"$lrepo/CLAUDE.md"
+: >"$lrepo/.claude/agents/reviewer.md"   # a pre-existing custom subagent
+mode="$(cd "$lrepo" && agentalloy wire --harness claude-code --lifecycle-mode assist --json 2>/dev/null \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin).get("lifecycle_mode",""))' 2>/dev/null)"
+if [ "$mode" = "assist" ] \
+   && grep -q "lifecycle_mode: assist" "$lrepo/.agentalloy/config" 2>/dev/null \
+   && [ ! -e "$lrepo/.agentalloy/phase" ]; then
+  echo "ok   [lifecycle assist: config=assist, phase not seeded]"
+else
+  echo "FAIL [lifecycle assist]: mode='$mode', config/phase state unexpected"
+  fail=1
+fi
+(cd "$lrepo" && agentalloy unwire >/dev/null 2>&1) || true
+
 echo
 if [ "$fail" -ne 0 ]; then
   echo "cleanroom smoke: FAILED"

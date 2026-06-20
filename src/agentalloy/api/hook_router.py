@@ -126,13 +126,19 @@ def _evaluate_sync(
         _build_predicate_context,
         _intake_route_hint,
         _load_workflow_skill_for_phase,
+        _read_lifecycle_mode,
         _read_phase,
         _write_phase_atomic,
     )
 
+    # Per-repo lifecycle mode gates the workflow-scaffold path. Only `full`
+    # composes/advances phases; `assist` and `off` both skip it (a deferring
+    # repo drives its own workflow — the additive system/domain skill injection
+    # in the pre/post-tool-use hooks is what `assist` keeps).
+    mode = _read_lifecycle_mode(cwd)
     current_phase = phase or _read_phase(cwd)
-    if current_phase is None:
-        return {"composed_block": "", "phase": None, "should_compose": False}
+    if mode != "full" or current_phase is None:
+        return {"composed_block": "", "phase": current_phase, "should_compose": False}
 
     skill = _load_workflow_skill_for_phase(current_phase, cwd)
     if skill is None:
@@ -395,6 +401,15 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
+    # Per-repo lifecycle: `off` mutes all injection; `assist`/`full` keep the
+    # additive system-skill path (this is the value a deferring repo retains).
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode  # noqa: PLC0415
+
+    if _read_lifecycle_mode(cwd) == "off":
+        return JSONResponse(
+            content={"status": "disabled", "system_skills": [], "cache_hit": False},
+        )
+
     # Check cache (same per-key cache as the prompt handler: keyed on
     # (cwd, effective phase) so recent compose activity for THIS repo/phase
     # short-circuits, never another repo's).
@@ -528,6 +543,12 @@ async def hook_post_tool_use(request: Request) -> JSONResponse:
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
+    # Per-repo lifecycle: `off` mutes domain injection; `assist`/`full` keep it.
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode  # noqa: PLC0415
+
+    if _read_lifecycle_mode(cwd) == "off":
+        return _done({"status": "no_action"})
+
     # Only act on writes to a contract file.
     if tool_name not in ("Edit", "Write", "MultiEdit") or ".agentalloy/contracts/" not in tool_path:
         return _done({"status": "no_action"})
@@ -598,7 +619,17 @@ async def hook_session_start(request: Request) -> JSONResponse:
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
 
-    from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase, _read_phase
+    from agentalloy.signals.skill_loader import (
+        _load_workflow_skill_for_phase,
+        _read_lifecycle_mode,
+        _read_phase,
+    )
+
+    # Per-repo deferral: only `full` gets the intake front-door. A repo with
+    # its own agents/workflows (`assist`) — or one fully muted (`off`) — must
+    # not be greeted with the intake interview on every session open.
+    if _read_lifecycle_mode(cwd) != "full":
+        return JSONResponse(content={"status": "disabled", "composed_block": ""})
 
     intake = _load_workflow_skill_for_phase("intake", cwd)
     prose = (intake or {}).get("raw_prose", "")

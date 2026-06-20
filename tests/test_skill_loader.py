@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -64,6 +65,59 @@ def test_read_phase_strips_whitespace(tmp_path: Path) -> None:
     phase_file.write_text("phase:  qa  \n")
 
     assert _read_phase(tmp_path) == "qa"
+
+
+# ---------------------------------------------------------------------------
+# _read_lifecycle_mode / _write_lifecycle_mode
+# ---------------------------------------------------------------------------
+
+
+def test_lifecycle_mode_defaults_to_full_when_absent(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode
+
+    # No .agentalloy/config at all -> historical behavior must be preserved.
+    assert _read_lifecycle_mode(tmp_path) == "full"
+
+
+def test_lifecycle_mode_round_trips_each_mode(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import (
+        LIFECYCLE_MODES,
+        _read_lifecycle_mode,
+        _write_lifecycle_mode,
+    )
+
+    for mode in LIFECYCLE_MODES:
+        _write_lifecycle_mode(tmp_path, mode)
+        assert (tmp_path / ".agentalloy" / "config").read_text() == f"lifecycle_mode: {mode}\n"
+        assert _read_lifecycle_mode(tmp_path) == mode
+
+
+def test_lifecycle_mode_unknown_value_falls_back_to_full(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode
+
+    config = tmp_path / ".agentalloy" / "config"
+    config.parent.mkdir(parents=True)
+    config.write_text("lifecycle_mode: bananas\n")  # not a valid mode
+
+    # An unrecognized value must never silently disable the lifecycle.
+    assert _read_lifecycle_mode(tmp_path) == "full"
+
+
+def test_lifecycle_mode_malformed_file_falls_back_to_full(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode
+
+    config = tmp_path / ".agentalloy" / "config"
+    config.parent.mkdir(parents=True)
+    config.write_text(": : not yaml : :\n[broken")
+
+    assert _read_lifecycle_mode(tmp_path) == "full"
+
+
+def test_write_lifecycle_mode_rejects_invalid_mode(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _write_lifecycle_mode
+
+    with pytest.raises(ValueError, match="invalid lifecycle mode"):
+        _write_lifecycle_mode(tmp_path, "turbo")
 
 
 # ---------------------------------------------------------------------------

@@ -173,6 +173,90 @@ class TestWire:
         assert (repo_root / "GEMINI.md").exists()
 
 
+class TestWireLifecycleMode:
+    """`wire` resolves a per-repo lifecycle mode and gates phase seeding on it.
+
+    A repo that already defines its own agents/commands can wire in `assist`
+    (or `off`) so AgentAlloy never seeds the phase machine / intake front-door.
+    """
+
+    @staticmethod
+    def _claude_repo_with_custom_workflow(repo_root: Path) -> None:
+        (repo_root / "CLAUDE.md").write_text("# Project\n")  # auto-detect claude-code
+        agents = repo_root / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "reviewer.md").write_text("# Reviewer subagent\n")
+
+    def _wire(self, **overrides: object) -> argparse.Namespace:
+        base = {
+            "harness": None,
+            "port": None,
+            "force": False,
+            "lifecycle_mode": None,
+            "json": False,
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def test_assist_writes_config_and_skips_phase_seed(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo_with_custom_workflow(repo_root)
+        monkeypatch.chdir(repo_root)
+        rc = wire._run(self._wire(lifecycle_mode="assist"))
+        assert rc == 0
+        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
+        # assist must NOT seed a phase — a seeded `intake` re-arms the front door.
+        assert not (repo_root / ".agentalloy" / "phase").exists()
+
+    def test_off_writes_config_and_skips_phase_seed(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo_with_custom_workflow(repo_root)
+        monkeypatch.chdir(repo_root)
+        rc = wire._run(self._wire(lifecycle_mode="off"))
+        assert rc == 0
+        assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
+        assert not (repo_root / ".agentalloy" / "phase").exists()
+
+    def test_detection_without_tty_defaults_to_full_and_seeds(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        # Custom workflow present, but no flag and no TTY (pytest) -> back-compat:
+        # default `full`, phase seeded exactly as before this feature existed.
+        self._claude_repo_with_custom_workflow(repo_root)
+        monkeypatch.chdir(repo_root)
+        rc = wire._run(self._wire())
+        assert rc == 0
+        assert "lifecycle_mode: full" in (repo_root / ".agentalloy" / "config").read_text()
+        assert (repo_root / ".agentalloy" / "phase").exists()
+
+    def test_tty_prompt_selects_mode(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import patch
+
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo_with_custom_workflow(repo_root)
+        monkeypatch.chdir(repo_root)
+        # Detection fires + TTY -> prompt. Choice "1" is the recommended default (assist).
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="1"),
+        ):
+            rc = wire._run(self._wire())
+        assert rc == 0
+        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
+        assert not (repo_root / ".agentalloy" / "phase").exists()
+
+
 # ---------------------------------------------------------------------------
 # unwire
 # ---------------------------------------------------------------------------

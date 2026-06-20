@@ -1023,3 +1023,111 @@ class TestSessionStartEndpoint:
             r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
         assert r.status_code == 200
         assert r.json()["composed_block"] == ""
+
+
+class TestLifecycleModeGuards:
+    """Per-repo lifecycle mode (.agentalloy/config) gates what the hooks inject.
+
+    full   = historical (intake front-door + phase machine + all injection)
+    assist = no workflow scaffold / intake front-door; keep the additive
+             system (PreToolUse) + domain (PostToolUse) injection
+    off    = wired but injects nothing anywhere
+    """
+
+    _LOADER = "agentalloy.signals.skill_loader._load_workflow_skill_for_phase"
+
+    @staticmethod
+    def _proj(tmp_path: Path, *, phase: str | None, mode: str | None) -> Path:
+        proj = tmp_path / "proj"
+        (proj / ".agentalloy").mkdir(parents=True, exist_ok=True)
+        if phase is not None:
+            (proj / ".agentalloy" / "phase").write_text(f"phase: {phase}\n", encoding="utf-8")
+        if mode is not None:
+            (proj / ".agentalloy" / "config").write_text(
+                f"lifecycle_mode: {mode}\n", encoding="utf-8"
+            )
+        return proj
+
+    # ---- SessionStart front door -----------------------------------------
+
+    @pytest.mark.parametrize("mode", ["assist", "off"])
+    def test_session_start_deferred_when_not_full(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+    ) -> None:
+        # Global intake ON; the per-repo mode must still defer (the whole point:
+        # a repo with its own workflow isn't greeted with the intake interview).
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
+        proj = self._proj(tmp_path, phase="intake", mode=mode)
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "disabled"
+        assert d["composed_block"] == ""
+
+    def test_session_start_full_still_runs_intake(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
+        proj = self._proj(tmp_path, phase="intake", mode="full")
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        assert r.json()["status"] == "intake"
+
+    # ---- UserPromptSubmit workflow scaffold ------------------------------
+
+    @pytest.mark.parametrize("mode", ["assist", "off"])
+    def test_prompt_submit_no_compose_when_not_full(
+        self, tmp_path: Path, mode: str, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.api.hook_router import _evaluate_sync
+
+        # assist/off short-circuit before any skill load — no patching needed.
+        proj = self._proj(tmp_path, phase="intake", mode=mode)
+        result = _evaluate_sync(prompt="build a thing", cwd=proj, phase="intake")
+        assert result["should_compose"] is False
+        assert result["composed_block"] == ""
+
+    # ---- PreToolUse system skills ----------------------------------------
+
+    def test_pre_tool_use_off_is_disabled(
+        self, client: TestClient, tmp_path: Path, reset_hook_cache: Any
+    ) -> None:
+        proj = self._proj(tmp_path, phase="build", mode="off")
+        r = client.post("/v1/hook/pre-tool-use", json={"tool_name": "Edit", "cwd": str(proj)})
+        d = r.json()
+        assert d["status"] == "disabled"
+        assert d["system_skills"] == []
+
+    def test_pre_tool_use_assist_keeps_injection(
+        self, client: TestClient, tmp_path: Path, reset_hook_cache: Any
+    ) -> None:
+        # assist retains the additive system-skill path — it must NOT be muted.
+        proj = self._proj(tmp_path, phase="build", mode="assist")
+        r = client.post("/v1/hook/pre-tool-use", json={"tool_name": "Edit", "cwd": str(proj)})
+        assert r.json()["status"] != "disabled"
+
+    # ---- PostToolUse domain skills ---------------------------------------
+
+    def test_post_tool_use_off_no_action_without_consulting_orchestrator(
+        self, tmp_path: Path
+    ) -> None:
+        from fastapi import FastAPI
+
+        from agentalloy.api import hook_router as hr
+
+        app = FastAPI()
+        app.include_router(hr.router)
+        proj = self._proj(tmp_path, phase="build", mode="off")
+        contract = str(proj / ".agentalloy" / "contracts" / "build" / "t.md")
+        # In off mode the handler must bail before the orchestrator is touched.
+        with patch.object(hr, "_get_compose_orchestrator", side_effect=AssertionError):
+            r = TestClient(app).post(
+                "/v1/hook/post-tool-use",
+                json={
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": contract},
+                    "cwd": str(proj),
+                },
+            )
+        assert r.json()["status"] == "no_action"
