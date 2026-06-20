@@ -25,6 +25,7 @@ from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
 from agentalloy.signals.prefilter import PreFilterMatch
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _build_predicate_context,
+    _intake_route_hint,
     _load_workflow_skill_for_phase,
     _read_phase,
     _write_phase_atomic,
@@ -142,11 +143,15 @@ async def evaluate_signal(
 
     def _run_gates() -> None:
         nonlocal gates_result
+        # Leaving intake branches on the contract route: fast → sdd-fast, else
+        # the linear intake → spec.
+        route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
         decision = decide_transition(
             current_phase=phase,
             gate_spec=exit_gates,
             ctx=ctx,
             lm_client=embed_client,
+            next_phase_hint=route_hint,
         )
         # 6. Phase transition: write atomically if gates are met
         if decision.should_transition and decision.to_phase:

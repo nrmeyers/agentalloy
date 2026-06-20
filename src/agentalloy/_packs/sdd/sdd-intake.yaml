@@ -25,6 +25,7 @@ contract_template: |
   ---
   phase: intake
   task_slug: {{task_slug}}
+  route: {{route}}
   domain_tags: []
   scope:
     touches: []

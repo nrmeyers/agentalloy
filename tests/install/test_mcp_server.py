@@ -39,7 +39,7 @@ class TestToolsList:
         assert tool["name"] == "get_skill_for"
         # Schema enumerates the lifecycle phases
         phase_enum = tool["inputSchema"]["properties"]["phase"]["enum"]
-        assert phase_enum == ["spec", "design", "build", "qa", "ship"]
+        assert phase_enum == ["spec", "design", "build", "qa", "ship", "sdd-fast"]
         assert tool["inputSchema"]["required"] == ["task"]
 
 

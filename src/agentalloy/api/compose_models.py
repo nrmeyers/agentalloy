@@ -11,7 +11,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-Phase = Literal["intake", "spec", "design", "build", "qa", "ship"]
+# intake/spec/design/build/qa/ship are the full SDD lifecycle; sdd-fast is the
+# fast-lane route (one compressed pass) intake can branch to.
+Phase = Literal["intake", "spec", "design", "build", "qa", "ship", "sdd-fast"]
 
 # Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
 # Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction
@@ -22,6 +24,7 @@ Phase = Literal["intake", "spec", "design", "build", "qa", "ship"]
 DEFAULT_K_BY_PHASE: dict[str, int] = {
     "build": 2,
     "ship": 2,
+    "sdd-fast": 2,  # compressed action pass — short-form like build
     "qa": 4,  # safer default; long-form qa (postmortem) needs anchor context
     "spec": 4,
     "design": 4,
@@ -35,6 +38,7 @@ DEFAULT_K_BY_PHASE: dict[str, int] = {
 DEFAULT_MAX_TOKENS_BY_PHASE: dict[str, int] = {
     "build": 2048,
     "ship": 2048,
+    "sdd-fast": 2048,
     "qa": 4096,
     "spec": 4096,
     "design": 4096,

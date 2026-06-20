@@ -124,6 +124,7 @@ def _evaluate_sync(
     """
     from agentalloy.signals.skill_loader import (
         _build_predicate_context,
+        _intake_route_hint,
         _load_workflow_skill_for_phase,
         _read_phase,
         _write_phase_atomic,
@@ -179,11 +180,15 @@ def _evaluate_sync(
     # Trigger matched — evaluate gates.
     from agentalloy.signals.gates import decide_transition
 
+    # Leaving intake branches the graph on the contract's route: fast → sdd-fast,
+    # else the linear intake → spec. Only intake reads a route hint.
+    route_hint = _intake_route_hint(cwd) if current_phase == INTAKE_PHASE else None
     decision = decide_transition(
         current_phase=current_phase,
         gate_spec=gate_spec,
         ctx=ctx,
         lm_client=lm_client,
+        next_phase_hint=route_hint,
     )
 
     # Phase transition
@@ -559,7 +564,8 @@ def _detect_active_contract(cwd: Path) -> str | None:
     if not contracts_dir.is_dir():
         return None
     try:
-        md = sorted(contracts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        # Contracts live in per-phase subdirs (contracts/<phase>/<slug>.md), so recurse.
+        md = sorted(contracts_dir.glob("**/*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
         return None
     return str(md[0].relative_to(cwd)) if md else None

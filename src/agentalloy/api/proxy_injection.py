@@ -147,7 +147,9 @@ async def compose_and_inject(
     # signal.phase may not be a valid Phase literal if it's something
     # unexpected; fall back to "build" as a safe default.
     compose_phase: Phase = (
-        phase if phase in ("intake", "spec", "design", "build", "qa", "ship") else "build"
+        phase
+        if phase in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+        else "build"
     )
 
     compose_req = ComposeRequest(

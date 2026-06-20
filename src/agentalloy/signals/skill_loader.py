@@ -138,6 +138,30 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
     return _load_workflow_skill_from_packs(phase)
 
 
+def _intake_route_hint(project_root: Path) -> str | None:
+    """Next-phase hint when leaving intake, from the active intake contract's route.
+
+    Returns ``"sdd-fast"`` when the contract chose the fast lane, else ``None``
+    (the linear graph then advances intake → spec). Best-effort: any read/parse
+    failure falls back to the default full route.
+    """
+    contracts_dir = project_root / ".agentalloy" / "contracts" / "intake"
+    if not contracts_dir.is_dir():
+        return None
+    try:
+        from agentalloy.contracts import parse_contract
+
+        md = sorted(contracts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for path in md:
+        try:
+            return "sdd-fast" if parse_contract(path).route == "fast" else None
+        except Exception:
+            continue
+    return None
+
+
 def _load_workflow_skill_from_packs(phase: str) -> dict[str, Any] | None:
     """Fallback: load a workflow skill from the shipped ``_packs/sdd`` directory."""
     try:

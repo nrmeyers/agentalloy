@@ -264,3 +264,58 @@ def test_safe_contract_path_rejects_path_outside_pinned_root(tmp_path: Path):
 
     safe, _ = safe_contract_path(str(f), project_root=tmp_path / "this-project")
     assert safe is None
+
+
+# ---------------------------------------------------------------------------
+# route field (fast-lane routing)
+# ---------------------------------------------------------------------------
+
+
+class TestContractRoute:
+    def test_route_defaults_full(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import parse_contract
+
+        c = parse_contract(_write_contract(tmp_path / "c.md"))
+        assert c.route == "full"
+
+    def test_route_fast(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import parse_contract
+
+        f = _write_contract(tmp_path / "c.md", extra_fields={"route": "fast"})
+        assert parse_contract(f).route == "fast"
+
+    def test_route_invalid_rejected(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import ContractMalformed, parse_contract
+
+        f = _write_contract(tmp_path / "c.md", extra_fields={"route": "turbo"})
+        with pytest.raises(ContractMalformed):
+            parse_contract(f)
+
+
+class TestIntakeRouteHint:
+    """_intake_route_hint reads the active intake contract's route → next-phase hint."""
+
+    def test_fast_contract_hints_sdd_fast(self, tmp_path: Path) -> None:
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
+            phase="intake",
+            extra_fields={"route": "fast"},
+        )
+        assert _intake_route_hint(tmp_path) == "sdd-fast"
+
+    def test_full_contract_hints_none(self, tmp_path: Path) -> None:
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
+            phase="intake",
+            extra_fields={"route": "full"},
+        )
+        assert _intake_route_hint(tmp_path) is None
+
+    def test_no_contract_hints_none(self, tmp_path: Path) -> None:
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        assert _intake_route_hint(tmp_path) is None

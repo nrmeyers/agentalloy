@@ -121,6 +121,7 @@ def _init(args: argparse.Namespace) -> int:
 
     phase: str = args.phase
     slug: str = args.slug
+    route: str = getattr(args, "route", "full")
     force: bool = getattr(args, "force", False)
 
     project_root = _repo_root()
@@ -143,6 +144,7 @@ def _init(args: argparse.Namespace) -> int:
             "---\n"
             "phase: {phase}\n"
             "task_slug: {task_slug}\n"
+            "route: {route}\n"
             "domain_tags: []\n"
             "scope:\n"
             "  touches: []\n"
@@ -161,9 +163,11 @@ def _init(args: argparse.Namespace) -> int:
         template.replace("{{phase}}", phase)
         .replace("{{task_slug}}", slug)
         .replace("{{created_at}}", now)
+        .replace("{{route}}", route)
         .replace("{phase}", phase)
         .replace("{task_slug}", slug)
         .replace("{created_at}", now)
+        .replace("{route}", route)
         .replace("{task_slug_title}", slug.replace("-", " ").title())
     )
 
@@ -267,6 +271,12 @@ def add_parser(
     )
     init_p.add_argument("--phase", required=True, help="Phase (e.g. build, spec, design).")
     init_p.add_argument("--slug", required=True, help="Task slug (kebab-case identifier).")
+    init_p.add_argument(
+        "--route",
+        choices=("full", "fast"),
+        default="full",
+        help="Workflow route chosen at intake: 'full' (spec→…→ship) or 'fast' (sdd-fast).",
+    )
     init_p.add_argument("--force", action="store_true", help="Overwrite existing contract.")
 
     p.set_defaults(func=_run)

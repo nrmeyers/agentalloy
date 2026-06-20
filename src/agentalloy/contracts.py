@@ -61,6 +61,9 @@ class Contract:
     related_contracts: list[Path]
     created_at: datetime | None
     body: str
+    # Workflow route chosen at intake: "full" (spec→…→ship) or "fast" (sdd-fast).
+    # The intake→next transition reads this to branch the phase graph.
+    route: str = "full"
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +186,10 @@ def parse_contract(path: Path) -> Contract:
         except OSError:
             pass
 
+    route = str(data.get("route") or "full").strip().lower()
+    if route not in ("full", "fast"):
+        raise ContractMalformed(f"Contract 'route' must be 'full' or 'fast', got '{route}'")
+
     return Contract(
         path=path.resolve(),
         phase=phase,
@@ -193,6 +200,7 @@ def parse_contract(path: Path) -> Contract:
         related_contracts=related_contracts,
         created_at=created_at,
         body=body,
+        route=route,
     )
 
 

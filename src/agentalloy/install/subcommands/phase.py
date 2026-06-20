@@ -20,7 +20,7 @@ from typing import Any
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
-VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship")
+VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
 
 SCHEMA_VERSION = 1
 
@@ -139,7 +139,7 @@ def add_parser(
     p_set.add_argument(
         "phase",
         choices=VALID_PHASES,
-        help="Phase to set: intake, spec, design, build, qa, ship",
+        help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast",
     )
     _add_project_root_flag(p_set)
     p_set.set_defaults(func=_run_set)

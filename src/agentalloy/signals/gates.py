@@ -27,11 +27,13 @@ INTAKE_PHASE = "intake"
 
 # Linear SDD phase graph: phase → next phase
 _PHASE_GRAPH: dict[str, str] = {
-    "intake": "spec",  # entry phase: intent interview → hand off to spec
+    "intake": "spec",  # entry phase: default (full) route. The fast route
+    #                    overrides this with a next_phase_hint of "sdd-fast".
     "spec": "design",
     "design": "build",
     "build": "qa",
     "qa": "ship",
+    "sdd-fast": "ship",  # fast lane: one compressed pass, then hand to ship
     "ship": "ship",  # terminal
 }
 

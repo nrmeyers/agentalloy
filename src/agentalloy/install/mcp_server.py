@@ -57,7 +57,7 @@ _TOOL_DEFINITION: dict[str, Any] = {
             },
             "phase": {
                 "type": "string",
-                "enum": ["spec", "design", "build", "qa", "ship"],
+                "enum": ["spec", "design", "build", "qa", "ship", "sdd-fast"],
                 "description": "Lifecycle phase. Defaults to 'build' if omitted.",
             },
         },
@@ -115,11 +115,11 @@ def _handle_tools_call(request_id: Any, params: dict[str, Any], port: int) -> di
     if not isinstance(task, str) or not task.strip():
         return _err(request_id, INVALID_PARAMS, "'task' must be a non-empty string")
     phase = args.get("phase", "build")
-    if phase not in ("spec", "design", "build", "qa", "ship"):
+    if phase not in ("spec", "design", "build", "qa", "ship", "sdd-fast"):
         return _err(
             request_id,
             INVALID_PARAMS,
-            f"'phase' must be one of spec|design|build|qa|ship; got {phase!r}",
+            f"'phase' must be one of spec|design|build|qa|ship|sdd-fast; got {phase!r}",
         )
     try:
         text = _call_compose(port, task, phase)

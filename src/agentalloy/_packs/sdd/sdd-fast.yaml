@@ -1,0 +1,88 @@
+skill_id: sdd-fast
+canonical_name: SDD — Fast Lane (sdd-fast)
+description: "One compressed spec-build-test-deliver pass for clearly-bounded work intake routed to the fast lane: keep the rigor, drop the ceremony, and bail to full SDD (spec) if it turns out harder than judged."
+category: operational
+skill_class: workflow
+domain_tags:
+  - spec-driven-development
+  - fast-lane
+  - small-change
+  - single-pr
+requires: []
+always_apply: false
+applies_to_phases:
+  - sdd-fast
+exit_gates:
+  all_of:
+    - artifact_exists:
+        path: "src/**"
+    - artifact_contains:
+        path: "tests/**/*.py"
+        sections: []
+signal_keywords:
+  - tests pass
+  - ready to ship
+  - ready for review
+  - done
+  - next phase
+contract_template: |
+  ---
+  phase: sdd-fast
+  task_slug: {{task_slug}}
+  route: fast
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug_title}}
+
+  ## The change
+
+  <what changes, in a sentence or two>
+
+  ## Done when
+
+  <the obvious acceptance — and the tests that prove it>
+phase_scope: []
+category_scope: [process]
+author: navistone
+change_summary: fast-lane workflow — compressed spec-build-test-deliver with bail-to-spec escape hatch
+raw_prose: |
+  # SDD — Fast Lane (sdd-fast)
+
+  You're on the fast lane: one compressed pass — spec → build → test → deliver —
+  for work intake judged clearly bounded. Keep the rigor; drop the ceremony.
+
+  ## One pass
+
+  1. **Spec-in-a-line.** State the change and its acceptance in a sentence or two
+     (you already have the intake contract — don't re-document it). If you can't
+     state "done" crisply, that's the signal you're on the wrong lane — bail.
+  2. **Build.** Make the change, one concern at a time. Stay inside the
+     contract's `scope.touches`; if you find yourself spreading wider, bail.
+  3. **Test.** Add or update the tests that prove the acceptance, and run them
+     green.
+  4. **Hand to ship.** Once the change is made and tests pass, you're done here —
+     the workflow advances to **ship** for the PR / delivery.
+
+  ## Bail to full SDD
+
+  The fast lane is a bet that this is simple. If it turns out to need real
+  design, touches more than you scoped, or the acceptance got fuzzy, **stop and
+  bail**:
+
+      agentalloy phase set spec
+
+  That drops you into the full lifecycle (`spec → design → build → qa → ship`)
+  with the same contract. Bailing early is far cheaper than forcing a complex
+  change through a one-pass lane.
+
+  ## Not this
+
+  Don't expand scope, gold-plate, or turn this into the full process by stealth.
+  If it needs the full process, bail to `spec` — don't fake-fast it.
