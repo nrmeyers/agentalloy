@@ -1,349 +1,38 @@
 skill_id: sdd-spec-and-scoping
 canonical_name: SDD — Spec and Scoping (sdd-spec)
-description: 'Turn a fuzzy product idea into a clear, actionable plan before writing code: define scope, success criteria, and non-goals to prevent wasted effort and ensure the final build matches your intent.'
-category: review
+description: "Turn the intake contract's fuzzy ask into a spec design and build can't drift from: surface assumptions, reframe wants into checkable acceptance, and name explicit non-goals — written to docs/spec/<slug>.md."
+category: operational
 skill_class: workflow
 domain_tags:
-- spec-driven-development
-- idea-refine
-- structured-specification
-- scoping
-- user-intent
-requires:
-- sdd-design-and-planning
+  - spec-driven-development
+  - scoping
+  - acceptance-criteria
+  - non-goals
+  - user-intent
+requires: []
 always_apply: false
-phase_scope:
-- design
-category_scope:
-- process
-author: authoring-agent
-change_summary: add explicit deliverable path (docs/spec) + optional domain_tags hint
-raw_prose: |
-  # SDD — Spec and Scoping (sdd-spec)
-
-  ## Overview
-
-  The SDD pipeline starts with `sdd-spec`: convert a fuzzy product ask into a precise spec with scope, success criteria, and explicit non-goals. This phase is the most leverage in the pipeline — bad specs cascade downstream into bad designs and bad code. This skill covers spec authoring patterns.
-
-  Sourced from agent-skills/spec-driven-development and agent-skills/idea-refine.
-
-  ## Deliverable to advance
-
-  Write the spec to **`docs/spec/<task_slug>.md`** with `## Acceptance Criteria`
-  and `## Out of Scope` sections. The phase advances to `design` only once that
-  file exists with those sections — until then you stay in `spec`.
-
-  ---
-
-
-  # Spec-Driven Development
-
-  ## Overview
-
-  Write a structured specification before writing any code. The spec is the shared source of truth between you and the human engineer — it defines what we're building, why, and how we'll know it's done. Code without a spec is guessing.
-
-  ## When to Use
-
-  - Starting a new project or feature
-  - Requirements are ambiguous or incomplete
-  - The change touches multiple files or modules
-  - You're about to make an architectural decision
-  - The task would take more than 30 minutes to implement
-
-  **When NOT to use:** Single-line fixes, typo corrections, or changes where requirements are unambiguous and self-contained.
-
-  ## The Gated Workflow
-
-  Spec-driven development has four phases. Do not advance to the next phase until the current one is validated.
-
-  ```
-  SPECIFY ──→ PLAN ──→ TASKS ──→ IMPLEMENT
-     │          │        │          │
-     ▼          ▼        ▼          ▼
-  Human      Human    Human      Human
-  reviews    reviews  reviews    reviews
-  ```
-
-  ### Phase 1: Specify
-
-  Start with a high-level vision. Ask the human clarifying questions until requirements are concrete.
-
-  **Surface assumptions immediately.** Before writing any spec content, list what you're assuming:
-
-  ```
-  ASSUMPTIONS I'M MAKING:
-  1. This is a web application (not native mobile)
-  2. Authentication uses session-based cookies (not JWT)
-  3. The database is PostgreSQL (based on existing Prisma schema)
-  4. We're targeting modern browsers only (no IE11)
-  → Correct me now or I'll proceed with these.
-  ```
-
-  Don't silently fill in ambiguous requirements. The spec's entire purpose is to surface misunderstandings *before* code gets written — assumptions are the most dangerous form of misunderstanding.
-
-  **Write a spec document covering these six core areas:**
-
-  1. **Objective** — What are we building and why? Who is the user? What does success look like?
-
-  2. **Commands** — Full executable commands with flags, not just tool names.
-     ```
-     Build: npm run build
-     Test: npm test -- --coverage
-     Lint: npm run lint --fix
-     Dev: npm run dev
-     ```
-
-  3. **Project Structure** — Where source code lives, where tests go, where docs belong.
-     ```
-     src/           → Application source code
-     src/components → React components
-     src/lib        → Shared utilities
-     tests/         → Unit and integration tests
-     e2e/           → End-to-end tests
-     docs/          → Documentation
-     ```
-
-  4. **Code Style** — One real code snippet showing your style beats three paragraphs describing it. Include naming conventions, formatting rules, and examples of good output.
-
-  5. **Testing Strategy** — What framework, where tests live, coverage expectations, which test levels for which concerns.
-
-  6. **Boundaries** — Three-tier system:
-     - **Always do:** Run tests before commits, follow naming conventions, validate inputs
-     - **Ask first:** Database schema changes, adding dependencies, changing CI config
-     - **Never do:** Commit secrets, edit vendor directories, remove failing tests without approval
-
-  **Spec template:**
-
-  ```markdown
-  # Spec: [Project/Feature Name]
-
-  ## Objective
-  [What we're building and why. User stories or acceptance criteria.]
-
-  ## Tech Stack
-  [Framework, language, key dependencies with versions]
-
-  ## Commands
-  [Build, test, lint, dev — full commands]
-
-  ## Project Structure
-  [Directory layout with descriptions]
-
-  ## Code Style
-  [Example snippet + key conventions]
-
-  ## Testing Strategy
-  [Framework, test locations, coverage requirements, test levels]
-
-  ## Boundaries
-  - Always: [...]
-  - Ask first: [...]
-  - Never: [...]
-
-  ## Success Criteria
-  [How we'll know this is done — specific, testable conditions]
-
-  ## Open Questions
-  [Anything unresolved that needs human input]
-  ```
-
-  **Reframe instructions as success criteria.** When receiving vague requirements, translate them into concrete conditions:
-
-  ```
-  REQUIREMENT: "Make the dashboard faster"
-
-  REFRAMED SUCCESS CRITERIA:
-  - Dashboard LCP < 2.5s on 4G connection
-  - Initial data load completes in < 500ms
-  - No layout shift during load (CLS < 0.1)
-  → Are these the right targets?
-  ```
-
-  This lets you loop, retry, and problem-solve toward a clear goal rather than guessing what "faster" means.
-
-  ### Phase 2: Plan
-
-  With the validated spec, generate a technical implementation plan:
-
-  1. Identify the major components and their dependencies
-  2. Determine the implementation order (what must be built first)
-  3. Note risks and mitigation strategies
-  4. Identify what can be built in parallel vs. what must be sequential
-  5. Define verification checkpoints between phases
-
-  The plan should be reviewable: the human should be able to read it and say "yes, that's the right approach" or "no, change X."
-
-  ### Phase 3: Tasks
-
-  Break the plan into discrete, implementable tasks:
-
-  - Each task should be completable in a single focused session
-  - Each task has explicit acceptance criteria
-  - Each task includes a verification step (test, build, manual check)
-  - Tasks are ordered by dependency, not by perceived importance
-  - No task should require changing more than ~5 files
-
-  **Task template:**
-  ```markdown
-  - [ ] Task: [Description]
-    - Acceptance: [What must be true when done]
-    - Verify: [How to confirm — test command, build, manual check]
-    - Files: [Which files will be touched]
-  ```
-
-  ### Phase 4: Implement
-
-  Execute tasks one at a time following `incremental-implementation` and `test-driven-development` skills. Use `context-engineering` to load the right spec sections and source files at each step rather than flooding the agent with the entire spec.
-
-  ---
-
-
-  # Idea Refine
-
-  Refines raw ideas into sharp, actionable concepts worth building through structured divergent and convergent thinking.
-
-  ## How It Works
-
-  1.  **Understand & Expand (Divergent):** Restate the idea, ask sharpening questions, and generate variations.
-  2.  **Evaluate & Converge:** Cluster ideas, stress-test them, and surface hidden assumptions.
-  3.  **Sharpen & Ship:** Produce a concrete markdown one-pager moving work forward.
-
-  ## Usage
-
-  This skill is primarily an interactive dialogue. Invoke it with an idea, and the agent will guide you through the process.
-
-  ```bash
-  # Optional: Initialize the ideas directory
-  bash /mnt/skills/user/idea-refine/scripts/idea-refine.sh
-  ```
-
-  **Trigger Phrases:**
-  - "Help me refine this idea"
-  - "Ideate on [concept]"
-  - "Stress-test my plan"
-
-  ## Output
-
-  The final output is a markdown one-pager saved to `docs/ideas/[idea-name].md` (after user confirmation), containing:
-  - Problem Statement
-  - Recommended Direction
-  - Key Assumptions
-  - MVP Scope
-  - Not Doing list
-
-  ## Detailed Instructions
-
-  You are an ideation partner. Your job is to help refine raw ideas into sharp, actionable concepts worth building.
-
-  ### Philosophy
-
-  - Simplicity is the ultimate sophistication. Push toward the simplest version that still solves the real problem.
-  - Start with the user experience, work backwards to technology.
-  - Say no to 1,000 things. Focus beats breadth.
-  - Challenge every assumption. "How it's usually done" is not a reason.
-  - Show people the future — don't just give them better horses.
-  - The parts you can't see should be as beautiful as the parts you can.
-
-  ### Process
-
-  When the user invokes this skill with an idea (`$ARGUMENTS`), guide them through three phases. Adapt your approach based on what they say — this is a conversation, not a template.
-
-  #### Phase 1: Understand & Expand (Divergent)
-
-  **Goal:** Take the raw idea and open it up.
-
-  1. **Restate the idea** as a crisp "How Might We" problem statement. This forces clarity on what's actually being solved.
-
-  2. **Ask 3-5 sharpening questions** — no more. Focus on:
-     - Who is this for, specifically?
-     - What does success look like?
-     - What are the real constraints (time, tech, resources)?
-     - What's been tried before?
-     - Why now?
-
-     Use the `AskUserQuestion` tool to gather this input. Do NOT proceed until you understand who this is for and what success looks like.
-
-  3. **Generate 5-8 idea variations** using these lenses:
-     - **Inversion:** "What if we did the opposite?"
-     - **Constraint removal:** "What if budget/time/tech weren't factors?"
-     - **Audience shift:** "What if this were for [different user]?"
-     - **Combination:** "What if we merged this with [adjacent idea]?"
-     - **Simplification:** "What's the version that's 10x simpler?"
-     - **10x version:** "What would this look like at massive scale?"
-     - **Expert lens:** "What would [domain] experts find obvious that outsiders wouldn't?"
-
-     Push beyond what the user initially asked for. Create products people don't know they need yet.
-
-  **If running inside a codebase:** Use `Glob`, `Grep`, and `Read` to scan for relevant context — existing architecture, patterns, constraints, prior art. Ground your variations in what actually exists. Reference specific files and patterns when relevant.
-
-  Read `frameworks.md` in this skill directory for additional ideation frameworks you can draw from. Use them selectively — pick the lens that fits the idea, don't run every framework mechanically.
-
-  #### Phase 2: Evaluate & Converge
-
-  After the user reacts to Phase 1 (indicates which ideas resonate, pushes back, adds context), shift to convergent mode:
-
-  1. **Cluster** the ideas that resonated into 2-3 distinct directions. Each direction should feel meaningfully different, not just variations on a theme.
-
-  2. **Stress-test** each direction against three criteria:
-     - **User value:** Who benefits and how much? Is this a painkiller or a vitamin?
-     - **Feasibility:** What's the technical and resource cost? What's the hardest part?
-     - **Differentiation:** What makes this genuinely different? Would someone switch from their current solution?
-
-     Read `refinement-criteria.md` in this skill directory for the full evaluation rubric.
-
-  3. **Surface hidden assumptions.** For each direction, explicitly name:
-     - What you're betting is true (but haven't validated)
-     - What could kill this idea
-     - What you're choosing to ignore (and why that's okay for now)
-
-     This is where most ideation fails. Don't skip it.
-
-  **Be honest about your assumptions.**
-
-  ## Artifact completeness evaluation (soft advisory)
-
-  When you see a `[agentalloy-eval]` block in your context, the system is
-  asking you to evaluate whether a specific artifact meets its completeness
-  criteria. This is a **soft advisory** — it does not block your work.
-
-  ```
-  [agentalloy-eval] Soft completeness check — does this artifact meet the bar?
-  Criteria: <criteria text>
-
-  <artifact content>
-  ```
-
-  **How to respond:**
-
-  1. Read the criteria and the artifact content.
-  2. Compare them honestly — does the artifact actually meet the stated bar?
-  3. If yes, acknowledge it briefly and continue.
-  4. If no, note what's missing and address it before proceeding.
-
-  This is your chance to catch quality issues that automated checks can't
-  detect: incomplete specs, half-finished implementations, missing edge
-  cases, or artifacts that look structurally correct but lack substance.
-  Be honest but pragmatic — \"good enough to proceed\" counts as complete.
 applies_to_phases:
-- spec
+  - spec
 exit_gates:
   all_of:
-  - artifact_exists:
-      path: docs/spec/*.md
-  - artifact_contains:
-      path: docs/spec/*.md
-      sections:
-      - Acceptance Criteria
-      - Out of Scope
+    - artifact_exists:
+        path: docs/spec/*.md
+    - artifact_contains:
+        path: docs/spec/*.md
+        sections:
+          - Acceptance Criteria
+          - Out of Scope
 signal_keywords:
-- done with spec
-- ready to design
-- next phase
+  - done with spec
+  - ready to design
+  - acceptance is clear
+  - next phase
 contract_template: |
   ---
   phase: spec
   task_slug: {{task_slug}}
-  domain_tags: []  # optional: add domain keywords (e.g. fastapi, sqlalchemy) to sharpen skill retrieval
+  route: full
+  domain_tags: []
   scope:
     touches: []
     avoids: []
@@ -354,5 +43,78 @@ contract_template: |
 
   # {{task_slug}}
 
-  ## Task description
-  <fill in what you intend to do and why>
+  ## Scope in a sentence
+
+  <what this changes, and the boundary of "this">
+
+  ## Spec
+
+  Acceptance criteria and out-of-scope live in docs/spec/{{task_slug}}.md.
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
+phase_scope: []
+category_scope: [process]
+author: navistone
+change_summary: "rewrite as a tight, contract-driven spec (assumptions → checkable acceptance → explicit non-goals, docs/spec/<slug>.md); drop the concatenated source skills, ASCII pipeline, six-area template, and the runtime-injected eval block"
+raw_prose: |
+  # SDD — Spec
+
+  Intake handed you a contract: the *what*, and a decision that this needs the
+  full lane. Your job is the highest-leverage step in the pipeline — turn that
+  fuzzy "what" into a spec precise enough that design and build can't drift:
+  scope, checkable acceptance, explicit non-goals. Bad specs cascade downstream
+  into bad designs and bad code; this is where you stop them.
+
+  ## 1. Start from the contract
+
+  Read `.agentalloy/contracts/intake/<slug>.md` — you already have the request
+  and the agreed scope. Sharpen what's there; don't re-interview from scratch.
+
+  ## 2. Surface your assumptions first
+
+  Before writing a line of spec, list what you're assuming — stack, data model,
+  auth, the boundary of "this" — and have the user correct them:
+
+      Assuming: session cookies (not JWT), Postgres (existing schema), web only.
+      Correct me now, or I build on these.
+
+  A silent assumption is the most expensive misunderstanding there is. The spec
+  exists to surface them *before* code does.
+
+  ## 3. Reframe the ask into checkable acceptance
+
+  Translate every vague want into a condition a test or a person can mark
+  true/false:
+
+      "make the dashboard faster"  →  LCP < 2.5s on 4G, data load < 500ms
+
+  If you can't make a requirement checkable, it isn't a requirement yet —
+  resolve it with the user, don't guess.
+
+  ## 4. Name what you're NOT doing
+
+  Write the non-goals down. An "Out of Scope" list is the cheapest scope control
+  there is, and the first thing you point at when the work starts to sprawl.
+
+  ## 5. Write it + hand off
+
+  Two artifacts, each with one job. The **contract** carries what the machinery
+  reads — seed it, reusing the intake slug so the work chains:
+
+      agentalloy contract init --phase spec --slug <task-slug>
+
+  Fill `domain_tags` (they focus retrieval) and `scope.touches/avoids` (they
+  bound where you work). The **spec doc** is the deliverable and the single
+  source of truth for acceptance — write it to **`docs/spec/<task-slug>.md`**
+  with `## Acceptance Criteria` and `## Out of Scope`. Don't copy acceptance
+  back into the contract; one home, no drift. That file completes spec and
+  hands to **design**.
+
+  ## Not this
+
+  Don't design the solution here — no architecture, no file-by-file plan;
+  that's design's job, and doing it now locks in choices you haven't earned.
+  Don't pad the spec with boilerplate the repo already documents (build
+  commands, directory layout). Don't leave acceptance fuzzy to "figure out
+  later" — later is more expensive. And if it now feels too small for the full
+  lane, intake over-called it: bail with `agentalloy phase set sdd-fast`.
