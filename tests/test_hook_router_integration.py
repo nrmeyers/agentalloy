@@ -937,7 +937,13 @@ class TestHookScriptPostToolUseInject:
 
 
 class TestSessionStartEndpoint:
-    """POST /v1/hook/session-start — intake is the session front door."""
+    """POST /v1/hook/session-start — intake is the session front door.
+
+    The front door is gated by ``session_intake_enabled`` (default off) until
+    the full workflow redesign lands; these tests enable it via the env var so
+    they exercise the real behavior. ``test_disabled_by_default_no_op`` covers
+    the gated-off path.
+    """
 
     _LOADER = "agentalloy.signals.skill_loader._load_workflow_skill_for_phase"
 
@@ -949,7 +955,21 @@ class TestSessionStartEndpoint:
             (proj / ".agentalloy" / "phase").write_text(f"phase: {phase}\n", encoding="utf-8")
         return proj
 
-    def test_fresh_runs_intake(self, client: TestClient, tmp_path: Path) -> None:
+    def test_disabled_by_default_no_op(self, client: TestClient, tmp_path: Path) -> None:
+        """With the flag unset, the wired hook still calls the endpoint but we
+        inject nothing — an incomplete workflow isn't forced on users."""
+        proj = self._proj(tmp_path, "intake")
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "disabled"
+        assert d["composed_block"] == ""
+
+    def test_fresh_runs_intake(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
         proj = self._proj(tmp_path, "intake")
         with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
             r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
@@ -961,7 +981,10 @@ class TestSessionStartEndpoint:
         assert "INTAKE-PROSE" in d["composed_block"]
         assert "fresh" in d["composed_block"].lower()
 
-    def test_in_progress_offers_resume(self, client: TestClient, tmp_path: Path) -> None:
+    def test_in_progress_offers_resume(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
         proj = self._proj(tmp_path, "build")
         with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
             r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
@@ -974,7 +997,10 @@ class TestSessionStartEndpoint:
         assert "phase: build" in d["composed_block"]
         assert "resume" in d["composed_block"].lower()
 
-    def test_detects_active_contract(self, client: TestClient, tmp_path: Path) -> None:
+    def test_detects_active_contract(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
         proj = self._proj(tmp_path, "build")
         contracts = proj / ".agentalloy" / "contracts"
         contracts.mkdir(parents=True)
@@ -985,7 +1011,10 @@ class TestSessionStartEndpoint:
         assert d["active_contract"].endswith("add-auth.md")
         assert "add-auth.md" in d["composed_block"]
 
-    def test_no_intake_skill_is_graceful(self, client: TestClient, tmp_path: Path) -> None:
+    def test_no_intake_skill_is_graceful(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "1")
         proj = self._proj(tmp_path, "intake")
         with patch(self._LOADER, return_value=None):
             r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})

@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     dedup_soft_threshold: float = 0.80
     bounce_budget: int = 3
 
+    # Session-start intake front door (the claude-code SessionStart hook that
+    # greets every session with the intake interview). Gated OFF until the full
+    # workflow redesign lands — the remaining phase prose and the sys-* system
+    # skills — so an incomplete, half-wired workflow isn't forced on users. The
+    # hook is still wired; its endpoint no-ops until this is enabled. Flip the
+    # default to True (or set SESSION_INTAKE_ENABLED=1) to activate.
+    session_intake_enabled: bool = False
+
     # Upstream LLM — the generative model the proxy forwards chat completions to.
     # Env vars: UPSTREAM_URL, UPSTREAM_MODEL, UPSTREAM_API_KEY (bare names, no prefix).
     upstream_url: str = ""

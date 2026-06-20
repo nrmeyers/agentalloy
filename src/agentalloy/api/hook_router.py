@@ -580,7 +580,17 @@ async def hook_session_start(request: Request) -> JSONResponse:
     left off, or start something new?" rather than silently dropping into the
     old phase). The injected state below tells intake's prose whether there's
     work in flight, so it can offer a precise resume instead of guessing.
+
+    Gated by ``session_intake_enabled`` (default off): until the full workflow
+    redesign lands — the remaining phase prose and the sys-* skills — the wired
+    hook still calls this endpoint but we inject nothing, so an incomplete
+    workflow isn't forced on users.
     """
+    from agentalloy.config import get_settings
+
+    if not get_settings().session_intake_enabled:
+        return JSONResponse(content={"status": "disabled", "composed_block": ""})
+
     try:
         body = await request.json()
     except Exception:

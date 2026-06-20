@@ -62,8 +62,9 @@ _VALID_FRAGMENT_TYPES = frozenset(
 # System-skill phase_scope vocabulary — the canonical SDD lifecycle (matches
 # gates._PHASE_GRAPH and the api.compose_models.Phase Literal). Previously the
 # alien {design, build, review} set, which couldn't scope to intake/spec/qa/ship
-# and whose "review" never matched runtime "qa". Reconciled in Stage 3b.
-_VALID_PHASES = frozenset({"intake", "spec", "design", "build", "qa", "ship"})
+# and whose "review" never matched runtime "qa". Reconciled in Stage 3b;
+# "sdd-fast" (the fast-lane phase) added so sys skills can scope to it.
+_VALID_PHASES = frozenset({"intake", "spec", "design", "build", "qa", "ship", "sdd-fast"})
 
 # Lint thresholds — derived from fixtures/skill-authoring-guidelines.md (R1–R8)
 # and fixtures/skill-authoring-agent.md "Hard fragmentation rules" / "Tag rules".

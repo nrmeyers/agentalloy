@@ -30,8 +30,9 @@ EXIT_VALIDATION = 2
 EXIT_DB = 3
 
 # Canonical SDD lifecycle (matches ingest._VALID_PHASES / gates._PHASE_GRAPH).
-# Reconciled from the old {design, build, review} in Stage 3b.
-_VALID_PHASES = {"intake", "spec", "design", "build", "qa", "ship"}
+# Reconciled from the old {design, build, review} in Stage 3b; "sdd-fast" (the
+# fast-lane phase) added so sys skills can scope to it.
+_VALID_PHASES = {"intake", "spec", "design", "build", "qa", "ship", "sdd-fast"}
 _VALID_CATEGORIES = {"governance", "operational", "tooling", "safety", "quality", "observability"}
 
 

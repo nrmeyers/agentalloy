@@ -208,6 +208,42 @@ def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
     store.close()
 
 
+def test_sdd_fast_phase_scope_is_valid(tmp_path: Path) -> None:
+    """sys skills can scope to the fast-lane phase — `sdd-fast` is in the
+    canonical lifecycle vocabulary, not rejected as unknown."""
+    db_path = str(tmp_path / "ladybug")
+    store = LadybugStore(db_path)
+    store.open()
+    store.migrate()
+    store.close()
+
+    md = tmp_path / "fast.md"
+    md.write_text(
+        textwrap.dedent("""\
+        # Fast Lane Rule
+
+        **skill_id:** sys-fast-rule
+        **category:** governance
+        **always_apply:** false
+        **phase_scope:** sdd-fast
+        **category_scope:**
+        **author:** test
+        **change_summary:** scoped to the fast lane
+
+        Keep the rigor; drop the ceremony.
+    """)
+    )
+
+    with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
+        code = main([str(md), "--yes"])
+
+    assert code == EXIT_OK
+    store.open()
+    row = store.execute("MATCH (s:Skill {skill_id: 'sys-fast-rule'}) RETURN s.phase_scope")
+    assert "sdd-fast" in row[0][0]
+    store.close()
+
+
 def test_always_apply_with_phase_scope_is_validation_error(tmp_path: Path) -> None:
     db_path = str(tmp_path / "ladybug")
     store = LadybugStore(db_path)
