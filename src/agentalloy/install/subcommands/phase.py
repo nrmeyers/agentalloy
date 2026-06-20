@@ -135,6 +135,13 @@ def add_parser(
     _add_project_root_flag(p)  # for the default (get) action
     sub = p.add_subparsers(dest="phase_action")
 
+    # Explicit `phase get` — the natural read verb agents reach for. Bare
+    # `phase` also runs get (the default below), but `get` must be a real
+    # subcommand or argparse rejects it as an invalid choice.
+    p_get = sub.add_parser("get", help="Print the current phase")
+    _add_project_root_flag(p_get)
+    p_get.set_defaults(func=_run_get)
+
     p_set = sub.add_parser("set", help="Set the current phase")
     p_set.add_argument(
         "phase",

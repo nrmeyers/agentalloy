@@ -5,15 +5,46 @@ Maps to plan: agentalloy phase CLI — set/get/clear phase lock file.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
 
+from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands.phase import (
     run_phase_clear,
     run_phase_get,
     run_phase_set,
 )
+
+
+class TestPhaseSubcommandParsing:
+    """Argparse-level: `phase get` must be a real subcommand.
+
+    Regression: only `set`/`clear` were registered, so an explicit
+    `agentalloy phase get` (the natural read verb agents reach for) errored
+    with `invalid choice: 'get'`, even though bare `phase` defaulted to get.
+    """
+
+    @staticmethod
+    def _parser() -> argparse.ArgumentParser:
+        parser = argparse.ArgumentParser(prog="agentalloy")
+        sub = parser.add_subparsers()
+        phase_mod.add_parser(sub)
+        return parser
+
+    def test_get_is_a_valid_subcommand(self) -> None:
+        args = self._parser().parse_args(["phase", "get"])
+        assert args.func is phase_mod._run_get  # pyright: ignore[reportPrivateUsage]
+
+    def test_bare_phase_defaults_to_get(self) -> None:
+        args = self._parser().parse_args(["phase"])
+        assert args.func is phase_mod._run_get  # pyright: ignore[reportPrivateUsage]
+
+    def test_set_and_clear_still_parse(self) -> None:
+        parser = self._parser()
+        assert parser.parse_args(["phase", "set", "spec"]).func is phase_mod._run_set  # pyright: ignore[reportPrivateUsage]
+        assert parser.parse_args(["phase", "clear"]).func is phase_mod._run_clear  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.fixture()
