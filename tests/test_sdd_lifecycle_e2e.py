@@ -99,6 +99,11 @@ class ProjectDir:
         (d / "tasks.md").write_text(
             "# Tasks\n\n## Tasks\n\n- T1: schema (satisfies AC-1)\n- T2: API (satisfies AC-2)\n"
         )
+        (d / "test-plan.md").write_text(
+            "# Test Plan\n\n## Test Cases\n\n"
+            "- TC1: POST /links creates a link -> 201 (proves AC-1, task T1)\n"
+            "- TC2: GET /links lists links (proves AC-2, task T2)\n"
+        )
         return d
 
     def write_build(self) -> None:

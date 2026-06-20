@@ -1,6 +1,6 @@
 skill_id: sdd-build
 canonical_name: SDD — Build (sdd-build)
-description: "Execute the design's task plan as code: work the ordered slices in docs/design/<slug>/tasks.md one at a time, test-first, each proven green against the spec's acceptance before moving on."
+description: "Execute the design's plan as code TDD-style: work the ordered tasks in docs/design/<slug>/tasks.md one at a time, turning each task's designed test cases (test-plan.md) red → green → refactor until the suite proves the spec's acceptance."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -51,7 +51,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight, contract-driven build (work the design folder's tasks.md top to bottom, test-first, scope-honest); drop the overview filler, the standalone PostToolUse section (folded to one line), and the runtime-injected eval block"
+change_summary: "rewrite as a tight, contract-driven build executing strict TDD (red → green → refactor) against the design's test-plan.md, work the tasks top to bottom, scope-honest; drop the overview filler, the standalone PostToolUse section (folded to one line), and the runtime-injected eval block"
 raw_prose: |
   # SDD — Build
 
@@ -62,10 +62,11 @@ raw_prose: |
 
   ## 1. Load the plan
 
-  Read `docs/design/<slug>/tasks.md` (your worklist) and `approach.md` (the how
-  + decisions you're implementing against), plus `docs/spec/<slug>.md` (the
-  acceptance you're building toward). Take the tasks in order; pull in the
-  folder's component files as the task you're on references them.
+  Read `docs/design/<slug>/tasks.md` (your worklist), `test-plan.md` (the unit
+  cases each task must pass), and `approach.md` (the how + decisions you're
+  implementing against), plus `docs/spec/<slug>.md` (the acceptance behind it
+  all). Take the tasks in order; pull in the folder's component files as the
+  task you're on references them.
 
   ## 2. Open a build contract
 
@@ -76,12 +77,18 @@ raw_prose: |
   arrives automatically. (If it doesn't: `agentalloy compose --contract
   .agentalloy/contracts/build/<slug>.md`.)
 
-  ## 3. Test first, one concern at a time
+  ## 3. TDD: red → green → refactor, one case at a time
 
-  For each slice: write the test that encodes its spec acceptance, watch it fail,
-  then write the code that makes it pass. Keep changes small and committed — one
-  concern per commit, a green suite at every step. A slice isn't done until its
-  test is green and the rest of the suite still is.
+  Design already decided what proves each task — work its test cases from
+  `test-plan.md`, don't re-derive them. For the task you're on, take each case:
+
+  1. **Red** — write it as a test and run it; watch it fail for the right reason.
+  2. **Green** — write the minimum code to pass. No more than the case asks for.
+  3. **Refactor** — clean it up with the test holding you safe.
+
+  Add cases the implementation reveals — the test plan is the floor, not the
+  ceiling — but every planned case ends up a real, passing test. One concern per
+  commit; the whole suite green at every step.
 
   ## 4. Stay inside the scope you declared
 
@@ -92,9 +99,9 @@ raw_prose: |
 
   ## 5. Done when
 
-  Every spec acceptance criterion has a passing test, the full suite is green
-  with no regressions, and the work lives under `src/` with tests under
-  `tests/`. Then hand to **qa**.
+  Every case in `test-plan.md` is a passing test (plus the edges you added), the
+  full suite is green with no regressions, and the work lives under `src/` with
+  tests under `tests/`. Then hand to **qa**.
 
   ## Not this
 
