@@ -257,6 +257,119 @@ class TestWireLifecycleMode:
         assert not (repo_root / ".agentalloy" / "phase").exists()
 
 
+class TestWireInstructionShaping:
+    """1b soft-precedence note + 1c clean-room excludes (claude-code), and the
+    unwire reversal of both (no leftover files — the openclaw lesson)."""
+
+    @staticmethod
+    def _claude_repo(repo_root: Path) -> None:
+        (repo_root / "CLAUDE.md").write_text("# Project\n")  # auto-detect claude-code
+
+    def _wire(self, **overrides: object) -> argparse.Namespace:
+        base = {
+            "harness": None,
+            "port": None,
+            "force": False,
+            "lifecycle_mode": None,
+            "clean_room": False,
+            "json": False,
+        }
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    # ---- 1b soft-precedence note -----------------------------------------
+
+    def test_full_writes_soft_note(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo(repo_root)
+        monkeypatch.chdir(repo_root)
+        assert wire._run(self._wire(lifecycle_mode="full")) == 0
+        note = repo_root / ".claude" / "CLAUDE.md"
+        assert note.exists()
+        txt = note.read_text()
+        assert "BEGIN agentalloy install" in txt
+        assert "AgentAlloy is active" in txt
+
+    def test_assist_skips_soft_note(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo(repo_root)
+        monkeypatch.chdir(repo_root)
+        assert wire._run(self._wire(lifecycle_mode="assist")) == 0
+        # The soft note asserts AgentAlloy precedence — wrong message when deferring.
+        assert not (repo_root / ".claude" / "CLAUDE.md").exists()
+
+    def test_soft_note_leaves_user_owned_file_untouched(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo(repo_root)
+        user_md = repo_root / ".claude" / "CLAUDE.md"
+        user_md.parent.mkdir(parents=True)
+        user_md.write_text("# My own .claude memory\n")
+        monkeypatch.chdir(repo_root)
+        assert wire._run(self._wire(lifecycle_mode="full")) == 0
+        assert user_md.read_text() == "# My own .claude memory\n"
+
+    def test_soft_note_unwire_roundtrip(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import unwire, wire
+
+        self._claude_repo(repo_root)
+        monkeypatch.chdir(repo_root)
+        wire._run(self._wire(lifecycle_mode="full"))
+        note = repo_root / ".claude" / "CLAUDE.md"
+        assert note.exists()
+        assert unwire._run(argparse.Namespace(force=False, json=True)) == 0
+        assert not note.exists()  # dedicated file deleted, no leftover
+
+    # ---- 1c clean-room excludes ------------------------------------------
+
+    def test_clean_room_writes_excludes_preserving_keys(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo(repo_root)
+        settings = repo_root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"theme": "dark"}) + "\n")
+        monkeypatch.chdir(repo_root)
+        assert wire._run(self._wire(lifecycle_mode="full", clean_room=True)) == 0
+        data = json.loads(settings.read_text())
+        assert data["theme"] == "dark"  # unrelated keys preserved
+        assert any(str(e).endswith("CLAUDE.md") for e in data["claudeMdExcludes"])
+
+    def test_clean_room_off_by_default(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        self._claude_repo(repo_root)
+        monkeypatch.chdir(repo_root)
+        assert wire._run(self._wire(lifecycle_mode="full")) == 0
+        assert not (repo_root / ".claude" / "settings.json").exists()
+
+    def test_clean_room_unwire_restores_original(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import unwire, wire
+
+        self._claude_repo(repo_root)
+        settings = repo_root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"theme": "dark"}, indent=2) + "\n")
+        original = settings.read_text()
+        monkeypatch.chdir(repo_root)
+        wire._run(self._wire(lifecycle_mode="full", clean_room=True))
+        assert "claudeMdExcludes" in settings.read_text()
+        assert unwire._run(argparse.Namespace(force=False, json=True)) == 0
+        assert settings.read_text() == original  # our exclude removed, theme kept
+
+
 # ---------------------------------------------------------------------------
 # unwire
 # ---------------------------------------------------------------------------
