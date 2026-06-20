@@ -939,10 +939,10 @@ class TestHookScriptPostToolUseInject:
 class TestSessionStartEndpoint:
     """POST /v1/hook/session-start — intake is the session front door.
 
-    The front door is gated by ``session_intake_enabled`` (default off) until
-    the full workflow redesign lands; these tests enable it via the env var so
-    they exercise the real behavior. ``test_disabled_by_default_no_op`` covers
-    the gated-off path.
+    The front door is gated by ``session_intake_enabled`` (default ON now that
+    the workflow redesign has landed). The enabled tests set the env var
+    explicitly so they're robust to the default; ``test_disabled_via_env_no_op``
+    covers the off-switch (``SESSION_INTAKE_ENABLED=0``).
     """
 
     _LOADER = "agentalloy.signals.skill_loader._load_workflow_skill_for_phase"
@@ -955,9 +955,12 @@ class TestSessionStartEndpoint:
             (proj / ".agentalloy" / "phase").write_text(f"phase: {phase}\n", encoding="utf-8")
         return proj
 
-    def test_disabled_by_default_no_op(self, client: TestClient, tmp_path: Path) -> None:
-        """With the flag unset, the wired hook still calls the endpoint but we
-        inject nothing — an incomplete workflow isn't forced on users."""
+    def test_disabled_via_env_no_op(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The off-switch still works: with SESSION_INTAKE_ENABLED=0 the wired
+        hook calls the endpoint but we inject nothing — no re-wire needed."""
+        monkeypatch.setenv("SESSION_INTAKE_ENABLED", "0")
         proj = self._proj(tmp_path, "intake")
         with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
             r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})

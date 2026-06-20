@@ -77,12 +77,11 @@ class Settings(BaseSettings):
     bounce_budget: int = 3
 
     # Session-start intake front door (the claude-code SessionStart hook that
-    # greets every session with the intake interview). Gated OFF until the full
-    # workflow redesign lands — the remaining phase prose and the sys-* system
-    # skills — so an incomplete, half-wired workflow isn't forced on users. The
-    # hook is still wired; its endpoint no-ops until this is enabled. Flip the
-    # default to True (or set SESSION_INTAKE_ENABLED=1) to activate.
-    session_intake_enabled: bool = False
+    # greets every session with the intake interview). Enabled now that the full
+    # workflow redesign has landed — the phase prose and the sys-* system skills.
+    # Set SESSION_INTAKE_ENABLED=0 to turn the front door off without re-wiring
+    # (the hook stays wired; its endpoint no-ops when this is false).
+    session_intake_enabled: bool = True
 
     # Upstream LLM — the generative model the proxy forwards chat completions to.
     # Env vars: UPSTREAM_URL, UPSTREAM_MODEL, UPSTREAM_API_KEY (bare names, no prefix).
