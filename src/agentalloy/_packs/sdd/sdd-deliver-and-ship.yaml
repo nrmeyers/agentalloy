@@ -69,8 +69,9 @@ raw_prose: |
 
   ## 2. Write the PR narrative
 
-  Open the PR (`gh pr create` / `glab mr create` — match the repo's forge). The
-  description is the deliverable, not an afterthought:
+  Open the PR with this repo's forge — the **VCS-forge** system skill names the
+  CLI (`gh` / `glab`) and the branch/PR conventions. The description is the
+  deliverable, not an afterthought:
 
   - **what** changed, in a sentence — the user-visible effect, not the file list.
   - **why** — the problem it solves; link the spec.
@@ -90,12 +91,13 @@ raw_prose: |
 
   ## 4. Reversibility scales with risk
 
-  Most changes ship by merge and are reversible with a revert — that's enough.
-  When the change carries real production risk — a migration, a user-facing
-  behavior change, anything hard to undo — gate it: ship behind a flag (deploy
-  off → enable for the team → 5% → 25% → 100%), watch error rate and latency
-  against baseline at each step, and roll back the moment a threshold trips.
-  Don't build that apparatus for a change a plain revert already covers.
+  How this org ships and rolls back is the **deploy-target** system skill's call
+  — read it. Its default is merge-is-release, reversible with a revert, and
+  that's enough for most changes. When the change carries real production risk —
+  a migration, a user-facing behavior change, anything hard to undo — follow the
+  deploy skill's rollout (flag / staged %) and watch the health signals it names,
+  rolling back the moment one trips. Don't build that apparatus for a change a
+  plain revert already covers.
 
   ## 5. After it lands
 

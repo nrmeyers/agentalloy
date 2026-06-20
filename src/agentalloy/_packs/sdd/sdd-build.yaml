@@ -82,7 +82,8 @@ raw_prose: |
   Design already decided what proves each task — work its test cases from
   `test-plan.md`, don't re-derive them. For the task you're on, take each case:
 
-  1. **Red** — write it as a test and run it; watch it fail for the right reason.
+  1. **Red** — write it as a test and run it (the **CI** system skill names the
+     runner); watch it fail for the right reason.
   2. **Green** — write the minimum code to pass. No more than the case asks for.
   3. **Refactor** — clean it up with the test holding you safe.
 
