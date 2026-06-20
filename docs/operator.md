@@ -79,14 +79,16 @@ Fragments are the smallest retrievable unit of skill content. Each fragment has:
 Phases track where the agent is in the software development lifecycle. The **authoritative SDD runtime lifecycle** is a linear graph (from `signals/gates.py`):
 
 ```
-spec → design → build → qa → ship
+intake → spec → design → build → qa → ship
 ```
+
+Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → ship`, with an escape hatch back to `spec`). Every session opens with intake (the claude-code `SessionStart` hook, gated by `session_intake_enabled`, default on).
 
 The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
 
 Two separate vocabularies exist for **skill authoring/ingest** and should not be confused with the runtime lifecycle above:
 
-- **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `design`, `build`, `review` — the values a skill may scope itself to at ingest time.
+- **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `intake`, `spec`, `design`, `build`, `qa`, `ship`, `sdd-fast` — the values a skill may scope itself to at ingest time (reconciled to the runtime lifecycle).
 - **Workflow position markers** (`ingest.py` `WORKFLOW_POSITION_MARKERS`): `sdd`, `phase:spec`, `phase:design`, `phase:plan`, `phase:testgen`, `phase:build`, `phase:verify`, `phase:deliver`, `code-review`, `release`, `incident`, `rfc` — tags describing where in a process a skill applies.
 
 ### Contracts
