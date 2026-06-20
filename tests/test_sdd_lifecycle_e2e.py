@@ -112,6 +112,17 @@ class ProjectDir:
         (self.root / "tests").mkdir(parents=True, exist_ok=True)
         (self.root / "tests" / "test_app.py").write_text("def test_app():\n    assert True\n")
 
+    def write_qa(self, slug: str) -> Path:
+        d = self.root / "docs" / "qa"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{slug}.md"
+        p.write_text(
+            "# QA\n\n"
+            "## Checks\n\nsuite green, lint clean, types clean\n\n"
+            "## Review\n\nAC-1/AC-2 met; non-goals respected; no Critical findings\n"
+        )
+        return p
+
 
 # ---------------------------------------------------------------------------
 # Scriptable intent oracle — the single neutralized LM verdict
@@ -244,7 +255,8 @@ def test_full_lifecycle_walk(app_client, project: ProjectDir, intent_oracle: _In
     r = _ups(client, project, "implementation done; run qa")
     assert r["transition"] is True and r["to_phase"] == "qa"
 
-    # qa -> ship: tests/**/*.py present.
+    # qa -> ship: docs/qa/<slug>.md with Checks + Review.
+    project.write_qa(slug)
     r = _ups(client, project, "tests pass — ship it")
     assert r["transition"] is True and r["to_phase"] == "ship"
     assert project.read_phase() == "phase: ship"
