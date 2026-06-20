@@ -1,0 +1,31 @@
+name: sys
+version: 1.0.0
+tier: foundation
+description: |
+  Golden system-capability skills — the org customization surface for the SDD
+  workflow. Each holds one capability's tool choice and conventions (VCS forge,
+  issue tracking, CI/quality gates, deploy target), co-injected by phase via the
+  deterministic system layer. Ships detection-first defaults that work
+  unconfigured; an org swaps a tool by editing one skill's raw_prose (+ a version
+  bump + re-ingest) while the golden workflows stay untouched.
+author: navistone
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
+license: MIT
+homepage: https://github.com/nrmeyers/agentalloy
+always_install: true
+depends_on:
+- core
+skills:
+- skill_id: sys-vcs-forge
+  file: sys-vcs-forge.yaml
+  fragment_count: 0
+- skill_id: sys-issue-tracking
+  file: sys-issue-tracking.yaml
+  fragment_count: 0
+- skill_id: sys-ci
+  file: sys-ci.yaml
+  fragment_count: 0
+- skill_id: sys-deploy-target
+  file: sys-deploy-target.yaml
+  fragment_count: 0

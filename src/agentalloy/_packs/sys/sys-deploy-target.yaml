@@ -1,0 +1,35 @@
+skill_id: sys-deploy-target
+canonical_name: "System — Deploy Target"
+description: "Where and how this org ships, and how to roll back — defaults to merge-is-release with revert-based rollback; customizable for real deploy pipelines."
+category: operational
+skill_class: system
+domain_tags:
+  - deploy
+  - release
+  - rollback
+always_apply: false
+phase_scope:
+  - ship
+category_scope: null
+author: navistone
+change_summary: "golden default: merge-is-release + revert rollback; customize point for staged-rollout pipelines"
+raw_prose: |
+  # Deploy target
+
+  Default: **merge is the release.** Shipping = the PR merges to the default
+  branch; rollback = revert that commit. No separate deploy step, no flags. This
+  fits libraries, services that deploy from the default branch, and most repos —
+  use it unless your org has a real deploy pipeline.
+
+  ## Rollback
+
+  Whatever the path in, name the path out in the ship record's `## Rollback`: the
+  revert commit by default, or the flag / redeploy step if you customize below.
+
+  ## Customize
+
+  If your org deploys to a real target — staged environments, a release train, a
+  feature-flagged rollout, a PaaS — set the deploy command, the rollout sequence
+  (off → team → 5% → 25% → 100%), the health signals to watch, and the rollback
+  procedure here. Ship's "reversibility scales with risk" reads the concrete from
+  this skill.

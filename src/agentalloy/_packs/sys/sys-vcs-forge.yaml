@@ -1,0 +1,40 @@
+skill_id: sys-vcs-forge
+canonical_name: "System — VCS Forge"
+description: "Which git forge this repo uses and how to drive it: detect GitHub vs GitLab from the remote, the CLI (gh/glab), branch naming, and PR/MR conventions."
+category: tooling
+skill_class: system
+domain_tags:
+  - vcs
+  - git
+  - pull-request
+  - code-review
+always_apply: true
+phase_scope: null
+category_scope: null
+author: navistone
+change_summary: "golden default: detect-first forge skill (gh/glab); the org customization point for VCS conventions"
+raw_prose: |
+  # VCS forge
+
+  The git remote is the source of truth — read it, don't guess:
+
+  - `github.com` → **GitHub**, CLI `gh` (`gh pr create`, `gh pr view`).
+  - `gitlab.com` or self-hosted GitLab → **GitLab**, CLI `glab` (`glab mr create`,
+    `glab mr view`).
+  - Neither CLI available → push the branch and print the forge's "create
+    PR/MR" URL.
+
+  ## Conventions
+
+  - Branch from the default branch; never commit straight to it.
+  - Branch name `<type>/<task-slug>` (e.g. `feat/link-shortener`), matching the
+    contract slug.
+  - One PR/MR per SDD task; conventional-commit title; body carries ship's
+    narrative — what / why / how-verified, with links to the spec, design, and QA
+    docs.
+
+  ## Customize
+
+  This is the one place VCS conventions live. If your org standardizes a forge,
+  branch scheme, or review process, set it here — the golden workflows say "open
+  a PR with your forge" and get the concrete from this skill.

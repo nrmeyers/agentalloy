@@ -1,0 +1,33 @@
+skill_id: sys-issue-tracking
+canonical_name: "System — Issue Tracking"
+description: "How this org tracks work: the issue tracker, the id convention, and how to link an SDD task to an issue across the lifecycle. Defaults to the forge's native issues; customizable for a dedicated tracker."
+category: tooling
+skill_class: system
+domain_tags:
+  - issue-tracking
+  - project-management
+always_apply: true
+phase_scope: null
+category_scope: null
+author: navistone
+change_summary: "golden default: forge-native issues with a customize point for dedicated trackers (Linear/Jira)"
+raw_prose: |
+  # Issue tracking
+
+  Default: the **forge's native issues** (GitHub Issues / GitLab Issues) — see
+  the VCS-forge system skill for which forge this repo uses. Unless your org runs
+  a dedicated tracker, that's the source of truth.
+
+  ## Linking work to an issue
+
+  - One SDD task ↔ one issue. Put the issue id in the contract `task_slug` where
+    it fits (e.g. `eng-1234-link-shortener`) and in commit messages.
+  - intake / spec: link the issue the work traces to, or open one if it's new.
+  - ship: reference the issue in the PR, and move it to Done on merge.
+
+  ## Customize
+
+  If your org tracks work in a dedicated tool — Linear (`ENG-1234`), Jira
+  (`PROJ-123`), etc. — set its name, id convention, and CLI here. The golden
+  workflows say "link the issue in your tracker" and get the concrete from this
+  skill.

@@ -15,6 +15,8 @@ EXCEPTIONS (packs where the dir name is NOT a meaningful consumer filter tag):
   meta            — meta-skills about the agent itself
   intake          — SDD intake phase, not a domain
   sdd             — lifecycle phase label, not a domain
+  sys             — golden system-capability skills, selected by applicability
+                    predicates (always_apply/phase_scope), not domain_tags filtering
   design-review   — review phase, not a domain
   code-review     — review phase, not a domain
   documentation   — process category, not a domain
@@ -43,6 +45,7 @@ TAG_EXCEPTIONS: frozenset[str] = frozenset(
         "meta",
         "intake",
         "sdd",
+        "sys",
         "design-review",
         "code-review",
         "documentation",

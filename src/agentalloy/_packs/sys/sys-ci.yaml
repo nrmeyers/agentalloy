@@ -1,0 +1,40 @@
+skill_id: sys-ci
+canonical_name: "System — CI and Quality Gates"
+description: "How this repo runs tests, lint, and typecheck, and the green-gate command build and qa must pass — detected from the repo's tooling, customizable per org."
+category: quality
+skill_class: system
+domain_tags:
+  - ci
+  - testing
+  - lint
+  - typecheck
+always_apply: false
+phase_scope:
+  - build
+  - qa
+category_scope: null
+author: navistone
+change_summary: "golden default: detect the repo's test/lint/typecheck commands; the green-gate for build and qa"
+raw_prose: |
+  # CI and quality gates
+
+  Find the commands in the repo — don't invent them:
+
+  - the test / lint / typecheck commands live in the project manifest or config
+    (`package.json` scripts, `pyproject.toml` / `Makefile` / `tox.ini` /
+    `justfile`, …) and in the CI workflow (`.github/workflows/*`,
+    `.gitlab-ci.yml`). Read those, and run what CI runs.
+  - prefer the project's own runner (`uv run pytest`, `pnpm test`, `cargo test`)
+    over a guess.
+
+  ## The green gate
+
+  - **build** runs the tests for the slice it's on, plus a quick local check.
+  - **qa** runs the *full* bar — whole suite, lint, typecheck — and that result
+    is the merge gate; record it in the QA report.
+  - A red gate blocks forward: fix and re-run (see the QA remediation routing).
+
+  ## Customize
+
+  If your org standardizes CI commands or a required gate (a coverage floor, a
+  security scan), set them here so build and qa run exactly what merge requires.
