@@ -1,6 +1,6 @@
 skill_id: sdd-build
 canonical_name: SDD — Build (sdd-build)
-description: "Implement features from a spec and design doc by writing code one concern at a time with tests: follow a strict build workflow that enforces a contract declaring intent and scope before coding begins."
+description: "Execute the design's task plan as code: work the ordered slices in docs/design/<slug>/tasks.md one at a time, test-first, each proven green against the spec's acceptance before moving on."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -8,9 +8,7 @@ domain_tags:
   - implementation
   - coding
   - build
-requires:
-- sdd-design-and-planning
-- sdd-spec-and-scoping
+requires: []
 always_apply: false
 applies_to_phases:
   - build
@@ -18,9 +16,8 @@ exit_gates:
   all_of:
     - artifact_exists:
         path: "src/**"
-    - artifact_contains:
+    - artifact_exists:
         path: "tests/**/*.py"
-        sections: []
 signal_keywords:
   - done building
   - ready for qa
@@ -30,7 +27,8 @@ contract_template: |
   ---
   phase: build
   task_slug: {{task_slug}}
-  domain_tags: []  # optional: add domain keywords (e.g. fastapi, pytest) to sharpen skill retrieval
+  route: full
+  domain_tags: []
   scope:
     touches: []
     avoids: []
@@ -41,91 +39,67 @@ contract_template: |
 
   # {{task_slug}}
 
-  ## Task description
+  ## Scope in a sentence
 
-  <fill in what you intend to implement and why>
+  <what this changes, and the boundary of "this">
 
-  ## Implementation plan
+  ## Plan
 
-  <outline key changes, files affected, and approach>
-phase_scope: [build]
+  Approach + task order live in docs/design/{{task_slug}}/ (approach.md, tasks.md).
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
+phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: add explicit deliverable path (src/ + tests/) + optional domain_tags hint
+change_summary: "rewrite as a tight, contract-driven build (work the design folder's tasks.md top to bottom, test-first, scope-honest); drop the overview filler, the standalone PostToolUse section (folded to one line), and the runtime-injected eval block"
 raw_prose: |
-  # SDD — Build (sdd-build)
+  # SDD — Build
 
-  ## Overview
+  Spec said *what*, design said *how* and *in what order*. Build is execution:
+  work the design's task slices, one at a time, each proven by a test before you
+  move on. No new decisions here — if you're inventing architecture or
+  acceptance, you're in the wrong phase.
 
-  The build phase is where you implement what the spec and design phases produced.
-  This workflow skill guides the paid LLM through implementation following SDD
-  discipline: one concern at a time, with tests, and with a contract that declares
-  intent and domain scope before writing code.
+  ## 1. Load the plan
 
-  ## Deliverable to advance
+  Read `docs/design/<slug>/tasks.md` (your worklist) and `approach.md` (the how
+  + decisions you're implementing against), plus `docs/spec/<slug>.md` (the
+  acceptance you're building toward). Take the tasks in order; pull in the
+  folder's component files as the task you're on references them.
 
-  Implement under **`src/`** with tests under **`tests/`**. The phase advances to
-  `qa` only once both exist — until then you stay in `build`.
+  ## 2. Open a build contract
 
-  ## Entering the build phase
+      agentalloy contract init --phase build --slug <task-slug>
 
-  Before writing any code:
+  Fill `domain_tags` and `scope.touches/avoids`. Writing it triggers the hook to
+  inject the domain skills matching your tags on the next turn — the help
+  arrives automatically. (If it doesn't: `agentalloy compose --contract
+  .agentalloy/contracts/build/<slug>.md`.)
 
-  1. Confirm the spec exists and has Acceptance Criteria and Out of Scope sections.
-  2. Confirm the design doc exists and describes the approach.
-  3. Write a contract (`agentalloy contract init --phase build --slug <task-slug>`)
-     that declares `domain_tags` and `scope.touches` for the work ahead.
-  4. Use the contract to focus domain retrieval on the right skills.
+  ## 3. Test first, one concern at a time
 
-  ## During the build phase
+  For each slice: write the test that encodes its spec acceptance, watch it fail,
+  then write the code that makes it pass. Keep changes small and committed — one
+  concern per commit, a green suite at every step. A slice isn't done until its
+  test is green and the rest of the suite still is.
 
-  - Work in small commits with clear messages.
-  - Keep the contract's `scope.touches` honest — if you touch a file not listed,
-    update the contract.
-  - Run tests after each meaningful change.
-  - Do not move to QA until the acceptance criteria in the spec are met.
+  ## 4. Stay inside the scope you declared
 
-  ## Exit gate
+  Work within the contract's `scope.touches`. Spreading wider than you planned is
+  the signal to stop and check: is this scope creep (cut it), or did design miss
+  something (fix it there — `agentalloy phase set design`)? Don't quietly grow
+  the blast radius.
 
-  The build phase is done when:
+  ## 5. Done when
 
-  - All spec acceptance criteria have a corresponding test.
-  - No known regressions in the existing test suite.
-  - The contract's `success_criteria` are checkable and checked.
+  Every spec acceptance criterion has a passing test, the full suite is green
+  with no regressions, and the work lives under `src/` with tests under
+  `tests/`. Then hand to **qa**.
 
-  Signal readiness with: "done building", "ready for qa", or "implementation complete".
+  ## Not this
 
-  ## After writing a task contract
-
-  After writing a task contract at `.agentalloy/contracts/build/<slug>.md`,
-  agentalloy's PostToolUse hook automatically composes the domain skill
-  fragments matching the contract's `domain_tags` and injects them into
-  your next turn. If for some reason the hook didn't fire, you can run
-  composition manually:
-
-      agentalloy compose --contract .agentalloy/contracts/build/<slug>.md
-
-  ## Artifact completeness evaluation (soft advisory)
-
-  When you see a `[agentalloy-eval]` block in your context, the system is
-  asking you to evaluate whether a specific artifact meets its completeness
-  criteria. This is a **soft advisory** — it does not block your work.
-
-  ```
-  [agentalloy-eval] Soft completeness check — does this artifact meet the bar?
-  Criteria: <criteria text>
-
-  <artifact content>
-  ```
-
-  **How to respond:**
-
-  1. Read the criteria and the artifact content.
-  2. Compare them honestly — does the artifact actually meet the stated bar?
-  3. If yes, acknowledge it briefly and continue.
-  4. If no, note what's missing and address it before proceeding.
-
-  This is your chance to catch quality issues that automated checks can't
-  detect: incomplete specs, half-finished implementations, missing edge
-  cases, or artifacts that look structurally correct but lack substance.
-  Be honest but pragmatic — "good enough to proceed" counts as complete.
+  Don't skip the test because the code "obviously works" — the test is the
+  acceptance, made executable. Don't gold-plate beyond the spec, and don't fold
+  in unrelated fixes you spot along the way (note them, leave them). If the
+  design turns out wrong mid-build, don't freelance a new one — bail to `design`
+  and re-plan.
