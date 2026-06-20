@@ -35,6 +35,16 @@ CARD_ID_PREFIX = "card::"
 # corpus_meta key recording which mode the corpus index was built with.
 META_KEY_CARD_INDEX = "card_index"
 
+# corpus_meta key recording the corpus schema version. Stamped on every embed
+# pass so `update`/`seed-corpus` read an explicit marker instead of assuming
+# "implicit v1".
+META_KEY_SCHEMA_VERSION = "schema_version"
+
+# Current corpus schema version, stamped into corpus_meta at build time. Bump
+# this when a corpus migration lands (and add the matching entry to
+# install/subcommands/update.py MIGRATIONS).
+CORPUS_SCHEMA_VERSION = 1
+
 
 class CardIndexMode(StrEnum):
     """``--card-index`` values. ``OFF`` is the regression-guaranteed default."""

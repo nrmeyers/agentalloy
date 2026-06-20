@@ -80,6 +80,15 @@ def test_rebuild_fts_runs_when_zero_fragments(
         assert code == EXIT_OK
         mock_vs.rebuild_fts_index.assert_called_once()
         assert "running --rebuild-fts only" in caplog.text or "rebuild-fts requested" in caplog.text
+        # Every pass stamps the corpus schema version into corpus_meta — even
+        # the zero-fragment / idempotent path — so existing corpora pick up the
+        # explicit marker without a full re-embed.
+        from agentalloy.storage.card_index import (
+            CORPUS_SCHEMA_VERSION,
+            META_KEY_SCHEMA_VERSION,
+        )
+
+        mock_vs.set_meta.assert_any_call(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
 
 
 def test_no_rebuild_without_flag_when_zero_fragments(

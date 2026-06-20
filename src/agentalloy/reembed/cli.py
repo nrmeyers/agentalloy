@@ -50,7 +50,9 @@ from agentalloy.lm_client import (
 )
 from agentalloy.storage.card_index import (
     CARD_FRAGMENT_TYPE,
+    CORPUS_SCHEMA_VERSION,
     META_KEY_CARD_INDEX,
+    META_KEY_SCHEMA_VERSION,
     CardIndexMode,
     apply_prefix,
     build_card_text,
@@ -934,6 +936,14 @@ def main(argv: list[str] | None = None) -> int:
                 vs.set_meta(META_KEY_CARD_INDEX, card_mode.value)
             except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
                 logger.warning("could not record card_index meta: %s", exc)
+
+            # Stamp the corpus schema version so `update`/`seed-corpus` read an
+            # explicit marker instead of assuming "implicit v1". Soft-fail: a
+            # metadata write must never fail the embed pass.
+            try:
+                vs.set_meta(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
+            except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+                logger.warning("could not record schema_version meta: %s", exc)
 
             # Keep authored phase eligibility in sync with the graph on every
             # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall

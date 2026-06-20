@@ -16,12 +16,14 @@ from typing import Any
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.storage.card_index import CORPUS_SCHEMA_VERSION
 
 SCHEMA_VERSION = 1
 
-# The corpus schema version the code expects.
-# Bump this when a migration changes the DB schema.
-EXPECTED_CORPUS_SCHEMA_VERSION = 1
+# The corpus schema version the code expects. Single source of truth lives in
+# storage.card_index (stamped into corpus_meta at build time); re-exported here
+# under the historical name the rest of install/ imports.
+EXPECTED_CORPUS_SCHEMA_VERSION = CORPUS_SCHEMA_VERSION
 
 # Sanity floor — flags truly empty corpora; not a quality bar.
 MIN_SKILL_COUNT = 25
@@ -53,8 +55,8 @@ def _check_duckdb(duck_path: Path) -> dict[str, Any]:
         embedding_dim = dim_row[0] if dim_row else None  # type: ignore[index]
 
         # Read schema_version from corpus_meta table if it exists.
-        # The table is written by the ingest CLI; corpora ingested before this
-        # was added will not have the table — that's treated as "unrecorded".
+        # The marker is stamped by the embed pass; corpora built before this
+        # was added will not have the row — that's treated as "unrecorded".
         recorded_version: int | None = None
         try:
             row = con.execute(
@@ -181,17 +183,18 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 �
         }
 
     # 3. Schema version check
-    # The ingest CLI writes schema_version into a `corpus_meta` table. Corpora
-    # built before that change won't have the table — those are treated as
-    # implicit v1 with a soft warning surfaced in the output.
+    # The embed pass stamps schema_version into the `corpus_meta` table. Corpora
+    # built before that change lack the marker — those are treated as implicit
+    # v1 (which is current) with a soft, harmless note surfaced in the output.
     recorded = duck_meta.get("corpus_schema_version_recorded")
     if recorded is None:
-        # Implicit v1 — pre-dates corpus_meta. Pass through but flag.
+        # No explicit marker — pre-dates the schema_version stamp. Implicit v1
+        # is the current schema, so this is harmless; flag it softly.
         corpus_schema_version = EXPECTED_CORPUS_SCHEMA_VERSION
         schema_warning: str | None = (
-            "corpus_meta table not present; treating corpus as implicit "
-            f"v{EXPECTED_CORPUS_SCHEMA_VERSION}. Run `python -m agentalloy.ingest "
-            "--write-corpus-meta` (or re-ingest) to make the schema version explicit."
+            f"corpus predates the schema_version marker; treating as v{EXPECTED_CORPUS_SCHEMA_VERSION} "
+            "(current — harmless). The marker is written on the next corpus rebuild "
+            "(`agentalloy reembed --force`)."
         )
     elif recorded != EXPECTED_CORPUS_SCHEMA_VERSION:
         # Real schema mismatch — abort with the contract's documented action.

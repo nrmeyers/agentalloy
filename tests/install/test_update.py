@@ -54,7 +54,10 @@ class TestSchemaDrift:
         self._setup(repo_root)
         with patch.object(upd, "_read_corpus_schema_version", return_value=None):
             result = upd.update(root=repo_root)
-        assert any("corpus_meta" in w for w in result["warnings"])
+        # Missing marker is harmless (implicit == current schema); the note
+        # points at the rebuild that stamps it, not the bogus ingest command.
+        assert any("schema_version marker" in w for w in result["warnings"])
+        assert not any("agentalloy.ingest" in w for w in result["warnings"])
 
     def test_corpus_ahead_of_code_warns(self, repo_root: Path) -> None:
         self._setup(repo_root)
