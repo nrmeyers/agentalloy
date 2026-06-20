@@ -55,7 +55,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight verify+review gate: full quality bar (suite incl. integration, lint, types) → spec/non-goals/drift check → severity-labelled multi-axis review, recorded to docs/qa/<slug>.md; drop the change-sizing/description/multi-model sections, ASCII diagrams, the corrupted dead-code block, and the runtime-injected eval block"
+change_summary: "rewrite as a tight verify+review gate: full quality bar (suite incl. integration, lint, types) → spec/non-goals/drift check → severity-labelled multi-axis review, recorded to docs/qa/<slug>.md; remediation routes by cause (code defect → build, design flaw → design, spec gap → spec, nits in place) with the report as the worklist and QA never editing src/; drop the change-sizing/description/multi-model sections, ASCII diagrams, the corrupted dead-code block, and the runtime-injected eval block"
 raw_prose: |
   # SDD — QA (Verify and Review)
 
@@ -104,12 +104,27 @@ raw_prose: |
   Then sweep for dead code the change orphaned — list it, and ask before
   deleting anything you didn't add.
 
-  ## 4. Record it + hand off
+  ## 4. Record it, then route
 
   Write the verdict to **`docs/qa/<slug>.md`** with `## Checks` (the suite, lint,
   and type results) and `## Review` (the findings + the spec/non-goals verdict).
-  A clean report hands to **ship**; an open Critical or required finding doesn't
-  — fix it first.
+  A clean report — green bar, every AC met, no open Critical or required finding
+  — hands to **ship**.
+
+  Anything open routes by *cause*, and you don't fix code here: the report is
+  the worklist for the phase that does.
+
+  - **code defect** → `agentalloy phase set build`; build reproduces it as a
+    failing test first, so the bug earns a regression test on the way out.
+  - **design flaw** (the approach is wrong, not just the code) →
+    `agentalloy phase set design`.
+  - **spec gap** (an acceptance criterion was wrong or missing) →
+    `agentalloy phase set spec`.
+  - **nit / optional** → fix in place; it's not a blocker and doesn't need a
+    test of its own.
+
+  The change comes back through QA once the fix lands. There's no iteration cap
+  — re-review until the report is clean.
 
   ## Not this
 
@@ -117,5 +132,6 @@ raw_prose: |
   the point. Don't treat every nit as a blocker (you'll never ship) or wave
   through a Critical (you'll ship the bug). Don't re-review the unit behaviors
   design already specified — QA is about the whole: the integration, the
-  regressions, the human-judgment axes. And don't patch around a design flaw
-  here; if the approach is wrong, bail to `design`.
+  regressions, the human-judgment axes. And don't fix a real defect in place:
+  QA reviews, it doesn't write `src/` — a fix made here skips the red test and
+  ships uncovered. Route it back instead.
