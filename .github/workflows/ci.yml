@@ -82,3 +82,9 @@ jobs:
 
       - name: Smoke — wheel-bundled packs discoverable
         run: agentalloy install-packs --list
+
+      - name: Smoke — CLI output shape (no raw-JSON noise)
+        # Runs every user-facing verb in an isolated HOME and asserts
+        # human-by-default stdout (not a raw JSON dump) + valid --json.
+        # Same script the clean-room container runs (container/Containerfile.cleanroom).
+        run: bash scripts/cleanroom-smoke.sh
