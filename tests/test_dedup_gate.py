@@ -15,6 +15,7 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from pathlib import Path
@@ -207,6 +208,27 @@ def test_gate_hard_cross_pack(seeded_store: VectorStore) -> None:
     assert hard_match.fragment_id_incoming == new_frag_id
     assert hard_match.verdict == "hard"
     assert hard_match.similarity >= _HARD
+
+
+def test_gate_logs_start_and_done(
+    seeded_store: VectorStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The gate logs start + done so a full re-embed (thousands of fragments,
+    one DuckDB vector search each) isn't a silent multi-minute hang."""
+    new_skill_id = "new-skill-gamma"
+    seeded_store.insert_embeddings(
+        [_mk_fragment("new-gamma-f1", skill_id=new_skill_id, vec=_unit_vec(0))]
+    )
+    with caplog.at_level(logging.INFO, logger="agentalloy.dedup_gate"):
+        run_dedup_gate(
+            new_skill_ids={new_skill_id},
+            new_fragment_vecs={"new-gamma-f1": (new_skill_id, _unit_vec(0))},
+            vector_store=seeded_store,
+            hard_similarity=_HARD,
+            soft_similarity=_SOFT,
+        )
+    assert "dedup gate: scanning 1 new fragment" in caplog.text
+    assert "dedup gate: done" in caplog.text
 
 
 def test_gate_self_match_does_not_shadow_cross_pack_hard(seeded_store: VectorStore) -> None:

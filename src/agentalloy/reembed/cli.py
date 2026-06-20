@@ -980,6 +980,7 @@ def main(argv: list[str] | None = None) -> int:
                     logger.info("rebuilding BM25 FTS index (--rebuild-fts requested)")
                 try:
                     vs.rebuild_fts_index()
+                    logger.info("BM25 FTS index rebuilt")
                 except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
                     logger.warning(
                         "FTS index rebuild failed (BM25 leg degraded): %s. "

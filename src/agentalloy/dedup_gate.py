@@ -178,7 +178,15 @@ def run_dedup_gate(
     """
     result = DedupGateResult()
 
-    for fragment_id, (incoming_skill_id, vec) in new_fragment_vecs.items():
+    total = len(new_fragment_vecs)
+    logger.info("dedup gate: scanning %d new fragment(s) for cross-pack near-duplicates", total)
+    # Each fragment is a DuckDB vector search, so a full re-embed (thousands of
+    # fragments) is otherwise silent for minutes. Emit ~10 progress ticks.
+    step = max(1, total // 10)
+
+    for i, (fragment_id, (incoming_skill_id, vec)) in enumerate(new_fragment_vecs.items(), start=1):
+        if total >= 200 and i % step == 0:
+            logger.info("dedup gate: %d/%d fragments scanned", i, total)
         hard_hit, soft_hits = dedup_fragment(
             label=fragment_id,
             query_vec=vec,
@@ -223,4 +231,10 @@ def run_dedup_gate(
                     )
                 )
 
+    logger.info(
+        "dedup gate: done — %d fragment(s) scanned, %d hard / %d soft hit(s)",
+        total,
+        len(result.hard),
+        len(result.soft),
+    )
     return result
