@@ -819,6 +819,65 @@ class VectorStore:
             "per_phase": per_phase,
         }
 
+    def aggregate_hook_coverage(self) -> dict[str, object]:
+        """Aggregate hook-layer activity: every prompt and every skill pull.
+
+        Complements ``aggregate_savings`` (which counts only ``status='compose'``)
+        by surfacing what the hook router now records — prompts (composed and
+        no-compose, incl. cache hits), system-skill pulls, and intake injections —
+        grouped by (event_type, status), with a per-phase prompt breakdown.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT event_type, status, COUNT(*) AS n
+            FROM composition_traces
+            GROUP BY event_type, status
+            ORDER BY n DESC
+            """
+        ).fetchall()
+        by_event: list[dict[str, object]] = [
+            {"event_type": str(r[0]), "status": str(r[1]), "count": int(r[2])} for r in rows
+        ]
+
+        def _count(predicate: str, params: list[object]) -> int:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM composition_traces WHERE {predicate}", params
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+        prompts_total = _count("event_type = ?", ["prompt_submit"])
+        prompts_composed = _count("event_type = ? AND status = ?", ["prompt_submit", "composed"])
+        prompts_no_compose = _count(
+            "event_type = ? AND status = ?", ["prompt_submit", "no_compose"]
+        )
+        system_skill_pulls = _count("event_type = ?", ["system_skill_applied"])
+        intake_injections = _count("event_type = ?", ["session_intake"])
+
+        prompt_phase_rows = self._conn.execute(
+            """
+            SELECT phase, COUNT(*) AS prompts,
+                   COALESCE(SUM(CASE WHEN status = 'composed' THEN 1 ELSE 0 END), 0) AS composed
+            FROM composition_traces
+            WHERE event_type = 'prompt_submit'
+            GROUP BY phase
+            ORDER BY prompts DESC
+            """
+        ).fetchall()
+        per_phase: list[dict[str, object]] = [
+            {"phase": str(r[0]), "prompts": int(r[1]), "composed": int(r[2])}
+            for r in prompt_phase_rows
+        ]
+
+        return {
+            "prompts_total": prompts_total,
+            "prompts_composed": prompts_composed,
+            "prompts_no_compose": prompts_no_compose,
+            "system_skill_pulls": system_skill_pulls,
+            "intake_injections": intake_injections,
+            "by_event": by_event,
+            "per_phase_prompts": per_phase,
+        }
+
     def clear_telemetry(self) -> dict[str, int]:
         """Delete all rows from composition_traces and prompt_loads.
 

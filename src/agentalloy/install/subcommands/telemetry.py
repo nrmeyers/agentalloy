@@ -52,6 +52,13 @@ def add_parser(
     add_json_flag(savings_p)
     savings_p.set_defaults(func=_run_savings)
 
+    coverage_p = sub.add_parser(
+        "coverage",
+        help="Show hook-layer coverage: every prompt + every skill pull recorded.",
+    )
+    add_json_flag(coverage_p)
+    coverage_p.set_defaults(func=_run_coverage)
+
     p.set_defaults(func=_dispatch)
 
 
@@ -236,5 +243,95 @@ def _render_savings(result: dict[str, Any]) -> None:
             print_rich(
                 "  * flat-equivalent is 0 for traces recorded before this feature "
                 "was deployed or with a non-RuntimeCache source."
+            )
+    print_rich()
+
+
+def _fetch_coverage_via_api(port: int) -> dict[str, Any] | None:
+    """GET /telemetry/coverage from the running service; None on any failure.
+
+    Returns the same dict shape as ``VectorStore.aggregate_hook_coverage()``.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/telemetry/coverage"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _run_coverage(args: argparse.Namespace) -> int:
+    """Print hook-layer coverage (prompts, no-compose, skill pulls, intake).
+
+    Same service-lock handling as ``savings``: route through the API when the
+    service is up; direct read only when it is down.
+    """
+    from agentalloy.install import server_proc
+
+    port = _service_port()
+    if server_proc.port_reachable(port):
+        result = _fetch_coverage_via_api(port)
+        if result is not None:
+            write_result(result, args, human_fn=_render_coverage)
+            return 0
+        print(
+            "ERROR: the agentalloy service is running but its /telemetry/coverage API "
+            "did not respond (older version?).",
+            file=sys.stderr,
+        )
+        print(
+            "FIX:   restart it to pick up this endpoint: `agentalloy server-restart` "
+            "(or `systemctl --user restart agentalloy`).",
+            file=sys.stderr,
+        )
+        return 1
+
+    from agentalloy.config import get_settings
+    from agentalloy.storage.vector_store import open_or_create
+
+    settings = get_settings()
+    vs = open_or_create(settings.duckdb_path)
+    try:
+        result = vs.aggregate_hook_coverage()
+    finally:
+        vs.close()
+
+    write_result(result, args, human_fn=_render_coverage)
+    return 0
+
+
+def _render_coverage(result: dict[str, Any]) -> None:
+    """Render hook-layer coverage in human-readable format."""
+    prompts = int(result.get("prompts_total", 0))
+    print_rich("\n  [bold]Hook Coverage[/bold]  [dim](every prompt + every skill pull)[/dim]\n")
+    if prompts == 0 and not result.get("by_event"):
+        print_rich("  No hook activity recorded yet.")
+        print_rich()
+        return
+
+    print_rich(f"  Prompts (total):         {prompts:,}")
+    print_rich(f"    composed:              {int(result.get('prompts_composed', 0)):,}")
+    print_rich(f"    no-compose:            {int(result.get('prompts_no_compose', 0)):,}")
+    print_rich(f"  System-skill pulls:      {int(result.get('system_skill_pulls', 0)):,}")
+    print_rich(f"  Intake injections:       {int(result.get('intake_injections', 0)):,}")
+
+    per_phase: list[dict[str, Any]] = list(result.get("per_phase_prompts") or [])
+    if per_phase:
+        print_rich()
+        print_rich("  [bold]Prompts per phase[/bold]")
+        print_rich()
+        header = f"  {'Phase':<14}  {'Prompts':>9}  {'Composed':>9}"
+        print_rich(header)
+        print_rich("  " + "-" * (len(header) - 2))
+        for row in per_phase:
+            print_rich(
+                f"  {str(row['phase']):<14}  {int(row['prompts']):>9,}  {int(row['composed']):>9,}"
             )
     print_rich()

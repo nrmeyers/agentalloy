@@ -311,6 +311,14 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
         if age_ms < SWR_TIMEOUT_MS:
             # Cache fresh — return immediately (short-circuit)
             latency_ms = int((time.monotonic() - start) * 1000)
+            _record_prompt_telemetry(
+                request,
+                prompt=prompt,
+                phase=cached.phase,
+                should_compose=cached.should_compose,
+                cache_status="cached",
+                latency_ms=latency_ms,
+            )
             return JSONResponse(
                 content={
                     "status": "cached",
@@ -336,6 +344,14 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
                     daemon=True,
                 ).start()
             latency_ms = int((time.monotonic() - start) * 1000)
+            _record_prompt_telemetry(
+                request,
+                prompt=prompt,
+                phase=cached.phase,
+                should_compose=cached.should_compose,
+                cache_status="stale",
+                latency_ms=latency_ms,
+            )
             return JSONResponse(
                 content={
                     "status": "stale",
@@ -364,6 +380,20 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
     )
 
     latency_ms = int((time.monotonic() - start) * 1000)
+    fresh_phase = result.get("phase")
+    fresh_should_compose = result.get("should_compose", False)
+    _record_prompt_telemetry(
+        request,
+        prompt=prompt,
+        phase=fresh_phase,
+        should_compose=fresh_should_compose,
+        cache_status="fresh",
+        latency_ms=latency_ms,
+        # The composed workflow scaffold for a phase is its `sdd-<phase>` skill.
+        workflow_skill_ids=[f"sdd-{fresh_phase}"]
+        if (fresh_should_compose and fresh_phase)
+        else None,
+    )
     return JSONResponse(
         content={
             "status": "fresh",
@@ -400,6 +430,7 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
 
     cwd_str = body.get("cwd", "")
     cwd = Path(cwd_str) if cwd_str else Path.cwd()
+    tool_name = str(body.get("tool_name", ""))
 
     # Per-repo lifecycle: `off` mutes all injection; `assist`/`full` keep the
     # additive system-skill path (this is the value a deferring repo retains).
@@ -431,6 +462,8 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
 
     # Evaluate applicable system skills for the current phase.
     system_skills: list[str] = []
+    applied_skill_ids: list[str] = []
+    current_phase: str | None = None
     try:
         from agentalloy.signals.skill_loader import _read_phase
 
@@ -448,6 +481,7 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
             from agentalloy.retrieval.system import retrieve_system_fragments
 
             result = retrieve_system_fragments(store, phase=current_phase, category=None)
+            applied_skill_ids = list(result.applied_skill_ids)
             by_skill: dict[str, list[ActiveFragment]] = {}
             for frag in result.candidates:
                 by_skill.setdefault(frag.skill_id, []).append(frag)
@@ -462,6 +496,21 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
         logger.warning("Hook pre-tool-use evaluation failed", exc_info=True)
 
     latency_ms = int((time.monotonic() - start) * 1000)
+    if applied_skill_ids:
+        # Fresh selection (cache-miss path) — record the system-skill pull. Cache
+        # hits return earlier and are intentionally not re-recorded (same pull,
+        # same (cwd, phase) key), which bounds per-tool-use telemetry volume.
+        from agentalloy.api.hook_telemetry import write_hook_trace
+
+        write_hook_trace(
+            _get_vector_store(request),
+            hook_event="pre_tool_use",
+            phase=current_phase or "unspecified",
+            status="system_skill",
+            system_skill_ids=applied_skill_ids,
+            correlation_id=tool_name or None,
+            total_latency_ms=latency_ms,
+        )
     return JSONResponse(
         content={
             "status": "fresh",
@@ -507,6 +556,42 @@ def _get_skill_store(request: Request) -> Any:
         return override()
     except Exception:
         return None
+
+
+def _get_vector_store(request: Request) -> Any:
+    """Return the live VectorStore from app.state (the DuckDB trace sink), or None.
+
+    Same instance the proxy/orchestrator record telemetry through — writing via
+    it (not a fresh ``open_or_create``) avoids contending for the single DuckDB
+    read-write lock uvicorn already holds.
+    """
+    return getattr(request.app.state, "vector_store", None)
+
+
+def _record_prompt_telemetry(
+    request: Request,
+    *,
+    prompt: str,
+    phase: str | None,
+    should_compose: bool,
+    cache_status: str,
+    latency_ms: int,
+    workflow_skill_ids: list[str] | None = None,
+) -> None:
+    """Record one UserPromptSubmit event (every prompt — composed, no-compose, or
+    served from cache). Soft-fail inside ``write_hook_trace``."""
+    from agentalloy.api.hook_telemetry import write_hook_trace
+
+    write_hook_trace(
+        _get_vector_store(request),
+        hook_event="user_prompt_submit",
+        phase=phase or "unspecified",
+        status="composed" if should_compose else "no_compose",
+        task_prompt=prompt,
+        workflow_skill_ids=workflow_skill_ids,
+        correlation_id=cache_status,
+        total_latency_ms=latency_ms,
+    )
 
 
 @router.post("/v1/hook/post-tool-use")
@@ -652,6 +737,16 @@ async def hook_session_start(request: Request) -> JSONResponse:
         state = (
             "[agentalloy] Session state — fresh (no work in progress). Run the intake interview."
         )
+
+    from agentalloy.api.hook_telemetry import write_hook_trace
+
+    write_hook_trace(
+        _get_vector_store(request),
+        hook_event="session_start",
+        phase=phase or "intake",
+        status="intake",
+        workflow_skill_ids=["sdd-intake"],
+    )
 
     return JSONResponse(
         content={

@@ -1131,3 +1131,65 @@ class TestLifecycleModeGuards:
                 },
             )
         assert r.json()["status"] == "no_action"
+
+
+class TestHookTelemetryRecording:
+    """The hook endpoints record activity to the live store when one is present,
+    and degrade gracefully when it is not."""
+
+    @staticmethod
+    def _proj(tmp_path: Path) -> Path:
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        return proj
+
+    def test_prompt_submit_records_every_prompt(
+        self, client: TestClient, tmp_path: Path, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.storage.vector_store import open_or_create
+
+        store = open_or_create(tmp_path / "t.duck")
+        client.app.state.vector_store = store
+        try:
+            proj = self._proj(tmp_path)
+            # No phase -> no compose, but the prompt is still recorded.
+            r = client.post("/v1/hook/user-prompt-submit", json={"prompt": "hi", "cwd": str(proj)})
+            assert r.status_code == 200
+            cov = store.aggregate_hook_coverage()
+            assert cov["prompts_total"] >= 1
+            assert cov["prompts_no_compose"] >= 1
+            # New statuses must not inflate the compose-only savings total.
+            assert store.aggregate_savings()["total_composes"] == 0
+        finally:
+            client.app.state.vector_store = None
+            store.close()
+
+    def test_no_store_is_graceful(
+        self, client: TestClient, tmp_path: Path, reset_hook_cache: Any
+    ) -> None:
+        client.app.state.vector_store = None  # runtime not loaded
+        proj = self._proj(tmp_path)
+        r = client.post("/v1/hook/user-prompt-submit", json={"prompt": "hi", "cwd": str(proj)})
+        assert r.status_code == 200  # recording no-ops; hook still works
+
+    def test_coverage_endpoint(
+        self, client: TestClient, tmp_path: Path, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.api.telemetry_router import TelemetryQuerier
+        from agentalloy.storage.vector_store import open_or_create
+
+        store = open_or_create(tmp_path / "t.duck")
+        client.app.state.vector_store = store
+        client.app.state.telemetry_querier = TelemetryQuerier(store)
+        try:
+            proj = self._proj(tmp_path)
+            client.post("/v1/hook/user-prompt-submit", json={"prompt": "x", "cwd": str(proj)})
+            r = client.get("/telemetry/coverage")
+            assert r.status_code == 200
+            data = r.json()
+            assert data["prompts_total"] >= 1
+            assert "by_event" in data
+        finally:
+            client.app.state.vector_store = None
+            client.app.state.telemetry_querier = None
+            store.close()
