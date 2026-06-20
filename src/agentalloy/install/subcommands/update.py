@@ -210,9 +210,8 @@ def update(root: Path | None = None) -> dict[str, Any]:
         # 2. Schema migrations
         if recorded is None:
             summary["warnings"].append(
-                f"Corpus predates the schema_version marker; treating as v{expected} "
-                "(current — harmless). The marker is stamped on the next corpus "
-                "rebuild (`agentalloy reembed --force`)."
+                "Corpus has no `corpus_meta` table; treating as implicit schema 1. "
+                "Re-ingest via `python -m agentalloy.ingest` to make schema explicit."
             )
         elif recorded < expected:
             summary["migrations"] = _run_migrations(duck_path, recorded, expected)

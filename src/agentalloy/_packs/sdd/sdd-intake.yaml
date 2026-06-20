@@ -1,6 +1,6 @@
 skill_id: sdd-intake
 canonical_name: SDD — Intake (sdd-intake)
-description: "Open every session: check for work in progress (resume or new), then for new work run a short intent interview, decide full SDD vs the fast lane, and write a contract that hands off to the chosen route."
+description: "Turn a vague request into a scoped, deterministic starting point: run a short intent interview (what / kind of change / scope / urgency), confirm the route, and write a contract that hands off to the spec phase."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -25,7 +25,6 @@ contract_template: |
   ---
   phase: intake
   task_slug: {{task_slug}}
-  route: {{route}}
   domain_tags: []
   scope:
     touches: []
@@ -50,59 +49,71 @@ contract_template: |
 
   ## Proposed route
 
-  <full SDD or sdd-fast (the fast lane), and why — default is full>
+  <which phase to start in and why — default is spec>
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: resume-aware intake front door + full/fast routing decision
+change_summary: initial intake-phase entry workflow (intent interview + routing handoff to spec)
 raw_prose: |
-  # SDD — Intake
+  # SDD — Intake (sdd-intake)
 
-  You open every session. Before any work, settle two things: **what are we
-  doing**, and **how much process does it need**.
+  ## Overview
 
-  ## 1. Resume or new?
+  Intake is the entry phase. A freshly-wired repo starts here so that the very
+  first thing you do is **understand the request before acting on it**. Your job
+  in this phase is not to build, design, or spec — it is to run a short intent
+  interview, agree on what the work actually is, and capture that as a contract.
+  Once a contract exists, the workflow hands off to the **spec** phase
+  automatically.
 
-  The injected session state (or `.agentalloy/phase`) tells you the current
-  phase. If it names a phase other than `intake`, there's work in flight — say
-  where the user left off (the phase + the active contract in
-  `.agentalloy/contracts/`) and ask: **pick up there, or start something new?**
+  This exists because a vague request ("make the dashboard better", "add auth")
+  is probabilistic — many different deliverables would satisfy it. Intake
+  converts that into a deterministic starting point everything downstream can
+  rely on.
 
-  - *Resume* → step aside; that phase takes back over on the next turn. Don't
-    re-interview.
-  - *New* → reset with `agentalloy phase set intake`, then continue below.
+  ## What to do
 
-  Nothing in progress (fresh repo, or the last work just shipped)? Continue.
+  1. **Interview, briefly.** Ask only what you genuinely can't infer. Aim to pin
+     down four signals:
+     - **intent** — new build, change to existing behavior, an investigation, or
+       a review?
+     - **artifact_type** — feature, bug fix, refactor, doc, spike, …
+     - **scope** — roughly how big, and what it touches vs. explicitly avoids.
+     - **urgency** — needed now, soon, or someday (this affects how much process
+       is worth it).
+     Keep it to a couple of focused questions. If the request is already
+     unambiguous, say what you understood and move on — don't interrogate for
+     its own sake.
 
-  ## 2. Frame it (briefly)
+  2. **Restate and confirm the route.** Reflect the request back in concrete
+     terms and propose where to start (default: **spec**). Let the user correct
+     you. This "propose → confirm" step is the point of intake — it's cheaper to
+     fix a misunderstanding here than three phases later.
 
-  Ask only what you can't infer. You need just enough to answer one question —
-  **full SDD, or the fast lane?**
+  3. **Write the contract.** Capture the agreed scope as a contract:
 
-  - **Full** (`spec → design → build → qa → ship`): new surface area, real design
-    choices, multiple components, risky or hard to reverse, or fuzzy acceptance.
-  - **Fast** (`sdd-fast` — one compressed spec-build-test-deliver): you could
-    confidently land it in a single PR with an obvious "done" — a small fix, a
-    localized change, a well-understood tweak.
+         agentalloy contract init --phase intake --slug <task-slug>
 
-  When in doubt, choose **full**. The fast lane is only for work that's *clearly*
-  bounded — and if `sdd-fast` turns out harder than it looked, it bails back to
-  `spec`, so under-calling it isn't a trap.
+     Fill in `domain_tags` and `scope.touches` honestly — these focus domain
+     retrieval for the rest of the work. Writing the contract is what completes
+     intake.
 
-  ## 3. Contract + route
+  ## Exit gate
 
-  Capture the agreed scope and the route, then write the contract:
+  Intake is done when a contract exists under `.agentalloy/contracts/`. At that
+  point the phase advances to **spec** and the spec-and-scoping workflow takes
+  over. You don't need to set the phase by hand — the signal layer transitions
+  it when it sees the contract.
 
-      agentalloy contract init --phase intake --slug <task-slug> --route <full|fast>
+  If you already know the work is tiny and well-understood, you can still write a
+  minimal contract and move straight through; intake is meant to be light, not a
+  gate you fight.
 
-  Fill `domain_tags` and `scope.touches` honestly — they focus retrieval
-  downstream. Writing the contract completes intake; it hands off to **spec**
-  (full) or **sdd-fast** (fast) automatically.
+  ## What intake is NOT
 
-  ## Not this
-
-  Intake is light, not a gate to fight. Don't write the spec, acceptance
-  criteria, or a design here — just enough to know *what* the work is and
-  *which lane* it takes. Once you hand off, normal phase composition resumes.
+  - It is not the spec. Don't write acceptance criteria or a design here — just
+    enough to know *what* the work is and *where* to start.
+  - It is not ambient guidance. This workflow only applies in the intake phase;
+    once you hand off, normal phase-scoped composition resumes.

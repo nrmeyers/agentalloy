@@ -124,7 +124,6 @@ def _evaluate_sync(
     """
     from agentalloy.signals.skill_loader import (
         _build_predicate_context,
-        _intake_route_hint,
         _load_workflow_skill_for_phase,
         _read_phase,
         _write_phase_atomic,
@@ -180,15 +179,11 @@ def _evaluate_sync(
     # Trigger matched — evaluate gates.
     from agentalloy.signals.gates import decide_transition
 
-    # Leaving intake branches the graph on the contract's route: fast → sdd-fast,
-    # else the linear intake → spec. Only intake reads a route hint.
-    route_hint = _intake_route_hint(cwd) if current_phase == INTAKE_PHASE else None
     decision = decide_transition(
         current_phase=current_phase,
         gate_spec=gate_spec,
         ctx=ctx,
         lm_client=lm_client,
-        next_phase_hint=route_hint,
     )
 
     # Phase transition
@@ -556,71 +551,6 @@ async def hook_post_tool_use(request: Request) -> JSONResponse:
     if not block:
         return _done({"status": "no_action"})  # empty domain result (e.g. no domain_tags)
     return _done({"status": "composed", "composed_block": block})
-
-
-def _detect_active_contract(cwd: Path) -> str | None:
-    """Most-recently-modified contract under ``.agentalloy/contracts/``, or None."""
-    contracts_dir = cwd / ".agentalloy" / "contracts"
-    if not contracts_dir.is_dir():
-        return None
-    try:
-        # Contracts live in per-phase subdirs (contracts/<phase>/<slug>.md), so recurse.
-        md = sorted(contracts_dir.glob("**/*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError:
-        return None
-    return str(md[0].relative_to(cwd)) if md else None
-
-
-@router.post("/v1/hook/session-start")
-async def hook_session_start(request: Request) -> JSONResponse:
-    """Handle a SessionStart hook event — intake is the session front door.
-
-    Every session opens with the **intake** workflow skill, regardless of the
-    current phase (so a mid-project session is greeted with "resume where you
-    left off, or start something new?" rather than silently dropping into the
-    old phase). The injected state below tells intake's prose whether there's
-    work in flight, so it can offer a precise resume instead of guessing.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    cwd_str = body.get("cwd", "")
-    cwd = Path(cwd_str) if cwd_str else Path.cwd()
-
-    from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase, _read_phase
-
-    intake = _load_workflow_skill_for_phase("intake", cwd)
-    prose = (intake or {}).get("raw_prose", "")
-    if not prose:
-        return JSONResponse(content={"status": "no_intake_skill", "composed_block": ""})
-
-    phase = _read_phase(cwd)
-    contract = _detect_active_contract(cwd)
-    in_progress = bool(phase and phase != "intake")
-
-    if in_progress:
-        state = f"[agentalloy] Session state — work in progress · phase: {phase}"
-        if contract:
-            state += f" · active contract: {contract}"
-        state += (
-            "\nAsk whether to resume here or start something new. Resume → continue in this "
-            "phase (don't re-interview). New → `agentalloy phase set intake`, then run intake."
-        )
-    else:
-        state = (
-            "[agentalloy] Session state — fresh (no work in progress). Run the intake interview."
-        )
-
-    return JSONResponse(
-        content={
-            "status": "intake",
-            "composed_block": f"{prose}\n\n{state}",
-            "phase": phase or "intake",
-            "in_progress": in_progress,
-            "active_contract": contract,
-        }
-    )
 
 
 @router.get("/v1/hook/cache-status")
