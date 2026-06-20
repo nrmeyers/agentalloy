@@ -92,7 +92,11 @@ class ProjectDir:
         d = self.root / "docs" / "design"
         d.mkdir(parents=True, exist_ok=True)
         p = d / f"{slug}.md"
-        p.write_text("# Design\n\n## Module Layout\n\nmain.py, db.py, auth.py\n")
+        p.write_text(
+            "# Design\n\n"
+            "## Approach\n\nmodule layout: main.py, db.py, auth.py\n\n"
+            "## Tasks\n\n- T1: schema (satisfies AC-1)\n- T2: API (satisfies AC-2)\n"
+        )
         return p
 
     def write_build(self) -> None:

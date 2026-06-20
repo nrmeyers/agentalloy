@@ -1,289 +1,110 @@
 skill_id: sdd-design-and-planning
-canonical_name: SDD — Design and Planning (sdd-design + sdd-plan)
-description: "Plan software projects by breaking high-level specs into technical designs and ordered, verifiable tasks with clear acceptance criteria to avoid architectural debt and ensure reliable implementation."
-category: review
+canonical_name: SDD — Design and Planning (sdd-design)
+description: "Turn the spec into a technical design and ordered, dependency-aware task plan build can execute without re-deciding: approach with rationale plus vertically-sliced tasks, written to docs/design/<slug>.md."
+category: operational
 skill_class: workflow
 domain_tags:
-- sdd
-- design
-- planning
-- task-breakdown
-- architecture
-requires:
-- sdd-spec-and-scoping
-- sdd-build
+  - spec-driven-development
+  - design
+  - planning
+  - task-breakdown
+  - architecture
+requires: []
 always_apply: false
-phase_scope: [design]
-category_scope: [process]
-author: authoring-agent
-change_summary: add explicit deliverable path (docs/design)
-raw_prose: |
-  # SDD — Design and Planning (sdd-design + sdd-plan)
-  
-  ## Overview
-  
-  After `sdd-spec` ships, `sdd-design` produces the technical design — the *how* — and `sdd-plan` decomposes that into ordered tasks. Skipping either is the most common SDD failure mode (jump straight to coding, then thrash on architectural debt). This skill covers both phases.
-
-  Sourced from agent-skills/planning-and-task-breakdown.
-
-  ## Deliverable to advance
-
-  Write the design to **`docs/design/<task_slug>.md`**. The phase advances to
-  `build` only once that file exists — until then you stay in `design`.
-
-  ---
-  
-  # Planning and Task Breakdown
-  
-  ## Overview
-  
-  Decompose work into small, verifiable tasks with explicit acceptance criteria. Good task breakdown is the difference between an agent that completes work reliably and one that produces a tangled mess. Every task should be small enough to implement, test, and verify in a single focused session.
-  
-  ## When to Use
-  
-  - You have a spec and need to break it into implementable units
-  - A task feels too large or vague to start
-  - Work needs to be parallelized across multiple agents or sessions
-  - You need to communicate scope to a human
-  - The implementation order isn't obvious
-  
-  **When NOT to use:** Single-file changes with obvious scope, or when the spec already contains well-defined tasks.
-  
-  ## The Planning Process
-  
-  ### Step 1: Enter Plan Mode
-  
-  Before writing any code, operate in read-only mode:
-  
-  - Read the spec and relevant codebase sections
-  - Identify existing patterns and conventions
-  - Map dependencies between components
-  - Note risks and unknowns
-  
-  **Do NOT write code during planning.** The output is a plan document, not implementation.
-  
-  ### Step 2: Identify the Dependency Graph
-  
-  Map what depends on what:
-  
-  ```
-  Database schema
-      │
-      ├── API models/types
-      │       │
-      │       ├── API endpoints
-      │       │       │
-      │       │       └── Frontend API client
-      │       │               │
-      │       │               └── UI components
-      │       │
-      │       └── Validation logic
-      │
-      └── Seed data / migrations
-  ```
-  
-  Implementation order follows the dependency graph bottom-up: build foundations first.
-  
-  ### Step 3: Slice Vertically
-  
-  Instead of building all the database, then all the API, then all the UI — build one complete feature path at a time:
-  
-  **Bad (horizontal slicing):**
-  ```
-  Task 1: Build entire database schema
-  Task 2: Build all API endpoints
-  Task 3: Build all UI components
-  Task 4: Connect everything
-  ```
-  
-  **Good (vertical slicing):**
-  ```
-  Task 1: User can create an account (schema + API + UI for registration)
-  Task 2: User can log in (auth schema + API + UI for login)
-  Task 3: User can create a task (task schema + API + UI for creation)
-  Task 4: User can view task list (query + API + UI for list view)
-  ```
-  
-  Each vertical slice delivers working, testable functionality.
-  
-  ### Step 4: Write Tasks
-  
-  Each task follows this structure:
-  
-  ```markdown
-  ## Task [N]: [Short descriptive title]
-  
-  **Description:** One paragraph explaining what this task accomplishes.
-  
-  **Acceptance criteria:**
-  - [ ] [Specific, testable condition]
-  - [ ] [Specific, testable condition]
-  
-  **Verification:**
-  - [ ] Tests pass: `npm test -- --grep "feature-name"`
-  - [ ] Build succeeds: `npm run build`
-  - [ ] Manual check: [description of what to verify]
-  
-  **Dependencies:** [Task numbers this depends on, or "None"]
-  
-  **Files likely touched:**
-  - `src/path/to/file.ts`
-  - `tests/path/to/test.ts`
-  
-  **Estimated scope:** [Small: 1-2 files | Medium: 3-5 files | Large: 5+ files]
-  ```
-  
-  ### Step 5: Order and Checkpoint
-  
-  Arrange tasks so that:
-  
-  1. Dependencies are satisfied (build foundation first)
-  2. Each task leaves the system in a working state
-  3. Verification checkpoints occur after every 2-3 tasks
-  4. High-risk tasks are early (fail fast)
-  
-  Add explicit checkpoints:
-  
-  ```markdown
-  ## Checkpoint: After Tasks 1-3
-  - [ ] All tests pass
-  - [ ] Application builds without errors
-  - [ ] Core user flow works end-to-end
-  - [ ] Review with human before proceeding
-  ```
-  
-  ## Task Sizing Guidelines
-  
-  | Size | Files | Scope | Example |
-  |------|-------|-------|---------|
-  | **XS** | 1 | Single function or config change | Add a validation rule |
-  | **S** | 1-2 | One component or endpoint | Add a new API endpoint |
-  | **M** | 3-5 | One feature slice | User registration flow |
-  | **L** | 5-8 | Multi-component feature | Search with filtering and pagination |
-  | **XL** | 8+ | **Too large — break it down further** | — |
-  
-  If a task is L or larger, it should be broken into smaller tasks. An agent performs best on S and M tasks.
-  
-  **When to break a task down further:**
-  - It would take more than one focused session (roughly 2+ hours of agent work)
-  - You cannot describe the acceptance criteria in 3 or fewer bullet points
-  - It touches two or more independent subsystems (e.g., auth and billing)
-  - You find yourself writing "and" in the task title (a sign it is two tasks)
-  
-  ## Plan Document Template
-  
-  ```markdown
-  # Implementation Plan: [Feature/Project Name]
-  
-  ## Overview
-  [One paragraph summary of what we're building]
-  
-  ## Architecture Decisions
-  - [Key decision 1 and rationale]
-  - [Key decision 2 and rationale]
-  
-  ## Task List
-  
-  ### Phase 1: Foundation
-  - [ ] Task 1: ...
-  - [ ] Task 2: ...
-  
-  ### Checkpoint: Foundation
-  - [ ] Tests pass, builds clean
-  
-  ### Phase 2: Core Features
-  - [ ] Task 3: ...
-  - [ ] Task 4: ...
-  
-  ### Checkpoint: Core Features
-  - [ ] End-to-end flow works
-  
-  ### Phase 3: Polish
-  - [ ] Task 5: ...
-  - [ ] Task 6: ...
-  
-  ### Checkpoint: Complete
-  - [ ] All acceptance criteria met
-  - [ ] Ready for review
-  
-  ## Risks and Mitigations
-  | Risk | Impact | Mitigation |
-  |------|--------|------------|
-  | [Risk] | [High/Med/Low] | [Strategy] |
-  
-  ## Open Questions
-  - [Question needing human input]
-  ```
-  
-  ## Parallelization Opportunities
-  
-  When multiple agents or sessions are available:
-  
-  - **Safe to parallelize:** Independent feature slices, tests for already-implemented features, documentation
-  - **Must be sequential:** Database migrations, shared state changes, dependency chains
-  - **Needs coordination:** Features that share an API contract (define the contract first, then parallelize)
-  
-  ## Common Rationalizations
-  
-  | Rationalization | Reality |
-  |---|---|
-  | "I'll figure it out as I go" | That's how you end up with a tangled mess and rework. 10 minutes of planning saves hours. |
-  | "The tasks are obvious" | Write them down anyway. Explicit tasks surface hidden dependencies and forgotten edge cases. |
-  | "Planning is overhead" | Planning is the task. Implementation without a plan is just typing. |
-  | "I can hold it all in my head" | Context windows are finite. Written plans survive session boundaries and compaction. |
-  
-  ## Red Flags
-  
-  - Starting implementation without a written task list
-  - Tasks that say "implement the feature" without acceptance criteria
-  - No verification steps in the plan
-  - All tasks are XL-sized
-  - No checkpoints between tasks
-  - Dependency order isn't considered
-  
-  ## Verification
-  
-  Before starting implementation, confirm:
-  
-  - [ ] Every task has acceptance criteria
-  - [ ] Every task has a verification step
-  - [ ] Task dependencies are identified and ordered correctly
-  - [ ] No task touches more than ~5 files
-  - [ ] Checkpoints exist between major phases
-  - [ ] The human has reviewed and approved the plan
-  
-  ## Artifact completeness evaluation (soft advisory)
-  
-  When you see a `[agentalloy-eval]` block in your context, the system is
-  asking you to evaluate whether a specific artifact meets its completeness
-  criteria. This is a **soft advisory** — it does not block your work.
-  
-  ```
-  [agentalloy-eval] Soft completeness check — does this artifact meet the bar?
-  Criteria: <criteria text>
-  
-  <artifact content>
-  ```
-  
-  **How to respond:**
-  
-  1. Read the criteria and the artifact content.
-  2. Compare them honestly — does the artifact actually meet the stated bar?
-  3. If yes, acknowledge it briefly and continue.
-  4. If no, note what's missing and address it before proceeding.
-  
-  This is your chance to catch quality issues that automated checks can't
-  detect: incomplete specs, half-finished implementations, missing edge
-  cases, or artifacts that look structurally correct but lack substance.
-  Be honest but pragmatic — \"good enough to proceed\" counts as complete.
 applies_to_phases:
-- design
+  - design
 exit_gates:
   all_of:
-  - artifact_exists:
-      path: docs/design/*.md
+    - artifact_exists:
+        path: docs/design/*.md
+    - artifact_contains:
+        path: docs/design/*.md
+        sections:
+          - Approach
+          - Tasks
 signal_keywords:
-- done with design
-- ready to build
-- next phase
-contract_template: "---\nphase: design\ntask_slug: {{task_slug}}\ndomain_tags: []\nscope:\n  touches: []\n  avoids: []\nsuccess_criteria: []\nrelated_contracts: []\ncreated_at: {{created_at}}\n---\n\n# {{task_slug}}\n\n## Design description\n<describe the design approach>\n"
+  - done with design
+  - ready to build
+  - next phase
+contract_template: |
+  ---
+  phase: design
+  task_slug: {{task_slug}}
+  route: full
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug}}
+
+  ## Scope in a sentence
+
+  <what this changes, and the boundary of "this">
+
+  ## Design
+
+  Approach and task plan live in docs/design/{{task_slug}}.md.
+# Workflow skills are selected by applies_to_phases (signal layer), not by
+# phase_scope, so this is left empty and scoped via category instead.
+phase_scope: []
+category_scope: [process]
+author: navistone
+change_summary: "rewrite as a tight, contract-driven design (read-only; approach-with-rationale → vertical slices in dependency order); add a content gate (Approach + Tasks); drop the concatenated planning skill, ASCII graphs, sizing/plan templates, and the runtime-injected eval block"
+raw_prose: |
+  # SDD — Design
+
+  Spec settled *what* and *done*. Design settles *how* — the approach, the
+  decisions you're committing to, and an ordered plan build can execute without
+  re-deciding anything. Skipping straight to code is the classic SDD failure:
+  you thrash on architecture you should have chosen on paper. Stay read-only
+  here — design produces a document, not a diff.
+
+  ## 1. Start from the spec
+
+  Read `docs/spec/<slug>.md` and the spec contract — acceptance and non-goals
+  are fixed; you don't reopen them. Then read the code you'll touch: existing
+  patterns, conventions, the seams you'll extend. Design fits the codebase you
+  have, not the one you'd draw fresh.
+
+  ## 2. Decide the approach — and say why
+
+  Write the *how*: the structure, the key choices, and the rationale for each.
+  The rationale is the point — "Postgres over SQLite because we need concurrent
+  writers" is a decision build can trust; "use Postgres" is an order it can't
+  evaluate. Name the alternatives you rejected when the call was close.
+
+  ## 3. Slice it vertically, in dependency order
+
+  Decompose into thin slices that each deliver a working, testable path — schema
+  + API + UI for one capability — not horizontal layers (all schema, then all
+  API). Order so foundations come first and every slice leaves the system green.
+  Each task names the spec acceptance it satisfies; don't invent new acceptance
+  here — that's spec's job.
+
+  Keep tasks small: one focused session each. If you're writing "and" in a task
+  title, it's two tasks.
+
+  ## 4. Write it + hand off
+
+  Seed the contract (machine-read fields only):
+
+      agentalloy contract init --phase design --slug <task-slug>
+
+  Fill `domain_tags` and `scope.touches/avoids`. Then write the design to
+  **`docs/design/<task-slug>.md`** with `## Approach` (the how + decisions) and
+  `## Tasks` (the ordered slices). That file completes design and hands to
+  **build**.
+
+  ## Not this
+
+  Don't write code — design is read-only; the moment you're editing `src/`
+  you've skipped to build. Don't re-litigate the spec's scope or acceptance; if
+  design reveals the spec was wrong, fix it there (`agentalloy phase set spec`),
+  don't quietly redefine it. Don't gold-plate the plan with sizing tables and
+  risk matrices the work doesn't need — ordered slices with clear acceptance is
+  the whole deliverable.
