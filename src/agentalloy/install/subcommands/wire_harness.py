@@ -894,6 +894,16 @@ def _wire_proxy(
     if harness == "codex":
         return _wire_proxy_codex(port, root)
 
+    if harness == "openclaw":
+        # openclaw wires ~/.openclaw/plugins.json, not a repo instruction file —
+        # its legacy registry `target` is None, so the instruction fallback below
+        # crashed on `root / None`. Delegate to the provider registry's working
+        # install_writer instead.
+        writer = REGISTRY["openclaw"].install_writer
+        assert writer is not None, "openclaw registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
 

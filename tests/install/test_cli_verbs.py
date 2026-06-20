@@ -235,6 +235,28 @@ class TestUnwire:
         assert env_path.exists(), "unwire must NOT delete the user .env"
         assert install_state.state_dir().exists(), "unwire must NOT remove the user-scope state dir"
 
+    def test_openclaw_wire_unwire_roundtrip(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """openclaw wires ~/.openclaw/plugins.json and unwire removes it.
+
+        Regression for two bugs the clean-room surfaced: wire crashed on the
+        legacy registry's None target (`root / None`), and unwire's uninstall
+        allowlist rejected the ~/.openclaw path, leaving plugins.json behind.
+        """
+        from agentalloy.install.subcommands import unwire, wire
+
+        monkeypatch.chdir(repo_root)
+        rc = wire._run(argparse.Namespace(harness="openclaw", port=None, force=False, json=True))
+        assert rc == 0
+        plugins = Path.home() / ".openclaw" / "plugins.json"
+        assert plugins.exists(), "openclaw wire must write ~/.openclaw/plugins.json"
+
+        capsys.readouterr()
+        rc = unwire._run(argparse.Namespace(force=False, json=True))
+        assert rc == 0
+        assert not plugins.exists(), "unwire must remove ~/.openclaw/plugins.json"
+
 
 # ---------------------------------------------------------------------------
 # serve

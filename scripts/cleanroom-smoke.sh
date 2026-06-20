@@ -72,6 +72,56 @@ assert_json  "reset --json"  -- agentalloy reset --yes --json
 echo "== machine verbs (JSON by contract) =="
 assert_json  "detect"       -- agentalloy detect
 
+echo "== wire + unwire every advertised harness (isolated repo each) =="
+# Enumerate from the CLI itself so this stays in sync with the registry.
+harnesses="$(agentalloy wire --help 2>&1 | grep -oE '\{[a-z0-9,-]+\}' | head -1 | tr -d '{}' | tr ',' ' ')"
+if [ -z "$harnesses" ]; then
+  echo "FAIL: could not enumerate harnesses from 'wire --help'"
+  fail=1
+fi
+for h in $harnesses; do
+  hrepo="$WORK/wire-$h"
+  mkdir -p "$hrepo"
+  git -C "$hrepo" init -q
+  out="$(cd "$hrepo" && agentalloy wire --harness "$h" 2>/dev/null)"
+  wrc=$?
+  urc=0
+  (cd "$hrepo" && agentalloy unwire >/dev/null 2>&1) || urc=$?
+  if [ "$wrc" -ne 0 ]; then
+    echo "FAIL [$h]: wire exit $wrc"
+    fail=1
+  elif printf '%s' "$out" | _is_json; then
+    echo "FAIL [$h]: wire dumped raw JSON"
+    fail=1
+  elif [ "$urc" -ne 0 ]; then
+    echo "FAIL [$h]: unwire exit $urc"
+    fail=1
+  else
+    echo "ok   [$h]: wire + unwire"
+  fi
+done
+
+echo "== auto-detection from repo markers (wire with no --harness) =="
+# marker:expected — mirrors wire.py _HARNESS_MARKERS (representative subset).
+for pair in "CLAUDE.md:claude-code" "GEMINI.md:gemini-cli" ".cursorrules:cursor" \
+            ".clinerules:cline" ".aider.conf.yml:aider"; do
+  marker="${pair%%:*}"
+  expect="${pair##*:}"
+  drepo="$WORK/detect-$expect"
+  mkdir -p "$drepo"
+  git -C "$drepo" init -q
+  : >"$drepo/$marker"
+  got="$(cd "$drepo" && agentalloy wire --json 2>/dev/null \
+         | python3 -c 'import sys,json; print(json.load(sys.stdin).get("harness",""))' 2>/dev/null)"
+  (cd "$drepo" && agentalloy unwire >/dev/null 2>&1) || true
+  if [ "$got" = "$expect" ]; then
+    echo "ok   [detect $marker -> $got]"
+  else
+    echo "FAIL [detect $marker]: expected $expect, got '$got'"
+    fail=1
+  fi
+done
+
 echo
 if [ "$fail" -ne 0 ]; then
   echo "cleanroom smoke: FAILED"

@@ -888,6 +888,7 @@ def uninstall(
         home / ".cursor",
         home / ".continue",
         home / ".agentalloy",
+        home / ".openclaw",
     )
     # Set of harness target basenames / suffix-paths we ever write. Any
     # `path` in state that doesn't end in one of these is rejected even
@@ -908,6 +909,7 @@ def uninstall(
         ".cline/settings.json",  # Cline proxy config
         ".claude/settings.json",  # Claude Code hook wiring (merged hooks)
         "agentalloy-hook-claude-code.sh",  # ~/.agentalloy/hooks/ hook script
+        ".openclaw/plugins.json",  # openclaw plugin config
     )
     root_resolved = root.resolve()
     # Iterate over harness entries only when wiring removal is enabled.
