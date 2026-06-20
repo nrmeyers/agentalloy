@@ -11,9 +11,8 @@ Use ``uninstall`` for a full user-scope teardown (state + corpus + .env).
 from __future__ import annotations
 
 import argparse
-import json
-import sys
 
+from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
 from agentalloy.install.subcommands.uninstall import uninstall
 
 
@@ -29,6 +28,7 @@ def add_parser(
         action="store_true",
         help="Force removal even when sentinel content has been edited.",
     )
+    add_json_flag(p)
     p.set_defaults(func=_run)
 
 
@@ -52,6 +52,5 @@ def _run(args: argparse.Namespace) -> int:
         remove_models=False,
         remove_wiring=True,
     )
-    json.dump(result, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Unwire"))
     return 0

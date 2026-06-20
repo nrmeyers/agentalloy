@@ -293,7 +293,7 @@ def _upgrade_native(
 
     # corpus schema migrations + model-drift report. Capture the JSON output so it
     # does not spill to the terminal; surface only its warnings, cleanly.
-    upd = _run_cli(["update"], check=False, capture=True)
+    upd = _run_cli(["update", "--json"], check=False, capture=True)
     actions.append("ran corpus migrations")
     try:
         upd_payload: dict[str, Any] = json.loads(upd.stdout or "{}")

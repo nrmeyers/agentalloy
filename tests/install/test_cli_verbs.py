@@ -200,7 +200,8 @@ class TestUnwire:
         )
         install_state.save_state(st, repo_root)
         capsys.readouterr()  # flush wire output
-        rc = unwire._run(argparse.Namespace(force=False))
+        # --json: this test inspects the structured result (files/warnings).
+        rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         # Hook wiring artifacts (script + settings.json) were modified/removed.

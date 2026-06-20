@@ -11,11 +11,12 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
 
 
 def _reingest_profile_defaults(profile_name: str) -> list[str]:
@@ -194,6 +195,7 @@ def add_parser(
         action="store_true",
         help="Skip confirmation prompt (dangerous).",
     )
+    add_json_flag(p)
     p.set_defaults(func=_run)
 
 
@@ -204,11 +206,5 @@ def _run(args: argparse.Namespace) -> int:
         include_domain=args.include_domain,
         yes=args.yes,
     )
-    if result.get("cancelled"):
-        print("  Reset cancelled.")
-        return 0
-    if result.get("error"):
-        print(f"  [error] {result['error']}", file=sys.stderr)
-        return 1
-    print(json.dumps(result, indent=2))
-    return 0
+    write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Reset"))
+    return 1 if result.get("error") else 0

@@ -21,7 +21,6 @@ is the responsibility of whichever PR bumps the schema.
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import subprocess
 import sys
@@ -31,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
+from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
 
 SCHEMA_VERSION = 1
 STEP_NAME = "update"
@@ -257,12 +257,13 @@ def add_parser(
         "update",
         help="Update an existing install: corpus migrations, model drift, git status.",
     )
+    add_json_flag(p)
     p.set_defaults(func=_run)
 
 
-def _run(args: argparse.Namespace) -> int:  # noqa: ARG001
+def _run(args: argparse.Namespace) -> int:
     result = update()
-    print(json.dumps(result, indent=2))
+    write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Update"))
     # Non-zero exit if migrations failed
     failed_migrations = [m for m in result.get("migrations", []) if not m.get("applied")]
     if failed_migrations:

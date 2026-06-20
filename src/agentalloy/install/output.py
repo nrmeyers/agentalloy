@@ -125,6 +125,71 @@ def write_result(
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle renderer (wire / unwire / update / reset — file-mutation verbs)
+# ---------------------------------------------------------------------------
+
+
+def render_lifecycle_result(result: dict[str, Any], title: str) -> None:
+    """Concise human render for install-lifecycle verbs.
+
+    Prints a title plus only the keys a given verb produced — file actions
+    (written +, modified ~, removed -), kept data, a one-line summary for
+    common scalar/list fields (harness, profile, migrations), and any
+    warnings/errors. Verbs that lack a key simply skip it. Full fidelity is
+    always available via ``--json``.
+    """
+    print_rich(f"\n  [bold]{title}[/bold]")
+
+    def _path(item: Any) -> str:
+        return str(item.get("path")) if isinstance(item, dict) else str(item)
+
+    def _files(key: str, marker: str, color: str) -> None:
+        for item in result.get(key) or []:
+            print_rich(f"    [{color}]{marker}[/{color}] {_path(item)}")
+
+    _files("files_written", "+", "green")
+    _files("files_modified", "~", "yellow")
+    _files("files_removed", "-", "red")
+
+    for kept in result.get("data_kept") or []:
+        print_rich(f"    [dim]kept[/dim]   {_path(kept)}")
+
+    if result.get("harness"):
+        print_rich(f"    harness: {result['harness']}")
+    if result.get("profile"):
+        print_rich(f"    profile: {result['profile']}")
+    overrides = result.get("deleted_overrides")
+    if overrides is not None:
+        n = len(overrides) if isinstance(overrides, list) else overrides
+        print_rich(f"    deleted {n} override(s)")
+    if result.get("reingested_defaults"):
+        print_rich("    re-ingested profile defaults")
+    migrations = result.get("migrations")
+    if migrations is not None:
+        applied = sum(1 for m in migrations if isinstance(m, dict) and m.get("applied"))
+        print_rich(f"    migrations: {applied}/{len(migrations)} applied")
+    if result.get("cancelled"):
+        print_rich("    [dim]cancelled[/dim]")
+
+    for warning in result.get("warnings") or []:
+        print_rich(f"    [yellow]![/yellow] {warning}")
+    errors = [result["error"]] if result.get("error") else (result.get("errors") or [])
+    for err in errors:
+        print_rich(f"    [red]error[/red] {err}")
+
+    summarized = (
+        any(
+            result.get(k)
+            for k in ("files_written", "files_modified", "files_removed", "reingested_defaults")
+        )
+        or migrations is not None
+        or overrides is not None
+    )
+    if not summarized and not errors and not result.get("cancelled"):
+        print_rich("    [dim]no changes[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # Checklist renderer (doctor / verify / preflight)
 # ---------------------------------------------------------------------------
 
