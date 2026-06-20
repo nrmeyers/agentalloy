@@ -1,6 +1,6 @@
 skill_id: sdd-design-and-planning
 canonical_name: SDD — Design and Planning (sdd-design)
-description: "Turn the spec into a technical design and ordered, dependency-aware task plan build can execute without re-deciding: approach with rationale plus vertically-sliced tasks, written to docs/design/<slug>.md."
+description: "Turn the spec into a technical design and ordered, dependency-aware task plan build can execute without re-deciding: approach with rationale plus vertically-sliced tasks, written to a docs/design/<slug>/ folder (approach.md + tasks.md, plus component files as the work needs) that build works off of."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -16,11 +16,16 @@ applies_to_phases:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: docs/design/*.md
+        path: docs/design/**/approach.md
     - artifact_contains:
-        path: docs/design/*.md
+        path: docs/design/**/approach.md
         sections:
           - Approach
+    - artifact_exists:
+        path: docs/design/**/tasks.md
+    - artifact_contains:
+        path: docs/design/**/tasks.md
+        sections:
           - Tasks
 signal_keywords:
   - done with design
@@ -48,13 +53,13 @@ contract_template: |
 
   ## Design
 
-  Approach and task plan live in docs/design/{{task_slug}}.md.
+  Approach + task plan live in docs/design/{{task_slug}}/ (approach.md, tasks.md).
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight, contract-driven design (read-only; approach-with-rationale → vertical slices in dependency order); add a content gate (Approach + Tasks); drop the concatenated planning skill, ASCII graphs, sizing/plan templates, and the runtime-injected eval block"
+change_summary: "rewrite as a tight, contract-driven design (read-only; approach-with-rationale → vertical slices in dependency order); fan out into a per-slug folder (approach.md + tasks.md + component files as needed) build works off of, gated on both load-bearing files; drop the concatenated planning skill, ASCII graphs, sizing/plan templates, and the runtime-injected eval block"
 raw_prose: |
   # SDD — Design
 
@@ -91,14 +96,21 @@ raw_prose: |
 
   ## 4. Write it + hand off
 
-  Seed the contract (machine-read fields only):
+  Design fans out into a per-slug folder build reads from — at minimum two
+  files, with the exact section headers the gate checks:
+
+      docs/design/<task-slug>/approach.md   # the how + decisions, under `## Approach`
+      docs/design/<task-slug>/tasks.md      # the ordered worklist, under `## Tasks`
+
+  Add more files as the work needs them — a data model, an interface contract, a
+  subsystem's design — one file per concern, in the same folder. Don't force the
+  split when two files suffice; don't cram a large design into one when it
+  doesn't. Then seed the contract (machine-read fields only):
 
       agentalloy contract init --phase design --slug <task-slug>
 
-  Fill `domain_tags` and `scope.touches/avoids`. Then write the design to
-  **`docs/design/<task-slug>.md`** with `## Approach` (the how + decisions) and
-  `## Tasks` (the ordered slices). That file completes design and hands to
-  **build**.
+  Fill `domain_tags` and `scope.touches/avoids`. The folder completes design and
+  hands to **build**, which works `tasks.md` top to bottom.
 
   ## Not this
 

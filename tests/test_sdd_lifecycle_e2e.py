@@ -89,15 +89,17 @@ class ProjectDir:
         return p
 
     def write_design(self, slug: str) -> Path:
-        d = self.root / "docs" / "design"
+        # Design fans out into a per-slug folder: approach.md + tasks.md are the
+        # two gated files (plus component files as the work needs).
+        d = self.root / "docs" / "design" / slug
         d.mkdir(parents=True, exist_ok=True)
-        p = d / f"{slug}.md"
-        p.write_text(
-            "# Design\n\n"
-            "## Approach\n\nmodule layout: main.py, db.py, auth.py\n\n"
-            "## Tasks\n\n- T1: schema (satisfies AC-1)\n- T2: API (satisfies AC-2)\n"
+        (d / "approach.md").write_text(
+            "# Design\n\n## Approach\n\nmodule layout: main.py, db.py, auth.py\n"
         )
-        return p
+        (d / "tasks.md").write_text(
+            "# Tasks\n\n## Tasks\n\n- T1: schema (satisfies AC-1)\n- T2: API (satisfies AC-2)\n"
+        )
+        return d
 
     def write_build(self) -> None:
         (self.root / "src").mkdir(parents=True, exist_ok=True)
