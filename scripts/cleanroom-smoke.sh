@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Clean-room CLI output-shape smoke for AgentAlloy.
+#
+# Runs each verb in a throwaway HOME and enforces the stdout contract:
+#   * user-facing lifecycle verbs (wire/unwire/update/reset) print concise
+#     HUMAN text by default — never a raw JSON dump — and valid JSON under --json;
+#   * machine verbs (detect) emit valid JSON by contract.
+#
+# No service, no corpus, no models. It never touches real host state — HOME and
+# the XDG dirs are redirected to a temp tree that's removed on exit. Safe to run
+# anywhere: inside the clean-room container, in CI, or on your laptop.
+set -uo pipefail
+
+WORK="$(mktemp -d)"
+export HOME="$WORK/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_DATA_HOME="$HOME/.local/share"
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+REPO="$WORK/repo"
+mkdir -p "$REPO"
+git -C "$REPO" init -q
+git -C "$REPO" config user.email smoke@example.com
+git -C "$REPO" config user.name smoke
+trap 'rm -rf "$WORK"' EXIT
+
+fail=0
+_is_json() { python3 -c 'import sys,json; json.load(sys.stdin)' >/dev/null 2>&1; }
+
+# assert_human <label> -- <command...>
+assert_human() {
+  local label="$1"
+  shift 2 # drop label + the literal "--"
+  local out
+  out="$("$@" 2>/dev/null)"
+  if [ -z "$out" ]; then
+    echo "FAIL [$label]: produced no stdout (expected human summary)"
+    fail=1
+  elif printf '%s' "$out" | _is_json; then
+    echo "FAIL [$label]: default stdout is raw JSON (should be human text)"
+    fail=1
+  else
+    echo "ok   [$label]: human by default"
+  fi
+}
+
+# assert_json <label> -- <command...>
+assert_json() {
+  local label="$1"
+  shift 2
+  if "$@" 2>/dev/null | _is_json; then
+    echo "ok   [$label]: valid JSON"
+  else
+    echo "FAIL [$label]: expected valid JSON on stdout"
+    fail=1
+  fi
+}
+
+cd "$REPO"
+
+echo "== user-facing lifecycle verbs (human by default, --json opt-in) =="
+agentalloy wire --harness claude-code >/dev/null 2>&1 || true
+assert_human "unwire"       -- agentalloy unwire
+agentalloy wire --harness claude-code >/dev/null 2>&1 || true
+assert_json  "unwire --json" -- agentalloy unwire --json
+
+assert_human "update"       -- agentalloy update
+assert_json  "update --json" -- agentalloy update --json
+
+assert_human "reset"        -- agentalloy reset --yes
+assert_json  "reset --json"  -- agentalloy reset --yes --json
+
+echo "== machine verbs (JSON by contract) =="
+assert_json  "detect"       -- agentalloy detect
+
+echo
+if [ "$fail" -ne 0 ]; then
+  echo "cleanroom smoke: FAILED"
+  exit 1
+fi
+echo "cleanroom smoke: PASSED"

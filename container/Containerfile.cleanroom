@@ -1,0 +1,38 @@
+# Clean-room image for testing the AgentAlloy CLI / installer lifecycle in
+# isolation — no service, no llama-server, no GGUF models. Build once, then run
+# any verb (wire / unwire / update / reset / uninstall …) against a throwaway
+# container HOME without ever touching your laptop's ~/.claude, ~/.agentalloy,
+# ~/.local/share/agentalloy, or systemd units.
+#
+# This is NOT the deploy image (see ../Containerfile, which runs the service).
+# It exists purely to exercise the host-mutating CLI surface safely.
+#
+#   podman build -t agentalloy-cleanroom -f container/Containerfile.cleanroom .
+#   podman run --rm agentalloy-cleanroom              # run the output-shape smoke
+#   podman run --rm -it agentalloy-cleanroom bash     # poke at verbs by hand
+#
+# Inside the interactive shell, every wire/unwire/reset mutates only the
+# container's HOME — exit and the state is gone.
+
+# --- build the wheel -------------------------------------------------------
+FROM python:3.12-slim AS build
+RUN pip install --no-cache-dir uv
+WORKDIR /src
+COPY . .
+RUN uv build
+
+# --- minimal runtime: wheel installed as a tool, plus git for `wire` -------
+FROM python:3.12-slim
+RUN pip install --no-cache-dir uv \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/dist/*.whl /tmp/
+RUN uv tool install /tmp/*.whl && rm -f /tmp/*.whl
+ENV PATH="/root/.local/bin:${PATH}"
+
+COPY scripts/cleanroom-smoke.sh /usr/local/bin/cleanroom-smoke.sh
+RUN chmod +x /usr/local/bin/cleanroom-smoke.sh
+
+# Default: run the smoke. Override with `bash` for an interactive clean room.
+CMD ["bash", "/usr/local/bin/cleanroom-smoke.sh"]
