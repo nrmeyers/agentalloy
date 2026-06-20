@@ -10,7 +10,7 @@
 #
 # The script expects JSON on stdin with these fields:
 #   {
-#     "hook_event_name": "UserPromptSubmit" | "PreToolUse" | "PostToolUse",
+#     "hook_event_name": "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse",
 #     "prompt": "...",               # UserPromptSubmit only
 #     "tool_name": "...",            # PreToolUse / PostToolUse
 #     "tool_input": {...},           # PreToolUse / PostToolUse (path extracted from it)
@@ -48,6 +48,7 @@ set -uo pipefail   # NOTE: intentionally NOT -e — every failure path is fail-o
 HOOK_URL="${AGENTALLOY_HOOK_URL:-http://localhost:47950/v1/hook/user-prompt-submit}"
 POST_TOOL_URL="${AGENTALLOY_HOOK_URL_POST:-http://localhost:47950/v1/hook/post-tool-use}"
 PRE_TOOL_URL="${AGENTALLOY_HOOK_URL_PRE:-http://localhost:47950/v1/hook/pre-tool-use}"
+SESSION_START_URL="${AGENTALLOY_HOOK_URL_SESSION:-http://localhost:47950/v1/hook/session-start}"
 
 # Tight fail-open timeouts. connect=0.2s fails fast when the service is down;
 # total=1.0s caps the whole turn-blocking call.
@@ -167,6 +168,29 @@ try:
         print(json.dumps({
             'hookSpecificOutput': {
                 'hookEventName': 'PostToolUse',
+                'additionalContext': block,
+            }
+        }))
+except Exception:
+    pass
+" 2>/dev/null || true
+        ;;
+
+    SessionStart)
+        # Intake is the session front door: load the intake workflow skill +
+        # detected state. Like PostToolUse, SessionStart injects via the
+        # hookSpecificOutput.additionalContext envelope (plain stdout is not used).
+        RESP="$("${_CURL[@]}" "$SESSION_START_URL" 2>/dev/null || echo "{}")"
+
+        printf '%s' "$RESP" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    block = d.get('composed_block', '')
+    if block:
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'SessionStart',
                 'additionalContext': block,
             }
         }))

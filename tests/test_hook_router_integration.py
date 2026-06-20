@@ -934,3 +934,60 @@ class TestHookScriptPostToolUseInject:
     def test_no_block_emits_nothing(self, tmp_path: Path) -> None:
         out = self._run(tmp_path, '{"status":"no_action"}')
         assert out == ""
+
+
+class TestSessionStartEndpoint:
+    """POST /v1/hook/session-start — intake is the session front door."""
+
+    _LOADER = "agentalloy.signals.skill_loader._load_workflow_skill_for_phase"
+
+    @staticmethod
+    def _proj(tmp_path: Path, phase: str | None) -> Path:
+        proj = tmp_path / "proj"
+        (proj / ".agentalloy").mkdir(parents=True, exist_ok=True)
+        if phase is not None:
+            (proj / ".agentalloy" / "phase").write_text(f"phase: {phase}\n", encoding="utf-8")
+        return proj
+
+    def test_fresh_runs_intake(self, client: TestClient, tmp_path: Path) -> None:
+        proj = self._proj(tmp_path, "intake")
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "intake"
+        assert d["in_progress"] is False
+        assert d["phase"] == "intake"
+        assert "INTAKE-PROSE" in d["composed_block"]
+        assert "fresh" in d["composed_block"].lower()
+
+    def test_in_progress_offers_resume(self, client: TestClient, tmp_path: Path) -> None:
+        proj = self._proj(tmp_path, "build")
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        d = r.json()
+        assert d["in_progress"] is True
+        assert d["phase"] == "build"
+        # Always intake's prose (not the build skill) — it's the greeter.
+        assert "INTAKE-PROSE" in d["composed_block"]
+        assert "work in progress" in d["composed_block"]
+        assert "phase: build" in d["composed_block"]
+        assert "resume" in d["composed_block"].lower()
+
+    def test_detects_active_contract(self, client: TestClient, tmp_path: Path) -> None:
+        proj = self._proj(tmp_path, "build")
+        contracts = proj / ".agentalloy" / "contracts"
+        contracts.mkdir(parents=True)
+        (contracts / "add-auth.md").write_text("# contract\n", encoding="utf-8")
+        with patch(self._LOADER, return_value={"raw_prose": "INTAKE-PROSE"}):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        d = r.json()
+        assert d["active_contract"].endswith("add-auth.md")
+        assert "add-auth.md" in d["composed_block"]
+
+    def test_no_intake_skill_is_graceful(self, client: TestClient, tmp_path: Path) -> None:
+        proj = self._proj(tmp_path, "intake")
+        with patch(self._LOADER, return_value=None):
+            r = client.post("/v1/hook/session-start", json={"cwd": str(proj)})
+        assert r.status_code == 200
+        assert r.json()["composed_block"] == ""

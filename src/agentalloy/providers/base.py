@@ -164,3 +164,39 @@ class WireRecord:
     def _compute_sha256(content: str) -> str:
         """Compute SHA-256 hex digest of *content*."""
         return hashlib.sha256(content.encode()).hexdigest()
+
+
+def sdd_instructions_markdown(port: int) -> str:
+    """Shared SDD instruction block for markdown-delivered harnesses.
+
+    One source of truth for the harnesses that wire via an instruction file
+    (cursor, windsurf, github-copilot, gemini-cli, aider, hermes-agent), so the
+    session-start / intake-front-door behaviour can't drift between them — the
+    same drift that bit the ``Phases:`` line. Hook-capable harnesses
+    (claude-code) deliver this dynamically via the SessionStart hook instead;
+    proxy-only harnesses get it via per-turn workflow-skill injection.
+
+    Callers that need YAML frontmatter (cursor, windsurf) prepend their own;
+    this returns just the body.
+    """
+    return (
+        "## AgentAlloy — skill context\n\n"
+        f"A local agentalloy service runs at `http://localhost:{port}` with a curated\n"
+        "corpus of engineering skills.\n\n"
+        f"**Health-gate.** Before using, verify: `curl -fs http://localhost:{port}/health`.\n"
+        "If unreachable, ignore this block.\n\n"
+        "**Open every session with intake.** Check `.agentalloy/phase`:\n"
+        "- If it names a phase other than `intake`, work is in progress — tell the user where\n"
+        "  they left off (the phase + the active contract under `.agentalloy/contracts/`) and\n"
+        "  ask whether to resume there or start something new. Resume → continue in that phase.\n"
+        "  New → `agentalloy phase set intake`, then run intake.\n"
+        "- Otherwise run **intake**: a brief intent interview, decide **full SDD vs the fast\n"
+        "  lane**, and write a contract — which hands off to the chosen route.\n\n"
+        "**When in an SDD phase, before starting work, compose skill context:**\n"
+        "```bash\n"
+        f"curl -s -X POST http://localhost:{port}/compose/text \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        '  -d \'{"task": "<task>", "phase": "<phase>"}\'\n'
+        "```\n\n"
+        "Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (`sdd-fast` = the fast lane).\n"
+    )

@@ -13,7 +13,7 @@ import hashlib
 from pathlib import Path
 
 from agentalloy.install.sentinel_utils import replace_marked_block
-from agentalloy.providers.base import WireRecord
+from agentalloy.providers.base import WireRecord, sdd_instructions_markdown
 
 _SENTINEL_BEGIN = "# <!-- BEGIN agentalloy install -->"
 _SENTINEL_END = "# <!-- END agentalloy install -->"
@@ -61,22 +61,7 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     instructions_path = root / ".agentalloy-aider-instructions.md"
     instructions_path.parent.mkdir(parents=True, exist_ok=True)
 
-    template_content = (
-        "## AgentAlloy — skill context\n\n"
-        f"A local agentalloy service runs at `http://localhost:{port}` with a curated\n"
-        "corpus of engineering skills.\n\n"
-        f"**Health-gate.** Before using, verify: `curl -fs http://localhost:{port}/health`.\n"
-        "If unreachable, ignore this block.\n\n"
-        "**Session start — determine phase.** Check `.agentalloy/phase` for the current\n"
-        "phase. If it exists, use that phase.\n\n"
-        "**When in an SDD phase, before starting work, run:**\n"
-        "```bash\n"
-        f"curl -s -X POST http://localhost:{port}/compose/text \\\n"
-        "  -H 'Content-Type: application/json' \\\n"
-        '  -d \'{"task": "<task>", "phase": "<phase>"}\'\n'
-        "```\n\n"
-        "Phases: `spec`, `design`, `build`, `qa`, `ship`.\n"
-    )
+    template_content = sdd_instructions_markdown(port)
 
     original_instructions = _capture_original(instructions_path)
     instructions_path.write_text(template_content, encoding="utf-8")

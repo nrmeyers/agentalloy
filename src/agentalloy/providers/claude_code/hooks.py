@@ -38,17 +38,23 @@ from typing import Any
 from agentalloy.providers.base import WireRecord
 
 # Hook events we wire. Rationale:
+# - SessionStart: intake is the session front door — every session opens with
+#   the intake workflow skill (resume-or-new check, then routing). No matcher.
 # - UserPromptSubmit: the signal layer's primary wake — evaluate phase exit
 #   gates on every prompt and inject the composed workflow block.
 # - PreToolUse: lets system skills (commit-safety, etc.) fire before a tool
 #   runs; matcher "*" so every tool is observed.
 # - PostToolUse: contract validation when .agentalloy/contracts/ files are
 #   written; matcher "*" so the router can filter by tool/path itself.
-_HOOK_EVENTS = ("UserPromptSubmit", "PreToolUse", "PostToolUse")
+_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse")
+
+# Events that take a Claude Code tool "matcher"; the prompt/session events don't.
+_MATCHER_EVENTS = ("PreToolUse", "PostToolUse")
 
 # Per-event endpoint env var + URL path. The script reads these to know where
 # to POST for each event type.
 _EVENT_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "SessionStart": ("AGENTALLOY_HOOK_URL_SESSION", "/v1/hook/session-start"),
     "UserPromptSubmit": ("AGENTALLOY_HOOK_URL", "/v1/hook/user-prompt-submit"),
     "PreToolUse": ("AGENTALLOY_HOOK_URL_PRE", "/v1/hook/pre-tool-use"),
     "PostToolUse": ("AGENTALLOY_HOOK_URL_POST", "/v1/hook/post-tool-use"),
@@ -136,8 +142,8 @@ def _build_hook_entries(port: int, script_abs: str) -> dict[str, list[dict[str, 
             "timeout": _HOOK_TIMEOUT_S,
         }
         group: dict[str, Any] = {"hooks": [hook_obj]}
-        # Tool events take a matcher; UserPromptSubmit does not.
-        if event != "UserPromptSubmit":
+        # Tool events take a matcher; SessionStart / UserPromptSubmit do not.
+        if event in _MATCHER_EVENTS:
             group["matcher"] = "*"
         entries[event] = [group]
     return entries
