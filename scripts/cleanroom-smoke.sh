@@ -140,6 +140,49 @@ else
 fi
 (cd "$lrepo" && agentalloy unwire >/dev/null 2>&1) || true
 
+echo "== per-repo lifecycle mode (off defers, no phase) =="
+orepo="$WORK/lifecycle-off"
+mkdir -p "$orepo"
+git -C "$orepo" init -q
+omode="$(cd "$orepo" && agentalloy wire --harness claude-code --lifecycle-mode off --json 2>/dev/null \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin).get("lifecycle_mode",""))' 2>/dev/null)"
+if [ "$omode" = "off" ] \
+   && grep -q "lifecycle_mode: off" "$orepo/.agentalloy/config" 2>/dev/null \
+   && [ ! -e "$orepo/.agentalloy/phase" ]; then
+  echo "ok   [lifecycle off: config=off, phase not seeded]"
+else
+  echo "FAIL [lifecycle off]: mode='$omode', config/phase state unexpected"
+  fail=1
+fi
+(cd "$orepo" && agentalloy unwire >/dev/null 2>&1) || true
+
+echo "== full mode: phase seeded + soft-precedence note + clean-room excludes =="
+frepo="$WORK/lifecycle-full"
+mkdir -p "$frepo"
+git -C "$frepo" init -q
+: >"$frepo/CLAUDE.md"
+(cd "$frepo" && agentalloy wire --harness claude-code --lifecycle-mode full --clean-room >/dev/null 2>&1) || true
+if grep -q "lifecycle_mode: full" "$frepo/.agentalloy/config" 2>/dev/null \
+   && [ -e "$frepo/.agentalloy/phase" ] \
+   && grep -q "BEGIN agentalloy install" "$frepo/.claude/CLAUDE.md" 2>/dev/null \
+   && grep -q "claudeMdExcludes" "$frepo/.claude/settings.json" 2>/dev/null; then
+  echo "ok   [full: phase seeded, soft note + clean-room excludes written]"
+else
+  echo "FAIL [full]: missing phase / soft note / clean-room excludes"
+  fail=1
+fi
+(cd "$frepo" && agentalloy unwire >/dev/null 2>&1) || true
+if [ -e "$frepo/.claude/CLAUDE.md" ]; then
+  echo "FAIL [full unwire]: .claude/CLAUDE.md soft note left behind"
+  fail=1
+else
+  echo "ok   [full unwire: soft note removed]"
+fi
+
+echo "== telemetry coverage verb (human by default, --json opt-in) =="
+assert_human "telemetry coverage"        -- agentalloy telemetry coverage
+assert_json  "telemetry coverage --json" -- agentalloy telemetry coverage --json
+
 echo
 if [ "$fail" -ne 0 ]; then
   echo "cleanroom smoke: FAILED"
