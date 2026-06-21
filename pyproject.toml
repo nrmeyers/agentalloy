@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "2.7.0"
+version = "2.7.1"
 description = "AgentAlloy — just-in-time agent skill composer. Phase-aware, intent-aware retrieval and assembly from a curated 300+ skill corpus. Deterministic by default, with optional off-by-default local LM-assist. Governance included. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
