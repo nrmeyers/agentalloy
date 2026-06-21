@@ -95,7 +95,14 @@ def _render_human(snapshot: dict[str, Any]) -> None:
 
     # Corpus
     corpus = snapshot.get("corpus", {})
-    corpus_status = "[green]present[/green]" if corpus.get("present") else "[red]missing[/red]"
+    if corpus.get("mode") == "container":
+        corpus_status = (
+            "[green]in container[/green]"
+            if corpus.get("present")
+            else "[yellow]container not running[/yellow]"
+        )
+    else:
+        corpus_status = "[green]present[/green]" if corpus.get("present") else "[red]missing[/red]"
     print_rich(f"\n  Corpus: {corpus_status}")
     print_rich(f"    Path: {corpus.get('path', 'N/A')}")
 
@@ -157,11 +164,9 @@ def _run(args: argparse.Namespace) -> int:
             }
         )
 
-    # Corpus presence
-    corpus_path = install_state.corpus_dir()
-    corpus_present = (corpus_path / "skills.duck").exists() and (corpus_path / "ladybug").exists()
-
-    # Service reachability — TCP connect only; doctor/verify do the deeper /health probe.
+    # Service reachability — TCP connect only; doctor/verify do the deeper /health
+    # probe. Computed before the corpus check because a container deploy derives
+    # corpus presence from the running service, not the host data dir.
     port_raw = st.get("port", 47950)
     try:
         port = install_state.validate_port(port_raw)
@@ -170,14 +175,29 @@ def _run(args: argparse.Namespace) -> int:
         port = None
         service_reachable = False
 
+    # Corpus presence. Container deploys keep the corpus in the agentalloy-data
+    # volume *inside* the container, so a host-path check always reports
+    # "missing" — the running container is the source of truth there.
+    corpus_path = install_state.corpus_dir()
+    service_mode = st.get("service_mode")
+    if service_mode == "container":
+        corpus_present = service_reachable
+        corpus_location = "container volume (agentalloy-data)"
+    else:
+        corpus_present = (corpus_path / "skills.duck").exists() and (
+            corpus_path / "ladybug"
+        ).exists()
+        corpus_location = str(corpus_path)
+
     snapshot: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "user_config_dir": str(install_state.user_config_dir()),
         "user_data_dir": str(install_state.user_data_dir()),
         "completed_steps": completed_step_names,
         "corpus": {
-            "path": str(corpus_path),
+            "path": corpus_location,
             "present": corpus_present,
+            "mode": service_mode,
         },
         "service": {
             "port": port,

@@ -106,6 +106,33 @@ class TestStatus:
         assert out["service"]["port"] is None
         assert out["service"]["reachable_on_loopback"] is False
 
+    def test_container_mode_corpus_from_service(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """In container mode the corpus lives in the container volume, so a host
+        path check is wrong — status derives presence from the running service."""
+        from agentalloy.install.subcommands import status
+
+        st = install_state.load_state(repo_root)
+        st["service_mode"] = "container"
+        install_state.save_state(st, repo_root)
+
+        # Container reachable -> corpus reported present (it's in the volume).
+        monkeypatch.setattr(status, "_port_open", lambda *a, **k: True)
+        rc = status._run(argparse.Namespace(json=True))
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["corpus"]["mode"] == "container"
+        assert out["corpus"]["present"] is True
+        assert "container" in out["corpus"]["path"].lower()
+
+        # Container down -> not present, but NOT the misleading host-path "missing".
+        monkeypatch.setattr(status, "_port_open", lambda *a, **k: False)
+        rc = status._run(argparse.Namespace(json=True))
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["corpus"]["present"] is False
+
 
 # ---------------------------------------------------------------------------
 # wire
@@ -491,6 +518,30 @@ class TestUnwire:
         rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
         assert not plugins.exists(), "unwire must remove ~/.openclaw/plugins.json"
+
+    def test_unwire_clears_repo_lifecycle_state(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """wire seeds .agentalloy/phase + config; unwire must remove them so a
+        later re-wire starts clean (the dogfood found a fresh wire inheriting a
+        stale `build` phase). Contracts are user work and are preserved."""
+        from agentalloy.install.subcommands import unwire, wire
+
+        (repo_root / "CLAUDE.md").write_text("# Project\n")  # auto-detect claude-code
+        monkeypatch.chdir(repo_root)
+        wire._run(argparse.Namespace(harness="claude-code", port=None, force=False))
+        phase = repo_root / ".agentalloy" / "phase"
+        config = repo_root / ".agentalloy" / "config"
+        assert phase.exists() and config.exists(), "full wire seeds phase + config"
+        contract = repo_root / ".agentalloy" / "contracts" / "spec" / "keep.md"
+        contract.parent.mkdir(parents=True)
+        contract.write_text("# user's contract\n")
+
+        rc = unwire._run(argparse.Namespace(force=False, json=True))
+        assert rc == 0
+        assert not phase.exists(), "unwire must clear the stale phase"
+        assert not config.exists(), "unwire must clear the lifecycle config"
+        assert contract.exists(), "unwire must preserve user contracts"
 
 
 # ---------------------------------------------------------------------------

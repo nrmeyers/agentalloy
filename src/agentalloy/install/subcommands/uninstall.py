@@ -1068,6 +1068,21 @@ def uninstall(
         if str(root / ".cline" / "settings.json") not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
 
+        # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config).
+        # Symmetric with wiring so a later re-wire starts clean — the dogfood
+        # found a fresh wire inheriting a leftover `build` phase. Contracts under
+        # .agentalloy/contracts/ are user work and are preserved.
+        for _name in ("phase", "config"):
+            _state_file = root / ".agentalloy" / _name
+            if _state_file.exists():
+                try:
+                    _state_file.unlink()
+                    files_removed.append(
+                        {"path": str(_state_file), "action": "removed_lifecycle_state"}
+                    )
+                except OSError:
+                    pass
+
     # User-scope proxies: only run during a global (all_repos) uninstall to avoid
     # removing global home-dir config when unwiring an unrelated repo.
     if remove_wiring and all_repos:
