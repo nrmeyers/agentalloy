@@ -257,3 +257,59 @@ class TestEvaluateSignal:
             result = asyncio.run(evaluate_signal(_req("run tests"), tmp_path))
         assert result.should_compose is True
         assert result.domain_tags == ["auth", "payments"]
+
+
+class TestProxyLifecycleMode:
+    """The proxy honors per-repo lifecycle_mode: assist/off defer to passthrough
+    even when a phase file is present and would otherwise compose. The hook path
+    keeps the finer-grained assist (system/domain skills); the proxy can't, since
+    all its injection flows through the single phase-gated compose."""
+
+    @staticmethod
+    def _set_mode(tmp_path: Path, mode: str) -> None:
+        d = tmp_path / ".agentalloy"
+        d.mkdir(exist_ok=True)
+        (d / "config").write_text(f"lifecycle_mode: {mode}\n")
+
+    def test_off_passthrough_even_with_phase(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")
+        self._set_mode(tmp_path, "off")
+        # Tripwire: the guard must short-circuit before any skill load / trigger.
+        with mock.patch(
+            "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+            side_effect=AssertionError("must not evaluate the lifecycle in off mode"),
+        ):
+            result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
+        assert result.should_compose is False
+
+    def test_assist_passthrough_even_with_phase(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")
+        self._set_mode(tmp_path, "assist")
+        with mock.patch(
+            "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+            side_effect=AssertionError("must not evaluate the lifecycle in assist mode"),
+        ):
+            result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
+        assert result.should_compose is False
+
+    def test_explicit_full_still_composes(self, tmp_path: Path) -> None:
+        # Explicit `full` behaves exactly as the default (no-config) path.
+        _set_phase(tmp_path, "build")
+        self._set_mode(tmp_path, "full")
+        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='test'")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["test"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=mock_match,
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.decide_transition",
+                return_value=_no_transition(),
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
+        assert result.should_compose is True

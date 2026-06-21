@@ -27,6 +27,7 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _build_predicate_context,
     _intake_route_hint,
     _load_workflow_skill_for_phase,
+    _read_lifecycle_mode,
     _read_phase,
     _write_phase_atomic,
 )
@@ -98,6 +99,17 @@ async def evaluate_signal(
     Returns:
         SignalResult with composition decision and metadata
     """
+    # 0. Per-repo lifecycle mode. Only `full` runs the phase lifecycle on the
+    # proxy. `assist`/`off` defer entirely: the proxy has no phase-independent
+    # injection path (all domain + system skills flow through this one compose),
+    # so deferring the lifecycle means full passthrough here. The hook (Claude
+    # Code) path offers the finer-grained `assist` that keeps system/domain
+    # injection because those hooks fire independently of the phase. Guarding
+    # before reading the phase means an assist/off repo that still has a stale
+    # `.agentalloy/phase` (e.g. re-wired from full) is not composed for.
+    if _read_lifecycle_mode(cwd) != "full":
+        return SignalResult(should_compose=False)
+
     # 1. Read phase file (sync, instant)
     phase = _read_phase(cwd)
     if not phase:

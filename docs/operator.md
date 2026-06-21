@@ -93,17 +93,17 @@ Two separate vocabularies exist for **skill authoring/ingest** and should not be
 
 ### Lifecycle modes
 
-Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.agentalloy/config` (`lifecycle_mode:`) and read by the hooks on every event:
+Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.agentalloy/config` (`lifecycle_mode:`) and read by both the hook and proxy paths on every request:
 
 - **`full`** (default) — the intake front-door runs on every session and the full phase lifecycle is active; workflow skills inject per phase.
-- **`assist`** — no intake, no phase forcing. AgentAlloy defers to a repo that already drives its own workflow, while still injecting the additive system (PreToolUse) and domain (PostToolUse) skills.
+- **`assist`** — no intake, no phase forcing. AgentAlloy defers to a repo that already drives its own workflow. On the hook (Claude Code) path it still injects the additive system (PreToolUse) and domain (PostToolUse) skills.
 - **`off`** — wired but injects nothing.
 
 Set it with `agentalloy wire --lifecycle-mode {full,assist,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`).
 
 In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
 
-**Scope:** `lifecycle_mode` currently governs the hook-wired path (Claude Code). Proxy-wired harnesses (Cline, Aider, Continue.dev, OpenCode, Hermes) always run the full lifecycle today; honoring `lifecycle_mode` in the proxy is a planned follow-up.
+**Hook vs proxy:** both paths honor `lifecycle_mode`. The difference is `assist`: on proxy-wired harnesses (Cline, Aider, Continue.dev, OpenCode, Hermes) `assist` behaves like `off` (full passthrough), because the proxy's skill injection all flows through a single phase-gated compose — there is no phase-independent injection path to keep. The hook path's PreToolUse/PostToolUse fire independently of the phase, so its `assist` keeps system/domain skills. In both paths `off` injects nothing and `full` runs the complete lifecycle.
 
 ### Contracts
 
