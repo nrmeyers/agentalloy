@@ -247,6 +247,9 @@ def _render_human(result: dict[str, Any]) -> None:
         )
         print_rich(f"  Lifecycle: [bold]{mode}[/bold] [dim]({note})[/dim]")
 
+    if result.get("stale_phase_cleared"):
+        print_rich("  [dim]Cleared a stale phase file (lifecycle is not full)[/dim]")
+
     if result.get("soft_precedence_note"):
         print_rich("  [dim].claude/CLAUDE.md note added (repo workflow loads last)[/dim]")
 
@@ -287,11 +290,16 @@ def _prompt_lifecycle_mode(detected: list[str]) -> str:
 
     Only invoked when custom-workflow signals are detected AND stdin is a TTY.
     Mirrors the numbered-choice prompt pattern used elsewhere in the installer;
-    EOF/interrupt or a blank line takes the default (``assist``).
+    EOF/interrupt or a blank line takes the default (``full``).
+
+    The default is ``full`` on purpose: a ``.claude/agents/`` directory is
+    near-ubiquitous and does NOT imply the user wants AgentAlloy's lifecycle
+    disabled. Deferral (assist/off) must be an explicit choice — defaulting to
+    assist here silently turned composition off for engaged users.
     """
     options: list[tuple[str, str]] = [
-        ("assist", "assist — defer to your workflow (no intake interview); keep skill suggestions"),
-        ("full", "full — run AgentAlloy's intake + phase lifecycle"),
+        ("full", "full — run AgentAlloy's intake + phase lifecycle (default)"),
+        ("assist", "assist — defer to your workflow (no intake/phase); keep skill suggestions"),
         ("off", "off — wire the proxy/hooks but inject nothing"),
     ]
     print(
@@ -492,6 +500,14 @@ def _run(args: argparse.Namespace) -> int:
         # assist/off must NOT seed a phase (a seeded `intake` re-arms the front
         # door). Still git-exclude `.agentalloy/` — the config file lives there.
         _git_exclude_agentalloy(cwd)
+        # Reconcile a stale phase file: an existing phase (e.g. `build` from a
+        # prior `full` wiring) would otherwise sit alongside `lifecycle_mode:
+        # assist` and silently suppress composition while looking active. The
+        # lifecycle is off here, so the phase is meaningless — clear it.
+        phase_file = cwd / ".agentalloy" / "phase"
+        if phase_file.exists():
+            phase_file.unlink()
+            result["stale_phase_cleared"] = True
 
     # Repo-local instruction shaping (claude-code only). Best-effort — wiring
     # already succeeded, so never fail it over these. 1b soft note is full-only

@@ -137,7 +137,19 @@ def _evaluate_sync(
     # in the pre/post-tool-use hooks is what `assist` keeps).
     mode = _read_lifecycle_mode(cwd)
     current_phase = phase or _read_phase(cwd)
-    if mode != "full" or current_phase is None:
+    if mode != "full":
+        # Deferral is intentional for assist/off, but it's easy to land in by
+        # accident (the wire prompt + a stale phase file). Make it diagnosable:
+        # stamp a reason that surfaces in the hook response and telemetry,
+        # instead of a silent should_compose=False the operator has to spelunk.
+        logger.debug("composition deferred for %s: lifecycle_mode=%s", cwd, mode)
+        return {
+            "composed_block": "",
+            "phase": current_phase,
+            "should_compose": False,
+            "reason": f"lifecycle_mode:{mode}",
+        }
+    if current_phase is None:
         return {"composed_block": "", "phase": current_phase, "should_compose": False}
 
     skill = _load_workflow_skill_for_phase(current_phase, cwd)
@@ -389,6 +401,8 @@ async def hook_user_prompt_submit(request: Request) -> JSONResponse:
         should_compose=fresh_should_compose,
         cache_status="fresh",
         latency_ms=latency_ms,
+        # Surfaces e.g. "lifecycle_mode:assist" for a deferred prompt.
+        reason=result.get("reason"),
         # The composed workflow scaffold for a phase is its `sdd-<phase>` skill.
         workflow_skill_ids=[f"sdd-{fresh_phase}"]
         if (fresh_should_compose and fresh_phase)
@@ -577,9 +591,14 @@ def _record_prompt_telemetry(
     cache_status: str,
     latency_ms: int,
     workflow_skill_ids: list[str] | None = None,
+    reason: str | None = None,
 ) -> None:
     """Record one UserPromptSubmit event (every prompt — composed, no-compose, or
-    served from cache). Soft-fail inside ``write_hook_trace``."""
+    served from cache). Soft-fail inside ``write_hook_trace``.
+
+    *reason* (e.g. ``"lifecycle_mode:assist"``) is preferred over *cache_status*
+    for the trace's correlation_id so a deferred prompt is attributable in
+    ``telemetry coverage`` instead of an unexplained no_compose."""
     from agentalloy.api.hook_telemetry import write_hook_trace
 
     write_hook_trace(
@@ -589,7 +608,7 @@ def _record_prompt_telemetry(
         status="composed" if should_compose else "no_compose",
         task_prompt=prompt,
         workflow_skill_ids=workflow_skill_ids,
-        correlation_id=cache_status,
+        correlation_id=reason or cache_status,
         total_latency_ms=latency_ms,
     )
 

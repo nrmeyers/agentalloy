@@ -1087,6 +1087,9 @@ class TestLifecycleModeGuards:
         result = _evaluate_sync(prompt="build a thing", cwd=proj, phase="intake")
         assert result["should_compose"] is False
         assert result["composed_block"] == ""
+        # Observability: a deferred prompt must carry the reason (surfaced in the
+        # response + telemetry), not a silent no-compose the operator has to debug.
+        assert result["reason"] == f"lifecycle_mode:{mode}"
 
     # ---- PreToolUse system skills ----------------------------------------
 

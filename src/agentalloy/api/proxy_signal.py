@@ -107,7 +107,9 @@ async def evaluate_signal(
     # injection because those hooks fire independently of the phase. Guarding
     # before reading the phase means an assist/off repo that still has a stale
     # `.agentalloy/phase` (e.g. re-wired from full) is not composed for.
-    if _read_lifecycle_mode(cwd) != "full":
+    mode = _read_lifecycle_mode(cwd)
+    if mode != "full":
+        logger.debug("composition deferred for %s: lifecycle_mode=%s", cwd, mode)
         return SignalResult(should_compose=False)
 
     # 1. Read phase file (sync, instant)

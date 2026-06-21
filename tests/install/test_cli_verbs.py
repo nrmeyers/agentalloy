@@ -246,15 +246,53 @@ class TestWireLifecycleMode:
 
         self._claude_repo_with_custom_workflow(repo_root)
         monkeypatch.chdir(repo_root)
-        # Detection fires + TTY -> prompt. Choice "1" is the recommended default (assist).
+        # Detection fires + TTY -> prompt. Option 2 is assist (explicit deferral).
         with (
             patch("sys.stdin.isatty", return_value=True),
-            patch("builtins.input", return_value="1"),
+            patch("builtins.input", return_value="2"),
         ):
             rc = wire._run(self._wire())
         assert rc == 0
         assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
         assert not (repo_root / ".agentalloy" / "phase").exists()
+
+    def test_tty_prompt_default_is_full(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import patch
+
+        from agentalloy.install.subcommands import wire
+
+        # Regression for the silent-deferral bug: a blank line (hit Enter) must
+        # default to `full` and keep composition on — NOT assist.
+        self._claude_repo_with_custom_workflow(repo_root)
+        monkeypatch.chdir(repo_root)
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value=""),
+        ):
+            rc = wire._run(self._wire())
+        assert rc == 0
+        assert "lifecycle_mode: full" in (repo_root / ".agentalloy" / "config").read_text()
+        assert (repo_root / ".agentalloy" / "phase").exists()
+
+    def test_assist_clears_stale_phase_file(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install.subcommands import wire
+
+        # A repo previously in `full` (phase=build) re-wired to assist must not
+        # keep the stale phase — it would silently suppress compose while looking
+        # active. wire reconciles by clearing it.
+        self._claude_repo_with_custom_workflow(repo_root)
+        phase_file = repo_root / ".agentalloy" / "phase"
+        phase_file.parent.mkdir(parents=True)
+        phase_file.write_text("phase: build\n")
+        monkeypatch.chdir(repo_root)
+        rc = wire._run(self._wire(lifecycle_mode="assist"))
+        assert rc == 0
+        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
+        assert not phase_file.exists()
 
 
 class TestWireInstructionShaping:
