@@ -82,7 +82,7 @@ Phases track where the agent is in the software development lifecycle. The **aut
 intake → spec → design → build → qa → ship
 ```
 
-Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → ship`, with an escape hatch back to `spec`). Every session opens with intake (the claude-code `SessionStart` hook, gated by `session_intake_enabled`, default on).
+Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → ship`, with an escape hatch back to `spec`). In the default lifecycle mode every session opens with intake (the claude-code `SessionStart` hook, gated globally by `session_intake_enabled` and per-repo by `lifecycle_mode` — see **Lifecycle modes** below).
 
 The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
 
@@ -90,6 +90,20 @@ Two separate vocabularies exist for **skill authoring/ingest** and should not be
 
 - **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `intake`, `spec`, `design`, `build`, `qa`, `ship`, `sdd-fast` — the values a skill may scope itself to at ingest time (reconciled to the runtime lifecycle).
 - **Workflow position markers** (`ingest.py` `WORKFLOW_POSITION_MARKERS`): `sdd`, `phase:spec`, `phase:design`, `phase:plan`, `phase:testgen`, `phase:build`, `phase:verify`, `phase:deliver`, `code-review`, `release`, `incident`, `rfc` — tags describing where in a process a skill applies.
+
+### Lifecycle modes
+
+Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.agentalloy/config` (`lifecycle_mode:`) and read by the hooks on every event:
+
+- **`full`** (default) — the intake front-door runs on every session and the full phase lifecycle is active; workflow skills inject per phase.
+- **`assist`** — no intake, no phase forcing. AgentAlloy defers to a repo that already drives its own workflow, while still injecting the additive system (PreToolUse) and domain (PostToolUse) skills.
+- **`off`** — wired but injects nothing.
+
+Set it with `agentalloy wire --lifecycle-mode {full,assist,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`).
+
+In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
+
+**Scope:** `lifecycle_mode` currently governs the hook-wired path (Claude Code). Proxy-wired harnesses (Cline, Aider, Continue.dev, OpenCode, Hermes) always run the full lifecycle today; honoring `lifecycle_mode` in the proxy is a planned follow-up.
 
 ### Contracts
 
@@ -175,6 +189,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 - `GET /retrieve/{skill_id}` — lookup single skill's fragments
 - `GET /skills/{skill_id}` — inspect skill metadata
 - `GET /telemetry/traces` — query composition traces
+- `GET /telemetry/coverage` — hook-layer coverage (prompts, no-compose, skill pulls)
 - `GET /health` — liveness probe
 - `GET /diagnostics/runtime` — backend/model/DB state
 
@@ -209,6 +224,8 @@ Served via the OpenAI-compatible `/v1/embeddings` endpoint that `llama-server --
 Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns. Trace fields include: `trace_id`, `request_ts`, `phase`, `task_prompt`, `status`, `selected_fragment_ids`, `source_skill_ids`, `system_skill_ids`, `workflow_skill_ids`, `retrieval_latency_ms`, `assembly_latency_ms`, `total_latency_ms`, `response_size_chars`, and (on failure) `error_code`.
 
 Signal-layer traces additionally capture: `event_type`, `pre_filter_matched`, `gates_met`, `gates_unmet`, `qwen_calls`.
+
+The hook layer records its own activity so every prompt and every skill pull is attributable: each UserPromptSubmit (composed, no-compose, and cache hits), each SessionStart intake injection, each PreToolUse system-skill selection, and PostToolUse contract composes (tagged via `correlation_id`). Summarize it with `agentalloy telemetry coverage` or `GET /telemetry/coverage` — counts of prompts, no-compose, system-skill pulls, intake injections, and contract composes, with a per-phase prompt breakdown. The token-savings view (`agentalloy telemetry savings`) is unaffected: it still counts only `status='compose'`.
 
 ## Configuration
 
