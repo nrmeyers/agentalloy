@@ -8,8 +8,8 @@ domain_tags:
   - git
   - pull-request
   - code-review
-always_apply: true
-phase_scope: null
+always_apply: false
+phase_scope: [build, qa, ship]
 category_scope: null
 author: navistone
 change_summary: "golden default: detect-first forge skill (gh/glab); the org customization point for VCS conventions"

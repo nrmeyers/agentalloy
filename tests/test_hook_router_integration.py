@@ -1196,3 +1196,91 @@ class TestHookTelemetryRecording:
             client.app.state.vector_store = None
             client.app.state.telemetry_querier = None
             store.close()
+
+
+class TestSystemSkillSessionDedup:
+    """PreToolUse system skills now ride additionalContext (which persists in the
+    model's context), so they're injected once per (session, phase) and skipped
+    thereafter — no per-tool-use re-payment."""
+
+    @staticmethod
+    def _proj(tmp_path: Path, phase: str) -> Path:
+        proj = tmp_path / "proj"
+        (proj / ".agentalloy").mkdir(parents=True, exist_ok=True)
+        (proj / ".agentalloy" / "phase").write_text(f"phase: {phase}\n", encoding="utf-8")
+        return proj
+
+    @staticmethod
+    def _patch_nonempty_system(monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.reads.models import ActiveFragment
+        from agentalloy.retrieval.system import SystemRetrievalResult
+
+        frag = ActiveFragment(
+            fragment_id="f1",
+            fragment_type="guardrail",
+            sequence=0,
+            content="CI guardrail prose",
+            skill_id="sys-ci",
+            version_id="sys-ci-v1",
+            skill_class="system",
+            category="quality",
+            domain_tags=[],
+        )
+        monkeypatch.setattr(
+            "agentalloy.retrieval.system.retrieve_system_fragments",
+            lambda *a, **k: SystemRetrievalResult(
+                candidates=[frag], applied_skill_ids=["sys-ci"], retrieval_ms=0
+            ),
+        )
+
+    @staticmethod
+    def _client_with_store() -> TestClient:
+        from agentalloy.api.skill_router import get_skill_store
+
+        app = create_app(use_default_lifespan=False)
+        app.dependency_overrides[get_skill_store] = lambda: object()  # non-None store
+        return TestClient(app)
+
+    def test_once_per_session_phase(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.api import hook_router as hr
+
+        hr._system_injected_session_phases.clear()
+        self._patch_nonempty_system(monkeypatch)
+        client = self._client_with_store()
+        body = {"tool_name": "Edit", "cwd": str(self._proj(tmp_path, "build")), "session_id": "S1"}
+        r1 = client.post("/v1/hook/pre-tool-use", json=body)
+        r2 = client.post("/v1/hook/pre-tool-use", json=body)
+        assert r1.json()["system_skills"], "first tool use injects the phase's system skills"
+        assert r2.json()["system_skills"] == [], "second is deduped (already in context)"
+
+    def test_phase_change_reinjects(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.api import hook_router as hr
+
+        hr._system_injected_session_phases.clear()
+        self._patch_nonempty_system(monkeypatch)
+        client = self._client_with_store()
+        proj = self._proj(tmp_path, "build")
+        body = {"tool_name": "Edit", "cwd": str(proj), "session_id": "S1"}
+        client.post("/v1/hook/pre-tool-use", json=body)  # build injected
+        (proj / ".agentalloy" / "phase").write_text("phase: qa\n", encoding="utf-8")
+        r = client.post("/v1/hook/pre-tool-use", json=body)  # (S1, qa) is new
+        assert r.json()["system_skills"], "a phase transition re-delivers that phase's system set"
+
+    def test_no_session_id_injects_every_time(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reset_hook_cache: Any
+    ) -> None:
+        from agentalloy.api import hook_router as hr
+
+        hr._system_injected_session_phases.clear()
+        self._patch_nonempty_system(monkeypatch)
+        client = self._client_with_store()
+        body = {"tool_name": "Edit", "cwd": str(self._proj(tmp_path, "build"))}  # no session_id
+        r1 = client.post("/v1/hook/pre-tool-use", json=body)
+        r2 = client.post("/v1/hook/pre-tool-use", json=body)
+        assert r1.json()["system_skills"] and r2.json()["system_skills"], (
+            "without a session id there's no dedup — inject as before"
+        )

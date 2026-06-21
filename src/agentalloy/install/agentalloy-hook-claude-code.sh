@@ -130,19 +130,25 @@ except Exception:
     PreToolUse)
         RESP="$("${_CURL[@]}" "$PRE_TOOL_URL" 2>/dev/null || echo "{}")"
 
-        SKILLS="$(printf '%s' "$RESP" | python3 -c "
+        # PreToolUse plain stdout is DEBUG-ONLY in Claude Code — it never reaches
+        # the model. System skills must ride the hookSpecificOutput.additionalContext
+        # envelope (like PostToolUse/SessionStart) to actually be injected. The
+        # server dedups to once-per-session, so this rarely returns content.
+        printf '%s' "$RESP" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
-    for skill in d.get('system_skills', []):
-        print(skill)
+    skills = d.get('system_skills', [])
+    if skills:
+        print(json.dumps({
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'additionalContext': '\n\n'.join(skills),
+            }
+        }))
 except Exception:
     pass
-" 2>/dev/null || true)"
-
-        if [ -n "$SKILLS" ]; then
-            printf '%s\n' "$SKILLS"
-        fi
+" 2>/dev/null || true
         ;;
 
     PostToolUse)

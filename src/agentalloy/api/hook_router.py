@@ -70,6 +70,15 @@ _cache: dict[_CacheKey, _CachedSignalResult] = {}
 _inflight_guard = threading.Lock()
 _inflight: set[_CacheKey] = set()
 
+# Once-per-session-phase dedup for PreToolUse system-skill injection. The skills
+# ride additionalContext (which persists in the model's context for the whole
+# session), so they only need delivering the first time a session works in a
+# given phase. Bounded to cap growth on a long-lived service; clearing just
+# re-delivers each session-phase one extra time (harmless).
+_system_dedup_lock = threading.Lock()
+_system_injected_session_phases: set[tuple[str, str]] = set()
+_SYSTEM_DEDUP_MAX = 4096
+
 
 def _cache_key(cwd: Path, phase: str | None) -> _CacheKey:
     """Canonical cache key: resolved cwd + effective phase."""
@@ -508,6 +517,25 @@ async def hook_pre_tool_use(request: Request) -> JSONResponse:
                     )
     except Exception:
         logger.warning("Hook pre-tool-use evaluation failed", exc_info=True)
+
+    # Once-per-session-phase dedup. System skills now ride additionalContext,
+    # which PERSISTS in the model's context for the session — so re-injecting on
+    # every PreToolUse is pure waste. Deliver them the first time a session works
+    # in a phase, then skip. Keyed on (session_id, phase) so a phase transition
+    # re-delivers that phase's set. No session_id (older harness / direct call)
+    # → no dedup, inject as before.
+    session_id = str(body.get("session_id") or "")
+    if session_id and applied_skill_ids and current_phase:
+        key = (session_id, current_phase)
+        with _system_dedup_lock:
+            first = key not in _system_injected_session_phases
+            if first:
+                if len(_system_injected_session_phases) >= _SYSTEM_DEDUP_MAX:
+                    _system_injected_session_phases.clear()
+                _system_injected_session_phases.add(key)
+        if not first:
+            system_skills = []
+            applied_skill_ids = []
 
     latency_ms = int((time.monotonic() - start) * 1000)
     if applied_skill_ids:

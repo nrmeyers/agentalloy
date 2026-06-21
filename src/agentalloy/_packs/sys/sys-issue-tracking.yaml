@@ -6,8 +6,8 @@ skill_class: system
 domain_tags:
   - issue-tracking
   - project-management
-always_apply: true
-phase_scope: null
+always_apply: false
+phase_scope: [intake, spec, ship]
 category_scope: null
 author: navistone
 change_summary: "golden default: forge-native issues with a customize point for dedicated trackers (Linear/Jira)"
