@@ -114,7 +114,7 @@ class TestStatus:
         from agentalloy.install.subcommands import status
 
         st = install_state.load_state(repo_root)
-        st["service_mode"] = "container"
+        st["deployment"] = "container"  # the real key `setup --deployment container` writes
         install_state.save_state(st, repo_root)
 
         # Container reachable -> corpus reported present (it's in the volume).

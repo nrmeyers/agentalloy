@@ -179,8 +179,8 @@ def _run(args: argparse.Namespace) -> int:
     # volume *inside* the container, so a host-path check always reports
     # "missing" — the running container is the source of truth there.
     corpus_path = install_state.corpus_dir()
-    service_mode = st.get("service_mode")
-    if service_mode == "container":
+    deployment = st.get("deployment")
+    if deployment == "container":
         corpus_present = service_reachable
         corpus_location = "container volume (agentalloy-data)"
     else:
@@ -197,7 +197,7 @@ def _run(args: argparse.Namespace) -> int:
         "corpus": {
             "path": corpus_location,
             "present": corpus_present,
-            "mode": service_mode,
+            "mode": deployment,
         },
         "service": {
             "port": port,
