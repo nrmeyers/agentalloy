@@ -321,6 +321,7 @@ def _render_coverage(result: dict[str, Any]) -> None:
     print_rich(f"    no-compose:            {int(result.get('prompts_no_compose', 0)):,}")
     print_rich(f"  System-skill pulls:      {int(result.get('system_skill_pulls', 0)):,}")
     print_rich(f"  Intake injections:       {int(result.get('intake_injections', 0)):,}")
+    print_rich(f"  Contract composes:       {int(result.get('contract_composes', 0)):,}")
 
     per_phase: list[dict[str, Any]] = list(result.get("per_phase_prompts") or [])
     if per_phase:

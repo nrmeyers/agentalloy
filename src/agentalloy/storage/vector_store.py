@@ -852,6 +852,13 @@ class VectorStore:
         )
         system_skill_pulls = _count("event_type = ?", ["system_skill_applied"])
         intake_injections = _count("event_type = ?", ["session_intake"])
+        # PostToolUse domain composes are recorded by the orchestrator as
+        # status='compose' (counted in savings); the correlation_id tag is what
+        # makes them attributable to the contract hook here.
+        contract_composes = _count(
+            "event_type IN ('compose', 'compose_empty') AND correlation_id = ?",
+            ["post_tool_use"],
+        )
 
         prompt_phase_rows = self._conn.execute(
             """
@@ -874,6 +881,7 @@ class VectorStore:
             "prompts_no_compose": prompts_no_compose,
             "system_skill_pulls": system_skill_pulls,
             "intake_injections": intake_injections,
+            "contract_composes": contract_composes,
             "by_event": by_event,
             "per_phase_prompts": per_phase,
         }

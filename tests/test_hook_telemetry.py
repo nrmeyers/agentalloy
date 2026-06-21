@@ -157,6 +157,57 @@ class TestHookCoverageRoundtrip:
             store.close()
 
 
+class TestContractComposeDiscriminator:
+    """PostToolUse-driven composes carry an origin tag (``requesting_agent`` ->
+    trace ``correlation_id``) so they're attributable, while still counting as a
+    real compose in savings."""
+
+    def test_origin_maps_to_correlation_id_and_coverage(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+
+        from agentalloy.telemetry import DuckDBTelemetryWriter, TelemetryRecord
+
+        store = open_or_create(tmp_path / "t.duck")
+        try:
+            DuckDBTelemetryWriter(store).write(
+                TelemetryRecord(
+                    composition_id="c1",
+                    timestamp=datetime.now(UTC),
+                    phase="build",
+                    task_prompt="implement",
+                    result_type="compose",
+                    requesting_agent="post_tool_use",
+                )
+            )
+            assert store.aggregate_hook_coverage()["contract_composes"] == 1
+            # It IS a compose — still counted in the token-savings total.
+            assert store.aggregate_savings()["total_composes"] == 1
+        finally:
+            store.close()
+
+    def test_direct_compose_has_no_origin(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+
+        from agentalloy.telemetry import DuckDBTelemetryWriter, TelemetryRecord
+
+        store = open_or_create(tmp_path / "t.duck")
+        try:
+            DuckDBTelemetryWriter(store).write(
+                TelemetryRecord(
+                    composition_id="c2",
+                    timestamp=datetime.now(UTC),
+                    phase="build",
+                    task_prompt="direct",
+                    result_type="compose",
+                )  # no requesting_agent
+            )
+            # A direct /compose is not attributed to the contract hook.
+            assert store.aggregate_hook_coverage()["contract_composes"] == 0
+            assert store.aggregate_savings()["total_composes"] == 1
+        finally:
+            store.close()
+
+
 class TestRenderCoverage:
     """The `agentalloy telemetry coverage` human renderer formats without error."""
 

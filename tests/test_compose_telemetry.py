@@ -63,6 +63,27 @@ def _empty_system() -> SystemRetrievalResult:
 
 
 @pytest.mark.asyncio
+async def test_requesting_agent_flows_to_record_on_success() -> None:
+    """A compose with an origin tag records it on the success-path TelemetryRecord."""
+    writer = _RecordingWriter()
+    frag = fake_fragment("f1", "execution", skill="sk-a")
+    domain = RetrievalResult(candidates=[frag], eligible_count=1, retrieval_ms=10)
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+    await orch.compose(ComposeRequest(task="x", phase="design", requesting_agent="post_tool_use"))
+    assert writer.records[-1].requesting_agent == "post_tool_use"
+
+
+@pytest.mark.asyncio
+async def test_requesting_agent_flows_to_record_on_empty() -> None:
+    """The origin tag is recorded even when retrieval yields nothing (compose_empty)."""
+    writer = _RecordingWriter()
+    domain = RetrievalResult(candidates=[], eligible_count=0, retrieval_ms=5)
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+    await orch.compose(ComposeRequest(task="x", phase="design", requesting_agent="post_tool_use"))
+    assert writer.records[-1].requesting_agent == "post_tool_use"
+
+
+@pytest.mark.asyncio
 async def test_compose_writes_telemetry_record() -> None:
     writer = _RecordingWriter()
     frag = fake_fragment("f1", "execution", skill="sk-a")

@@ -120,5 +120,8 @@ async def compose_from_contract(
         phase=contract.phase,  # type: ignore[arg-type]
         contract_tags=contract.domain_tags,
         contract_path=str(safe_path),
+        # Tag the origin so PostToolUse-driven composes are distinguishable in
+        # telemetry from direct /compose calls (lands in trace.correlation_id).
+        requesting_agent="post_tool_use",
     )
     return await orchestrator.compose(compose_req)

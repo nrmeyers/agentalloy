@@ -134,7 +134,10 @@ class DuckDBTelemetryWriter:
             phase=record.phase or "unspecified",
             task_prompt=record.task_prompt,
             status=record.result_type,
-            correlation_id=None,
+            # Carries the compose origin (e.g. "post_tool_use") when the caller
+            # set it; None for direct /compose. Previously hardcoded None, which
+            # silently dropped this caller context.
+            correlation_id=record.requesting_agent,
             category=None,
             selected_fragment_ids=selected,
             source_skill_ids=list(record.source_skill_ids or []),

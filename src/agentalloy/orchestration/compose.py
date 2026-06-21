@@ -141,6 +141,7 @@ class ComposeOrchestrator:
                     error_payload=retrieval_error_code,
                     lm_assist_outcome=lm_assist_outcome,
                     lm_assist_model=lm_assist_model,
+                    requesting_agent=req.requesting_agent,
                 )
             )
             return EmptyResult(
@@ -201,6 +202,7 @@ class ComposeOrchestrator:
                 tokens_flat_equivalent=tokens_flat_equivalent,
                 lm_assist_outcome=lm_assist_outcome,
                 lm_assist_model=lm_assist_model,
+                requesting_agent=req.requesting_agent,
             )
         )
         return ComposedResult(

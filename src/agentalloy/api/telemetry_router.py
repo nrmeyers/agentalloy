@@ -117,6 +117,7 @@ class CoverageResponse(BaseModel):
     prompts_no_compose: int
     system_skill_pulls: int
     intake_injections: int
+    contract_composes: int = 0
     by_event: list[EventCount]
     per_phase_prompts: list[PhasePrompts]
 
@@ -128,6 +129,7 @@ class CoverageResponse(BaseModel):
             prompts_no_compose=0,
             system_skill_pulls=0,
             intake_injections=0,
+            contract_composes=0,
             by_event=[],
             per_phase_prompts=[],
         )

@@ -78,6 +78,14 @@ class ComposeRequest(BaseModel):
         default=None,
         description="Caller-supplied correlation id. Logged alongside the server-generated composition_id.",
     )
+    requesting_agent: str | None = Field(
+        default=None,
+        description=(
+            "Origin of this compose (e.g. 'post_tool_use' for the contract hook). "
+            "Recorded as the trace's correlation_id so hook-driven composes are "
+            "distinguishable from direct /compose calls."
+        ),
+    )
     # Contract integration (Phase 2)
     contract_path: str | None = Field(
         default=None,
