@@ -27,7 +27,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 
 | Harness | Wiring Vector |
 |---|---|
-| `claude-code` | per-repo `.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL=…/proj/<token>`, sourced via direnv) |
+| `claude-code` | per-repo `.claude/settings.local.json` `env` (`ANTHROPIC_BASE_URL=…/proj/<token>`, auto-loaded by Claude Code) + `.agentalloy/claude-code-env.sh` shell/direnv fallback |
 | `continue-closed`, `continue-local` | `.continuerc.json` `models[].apiBase` |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `model`) |
 | `hermes-agent` | `~/.hermes/config.yaml` `custom_providers` (user scope) or `AGENTS.md` instruction (repo scope) |

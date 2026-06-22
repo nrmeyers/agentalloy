@@ -1067,6 +1067,11 @@ def uninstall(
             proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
         if str(root / ".cline" / "settings.json") not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
+        # claude-code auto-load carrier: strip env.ANTHROPIC_BASE_URL from
+        # .claude/settings.local.json (surgical — preserves the user's other
+        # settings). Repo-scoped, symmetric with `_wire_proxy_claude_code`.
+        if str(root / ".claude" / "settings.local.json") not in handled_paths:
+            proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(root))
 
         # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config).
         # Symmetric with wiring so a later re-wire starts clean — the dogfood
@@ -1082,6 +1087,18 @@ def uninstall(
                     )
                 except OSError:
                     pass
+
+        # Leave no empty husk: once the env file (harness-record loop) and the
+        # lifecycle state above are gone, drop .agentalloy/ itself — but only if
+        # it is genuinely empty. A non-empty rmdir raises OSError, which preserves
+        # user work (e.g. .agentalloy/contracts/) untouched.
+        _agentalloy_dir = root / ".agentalloy"
+        if _agentalloy_dir.is_dir():
+            try:
+                _agentalloy_dir.rmdir()
+                files_removed.append({"path": str(_agentalloy_dir), "action": "removed_empty_dir"})
+            except OSError:
+                pass
 
     # User-scope proxies: only run during a global (all_repos) uninstall to avoid
     # removing global home-dir config when unwiring an unrelated repo.

@@ -1145,12 +1145,19 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
     mode, which breaks account/OAuth auth for Pro/Max/Team users who have no API
     key. The proxy forwards the caller's own credential upstream untouched.
 
-    Carrier: if ``<root>/.envrc`` exists, a sentinel-bounded ``source_env`` line
-    is appended (idempotently) so direnv loads the env file on ``cd``. If there
-    is no ``.envrc`` we do not create one — the returned ``hint`` record tells
-    the user to source the file in their shell or add it to direnv themselves.
+    Carriers, in order of preference:
+
+    1. ``<root>/.claude/settings.local.json`` ``env`` block — Claude Code reads it
+       natively, so the proxy auto-loads with no shell step. Gitignored by
+       convention, so the machine-specific URL stays out of git. Common-case path;
+       prints a one-line confirmation (no must-source wart).
+    2. ``<root>/.envrc`` — if one already exists, a sentinel-bounded ``source_env``
+       line is appended (idempotently) so direnv loads the shell env file on ``cd``.
+    3. Fallback hint — only when (1) is unavailable (malformed settings file) AND
+       there is no ``.envrc``: tell the user to source the env file themselves.
     """
     from agentalloy.api.proxy_context import encode_proj_token
+    from agentalloy.providers.claude_code.install import apply_claude_settings_env
 
     agentalloy_dir = root / ".agentalloy"
     agentalloy_dir.mkdir(parents=True, exist_ok=True)
@@ -1203,7 +1210,30 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
         }
     ]
 
-    # Carrier: prefer direnv when an .envrc already exists; otherwise hint.
+    # Primary carrier: Claude Code natively reads the `env` map from
+    # .claude/settings.local.json, so writing ANTHROPIC_BASE_URL there auto-loads
+    # the proxy with no shell/direnv step (this kills the "you must source this"
+    # wart for the common case). settings.local.json is gitignored by Claude Code
+    # convention, so the machine-specific /proj/<token> URL stays out of git.
+    # Cleanup is surgical via uninstall_proxy._unwire_proxy_claude_code_settings,
+    # so this is deliberately NOT added to `records` (a record-driven restore
+    # would clobber unrelated user edits to settings.local.json on unwire).
+    settings_wired = False
+    settings_rel = ""
+    try:
+        settings_path, _ = apply_claude_settings_env(root, proxy_url)
+        settings_wired = True
+        settings_rel = settings_path.relative_to(root).as_posix()
+    except json.JSONDecodeError:
+        print(
+            f"[AgentAlloy] {root / '.claude' / 'settings.local.json'} is not valid JSON — "
+            "skipped the auto-load carrier; the env file below still works.",
+            file=sys.stderr,
+        )
+
+    # Secondary carrier: prefer direnv when an .envrc already exists; otherwise a
+    # one-line hint — but only when settings.local.json did NOT auto-wire (else
+    # the var already loads and the hint would be noise).
     envrc_path = root / ".envrc"
     rel_env = env_path.relative_to(root).as_posix()
     if envrc_path.exists():
@@ -1231,10 +1261,11 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
                 **({"original_content": envrc_original} if envrc_original is not None else {}),
             }
         )
-    else:
-        # No .envrc: don't create one. Emit a carrier hint on stderr and attach
-        # it to the env-file record (rather than a pathless record that uninstall
-        # would warn about) so the returned result still carries the guidance.
+    elif not settings_wired:
+        # No .envrc AND settings.local.json carrier unavailable: the var won't
+        # auto-load, so emit the must-source hint and attach it to the env-file
+        # record (rather than a pathless record uninstall would warn about) so the
+        # returned result still carries the guidance.
         hint = (
             f"AgentAlloy wrote {env_path}. Load it before running Claude Code: "
             f"`source {rel_env}` in your shell, or add `source_env {rel_env}` to a "
@@ -1242,6 +1273,14 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
         )
         print(f"[AgentAlloy] {hint}", file=sys.stderr)
         records[0]["carrier_hint"] = hint
+
+    if settings_wired:
+        print(
+            f"[AgentAlloy] Wired Claude Code → AgentAlloy proxy via {settings_rel} — "
+            "Claude Code loads it automatically, no shell setup needed. "
+            f"(Shell/direnv users can also `source {rel_env}`.)",
+            file=sys.stderr,
+        )
 
     return records
 

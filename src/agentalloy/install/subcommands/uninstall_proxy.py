@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def _remove_sentinel_block(content: str) -> str:
@@ -164,6 +164,50 @@ def _unwire_proxy_claude_code(root: Path) -> list[Path]:
         print(f"  source {env_path}", file=sys.stderr)
         return [env_path]
     return []
+
+
+def _unwire_proxy_claude_code_settings(root: Path) -> list[Path]:
+    """Strip the AgentAlloy proxy URL from ``<root>/.claude/settings.local.json``.
+
+    Surgical, mirroring the cline cleanup: removes only ``env.ANTHROPIC_BASE_URL``
+    when it points at our ``/proj/`` discriminator (so a user's own base URL is
+    left alone), drops the ``env`` block if it becomes empty, and preserves every
+    other key (permissions, MCP toggles, …). The file is rewritten in place; it is
+    only unlinked if our edit leaves it completely empty (``{}``).
+
+    A record-driven restore is deliberately NOT used for this file: it would
+    revert unrelated edits the user made to settings.local.json after wiring.
+    """
+    settings_path = root / ".claude" / "settings.local.json"
+    if not settings_path.exists():
+        return []
+    try:
+        raw = json.loads(settings_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(
+            f"WARNING: {settings_path} could not be parsed ({e}) — skipping settings cleanup.",
+            file=sys.stderr,
+        )
+        return []
+    if not isinstance(raw, dict):
+        return []
+    data = cast("dict[str, Any]", raw)
+    env_raw = data.get("env")
+    if not isinstance(env_raw, dict):
+        return []
+    env = cast("dict[str, Any]", env_raw)
+    url = env.get("ANTHROPIC_BASE_URL")
+    if not (isinstance(url, str) and "/proj/" in url):
+        # Not ours (or already gone) — leave the user's own base URL untouched.
+        return []
+    env.pop("ANTHROPIC_BASE_URL", None)
+    if not env:
+        data.pop("env", None)
+    if data:
+        settings_path.write_text(json.dumps(data, indent=2) + "\n")
+    else:
+        settings_path.unlink()
+    return [settings_path]
 
 
 def _unwire_proxy_cline(root: Path) -> list[Path]:

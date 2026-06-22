@@ -34,7 +34,7 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `aider` | `.aider.conf.yml` | `openai-api-base`, `openai-api-key`, `model` | P1 |
 | `hermes-agent` | `~/.hermes/config.yaml` (user) or `AGENTS.md` (repo) | `custom_providers.agentalloy` | P1 |
 | `opencode` | `.opencode/.agentalloy-env` | `OPENAI_API_BASE`, `OPENAI_API_KEY` | P1 |
-| `claude-code` | per-repo `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
+| `claude-code` | per-repo `.claude/settings.local.json` `env` (primary) + `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
 
 ### Anthropic Messages Router
@@ -62,7 +62,7 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 
 | Harness | Proxy Config File | Notes |
 |---------|------------------|-------|
-| `claude-code` | per-repo `.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL=…/proj/<token>` **only** — never an API key) | Native Anthropic Messages passthrough. Sourced via direnv, or a printed `source` hint. Auth is transparent: the proxy forwards the caller's own credential. |
+| `claude-code` | per-repo `.claude/settings.local.json` `env` block (`ANTHROPIC_BASE_URL=…/proj/<token>` **only** — never an API key), with `.agentalloy/claude-code-env.sh` as a shell/direnv fallback | Native Anthropic Messages passthrough. settings.local.json is read natively by Claude Code, so the proxy auto-loads with no `source`/direnv step (the file is gitignored, so the machine-specific URL stays out of git). Auth is transparent: the proxy forwards the caller's own credential. |
 | `continue-closed`, `continue-local` | `.continuerc.json` (`models[].apiBase`) | JSON mutation per model entry. |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
 | `hermes-agent` | `~/.hermes/config.yaml` (`custom_providers.agentalloy`) user scope, or sentinel block in `AGENTS.md` repo scope | Scope resolved at runtime via `--scope user|repo`. |
@@ -218,7 +218,7 @@ the injected block, then cleans up any dedicated files:
 | `aider` | Sentinel block from `.aider.conf.yml`; `.agentalloy-aider-instructions.md` |
 | `hermes-agent` | Sentinel block from `~/.hermes/config.yaml` (user) or `AGENTS.md` (repo) |
 | `opencode` | `.opencode/.agentalloy-env` and `.opencode/system-prompt.md` |
-| `claude-code` | `~/.agentalloy/claude-code-env.sh`; user must remove shell profile source line manually |
+| `claude-code` | `.claude/settings.local.json` `env.ANTHROPIC_BASE_URL` stripped (other settings preserved) + `.agentalloy/claude-code-env.sh` removed; empty `.agentalloy/` directory is also removed |
 | `cline` | Proxy fields from `.cline/settings.json` (or removes file if empty) |
 
 For `--legacy` installs, uninstall removes the injected sentinel blocks and dedicated files

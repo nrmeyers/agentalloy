@@ -8,13 +8,18 @@ never ``ANTHROPIC_API_KEY`` — setting an API key would break account/OAuth aut
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from agentalloy.api.proxy_context import decode_proj_token, encode_proj_token
 from tests._wire_compat import wire_compat
+
+# Uninstall module namespace for patching state/proxy seams.
+_UNINSTALL = "agentalloy.install.subcommands.uninstall"
 
 
 @pytest.fixture
@@ -69,10 +74,16 @@ class TestClaudeCodeProxyWiring:
         assert "localhost:7070" not in content
         assert content.count("# <!-- BEGIN agentalloy install -->") == 1
 
-    def test_claude_code_proxy_no_envrc_emits_hint(self, tmp_path: Path) -> None:
-        """With no .envrc, a carrier hint rides on the env-file record; no .envrc created."""
+    def test_claude_code_proxy_no_envrc_auto_wires_no_hint(self, tmp_path: Path) -> None:
+        """With no .envrc, settings.local.json is the carrier — no must-source hint.
+
+        Previously (env-file only) a carrier hint rode on the env-file record. Now
+        the settings.local.json ``env`` block auto-loads, so the hint is suppressed.
+        """
         result = wire_compat("claude-code", port=7070, root=tmp_path)
         assert not (tmp_path / ".envrc").exists()
+        # settings.local.json carrier was written and auto-loads.
+        assert (tmp_path / ".claude" / "settings.local.json").exists()
 
         env_entries = [
             f
@@ -80,10 +91,7 @@ class TestClaudeCodeProxyWiring:
             if str(f.get("path", "")).endswith(".agentalloy/claude-code-env.sh")
         ]
         assert len(env_entries) == 1
-        hint = env_entries[0].get("carrier_hint")
-        assert hint is not None
-        assert ".agentalloy/claude-code-env.sh" in hint
-        assert "source_env .agentalloy/claude-code-env.sh" in hint
+        assert env_entries[0].get("carrier_hint") is None
 
     def test_claude_code_proxy_appends_source_env_to_existing_envrc(self, tmp_path: Path) -> None:
         """A pre-existing .envrc gets a sentinel-bounded source_env line appended."""
@@ -149,3 +157,187 @@ class TestClaudeCodeRegistryAuthTransparency:
         for env in (cc._env_builder(7070), runtime.build_launch_env(7070)):
             assert "ANTHROPIC_API_KEY" not in env
             assert env["ANTHROPIC_BASE_URL"] == f"http://localhost:7070/proj/{token}"
+
+
+class TestClaudeCodeSettingsCarrier:
+    """The primary auto-load carrier: .claude/settings.local.json `env` block.
+
+    Claude Code reads `env` natively, so the proxy URL loads with no shell/direnv
+    step. Auth-transparent (never an API key) and the merge preserves user keys.
+    """
+
+    @staticmethod
+    def _settings(root: Path) -> dict:
+        return json.loads((root / ".claude" / "settings.local.json").read_text())
+
+    def test_wire_writes_settings_env_base_url(self, tmp_path: Path) -> None:
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        token = encode_proj_token(tmp_path)
+        data = self._settings(tmp_path)
+        assert data["env"]["ANTHROPIC_BASE_URL"] == f"http://localhost:7070/proj/{token}"
+        # round-trips back to this repo
+        assert str(decode_proj_token(token)) == os.path.realpath(tmp_path)
+
+    def test_wire_settings_never_sets_api_key(self, tmp_path: Path) -> None:
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        raw = (tmp_path / ".claude" / "settings.local.json").read_text()
+        assert "ANTHROPIC_API_KEY" not in raw
+
+    def test_wire_settings_preserves_existing_keys(self, tmp_path: Path) -> None:
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        (claude / "settings.local.json").write_text(
+            json.dumps({"permissions": {"allow": ["Bash(ls)"]}, "env": {"FOO": "bar"}})
+        )
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        data = self._settings(tmp_path)
+        assert data["permissions"]["allow"] == ["Bash(ls)"]
+        assert data["env"]["FOO"] == "bar"
+        assert "ANTHROPIC_BASE_URL" in data["env"]
+
+    def test_wire_settings_idempotent(self, tmp_path: Path) -> None:
+        wire_compat("claude-code", port=7070, root=tmp_path)
+        wire_compat("claude-code", port=8080, root=tmp_path)
+        data = self._settings(tmp_path)
+        assert data["env"]["ANTHROPIC_BASE_URL"].endswith(
+            ":8080/proj/" + encode_proj_token(tmp_path)
+        )
+
+    def test_wire_malformed_settings_falls_back_to_hint(self, tmp_path: Path) -> None:
+        """A malformed settings.local.json is left untouched; the env-file hint returns."""
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        (claude / "settings.local.json").write_text("{ not valid json")
+        result = wire_compat("claude-code", port=7070, root=tmp_path)
+        # Not clobbered.
+        assert (claude / "settings.local.json").read_text() == "{ not valid json"
+        # No .envrc + no settings carrier ⇒ must-source hint is restored.
+        env_entries = [
+            f
+            for f in result["files_written"]
+            if str(f.get("path", "")).endswith(".agentalloy/claude-code-env.sh")
+        ]
+        assert env_entries and env_entries[0].get("carrier_hint") is not None
+
+
+class TestClaudeCodeUnwireCleanup:
+    """`unwire` strips only our settings env key and leaves no empty .agentalloy husk."""
+
+    def test_unwire_strips_only_our_base_url(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import uninstall_proxy
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        token = encode_proj_token(tmp_path)
+        (claude / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "permissions": {"allow": ["Bash(ls)"]},
+                    "env": {
+                        "ANTHROPIC_BASE_URL": f"http://localhost:7070/proj/{token}",
+                        "FOO": "bar",
+                    },
+                }
+            )
+        )
+        removed = uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        assert removed == [claude / "settings.local.json"]
+        data = json.loads((claude / "settings.local.json").read_text())
+        assert "ANTHROPIC_BASE_URL" not in data["env"]
+        assert data["env"]["FOO"] == "bar"  # sibling env key preserved
+        assert data["permissions"]["allow"] == ["Bash(ls)"]  # other keys preserved
+
+    def test_unwire_drops_empty_env_block(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import uninstall_proxy
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        token = encode_proj_token(tmp_path)
+        (claude / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "permissions": {"allow": ["Bash(ls)"]},
+                    "env": {"ANTHROPIC_BASE_URL": f"http://localhost:7070/proj/{token}"},
+                }
+            )
+        )
+        uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        data = json.loads((claude / "settings.local.json").read_text())
+        assert "env" not in data  # emptied env block dropped entirely
+        assert "permissions" in data  # rest of the file survives
+
+    def test_unwire_preserves_users_own_base_url(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import uninstall_proxy
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        (claude / "settings.local.json").write_text(
+            json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://my-own-proxy.example.com"}})
+        )
+        removed = uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        assert removed == []  # not our /proj/ URL → untouched
+        data = json.loads((claude / "settings.local.json").read_text())
+        assert data["env"]["ANTHROPIC_BASE_URL"] == "https://my-own-proxy.example.com"
+
+    def test_unwire_unlinks_file_when_only_our_content(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import uninstall_proxy
+
+        claude = tmp_path / ".claude"
+        claude.mkdir()
+        token = encode_proj_token(tmp_path)
+        (claude / "settings.local.json").write_text(
+            json.dumps({"env": {"ANTHROPIC_BASE_URL": f"http://localhost:7070/proj/{token}"}})
+        )
+        uninstall_proxy._unwire_proxy_claude_code_settings(tmp_path)
+        assert not (claude / "settings.local.json").exists()  # nothing left → removed
+
+    def _run_unwire(self, tmp_path: Path, st: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands.uninstall import uninstall
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir(exist_ok=True)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+        with (
+            patch(f"{_UNINSTALL}.install_state.load_state", return_value=st),
+            patch(f"{_UNINSTALL}.install_state.save_state"),
+            patch(f"{_UNINSTALL}.install_state.is_inside_root", return_value=True),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_aider", return_value=[]),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_opencode", return_value=[]),
+            patch(f"{_UNINSTALL}.uninstall_proxy._unwire_proxy_cline", return_value=[]),
+        ):
+            uninstall(
+                remove_data=False,
+                force=False,
+                root=tmp_path,
+                remove_user_state=False,
+                remove_env=False,
+                all_repos=False,
+                remove_models=False,
+                remove_wiring=True,
+                stop_services=False,
+            )
+
+    def test_unwire_removes_empty_agentalloy_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = wire_compat("claude-code", port=7070, root=tmp_path)
+        agentalloy = tmp_path / ".agentalloy"
+        (agentalloy / "phase").write_text("build\n")  # lifecycle state wire seeds
+        assert (agentalloy / "claude-code-env.sh").exists()
+
+        self._run_unwire(tmp_path, {"harness_files_written": result["files_written"]}, monkeypatch)
+        assert not agentalloy.exists()  # empty husk removed, no trace left
+
+    def test_unwire_preserves_agentalloy_dir_with_contracts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = wire_compat("claude-code", port=7070, root=tmp_path)
+        agentalloy = tmp_path / ".agentalloy"
+        contract = agentalloy / "contracts" / "spec.md"
+        contract.parent.mkdir(parents=True, exist_ok=True)
+        contract.write_text("# user work\n")
+
+        self._run_unwire(tmp_path, {"harness_files_written": result["files_written"]}, monkeypatch)
+        assert agentalloy.exists()  # preserved — contracts/ is user work
+        assert contract.read_text() == "# user work\n"
+        assert not (agentalloy / "claude-code-env.sh").exists()  # but our carrier is gone
