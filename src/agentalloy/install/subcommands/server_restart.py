@@ -18,6 +18,13 @@ def add_parser(
     p: argparse.ArgumentParser = subparsers.add_parser(
         "server-restart",
         help="Restart the background agentalloy service.",
+        description=(
+            "Restart the agentalloy service. In container mode this restarts the "
+            "uvicorn process *inside* the existing container — it does NOT change "
+            "container-level spec (mounts, env, published ports). To pick up a new "
+            "projects-root mount or image, recreate the container with "
+            "`agentalloy upgrade` instead."
+        ),
     )
     p.add_argument("--port", type=int, default=None, help="Override configured port.")
     p.add_argument(

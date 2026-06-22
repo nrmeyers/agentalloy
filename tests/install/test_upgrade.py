@@ -345,3 +345,93 @@ def test_container_pull_failure_aborts_before_cli_swap():
     run_ct.assert_not_called()  # container was NOT recreated
     assert not any("upgraded CLI" in a for a in actions)
     assert any("isn't available yet" in w for w in warnings)
+
+
+def test_target_image_falsy_version_does_not_crash():
+    """A falsy version (no --ref, API unreachable) must fall back to the base ref,
+    never build `repo:` — the AttributeError/invalid-image that aborted recreate."""
+    default = up._target_image(None, None)
+    assert default.startswith("ghcr.io/") and ":" in default  # a real, tagged ref
+    assert up._target_image("ghcr.io/x/y:3.0.4", "") == "ghcr.io/x/y:3.0.4"
+    assert up._target_image("ghcr.io/x/y:3.0.4", None) == "ghcr.io/x/y:3.0.4"
+    # a real version still pins, preserving the -full variant
+    assert up._target_image("ghcr.io/x/y:3.0.4-full", "v9.9.9") == "ghcr.io/x/y:9.9.9-full"
+
+
+def test_container_recreate_runs_under_new_cli_after_swap():
+    """After a real CLI swap the recreate must be delegated to the freshly-installed
+    binary (`upgrade --recreate-only`), NOT run in-process with the stale module —
+    the bug that shipped a new CLI orchestrating a mountless container."""
+    state = {
+        "deployment": "container",
+        "runtime_binary": "podman",
+        "image_tag": "ghcr.io/nrmeyers/agentalloy:3.0.4",
+        "installed_packs": ["core"],
+    }
+    from agentalloy.install.subcommands import container_runtime as cr
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(cr, "_pull_image", return_value=0),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),  # CLI swap
+        patch.object(up, "_run_cli", return_value=_proc(0)) as run_cli,
+        patch.object(cr, "_run_container") as run_ct,  # must NOT be called in-process
+    ):
+        actions, warnings = up._upgrade_container("v3.0.5", state, assume_yes=True)
+
+    run_ct.assert_not_called()  # recreate did NOT happen in the stale process
+    run_cli.assert_called_once()
+    assert run_cli.call_args.args[0] == ["upgrade", "--recreate-only", "--ref", "v3.0.5"]
+    assert any("recreated container (post-swap CLI)" in a for a in actions)
+    assert not warnings
+
+
+def test_container_recreate_source_stays_in_process():
+    """A source checkout swaps nothing, so the running process IS the new code —
+    recreate in-process and verify the spec."""
+    state = {
+        "deployment": "container",
+        "runtime_binary": "podman",
+        "image_tag": "ghcr.io/nrmeyers/agentalloy:3.0.4",
+        "installed_packs": ["core"],
+    }
+    from agentalloy.install.subcommands import container_runtime as cr
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="source"),
+        patch.object(cr, "_pull_image", return_value=0),
+        patch.object(cr, "_generate_entrypoint", return_value="/tmp/entry.sh"),
+        patch.object(cr, "_run_container", return_value=0) as run_ct,
+        patch.object(up, "_run_cli") as run_cli,  # must NOT shell out for source
+        patch.object(up, "_verify_container_spec", return_value=[]),
+    ):
+        actions, warnings = up._upgrade_container("v3.0.5", state, assume_yes=True)
+
+    run_cli.assert_not_called()
+    run_ct.assert_called_once()
+    assert any("recreated container" in a for a in actions)
+    assert not warnings
+
+
+def test_verify_container_spec_warns_only_on_confirmed_missing_mount():
+    """The post-condition warns when a mount is provably absent, and stays silent
+    when it simply can't inspect (no false positives in CI / missing runtime)."""
+    cr = MagicMock()
+    cr.resolve_projects_root.return_value = "/home/nmeyers"
+
+    # mount present -> clean
+    with patch.object(up.subprocess, "run", return_value=_proc(0, "/app/data /home/nmeyers ")):
+        assert up._verify_container_spec("podman", cr) == []
+
+    # mount confirmed absent -> one loud warning
+    with patch.object(up.subprocess, "run", return_value=_proc(0, "/app/data ")):
+        warns = up._verify_container_spec("podman", cr)
+    assert len(warns) == 1 and "missing the projects-root mount" in warns[0]
+
+    # inspect failed -> can't confirm, stay silent
+    with patch.object(up.subprocess, "run", return_value=_proc(1)):
+        assert up._verify_container_spec("podman", cr) == []
+
+    # '/' root was already refused at run time -> nothing to assert
+    cr.resolve_projects_root.return_value = "/"
+    assert up._verify_container_spec("podman", cr) == []

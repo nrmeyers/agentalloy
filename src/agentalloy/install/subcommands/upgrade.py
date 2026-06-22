@@ -323,11 +323,18 @@ def _upgrade_native(
 # ---------------------------------------------------------------------------
 
 
-def _target_image(current_tag: str | None, version: str) -> str:
-    """Pin the image to the release ``version``, preserving registry + -full variant."""
+def _target_image(current_tag: str | None, version: str | None) -> str:
+    """Pin the image to the release ``version``, preserving registry + -full variant.
+
+    When ``version`` is falsy (no ``--ref`` and the releases API was unreachable,
+    or a recreate-only pass with nothing to pin), fall back to the base ref's own
+    tag rather than building ``repo:`` — an invalid image that aborts the run.
+    """
     from agentalloy.install.subcommands.container_runtime import _DEFAULT_IMAGE
 
     base_ref = current_tag or _DEFAULT_IMAGE
+    if not version:
+        return base_ref
     repo = base_ref.rsplit(":", 1)[0]
     suffix = "-full" if base_ref.endswith("-full") else ""
     return f"{repo}:{version.lstrip('v')}{suffix}"
@@ -364,12 +371,62 @@ def _upgrade_container(
 
     # Image is present — now keep the orchestrating CLI in lock-step with it so the
     # recreate uses the new entrypoint (with stamp-compare re-seed). Best-effort.
-    if _detect_install_method() != "source":
+    method = _detect_install_method()
+    swapped = False
+    if method != "source":
         try:
-            subprocess.run(_swap_command(_detect_install_method(), ref), check=True, timeout=1800)
+            subprocess.run(_swap_command(method, ref), check=True, timeout=1800)
             actions.append(f"upgraded CLI to {ref}")
+            swapped = True
         except (subprocess.SubprocessError, OSError) as exc:
             warnings.append(f"CLI upgrade failed ({exc}); continuing with image recreate")
+
+    # Recreate under the *new* code, never this stale in-process module. The
+    # container spec (mounts, env, entrypoint) is baked at `podman run` time, so a
+    # recreate run by the pre-swap module bakes the OLD spec — the exact failure
+    # that shipped a 3.0.5 CLI orchestrating a mountless container. After a
+    # successful swap, shell the freshly-installed binary to do the recreate
+    # (mirroring how every other post-swap step already runs the new code). For a
+    # source checkout nothing was swapped, so this process *is* the new code.
+    if swapped:
+        rec = _run_cli(["upgrade", "--recreate-only", "--ref", ref], check=False, capture=True)
+        actions.append("recreated container (post-swap CLI)")
+        if rec.returncode != 0:
+            # Surface the child's own warning lines (recreate failure *or* a spec
+            # post-condition warning) rather than a generic blanket message.
+            detail = (rec.stdout or rec.stderr or "").strip().splitlines()
+            warnings.append(
+                "post-swap recreate reported issues: "
+                + (detail[-1] if detail else "re-run `agentalloy upgrade` and check the container")
+            )
+        else:
+            actions.append("corpus self-heals on the new entrypoint (stamp-compare re-seed)")
+    else:
+        a, w = _recreate_container(image, state)
+        actions.extend(a)
+        warnings.extend(w)
+    return actions, warnings
+
+
+def _recreate_container(
+    image: str | None, state: dict[str, Any]
+) -> tuple[list[str], list[str]]:
+    """Recreate the container with *this* code's spec, then verify it took.
+
+    Skips image pull and CLI swap — it is the recreate half only, invoked either
+    in-process (source checkout) or via ``upgrade --recreate-only`` as a post-swap
+    CLI step so the spec is always baked by the running code, never a stale module.
+    """
+    from agentalloy.install.subcommands import container_runtime as cr
+
+    actions: list[str] = []
+    warnings: list[str] = []
+
+    runtime = state.get("runtime_binary") or cr._detect_runtime_binary()
+    if not runtime:
+        warnings.append("no container runtime (podman/docker) found on PATH")
+        return actions, warnings
+    image = image or _target_image(state.get("image_tag"), None)
 
     packs = _installed_packs(state)
     entrypoint = cr._generate_entrypoint(packs)
@@ -377,8 +434,42 @@ def _upgrade_container(
         warnings.append("container recreate failed")
         return actions, warnings
     actions.append("recreated container")
-    actions.append("corpus self-heals on the new entrypoint (stamp-compare re-seed)")
+    warnings.extend(_verify_container_spec(runtime, cr))
     return actions, warnings
+
+
+def _verify_container_spec(runtime: str, cr: Any) -> list[str]:
+    """Post-condition: the live container must carry the spec this code intends.
+
+    Catches the stale-spec class of bug — a recreate that silently kept an old
+    mount, or a ``restart`` that reused the original create spec. A missing
+    projects-root mount is the specific silent killer: the proxy then can't read
+    ``.agentalloy/`` phase state and phase injection no-ops with no error.
+    """
+    root = str(cr.resolve_projects_root())
+    if root == "/":
+        return []  # the run path already refused to mount '/'; nothing to assert
+    # Only warn on a *confirmed* missing mount. If inspect can't run (no runtime,
+    # transient error, container absent) we can't confirm a problem, so stay quiet
+    # rather than emit a false positive — the recreate's own exit code is the
+    # primary success signal.
+    try:
+        out = subprocess.run(
+            [runtime, "inspect", "agentalloy", "--format",
+             "{{range .Mounts}}{{.Destination}} {{end}}"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    if root not in (out.stdout or "").split():
+        return [
+            f"container is missing the projects-root mount ({root}) — the proxy "
+            "cannot read .agentalloy/ phase state, so phase injection silently no-ops. "
+            "A plain `podman restart` reuses the old spec; re-run `agentalloy upgrade`."
+        ]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +572,11 @@ def add_parser(
         default=None,
         help="Target a specific release tag (e.g. v2.2.0) instead of the latest.",
     )
+    p.add_argument(
+        "--recreate-only",
+        action="store_true",
+        help=argparse.SUPPRESS,  # internal: post-swap recreate run by the new CLI
+    )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
@@ -514,6 +610,23 @@ def _render_human(result: dict[str, Any]) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
+    # Internal post-swap entry: recreate the container only (no pull, no CLI swap).
+    # This is what `_upgrade_container` shells after the swap so the spec is baked
+    # by the freshly-installed code rather than the stale orchestrating process.
+    if getattr(args, "recreate_only", False):
+        state = install_state.load_state()
+        ref = getattr(args, "ref", None)
+        image = _target_image(state.get("image_tag"), ref or _current_version())
+        actions, warnings = _recreate_container(image, state)
+        result = {
+            "schema_version": SCHEMA_VERSION,
+            "deployment": state.get("deployment") or "container",
+            "actions": actions,
+            "warnings": warnings,
+        }
+        write_result(result, args, human_fn=_render_human)
+        return 1 if warnings else 0
+
     result = upgrade(
         ref=getattr(args, "ref", None),
         check=getattr(args, "check", False),
