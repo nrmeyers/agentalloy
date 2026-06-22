@@ -31,9 +31,9 @@ from tests._wire_compat import wire_compat
 
 @pytest.fixture(autouse=True)
 def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """claude-code wiring (hook default) writes under Path.home() —
+    """Several harnesses (and the --mcp-fallback path) write under Path.home() —
     every test in this module must see a throwaway home, or the suite
-    pollutes the developer's real ~/.claude/settings.json (tripwire:
+    pollutes the developer's real ~/.claude (tripwire:
     _guard_real_home_wiring in tests/conftest.py)."""
     home = tmp_path / "fake-home"
     home.mkdir(exist_ok=True)
@@ -141,53 +141,6 @@ class TestSentinelInjection:
 # ---------------------------------------------------------------------------
 # Claude Code
 # ---------------------------------------------------------------------------
-
-
-class TestClaudeCode:
-    """claude-code with legacy=True uses hooks-based wiring, not markdown injection.
-
-    The legacy path now delegates to the modern provider hook_writer, which
-    writes under Path.home() (~/.agentalloy/hooks + ~/.claude/settings.json) —
-    home MUST be patched or these tests pollute the developer's real Claude
-    settings (it happened: see PR #118 history).
-    """
-
-    @pytest.fixture(autouse=True)
-    def _fake_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        home = tmp_path / "home"
-        home.mkdir()
-        monkeypatch.setattr(Path, "home", lambda: home)
-        return home
-
-    def test_creates_hooks_config(self, repo_root: Path) -> None:
-        result = wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
-        assert result["harness"] == "claude-code"
-        assert result["integration_vector"] == "claude_code_hooks"
-        # Script install + settings.json merge.
-        paths = [f["path"] for f in result["files_written"]]
-        assert any("agentalloy-hook-claude-code.sh" in p for p in paths)
-        assert any(p.endswith(".claude/settings.json") for p in paths)
-        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
-        assert "UserPromptSubmit" in settings["hooks"]
-
-    def test_hooks_idempotent(self, repo_root: Path) -> None:
-        wire_compat("claude-code", port=8000, root=repo_root, legacy=True)
-        wire_compat("claude-code", port=9090, root=repo_root, legacy=True)
-        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
-        # Re-wiring must not duplicate our entries per event.
-        for groups in settings["hooks"].values():
-            ours = [
-                g
-                for g in groups
-                if any("agentalloy" in h.get("command", "") for h in g.get("hooks", []))
-            ]
-            assert len(ours) == 1
-
-    def test_custom_port_hooks(self, repo_root: Path) -> None:
-        wire_compat("claude-code", port=3000, root=repo_root, legacy=True)
-        settings = json.loads((Path.home() / ".claude" / "settings.json").read_text())
-        blob = json.dumps(settings["hooks"])
-        assert "localhost:3000" in blob
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +668,7 @@ class TestIntakeActivationMarkers:
             assert marker in content, f"Missing marker: {marker}"
 
     def test_gemini_cli_has_intake_markers(self, repo_root: Path) -> None:
-        """gemini-cli uses markdown injection (not hooks like claude-code)."""
+        """gemini-cli uses markdown injection."""
         wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         content = (repo_root / "GEMINI.md").read_text()
         for marker in self._INTAKE_MARKERS:
@@ -943,8 +896,7 @@ class TestLegacyFlag:
     """Verify --legacy flag routes to markdown-injection wiring."""
 
     def test_legacy_flag_uses_markdown_injection(self, repo_root: Path) -> None:
-        """--legacy writes the markdown-injection block (gemini-cli, not claude-code)."""
-        # claude-code legacy path uses hooks; gemini-cli uses markdown injection
+        """--legacy writes the markdown-injection block (gemini-cli)."""
         result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
         assert result["integration_vector"] == "markdown_injection"
         gemini_md = repo_root / "GEMINI.md"
@@ -1283,16 +1235,20 @@ class TestWireOutputRedaction:
         (home / ".claude").mkdir(parents=True)
         monkeypatch.setattr(Path, "home", lambda: home)
         secret = "glpat-TOPSECRET-must-not-print"
-        (home / ".claude" / "settings.json").write_text(
-            json.dumps({"env": {"GITLAB_TOKEN": secret}})
-        )
         repo = tmp_path / "repo"
         repo.mkdir()
+        # Pre-existing per-repo carrier whose content must be preserved as
+        # original_content (and never printed) when claude-code re-wires proxy.
+        (repo / ".agentalloy").mkdir(parents=True)
+        (repo / ".agentalloy" / "claude-code-env.sh").write_text(f"export SECRET={secret}\n")
 
-        result = wire.apply_hook_wiring("claude-code", port=47950, root=repo)
+        st0 = install_state.load_state(repo)
+        st0["port"] = 47950
+        install_state.save_state(st0, repo)
+        result = wire_compat("claude-code", port=47950, root=repo)
 
         # Restore data IS persisted to install-state.json for unwire.
-        st = install_state.load_state()
+        st = install_state.load_state(repo)
         assert secret in json.dumps(st["harness_files_written"])
 
         # ...but the redacted command output (stdout / --json) carries no secret.

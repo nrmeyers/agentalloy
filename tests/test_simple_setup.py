@@ -449,27 +449,11 @@ class TestSimpleSetupExecution:
             rc = mod.run_setup(mod.SetupConfig(non_interactive=False))
         return rc, prompt_upstream, write_upstream
 
-    def test_interactive_hook_harness_skips_upstream_prompt(self, tmp_state_dir: tuple[Path, Path]):
-        """A hook-wired harness (claude-code) never prompts for the proxy upstream LLM."""
-        rc, prompt_upstream, _ = self._run_interactive_until_confirm("claude-code")
-        # Aborted at the confirm prompt, after the upstream block ran (or was skipped).
-        assert rc == 1
-        prompt_upstream.assert_not_called()
-
     def test_interactive_proxy_harness_prompts_for_upstream(self, tmp_state_dir: tuple[Path, Path]):
         """A genuinely proxy-wired harness still prompts for the upstream LLM."""
         rc, prompt_upstream, _ = self._run_interactive_until_confirm("opencode")
         assert rc == 1
         prompt_upstream.assert_called_once()
-
-    def test_hook_harness_skips_write_upstream_env(self, tmp_state_dir: tuple[Path, Path]):
-        """Non-interactive claude-code setup does not write upstream LLM .env vars."""
-        import agentalloy.install.subcommands.simple_setup as mod
-
-        with patch.object(mod, "_write_upstream_env") as write_upstream:
-            rc = mod.run_setup(mod.SetupConfig(harness="claude-code", non_interactive=True))
-        assert rc == 0
-        write_upstream.assert_not_called()
 
     def test_proxy_harness_writes_upstream_env(self, tmp_state_dir: tuple[Path, Path]):
         """Non-interactive proxy harness setup still writes upstream LLM .env vars."""

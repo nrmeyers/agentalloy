@@ -1751,17 +1751,18 @@ def run_setup(cfg: SetupConfig) -> int:
     preset = _resolve_preset(cfg)
     # Preset is an internal write-env detail; not shown to the user.
 
-    # Resolve the integration vector the same way `wire`/`apply_hook_wiring` does:
-    # claude-code resolves to 'hook' (per-turn hook, never the proxy), sidecar
-    # harnesses to 'proxy' but can't actually be intercepted, everything else to
-    # 'proxy'. Only genuinely proxy-wired harnesses need an upstream LLM target.
+    # Resolve the integration vector the same way `wire` does: every harness
+    # resolves to 'proxy' (including claude-code, which is now proxy-wired).
+    # Sidecar harnesses resolve to 'proxy' too but can't actually be intercepted,
+    # so they're excluded below. Only genuinely proxy-wired harnesses need an
+    # upstream LLM target.
     via = resolve_via(cfg.harness, None) if cfg.harness != "manual" else "manual"
     uses_proxy = via == "proxy" and cfg.harness not in PROXY_UNABLE_HARNESSES
 
     # 8. Upstream LLM — only relevant when the harness actually routes through the
-    # proxy. Hook harnesses (claude-code) wire via the per-turn hook and sidecar
-    # harnesses fall back to a static rules file; neither forwards through the
-    # proxy, so prompting for an upstream target would be confusing and unused.
+    # proxy. Sidecar harnesses fall back to a static rules file and don't forward
+    # through the proxy, so prompting for an upstream target would be confusing
+    # and unused.
     if uses_proxy:
         if not cfg.non_interactive:
             _prompt_upstream(cfg)
@@ -1870,8 +1871,8 @@ def run_setup(cfg: SetupConfig) -> int:
     _print("  [green]  Done.[/green]")
 
     # Step c2: Write upstream LLM vars to .env (only for proxy-wired harnesses;
-    # hook/sidecar harnesses never forward through the proxy, so an upstream
-    # target is meaningless for them).
+    # sidecar harnesses never forward through the proxy, so an upstream target
+    # is meaningless for them).
     if uses_proxy:
         _print("  [dim]-> Writing upstream LLM config[/dim]")
         _write_upstream_env(cfg)

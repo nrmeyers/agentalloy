@@ -4,7 +4,7 @@ Covers:
 - Bug 1: _repo_root() treats $HOME as a boundary (never resolves the repo
   root to the home directory via a stray ~/package.json).
 - Bug 3: `wire` seeds the entry phase (create-only) and git-excludes
-  .agentalloy/; `status` classifies global-hook files and reports per-repo
+  .agentalloy/; `status` classifies user-global files and reports per-repo
   activation.
 - Intake: the `intake` phase is accepted and selects the intake workflow skill.
 """
@@ -97,14 +97,16 @@ class TestWireSeedsEntryPhase:
 
 
 class TestStatusHonesty:
-    """Bug 3: status classifies global-hook files and reports activation."""
+    """Bug 3: status classifies user-global files and reports activation."""
 
-    def test_path_scope_flags_global_hook_files(
+    def test_path_scope_flags_global_files(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = tmp_path / "home"
         home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: home)
+        # User-global locations stay flagged "global" — covers --mcp-fallback
+        # configs and any migration-leftover hook artifacts.
         assert _path_scope(str(home / ".claude" / "settings.json")) == "global"
         assert _path_scope(str(home / ".agentalloy" / "hooks" / "h.sh")) == "global"
         assert _path_scope(str(tmp_path / "proj" / ".claude" / "settings.json")) == "repo"

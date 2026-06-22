@@ -30,14 +30,12 @@ if TYPE_CHECKING:
 class Capability(Enum):
     """Integration capability for a harness.
 
-    Exactly four values:
-    - HOOK:      the harness uses the AgentAlloy hook path (UserPromptSubmit)
+    Exactly three values:
     - PROXY:     the harness uses the AgentAlloy proxy path (base-url rewrite)
     - MARKDOWN_ONLY: the harness only gets markdown injection (no tool-use)
     - MCP_ONLY:  the harness uses the MCP fallback path only
     """
 
-    HOOK = "hook"
     PROXY = "proxy"
     MARKDOWN_ONLY = "markdown_only"
     MCP_ONLY = "mcp_only"
@@ -69,9 +67,6 @@ class Protocol(Enum):
 HarnessSpecEnvBuilder = Callable[[int], dict[str, str]]
 """Build an environment dict for a child process given a port number."""
 
-HarnessSpecHookWriter = Callable[[int, "Path"], "list[WireRecord]"]
-"""Write hook configuration for a harness, returning the records of files touched."""
-
 HarnessSpecInstallWriter = Callable[[int, "Path", bool], "list[WireRecord]"]
 """Run the full install/wire for a harness, returning the records of files touched."""
 
@@ -86,7 +81,6 @@ class HarnessSpec:
         capabilities:        tuple of ``Capability`` values this harness supports.
         protocol:            the LLM protocol the harness speaks.
         env_builder:         callable that returns env vars for a given port.
-        hook_writer:         callable that writes hook config; returns WireRecords.
         install_writer:      callable that runs full wiring; returns WireRecords.
     """
 
@@ -95,7 +89,6 @@ class HarnessSpec:
     capabilities: tuple[Capability, ...]
     protocol: Protocol
     env_builder: HarnessSpecEnvBuilder
-    hook_writer: HarnessSpecHookWriter | None = None
     install_writer: HarnessSpecInstallWriter | None = None
 
 
@@ -172,9 +165,9 @@ def sdd_instructions_markdown(port: int) -> str:
     One source of truth for the harnesses that wire via an instruction file
     (cursor, windsurf, github-copilot, gemini-cli, aider, hermes-agent), so the
     session-start / intake-front-door behaviour can't drift between them — the
-    same drift that bit the ``Phases:`` line. Hook-capable harnesses
-    (claude-code) deliver this dynamically via the SessionStart hook instead;
-    proxy-only harnesses get it via per-turn workflow-skill injection.
+    same drift that bit the ``Phases:`` line. Proxy-wired harnesses
+    (claude-code and the OpenAI-compatible ones) get it via per-turn
+    workflow-skill injection instead.
 
     Callers that need YAML frontmatter (cursor, windsurf) prepend their own;
     this returns just the body.

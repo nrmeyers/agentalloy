@@ -5,7 +5,6 @@ Registers the ``gemini-cli`` harness in REGISTRY with:
 - Capabilities: MARKDOWN_ONLY (sidecar harness, markdown injection)
 - env_builder: returns empty dict (Gemini CLI uses markdown injection)
 - install_writer: writes GEMINI.md with sentinel-bounded block
-- hook_writer: None (Gemini CLI does not use hook-based wiring)
 """
 
 from __future__ import annotations
@@ -41,11 +40,6 @@ def _install_writer(port: int, root: Path, force: bool = False) -> list[WireReco
     return install.apply_persistent_config(port, root, force)
 
 
-def _hook_writer(port: int, root: Path) -> list[WireRecord]:
-    """Hook writer for gemini-cli — not applicable for markdown injection."""
-    return []
-
-
 # Register the harness in the global REGISTRY.
 REGISTRY["gemini-cli"] = HarnessSpec(
     name="gemini-cli",
@@ -53,6 +47,5 @@ REGISTRY["gemini-cli"] = HarnessSpec(
     capabilities=(Capability.MARKDOWN_ONLY,),
     protocol=Protocol.EITHER,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )

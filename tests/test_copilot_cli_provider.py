@@ -55,12 +55,6 @@ class TestCopilotCliHarnessSpec(TestCase):
         self.assertIsNotNone(spec.install_writer)
         self.assertTrue(callable(spec.install_writer))
 
-    def test_copilot_cli_hook_writer_none(self):
-        """hook_writer is a callable for github-copilot (returns empty list)."""
-        spec = REGISTRY["github-copilot"]
-        self.assertIsNotNone(spec.hook_writer)
-        self.assertTrue(callable(spec.hook_writer))
-
 
 # ---------------------------------------------------------------------------
 # install module tests

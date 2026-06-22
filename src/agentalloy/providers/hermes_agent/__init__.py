@@ -5,7 +5,6 @@ Registers the ``hermes-agent`` harness in REGISTRY with:
 - Capabilities: PROXY (proxy wiring via config file)
 - env_builder: returns empty dict (Hermes Agent uses file-based config)
 - install_writer: writes ~/.hermes/SOUL.md (user scope) or AGENTS.md (repo scope)
-- hook_writer: None (Hermes Agent does not use hook-based wiring)
 """
 
 from __future__ import annotations
@@ -41,11 +40,6 @@ def _install_writer(port: int, root: Path, force: bool = False) -> list[WireReco
     return install.apply_persistent_config(port, root, force)
 
 
-def _hook_writer(port: int, root: Path) -> list[WireRecord]:
-    """Hook writer for hermes-agent — not applicable for file-based config."""
-    return []
-
-
 # Register the harness in the global REGISTRY.
 REGISTRY["hermes-agent"] = HarnessSpec(
     name="hermes-agent",
@@ -53,6 +47,5 @@ REGISTRY["hermes-agent"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.ANTHROPIC,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )

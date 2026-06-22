@@ -2,14 +2,12 @@
 
 Registers the ``claude-code`` harness in REGISTRY with:
 - Protocol: ANTHROPIC (Claude Code speaks the Anthropic Messages API)
-- Capabilities: HOOK (default) + PROXY (opt-in via --via proxy)
+- Capabilities: PROXY
 - env_builder: sets ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY for the claude binary
 - install_writer: writes ~/.agentalloy/claude-code-env.sh with proxy config
-- hook_writer: installs the hook script + merges ~/.claude/settings.json (default)
 
-HOOK is listed first because it is the DEFAULT wiring for claude-code: a down
-AgentAlloy service degrades the hook to a no-op (vanilla Claude), whereas proxy
-wiring would break Claude Code entirely. Proxy stays available as opt-in.
+claude-code wires through the native proxy: env vars point the Anthropic SDK at
+the AgentAlloy proxy, which injects composed skills and forwards upstream.
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ from agentalloy.providers.base import (
 )
 
 from . import install
-from .hooks import hook_writer as _hook_writer
 
 
 def _env_builder(port: int) -> dict[str, str]:
@@ -51,15 +48,13 @@ def _install_writer(port: int, root: Path, force: bool = False) -> list[WireReco
     return install.apply_persistent_config(port, root, force)
 
 
-# Register the harness in the global REGISTRY. HOOK is the default capability
-# (see module docstring); PROXY is opt-in. ``_hook_writer`` is imported from
-# the .hooks module.
+# Register the harness in the global REGISTRY. claude-code wires through the
+# native proxy (see module docstring).
 REGISTRY["claude-code"] = HarnessSpec(
     name="claude-code",
     binary="claude",
-    capabilities=(Capability.HOOK, Capability.PROXY),
+    capabilities=(Capability.PROXY,),
     protocol=Protocol.ANTHROPIC,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )

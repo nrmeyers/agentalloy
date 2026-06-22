@@ -26,69 +26,14 @@ from agentalloy.install.subcommands.wire_harness import (
 from agentalloy.providers.base import WireRecord
 from agentalloy.signals.skill_loader import LIFECYCLE_MODES
 
-# Harnesses that default to hook wiring (graceful degradation) rather than
-# proxy wiring (a down service breaks the harness). Only claude-code today.
-_HOOK_DEFAULT_HARNESSES = frozenset({"claude-code"})
-
 
 def resolve_via(harness: str, via: str | None) -> str:
     """Resolve the effective wiring method for *harness*.
 
-    Explicit ``--via`` always wins. When unset, claude-code defaults to
-    ``hook`` (the failure-safe default) and every other harness to ``proxy``.
+    Every harness wires through the native proxy. Explicit ``--via`` is
+    accepted for compatibility but always resolves to ``"proxy"``.
     """
-    if via is not None:
-        return via
-    return "hook" if harness in _HOOK_DEFAULT_HARNESSES else "proxy"
-
-
-def apply_hook_wiring(harness: str, port: int, root: Path) -> dict[str, Any]:
-    """Wire *harness* via the provider hook_writer and record install state.
-
-    Returns a wire-harness-shaped result dict. Records each WireRecord into
-    ``harness_files_written`` (with original_content + repo_root preserved) so
-    ``uninstall`` can reverse the change. Refuses (SystemExit 1) if the harness
-    has no hook_writer.
-    """
-    from agentalloy.providers import REGISTRY
-
-    spec = REGISTRY.get(harness)
-    if spec is None or spec.hook_writer is None:
-        print(
-            f"ERROR: harness '{harness}' does not support hook wiring (--via hook).",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    records = spec.hook_writer(port, root)
-
-    files_written: list[dict[str, Any]] = []
-    for rec in records:
-        entry = rec.to_dict()
-        entry.setdefault("harness", harness)
-        entry.setdefault("repo_root", str(root))
-        files_written.append(entry)
-
-    # Merge into user-scoped install state, preserving prior original_content
-    # on re-wire (the fresh record captured the post-first-write state).
-    st = install_state.load_state(root)
-    prior = st.get("harness_files_written") or []
-    new_paths = {f.get("path") for f in files_written}
-    prior_by_path = {e.get("path"): e for e in prior}
-    for new_entry in files_written:
-        prior_entry = prior_by_path.get(new_entry.get("path"))
-        if prior_entry and "original_content" in prior_entry:
-            new_entry.setdefault("original_content", prior_entry["original_content"])
-    merged = [e for e in prior if e.get("path") not in new_paths] + files_written
-    st["harness_files_written"] = merged
-    install_state.save_state(st, root)
-
-    return {
-        "schema_version": 1,
-        "harness": harness,
-        "integration_vector": "hook",
-        "files_written": files_written,
-    }
+    return "proxy"
 
 
 def add_parser(
@@ -112,12 +57,12 @@ def add_parser(
     )
     p.add_argument(
         "--via",
-        choices=("hook", "proxy"),
+        choices=("proxy",),
         default=None,
         help=(
-            "Wiring method. Default resolves per harness: 'hook' for claude-code "
-            "(degrades gracefully if the service is down), 'proxy' for everything "
-            "else. Pass --via proxy to force base-URL proxy wiring for claude-code."
+            "Wiring method. Every harness wires through the native proxy "
+            "(base-URL rewrite); this flag is retained for compatibility and "
+            "always resolves to 'proxy'."
         ),
     )
     p.add_argument(
@@ -131,10 +76,9 @@ def add_parser(
         default=None,
         help=(
             "How AgentAlloy behaves in this repo. 'full' (default): intake + "
-            "phase lifecycle. 'assist': defer to your own workflow — no intake "
-            "front-door, keep skill suggestions. 'off': wire but inject nothing. "
-            "When omitted and the repo already defines its own agents/commands, "
-            "you're prompted (TTY only); non-interactive runs default to 'full'."
+            "phase lifecycle. 'off': wire but inject nothing. When omitted and "
+            "the repo already defines its own agents/commands, you're prompted "
+            "(TTY only); non-interactive runs default to 'full'."
         ),
     )
     p.add_argument(
@@ -195,8 +139,8 @@ def _git_exclude_agentalloy(root: Path) -> None:
 def _seed_entry_phase(root: Path) -> str | None:
     """Activate *root* by seeding the entry phase, returning the phase or None.
 
-    Composition short-circuits (hook and proxy paths alike) when ``.agentalloy/
-    phase`` is absent, so a wired-but-phaseless repo is inert. Seed ``intake``
+    Composition short-circuits (the proxy path) when ``.agentalloy/phase`` is
+    absent, so a wired-but-phaseless repo is inert. Seed ``intake``
     so the intent-interview workflow composes on the next prompt. Create-only:
     never clobber a repo already mid-lifecycle. Also git-excludes ``.agentalloy/``.
     """
@@ -240,12 +184,7 @@ def _render_human(result: dict[str, Any]) -> None:
 
     mode = result.get("lifecycle_mode")
     if mode and mode != "full":
-        note = (
-            "defers to your workflow; keeps skill suggestions"
-            if mode == "assist"
-            else "wired, injection muted"
-        )
-        print_rich(f"  Lifecycle: [bold]{mode}[/bold] [dim]({note})[/dim]")
+        print_rich(f"  Lifecycle: [bold]{mode}[/bold] [dim](wired, injection muted)[/dim]")
 
     if result.get("stale_phase_cleared"):
         print_rich("  [dim]Cleared a stale phase file (lifecycle is not full)[/dim]")
@@ -294,13 +233,12 @@ def _prompt_lifecycle_mode(detected: list[str]) -> str:
 
     The default is ``full`` on purpose: a ``.claude/agents/`` directory is
     near-ubiquitous and does NOT imply the user wants AgentAlloy's lifecycle
-    disabled. Deferral (assist/off) must be an explicit choice — defaulting to
-    assist here silently turned composition off for engaged users.
+    disabled. Deferral (off) must be an explicit choice — defaulting to off
+    here silently turned composition off for engaged users.
     """
     options: list[tuple[str, str]] = [
         ("full", "full — run AgentAlloy's intake + phase lifecycle (default)"),
-        ("assist", "assist — defer to your workflow (no intake/phase); keep skill suggestions"),
-        ("off", "off — wire the proxy/hooks but inject nothing"),
+        ("off", "off — wire the proxy but inject nothing"),
     ]
     print(
         f"\nThis repo already defines its own agent workflow ({', '.join(detected)}).",
@@ -350,7 +288,7 @@ def _resolve_lifecycle_mode(args: argparse.Namespace, cwd: Path) -> tuple[str, l
 # user-authored `./CLAUDE.md`, which still loads.
 _SOFT_NOTE_INNER = (
     "**AgentAlloy is active in this repo.** It composes just-in-time skills and "
-    "drives a spec→ship workflow through hooks. Where this repo's workflow "
+    "drives a spec→ship workflow through the proxy. Where this repo's workflow "
     "guidance conflicts with global/user-level directives, prefer the repo "
     "workflow here. Managed by AgentAlloy — edits inside these markers are "
     "overwritten on re-wire."
@@ -424,8 +362,8 @@ def _write_clean_room_excludes(root: Path) -> WireRecord | None:
 def _persist_extra_records(root: Path, harness: str, records: list[WireRecord]) -> None:
     """Merge extra wire records into install-state so unwire reverses them.
 
-    Mirrors ``apply_hook_wiring``'s merge, but preserves the prior entry's
-    *original_content and action* across re-wires — the FIRST wire captured the
+    Preserves the prior entry's *original_content and action* across re-wires
+    — the FIRST wire captured the
     true pre-install state; a re-wire re-reads our own block and must not let
     that masquerade as the original (which would leave the block behind).
     """
@@ -471,15 +409,12 @@ def _run(args: argparse.Namespace) -> int:
         st = install_state.load_state()
         port = install_state.validate_port(st.get("port", 47950))
 
-    via = resolve_via(harness, getattr(args, "via", None))
-    if via == "hook":
-        result = apply_hook_wiring(harness, port=port, root=cwd)
-    else:
-        result = wire_harness(harness, port=port, root=cwd, force=args.force)
+    resolve_via(harness, getattr(args, "via", None))  # validated; always proxy
+    result = wire_harness(harness, port=port, root=cwd, force=args.force)
 
-    # Resolve and persist the per-repo lifecycle mode the hooks read on every
-    # event. `assist`/`off` let a repo with its own agents/workflows opt out of
-    # the intake front-door and phase forcing (the collision this guards).
+    # Resolve and persist the per-repo lifecycle mode the proxy reads on every
+    # turn. `off` lets a repo with its own agents/workflows opt out of the
+    # intake front-door and phase forcing (the collision this guards).
     from agentalloy.signals.skill_loader import _write_lifecycle_mode
 
     mode, detected = _resolve_lifecycle_mode(args, cwd)
@@ -490,19 +425,19 @@ def _run(args: argparse.Namespace) -> int:
 
     if mode == "full":
         # Activate this repo: seed the entry phase so composition engages on the
-        # next prompt. Without a phase file, both the hook and proxy paths
-        # short-circuit and the repo stays inert (the "wired but nothing happens"
-        # trap). Create-only — an already-phased repo is left untouched.
+        # next prompt. Without a phase file, the proxy path short-circuits and
+        # the repo stays inert (the "wired but nothing happens" trap).
+        # Create-only — an already-phased repo is left untouched.
         phase_seeded = _seed_entry_phase(cwd)
         if phase_seeded:
             result["phase_seeded"] = phase_seeded
     else:
-        # assist/off must NOT seed a phase (a seeded `intake` re-arms the front
-        # door). Still git-exclude `.agentalloy/` — the config file lives there.
+        # off must NOT seed a phase (a seeded `intake` re-arms the front door).
+        # Still git-exclude `.agentalloy/` — the config file lives there.
         _git_exclude_agentalloy(cwd)
         # Reconcile a stale phase file: an existing phase (e.g. `build` from a
         # prior `full` wiring) would otherwise sit alongside `lifecycle_mode:
-        # assist` and silently suppress composition while looking active. The
+        # off` and silently suppress composition while looking active. The
         # lifecycle is off here, so the phase is meaningless — clear it.
         phase_file = cwd / ".agentalloy" / "phase"
         if phase_file.exists():

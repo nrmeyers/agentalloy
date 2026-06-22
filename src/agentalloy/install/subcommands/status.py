@@ -28,10 +28,11 @@ SCHEMA_VERSION = 1
 def _path_scope(path: str | None) -> str:
     """Classify a wired-file path as 'global' (user-scope) or 'repo' (project).
 
-    The claude-code hook lives in the user-global ``~/.claude/settings.json``
-    (and ``~/.agentalloy/hooks/``), so it fires in every session — it is not a
-    per-repo file even though it was written *during* a per-repo `wire`. Flag
-    those so status stops implying the hook is repo-scoped.
+    claude-code is proxy-wired per repo (``<repo>/.agentalloy/claude-code-env.sh``),
+    so its carrier is genuinely repo-scoped. Some harness configs still land in
+    user-global locations under ``~/.claude`` / ``~/.agentalloy`` (e.g. the
+    ``--mcp-fallback`` server config), written *during* a per-repo `wire`. Flag
+    those so status stops implying they are repo-scoped.
     """
     if not path:
         return "repo"
@@ -131,7 +132,7 @@ def _render_human(snapshot: dict[str, Any]) -> None:
             for entry in entries:
                 harness = entry.get("harness", "unknown")
                 path = entry.get("path", "")
-                scope_tag = " [dim](global hook)[/dim]" if entry.get("scope") == "global" else ""
+                scope_tag = " [dim](global)[/dim]" if entry.get("scope") == "global" else ""
                 print_rich(f"      {harness}: {path}{scope_tag}")
     else:
         print_rich("\n  Wired repos: none")

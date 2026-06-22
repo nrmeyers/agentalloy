@@ -19,9 +19,9 @@ from agentalloy.install import state as install_state
 
 @pytest.fixture(autouse=True)
 def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """claude-code wiring (hook default) writes under Path.home() —
+    """Some harness wiring (and --mcp-fallback) writes under Path.home() —
     every test in this module must see a throwaway home, or the suite
-    pollutes the developer's real ~/.claude/settings.json (tripwire:
+    pollutes the developer's real ~/.claude (tripwire:
     _guard_real_home_wiring in tests/conftest.py)."""
     home = tmp_path / "fake-home"
     home.mkdir(exist_ok=True)
@@ -153,18 +153,14 @@ class TestWire:
         args = argparse.Namespace(harness=None, port=None, force=False)
         rc = wire._run(args)
         assert rc == 0
-        # Default claude-code wiring is the per-turn hook: script installed
-        # and hooks merged into settings.json. The proxy env file is NOT
-        # written unless --via proxy is passed.
-        script = fake_home / ".agentalloy" / "hooks" / "agentalloy-hook-claude-code.sh"
-        settings = fake_home / ".claude" / "settings.json"
-        assert script.exists()
-        assert settings.exists()
-        assert "UserPromptSubmit" in settings.read_text()
-        # Mutual exclusivity: the hook path writes NO proxy env carrier, in either
-        # the (legacy) home location or the new per-repo <root>/.agentalloy/ one.
-        assert not (fake_home / ".agentalloy" / "claude-code-env.sh").exists()
-        assert not (repo_root / ".agentalloy" / "claude-code-env.sh").exists()
+        # claude-code wires through the native proxy: a per-repo env carrier is
+        # written at <root>/.agentalloy/claude-code-env.sh. The retired hook
+        # script + settings.json merge are NO LONGER written.
+        env_file = repo_root / ".agentalloy" / "claude-code-env.sh"
+        assert env_file.exists()
+        assert "ANTHROPIC_BASE_URL" in env_file.read_text()
+        assert not (fake_home / ".agentalloy" / "hooks" / "agentalloy-hook-claude-code.sh").exists()
+        assert not (fake_home / ".claude" / "settings.json").exists()
 
     def test_auto_detects_cursor_when_dir_present(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -206,8 +202,8 @@ class TestWire:
 class TestWireLifecycleMode:
     """`wire` resolves a per-repo lifecycle mode and gates phase seeding on it.
 
-    A repo that already defines its own agents/commands can wire in `assist`
-    (or `off`) so AgentAlloy never seeds the phase machine / intake front-door.
+    A repo that already defines its own agents/commands can wire in `off`
+    so AgentAlloy never seeds the phase machine / intake front-door.
     """
 
     @staticmethod
@@ -228,19 +224,6 @@ class TestWireLifecycleMode:
         base.update(overrides)
         return argparse.Namespace(**base)
 
-    def test_assist_writes_config_and_skips_phase_seed(
-        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from agentalloy.install.subcommands import wire
-
-        self._claude_repo_with_custom_workflow(repo_root)
-        monkeypatch.chdir(repo_root)
-        rc = wire._run(self._wire(lifecycle_mode="assist"))
-        assert rc == 0
-        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
-        # assist must NOT seed a phase — a seeded `intake` re-arms the front door.
-        assert not (repo_root / ".agentalloy" / "phase").exists()
-
     def test_off_writes_config_and_skips_phase_seed(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -251,6 +234,7 @@ class TestWireLifecycleMode:
         rc = wire._run(self._wire(lifecycle_mode="off"))
         assert rc == 0
         assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
+        # off must NOT seed a phase — a seeded `intake` re-arms the front door.
         assert not (repo_root / ".agentalloy" / "phase").exists()
 
     def test_detection_without_tty_defaults_to_full_and_seeds(
@@ -276,14 +260,14 @@ class TestWireLifecycleMode:
 
         self._claude_repo_with_custom_workflow(repo_root)
         monkeypatch.chdir(repo_root)
-        # Detection fires + TTY -> prompt. Option 2 is assist (explicit deferral).
+        # Detection fires + TTY -> prompt. Option 2 is off (explicit deferral).
         with (
             patch("sys.stdin.isatty", return_value=True),
             patch("builtins.input", return_value="2"),
         ):
             rc = wire._run(self._wire())
         assert rc == 0
-        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
+        assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
         assert not (repo_root / ".agentalloy" / "phase").exists()
 
     def test_tty_prompt_default_is_full(
@@ -306,12 +290,12 @@ class TestWireLifecycleMode:
         assert "lifecycle_mode: full" in (repo_root / ".agentalloy" / "config").read_text()
         assert (repo_root / ".agentalloy" / "phase").exists()
 
-    def test_assist_clears_stale_phase_file(
+    def test_off_clears_stale_phase_file(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.install.subcommands import wire
 
-        # A repo previously in `full` (phase=build) re-wired to assist must not
+        # A repo previously in `full` (phase=build) re-wired to off must not
         # keep the stale phase — it would silently suppress compose while looking
         # active. wire reconciles by clearing it.
         self._claude_repo_with_custom_workflow(repo_root)
@@ -319,9 +303,9 @@ class TestWireLifecycleMode:
         phase_file.parent.mkdir(parents=True)
         phase_file.write_text("phase: build\n")
         monkeypatch.chdir(repo_root)
-        rc = wire._run(self._wire(lifecycle_mode="assist"))
+        rc = wire._run(self._wire(lifecycle_mode="off"))
         assert rc == 0
-        assert "lifecycle_mode: assist" in (repo_root / ".agentalloy" / "config").read_text()
+        assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
         assert not phase_file.exists()
 
 
@@ -359,12 +343,12 @@ class TestWireInstructionShaping:
         assert "BEGIN agentalloy install" in txt
         assert "AgentAlloy is active" in txt
 
-    def test_assist_skips_soft_note(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_off_skips_soft_note(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from agentalloy.install.subcommands import wire
 
         self._claude_repo(repo_root)
         monkeypatch.chdir(repo_root)
-        assert wire._run(self._wire(lifecycle_mode="assist")) == 0
+        assert wire._run(self._wire(lifecycle_mode="off")) == 0
         # The soft note asserts AgentAlloy precedence — wrong message when deferring.
         assert not (repo_root / ".claude" / "CLAUDE.md").exists()
 
@@ -469,10 +453,9 @@ class TestUnwire:
         rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
-        # Hook wiring artifacts (script + settings.json) were modified/removed.
+        # claude-code proxy wiring artifact (per-repo env carrier) was removed.
         touched = [f.get("path", "") for f in out["files_modified"] + out["files_removed"]]
-        assert any("agentalloy-hook-claude-code.sh" in p for p in touched)
-        assert any(p.endswith("settings.json") for p in touched)
+        assert any(p.endswith(".agentalloy/claude-code-env.sh") for p in touched)
         # The other-repo entry should have produced a "different repo" warning, not deletion
         assert any("different repo" in w.lower() for w in out["warnings"])
 

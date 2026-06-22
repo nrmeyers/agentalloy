@@ -34,10 +34,6 @@ def _noop_env(port: int) -> dict[str, str]:
     return {"AGENTALLOY_PORT": str(port)}
 
 
-def _noop_hook(port: int, root: Path) -> list[WireRecord]:
-    return []
-
-
 def _noop_install(port: int, root: Path, force: bool = False) -> list[WireRecord]:
     return []
 
@@ -46,10 +42,9 @@ def _make_spec(name: str = "test-harness") -> HarnessSpec:
     return HarnessSpec(
         name=name,
         binary="test-binary",
-        capabilities=(Capability.HOOK, Capability.PROXY),
+        capabilities=(Capability.MCP_ONLY, Capability.PROXY),
         protocol=Protocol.ANTHROPIC,
         env_builder=_noop_env,
-        hook_writer=_noop_hook,
         install_writer=_noop_install,
     )
 
@@ -67,14 +62,13 @@ class TestHarnessSpec(TestCase):
         spec = _make_spec()
         self.assertEqual(spec.name, "test-harness")
         self.assertEqual(spec.binary, "test-binary")
-        self.assertEqual(spec.capabilities, (Capability.HOOK, Capability.PROXY))
+        self.assertEqual(spec.capabilities, (Capability.MCP_ONLY, Capability.PROXY))
         self.assertEqual(spec.protocol, Protocol.ANTHROPIC)
         self.assertIsNotNone(spec.env_builder)
-        self.assertIsNotNone(spec.hook_writer)
         self.assertIsNotNone(spec.install_writer)
 
-    def test_defaults_hook_and_install(self):
-        """HarnessSpec allows hook_writer and install_writer to be None."""
+    def test_defaults_install(self):
+        """HarnessSpec allows install_writer to default to None."""
         spec = HarnessSpec(
             name="minimal",
             binary="bin",
@@ -82,7 +76,6 @@ class TestHarnessSpec(TestCase):
             protocol=Protocol.OPENAI,
             env_builder=_noop_env,
         )
-        self.assertIsNone(spec.hook_writer)
         self.assertIsNone(spec.install_writer)
 
     def test_frozen_immutability(self):
@@ -106,10 +99,9 @@ class TestHarnessSpec(TestCase):
         s2 = HarnessSpec(
             name="dup",
             binary="test-binary",
-            capabilities=(Capability.HOOK, Capability.PROXY),
+            capabilities=(Capability.MCP_ONLY, Capability.PROXY),
             protocol=Protocol.ANTHROPIC,
             env_builder=_noop_env,
-            hook_writer=_noop_hook,
             install_writer=_noop_install,
         )
         self.assertEqual(s1, s2)
@@ -130,9 +122,9 @@ class TestHarnessSpec(TestCase):
 class TestCapability(TestCase):
     """Tests for the Capability enum."""
 
-    def test_four_values(self):
-        """Capability has exactly 4 values: HOOK, PROXY, MARKDOWN_ONLY, MCP_ONLY."""
-        expected = {"HOOK", "PROXY", "MARKDOWN_ONLY", "MCP_ONLY"}
+    def test_three_values(self):
+        """Capability has exactly 3 values: PROXY, MARKDOWN_ONLY, MCP_ONLY."""
+        expected = {"PROXY", "MARKDOWN_ONLY", "MCP_ONLY"}
         actual = {c.name for c in Capability}
         self.assertEqual(actual, expected)
 
@@ -316,7 +308,7 @@ class TestProviderRegistry(TestCase):
             HarnessSpec(
                 name="a",
                 binary="a-bin",
-                capabilities=(Capability.HOOK,),
+                capabilities=(Capability.MCP_ONLY,),
                 protocol=Protocol.ANTHROPIC,
                 env_builder=_noop_env,
             ),
@@ -372,12 +364,6 @@ class TestTypeStubs(TestCase):
         self.assertTrue(callable(_noop_env))
         result = _noop_env(8080)
         self.assertIsInstance(result, dict)
-
-    def test_hook_writer_type(self):
-        """HarnessSpecHookWriter is a valid callable type."""
-        self.assertTrue(callable(_noop_hook))
-        result = _noop_hook(8080, Path("/tmp"))
-        self.assertIsInstance(result, list)
 
     def test_install_writer_type(self):
         """HarnessSpecInstallWriter is a valid callable type."""

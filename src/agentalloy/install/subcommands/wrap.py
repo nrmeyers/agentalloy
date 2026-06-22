@@ -125,12 +125,12 @@ def _render_human(result: dict[str, Any]) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
-    from agentalloy.install.subcommands.wire import apply_hook_wiring, resolve_via
+    from agentalloy.install.subcommands.wire import resolve_via
 
     cwd = Path.cwd().resolve()
     harness = args.harness
     port = args.port
-    via = resolve_via(harness, getattr(args, "via", None))  # "hook" or "proxy"
+    via = resolve_via(harness, getattr(args, "via", None))  # always "proxy"
     no_start_server = args.no_start_server
     child_args = args.child_args
     json_output = getattr(args, "json", False)
@@ -219,18 +219,13 @@ def _run(args: argparse.Namespace) -> int:
     # ------------------------------------------------------------------
     _out(f"  Wiring harness '{harness}' via {via} ...")
 
-    if via == "hook":
-        # Hook wiring: install the hook script + merge settings.json via the
-        # provider hook_writer. Graceful-degradation default for claude-code.
-        result = apply_hook_wiring(harness, port=port, root=cwd)
-    else:
-        # Proxy wiring (opt-in for claude-code; default elsewhere).
-        result = wire_harness(
-            harness,
-            port=port,
-            root=cwd,
-            scope="repo",
-        )
+    # Proxy wiring — the only transport (claude-code included).
+    result = wire_harness(
+        harness,
+        port=port,
+        root=cwd,
+        scope="repo",
+    )
 
     files_written = result.get("files_written", [])
     _out(f"  Wired {len(files_written)} file(s)")

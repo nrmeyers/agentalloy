@@ -21,8 +21,8 @@ from agentalloy.signals.predicates import (
 
 # The entry phase. A freshly-wired repo starts here so the intake (intent
 # interview) workflow composes on the first prompt; it bypasses the
-# signal-keyword pre-filter (see api/hook_router and api/proxy_signal) and
-# hands off to "spec" via _PHASE_GRAPH.
+# signal-keyword pre-filter (see api/proxy_signal) and hands off to "spec"
+# via _PHASE_GRAPH.
 INTAKE_PHASE = "intake"
 
 # Linear SDD phase graph: phase → next phase

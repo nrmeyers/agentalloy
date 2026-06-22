@@ -57,11 +57,6 @@ class TestOpenclawHarnessSpec(TestCase):
         self.assertIsNotNone(spec.install_writer)
         self.assertTrue(callable(spec.install_writer))
 
-    def test_openclaw_hook_writer_none(self):
-        """hook_writer is None for openclaw (no hook-based wiring)."""
-        spec = REGISTRY["openclaw"]
-        self.assertIsNone(spec.hook_writer)
-
 
 # ---------------------------------------------------------------------------
 # install module tests

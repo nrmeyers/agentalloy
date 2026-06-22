@@ -381,30 +381,6 @@ class TestRun:
             rc = _run(args)
             assert rc == 0
 
-    def test_hook_wiring_applied(self, tmp_state_dir: tuple[Path, Path]):
-        """--via hook routes through apply_hook_wiring (provider hook_writer).
-
-        apply_hook_wiring MUST be mocked: the real one writes to
-        ~/.claude/settings.json and ~/.agentalloy/hooks under Path.home().
-        """
-        with (
-            patch(
-                "agentalloy.install.subcommands.wrap.server_proc.find_listening_pid",
-                return_value=9999,
-            ),
-            patch(
-                "agentalloy.install.subcommands.wire.apply_hook_wiring",
-                return_value={"files_written": [], "harness": "claude-code"},
-            ) as mock_hook,
-            patch(
-                "agentalloy.install.subcommands.wrap.server_proc.stop",
-            ),
-        ):
-            args = self._make_args(via="hook", child_args=["echo", "hello"])
-            rc = _run(args)
-            assert rc == 0
-            mock_hook.assert_called_once()
-
     def test_child_process_spawned(self, tmp_state_dir: tuple[Path, Path]):
         """Child process should be spawned via subprocess.Popen."""
         mock_proc = MagicMock()

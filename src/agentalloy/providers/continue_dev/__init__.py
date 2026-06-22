@@ -5,7 +5,6 @@ Registers the ``continue-closed`` and ``continue-local`` harnesses in REGISTRY w
 - Capabilities: PROXY (proxy wiring via .continuerc.json)
 - env_builder: returns empty dict (Continue uses file-based config)
 - install_writer: writes .continuerc.json with proxy model config
-- hook_writer: None (Continue does not use hook-based wiring)
 """
 
 from __future__ import annotations
@@ -40,11 +39,6 @@ def _install_writer(port: int, root: Path, force: bool = False) -> list[WireReco
     return install.apply_persistent_config(port, root, force)
 
 
-def _hook_writer(port: int, root: Path) -> list[WireRecord]:
-    """Hook writer for continue-dev — not applicable for file-based config."""
-    return []
-
-
 # Register the ``continue-closed`` harness in the global REGISTRY.
 REGISTRY["continue-closed"] = HarnessSpec(
     name="continue-closed",
@@ -52,7 +46,6 @@ REGISTRY["continue-closed"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )
 
@@ -63,6 +56,5 @@ REGISTRY["continue-local"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )

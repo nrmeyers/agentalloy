@@ -5,7 +5,6 @@ Registers the ``codex`` harness in REGISTRY with:
 - Capabilities: PROXY (proxy wiring via env vars)
 - env_builder: sets OPENAI_BASE_URL for the codex binary
 - install_writer: writes ~/.codex/config.toml with apiBaseUrl sentinel
-- hook_writer: None (Codex does not use Claude Code hooks)
 """
 
 from __future__ import annotations
@@ -50,6 +49,5 @@ REGISTRY["codex"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    hook_writer=None,
     install_writer=_install_writer,
 )

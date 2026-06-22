@@ -274,7 +274,7 @@ For the full proxy-wired and sidecar harness sets, see [Harness Classification](
 
 The old three-tier model (hooks / per-session injection / sidecar) collapsed to a binary proxy-wired vs sidecar classification (see [Harness Classification](harness-classification.md)). The proxy is now the universal mechanism for interceptable harnesses; the file-watching sidecar remains for non-interceptable ones (cursor, windsurf, github-copilot, gemini-cli).
 
-The hook routes are **kept and live** — Claude Code's default wiring is the hook path (`/v1/hook/user-prompt-submit`, `/v1/hook/pre-tool-use`, `/v1/hook/post-tool-use` in `api/hook_router.py`), which degrades gracefully if the service is down; `agentalloy wire --via proxy` switches it to base-URL proxy wiring. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 47951, queries prefixed `search_query: ` and documents `search_document: `), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
+There is **no hook transport**. Claude Code is **proxy-wired** via the native Anthropic passthrough at `/proj/<token>/v1/messages` (`ANTHROPIC_BASE_URL`); the per-turn hook routes have been removed. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 47951, queries prefixed `search_query: ` and documents `search_document: `), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
 
 ## Telemetry
 

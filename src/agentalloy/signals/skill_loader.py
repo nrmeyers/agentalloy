@@ -37,9 +37,9 @@ __all__ = [
 ]
 
 # Per-repo lifecycle modes (see ``_read_lifecycle_mode``). ``full`` is the
-# historical default; ``assist``/``off`` let a repo with its own agents and
-# workflows opt out of AgentAlloy's intake front-door and phase forcing.
-LIFECYCLE_MODES = ("full", "assist", "off")
+# historical default; ``off`` lets a repo with its own agents and workflows
+# opt out of AgentAlloy's intake front-door, phase machine, and composition.
+LIFECYCLE_MODES = ("full", "off")
 _DEFAULT_LIFECYCLE_MODE = "full"
 
 
@@ -100,15 +100,16 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
 def _read_lifecycle_mode(project_root: Path) -> str:
     """Read the per-repo lifecycle mode from ``.agentalloy/config``.
 
-    Returns one of ``full`` | ``assist`` | ``off``. Defaults to ``full``
+    Returns one of ``full`` | ``off``. Defaults to ``full``
     (historical behavior) whenever the file is absent, unreadable, malformed,
     or holds an unrecognized value — a missing/garbled config must never
     silently disable the lifecycle.
 
-    - ``full``   — intake front-door + phase machine + all skill injection.
-    - ``assist`` — no intake front-door, no phase forcing; keep the additive
-      system/domain skill injection (PreToolUse/PostToolUse).
-    - ``off``    — hooks stay wired but inject nothing.
+    - ``full`` — intake front-door + phase machine + composition.
+    - ``off``  — compose nothing.
+
+    The legacy ``assist`` mode was defined entirely by hook behavior; with the
+    hook transport gone it has no distinct meaning and reads back as ``off``.
     """
     config_file = project_root / ".agentalloy" / "config"
     if not config_file.exists():
@@ -124,6 +125,11 @@ def _read_lifecycle_mode(project_root: Path) -> str:
             key, _, value = line.partition(":")
             if key.strip() == "lifecycle_mode":
                 mode = value.strip().strip('"').strip("'").lower()
+                # Legacy ``assist`` collapsed to ``off`` when the hook transport
+                # was removed; map it explicitly so it does not fall through to
+                # the ``full`` default and wrongly re-enable composition.
+                if mode == "assist":
+                    return "off"
                 return mode if mode in LIFECYCLE_MODES else _DEFAULT_LIFECYCLE_MODE
     except OSError:
         return _DEFAULT_LIFECYCLE_MODE

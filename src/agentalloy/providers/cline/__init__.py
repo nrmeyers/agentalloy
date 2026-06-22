@@ -5,7 +5,6 @@ Registers the ``cline`` harness in REGISTRY with:
 - Capabilities: PROXY (proxy wiring via .cline/settings.json)
 - env_builder: returns empty dict (Cline uses file-based config)
 - install_writer: writes .cline/settings.json with proxy API fields
-- hook_writer: None (Cline does not use hook-based wiring)
 """
 
 from __future__ import annotations
@@ -40,11 +39,6 @@ def _install_writer(port: int, root: Path, force: bool = False) -> list[WireReco
     return install.apply_persistent_config(port, root, force)
 
 
-def _hook_writer(port: int, root: Path) -> list[WireRecord]:
-    """Hook writer for cline — not applicable for file-based config."""
-    return []
-
-
 # Register the harness in the global REGISTRY.
 REGISTRY["cline"] = HarnessSpec(
     name="cline",
@@ -52,6 +46,5 @@ REGISTRY["cline"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    hook_writer=_hook_writer,
     install_writer=_install_writer,
 )

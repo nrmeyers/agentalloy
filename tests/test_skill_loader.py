@@ -86,10 +86,27 @@ def test_lifecycle_mode_round_trips_each_mode(tmp_path: Path) -> None:
         _write_lifecycle_mode,
     )
 
+    # Two-mode world after the hook transport was removed: full / off.
+    assert LIFECYCLE_MODES == ("full", "off")
     for mode in LIFECYCLE_MODES:
         _write_lifecycle_mode(tmp_path, mode)
         assert (tmp_path / ".agentalloy" / "config").read_text() == f"lifecycle_mode: {mode}\n"
         assert _read_lifecycle_mode(tmp_path) == mode
+
+
+def test_lifecycle_mode_legacy_assist_reads_as_off(tmp_path: Path) -> None:
+    """Legacy ``assist`` collapsed to ``off`` when the hook transport was removed.
+
+    It must NOT fall through to the ``full`` default (which would wrongly
+    re-enable composition for repos that had opted into assist).
+    """
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode
+
+    config = tmp_path / ".agentalloy" / "config"
+    config.parent.mkdir(parents=True)
+    config.write_text("lifecycle_mode: assist\n")
+
+    assert _read_lifecycle_mode(tmp_path) == "off"
 
 
 def test_lifecycle_mode_unknown_value_falls_back_to_full(tmp_path: Path) -> None:

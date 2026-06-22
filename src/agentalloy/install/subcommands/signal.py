@@ -390,7 +390,7 @@ def add_parser(
     es: argparse.ArgumentParser = sub.add_parser(
         "evaluate-system", help="Emit system skill prose for matching applies_when"
     )
-    es.add_argument("--tool", default="", help="Tool name being used (for PreToolUse hook)")
+    es.add_argument("--tool", default="", help="Tool name being used (tool-use predicate context)")
 
     wc: argparse.ArgumentParser = sub.add_parser(
         "watch-contract", help="Validate contract and invoke compose"

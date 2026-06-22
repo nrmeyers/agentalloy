@@ -5,7 +5,6 @@ Registers the ``openclaw`` harness in REGISTRY with:
 - Capabilities: PROXY (proxy wiring via env vars + persistent plugin config)
 - env_builder: sets OPENAI_BASE_URL for the openclaw binary
 - install_writer: writes ~/.openclaw/plugins.json with agentalloy plugin entry
-- hook_writer: None (Openclaw does not use Claude Code hooks)
 """
 
 from __future__ import annotations
@@ -51,6 +50,5 @@ REGISTRY["openclaw"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    hook_writer=None,
     install_writer=_install_writer,
 )
