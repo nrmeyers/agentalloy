@@ -260,10 +260,9 @@ class TestEvaluateSignal:
 
 
 class TestProxyLifecycleMode:
-    """The proxy honors per-repo lifecycle_mode: assist/off defer to passthrough
-    even when a phase file is present and would otherwise compose. The hook path
-    keeps the finer-grained assist (system/domain skills); the proxy can't, since
-    all its injection flows through the single phase-gated compose."""
+    """The proxy honors per-repo lifecycle_mode: any non-`full` mode (`off`, and
+    the legacy `assist` which now reads as `off`) defers to plain passthrough even
+    when a phase file is present and would otherwise compose."""
 
     @staticmethod
     def _set_mode(tmp_path: Path, mode: str) -> None:
@@ -282,12 +281,14 @@ class TestProxyLifecycleMode:
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
         assert result.should_compose is False
 
-    def test_assist_passthrough_even_with_phase(self, tmp_path: Path) -> None:
+    def test_legacy_assist_defers_as_off(self, tmp_path: Path) -> None:
+        # `assist` was removed with the hook transport; a repo still carrying it
+        # reads as `off` and must defer (compose nothing).
         _set_phase(tmp_path, "build")
         self._set_mode(tmp_path, "assist")
         with mock.patch(
             "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-            side_effect=AssertionError("must not evaluate the lifecycle in assist mode"),
+            side_effect=AssertionError("legacy assist must read as off and not evaluate"),
         ):
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
         assert result.should_compose is False

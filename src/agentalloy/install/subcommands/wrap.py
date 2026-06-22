@@ -2,7 +2,7 @@
 
 Usage::
 
-    python -m agentalloy.install wrap <harness> [--port N] [--via hook|proxy]
+    python -m agentalloy.install wrap <harness> [--port N]
         [--no-start-server] [-- <args ...>]
 
 Lifecycle:

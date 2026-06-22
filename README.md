@@ -244,7 +244,7 @@ Three small artifacts on disk drive everything AgentAlloy does. None of them bel
 
 A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
 
-The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,assist,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `assist` defers to a repo's own agents/workflow — no intake, no phase forcing — while keeping the additive system + domain skill injection; `off` stays wired but injects nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
+The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `off` stays wired but composes nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
 
 ### 2. Task contracts
 
@@ -373,7 +373,7 @@ The `agentalloy` CLI handles install, service management, phase control, and com
 
 ```bash
 agentalloy setup                          # Interactive install wizard
-agentalloy wire --harness <name>          # Wire a harness (--via hook|proxy, --lifecycle-mode full|assist|off, --clean-room)
+agentalloy wire --harness <name>          # Wire a harness (--lifecycle-mode full|off, --clean-room)
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy compose --contract <path>      # One-shot composition
@@ -455,7 +455,7 @@ Both runtime paths are **deterministic by default** — the only optional LM sta
 
 Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns — no async backlog, no dropped traces. Trace-write failures never propagate.
 
-Query via `GET /telemetry/traces` and `GET /telemetry/coverage`; the CLI exposes `agentalloy telemetry savings` (token-savings summary), `agentalloy telemetry coverage` (hook-layer coverage: every prompt + every skill pull), and `agentalloy telemetry clear`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
+Query via `GET /telemetry/traces` and `GET /telemetry/coverage`; the CLI exposes `agentalloy telemetry savings` (token-savings summary), `agentalloy telemetry coverage` (composition coverage: every prompt + every skill pull), and `agentalloy telemetry clear`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
 
 ---
 
