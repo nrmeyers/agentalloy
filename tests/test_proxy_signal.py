@@ -1,8 +1,11 @@
 """Signal layer integration tests for proxy requests.
 
-Tests evaluate_signal() and SignalResult -- covers the full signal flow:
-no phase, no skill, pre-filter miss, pre-filter hit, gate evaluation,
-and phase transitions.
+Tests ``evaluate_signal()`` and ``SignalResult`` under the announce-once
+cadence: a phase's orientation block is emitted exactly once on entry
+(``.agentalloy/announced`` != phase), and the transition eval injects only when
+the reranker trigger fires AND the gate yields an advisory. A steady-state turn
+(already announced, no trigger) is a pure passthrough — the every-turn flood the
+old intake bypass produced is gone.
 """
 
 from __future__ import annotations
@@ -35,6 +38,18 @@ def _set_phase(tmp_path: Path, phase: str) -> None:
     (phase_dir / "phase").write_text(f"phase: {phase}\n")
 
 
+def _set_announced(tmp_path: Path, phase: str) -> None:
+    """Mark *phase* as already announced, so the turn is steady-state (not entry)."""
+    d = tmp_path / ".agentalloy"
+    d.mkdir(exist_ok=True)
+    (d / "announced").write_text(f"{phase}\n")
+
+
+def _read_announced(tmp_path: Path) -> str | None:
+    f = tmp_path / ".agentalloy" / "announced"
+    return f.read_text().strip() if f.exists() else None
+
+
 def _skill(
     keywords: list[str], phases: list[str] | None = None, domain_tags: list[str] | None = None
 ) -> dict[str, Any]:
@@ -49,9 +64,33 @@ def _skill(
 def _no_transition(qwen: int = 0) -> MagicMock:
     d = MagicMock()
     d.should_transition = False
+    d.to_phase = None
     d.gates_met = []
     d.gates_unmet = []
     d.qwen_calls = qwen
+    d.advisories = []
+    return d
+
+
+def _transition(to_phase: str, gate_names: list[str], qwen: int = 1) -> MagicMock:
+    d = MagicMock()
+    d.should_transition = True
+    d.to_phase = to_phase
+    d.gates_met = [MagicMock(gate_name=n) for n in gate_names]
+    d.gates_unmet = []
+    d.qwen_calls = qwen
+    d.advisories = []
+    return d
+
+
+def _advisory(messages: list[str], qwen: int = 1) -> MagicMock:
+    d = MagicMock()
+    d.should_transition = False
+    d.to_phase = None
+    d.gates_met = []
+    d.gates_unmet = [MagicMock(gate_name="exit_artifact")]
+    d.qwen_calls = qwen
+    d.advisories = messages
     return d
 
 
@@ -72,8 +111,56 @@ class TestEvaluateSignal:
         assert result.phase == "build"
         assert result.task == "hello"
 
-    def test_phase_exists_pre_filter_no_match(self, tmp_path: Path) -> None:
+    def test_entry_announces_even_without_trigger(self, tmp_path: Path) -> None:
+        """First turn in a phase announces it, even when no trigger fires.
+
+        The trigger is still consulted (no bypass) — but a fresh phase whose
+        `announced` marker doesn't match composes its orientation regardless.
+        """
         _set_phase(tmp_path, "build")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["deploy"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ) as mock_trigger,
+        ):
+            result = asyncio.run(evaluate_signal(_req("just writing code"), tmp_path))
+        assert result.should_compose is True
+        assert result.announce is True
+        assert result.phase == "build"
+        mock_trigger.assert_called_once()  # consulted, not bypassed
+        assert _read_announced(tmp_path) == "build"  # recorded so the next turn is quiet
+
+    def test_intake_entry_announces_once_then_quiet(self, tmp_path: Path) -> None:
+        """Intake announces on the first prompt, then stops — no every-turn flood.
+
+        This is the regression guard for the old unconditional intake bypass.
+        """
+        _set_phase(tmp_path, "intake")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill([], phases=["intake"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ),
+        ):
+            first = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+            second = asyncio.run(evaluate_signal(_req("still here"), tmp_path))
+            third = asyncio.run(evaluate_signal(_req("and again"), tmp_path))
+        assert first.should_compose is True and first.announce is True
+        assert second.should_compose is False  # already announced → quiet
+        assert third.should_compose is False
+
+    def test_already_announced_trigger_miss_is_passthrough(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -86,72 +173,14 @@ class TestEvaluateSignal:
         ):
             result = asyncio.run(evaluate_signal(_req("just writing code"), tmp_path))
         assert result.should_compose is False
+        assert result.announce is False
         assert result.phase == "build"
 
-    def test_phase_exists_pre_filter_match_composes(self, tmp_path: Path) -> None:
+    def test_already_announced_advisory_composes_as_eval(self, tmp_path: Path) -> None:
+        """A trigger hit that yields an advisory injects the eval block (not announce)."""
         _set_phase(tmp_path, "build")
-        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='test'")
-        with (
-            mock.patch(
-                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                return_value=_skill(["test", "deploy"]),
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.check_transition_trigger",
-                return_value=mock_match,
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                return_value=_no_transition(),
-            ),
-        ):
-            result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
-        assert result.should_compose is True
-        assert result.phase == "build"
-        assert result.task == "run the test suite"
-        assert result.pre_filter_matched == "keyword='test'"
-
-    def test_intake_phase_bypasses_prefilter(self, tmp_path: Path) -> None:
-        """Intake composes on the first prompt regardless of signal keywords.
-
-        The intake entry workflow must engage before any keyword exists, so the
-        pre-filter is bypassed entirely when phase == intake.
-        """
-        _set_phase(tmp_path, "intake")
-        with (
-            mock.patch(
-                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                # Empty keywords + a non-matching prompt: check_prefilter would
-                # return None, yet intake must still compose.
-                return_value=_skill([], phases=["intake"]),
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.check_transition_trigger",
-                return_value=None,
-            ) as mock_prefilter,
-            mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                return_value=_no_transition(),
-            ),
-        ):
-            result = asyncio.run(evaluate_signal(_req("literally anything at all"), tmp_path))
-        assert result.should_compose is True
-        assert result.phase == "intake"
-        mock_prefilter.assert_not_called()  # bypassed, not consulted
-        assert result.pre_filter_matched == "intake phase composes unconditionally"
-
-    def test_phase_transition_on_gates_met(self, tmp_path: Path) -> None:
-        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")
         mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='deploy'")
-        decision = MagicMock()
-        decision.should_transition = True
-        decision.to_phase = "qa"
-        decision.gates_met = [
-            MagicMock(gate_name="test_passed"),
-            MagicMock(gate_name="lint_clean"),
-        ]
-        decision.gates_unmet = []
-        decision.qwen_calls = 1
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -163,25 +192,47 @@ class TestEvaluateSignal:
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.decide_transition",
-                return_value=decision,
+                return_value=_advisory(["produce docs/spec/*.md to advance"]),
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("are we done?"), tmp_path))
+        assert result.should_compose is True
+        assert result.announce is False  # eval block, not orientation
+        assert result.advisories == ["produce docs/spec/*.md to advance"]
+        assert result.pre_filter_matched == "keyword='deploy'"
+
+    def test_clean_transition_writes_phase_without_injecting(self, tmp_path: Path) -> None:
+        """A clean transition (gates met, no advisory) advances the phase but
+        injects nothing this turn — the new phase announces on the next turn."""
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")
+        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='deploy'")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["deploy"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=mock_match,
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.decide_transition",
+                return_value=_transition("qa", ["test_passed", "lint_clean"]),
             ),
             mock.patch("agentalloy.api.proxy_signal._write_phase_atomic") as mock_write,
         ):
             result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path))
-        assert result.should_compose is True
+        assert result.should_compose is False  # nothing to inject this turn
         mock_write.assert_called_once_with(tmp_path, "qa")
-        assert result.gates_met == ["test_passed", "lint_clean"]
+        assert result.gates_met == ["test_passed", "lint_clean"]  # carried for telemetry
         assert result.qwen_calls == 1
 
     def test_phase_write_error_is_logged_not_raised(self, tmp_path: Path) -> None:
+        # Entry turn (announce) + a transition whose write fails: the OSError is
+        # swallowed and the announce still composes.
         _set_phase(tmp_path, "build")
         mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='deploy'")
-        decision = MagicMock()
-        decision.should_transition = True
-        decision.to_phase = "qa"
-        decision.gates_met = []
-        decision.gates_unmet = []
-        decision.qwen_calls = 0
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -193,7 +244,7 @@ class TestEvaluateSignal:
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.decide_transition",
-                return_value=decision,
+                return_value=_transition("qa", []),
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal._write_phase_atomic",
@@ -201,28 +252,7 @@ class TestEvaluateSignal:
             ),
         ):
             result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path))
-        assert result.should_compose is True
-
-    def test_manual_force_check_triggers(self, tmp_path: Path) -> None:
-        _set_phase(tmp_path, "build")
-        mock_match = PreFilterMatch(name="manual", detail="AGENTALLOY_FORCE_CHECK=1")
-        with (
-            mock.patch(
-                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                return_value=_skill([]),
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.check_transition_trigger",
-                return_value=mock_match,
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                return_value=_no_transition(),
-            ),
-        ):
-            result = asyncio.run(evaluate_signal(_req("anything"), tmp_path))
-        assert result.should_compose is True
-        assert result.pre_filter_matched == "AGENTALLOY_FORCE_CHECK=1"
+        assert result.should_compose is True  # announce survives the write failure
 
     def test_empty_user_message_returns_none_task(self, tmp_path: Path) -> None:
         _set_phase(tmp_path, "build")
@@ -241,9 +271,8 @@ class TestEvaluateSignal:
         assert result.should_compose is False
         assert result.task is None
 
-    def test_domain_tags_from_skill(self, tmp_path: Path) -> None:
-        _set_phase(tmp_path, "build")
-        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='test'")
+    def test_domain_tags_from_skill_on_announce(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")  # entry → announce carries the skill's tags
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -251,16 +280,48 @@ class TestEvaluateSignal:
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.check_transition_trigger",
-                return_value=mock_match,
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                return_value=_no_transition(),
+                return_value=None,
             ),
         ):
             result = asyncio.run(evaluate_signal(_req("run tests"), tmp_path))
         assert result.should_compose is True
+        assert result.announce is True
         assert result.domain_tags == ["auth", "payments"]
+
+
+class TestAnnounceCadence:
+    """The `.agentalloy/announced` marker governs re-announcement across entries."""
+
+    def test_reannounces_after_phase_changes(self, tmp_path: Path) -> None:
+        # Announced for build; the phase file now reads qa (a transition advanced
+        # it). The mismatch makes this an entry turn for qa → announce again.
+        _set_phase(tmp_path, "qa")
+        _set_announced(tmp_path, "build")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill([], phases=["qa"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("anything"), tmp_path))
+        assert result.should_compose is True
+        assert result.announce is True
+        assert _read_announced(tmp_path) == "qa"
+
+    def test_announce_not_written_when_skill_missing(self, tmp_path: Path) -> None:
+        # Skill load fails before the announce decision → no announced marker is
+        # written (the repo isn't actually composed for).
+        _set_phase(tmp_path, "build")
+        with mock.patch(
+            "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+            return_value=None,
+        ):
+            asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+        assert _read_announced(tmp_path) is None
 
 
 class TestProxyLifecycleMode:
@@ -298,10 +359,10 @@ class TestProxyLifecycleMode:
         assert result.should_compose is False
 
     def test_explicit_full_still_composes(self, tmp_path: Path) -> None:
-        # Explicit `full` behaves exactly as the default (no-config) path.
+        # Explicit `full` behaves exactly as the default (no-config) path: a fresh
+        # phase announces on entry.
         _set_phase(tmp_path, "build")
         self._set_mode(tmp_path, "full")
-        mock_match = PreFilterMatch(name="prompt_keyword", detail="keyword='test'")
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -309,11 +370,7 @@ class TestProxyLifecycleMode:
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.check_transition_trigger",
-                return_value=mock_match,
-            ),
-            mock.patch(
-                "agentalloy.api.proxy_signal.decide_transition",
-                return_value=_no_transition(),
+                return_value=None,
             ),
         ):
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))

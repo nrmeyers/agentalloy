@@ -30,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.compose_models import ComposeRequest, EmptyResult, Phase
 from agentalloy.api.proxy_context import decode_proj_token
-from agentalloy.api.proxy_injection import anthropic_has_marker, inject_into_anthropic_messages
+from agentalloy.api.proxy_injection import inject_into_anthropic_messages
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import get_embed_client, get_orchestrator_for_proxy
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
@@ -97,27 +97,39 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
 
 
 async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> str:
-    """Compose the prose block to inject (advisories + domain output), or ""."""
-    phase = signal.phase
-    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
-    compose_req = ComposeRequest(
-        task=signal.task or "",
-        phase=compose_phase,
-        domain_tags=signal.domain_tags or None,
-    )
+    """Compose the prose block to inject, or "".
 
+    Two independent parts, each gated separately:
+
+    - **Eval advisory** — emitted whenever the gate eval produced advisories
+      (a transition trigger fired). Light; may recur across turns.
+    - **Orientation/domain block** — the orchestrator output, emitted only on an
+      *entry* turn (``signal.announce``). Heavy; emitted once per phase entry so
+      it does not flood every steady-state turn.
+
+    Returns the two parts joined, or "" when neither has content.
+    """
     advisory_block = ""
     if signal.advisories:
         advisory_block = (
             "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
         )
 
-    try:
-        result = await orchestrator.compose(compose_req)
-        domain_output = "" if isinstance(result, EmptyResult) else result.output
-    except Exception:
-        logger.warning("Composition failed -- passing through unchanged", exc_info=True)
-        domain_output = ""
+    domain_output = ""
+    if signal.announce:
+        phase = signal.phase
+        compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+        compose_req = ComposeRequest(
+            task=signal.task or "",
+            phase=compose_phase,
+            domain_tags=signal.domain_tags or None,
+        )
+        try:
+            result = await orchestrator.compose(compose_req)
+            domain_output = "" if isinstance(result, EmptyResult) else result.output
+        except Exception:
+            logger.warning("Composition failed -- passing through unchanged", exc_info=True)
+            domain_output = ""
 
     return "\n\n".join(p for p in (advisory_block, domain_output) if p)
 
@@ -140,11 +152,12 @@ async def _maybe_inject(
     if not (signal.should_compose and signal.phase and orchestrator is not None):
         return None
 
-    # Per-phase/session cadence: if this phase's workflow block is already
-    # anywhere in the conversation, don't inject again (stateless dedup).
-    if anthropic_has_marker(payload, kind="workflow", phase=signal.phase):
-        return None
-
+    # Cadence lives in `.agentalloy/announced` (durable, owned by the signal
+    # layer), not in the request body. The old marker-echo dedup here was
+    # structurally dead — Claude Code never persists an injected marker back into
+    # the next request, so it never matched — and is gone. The signal layer has
+    # already decided this turn warrants injection (entry announce and/or eval
+    # advisory); we just compose and inject.
     block = await _compose_block(signal, orchestrator)
     if not block:
         return None

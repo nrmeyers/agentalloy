@@ -28,8 +28,10 @@ __all__ = [
     "_build_predicate_context",
     "_load_workflow_skill_for_phase",
     "_load_workflow_skill_from_packs",
+    "_read_announced",
     "_read_lifecycle_mode",
     "_read_phase",
+    "_write_announced_atomic",
     "_write_lifecycle_mode",
     "_write_phase_atomic",
     "_write_telemetry",
@@ -86,6 +88,54 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
     try:
         tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
         os.replace(tmp, phase_file)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Announce-state helpers (once-per-entry injection cadence)
+# ---------------------------------------------------------------------------
+#
+# `.agentalloy/announced` records the last phase whose orientation block was
+# injected. The proxy announces a phase's workflow block exactly once on entry
+# (when `announced != phase`), then stays quiet until a transition changes the
+# phase — at which point `announced` no longer matches and the new phase is
+# announced. This decouples the heavy orientation block from per-turn injection:
+# the marker-echo dedup it replaces was structurally dead (Claude Code never
+# persists injected markers back into the next request), so cadence must live in
+# durable state here, not in the request body.
+
+
+def _read_announced(project_root: Path) -> str | None:
+    """Read the last-announced phase from ``.agentalloy/announced``.
+
+    Returns ``None`` when the file is absent, unreadable, or empty — which the
+    proxy treats as "nothing announced yet", so the current phase announces.
+    """
+    announced_file = project_root / ".agentalloy" / "announced"
+    if not announced_file.exists():
+        return None
+    try:
+        return announced_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _write_announced_atomic(project_root: Path, phase: str) -> None:
+    """Atomically record *phase* as the last-announced phase.
+
+    Mirrors ``_write_phase_atomic``: a per-writer temp file + ``os.replace`` so
+    the watcher and the async proxy never leave a half-written file when they
+    race without a shared lock.
+    """
+    announced_file = project_root / ".agentalloy" / "announced"
+    announced_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = announced_file.with_name(f"announced.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(f"{phase}\n", encoding="utf-8")
+        os.replace(tmp, announced_file)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()

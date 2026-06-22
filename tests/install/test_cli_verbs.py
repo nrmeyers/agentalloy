@@ -403,7 +403,13 @@ class TestWireInstructionShaping:
         self._claude_repo(repo_root)
         monkeypatch.chdir(repo_root)
         assert wire._run(self._wire(lifecycle_mode="full")) == 0
-        assert not (repo_root / ".claude" / "settings.json").exists()
+        # Full mode writes settings.json for the status line, but clean-room is
+        # off by default: no global CLAUDE.md exclusion without --clean-room.
+        settings = repo_root / ".claude" / "settings.json"
+        assert settings.exists()
+        data = json.loads(settings.read_text())
+        assert data["statusLine"]["command"] == "agentalloy statusline"
+        assert "claudeMdExcludes" not in data
 
     def test_clean_room_unwire_restores_original(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch

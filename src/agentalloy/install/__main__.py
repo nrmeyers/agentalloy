@@ -47,6 +47,7 @@ from agentalloy.install.subcommands import (
     start_embed_server,
     start_rerank_server,
     status,
+    statusline,
     telemetry,
     uninstall,
     unwire,
@@ -92,6 +93,7 @@ _SUBCOMMANDS = [
     server_status,
     enable_service,
     status,
+    statusline,
     cleanup,
     # Underlying step subcommands (still available for power-users + the
     # runbook LLM that drives them individually).

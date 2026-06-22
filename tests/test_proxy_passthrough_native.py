@@ -183,7 +183,8 @@ def test_tc1_query_string_preserved(tmp_path: Path) -> None:
 def test_inject_into_last_user_message_system_untouched(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
     app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
-    signal = SignalResult(should_compose=True, phase="build", task="the real task")
+    # announce=True: an entry turn emits the orchestrator orientation block.
+    signal = SignalResult(should_compose=True, announce=True, phase="build", task="the real task")
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
     assert resp.status_code == 200
@@ -207,7 +208,10 @@ def test_idempotent_when_phase_block_already_present(tmp_path: Path) -> None:
     body["messages"][-1]["content"] = (
         "the real task\n\n<!-- BEGIN AGENTALLOY-CONTEXT phase=build -->\nx\n<!-- END AGENTALLOY-CONTEXT -->"
     )
-    signal = SignalResult(should_compose=True, phase="build", task="t")
+    # announce=True so compose actually produces a block; the request-level
+    # injector is still idempotent for the current phase (a marker for phase=build
+    # already in this payload short-circuits a second injection).
+    signal = SignalResult(should_compose=True, announce=True, phase="build", task="t")
     with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
         client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
     sent = json.loads(captured["body"])

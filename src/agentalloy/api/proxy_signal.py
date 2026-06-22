@@ -27,8 +27,10 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _build_predicate_context,
     _intake_route_hint,
     _load_workflow_skill_for_phase,
+    _read_announced,
     _read_lifecycle_mode,
     _read_phase,
+    _write_announced_atomic,
     _write_phase_atomic,
 )
 
@@ -47,6 +49,12 @@ class SignalResult:
     phase: str | None = None
     task: str | None = None
     domain_tags: list[str] | None = field(default_factory=lambda: list[str]())
+
+    # True when this request is the first one in *phase* (the phase changed since
+    # we last announced), so the orientation/domain block should be emitted. When
+    # False, only gate advisories (if any) are injected — the heavy block is
+    # suppressed to keep steady-state turns quiet. See `_read_announced`.
+    announce: bool = False
 
     # Optional signal-layer metadata (for telemetry)
     pre_filter_matched: str | None = None
@@ -155,70 +163,97 @@ async def evaluate_signal(
         # Proxy has no file/tool events — only prompt text
     )
 
-    # 4. Transition trigger (reranker-primary, deterministic fallback floor).
-    #    Intake is the entry phase: it must compose on the first prompt, before
-    #    any signal exists, so it bypasses the trigger. Normal gating resumes
-    #    once intake hands off to spec.
-    match: PreFilterMatch | None
-    if phase == INTAKE_PHASE:
-        match = PreFilterMatch(name="intake_entry", detail="intake phase composes unconditionally")
-    else:
-        match = check_transition_trigger(signal_keywords, exit_gates, ctx, embed_client)
-    if match is None:
+    # 4. Announce cadence: a phase's orientation/domain block is emitted exactly
+    #    once on entry. `.agentalloy/announced` records the last phase we
+    #    announced; when it no longer matches the current phase (fresh wire, or a
+    #    transition advanced us here) this is an entry turn and we announce. Turns
+    #    in the middle of a phase do not re-announce — that every-turn re-compose
+    #    (intake especially, which used to bypass the trigger and compose
+    #    unconditionally) was the flood this replaces. Cadence lives in durable
+    #    state, not in the request body: Claude Code never echoes an injected
+    #    marker back, so the old marker-echo dedup was structurally dead.
+    announce = _read_announced(cwd) != phase
+
+    # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
+    #    for every phase, including intake — there is no unconditional bypass. On
+    #    a turn carrying no completion/approval signal the trigger does not fire,
+    #    so an in-progress phase stays silent unless it is also an entry turn.
+    match: PreFilterMatch | None = check_transition_trigger(
+        signal_keywords, exit_gates, ctx, embed_client
+    )
+
+    # 6. Eval (only when the trigger fired): evaluate exit gates, transition the
+    #    phase if met, and collect gate advisories. Runs in a thread so the
+    #    file/embed work in decide_transition never blocks the event loop.
+    advisories: list[str] = []
+    gates_met: list[str] = []
+    gates_unmet: list[str] = []
+    qwen_calls = 0
+
+    if match is not None:
+
+        def _run_gates() -> None:
+            nonlocal advisories, gates_met, gates_unmet, qwen_calls
+            # Leaving intake branches on the contract route: fast → sdd-fast, else
+            # the linear intake → spec.
+            route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
+            decision = decide_transition(
+                current_phase=phase,
+                gate_spec=exit_gates,
+                ctx=ctx,
+                lm_client=embed_client,
+                next_phase_hint=route_hint,
+            )
+            if decision.should_transition and decision.to_phase:
+                try:
+                    _write_phase_atomic(cwd, decision.to_phase)
+                    logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
+                except OSError as e:
+                    logger.warning("Failed to write phase file: %s", e)
+
+            advisories = list(decision.advisories)
+            gates_met = [g.gate_name for g in decision.gates_met]
+            gates_unmet = [g.gate_name for g in decision.gates_unmet]
+            qwen_calls = decision.qwen_calls
+
+        await asyncio.to_thread(_run_gates)
+
+    # 7. Decide. Inject when this is an entry turn (announce the phase) OR the
+    #    eval produced advisories (a trigger fired and the gate has guidance).
+    #    Neither → a quiet steady-state turn: forward unchanged.
+    if not (announce or advisories):
+        # A quiet turn: no entry to announce and no advisory to surface. When a
+        # clean transition fired this turn (phase written, no advisory), carry the
+        # gate metadata so telemetry still records the eval even though nothing is
+        # injected — the new phase announces on the next turn.
         return SignalResult(
             should_compose=False,
             phase=phase,
             task=task,
-        )
-
-    # 5. Trigger matched — compose is warranted.
-    # Run gate evaluation in a thread to avoid blocking the event loop.
-    gates_result: SignalResult | None = None
-
-    def _run_gates() -> None:
-        nonlocal gates_result
-        # Leaving intake branches on the contract route: fast → sdd-fast, else
-        # the linear intake → spec.
-        route_hint = _intake_route_hint(cwd) if phase == INTAKE_PHASE else None
-        decision = decide_transition(
-            current_phase=phase,
-            gate_spec=exit_gates,
-            ctx=ctx,
-            lm_client=embed_client,
-            next_phase_hint=route_hint,
-        )
-        # 6. Phase transition: write atomically if gates are met
-        if decision.should_transition and decision.to_phase:
-            try:
-                _write_phase_atomic(cwd, decision.to_phase)
-                logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
-            except OSError as e:
-                logger.warning("Failed to write phase file: %s", e)
-
-        gates_met = [g.gate_name for g in decision.gates_met]
-        gates_unmet = [g.gate_name for g in decision.gates_unmet]
-
-        gates_result = SignalResult(
-            should_compose=True,
-            phase=phase,
-            task=task,
-            domain_tags=skill.get("domain_tags"),
-            pre_filter_matched=match.detail,
             gates_met=gates_met,
             gates_unmet=gates_unmet,
-            qwen_calls=decision.qwen_calls,
-            advisories=list(decision.advisories),
+            qwen_calls=qwen_calls,
         )
 
-    await asyncio.to_thread(_run_gates)
+    # Record the announce now so the next turn in this phase stays quiet. The
+    # signal layer owns all `.agentalloy/` state transitions; if the composed
+    # block later turns out empty, re-announcing would inject nothing anyway, so
+    # marking it at decision time is safe.
+    if announce:
+        try:
+            _write_announced_atomic(cwd, phase)
+        except OSError as e:
+            logger.warning("Failed to write announced file: %s", e)
 
-    if gates_result is not None:
-        return gates_result
-
-    # Fallback: pre-filter matched but gates didn't populate
     return SignalResult(
         should_compose=True,
+        announce=announce,
         phase=phase,
         task=task,
-        pre_filter_matched=match.detail,
+        domain_tags=skill.get("domain_tags"),
+        pre_filter_matched=match.detail if match is not None else None,
+        gates_met=gates_met,
+        gates_unmet=gates_unmet,
+        qwen_calls=qwen_calls,
+        advisories=advisories,
     )

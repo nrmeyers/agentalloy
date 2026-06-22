@@ -167,7 +167,15 @@ This adds **zero new server state**: resolution is stateless and restart-safe, b
 
 ### Injection target — last user message, system untouched
 
-Unlike the OpenAI path (which appends to the system message), the passthrough path injects the composed block into the **last `role:"user"` message**, leaving the top-level `system` block byte-unchanged. Claude Code prompt-caches the system block (active `prompt-caching-scope` / `extended-cache-ttl` betas); mutating that cached prefix would bust the cache every turn, so injection deliberately avoids it. If the user `content` is a string the marker block is appended; if it is a block array, a text block is appended (or a stale one replaced). Markers are phase-stamped: `<!-- BEGIN AGENTALLOY-CONTEXT phase=<p> -->`. Cadence is stateless — the proxy scans message history for a marker: current-phase block present → inject nothing; different-phase block present → strip stale and inject current; absent → inject. System/always-apply uses a distinct `AGENTALLOY-SYSTEM` marker injected once per session.
+Unlike the OpenAI path (which appends to the system message), the passthrough path injects the composed block into the **last `role:"user"` message**, leaving the top-level `system` block byte-unchanged. Claude Code prompt-caches the system block (active `prompt-caching-scope` / `extended-cache-ttl` betas); mutating that cached prefix would bust the cache every turn, so injection deliberately avoids it. If the user `content` is a string the marker block is appended; if it is a block array, a text block is appended (or a stale one replaced). Markers are phase-stamped: `<!-- BEGIN AGENTALLOY-CONTEXT phase=<p> -->`.
+
+Cadence is **durable, not stateless**. Claude Code never echoes an injected marker back into the next request, so scanning message history for one was structurally dead — it never matched, and the orientation block re-injected every turn (intake worst of all, since it bypassed the trigger entirely). Cadence now lives in `.agentalloy/announced`, which records the last phase whose orientation was emitted:
+
+- **Entry announce** — when `announced != phase` (fresh wire, or a transition advanced the phase), the orchestrator orientation block is injected once and `announced` is set to the phase. Subsequent turns in the same phase match and stay quiet.
+- **Transition eval** — every turn (all phases, no bypass) the reranker transition trigger runs; when it fires and the exit gate yields an advisory, a light `[agentalloy-eval]` block is injected. A clean transition (gate met, no advisory) advances the phase but injects nothing that turn — the new phase announces on the next turn.
+- **Neither** — steady-state turn: forwarded unchanged.
+
+The request-level injector remains idempotent within a single payload (a current-phase marker already present short-circuits a second injection), which is independent of the cross-turn `announced` state. The active phase is also surfaced as standing state every turn via the Claude Code status line (`agentalloy statusline` → `⚙ agentalloy ▸ <phase>`) and the managed `.claude/CLAUDE.md` phase-protocol block, so the agent stays oriented even on the quiet turns. System/always-apply uses a distinct `AGENTALLOY-SYSTEM` marker injected once per session.
 
 ### Auth transparency
 
@@ -194,12 +202,13 @@ Any error in the pre-forward stage (resolve / compose / inject) forwards the **o
 ### Flow
 
 1. **Request arrives** — proxy extracts system prompt, messages, and working directory
-2. **Phase check** — reads `.agentalloy/phase`. If no phase file exists, skip to passthrough
-3. **Pre-filter** — runs signal keywords against the user message. If no match, skip to passthrough
-4. **Gate evaluation** — evaluates exit gates (deterministic predicates + cosine similarity)
-5. **Compose** — if gates match, runs composition via existing `/compose` logic
-6. **Inject** — appends composed skills to the system message
-7. **Forward** — sends modified request to upstream LLM
+2. **Lifecycle + phase check** — reads `.agentalloy/config` (mode) and `.agentalloy/phase`. Non-`full` mode or no phase file → passthrough
+3. **Announce decision** — compares `.agentalloy/phase` against `.agentalloy/announced`. A mismatch marks this as an *entry* turn (announce the phase once)
+4. **Transition trigger** — runs the reranker-primary intent classifier (deterministic floor) for *every* phase, including intake. No bypass
+5. **Gate evaluation** — when the trigger fires, evaluates exit gates (deterministic predicates + cosine similarity); a met gate advances the phase, an unmet one yields an advisory
+6. **Compose** — entry turn → orchestrator orientation block; advisory present → light `[agentalloy-eval]` block. Neither → nothing
+7. **Inject** — entry announce records `announced = phase`; the block lands in the last user message
+8. **Forward** — sends the (possibly unchanged) request to upstream LLM
 
 ### Passthrough
 

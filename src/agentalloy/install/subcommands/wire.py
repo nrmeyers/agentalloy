@@ -192,6 +192,9 @@ def _render_human(result: dict[str, Any]) -> None:
     if result.get("soft_precedence_note"):
         print_rich("  [dim].claude/CLAUDE.md note added (repo workflow loads last)[/dim]")
 
+    if result.get("statusline"):
+        print_rich("  [dim]Status line wired (.claude/settings.json shows the active phase)[/dim]")
+
     if result.get("clean_room_excludes"):
         print_rich(
             "  [yellow]Clean-room:[/yellow] global ~/.claude/CLAUDE.md excluded from this repo "
@@ -291,7 +294,16 @@ _SOFT_NOTE_INNER = (
     "drives a spec→ship workflow through the proxy. Where this repo's workflow "
     "guidance conflicts with global/user-level directives, prefer the repo "
     "workflow here. Managed by AgentAlloy — edits inside these markers are "
-    "overwritten on re-wire."
+    "overwritten on re-wire.\n\n"
+    "**Phase protocol.** This repo runs a linear lifecycle: intake → spec → "
+    "design → build → qa → ship. The active phase is shown in your status line "
+    "(`⚙ agentalloy ▸ <phase>`) and its orientation is injected once when the "
+    "phase changes — not every turn, so the absence of an injected block means "
+    "the phase is unchanged, not that there is none. Stay within the current "
+    "phase's intent and produce its exit artifact before advancing; advances are "
+    "gated on that artifact. Read the phase with `agentalloy phase`; advance with "
+    "`agentalloy phase set <phase>` (the proxy also advances it automatically "
+    "when an exit gate is satisfied)."
 )
 
 
@@ -321,16 +333,36 @@ def _write_soft_precedence_note(root: Path) -> WireRecord | None:
     )
 
 
-def _write_clean_room_excludes(root: Path) -> WireRecord | None:
-    """Opt-in: add the global ~/.claude/CLAUDE.md to this repo's claudeMdExcludes.
+# The command Claude Code runs once per turn to render the status line (full
+# mode). It dispatches to `subcommands/statusline.py`, which prints the repo's
+# active phase. `padding: 0` keeps it flush; the command is the `agentalloy`
+# console script, so it resolves wherever AgentAlloy is installed.
+_STATUSLINE_COMMAND = "agentalloy statusline"
 
-    Merges into `./.claude/settings.json`, preserving any existing keys and
-    excludes. Returns None if the file exists but isn't a JSON object (we won't
-    stomp something we can't safely merge). unwire restores the captured
-    original (or deletes the file if we created it).
+
+def _statusline_obj() -> dict[str, Any]:
+    return {"type": "command", "command": _STATUSLINE_COMMAND, "padding": 0}
+
+
+def _write_claude_settings(root: Path, *, statusline: bool, clean_room: bool) -> WireRecord | None:
+    """Merge AgentAlloy keys into `./.claude/settings.json` in one write.
+
+    Two independent concerns share this file, so they're merged together to avoid
+    two WireRecords racing on the same path (the second would capture the first's
+    output as "original" and leak a key through unwire):
+
+    - ``statusline`` (full mode): set ``statusLine`` to our phase renderer, but
+      ONLY when the repo has no status line of its own — a user's own status line
+      is never clobbered.
+    - ``clean_room`` (opt-in): add the global ``~/.claude/CLAUDE.md`` to
+      ``claudeMdExcludes``.
+
+    Preserves every other key and existing excludes. Returns None when the file
+    exists but isn't a JSON object (we won't stomp what we can't safely merge),
+    or when nothing needed changing. unwire restores the captured original (or
+    deletes the file when we created it).
     """
     settings = root / ".claude" / "settings.json"
-    global_md = str(Path.home() / ".claude" / "CLAUDE.md")
     if settings.exists():
         original: str | None = settings.read_text(encoding="utf-8")
         try:
@@ -342,11 +374,32 @@ def _write_clean_room_excludes(root: Path) -> WireRecord | None:
     else:
         original = None
         data = {}
-    existing = data.get("claudeMdExcludes")
-    excludes: list[Any] = list(existing) if isinstance(existing, list) else []
-    if global_md not in excludes:
-        excludes.append(global_md)
-    data["claudeMdExcludes"] = excludes
+
+    changed = False
+
+    if statusline:
+        # Claim `statusLine` only when absent. If it's already ours, it's current
+        # (idempotent); if it's the user's own, leave it untouched.
+        existing_sl = data.get("statusLine")
+        if existing_sl is None:
+            data["statusLine"] = _statusline_obj()
+            changed = True
+
+    if clean_room:
+        global_md = str(Path.home() / ".claude" / "CLAUDE.md")
+        existing = data.get("claudeMdExcludes")
+        excludes: list[Any] = list(existing) if isinstance(existing, list) else []
+        if global_md not in excludes:
+            excludes.append(global_md)
+            changed = True
+        data["claudeMdExcludes"] = excludes
+
+    # Nothing to do (e.g. re-wire with our keys already present) — don't rewrite
+    # an existing file just to bump its mtime. A brand-new file with no changes
+    # can't happen (statusline or clean_room always sets something when absent).
+    if not changed:
+        return None
+
     serialized = json.dumps(data, indent=2) + "\n"
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(serialized, encoding="utf-8")
@@ -355,7 +408,7 @@ def _write_clean_room_excludes(root: Path) -> WireRecord | None:
         action="wrote_new_file" if original is None else "injected_block",
         content_sha256=_sha256(serialized),
         original_content=original,
-        marker_key="agentalloy.clean-room-excludes",
+        marker_key="agentalloy.claude-settings",
     )
 
 
@@ -449,16 +502,24 @@ def _run(args: argparse.Namespace) -> int:
     # (AgentAlloy driving); 1c clean-room is opt-in via --clean-room.
     extra: list[WireRecord] = []
     if harness == "claude-code":
+        clean_room = bool(getattr(args, "clean_room", False))
         if mode == "full":
             note = _write_soft_precedence_note(cwd)
             if note is not None:
                 extra.append(note)
                 result["soft_precedence_note"] = note.path
-        if getattr(args, "clean_room", False):
-            cr = _write_clean_room_excludes(cwd)
-            if cr is not None:
-                extra.append(cr)
-                result["clean_room_excludes"] = cr.path
+        # Both the (full-mode) status line and the (opt-in) clean-room excludes
+        # live in .claude/settings.json — written together in a single record so
+        # unwire reverses them as one and neither captures the other as "original".
+        settings_rec = _write_claude_settings(
+            cwd, statusline=(mode == "full"), clean_room=clean_room
+        )
+        if settings_rec is not None:
+            extra.append(settings_rec)
+            if mode == "full":
+                result["statusline"] = _STATUSLINE_COMMAND
+            if clean_room:
+                result["clean_room_excludes"] = settings_rec.path
     _persist_extra_records(cwd, harness, extra)
 
     # Restore data (original_content) is already persisted to install-state.json
