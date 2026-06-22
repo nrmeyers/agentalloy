@@ -82,7 +82,7 @@ Phases track where the agent is in the software development lifecycle. The **aut
 intake → spec → design → build → qa → ship
 ```
 
-Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → ship`, with an escape hatch back to `spec`). In the default lifecycle mode every session opens with intake (the claude-code `SessionStart` hook, gated globally by `session_intake_enabled` and per-repo by `lifecycle_mode` — see **Lifecycle modes** below).
+Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → ship`, with an escape hatch back to `spec`). In the default lifecycle mode every session opens with intake: the proxy composes the intake workflow on the first request of a fresh session (the signal layer handles `intake` unconditionally), gated per-repo by `lifecycle_mode` — see **Lifecycle modes** below.
 
 The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
 
@@ -93,17 +93,14 @@ Two separate vocabularies exist for **skill authoring/ingest** and should not be
 
 ### Lifecycle modes
 
-Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.agentalloy/config` (`lifecycle_mode:`) and read by both the hook and proxy paths on every request:
+Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.agentalloy/config` (`lifecycle_mode:`) and read by the proxy on every request:
 
 - **`full`** (default) — the intake front-door runs on every session and the full phase lifecycle is active; workflow skills inject per phase.
-- **`assist`** — no intake, no phase forcing. AgentAlloy defers to a repo that already drives its own workflow. On the hook (Claude Code) path it still injects the additive system (PreToolUse) and domain (PostToolUse) skills.
-- **`off`** — wired but injects nothing.
+- **`off`** — wired but composes nothing (full passthrough).
 
-Set it with `agentalloy wire --lifecycle-mode {full,assist,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`).
+Set it with `agentalloy wire --lifecycle-mode {full,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`). (The legacy `assist` mode was removed with the hook transport; a repo still configured `assist` now reads as `off`.)
 
 In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
-
-**Hook vs proxy:** both paths honor `lifecycle_mode`. The difference is `assist`: on proxy-wired harnesses (Cline, Aider, Continue.dev, OpenCode, Hermes) `assist` behaves like `off` (full passthrough), because the proxy's skill injection all flows through a single phase-gated compose — there is no phase-independent injection path to keep. The hook path's PreToolUse/PostToolUse fire independently of the phase, so its `assist` keeps system/domain skills. In both paths `off` injects nothing and `full` runs the complete lifecycle.
 
 ### Contracts
 
@@ -189,7 +186,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 - `GET /retrieve/{skill_id}` — lookup single skill's fragments
 - `GET /skills/{skill_id}` — inspect skill metadata
 - `GET /telemetry/traces` — query composition traces
-- `GET /telemetry/coverage` — hook-layer coverage (prompts, no-compose, skill pulls)
+- `GET /telemetry/coverage` — composition coverage (prompts, no-compose, skill pulls)
 - `GET /health` — liveness probe
 - `GET /diagnostics/runtime` — backend/model/DB state
 
@@ -225,7 +222,7 @@ Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace t
 
 Signal-layer traces additionally capture: `event_type`, `pre_filter_matched`, `gates_met`, `gates_unmet`, `qwen_calls`.
 
-The hook layer records its own activity so every prompt and every skill pull is attributable: each UserPromptSubmit (composed, no-compose, and cache hits), each SessionStart intake injection, each PreToolUse system-skill selection, and PostToolUse contract composes (tagged via `correlation_id`). Summarize it with `agentalloy telemetry coverage` or `GET /telemetry/coverage` — counts of prompts, no-compose, system-skill pulls, intake injections, and contract composes, with a per-phase prompt breakdown. The token-savings view (`agentalloy telemetry savings`) is unaffected: it still counts only `status='compose'`.
+The proxy records its activity so every prompt and every skill pull is attributable: each intercepted request (composed, no-compose), intake injections, and contract composes. Summarize it with `agentalloy telemetry coverage` or `GET /telemetry/coverage` — counts of prompts, no-compose, system-skill pulls, intake injections, and contract composes, with a per-phase prompt breakdown. The token-savings view (`agentalloy telemetry savings`) is unaffected: it still counts only `status='compose'`.
 
 ## Configuration
 
@@ -263,6 +260,7 @@ profiles:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `AGENTALLOY_URL` | AgentAlloy service URL | `http://localhost:47950` |
+| `ANTHROPIC_UPSTREAM_URL` | Upstream for the native Anthropic passthrough (`/proj/<token>/v1/messages`); point at another proxy to chain | `https://api.anthropic.com` |
 | `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
 | `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `nomic-embed-text-v1.5.Q8_0.gguf` |
 | `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |

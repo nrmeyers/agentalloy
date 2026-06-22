@@ -23,7 +23,7 @@ When AgentAlloy runs, it detects the active profile for the current working dire
 
 4. **Fallback** — the `default_profile` from `profiles.yaml` (defaults to `"default"`).
 
-Resolution is fast and runs on every skill retrieval and hook fire. Stale project markers (referencing profiles that no longer exist in config) fall through to detection rules rather than erroring.
+Resolution is fast and runs on every skill retrieval and proxy request. Stale project markers (referencing profiles that no longer exist in config) fall through to detection rules rather than erroring.
 
 ## Config file
 

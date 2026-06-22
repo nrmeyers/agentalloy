@@ -34,23 +34,22 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `aider` | `.aider.conf.yml` | `openai-api-base`, `openai-api-key`, `model` | P1 |
 | `hermes-agent` | `~/.hermes/config.yaml` (user) or `AGENTS.md` (repo) | `custom_providers.agentalloy` | P1 |
 | `opencode` | `.opencode/.agentalloy-env` | `OPENAI_API_BASE`, `OPENAI_API_KEY` | P1 |
-| `claude-code` | `~/.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` | P2 |
+| `claude-code` | per-repo `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
 
 ### Anthropic Messages Router
 
-The Anthropic router (`proxy_anthropic_router.py`) allows Claude Code and Cline to use
-the Anthropic `/v1/messages` API through the proxy. It translates Anthropic request/response
-formats to/from the OpenAI-compatible upstream, including streaming SSE event conversion.
+Two paths serve Anthropic-speaking harnesses:
 
-Phase 1 scope: text-only. Tool use / function calling is out of scope — tool_calls
-deltas are silently stripped.
+- **Native passthrough** (`proxy_passthrough_router.py`, `POST /proj/<token>/v1/messages`) — Claude Code's transport. No translation: it composes + injects, then forwards the request verbatim to a configurable Anthropic upstream with the caller's own credential.
+- **Translation shim** (`proxy_anthropic_router.py`, bare `/v1/messages`) — for Anthropic-speaking harnesses pointed at an OpenAI-compatible upstream (e.g. Cline). It translates Anthropic request/response formats to/from the OpenAI upstream, including streaming SSE conversion. Text-only; tool_calls deltas are stripped.
 
 ### Legacy Wiring (`--legacy`)
 
-The `--legacy` flag opts into the old markdown-injection wiring path. This is the
-behavior from before proxy wiring was introduced. Legacy wiring writes static rules
-files and (for some harnesses) installs hook scripts.
+The `--legacy` flag opts into the old markdown-injection wiring path for harnesses
+that support it (static rules files / sidecar watchers). This is the behavior from
+before proxy wiring was introduced. It no longer installs hook scripts — the hook
+transport has been removed; `claude-code` is proxy-wired only.
 
 
 ## Full Harness List
@@ -63,14 +62,14 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 
 | Harness | Proxy Config File | Notes |
 |---------|------------------|-------|
-| `claude-code` | `~/.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`) | Anthropic Messages API via proxy. Sourced by the user's shell or claude-code launcher. |
+| `claude-code` | per-repo `.agentalloy/claude-code-env.sh` (`ANTHROPIC_BASE_URL=…/proj/<token>` **only** — never an API key) | Native Anthropic Messages passthrough. Sourced via direnv, or a printed `source` hint. Auth is transparent: the proxy forwards the caller's own credential. |
 | `continue-closed`, `continue-local` | `.continuerc.json` (`models[].apiBase`) | JSON mutation per model entry. |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
 | `hermes-agent` | `~/.hermes/config.yaml` (`custom_providers.agentalloy`) user scope, or sentinel block in `AGENTS.md` repo scope | Scope resolved at runtime via `--scope user|repo`. |
 | `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `.opencode/system-prompt.md` | Env file must be sourced before launching OpenCode. |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
 
-> **Legacy hook mode:** Before the proxy redesign, `claude-code` used `UserPromptSubmit` / `PreToolUse` / `PostToolUse` hooks installed via `.claude/settings.json`. Proxy wiring supersedes that path — the proxy handles phase detection, skill composition, and system-message injection. The `--legacy` flag still installs hooks for backward compatibility.
+> **Hook transport removed:** `claude-code` originally used `UserPromptSubmit` / `PreToolUse` / `PostToolUse` hooks installed via `.claude/settings.json`. That transport has been **removed entirely** — `claude-code` is now proxy-wired like every other interceptable harness (the proxy handles phase detection, skill composition, and injection). `agentalloy unwire` still strips any leftover hook entries from a previously hook-wired `~/.claude/settings.json`.
 
 ### Sidecar (no proxy interception)
 

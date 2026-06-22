@@ -175,7 +175,7 @@ Wiring sets **only** `ANTHROPIC_BASE_URL` and **never** `ANTHROPIC_API_KEY`. Set
 
 #### Auth spike result
 
-Confirmed from live traffic: an account-authenticated Claude Code (OAuth, `anthropic-beta: …oauth-2025-04-20…`, no `x-api-key`) attaches its credential to a custom `ANTHROPIC_BASE_URL`, and a passthrough proxy forwards it to `api.anthropic.com` successfully. Proxy-only is therefore viable for everyone, including account users. This **unblocks** hook-path removal as a separate follow-on (it does not perform that removal).
+Confirmed from live traffic: an account-authenticated Claude Code (OAuth, `anthropic-beta: …oauth-2025-04-20…`, no `x-api-key`) attaches its credential to a custom `ANTHROPIC_BASE_URL`, and a passthrough proxy forwards it to `api.anthropic.com` successfully. Proxy-only is therefore viable for everyone, including account users. On that basis the hook path has since been **removed entirely** — the proxy is the sole transport for Claude Code.
 
 ### Configurable upstream
 
