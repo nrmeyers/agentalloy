@@ -65,6 +65,18 @@ def rec_subprocess(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _native_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default to native mode so port logic is host-independent.
+
+    Without this, ``_agentalloy_container_running`` would shell out to a real
+    ``podman``/``docker`` on the test host (and pass/fail depending on whether
+    an ``agentalloy`` container happens to be up). Container-aware tests opt
+    back in by patching it to return True.
+    """
+    monkeypatch.setattr(ra, "_agentalloy_container_running", lambda: False)
+
+
 # --- process reaping -------------------------------------------------------
 
 
@@ -265,3 +277,66 @@ def test_detect_orphans_silent_when_clean(
 def test_reap_unknown_scope_raises() -> None:
     with pytest.raises(ValueError):
         ra.reap("bogus")
+
+
+# --- container-mode awareness (:47950 forwarder is ours, not foreign) -------
+
+
+def test_detect_orphans_skips_our_container_port(
+    monkeypatch: pytest.MonkeyPatch, force_linux: None
+) -> None:
+    """A running agentalloy container's :47950 forwarder is not a conflict."""
+    monkeypatch.setattr(ra, "_agentalloy_container_running", lambda: True)
+    # The host holder of :47950 is the runtime's port-forwarder (foreign cmdline);
+    # embed/rerank run *inside* the container, so no host listener there.
+    monkeypatch.setattr(
+        ra.server_proc,
+        "find_listening_pid",
+        lambda port, **k: ra.SERVICE_PORT if port == ra.SERVICE_PORT else None,
+    )
+    monkeypatch.setattr(ra.server_proc, "_read_cmdline", lambda pid: "rootlessport")
+    monkeypatch.setattr(ra, "shim_path", lambda: Path("/nonexistent/llama-server"))
+
+    orphans = ra.detect_orphans()
+
+    assert not any(o.port == ra.SERVICE_PORT for o in orphans)
+    assert not any(o.kind == "conflict" for o in orphans)
+
+
+def test_reap_processes_spares_our_container_port(
+    monkeypatch: pytest.MonkeyPatch, force_linux: None
+) -> None:
+    """Reaping never warns/stops the container's :47950 forwarder."""
+    monkeypatch.setattr(ra, "_agentalloy_container_running", lambda: True)
+    monkeypatch.setattr(
+        ra.server_proc,
+        "find_listening_pid",
+        lambda port, **k: ra.SERVICE_PORT if port == ra.SERVICE_PORT else None,
+    )
+    monkeypatch.setattr(ra.server_proc, "_read_cmdline", lambda pid: "rootlessport")
+    reclaimed: list[int] = []
+    monkeypatch.setattr(ra.server_proc, "reclaim_stale_port", lambda p, m: reclaimed.append(p))
+
+    actions = ra.reap("processes", dry_run=True)
+
+    assert not any(a.target == f"pid://{ra.SERVICE_PORT}" for a in actions)
+    assert not any(a.op == "warn_foreign" for a in actions)
+    assert reclaimed == []
+
+
+def test_detect_orphans_reports_foreign_47950_in_native_mode(
+    monkeypatch: pytest.MonkeyPatch, force_linux: None
+) -> None:
+    """Regression: with no container, a foreign :47950 holder is still a conflict."""
+    monkeypatch.setattr(ra, "_agentalloy_container_running", lambda: False)
+    monkeypatch.setattr(
+        ra.server_proc,
+        "find_listening_pid",
+        lambda port, **k: ra.SERVICE_PORT if port == ra.SERVICE_PORT else None,
+    )
+    monkeypatch.setattr(ra.server_proc, "_read_cmdline", lambda pid: "nginx")
+    monkeypatch.setattr(ra, "shim_path", lambda: Path("/nonexistent/llama-server"))
+
+    orphans = ra.detect_orphans()
+
+    assert any(o.port == ra.SERVICE_PORT and o.kind == "conflict" for o in orphans)

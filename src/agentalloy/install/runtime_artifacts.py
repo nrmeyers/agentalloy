@@ -28,6 +28,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -192,6 +193,43 @@ def _unit_active(port: int) -> bool:
         return False
 
 
+def _agentalloy_container_running() -> bool:
+    """True if a container named ``agentalloy`` is running under podman or docker.
+
+    In container mode the host listener on :47950 is the runtime's port-forwarder
+    (e.g. podman ``rootlessport``), whose cmdline does not match our native
+    uvicorn signature. Recognizing our own container keeps detect/reap from
+    flagging it as a foreign conflict. Any failure (no runtime, error, timeout)
+    returns False — we fall back to the native cmdline classification.
+    """
+    for bin_name in ("podman", "docker"):
+        binary = shutil.which(bin_name)
+        if binary is None:
+            continue
+        try:
+            result = subprocess.run(
+                [
+                    binary,
+                    "ps",
+                    "--filter",
+                    "name=^agentalloy$",
+                    "--filter",
+                    "status=running",
+                    "--format",
+                    "{{.Names}}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and "agentalloy" in result.stdout.split():
+            return True
+    return False
+
+
 def _safe_reclaim(port: int, match: tuple[str, ...]) -> int | None:
     try:
         return server_proc.reclaim_stale_port(port, list(match))
@@ -239,10 +277,14 @@ def detect_orphans() -> list[Orphan]:
     (``shim``). A healthy, unit-managed stack reports nothing.
     """
     found: list[Orphan] = []
+    container_active = _agentalloy_container_running()
 
     for port, match in RUNTIME_PORTS:
         pid = _safe_find_pid(port)
         if pid is None:
+            continue
+        if port == SERVICE_PORT and container_active:
+            # Our own container's port-forwarder holds :47950, not an orphan.
             continue
         cmdline = _cmdline(pid)
         if cmdline and all(s in cmdline for s in match):
@@ -300,9 +342,13 @@ def reap(scope: str = "all", *, dry_run: bool = False, stale_only: bool = False)
 
 def _reap_processes(*, dry_run: bool) -> list[Action]:
     actions: list[Action] = []
+    container_active = _agentalloy_container_running()
     for port, match in RUNTIME_PORTS:
         pid = _safe_find_pid(port)
         if pid is None:
+            continue
+        if port == SERVICE_PORT and container_active:
+            # Our own container's port-forwarder holds :47950 — never reap or warn.
             continue
         cmdline = _cmdline(pid)
         if not cmdline or not all(s in cmdline for s in match):
