@@ -7,6 +7,7 @@ and locating the agentalloy build context (for building the container image).
 from __future__ import annotations
 
 import contextlib
+import os
 import shlex
 import shutil
 import subprocess
@@ -592,11 +593,30 @@ def _cleanup_temp_entrypoint(entrypoint: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def resolve_projects_root() -> Path:
+    """Host directory bind-mounted into the container at the identical path.
+
+    The proxy decodes each repo's ``/proj/<token>`` back to its real host path
+    and reads ``.agentalloy/`` (phase + lifecycle config) from it. In container
+    mode that path only exists inside the container if the host tree is mounted
+    there — so this root is mounted ``rw`` at the same absolute path, letting the
+    proxy read every repo's phase state and write phase transitions back.
+
+    Resolution order: ``AGENTALLOY_PROJECTS_ROOT`` (when set to an absolute path),
+    else ``~``. The result is realpath-normalised to match the proxy's own
+    ``realpath`` of the decoded token.
+    """
+    env_root = os.environ.get("AGENTALLOY_PROJECTS_ROOT", "").strip()
+    root = env_root if env_root and os.path.isabs(env_root) else str(Path.home())
+    return Path(os.path.realpath(root))
+
+
 def _run_container(
     runtime: str,
     entrypoint: Path,
     packs: str,
     image_ref: str | None = None,
+    projects_root: Path | None = None,
 ) -> int:
     """Run the agentalloy container with volumes, env, and port mapping.
 
@@ -605,6 +625,9 @@ def _run_container(
 
     * Volume mount: ``agentalloy-data:/app/data`` (the GGUF models persist
       under ``/app/data/models`` in this same volume).
+    * Volume mount: the projects root (``resolve_projects_root()``) bind-mounted
+      ``rw`` at the identical host path, so the proxy can read each repo's
+      ``.agentalloy/`` phase state and write phase transitions back.
     * Env vars: ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
       ``DUCKDB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
@@ -635,6 +658,29 @@ def _run_container(
     for k, v in env.items():
         env_cmd.extend(["-e", f"{k}={v}"])
 
+    # Bind-mount the projects root at its identical host path so the proxy can
+    # read each repo's `.agentalloy/` phase state (the decoded `/proj/<token>`
+    # path) and write transitions back. Refuse to mount the whole root fs.
+    root = projects_root or resolve_projects_root()
+    projects_mount: list[str] = []
+    if str(root) == "/":
+        _print(
+            "  [red]Projects root resolved to '/' — refusing to bind-mount the whole "
+            "filesystem. Set AGENTALLOY_PROJECTS_ROOT to your code root (e.g. ~/dev); "
+            "phase state will be unreadable until you do.[/red]"
+        )
+    else:
+        projects_mount = ["-v", f"{root}:{root}:rw"]
+        _print(
+            f"  [dim]Mounting projects root {root} (rw) so the proxy can read "
+            f".agentalloy/ phase state.[/dim]"
+        )
+        if root == Path(os.path.realpath(Path.home())):
+            _print(
+                "  [dim]Tip: set AGENTALLOY_PROJECTS_ROOT to narrow the exposed tree "
+                "(e.g. ~/dev) instead of all of $HOME.[/dim]"
+            )
+
     image = image_ref or _DEFAULT_IMAGE
 
     # `--replace` is a Podman extension; Docker does not support it.
@@ -662,6 +708,7 @@ def _run_container(
         "47950:47950",
         "-v",
         "agentalloy-data:/app/data",
+        *projects_mount,
         "-v",
         f"{entrypoint}:/app/entrypoint.sh:ro",
         *env_cmd,

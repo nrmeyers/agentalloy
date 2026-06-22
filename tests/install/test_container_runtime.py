@@ -454,3 +454,55 @@ class TestListConflictingContainers:
         assert any("name=^myapp$" in arg for arg in calls[0])
         # Second call: port filter with custom port
         assert any("publish=9999" in arg for arg in calls[1])
+
+
+# ---------------------------------------------------------------------------
+# Projects-root bind mount: the proxy must see each repo's .agentalloy/ at the
+# decoded host path, so _run_container bind-mounts the projects root rw there.
+# ---------------------------------------------------------------------------
+
+
+class TestProjectsRootMount:
+    """_run_container bind-mounts resolve_projects_root() rw at its identical path."""
+
+    def _run(self, tmp_path: Path) -> list[str]:
+        entrypoint = tmp_path / "entrypoint.sh"
+        entrypoint.write_text("#!/bin/bash\n")
+        captured: list[str] = []
+
+        def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd[:2] == ["podman", "run"]:
+                captured.clear()
+                captured.extend(cmd)
+            return MagicMock(returncode=0)
+
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=_fake_run,
+        ):
+            rc = container_runtime._run_container("podman", entrypoint, "")
+        assert rc == 0
+        return captured
+
+    def test_env_root_mounted_rw_at_identical_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "code"
+        root.mkdir()
+        monkeypatch.setenv("AGENTALLOY_PROJECTS_ROOT", str(root))
+        cmd = self._run(tmp_path)
+        assert f"{root}:{root}:rw" in cmd
+
+    def test_root_filesystem_is_not_mounted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENTALLOY_PROJECTS_ROOT", "/")
+        cmd = self._run(tmp_path)
+        assert not any(arg == "/:/:rw" for arg in cmd)
+        assert "/:/:rw" not in cmd
+
+    def test_resolve_projects_root_defaults_to_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("AGENTALLOY_PROJECTS_ROOT", raising=False)
+        import os
+
+        assert container_runtime.resolve_projects_root() == Path(os.path.realpath(Path.home()))

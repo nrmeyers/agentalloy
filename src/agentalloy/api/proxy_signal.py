@@ -34,6 +34,10 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
 
 logger = logging.getLogger(__name__)
 
+# Project roots we've already warned about being invisible to the proxy, so the
+# WARNING fires at most once per repo per process instead of on every request.
+_warned_missing_root: set[str] = set()
+
 
 @dataclass
 class SignalResult:
@@ -115,6 +119,22 @@ async def evaluate_signal(
     # 1. Read phase file (sync, instant)
     phase = _read_phase(cwd)
     if not phase:
+        # A missing `.agentalloy/` here (lifecycle is active — we passed the
+        # mode!="full" guard above) is the signature of a project root that
+        # isn't visible to the proxy: in container mode the decoded host path
+        # must be bind-mounted at this exact path. Warn once per repo so this
+        # never fails silently as a plain passthrough.
+        agentalloy_dir = cwd / ".agentalloy"
+        if not agentalloy_dir.exists():
+            key = str(cwd)
+            if key not in _warned_missing_root:
+                _warned_missing_root.add(key)
+                logger.warning(
+                    "lifecycle active but %s is not visible to the proxy — if AgentAlloy "
+                    "runs in a container, the project root must be bind-mounted at this exact "
+                    "path (see AGENTALLOY_PROJECTS_ROOT). Composition skipped for this repo.",
+                    agentalloy_dir,
+                )
         return SignalResult(should_compose=False)
 
     task = _extract_task_from_messages(request)

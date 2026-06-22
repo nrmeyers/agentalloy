@@ -8,11 +8,15 @@ and phase transitions.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock
 
+import pytest
+
+from agentalloy.api import proxy_signal
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.prefilter import PreFilterMatch
@@ -314,3 +318,35 @@ class TestProxyLifecycleMode:
         ):
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
         assert result.should_compose is True
+
+
+class TestMissingProjectRootWarning:
+    """An unmounted project root (no `.agentalloy/` visible) must warn, not pass silently."""
+
+    @pytest.fixture(autouse=True)
+    def _reset(self) -> None:
+        proxy_signal._warned_missing_root.clear()
+
+    def test_missing_agentalloy_dir_warns_once(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # No `.agentalloy/` at all → lifecycle defaults to "full", phase read
+        # fails → the "not visible to the proxy" warning fires exactly once per cwd.
+        with caplog.at_level(logging.WARNING, logger="agentalloy.api.proxy_signal"):
+            r1 = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+            r2 = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+        assert r1.should_compose is False
+        assert r2.should_compose is False
+        warns = [r for r in caplog.records if "not visible to the proxy" in r.getMessage()]
+        assert len(warns) == 1
+
+    def test_present_agentalloy_dir_does_not_warn(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # `.agentalloy/` exists but holds no phase file: the root IS visible, so
+        # this is a legitimate passthrough — no "not visible" warning.
+        (tmp_path / ".agentalloy").mkdir()
+        with caplog.at_level(logging.WARNING, logger="agentalloy.api.proxy_signal"):
+            result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
+        assert result.should_compose is False
+        assert not any("not visible to the proxy" in r.getMessage() for r in caplog.records)
