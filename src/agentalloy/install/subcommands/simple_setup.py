@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import PROXY_UNABLE_HARNESSES
+from agentalloy.install import NATIVE_PASSTHROUGH_HARNESSES, PROXY_UNABLE_HARNESSES
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import (
     detect,
@@ -1757,7 +1757,15 @@ def run_setup(cfg: SetupConfig) -> int:
     # so they're excluded below. Only genuinely proxy-wired harnesses need an
     # upstream LLM target.
     via = resolve_via(cfg.harness, None) if cfg.harness != "manual" else "manual"
-    uses_proxy = via == "proxy" and cfg.harness not in PROXY_UNABLE_HARNESSES
+    # The OpenAI-style upstream (UPSTREAM_URL/MODEL/KEY) applies only to harnesses
+    # that route through the OpenAI-compatible bridge. Native-passthrough harnesses
+    # (claude-code) forward the caller's own credential to ANTHROPIC_UPSTREAM_URL
+    # and never use UPSTREAM_URL, so they must not be prompted for it.
+    uses_proxy = (
+        via == "proxy"
+        and cfg.harness not in PROXY_UNABLE_HARNESSES
+        and cfg.harness not in NATIVE_PASSTHROUGH_HARNESSES
+    )
 
     # 8. Upstream LLM — only relevant when the harness actually routes through the
     # proxy. Sidecar harnesses fall back to a static rules file and don't forward
@@ -1771,6 +1779,13 @@ def run_setup(cfg: SetupConfig) -> int:
         # set — the proxy can be configured later via env vars.
         _print(f"  Upstream URL:   {cfg.upstream_url or '(not set)'}")
         _print(f"  Upstream model: {cfg.upstream_model or '(not set)'}")
+    elif cfg.harness in NATIVE_PASSTHROUGH_HARNESSES:
+        if not cfg.non_interactive:
+            _print(
+                "  [dim]Claude Code uses the native Anthropic passthrough — it forwards your "
+                "own credential to api.anthropic.com (set ANTHROPIC_UPSTREAM_URL to chain). "
+                "No upstream LLM prompt needed.[/dim]"
+            )
     elif cfg.harness == "manual":
         if not cfg.non_interactive:
             _print("  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]")

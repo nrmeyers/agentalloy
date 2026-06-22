@@ -14,3 +14,10 @@ Each module exposes ``add_parser(subparsers)`` and ``run(args) -> int``.
 PROXY_UNABLE_HARNESSES: frozenset[str] = frozenset(
     {"cursor", "windsurf", "github-copilot", "gemini-cli"}
 )
+
+# Harnesses that use the native Anthropic passthrough (`/proj/<token>/v1/messages`)
+# rather than the OpenAI-compatible bridge. They forward the caller's own
+# credential to the Anthropic upstream (`ANTHROPIC_UPSTREAM_URL`, default
+# api.anthropic.com), so the setup wizard must NOT prompt them for the OpenAI
+# `UPSTREAM_URL` — they don't use it.
+NATIVE_PASSTHROUGH_HARNESSES: frozenset[str] = frozenset({"claude-code"})

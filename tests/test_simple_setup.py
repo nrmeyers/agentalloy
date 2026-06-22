@@ -464,6 +464,27 @@ class TestSimpleSetupExecution:
         assert rc == 0
         write_upstream.assert_called_once()
 
+    def test_native_passthrough_harness_skips_upstream_prompt(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """claude-code uses the native Anthropic passthrough — it forwards the caller's
+        own credential to ANTHROPIC_UPSTREAM_URL and never uses the OpenAI UPSTREAM_URL,
+        so the wizard must NOT prompt for it (regression: 3.0.0 wrongly prompted)."""
+        rc, prompt_upstream, _ = self._run_interactive_until_confirm("claude-code")
+        assert rc == 1
+        prompt_upstream.assert_not_called()
+
+    def test_native_passthrough_harness_skips_write_upstream_env(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """Non-interactive claude-code setup does not write the OpenAI upstream .env vars."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        with patch.object(mod, "_write_upstream_env") as write_upstream:
+            rc = mod.run_setup(mod.SetupConfig(harness="claude-code", non_interactive=True))
+        assert rc == 0
+        write_upstream.assert_not_called()
+
     def test_run_setup_stops_on_step_failure(self, tmp_state_dir: tuple[Path, Path]):
         """Setup aborts when an intermediate step fails."""
         self.mock.mocks["seed_corpus"].return_value = 1
