@@ -26,8 +26,21 @@ def _base_path(env: dict[str, str], key: str) -> str:
 
 def test_claude_code_base_url_resolves_to_messages_route() -> None:
     env = REGISTRY["claude-code"].env_builder(47950)
-    # The Anthropic SDK requests {base}/v1/messages.
-    assert _base_path(env, "ANTHROPIC_BASE_URL") + "/v1/messages" in _app_route_paths()
+    base = _base_path(env, "ANTHROPIC_BASE_URL")  # /proj/<token>
+    assert base.startswith("/proj/"), f"expected a /proj/<token> base, got {base!r}"
+    # The Anthropic SDK requests {base}/v1/messages. The native passthrough route
+    # is templated on the discriminator, so normalize the concrete token segment
+    # back to {token} before matching (guards the old /v1/v1/messages 404 bug).
+    parts = (base + "/v1/messages").split("/")
+    parts[2] = "{token}"
+    assert "/".join(parts) in _app_route_paths()
+
+
+def test_claude_code_env_builder_is_auth_transparent() -> None:
+    # Never set ANTHROPIC_API_KEY — that would force API-key mode and break
+    # account/OAuth auth. The proxy forwards the caller's own credential.
+    env = REGISTRY["claude-code"].env_builder(47950)
+    assert "ANTHROPIC_API_KEY" not in env
 
 
 def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:

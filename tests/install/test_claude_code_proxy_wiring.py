@@ -111,3 +111,41 @@ class TestClaudeCodeProxyWiring:
         assert content.count("# <!-- BEGIN agentalloy install -->") == 1
         # Original content survives both passes.
         assert "export EXISTING=1" in content
+
+
+class TestClaudeCodeRegistryAuthTransparency:
+    """The provider-registry paths (install_writer + env_builder) used by `wrap`
+    and registry wiring must be auth-transparent too — they previously set a dummy
+    ANTHROPIC_API_KEY + bare URL, which broke account auth and missed the native
+    passthrough route.
+    """
+
+    def test_install_writer_no_key_carries_proj_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.providers.claude_code import install
+
+        home = tmp_path / "home"
+        home.mkdir()
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+
+        install.apply_persistent_config(7070, repo)
+        content = (home / ".agentalloy" / "claude-code-env.sh").read_text()
+
+        assert "ANTHROPIC_API_KEY" not in content
+        assert f"http://localhost:7070/proj/{encode_proj_token(repo)}" in content
+        assert "7070/v1" not in content  # no /v1 suffix
+
+    def test_env_builder_and_launch_env_no_key_carry_proj_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import agentalloy.providers.claude_code as cc
+        from agentalloy.providers.claude_code import runtime
+
+        monkeypatch.chdir(tmp_path)
+        token = encode_proj_token(tmp_path)
+        for env in (cc._env_builder(7070), runtime.build_launch_env(7070)):
+            assert "ANTHROPIC_API_KEY" not in env
+            assert env["ANTHROPIC_BASE_URL"] == f"http://localhost:7070/proj/{token}"

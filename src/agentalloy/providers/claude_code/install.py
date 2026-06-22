@@ -1,7 +1,8 @@
 """Claude Code install module — apply_persistent_config / install_writer.
 
-Writes ~/.agentalloy/claude-code-env.sh with a sentinel-bounded block
-containing ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY pointing to the proxy.
+Writes ~/.agentalloy/claude-code-env.sh with a sentinel-bounded block containing
+**only** ANTHROPIC_BASE_URL (auth-transparent — never ANTHROPIC_API_KEY), pointing
+at the proxy's per-repo /proj/<token> discriminator.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.install.sentinel_utils import replace_marked_block
 from agentalloy.providers.base import WireRecord
 
@@ -57,13 +59,15 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     env_path = agentalloy_dir / "claude-code-env.sh"
     original_content = _capture_original(env_path)
 
-    # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL.
-    proxy_url = f"http://localhost:{port}"
+    # Per-repo /proj/<token> discriminator (no /v1 suffix: the Anthropic SDK
+    # appends /v1/messages). Only ANTHROPIC_BASE_URL is set — never an API key —
+    # so the proxy forwards the caller's own credential (account/OAuth safe).
+    token = encode_proj_token(root)
+    proxy_url = f"http://localhost:{port}/proj/{token}"
 
     block_lines = [
         _SENTINEL_BEGIN,
         f'export ANTHROPIC_BASE_URL="{proxy_url}"',
-        'export ANTHROPIC_API_KEY="agentalloy"',
         _SENTINEL_END,
     ]
     block = "\n".join(block_lines)
