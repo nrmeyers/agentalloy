@@ -332,25 +332,34 @@ def _upgrade_container(
     actions: list[str] = []
     warnings: list[str] = []
 
-    # Keep the orchestrating CLI in lock-step with the image so the recreate
-    # uses the new entrypoint (with stamp-compare re-seed). Best-effort.
-    if _detect_install_method() != "source":
-        try:
-            subprocess.run(_swap_command(_detect_install_method(), ref), check=True, timeout=1800)
-            actions.append(f"upgraded CLI to {ref}")
-        except (subprocess.SubprocessError, OSError) as exc:
-            warnings.append(f"CLI upgrade failed ({exc}); continuing with image pull")
-
     runtime = state.get("runtime_binary") or cr._detect_runtime_binary()
     if not runtime:
         warnings.append("no container runtime (podman/docker) found on PATH")
         return actions, warnings
     image = _target_image(state.get("image_tag"), ref)
 
+    # Pull the image FIRST, before touching the CLI. A freshly-tagged release can
+    # take a few minutes to publish its container image, so the release/tag can be
+    # visible while the image is not. If we swapped the CLI first and the pull then
+    # failed, we'd strand a newer CLI orchestrating the old container. Pulling first
+    # means a not-yet-published image aborts with everything on the current version.
     if cr._pull_image(runtime, image) != 0:
-        warnings.append(f"failed to pull {image}")
+        warnings.append(
+            f"image {image} isn't available yet — a new release's container image can "
+            "take a few minutes to publish after the tag. Nothing was changed (CLI and "
+            "container are both unchanged); re-run `agentalloy upgrade` shortly."
+        )
         return actions, warnings
     actions.append(f"pulled {image}")
+
+    # Image is present — now keep the orchestrating CLI in lock-step with it so the
+    # recreate uses the new entrypoint (with stamp-compare re-seed). Best-effort.
+    if _detect_install_method() != "source":
+        try:
+            subprocess.run(_swap_command(_detect_install_method(), ref), check=True, timeout=1800)
+            actions.append(f"upgraded CLI to {ref}")
+        except (subprocess.SubprocessError, OSError) as exc:
+            warnings.append(f"CLI upgrade failed ({exc}); continuing with image recreate")
 
     packs = _installed_packs(state)
     entrypoint = cr._generate_entrypoint(packs)

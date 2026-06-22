@@ -327,15 +327,21 @@ def test_container_recreates_with_versioned_image():
     assert not warnings
 
 
-def test_container_pull_failure_warns():
+def test_container_pull_failure_aborts_before_cli_swap():
+    """A not-yet-published image must abort BEFORE the CLI swap, so we never strand
+    a newer CLI orchestrating the old container (the v3.0.1 release-window race)."""
     state = {"deployment": "container", "runtime_binary": "podman", "image_tag": None}
     from agentalloy.install.subcommands import container_runtime as cr
 
     with (
-        patch.object(up, "_detect_install_method", return_value="source"),
+        # A real install method so the swap WOULD run if we reached it.
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
         patch.object(cr, "_pull_image", return_value=1),
+        patch.object(up.subprocess, "run") as run_swap,
         patch.object(cr, "_run_container") as run_ct,
     ):
-        actions, warnings = up._upgrade_container("v2.2.1", state, assume_yes=True)
-    run_ct.assert_not_called()
-    assert any("failed to pull" in w for w in warnings)
+        actions, warnings = up._upgrade_container("v3.0.2", state, assume_yes=True)
+    run_swap.assert_not_called()  # CLI was NOT swapped
+    run_ct.assert_not_called()  # container was NOT recreated
+    assert not any("upgraded CLI" in a for a in actions)
+    assert any("isn't available yet" in w for w in warnings)
