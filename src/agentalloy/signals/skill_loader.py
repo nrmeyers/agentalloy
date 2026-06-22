@@ -33,6 +33,7 @@ __all__ = [
     "_write_lifecycle_mode",
     "_write_phase_atomic",
     "_write_telemetry",
+    "exit_gates_for_phase",
 ]
 
 # Per-repo lifecycle modes (see ``_read_lifecycle_mode``). ``full`` is the
@@ -239,6 +240,22 @@ def _load_workflow_skill_from_packs(phase: str) -> dict[str, Any] | None:
     except Exception:
         pass
     return None
+
+
+def exit_gates_for_phase(phase: str) -> dict[str, Any] | None:
+    """Exit-gate spec for ``phase``, read from the wheel-bundled ``_packs/sdd`` YAML.
+
+    Corpus/DB-free: this reads the packaged skill YAML directly (via
+    ``_load_workflow_skill_from_packs``) rather than the DuckDB corpus, so the
+    guarded ``phase set`` can check a phase's deterministic exit gates without
+    touching the database or the embed server. Returns ``None`` when the phase
+    has no packaged workflow skill, or that skill declares no ``exit_gates``.
+    """
+    skill = _load_workflow_skill_from_packs(phase)
+    if not skill:
+        return None
+    gates = skill.get("exit_gates")
+    return cast("dict[str, Any]", gates) if isinstance(gates, dict) else None
 
 
 # ---------------------------------------------------------------------------

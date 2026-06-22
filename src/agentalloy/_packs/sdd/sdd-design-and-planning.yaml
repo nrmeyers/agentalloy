@@ -128,9 +128,16 @@ raw_prose: |
 
       agentalloy contract init --phase design --slug <task-slug>
 
-  Fill `domain_tags` and `scope.touches/avoids`. The folder completes design and
-  hands to **build**, which works `tasks.md` top to bottom, turning each task's
-  test cases red-then-green.
+  Fill `domain_tags` and `scope.touches/avoids`. The folder completes design.
+
+  Then advance yourself — the moment all three files are written and the plan is
+  unambiguous, run `agentalloy phase set build` and start working `tasks.md` top
+  to bottom, turning each task's test cases red-then-green. Don't wait to be
+  told. If the design still has an open question — an approach you haven't
+  committed to, a slice you can't yet test — **stop and surface it** instead of
+  advancing. The phase guard refuses the jump until `approach.md`, `tasks.md`,
+  and `test-plan.md` all exist with their required sections, so a premature
+  `phase set` just names what's missing.
 
   ## Not this
 

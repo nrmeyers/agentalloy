@@ -106,6 +106,16 @@ raw_prose: |
   route by cause (`agentalloy phase set build` for a defect, which earns a
   regression test on the way back through), don't hotfix blind.
 
+  ## 6. Close it out
+
+  Ship is terminal — unlike every other phase, it does **not** self-advance.
+  Once the delivery record is written and the merge is healthy, the work is
+  done: **stay in `ship`** and tell the user it shipped. The one transition out
+  is back to the top, and it's the user's call, not yours — when they confirm
+  they're finished (or kick off something new), reset the lifecycle with
+  `agentalloy phase set intake` so the next session opens fresh. Never reset on
+  your own initiative; wait for their go-ahead.
+
   ## Not this
 
   Don't re-do QA's work — ship trusts the gate; reverifying everything is just

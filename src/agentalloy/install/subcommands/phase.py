@@ -81,8 +81,55 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
     }
 
 
-def run_phase_set(phase: str, root: Path | None = None) -> dict[str, Any]:
-    """Set or update the current phase."""
+def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, list[str]]:
+    """Whether a *forward* ``phase set`` should be refused, with advisories.
+
+    A transition is "forward" only when ``target`` is the next phase in the
+    linear SDD graph (``_PHASE_GRAPH[current]``). Backward routes (``qa → build``,
+    ``design → spec``), bail routes (``sdd-fast → spec``), and the ship→intake
+    reset are not forward, so they never gate — they return ``(False, [])``.
+
+    For a forward target we evaluate the *current* phase's packaged ``exit_gates``
+    deterministically (``lm_client=None``): only a hard ``NOT_MET`` blocks. An
+    embed-dependent predicate yields ``UNKNOWN`` and never blocks, so the guard
+    enforces exactly the cheap, certain checks (the exit artifact exists / has its
+    required sections) and stays out of the way of everything it can't be sure of.
+    """
+    from agentalloy.signals.gates import (  # noqa: PLC0415
+        _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
+        decide_transition,
+        evaluate_node,
+    )
+    from agentalloy.signals.predicates import PredicateContext, PredicateResult  # noqa: PLC0415
+    from agentalloy.signals.skill_loader import exit_gates_for_phase  # noqa: PLC0415
+
+    if target != _PHASE_GRAPH.get(current):
+        return False, []  # backward / bail / non-linear → unguarded
+
+    gate_spec = exit_gates_for_phase(current)
+    if not gate_spec:
+        return False, []  # no packaged gate for this phase → nothing to enforce
+
+    ctx = PredicateContext(project_root=root, current_phase=current)
+    result, _ = evaluate_node(gate_spec, ctx, lm_client=None, qwen_calls=[0])
+    if result != PredicateResult.NOT_MET:
+        return False, []  # MET or UNKNOWN → allow
+
+    # Reuse decide_transition purely for its advisory text (which exit artifact
+    # is missing / misplaced). It re-evaluates deterministically (lm_client=None).
+    decision = decide_transition(current, gate_spec, ctx, lm_client=None)
+    return True, decision.advisories
+
+
+def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> dict[str, Any]:
+    """Set or update the current phase.
+
+    A *forward* transition (the next phase in the linear SDD graph) is gated on
+    the current phase's deterministic exit gates: if the exit artifact isn't on
+    disk, the write is refused and the returned dict carries ``blocked=True`` plus
+    advisories naming what's missing. ``force=True`` bypasses the gate. Backward,
+    bail, and reset transitions are never gated.
+    """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
@@ -95,6 +142,18 @@ def run_phase_set(phase: str, root: Path | None = None) -> dict[str, Any]:
         sys.exit(1)
 
     existing = _read_phase(root)
+    current = existing.get("phase") if existing else None
+
+    if not force and current and current != phase:
+        blocked, advisories = _forward_gate_blocks(current, phase, root)
+        if blocked:
+            return {
+                "phase": current,
+                "blocked": True,
+                "target": phase,
+                "advisories": advisories,
+            }
+
     now = _now_iso()
 
     data: dict[str, Any] = {
@@ -105,7 +164,7 @@ def run_phase_set(phase: str, root: Path | None = None) -> dict[str, Any]:
     }
 
     _write_phase(data, root)
-    return data
+    return {**data, "blocked": False}
 
 
 def run_phase_clear(root: Path | None = None) -> dict[str, Any]:
@@ -148,6 +207,11 @@ def add_parser(
         choices=VALID_PHASES,
         help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast",
     )
+    p_set.add_argument(
+        "--force",
+        action="store_true",
+        help="Advance even if the current phase's exit gate isn't met.",
+    )
     _add_project_root_flag(p_set)
     p_set.set_defaults(func=_run_set)
 
@@ -189,7 +253,22 @@ def _run_get(args: argparse.Namespace) -> int:
 
 
 def _run_set(args: argparse.Namespace) -> int:
-    result = run_phase_set(args.phase, root=_resolve_root(args))
+    result = run_phase_set(
+        args.phase, root=_resolve_root(args), force=getattr(args, "force", False)
+    )
+    if result.get("blocked"):
+        print(
+            f"Refusing to advance {result['phase']} → {result['target']}: "
+            f"the current phase's exit gate isn't met.",
+            file=sys.stderr,
+        )
+        for advisory in result.get("advisories", []):
+            print(f"  {advisory}", file=sys.stderr)
+        print(
+            "  Finish the exit artifact, or pass --force once you've confirmed the work is done.",
+            file=sys.stderr,
+        )
+        return 1
     print(f"Phase set to: {result['phase']}")
     return 0
 

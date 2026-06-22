@@ -107,8 +107,15 @@ raw_prose: |
   bound where you work). The **spec doc** is the deliverable and the single
   source of truth for acceptance — write it to **`docs/spec/<task-slug>.md`**
   with `## Acceptance Criteria` and `## Out of Scope`. Don't copy acceptance
-  back into the contract; one home, no drift. That file completes spec and
-  hands to **design**.
+  back into the contract; one home, no drift. That file completes spec.
+
+  Then advance yourself — don't wait to be told. The moment the spec is written
+  and unambiguous, run `agentalloy phase set design` and carry straight on into
+  design. If anything's still unresolved — an assumption the user hasn't
+  confirmed, an acceptance criterion you can't make checkable — **stop and
+  surface it** instead of advancing; resolve it first. The phase guard refuses
+  the jump until `docs/spec/<slug>.md` exists with its required sections, so a
+  premature `phase set` just tells you what's still missing.
 
   ## Not this
 

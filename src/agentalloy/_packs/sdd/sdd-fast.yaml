@@ -67,8 +67,11 @@ raw_prose: |
      contract's `scope.touches`; if you find yourself spreading wider, bail.
   3. **Test.** Add or update the tests that prove the acceptance, and run them
      green.
-  4. **Hand to ship.** Once the change is made and tests pass, you're done here —
-     the workflow advances to **ship** for the PR / delivery.
+  4. **Hand to ship.** Once the change is made and the tests pass, advance
+     yourself — `agentalloy phase set ship` — and carry on into the PR /
+     delivery. Don't wait to be told. The phase guard refuses the jump until
+     code exists under `src/` and a test under `tests/`, so a premature
+     `phase set` just tells you what's still missing.
 
   ## Bail to full SDD
 

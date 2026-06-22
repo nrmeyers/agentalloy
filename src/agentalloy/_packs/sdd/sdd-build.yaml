@@ -102,7 +102,14 @@ raw_prose: |
 
   Every case in `test-plan.md` is a passing test (plus the edges you added), the
   full suite is green with no regressions, and the work lives under `src/` with
-  tests under `tests/`. Then hand to **qa**.
+  tests under `tests/`.
+
+  Then advance yourself — don't wait to be told. With the suite green, run
+  `agentalloy phase set qa` and carry on into review. If anything's unresolved —
+  a case you couldn't make pass, a regression you can't explain — **stop and
+  surface it** instead of advancing; a red suite isn't done. The phase guard
+  refuses the jump until code exists under `src/` and tests under `tests/`, so a
+  premature `phase set` just tells you what's missing.
 
   ## Not this
 

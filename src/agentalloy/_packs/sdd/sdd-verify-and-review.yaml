@@ -110,10 +110,15 @@ raw_prose: |
   Write the verdict to **`docs/qa/<slug>.md`** with `## Checks` (the suite, lint,
   and type results) and `## Review` (the findings + the spec/non-goals verdict).
   A clean report — green bar, every AC met, no open Critical or required finding
-  — hands to **ship**.
+  — clears the way to ship. Advance yourself: `agentalloy phase set ship`, and
+  go straight into delivery. Don't wait to be told; a clean report *is* the
+  signal. The phase guard refuses the jump until `docs/qa/<slug>.md` exists with
+  its `## Checks` and `## Review` sections, so a premature `phase set` just names
+  what's missing.
 
   Anything open routes by *cause*, and you don't fix code here: the report is
-  the worklist for the phase that does.
+  the worklist for the phase that does. Don't advance to ship with an open
+  Critical or required finding — route it back instead.
 
   - **code defect** → `agentalloy phase set build`; build reproduces it as a
     failing test first, so the bug earns a regression test on the way out.

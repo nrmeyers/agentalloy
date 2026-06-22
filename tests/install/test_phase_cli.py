@@ -123,3 +123,106 @@ class TestPhaseFileFormat:
         assert "started_at:" in content
         assert "last_updated:" in content
         assert "workflow:" in content
+
+    def test_blocked_flag_not_persisted(self, repo_root: Path) -> None:
+        # The return-only `blocked` signal must never leak into the lock file.
+        run_phase_set("build", root=repo_root)
+        assert "blocked" not in (repo_root / ".agentalloy" / "phase").read_text()
+
+
+def _write_spec_doc(repo_root: Path) -> None:
+    """Write a spec doc that satisfies the `spec` phase's exit gate."""
+    spec = repo_root / "docs" / "spec"
+    spec.mkdir(parents=True, exist_ok=True)
+    (spec / "x.md").write_text("# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
+
+
+class TestGuardedAdvance:
+    """B2 — a *forward* `phase set` is gated on the current phase's exit gate.
+
+    Maps to test-plan TC15–TC20.
+    """
+
+    def test_forward_guard_blocks_when_artifact_missing(self, repo_root: Path) -> None:
+        # TC15: in `spec` with no docs/spec/*.md → spec→design refuses.
+        run_phase_set("spec", root=repo_root)
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is True
+        assert result["phase"] == "spec"  # unchanged
+        assert result["target"] == "design"
+        assert any("docs/spec" in a for a in result["advisories"])
+        # phase file still says spec
+        assert run_phase_get(root=repo_root)["phase"] == "spec"
+
+    def test_forward_guard_passes_when_artifact_present(self, repo_root: Path) -> None:
+        # TC16: conformant spec doc present → spec→design succeeds.
+        run_phase_set("spec", root=repo_root)
+        _write_spec_doc(repo_root)
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is False
+        assert result["phase"] == "design"
+
+    def test_force_bypasses_the_gate(self, repo_root: Path) -> None:
+        # TC17: --force writes regardless of the gate.
+        run_phase_set("spec", root=repo_root)
+        result = run_phase_set("design", root=repo_root, force=True)
+        assert result["blocked"] is False
+        assert result["phase"] == "design"
+
+    def test_backward_and_bail_are_unguarded(self, repo_root: Path) -> None:
+        # TC18: backward (qa→build, design→spec) and bail (sdd-fast→spec) never gate.
+        run_phase_set("qa", root=repo_root)
+        assert run_phase_set("build", root=repo_root)["phase"] == "build"
+
+        (repo_root / ".agentalloy" / "phase").unlink()
+        run_phase_set("design", root=repo_root)
+        assert run_phase_set("spec", root=repo_root)["phase"] == "spec"
+
+        (repo_root / ".agentalloy" / "phase").unlink()
+        run_phase_set("sdd-fast", root=repo_root)
+        assert run_phase_set("spec", root=repo_root)["phase"] == "spec"
+
+    def test_ship_to_intake_reset_is_unguarded(self, repo_root: Path) -> None:
+        # TC23 (partial): the ship→intake reset is not a linear-forward edge → unguarded.
+        run_phase_set("ship", root=repo_root)
+        assert run_phase_set("intake", root=repo_root)["phase"] == "intake"
+
+    def test_unknown_never_blocks_only_not_met_does(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # TC19: guard evaluates deterministically (lm_client=None). A semantic
+        # predicate yields UNKNOWN and must NOT block; only a deterministic
+        # NOT_MET blocks.
+        import agentalloy.signals.skill_loader as skill_loader
+
+        gate = {
+            "all_of": [
+                {"artifact_exists": {"path": "docs/spec/*.md"}},
+                {"artifact_completeness": {"path": "docs/spec/*.md", "criteria": "thorough"}},
+            ]
+        }
+        monkeypatch.setattr(skill_loader, "exit_gates_for_phase", lambda _phase: gate)
+
+        # deterministic part MET, semantic part UNKNOWN → allowed (UNKNOWN doesn't block)
+        run_phase_set("spec", root=repo_root)
+        _write_spec_doc(repo_root)
+        assert run_phase_set("design", root=repo_root)["blocked"] is False
+
+        # deterministic part NOT_MET → blocked, regardless of the UNKNOWN semantic part
+        (repo_root / ".agentalloy" / "phase").unlink()
+        for p in (repo_root / "docs" / "spec").glob("*.md"):
+            p.unlink()
+        run_phase_set("spec", root=repo_root)
+        assert run_phase_set("design", root=repo_root)["blocked"] is True
+
+    def test_phase_to_gate_loader_is_corpus_free(self, repo_root: Path) -> None:
+        # TC20: each phase maps to its packaged exit_gates, read from the wheel
+        # YAML with no corpus/DB present (repo_root has no .duckdb / LadybugDB).
+        from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+        spec_gate = exit_gates_for_phase("spec")
+        assert spec_gate is not None
+        assert "docs/spec" in str(spec_gate)
+
+        for phase in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast"):
+            assert exit_gates_for_phase(phase) is not None

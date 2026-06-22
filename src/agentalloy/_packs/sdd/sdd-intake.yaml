@@ -98,8 +98,12 @@ raw_prose: |
       agentalloy contract init --phase intake --slug <task-slug> --route <full|fast>
 
   Fill `domain_tags` and `scope.touches` honestly — they focus retrieval
-  downstream. Writing the contract completes intake; it hands off to **spec**
-  (full) or **sdd-fast** (fast) automatically.
+  downstream. Writing the contract completes intake. Advance to the route you
+  agreed and carry on: `agentalloy phase set spec` for the full lane, or
+  `agentalloy phase set sdd-fast` for the fast lane. (The contract write also
+  advances on the next turn, so the new phase opens either way; running it
+  yourself just keeps you moving now.) Stop here only if the route itself is
+  genuinely unclear — surface that and let the user make the call.
 
   ## Not this
 
