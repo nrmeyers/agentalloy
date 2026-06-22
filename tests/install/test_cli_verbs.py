@@ -161,7 +161,10 @@ class TestWire:
         assert script.exists()
         assert settings.exists()
         assert "UserPromptSubmit" in settings.read_text()
+        # Mutual exclusivity: the hook path writes NO proxy env carrier, in either
+        # the (legacy) home location or the new per-repo <root>/.agentalloy/ one.
         assert not (fake_home / ".agentalloy" / "claude-code-env.sh").exists()
+        assert not (repo_root / ".agentalloy" / "claude-code-env.sh").exists()
 
     def test_auto_detects_cursor_when_dir_present(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch

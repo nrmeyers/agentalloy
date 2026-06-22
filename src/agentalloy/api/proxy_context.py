@@ -50,9 +50,7 @@ def decode_proj_token(token: str) -> Path:
     return Path(text)
 
 
-def resolve_working_dir(
-    request: ProxyRequest, project_dir_override: Path | None = None
-) -> Path:
+def resolve_working_dir(request: ProxyRequest, project_dir_override: Path | None = None) -> Path:
     """Determine the project working directory for this request.
 
     Resolution order:

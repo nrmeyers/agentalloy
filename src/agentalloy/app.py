@@ -11,6 +11,7 @@ import httpx
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.compose_models import ErrorResponse
 from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.compose_router import router as compose_router
@@ -20,6 +21,7 @@ from agentalloy.api.health_router import HealthChecker, ReadinessChecker
 from agentalloy.api.health_router import router as health_router
 from agentalloy.api.hook_router import router as hook_router
 from agentalloy.api.proxy_anthropic_router import router as anthropic_router
+from agentalloy.api.proxy_passthrough_router import router as passthrough_router
 from agentalloy.api.proxy_router import router as proxy_router
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
@@ -148,6 +150,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.upstream_client = upstream_client
 
+    # Native Anthropic passthrough client (the /proj/<token>/v1/messages path).
+    # Always constructed (default upstream https://api.anthropic.com). It holds
+    # NO Anthropic credential — it forwards the caller's own, verbatim.
+    anthropic_passthrough_client = AnthropicPassthroughClient(settings.anthropic_upstream_url)
+    app.state.anthropic_passthrough_client = anthropic_passthrough_client
+
     try:
         yield
     finally:
@@ -161,6 +169,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             if aclient is not None:
                 with suppress(Exception):
                     await aclient.aclose()
+        with suppress(Exception):
+            await anthropic_passthrough_client.aclose()
         for closeable in (telemetry, embed_client, vector_store, store):
             with suppress(Exception):
                 closeable.close()
@@ -224,6 +234,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app.include_router(telemetry_router)
     app.include_router(proxy_router)
     app.include_router(anthropic_router)
+    app.include_router(passthrough_router)
     app.include_router(hook_router)
 
     return app

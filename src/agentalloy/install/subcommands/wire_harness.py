@@ -1145,14 +1145,26 @@ def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
 
 
 def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
-    """Wire Claude Code to use the AgentAlloy proxy.
+    """Wire Claude Code to use the AgentAlloy proxy (auth-transparent passthrough).
 
-    Writes ``~/.agentalloy/claude-code-env.sh`` with sentinel-bounded
-    ``ANTHROPIC_BASE_URL`` and ``ANTHROPIC_API_KEY`` exports. Claude Code
-    reads these environment variables at startup to route requests through
-    the proxy.
+    Writes a per-repo carrier at ``<root>/.agentalloy/claude-code-env.sh``
+    holding a sentinel-bounded ``ANTHROPIC_BASE_URL`` export. The URL embeds the
+    repo's ``/proj/<token>`` discriminator so the proxy resolves this repo from
+    the URL alone (see :func:`agentalloy.api.proxy_context.encode_proj_token`).
+
+    Auth transparency: we set **only** ``ANTHROPIC_BASE_URL`` and never
+    ``ANTHROPIC_API_KEY``. Setting any API key forces Claude Code into API-key
+    mode, which breaks account/OAuth auth for Pro/Max/Team users who have no API
+    key. The proxy forwards the caller's own credential upstream untouched.
+
+    Carrier: if ``<root>/.envrc`` exists, a sentinel-bounded ``source_env`` line
+    is appended (idempotently) so direnv loads the env file on ``cd``. If there
+    is no ``.envrc`` we do not create one — the returned ``hint`` record tells
+    the user to source the file in their shell or add it to direnv themselves.
     """
-    agentalloy_dir = Path.home() / ".agentalloy"
+    from agentalloy.api.proxy_context import encode_proj_token
+
+    agentalloy_dir = root / ".agentalloy"
     agentalloy_dir.mkdir(parents=True, exist_ok=True)
 
     env_path = agentalloy_dir / "claude-code-env.sh"
@@ -1160,13 +1172,15 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
     sentinel_begin = "# <!-- BEGIN agentalloy install -->"
     sentinel_end = "# <!-- END agentalloy install -->"
 
-    # No /v1 suffix: the Anthropic SDK appends /v1/messages to the base URL,
-    # so a /v1 here produces /v1/v1/messages (404 against the proxy).
-    proxy_url = f"http://localhost:{port}"
+    # The /proj/<token> discriminator lets the stateless proxy resolve this repo
+    # from the URL path alone, independent of its own cwd. No /v1 suffix: the
+    # Anthropic SDK appends /v1/messages to the base URL, so a /v1 here would
+    # produce /v1/v1/messages (404 against the proxy).
+    token = encode_proj_token(root)
+    proxy_url = f"http://localhost:{port}/proj/{token}"
     block_lines = [
         sentinel_begin,
         f"export ANTHROPIC_BASE_URL={proxy_url}",
-        "export ANTHROPIC_API_KEY=agentalloy",
         sentinel_end,
     ]
     block = "\n".join(block_lines)
@@ -1189,7 +1203,7 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
 
     install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]
 
-    return [
+    records: list[dict[str, Any]] = [
         {
             "path": str(env_path),
             # "replaced_file" when the file pre-existed: uninstall's
@@ -1200,6 +1214,48 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
             **({"original_content": original_content} if original_content is not None else {}),
         }
     ]
+
+    # Carrier: prefer direnv when an .envrc already exists; otherwise hint.
+    envrc_path = root / ".envrc"
+    rel_env = env_path.relative_to(root).as_posix()
+    if envrc_path.exists():
+        envrc_original = _capture_original(envrc_path)
+        envrc_block = f"{sentinel_begin}\nsource_env {rel_env}\n{sentinel_end}"
+        envrc_content = envrc_path.read_text()
+        if sentinel_begin in envrc_content and sentinel_end in envrc_content:
+            begin_idx = envrc_content.index(sentinel_begin)
+            end_idx = envrc_content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(envrc_content) and envrc_content[end_idx] == "\n":
+                end_idx += 1
+            envrc_content = envrc_content[:begin_idx] + envrc_block + "\n" + envrc_content[end_idx:]
+        else:
+            if envrc_content and not envrc_content.endswith("\n"):
+                envrc_content += "\n"
+            envrc_content += envrc_block + "\n"
+        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
+            envrc_path, envrc_content
+        )
+        records.append(
+            {
+                "path": str(envrc_path),
+                "action": "wrote_new_file" if envrc_original is None else "replaced_file",
+                "content_sha256": _sha256(envrc_block),
+                **({"original_content": envrc_original} if envrc_original is not None else {}),
+            }
+        )
+    else:
+        # No .envrc: don't create one. Emit a carrier hint on stderr and attach
+        # it to the env-file record (rather than a pathless record that uninstall
+        # would warn about) so the returned result still carries the guidance.
+        hint = (
+            f"AgentAlloy wrote {env_path}. Load it before running Claude Code: "
+            f"`source {rel_env}` in your shell, or add `source_env {rel_env}` to a "
+            "direnv `.envrc` in this repo."
+        )
+        print(f"[AgentAlloy] {hint}", file=sys.stderr)
+        records[0]["carrier_hint"] = hint
+
+    return records
 
 
 def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:

@@ -493,12 +493,12 @@ class TestState:
         assert st["harness_files_written"][0]["repo_root"] == str(repo_root)
         assert install_state.is_step_completed(st, STEP_NAME)
 
-    def test_records_files_written(self, repo_root: Path, mock_home: Path) -> None:
+    def test_records_files_written(self, repo_root: Path, mock_home: Path) -> None:  # noqa: ARG002
         wire_compat("claude-code", port=8000, root=repo_root)
         st = install_state.load_state(repo_root)
-        assert len(st["harness_files_written"]) == 1  # env file only
-        # Verify it wrote to the mocked home, not the real one
-        assert (mock_home / ".agentalloy" / "claude-code-env.sh").exists()
+        assert len(st["harness_files_written"]) == 1  # env file only (no .envrc)
+        # The carrier is per-repo now: <root>/.agentalloy/, not ~/.agentalloy/.
+        assert (repo_root / ".agentalloy" / "claude-code-env.sh").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -877,24 +877,23 @@ class TestProxyWiring:
         assert len(proxy_models) == 1
         assert proxy_models[0]["apiBase"] == "http://localhost:7777/v1"
 
-    def test_claude_code_proxy_writes_env_file(
-        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """claude-code default wiring writes ~/.agentalloy/claude-code-env.sh."""
-        fake_home = repo_root / "home"
-        fake_home.mkdir()
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+    def test_claude_code_proxy_writes_env_file(self, repo_root: Path) -> None:
+        """claude-code default wiring writes per-repo <root>/.agentalloy/claude-code-env.sh."""
+        from agentalloy.api.proxy_context import encode_proj_token
 
         result = wire_compat("claude-code", port=5555, root=repo_root)
         assert result["integration_vector"] == "proxy"
 
-        env_path = fake_home / ".agentalloy" / "claude-code-env.sh"
+        # Per-repo carrier, not ~/.agentalloy/.
+        env_path = repo_root / ".agentalloy" / "claude-code-env.sh"
         assert env_path.exists()
         content = env_path.read_text()
         assert SENTINEL_BEGIN in content
-        assert "ANTHROPIC_BASE_URL=http://localhost:5555" in content
+        token = encode_proj_token(repo_root)
+        assert f"ANTHROPIC_BASE_URL=http://localhost:5555/proj/{token}" in content
         assert "5555/v1" not in content  # SDK appends /v1/messages
-        assert "ANTHROPIC_API_KEY=agentalloy" in content
+        # Auth transparency: never set an API key (would break OAuth/account auth).
+        assert "ANTHROPIC_API_KEY" not in content
 
     def test_manual_proxy_prints_to_stderr(
         self, repo_root: Path, capsys: pytest.CaptureFixture[str]

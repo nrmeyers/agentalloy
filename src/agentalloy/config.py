@@ -89,6 +89,12 @@ class Settings(BaseSettings):
     upstream_model: str = ""
     upstream_api_key: str = ""
 
+    # Native Anthropic passthrough upstream (the /proj/<token>/v1/messages path).
+    # Distinct from upstream_url: this path forwards the caller's OWN credential
+    # verbatim and stores none of its own. Point it at another proxy to chain
+    # (Claude Code → AgentAlloy → … → Anthropic). Env: ANTHROPIC_UPSTREAM_URL.
+    anthropic_upstream_url: str = "https://api.anthropic.com"
+
     # Profile root. Resolves to ~/.agentalloy by default.
     profile_root: str = Field(default_factory=lambda: str(Path.home() / ".agentalloy"))
 
