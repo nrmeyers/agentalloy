@@ -20,6 +20,7 @@ from agentalloy.retrieval.embedding_errors import (
     EmbeddingErrorCode,
     EmbeddingErrorResult,
 )
+from agentalloy.retrieval.query_bounds import build_retrieval_query
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import (
     BM25Hit,
@@ -833,3 +834,73 @@ def test_lm_assist_hit_filters_to_kept_fragments(
     result = _retrieve_design(populated, populated_vectors)
     assert result.lm_assist_outcome == "hit"
     assert len(result.candidates) == 2
+
+
+# -------- query bounding: an oversized first turn must not reach the embedder --------
+
+
+class _RecordingLMClient(StubLMClient):
+    """StubLMClient that records every text handed to ``embed`` (still returning
+    the deterministic stub vectors)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.embed_calls: list[list[str]] = []
+
+    def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+        self.embed_calls.append(list(texts))
+        return super().embed(model=model, texts=texts)
+
+
+def test_retrieval_query_is_bounded_before_embedding(
+    populated: LadybugStore, populated_vectors: VectorStore
+) -> None:
+    # First user turn = a real instruction buried under a giant injected
+    # <system-reminder> dump (the 6050-token-500 shape). The dense leg must embed
+    # the stripped, bounded query — never the raw task that overflows the ceiling.
+    instruction = "add retry with backoff to the fastapi http client"
+    task = f"{instruction}\n<system-reminder>\n{'noise ' * 5000}\n</system-reminder>"
+    lm = _RecordingLMClient()
+
+    result = retrieve_domain_candidates(
+        populated,
+        lm,
+        populated_vectors,
+        task=task,
+        phase="design",
+        domain_tags=None,
+        k=10,
+        embedding_model="stub-embed",
+    )
+
+    assert not isinstance(result, EmbeddingErrorResult)
+    assert lm.embed_calls, "dense leg should have embedded the bounded query"
+    embedded = lm.embed_calls[0][0]
+    assert embedded == f"search_query: {build_retrieval_query(task)}"
+    assert "noise" not in embedded
+    assert instruction in embedded
+
+
+def test_noise_only_task_skips_dense_leg(
+    populated: LadybugStore, populated_vectors: VectorStore
+) -> None:
+    # Once injected context is stripped the first turn carries no instruction, so
+    # the bounded query is empty. Skip the dense embed entirely (embedding "" is a
+    # constant, meaningless vector) and lean on BM25 — without raising or 500ing.
+    task = "<system-reminder>" + ("noise " * 2000) + "</system-reminder>"
+    assert build_retrieval_query(task) == ""
+    lm = _RecordingLMClient()
+
+    result = retrieve_domain_candidates(
+        populated,
+        lm,
+        populated_vectors,
+        task=task,
+        phase="design",
+        domain_tags=None,
+        k=10,
+        embedding_model="stub-embed",
+    )
+
+    assert not isinstance(result, EmbeddingErrorResult)
+    assert lm.embed_calls == [], "empty bounded query must not reach the embedder"

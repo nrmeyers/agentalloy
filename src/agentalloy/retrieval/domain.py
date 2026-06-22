@@ -45,6 +45,7 @@ from agentalloy.retrieval.lm_assist import (
     load_config,
     max_candidates,
 )
+from agentalloy.retrieval.query_bounds import build_retrieval_query
 from agentalloy.retrieval.rerank import build_reranker_from_env, rerank_max_pairs
 from agentalloy.storage.card_index import is_card_id, skill_id_from_card_id
 from agentalloy.storage.vector_store import SimilarityHit, VectorStore
@@ -354,7 +355,7 @@ def retrieve_domain_candidates(
     Stages:
 
     1. Check circuit breaker — if open, skip embedding and return BM25-only
-    2. embed the task via ``safe_embed`` (propagates EmbeddingError on failure)
+    2. bound the task (``build_retrieval_query``), embed via ``safe_embed``; empty -> BM25-only
     3. DuckDB top-k vector search filtered by phase categories
     4. DuckDB BM25 search on prose column filtered by phase categories (with keyword extraction)
     5. Reciprocal Rank Fusion of both legs (with phase-specific weighting)
@@ -402,36 +403,14 @@ def retrieve_domain_candidates(
             start_ns=start_ns,
         )
 
-    # ------------------------------------------------------------------
-    # Stage 2: Safe embedding with circuit-breaker integration
-    # ------------------------------------------------------------------
-    try:
-        embed_input = f"search_query: {task}"
-        query_vec = safe_embed(lm, embedding_model, [embed_input])[0]
-    except EmbeddingError as exc:
-        if exc.code not in _DEGRADABLE_EMBEDDING_CODES:
-            if exc.original is not None:
-                raise exc.original from exc
-            raise
-        logger.warning(
-            "embedding failed for task=%s phase=%s code=%s: %s",
-            task[:80],
-            phase,
-            exc.code.value,
-            exc.message,
-        )
-        return _bm25_fallback_result(
-            frag_src,
-            vector_store,
-            task=task,
-            phase=phase,
-            domain_tags=domain_tags,
-            k=k,
-            raw_scores=raw_scores,
-            contract_tags=contract_tags,
-            error=exc,
-            start_ns=start_ns,
-        )
+    # Bound the retrieval query ONCE: strip injected context (<system-reminder>
+    # blocks, CLAUDE.md / environment dumps, fenced code) out of the first user
+    # turn and head-cap to ~512 tokens. The raw task routinely overflowed the hard
+    # 2048-token embed ceiling (the logged 6050-token 500 -> silent BM25 fallback),
+    # and a focused query is a sharper dense vector besides. The same bounded query
+    # also feeds the cross-encoder reranker and the LM scorer below; the phase-gate
+    # path deliberately stays on full first-turn text (handled in classifier.py).
+    query = build_retrieval_query(task)
 
     # Phase-agnostic retrieval: the candidate pool is no longer gated by
     # phase->category eligibility. An A/B (gold-hit 18/18 and audit topic 0.97
@@ -442,13 +421,55 @@ def retrieve_domain_candidates(
     pool_size = max(k * 2, 50)
     deprecated_ids = frag_src.get_deprecated_skill_ids()
 
-    dense_hits = vector_store.search_similar(
-        query_vec,
-        categories=None,
-        phases=None,
-        deprecated_skill_ids=deprecated_ids,
-        k=pool_size,
-    )
+    # ------------------------------------------------------------------
+    # Stage 2: Safe embedding with circuit-breaker integration
+    # ------------------------------------------------------------------
+    # An empty bounded query means the first turn was all injected noise with no
+    # instruction left to embed; "" embeds to a constant, meaningless vector, so
+    # skip the dense leg and let BM25 carry the request. (Fix B will mark the
+    # trace dense_leg_degraded so this path is observable rather than silent.)
+    dense_hits: list[SimilarityHit] = []
+    if query:
+        try:
+            embed_input = f"search_query: {query}"
+            query_vec = safe_embed(lm, embedding_model, [embed_input])[0]
+        except EmbeddingError as exc:
+            if exc.code not in _DEGRADABLE_EMBEDDING_CODES:
+                if exc.original is not None:
+                    raise exc.original from exc
+                raise
+            logger.warning(
+                "embedding failed for task=%s phase=%s code=%s: %s",
+                task[:80],
+                phase,
+                exc.code.value,
+                exc.message,
+            )
+            return _bm25_fallback_result(
+                frag_src,
+                vector_store,
+                task=task,
+                phase=phase,
+                domain_tags=domain_tags,
+                k=k,
+                raw_scores=raw_scores,
+                contract_tags=contract_tags,
+                error=exc,
+                start_ns=start_ns,
+            )
+        dense_hits = vector_store.search_similar(
+            query_vec,
+            categories=None,
+            phases=None,
+            deprecated_skill_ids=deprecated_ids,
+            k=pool_size,
+        )
+    else:
+        logger.warning(
+            "retrieval query empty after bounding for task=%s phase=%s; BM25-only",
+            task[:80],
+            phase,
+        )
 
     # BM25 query: contract tags take priority over rule-extracted keywords.
     # The paid LLM picked them deliberately; they're better keywords than
@@ -535,7 +556,7 @@ def retrieve_domain_candidates(
     else:
         # Stage A: cross-encoder rerank of the top skills before selection.
         # Best-effort — a failure or disabled stage leaves ``ranked`` untouched.
-        ranked, reranked = _maybe_rerank(ranked, task)
+        ranked, reranked = _maybe_rerank(ranked, query)
 
         # Graph expansion (RETRIEVAL_GRAPH_EXPAND=on) runs *before* Stage B so
         # the reranker scores graph-expanded candidates too. Required-skill
@@ -556,7 +577,7 @@ def retrieve_domain_candidates(
         # order). On disabled/timeout/error it returns (None, outcome) and the
         # deterministic path below runs byte-for-byte as if Stage B did not
         # exist. The deterministic path never sees the reranker.
-        lm_selected, lm_outcome = _maybe_lm_arbitrate(ranked, task, k)
+        lm_selected, lm_outcome = _maybe_lm_arbitrate(ranked, query, k)
         if lm_selected is not None:
             selected = lm_selected
             skills_ranked = list(dict.fromkeys(f.skill_id for f in ranked))
@@ -635,13 +656,13 @@ def _graph_expand(
     return selected + appended
 
 
-def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveFragment], bool]:
+def _maybe_rerank(ranked: list[ActiveFragment], query: str) -> tuple[list[ActiveFragment], bool]:
     """Reorder ``ranked`` by cross-encoder relevance over the top skills.
 
     Groups fragments by skill (rank order; dict insertion order gives this for
     free, same trick as ``skill_granular_select``), takes the top
     ``RUNTIME_RERANK_MAX_PAIRS`` skills, scores each skill's best fragment
-    against ``task``, and reorders those skills by score descending (stable for
+    against ``query``, and reorders those skills by score descending (stable for
     ties). Skills beyond the cap keep their original relative order after the
     reranked ones. Within-skill fragment order is preserved throughout.
 
@@ -650,6 +671,9 @@ def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveF
     stage, or trivial pool returns the input list unchanged with False — this
     function never raises.
     """
+    if not query:
+        # Nothing instruction-bearing survived query bounding; skip reranking.
+        return ranked, False
     reranker = build_reranker_from_env()
     if reranker is None:
         return ranked, False
@@ -671,7 +695,7 @@ def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveF
     passages = [f"{sid.replace('-', ' ')}: {skill_queues[sid][0].content}" for sid in head_ids]
 
     try:
-        scores = reranker.score(task, passages)
+        scores = reranker.score(query, passages)
     except Exception:  # pyright: ignore[reportBroadExceptionCaught]
         # The latched reranker already swallows scorer errors, but guard the
         # call site too — reranking must never break retrieval.
@@ -692,11 +716,11 @@ def _maybe_rerank(ranked: list[ActiveFragment], task: str) -> tuple[list[ActiveF
 
 
 def _maybe_lm_arbitrate(
-    ranked: list[ActiveFragment], task: str, k: int
+    ranked: list[ActiveFragment], query: str, k: int
 ) -> tuple[list[ActiveFragment] | None, LMAssistOutcome]:
     """Stage B — LM fragment re-rank over the top fused fragments.
 
-    Scores up to ``max_candidates()`` top fused fragments against ``task``,
+    Scores up to ``max_candidates()`` top fused fragments against ``query``,
     keeps those whose yes-probability clears the configured threshold (in
     fusion-score order, capped at ``k``), and returns them as the final
     selection. An empty keep is a *valid* high-confidence result meaning
@@ -714,6 +738,10 @@ def _maybe_lm_arbitrate(
     Never raises — the scorer swallows its own errors and this function guards
     the call site too.
     """
+    if not query:
+        # Nothing instruction-bearing survived query bounding; defer to the
+        # deterministic path.
+        return None, LMAssistOutcome.DISABLED
     scorer = build_scorer_from_env()
     if scorer is None:
         return None, LMAssistOutcome.DISABLED
@@ -727,7 +755,7 @@ def _maybe_lm_arbitrate(
     documents = [f"{f.skill_id.replace('-', ' ')}: {f.content}" for f in head]
 
     try:
-        result = scorer.score(task, documents)
+        result = scorer.score(query, documents)
     except Exception:  # pyright: ignore[reportBroadExceptionCaught]
         logger.warning("lm-assist Stage B raised at call site; using deterministic selection")
         return None, LMAssistOutcome.ERROR
