@@ -124,6 +124,10 @@ class CompositionTrace:
     # embedding failure (500 / circuit-open) or an empty bounded query. Makes the
     # otherwise-silent BM25 fallback queryable instead of inferred.
     dense_leg_degraded: bool = False
+    # True when a semantic phase-gate (or transition-trigger intent) hit an embed
+    # failure: the gate fell open to UNKNOWN and the transition may have silently
+    # not fired. Distinguishes an infra-degraded gate from a legitimately-unmet one.
+    phase_gate_embed_failed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +202,8 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     tokens_flat_equivalent INTEGER NOT NULL DEFAULT 0,
     lm_assist_outcome VARCHAR NOT NULL DEFAULT 'disabled',
     lm_assist_model VARCHAR,
-    dense_leg_degraded BOOLEAN NOT NULL DEFAULT FALSE
+    dense_leg_degraded BOOLEAN NOT NULL DEFAULT FALSE,
+    phase_gate_embed_failed BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -638,8 +643,9 @@ class VectorStore:
                 event_type, pre_filter_matched, gates_met, gates_unmet, qwen_calls,
                 contract_path, contract_tags, bm25_source, reranked,
                 tokens_returned, tokens_flat_equivalent,
-                lm_assist_outcome, lm_assist_model, dense_leg_degraded
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                lm_assist_outcome, lm_assist_model, dense_leg_degraded,
+                phase_gate_embed_failed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -675,6 +681,7 @@ class VectorStore:
                 trace.lm_assist_outcome,
                 trace.lm_assist_model,
                 trace.dense_leg_degraded,
+                trace.phase_gate_embed_failed,
             ],
         )
 
@@ -704,7 +711,8 @@ class VectorStore:
                    gates_met, gates_unmet, qwen_calls,
                    contract_path, contract_tags, bm25_source, reranked,
                    tokens_returned, tokens_flat_equivalent,
-                   lm_assist_outcome, lm_assist_model, dense_leg_degraded
+                   lm_assist_outcome, lm_assist_model, dense_leg_degraded,
+                   phase_gate_embed_failed
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -746,6 +754,7 @@ class VectorStore:
                 lm_assist_outcome=str(r[30]) if r[30] is not None else "disabled",
                 lm_assist_model=r[31],
                 dense_leg_degraded=bool(r[32]),
+                phase_gate_embed_failed=bool(r[33]),
             )
             for r in rows
         ]
@@ -936,6 +945,7 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("lm_assist_outcome", "VARCHAR", "DEFAULT 'disabled'"),
     ("lm_assist_model", "VARCHAR", ""),
     ("dense_leg_degraded", "BOOLEAN", "DEFAULT FALSE"),
+    ("phase_gate_embed_failed", "BOOLEAN", "DEFAULT FALSE"),
 )
 
 

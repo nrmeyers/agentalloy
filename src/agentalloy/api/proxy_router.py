@@ -270,6 +270,7 @@ async def _write_flow_telemetry(
     latency_ms: int | None,
     error_code: str | None = None,
     source_skill_ids: list[str] | None = None,
+    phase_gate_embed_failed: bool = False,
 ) -> None:
     """Write a telemetry trace for the full proxy request flow."""
     if vector_store is None:
@@ -288,6 +289,7 @@ async def _write_flow_telemetry(
         total_latency_ms=latency_ms,
         source_skill_ids=source_skill_ids,
         error_code=error_code,
+        phase_gate_embed_failed=phase_gate_embed_failed,
     )
 
 
@@ -351,6 +353,10 @@ async def proxy_chat_completions(
             )
             modified_request = request
 
+    # Carry the phase-gate embed-failure flag into every telemetry write below
+    # (computed once; the value is the same for all exit paths of this request).
+    gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False
+
     # --- Step 5: Forward to upstream ---
     try:
         payload = _build_payload(modified_request, settings.upstream_model)
@@ -380,6 +386,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=None,  # streaming latency tracked separately
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _stream_upstream_response(upstream, payload)
 
@@ -402,6 +409,7 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             error_code=error_code,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.TimeoutException as e:
@@ -420,6 +428,7 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             error_code=error_code,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.RequestError as e:
@@ -438,6 +447,7 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             error_code=error_code,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.HTTPError as e:
@@ -456,6 +466,7 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             error_code=error_code,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _upstream_unavailable_error(str(e))
 
@@ -475,6 +486,7 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             error_code=error_code,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         return _upstream_unavailable_error(f"HTTP {resp.status_code}")
 
@@ -494,6 +506,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             source_skill_ids=source_skill_ids,
+            phase_gate_embed_failed=gate_embed_failed,
         )
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
@@ -515,6 +528,7 @@ async def proxy_chat_completions(
         signal_result.qwen_calls if signal_result else 0,
         latency_ms=latency_ms,
         source_skill_ids=source_skill_ids,
+        phase_gate_embed_failed=gate_embed_failed,
     )
 
     return JSONResponse(

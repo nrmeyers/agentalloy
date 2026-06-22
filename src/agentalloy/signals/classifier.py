@@ -284,14 +284,19 @@ def _classify_intent(
     intent: str,
     lm_client: EmbedClient,
     model: str,
+    ctx: PredicateContext | None = None,
 ) -> PredicateResult:
-    """Named-intent decision via the selected backend, cosine as the floor."""
+    """Named-intent decision via the selected backend, cosine as the floor.
+
+    ``ctx`` (when provided) receives an embed-failure flag if the cosine floor's
+    embed call errors — the reranker leg never embeds, so only the floor records.
+    """
     scorer = build_intent_scorer_from_env()
     if scorer is not None:
         verdict = _intent_rerank(text, intent, scorer, _rerank_threshold())
         if verdict is not None:
             return verdict
-    return _intent_similarity(text, intent, lm_client, model)
+    return _intent_similarity(text, intent, lm_client, model, ctx=ctx)
 
 
 # Forward-transition intents: the user/agent signaling the current phase's work
@@ -337,7 +342,7 @@ def check_transition_trigger(
                 model = None
         if model:
             for intent in _TRANSITION_INTENTS:
-                if _classify_intent(text, intent, lm_client, model) is PredicateResult.MET:
+                if _classify_intent(text, intent, lm_client, model, ctx=ctx) is PredicateResult.MET:
                     return PreFilterMatch(name="intent", detail=f"intent={intent}")
 
     # Fallback floor: deterministic keyword / artifact-event / tool-use match.
@@ -373,6 +378,7 @@ def _intent_similarity(
     lm_client: EmbedClient,
     model: str,
     threshold: float = _SIMILARITY_THRESHOLD,
+    ctx: PredicateContext | None = None,
 ) -> PredicateResult:
     refs = _INTENT_REFERENCES.get(intent)
     if not refs:
@@ -386,6 +392,8 @@ def _intent_similarity(
         )
     except Exception as exc:
         _log.warning("phase-gate embed failed; gate -> UNKNOWN (transition may not fire): %s", exc)
+        if ctx is not None:
+            ctx.record_embed_failure()
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
     qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant
@@ -400,6 +408,7 @@ def _topic_similarity(
     lm_client: EmbedClient,
     model: str,
     threshold: float = _SIMILARITY_THRESHOLD,
+    ctx: PredicateContext | None = None,
 ) -> PredicateResult:
     if not topics:
         return PredicateResult.UNKNOWN
@@ -411,6 +420,8 @@ def _topic_similarity(
         )
     except Exception as exc:
         _log.warning("phase-gate embed failed; gate -> UNKNOWN (transition may not fire): %s", exc)
+        if ctx is not None:
+            ctx.record_embed_failure()
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
     qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant
@@ -430,7 +441,7 @@ def eval_user_intent_matches(
     text = (ctx.recent_prompt_text or "").strip()
     if not text or not intent:
         return PredicateResult.UNKNOWN
-    return _classify_intent(text, intent, lm_client, model)
+    return _classify_intent(text, intent, lm_client, model, ctx=ctx)
 
 
 def eval_agent_intent_matches(
@@ -459,7 +470,7 @@ def eval_agent_intent_matches(
 
     if not text:
         return PredicateResult.UNKNOWN
-    return _classify_intent(text, intent, lm_client, model)
+    return _classify_intent(text, intent, lm_client, model, ctx=ctx)
 
 
 def eval_artifact_completeness(
@@ -483,7 +494,7 @@ def eval_prompt_topic_matches(
     text = (ctx.recent_prompt_text or "").strip()
     if not text or not topics:
         return PredicateResult.UNKNOWN
-    return _topic_similarity(text, topics, lm_client, model)
+    return _topic_similarity(text, topics, lm_client, model, ctx=ctx)
 
 
 SEMANTIC_PREDICATES: dict[

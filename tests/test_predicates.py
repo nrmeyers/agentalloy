@@ -39,6 +39,32 @@ def _ctx(tmp_path: Path, **kwargs: Any) -> PredicateContext:
 
 
 # ---------------------------------------------------------------------------
+# embed-failure diagnostics sink
+# ---------------------------------------------------------------------------
+
+
+def test_embed_failed_defaults_false(tmp_path: Path) -> None:
+    """A fresh context reports no embed failure."""
+    assert _ctx(tmp_path).embed_failed is False
+
+
+def test_record_embed_failure_sets_flag(tmp_path: Path) -> None:
+    """record_embed_failure flips embed_failed and is idempotent."""
+    ctx = _ctx(tmp_path)
+    ctx.record_embed_failure()
+    assert ctx.embed_failed is True
+    ctx.record_embed_failure()  # idempotent — still True, no error
+    assert ctx.embed_failed is True
+
+
+def test_embed_failure_is_per_context(tmp_path: Path) -> None:
+    """The sink is per-instance: one context's failure doesn't leak to another."""
+    failed = _ctx(tmp_path)
+    failed.record_embed_failure()
+    assert _ctx(tmp_path).embed_failed is False
+
+
+# ---------------------------------------------------------------------------
 # artifact_exists / artifact_absent
 # ---------------------------------------------------------------------------
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -160,6 +160,62 @@ def test_intent_similarity_embed_failure_returns_unknown() -> None:
     client.embed.side_effect = RuntimeError("connection refused")
     result = _intent_similarity("text", "completion", client, "embed-model")
     assert result == PredicateResult.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# embed-failure observability: a failed embed records on the PredicateContext
+# so the proxy can surface a silently-degraded phase gate (not just an UNKNOWN).
+# ---------------------------------------------------------------------------
+
+
+def test_intent_similarity_embed_failure_records_on_ctx(tmp_path: Path) -> None:
+    from agentalloy.signals.predicates import PredicateContext
+
+    ctx = PredicateContext(project_root=tmp_path, current_phase="build")
+    client = MagicMock()
+    client.embed.side_effect = RuntimeError("input too large")
+    result = _intent_similarity("text", "completion", client, "embed-model", ctx=ctx)
+    assert result == PredicateResult.UNKNOWN
+    assert ctx.embed_failed is True
+
+
+def test_intent_similarity_success_leaves_ctx_clean(tmp_path: Path) -> None:
+    from agentalloy.signals.predicates import PredicateContext
+
+    ctx = PredicateContext(project_root=tmp_path, current_phase="build")
+    client = _mock_client([[1.0, 0.0], [0.99, 0.14], [0.0, 1.0]])
+    _intent_similarity("done", "completion", client, "embed-model", threshold=0.75, ctx=ctx)
+    assert ctx.embed_failed is False
+
+
+def test_topic_similarity_embed_failure_records_on_ctx(tmp_path: Path) -> None:
+    from agentalloy.signals.predicates import PredicateContext
+
+    ctx = PredicateContext(project_root=tmp_path, current_phase="build")
+    client = MagicMock()
+    client.embed.side_effect = RuntimeError("connection refused")
+    result = _topic_similarity("auth?", ["authentication"], client, "embed-model", ctx=ctx)
+    assert result == PredicateResult.UNKNOWN
+    assert ctx.embed_failed is True
+
+
+def test_eval_user_intent_matches_records_embed_failure(tmp_path: Path) -> None:
+    """The public predicate path threads ctx through so the failure is recorded."""
+    from agentalloy.signals.predicates import PredicateContext
+
+    ctx = PredicateContext(
+        project_root=tmp_path,
+        current_phase="build",
+        recent_prompt_text="are we done here",
+    )
+    client = MagicMock()
+    client.embed.side_effect = RuntimeError("input too large")
+    # Force the cosine floor (reranker off) so the embed call is actually made.
+    monkey = MagicMock(return_value=None)
+    with patch("agentalloy.signals.classifier.build_intent_scorer_from_env", monkey):
+        result = eval_user_intent_matches({"intent": "completion"}, ctx, client, "embed-model")
+    assert result == PredicateResult.UNKNOWN
+    assert ctx.embed_failed is True
 
 
 # ---------------------------------------------------------------------------

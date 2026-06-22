@@ -391,6 +391,7 @@ def test_query_traces_returns_all_27_fields(store: VectorStore) -> None:
         contract_tags=["tag1", "tag2"],
         bm25_source="contract",
         dense_leg_degraded=True,
+        phase_gate_embed_failed=True,
     )
     store.record_composition_trace(trace)
     assert store.count_traces() == 1
@@ -426,6 +427,7 @@ def test_query_traces_returns_all_27_fields(store: VectorStore) -> None:
     assert r.contract_tags == ["tag1", "tag2"]
     assert r.bm25_source == "contract"
     assert r.dense_leg_degraded is True
+    assert r.phase_gate_embed_failed is True
 
 
 # ---------------------------------------------------------------------------

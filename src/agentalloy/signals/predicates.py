@@ -33,6 +33,12 @@ class PredicateContext:
     _git_cache: dict[str, str | None] = field(
         default_factory=lambda: cast(dict[str, str | None], {})
     )
+    # Mutable diagnostics sink (same frozen-dataclass-safe pattern as _git_cache).
+    # Semantic predicates record an embed-call failure here so the proxy can
+    # surface a silently-degraded phase gate in telemetry: an UNKNOWN caused by
+    # the embed server erroring is otherwise indistinguishable from an UNKNOWN
+    # caused by "nothing to classify". See record_embed_failure / embed_failed.
+    _diagnostics: dict[str, bool] = field(default_factory=lambda: cast(dict[str, bool], {}))
 
     def __post_init__(self) -> None:
         if self.contracts_root is None:
@@ -40,6 +46,21 @@ class PredicateContext:
             object.__setattr__(
                 self, "contracts_root", self.project_root / ".agentalloy" / "contracts"
             )
+
+    def record_embed_failure(self) -> None:
+        """Flag that a semantic predicate's embed call failed this evaluation.
+
+        The predicate still returns UNKNOWN (the gate fails open), but UNKNOWN
+        alone can't tell an infra failure from "no text to score". This makes the
+        embed failure observable so a silently-not-fired phase transition is
+        queryable in telemetry instead of inferred from logs.
+        """
+        self._diagnostics["embed_failed"] = True
+
+    @property
+    def embed_failed(self) -> bool:
+        """True if any semantic predicate hit an embed failure this evaluation."""
+        return bool(self._diagnostics.get("embed_failed"))
 
 
 def _glob_files(root: Path, pattern: str) -> list[Path]:

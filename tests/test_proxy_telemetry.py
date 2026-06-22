@@ -112,6 +112,31 @@ class TestWriteProxyTrace:
         assert trace.gates_unmet == ["integration_passed"]
         assert trace.qwen_calls == 2
 
+    def test_phase_gate_embed_failed_field(self):
+        """phase_gate_embed_failed flows through to the trace when set."""
+        mock_store = MagicMock()
+        write_proxy_trace(
+            mock_store,
+            phase="design",
+            task_prompt="looks done",
+            status="proxy_passthrough",
+            phase_gate_embed_failed=True,
+        )
+        trace = mock_store.record_composition_trace.call_args[0][0]
+        assert trace.phase_gate_embed_failed is True
+
+    def test_phase_gate_embed_failed_defaults_false(self):
+        """phase_gate_embed_failed defaults to False when not passed."""
+        mock_store = MagicMock()
+        write_proxy_trace(
+            mock_store,
+            phase="design",
+            task_prompt="plan",
+            status="proxy_passthrough",
+        )
+        trace = mock_store.record_composition_trace.call_args[0][0]
+        assert trace.phase_gate_embed_failed is False
+
     def test_error_code_field(self):
         """error_code is written when present."""
         mock_store = MagicMock()

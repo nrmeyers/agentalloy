@@ -246,7 +246,9 @@ def test_classify_intent_cosine_optout_uses_cosine(monkeypatch: pytest.MonkeyPat
     sentinel = PredicateResult.MET
     cosine_called: list[tuple[str, str]] = []
 
-    def fake_cosine(text: str, intent: str, _client: object, _model: str) -> PredicateResult:
+    def fake_cosine(
+        text: str, intent: str, _client: object, _model: str, ctx: object = None
+    ) -> PredicateResult:
         cosine_called.append((text, intent))
         return sentinel
 

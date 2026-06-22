@@ -205,6 +205,61 @@ class TestEvaluateSignal:
         assert result.advisories == ["produce docs/spec/*.md to advance"]
         assert result.pre_filter_matched == "keyword='deploy'"
 
+    def test_phase_gate_embed_failure_surfaced_on_result(self, tmp_path: Path) -> None:
+        """A semantic-gate embed failure during eval is surfaced on the result.
+
+        decide_transition runs the gates against the shared ctx; here it records
+        an embed failure (as the real classifier does on a 500 / unreachable
+        embed). evaluate_signal must read that off ctx and flag it for telemetry
+        instead of letting the silently-degraded gate vanish into an UNKNOWN.
+        """
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")  # steady-state: result hinges on the eval
+        mock_match = PreFilterMatch(name="intent", detail="intent=completion")
+
+        def _fail_embed(**kwargs: Any) -> MagicMock:
+            kwargs["ctx"].record_embed_failure()
+            return _advisory(["produce docs/spec/*.md to advance"])
+
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["deploy"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=mock_match,
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.decide_transition",
+                side_effect=_fail_embed,
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("are we done?"), tmp_path, MagicMock()))
+        assert result.phase_gate_embed_failed is True
+
+    def test_phase_gate_embed_failed_false_on_clean_eval(self, tmp_path: Path) -> None:
+        """A healthy gate eval leaves phase_gate_embed_failed False."""
+        _set_phase(tmp_path, "build")
+        _set_announced(tmp_path, "build")
+        mock_match = PreFilterMatch(name="intent", detail="intent=completion")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["deploy"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=mock_match,
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.decide_transition",
+                return_value=_advisory(["produce docs/spec/*.md to advance"]),
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("are we done?"), tmp_path, MagicMock()))
+        assert result.phase_gate_embed_failed is False
+
     def test_clean_transition_writes_phase_without_injecting(self, tmp_path: Path) -> None:
         """A clean transition (gates met, no advisory) advances the phase but
         injects nothing this turn — the new phase announces on the next turn."""

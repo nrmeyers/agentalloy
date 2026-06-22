@@ -74,6 +74,12 @@ class SignalResult:
     gates_unmet: list[str] = field(default_factory=lambda: list[str]())
     qwen_calls: int = 0
 
+    # True when a semantic phase-gate (or the transition-trigger intent) hit an
+    # embed failure this turn — the gate fell open to UNKNOWN and the transition
+    # may have silently not fired. Surfaced so telemetry can distinguish an
+    # infra-degraded gate from a legitimately-unmet one. See PredicateContext.
+    phase_gate_embed_failed: bool = False
+
     # Human-facing gate advisories (e.g. "intent fired but the exit artifact is
     # missing"). Surfaced to the agent alongside composed skills.
     advisories: list[str] = field(default_factory=lambda: list[str]())
@@ -267,6 +273,13 @@ async def evaluate_signal(
 
         await asyncio.to_thread(_run_gates)
 
+    # Did any semantic gate / transition-trigger intent hit an embed failure this
+    # turn? Read off the shared ctx (the trigger ran on this thread, the gates in
+    # the worker thread — both mutate the same diagnostics sink, and to_thread
+    # has already joined). Carried into telemetry so a silently-degraded gate is
+    # queryable instead of only a WARNING line.
+    phase_gate_embed_failed = ctx.embed_failed
+
     # 7. Tier 2 cadence: resolve the current work-item contract and decide whether
     #    its domain block fires. Tier 2 fires when the cursor changed since we last
     #    composed it — on phase entry (the incoming contract becomes current) or an
@@ -288,6 +301,7 @@ async def evaluate_signal(
             gates_met=gates_met,
             gates_unmet=gates_unmet,
             qwen_calls=qwen_calls,
+            phase_gate_embed_failed=phase_gate_embed_failed,
         )
 
     # Record cadence state now so the next turn stays quiet. The signal layer owns
@@ -317,4 +331,5 @@ async def evaluate_signal(
         gates_unmet=gates_unmet,
         qwen_calls=qwen_calls,
         advisories=advisories,
+        phase_gate_embed_failed=phase_gate_embed_failed,
     )

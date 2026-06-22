@@ -35,6 +35,7 @@ def write_proxy_trace(
     total_latency_ms: int | None = None,
     source_skill_ids: Sequence[str] | None = None,
     error_code: str | None = None,
+    phase_gate_embed_failed: bool = False,
 ) -> None:
     """Write a CompositionTrace for a proxy request.
 
@@ -54,6 +55,9 @@ def write_proxy_trace(
         total_latency_ms: Total proxy request latency in milliseconds.
         source_skill_ids: Skill IDs injected into the system message.
         error_code: Error message if the request failed.
+        phase_gate_embed_failed: True when a semantic phase-gate / transition-trigger
+            embed call failed this turn (gate fell open to UNKNOWN, transition may
+            not have fired).
     """
     try:
         trace = CompositionTrace(
@@ -70,6 +74,7 @@ def write_proxy_trace(
             total_latency_ms=total_latency_ms,
             source_skill_ids=list(source_skill_ids) if source_skill_ids else [],
             error_code=error_code,
+            phase_gate_embed_failed=phase_gate_embed_failed,
         )
         vector_store.record_composition_trace(trace)
     except Exception:  # noqa: BLE001 — soft-fail; telemetry never blocks the request
