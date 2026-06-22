@@ -329,6 +329,8 @@ If your harness honors a custom API base URL (OpenAI / Anthropic / a config-file
 agentalloy wire --harness <name>
 ```
 
+**Claude Code is auth-transparent.** Wiring writes a per-repo `.agentalloy/claude-code-env.sh` that exports **only** `ANTHROPIC_BASE_URL=http://localhost:47950/proj/<token>` — never an API key. The `/proj/<token>` segment is `base64url(realpath)` of the repo, so the proxy resolves this repo's phase and lifecycle straight from the URL (no shared state). Because no key is set, Claude Code attaches your **own** credential and the proxy forwards it verbatim — account/OAuth auth (Pro/Max/Team, who have no API key) keeps working unchanged. The env file is sourced via direnv if a `.envrc` is present, otherwise `wire` prints a one-line `source` hint.
+
 ### Wired into a sidecar harness
 
 A few harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI) route through their own backends and can't be intercepted. For those, AgentAlloy writes a static rules file and a file-watching sidecar regenerates that file within ~1s of a phase or contract change. You start the sidecar once per session:
@@ -392,8 +394,9 @@ Each subcommand emits structured JSON on stdout; pair with `jq` for scripting.
 
 AgentAlloy serves both OpenAI-compatible and Anthropic Messages API endpoints through the proxy:
 
+- `POST /proj/{token}/v1/messages` — native Anthropic passthrough (Claude Code); auth-transparent, per-repo `{token}` discriminator, no translation
+- `POST /v1/messages` — Anthropic→OpenAI translation shim (for Anthropic-format callers on an OpenAI upstream, e.g. Cline)
 - `POST /v1/chat/completions` — OpenAI-compatible proxy
-- `POST /v1/messages` — Anthropic Messages API proxy (Claude Code, Cline)
 - `POST /compose` — Manual skill composition
 - `GET /health` — Liveness probe
 
