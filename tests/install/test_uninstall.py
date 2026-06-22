@@ -812,6 +812,7 @@ class TestResultDictKeys:
                 remove_data=False,
                 force=True,
                 stop_services=True,
+                root=tmp_path,
             )
 
         # Primary key
@@ -857,6 +858,7 @@ class TestResultDictKeys:
                 remove_data=False,
                 force=True,
                 stop_services=True,
+                root=tmp_path,
             )
 
         assert "action" in result["cli_install"]
@@ -925,7 +927,7 @@ class TestPortConflictDiagnostics:
             patch("agentalloy.install.state.user_data_dir", return_value=tmp_path / "data"),
             patch("agentalloy.install.state.user_config_dir", return_value=tmp_path / "config"),
         ):
-            result = uninstall(remove_data=False, force=True, stop_services=True)
+            result = uninstall(remove_data=False, force=True, stop_services=True, root=tmp_path)
 
         mock_reap.assert_called_once_with("all")
         warnings = result.get("warnings", [])
@@ -953,7 +955,7 @@ class TestPortConflictDiagnostics:
             patch("agentalloy.install.state.user_data_dir", return_value=tmp_path / "data"),
             patch("agentalloy.install.state.user_config_dir", return_value=tmp_path / "config"),
         ):
-            result = uninstall(remove_data=False, force=True, stop_services=True)
+            result = uninstall(remove_data=False, force=True, stop_services=True, root=tmp_path)
 
         files_removed = result.get("files_removed", [])
         assert any(
