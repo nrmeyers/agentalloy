@@ -35,6 +35,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from agentalloy.install import runtime_artifacts
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
@@ -170,12 +171,21 @@ def _systemctl(*args: str) -> int:
 
 
 def _stop_service() -> str:
-    """Stop the main API service before swapping the package. Returns the mode."""
+    """Stop the main API service before swapping the package. Returns the mode.
+
+    ``uv tool install --force`` swaps the package but does not stop the running
+    stack, so orphaned llama-servers keep running off the replaced/deleted files.
+    Reap our own stale processes (best-effort, never raises, foreign processes
+    untouched) before the swap; units and the shim are left in place.
+    """
     if _is_systemd():
         _systemctl("stop", "agentalloy.service")
-        return "systemd"
-    _run_cli(["server-stop"], check=False)
-    return "manual"
+        mode = "systemd"
+    else:
+        _run_cli(["server-stop"], check=False)
+        mode = "manual"
+    runtime_artifacts.reap("processes")
+    return mode
 
 
 def _start_inference_servers() -> None:

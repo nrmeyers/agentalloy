@@ -1843,6 +1843,23 @@ def run_setup(cfg: SetupConfig) -> int:
         return 1
     _print("  [green]  Preflight (early) passed.[/green]")
 
+    # Step a2: Pre-clean stale native state from a prior broken install.
+    # A crashed `uv tool install --force` or a half-finished setup can leave
+    # dead systemd/launchd units and a dangling llama-server shim behind. Reap
+    # ONLY the stale ones (live, healthy units/shims are left untouched) so a
+    # fresh install doesn't trip over them when it pulls models and binds ports.
+    # Best-effort: reap() never raises, and a failure here must not block setup.
+    # Native-only — the container flow already returned above.
+    from agentalloy.install import runtime_artifacts
+
+    stale = runtime_artifacts.reap("services", stale_only=True) + runtime_artifacts.reap(
+        "shim", stale_only=True
+    )
+    if stale:
+        _print("  [dim]-> Clearing stale state from a prior install[/dim]")
+        for a in stale:
+            _print(f"  [dim]  {a.summary}[/dim]")
+
     # Step b: Preflight (runner)
     _print("  [dim]-> Preflight (runner)[/dim]")
     runner_preflight = preflight.run_preflight(phase="runner", runner=cfg.runner, port=cfg.port)

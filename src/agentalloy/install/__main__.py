@@ -19,6 +19,7 @@ import argparse
 import sys
 
 from agentalloy.install.subcommands import (
+    cleanup,
     compose,
     contract,
     customize,
@@ -91,6 +92,7 @@ _SUBCOMMANDS = [
     server_status,
     enable_service,
     status,
+    cleanup,
     # Underlying step subcommands (still available for power-users + the
     # runbook LLM that drives them individually).
     detect,

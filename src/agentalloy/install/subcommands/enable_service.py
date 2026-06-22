@@ -47,6 +47,7 @@ import xml.sax.saxutils
 from pathlib import Path
 from typing import Any
 
+from agentalloy.install import runtime_artifacts
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
@@ -176,6 +177,12 @@ def _render_systemd_unit(uv_bin: str, repo_root: Path, port: int, env_path: Path
 _LLAMA_EMBED_PORT = 47951
 _LLAMA_RERANK_PORT = 47952
 
+# Foreign-safe cmdline matchers keyed by port. Sourced from
+# runtime_artifacts.RUNTIME_PORTS (the single source of truth) so the matchers
+# passed to _reclaim_port can never drift from the reaping logic in
+# runtime_artifacts. port int -> tuple of cmdline substrings.
+_PORT_MATCH = dict(runtime_artifacts.RUNTIME_PORTS)
+
 
 def _llama_unit_path(name: str) -> Path:
     config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -304,9 +311,15 @@ def _write_llama_units(target: str | None = None) -> list[str]:
     # Reclaim the embed/rerank ports from any stale llama-server squatting them
     # (e.g. an orphan left by `uv tool install --force`) so the units can bind —
     # otherwise they crash-loop with "couldn't bind HTTP server socket".
-    _reclaim_port("agentalloy-embed.service", _LLAMA_EMBED_PORT, ["llama-server", "nomic-embed"])
     _reclaim_port(
-        "agentalloy-rerank.service", _LLAMA_RERANK_PORT, ["llama-server", "Qwen3-Reranker"]
+        "agentalloy-embed.service",
+        _LLAMA_EMBED_PORT,
+        list(_PORT_MATCH[runtime_artifacts.EMBED_PORT]),
+    )
+    _reclaim_port(
+        "agentalloy-rerank.service",
+        _LLAMA_RERANK_PORT,
+        list(_PORT_MATCH[runtime_artifacts.RERANK_PORT]),
     )
     # Pass 2: enable + start the now-visible units.
     for unit_name, _content in units:
@@ -341,7 +354,7 @@ def _enable_native_linux(
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     # Reclaim port 47950 from a stale uvicorn (an orphan left by `--force`
     # reinstall also holds the corpus DuckDB lock; killing it releases both).
-    _reclaim_port("agentalloy.service", port, ["uvicorn", "agentalloy.app"])
+    _reclaim_port("agentalloy.service", port, list(_PORT_MATCH[runtime_artifacts.SERVICE_PORT]))
     result = subprocess.run(
         ["systemctl", "--user", "enable", "--now", "agentalloy.service"],
         capture_output=True,

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path, Path as _RealPath  # noqa: F811 -- _RealPath used when patching uninstall.Path
+from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -900,124 +900,63 @@ class TestPromptUninstallPreset:
 
 
 class TestPortConflictDiagnostics:
-    """Test port conflict detection in the uninstall function (step 5b)."""
+    """Uninstall delegates process/unit/shim teardown to ``runtime_artifacts.reap``
+    and maps its actions into the result. The foreign-vs-ours kill decision lives
+    in runtime_artifacts (covered in test_runtime_artifacts.py); here we only check
+    that uninstall consumes the actions: warn_foreign → warning (never recorded as
+    removed), executed actions → files_removed entries."""
 
-    @patch("agentalloy.install.server_proc.find_listening_pid")
-    @patch("agentalloy.install.server_proc.stop")
-    @patch("agentalloy.install.subcommands.uninstall.Path")
-    def test_foreign_process_warns_no_kill(
-        self,
-        mock_path_cls: MagicMock,
-        mock_stop: MagicMock,
-        mock_find_pid: MagicMock,
-        tmp_path: Path,
-    ):
-        """Foreign process on the port: warning added, no kill attempted."""
-        mock_find_pid.return_value = 12345
-        cmdline_path_str = "/proc/12345/cmdline"
-        cmdline_content = "nginx: master process /usr/sbin/nginx"
-
-        # Create a mock Path instance for the cmdline
-        cmdline_mock = MagicMock(spec=_RealPath)
-        cmdline_mock.exists.return_value = True
-        cmdline_mock.read_bytes.return_value = cmdline_content.encode()
-
-        # Make Path.home() return a real Path (needed for claude_mcp path construction)
-        mock_path_cls.home = _RealPath.home
-
-        # Patch Path to return our mock for cmdline path, real Path otherwise
-        def path_side_effect(*args: Any, **kwargs: Any) -> Any:
-            if not args:
-                # Called as a classmethod (e.g., Path.home) — fall back to real
-                return _RealPath.home()
-            if str(args[0]) == cmdline_path_str:
-                return cmdline_mock
-            return _RealPath(*args, **kwargs)
-
-        mock_path_cls.side_effect = path_side_effect
-
+    def test_foreign_process_warns_no_kill(self, tmp_path: Path) -> None:
+        """A warn_foreign action surfaces as a warning, not a removal."""
+        from agentalloy.install.runtime_artifacts import Action
         from agentalloy.install.subcommands.uninstall import uninstall
 
-        minimal_state: dict[str, Any] = {
-            "harness_files_written": [],
-            "port": 47950,
-        }
+        foreign = Action(
+            "warn_foreign",
+            "pid://12345",
+            ":47950 held by foreign pid 12345 — left running",
+            executed=False,
+        )
+        minimal_state: dict[str, Any] = {"harness_files_written": [], "port": 47950}
 
         with (
+            patch("agentalloy.install.runtime_artifacts.reap", return_value=[foreign]) as mock_reap,
             patch("agentalloy.install.state.load_state", return_value=minimal_state),
             patch("agentalloy.install.state.user_data_dir", return_value=tmp_path / "data"),
             patch("agentalloy.install.state.user_config_dir", return_value=tmp_path / "config"),
         ):
-            result = uninstall(
-                remove_data=False,
-                force=True,
-                stop_services=True,
-            )
+            result = uninstall(remove_data=False, force=True, stop_services=True)
 
-        # Verify no attempt to stop the process
-        mock_stop.assert_not_called()
-
-        # Verify a warning about the foreign process was added
+        mock_reap.assert_called_once_with("all")
         warnings = result.get("warnings", [])
-        found_warning = any("not an agentalloy server" in w.lower() for w in warnings)
-        assert found_warning, f"No foreign-process warning found in: {warnings}"
+        assert any("foreign pid 12345" in w for w in warnings), warnings
+        # Advisory only — nothing recorded as removed for the foreign holder.
+        files_removed = result.get("files_removed", [])
+        assert not any(f.get("path") == "pid://12345" for f in files_removed), files_removed
 
-    @patch("agentalloy.install.server_proc.find_listening_pid")
-    @patch("agentalloy.install.server_proc.stop")
-    @patch("agentalloy.install.subcommands.uninstall.Path")
-    def test_agentalloy_process_stopped(
-        self,
-        mock_path_cls: MagicMock,
-        mock_stop: MagicMock,
-        mock_find_pid: MagicMock,
-        tmp_path: Path,
-    ):
-        """Agentalloy process on the port: it is stopped."""
-        mock_find_pid.return_value = 12345
-        cmdline_path_str = "/proc/12345/cmdline"
-        cmdline_content = "python -m uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950"
-
-        # Create a mock Path instance for the cmdline
-        cmdline_mock = MagicMock(spec=_RealPath)
-        cmdline_mock.exists.return_value = True
-        cmdline_mock.read_bytes.return_value = cmdline_content.encode()
-
-        # Make Path.home() return a real Path (needed for claude_mcp path construction)
-        mock_path_cls.home = _RealPath.home
-
-        # Patch Path to return our mock for cmdline path, real Path otherwise
-        def path_side_effect(*args: Any, **kwargs: Any) -> Any:
-            if not args:
-                return _RealPath.home()
-            if str(args[0]) == cmdline_path_str:
-                return cmdline_mock
-            return _RealPath(*args, **kwargs)
-
-        mock_path_cls.side_effect = path_side_effect
-
+    def test_agentalloy_process_stopped(self, tmp_path: Path) -> None:
+        """An executed stop_process action is recorded in files_removed."""
+        from agentalloy.install.runtime_artifacts import Action
         from agentalloy.install.subcommands.uninstall import uninstall
 
-        minimal_state: dict[str, Any] = {
-            "harness_files_written": [],
-            "port": 47950,
-        }
+        stopped = Action(
+            "stop_process",
+            "pid://12345",
+            "stopped uvicorn on :47950 (pid 12345)",
+            executed=True,
+        )
+        minimal_state: dict[str, Any] = {"harness_files_written": [], "port": 47950}
 
         with (
+            patch("agentalloy.install.runtime_artifacts.reap", return_value=[stopped]),
             patch("agentalloy.install.state.load_state", return_value=minimal_state),
             patch("agentalloy.install.state.user_data_dir", return_value=tmp_path / "data"),
             patch("agentalloy.install.state.user_config_dir", return_value=tmp_path / "config"),
         ):
-            mock_stop.return_value = "SIGTERM"
-            result = uninstall(
-                remove_data=False,
-                force=True,
-                stop_services=True,
-            )
+            result = uninstall(remove_data=False, force=True, stop_services=True)
 
-        # Verify stop was called with the pid
-        mock_stop.assert_called_once_with(12345)
-
-        # Verify the server was recorded as stopped
         files_removed = result.get("files_removed", [])
-        stopped = any("stopped_manual_server" in f.get("action", "") for f in files_removed)
-        assert stopped, f"No stopped server entry found in: {files_removed}"
+        assert any(
+            f.get("path") == "pid://12345" and f.get("action") == "stop_process"
+            for f in files_removed
+        ), files_removed

@@ -433,6 +433,10 @@ def _patch_all_checks(
                 "agentalloy.install.subcommands.doctor._check_pack_manifests",
                 return_value={"name": "pack_manifests", "passed": manifests_ok},
             ),
+            patch(
+                "agentalloy.install.subcommands.doctor._check_orphans",
+                return_value={"name": "orphans", "passed": True},
+            ),
         ):
             yield
 
@@ -456,6 +460,7 @@ class TestRunDoctorAllGreen:
             "service",
             "pack_manifests",
             "reranker",
+            "orphans",
         ]
 
     def test_all_checks_have_name_and_passed(self) -> None:
@@ -481,7 +486,7 @@ class TestRunDoctorJson:
         assert "schema_version" in parsed
         assert "all_checks_passed" in parsed
         assert isinstance(parsed["checks"], list)
-        assert len(parsed["checks"]) == 9
+        assert len(parsed["checks"]) == 10
 
 
 # ---------------------------------------------------------------------------

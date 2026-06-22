@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from agentalloy.install import runtime_artifacts
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import uninstall_proxy
 from agentalloy.install.subcommands.container_runtime import DEFAULT_IMAGE
@@ -550,48 +551,6 @@ def _remove_sentinel_block(text: str, begin: str, end: str) -> str:
     while "\n\n\n" in result:
         result = result.replace("\n\n\n", "\n\n")
     return result
-
-
-def _stop_native_service(st: dict[str, Any]) -> list[dict[str, Any]]:
-    """Stop and disable the native systemd/launchd service if one was registered."""
-    actions: list[dict[str, Any]] = []
-    mode = st.get("service_mode")
-    unit_path_str = st.get("service_unit_path")
-    if mode != "native" or not unit_path_str:
-        return actions
-
-    unit_path = Path(unit_path_str)
-    os_name = sys.platform
-
-    if os_name == "linux" and unit_path.suffix == ".service":
-        unit_name = unit_path.name
-        for cmd in (
-            ["systemctl", "--user", "disable", "--now", unit_name],
-            ["systemctl", "--user", "daemon-reload"],
-        ):
-            with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-                subprocess.run(cmd, capture_output=True, timeout=10)
-        if unit_path.exists():
-            unit_path.unlink()
-            actions.append({"path": str(unit_path), "action": "deleted_systemd_unit"})
-        # Also remove the sanitized env file written alongside the unit
-        sanitized = unit_path.parent / "agentalloy.env"
-        if sanitized.exists():
-            sanitized.unlink()
-            actions.append({"path": str(sanitized), "action": "deleted_systemd_env"})
-
-    elif os_name == "darwin" and unit_path.suffix == ".plist":
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            subprocess.run(
-                ["launchctl", "unload", "-w", str(unit_path)],
-                capture_output=True,
-                timeout=10,
-            )
-        if unit_path.exists():
-            unit_path.unlink()
-            actions.append({"path": str(unit_path), "action": "deleted_launchd_plist"})
-
-    return actions
 
 
 def _detect_install_mode() -> dict[str, Any]:
@@ -1291,79 +1250,17 @@ def uninstall(
     elif corpus.exists():
         data_kept.append(str(corpus))
 
-    # 5b. Stop a manual-mode agentalloy server still listening on the port.
-    # Native systemd/launchd modes are handled in step 6; this catches the
-    # case where the user ran `agentalloy server-start` directly.
+    # 5b/6. Full native teardown: stop+disable+remove all systemd user units
+    # (or launchd plists), reclaim our own stale processes squatting ports
+    # 47950/47951/47952, and strip the llama-server shim. Foreign processes are
+    # never killed — they surface as warnings. Skipped by `unwire`, which passes
+    # stop_services=False so a soft unwire leaves running services in place.
     if stop_services:
-        from agentalloy.install import server_proc
-
-        port = int(st.get("port", 47950) or 47950)
-        try:
-            pid = server_proc.find_listening_pid(port)
-        except Exception as exc:  # noqa: BLE001 — defensive; never block uninstall
-            warnings.append(f"Could not check port {port}: {exc}")
-            pid = None
-        if pid:
-            # Check if the process holding the port is actually agentalloy.
-            # If not, warn the user instead of trying to kill it.
-            is_agentalloy = False
-            cmdline_str = ""
-            try:
-                cmdline_path = Path(f"/proc/{pid}/cmdline")
-                if cmdline_path.exists():
-                    cmdline = cmdline_path.read_bytes()
-                    # Replace null bytes with spaces for readability
-                    cmdline_str = cmdline.decode("utf-8", errors="replace").replace("\x00", " ")
-                    is_agentalloy = (
-                        "agentalloy.app:app" in cmdline_str
-                        or "agentalloy/__main__.py" in cmdline_str
-                    )
-                else:
-                    # macOS fallback: use ps
-                    ps_result = subprocess.run(
-                        ["ps", "-o", "command=", "-p", str(pid)],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    if ps_result.returncode == 0:
-                        cmdline_str = ps_result.stdout.strip()
-                        is_agentalloy = (
-                            "agentalloy.app:app" in cmdline_str
-                            or "agentalloy/__main__.py" in cmdline_str
-                        )
-            except (OSError, subprocess.TimeoutExpired):
-                # Can't determine owner — treat as a foreign process to be safe.
-                # Defaulting to True would risk killing an unrelated process.
-                is_agentalloy = False
-
-            if not is_agentalloy:
-                # Port is held by a foreign process — warn, don't kill
-                short_cmd_parts = cmdline_str.split()[:3] if cmdline_str else ["<unknown>"]
-                cmd_display = " ".join(short_cmd_parts)
-                warnings.append(
-                    f"Port {port} is held by pid {pid} running '{cmd_display}' — "
-                    f"this is not an agentalloy server. Stop it manually "
-                    f"(e.g. 'kill {pid}') or reconfigure AgentAlloy to use a "
-                    f"different port."
-                )
-            else:
-                try:
-                    signal_used = server_proc.stop(pid)
-                    files_removed.append(
-                        {
-                            "path": f"pid://{pid}",
-                            "action": f"stopped_manual_server ({signal_used})",
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"Could not stop server pid {pid} on port {port}: {exc}")
-
-    # 6. Stop and remove native service unit / plist (skipped by `unwire`)
-    service_actions: list[dict[str, Any]] = []
-    if stop_services:
-        service_actions = _stop_native_service(st)
-        files_removed.extend(service_actions)
+        for a in runtime_artifacts.reap("all"):
+            if a.op == "warn_foreign":
+                warnings.append(a.summary)
+            elif a.executed:
+                files_removed.append({"path": a.target, "action": a.op})
 
     # 6b. Remove pulled models from runner caches. Independent of
     # stop_services — you may want models gone but services left running

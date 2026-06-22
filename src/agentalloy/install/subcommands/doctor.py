@@ -1,7 +1,7 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
 """``doctor`` subcommand — diagnose and optionally repair a broken install.
 
-Nine checks covering the full install surface:
+Ten checks covering the full install surface:
 
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
  2. embed_server    — GET {RUNTIME_EMBED_BASE_URL} reachable; model listed (warn, not fail)
@@ -12,6 +12,7 @@ Nine checks covering the full install surface:
  7. service         — port /health responding (down is ok; up-degraded is warned)
  8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
  9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
+10. orphans         — stray runtime processes / dangling shim on host (warn, not fail)
 
 ``--repair``:  migrate → install-packs → reembed → re-diagnose (in that order).
 Lock-held aborts repair immediately — repair must not kill processes.
@@ -408,6 +409,70 @@ def _check_reranker(env: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _check_orphans() -> dict[str, Any]:
+    """Check 10: stray runtime artifacts left on the host (soft warn, never fatal).
+
+    ``detect_orphans`` is read-only and never raises, but the import + call are
+    still wrapped so a detection bug can never break doctor. Stale processes and
+    a dangling shim warn (run `agentalloy cleanup` to reap); a foreign holder of
+    one of our ports is reported as an informational note, never as a fault.
+    """
+    t0 = time.monotonic()
+    try:
+        from agentalloy.install.runtime_artifacts import detect_orphans
+
+        orphans = detect_orphans()
+    except Exception as exc:  # noqa: BLE001 — detection must never break doctor
+        return {
+            "name": "orphans",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Could not scan for orphaned runtime artifacts: {exc}",
+        }
+
+    if not orphans:
+        return {
+            "name": "orphans",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "no orphaned runtime artifacts",
+        }
+
+    stale = sum(1 for o in orphans if o.kind == "process")
+    shims = sum(1 for o in orphans if o.kind == "shim")
+    conflicts = [o for o in orphans if o.kind == "conflict"]
+
+    parts: list[str] = []
+    if stale:
+        parts.append(f"{stale} stale runtime process{'es' if stale != 1 else ''}")
+    if shims:
+        parts.append(f"{shims} dangling shim{'s' if shims != 1 else ''}")
+    notes = [o.summary for o in conflicts]
+
+    if not parts:
+        # Only foreign port-holders — informational, no remediation needed.
+        return {
+            "name": "orphans",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "; ".join(notes),
+        }
+
+    detail = ", ".join(parts)
+    if notes:
+        detail = f"{detail} ({'; '.join(notes)})"
+    return {
+        "name": "orphans",
+        "passed": True,
+        "severity": "warn",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": detail,
+        "remediation": "run `agentalloy cleanup`",
+    }
+
+
 def _check_pack_manifests() -> dict[str, Any]:
     """Check 8: every bundled pack manifest passes full drift validation."""
     t0 = time.monotonic()
@@ -469,7 +534,7 @@ def _check_pack_manifests() -> dict[str, Any]:
 
 
 def run_doctor() -> dict[str, Any]:
-    """Run all 8 doctor checks. Returns a result dict."""
+    """Run all 10 doctor checks. Returns a result dict."""
     from agentalloy.config import get_settings
     from agentalloy.install.state import corpus_dir, env_path, parse_env_file
 
@@ -505,6 +570,7 @@ def run_doctor() -> dict[str, Any]:
     checks.append(_check_service(port))
     checks.append(_check_pack_manifests())
     checks.append(_check_reranker(env))
+    checks.append(_check_orphans())
 
     all_passed = all(c["passed"] for c in checks)
     return {
@@ -643,8 +709,8 @@ def add_parser(
         "doctor",
         help=(
             "Diagnose broken installs: config, embed server, corpus files, schema, "
-            "skill count, embedding dim, service, and pack manifests. "
-            "Pass --repair to auto-fix what's broken."
+            "skill count, embedding dim, service, pack manifests, and orphaned "
+            "runtime artifacts. Pass --repair to auto-fix what's broken."
         ),
     )
     p.add_argument(

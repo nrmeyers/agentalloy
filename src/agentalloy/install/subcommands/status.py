@@ -64,6 +64,41 @@ def _repo_phase(repo_root: str) -> str | None:
         return None
 
 
+def _orphan_summary() -> str:
+    """Return a one-line summary of stray runtime artifacts, or 'none'.
+
+    Read-only and best-effort: ``detect_orphans`` never mutates and never
+    raises, but any failure here resolves to 'none' so status never breaks.
+    """
+    try:
+        from agentalloy.install.runtime_artifacts import detect_orphans  # noqa: PLC0415
+
+        orphans = detect_orphans()
+    except Exception:
+        return "none"
+    if not orphans:
+        return "none"
+
+    stale = sum(1 for o in orphans if o.kind == "process")
+    shims = sum(1 for o in orphans if o.kind == "shim")
+    conflicts = sum(1 for o in orphans if o.kind == "conflict")
+
+    parts: list[str] = []
+    if stale:
+        parts.append(f"{stale} stale process{'es' if stale != 1 else ''}")
+    if shims:
+        parts.append(f"{shims} dangling shim{'s' if shims != 1 else ''}")
+    if conflicts:
+        parts.append(f"{conflicts} port conflict{'s' if conflicts != 1 else ''}")
+    if not parts:
+        return "none"
+    summary = ", ".join(parts)
+    # Only the reapable kinds warrant the cleanup hint.
+    if stale or shims:
+        summary = f"{summary} (run 'agentalloy cleanup')"
+    return summary
+
+
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
@@ -113,6 +148,11 @@ def _render_human(snapshot: dict[str, Any]) -> None:
     reachable = service.get("reachable_on_loopback", False)
     status_icon = "[green]✓ reachable[/green]" if reachable else "[red]✗ not reachable[/red]"
     print_rich(f"\n  Service (port {port}): {status_icon}")
+
+    # Orphaned runtime artifacts (stale processes / dangling shim)
+    orphans = snapshot.get("orphans", "none")
+    orphan_status = "[green]none[/green]" if orphans == "none" else f"[yellow]{orphans}[/yellow]"
+    print_rich(f"\n  Orphans: {orphan_status}")
 
     # Wired repos
     repos = snapshot.get("wired_repos", [])
@@ -204,6 +244,7 @@ def _run(args: argparse.Namespace) -> int:
             "port": port,
             "reachable_on_loopback": service_reachable,
         },
+        "orphans": _orphan_summary(),
         "wired_repos": [
             {
                 "repo_root": repo_root,
