@@ -120,6 +120,10 @@ class CompositionTrace:
     lm_assist_outcome: str = "disabled"
     # The LM_ASSIST_MODEL tag in effect for this composition (telemetry only).
     lm_assist_model: str | None = None
+    # True when the dense retrieval leg was skipped or fell back to BM25 — an
+    # embedding failure (500 / circuit-open) or an empty bounded query. Makes the
+    # otherwise-silent BM25 fallback queryable instead of inferred.
+    dense_leg_degraded: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +197,8 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     tokens_returned INTEGER NOT NULL DEFAULT 0,
     tokens_flat_equivalent INTEGER NOT NULL DEFAULT 0,
     lm_assist_outcome VARCHAR NOT NULL DEFAULT 'disabled',
-    lm_assist_model VARCHAR
+    lm_assist_model VARCHAR,
+    dense_leg_degraded BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -633,8 +638,8 @@ class VectorStore:
                 event_type, pre_filter_matched, gates_met, gates_unmet, qwen_calls,
                 contract_path, contract_tags, bm25_source, reranked,
                 tokens_returned, tokens_flat_equivalent,
-                lm_assist_outcome, lm_assist_model
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                lm_assist_outcome, lm_assist_model, dense_leg_degraded
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -669,6 +674,7 @@ class VectorStore:
                 trace.tokens_flat_equivalent,
                 trace.lm_assist_outcome,
                 trace.lm_assist_model,
+                trace.dense_leg_degraded,
             ],
         )
 
@@ -698,7 +704,7 @@ class VectorStore:
                    gates_met, gates_unmet, qwen_calls,
                    contract_path, contract_tags, bm25_source, reranked,
                    tokens_returned, tokens_flat_equivalent,
-                   lm_assist_outcome, lm_assist_model
+                   lm_assist_outcome, lm_assist_model, dense_leg_degraded
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -739,6 +745,7 @@ class VectorStore:
                 tokens_flat_equivalent=int(r[29]) if r[29] is not None else 0,
                 lm_assist_outcome=str(r[30]) if r[30] is not None else "disabled",
                 lm_assist_model=r[31],
+                dense_leg_degraded=bool(r[32]),
             )
             for r in rows
         ]
@@ -928,6 +935,7 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("tokens_flat_equivalent", "INTEGER", "DEFAULT 0"),
     ("lm_assist_outcome", "VARCHAR", "DEFAULT 'disabled'"),
     ("lm_assist_model", "VARCHAR", ""),
+    ("dense_leg_degraded", "BOOLEAN", "DEFAULT FALSE"),
 )
 
 

@@ -165,6 +165,9 @@ class RetrievalResult:
     # Stage B (LM fragment re-rank) outcome for this composition. "disabled"
     # whenever LM_ASSIST=off or the stage never ran; otherwise hit/timeout/error.
     lm_assist_outcome: str = "disabled"
+    # True when the dense leg was skipped because the bounded query came back
+    # empty (a noise-only first turn). compose maps this to a degraded trace.
+    dense_leg_degraded: bool = False
 
 
 class StoreFragmentSource:
@@ -411,6 +414,9 @@ def retrieve_domain_candidates(
     # also feeds the cross-encoder reranker and the LM scorer below; the phase-gate
     # path deliberately stays on full first-turn text (handled in classifier.py).
     query = build_retrieval_query(task)
+    # An empty bounded query means the dense leg is skipped below; surface that as
+    # a degraded trace (compose threads this through to dense_leg_degraded).
+    dense_leg_degraded = not query
 
     # Phase-agnostic retrieval: the candidate pool is no longer gated by
     # phase->category eligibility. An A/B (gold-hit 18/18 and audit topic 0.97
@@ -426,8 +432,8 @@ def retrieve_domain_candidates(
     # ------------------------------------------------------------------
     # An empty bounded query means the first turn was all injected noise with no
     # instruction left to embed; "" embeds to a constant, meaningless vector, so
-    # skip the dense leg and let BM25 carry the request. (Fix B will mark the
-    # trace dense_leg_degraded so this path is observable rather than silent.)
+    # skip the dense leg and let BM25 carry the request. dense_leg_degraded (set
+    # above) marks the trace so this path is observable rather than silent.
     dense_hits: list[SimilarityHit] = []
     if query:
         try:
@@ -488,7 +494,11 @@ def retrieve_domain_candidates(
     if not dense_hits and not bm25_hits:
         elapsed_ms = (time.perf_counter_ns() - start_ns) // 1_000_000
         return RetrievalResult(
-            candidates=[], eligible_count=0, retrieval_ms=int(elapsed_ms), bm25_source=_bm25_source
+            candidates=[],
+            eligible_count=0,
+            retrieval_ms=int(elapsed_ms),
+            bm25_source=_bm25_source,
+            dense_leg_degraded=dense_leg_degraded,
         )
 
     # Apply phase-specific RRF weights
@@ -599,6 +609,7 @@ def retrieve_domain_candidates(
         skills_ranked=skills_ranked,
         reranked=reranked,
         lm_assist_outcome=lm_outcome.value,
+        dense_leg_degraded=dense_leg_degraded,
     )
 
 

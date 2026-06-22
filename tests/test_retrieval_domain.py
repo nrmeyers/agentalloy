@@ -873,7 +873,8 @@ def test_retrieval_query_is_bounded_before_embedding(
         embedding_model="stub-embed",
     )
 
-    assert not isinstance(result, EmbeddingErrorResult)
+    assert isinstance(result, domain_module.RetrievalResult)
+    assert result.dense_leg_degraded is False  # a real query ran the dense leg
     assert lm.embed_calls, "dense leg should have embedded the bounded query"
     embedded = lm.embed_calls[0][0]
     assert embedded == f"search_query: {build_retrieval_query(task)}"
@@ -902,5 +903,6 @@ def test_noise_only_task_skips_dense_leg(
         embedding_model="stub-embed",
     )
 
-    assert not isinstance(result, EmbeddingErrorResult)
+    assert isinstance(result, domain_module.RetrievalResult)
+    assert result.dense_leg_degraded is True  # empty bounded query -> degraded trace
     assert lm.embed_calls == [], "empty bounded query must not reach the embedder"

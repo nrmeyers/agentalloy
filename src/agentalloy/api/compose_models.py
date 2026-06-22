@@ -152,6 +152,14 @@ class ComposedResult(BaseModel):
             "response without truncating. Honoring it is optional."
         ),
     )
+    dense_leg_degraded: bool = Field(
+        default=False,
+        description=(
+            "True when the dense retrieval leg was skipped or fell back to BM25 "
+            "(an embedding failure or an empty bounded query). Signals degraded "
+            "retrieval quality for this response."
+        ),
+    )
 
 
 class EmptyResult(BaseModel):
@@ -168,6 +176,7 @@ class EmptyResult(BaseModel):
     system_skills_applied: bool
     reason: Literal["no_domain_fragments_matched"] = "no_domain_fragments_matched"
     recommended_max_tokens: int | None = None
+    dense_leg_degraded: bool = False
 
 
 class ErrorAvailable(BaseModel):

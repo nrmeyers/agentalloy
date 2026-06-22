@@ -214,3 +214,56 @@ async def test_compose_empty_with_embedding_error_sets_error_payload() -> None:
     assert r.error_payload == EmbeddingErrorCode.UNAVAILABLE.value
     assert r.domain_fragment_ids == []
     assert r.source_skill_ids == []
+
+
+@pytest.mark.asyncio
+async def test_compose_marks_dense_leg_degraded_on_embedding_error() -> None:
+    """An embedding failure that falls back to BM25 is a degraded dense leg —
+    surfaced on the response and the trace, not silent."""
+    writer = _RecordingWriter()
+    frag = fake_fragment("f1", "execution", skill="sk-a")
+    domain = EmbeddingErrorResult(
+        error=EmbeddingError(EmbeddingErrorCode.UNAVAILABLE, "embed down"),
+        bm25_only=True,
+        candidates=[frag],
+        eligible_count=1,
+        retrieval_ms=6,
+        scores_by_id={frag.fragment_id: 1.0},
+    )
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+
+    result = await orch.compose(_req())
+
+    assert result.dense_leg_degraded is True
+    assert writer.records[0].dense_leg_degraded is True
+
+
+@pytest.mark.asyncio
+async def test_compose_marks_dense_leg_degraded_on_empty_query() -> None:
+    """A RetrievalResult flagged degraded (empty bounded query -> dense skipped)
+    propagates to the response and the trace."""
+    writer = _RecordingWriter()
+    frag = fake_fragment("f1", "execution", skill="sk-a")
+    domain = RetrievalResult(
+        candidates=[frag], eligible_count=1, retrieval_ms=4, dense_leg_degraded=True
+    )
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+
+    result = await orch.compose(_req())
+
+    assert result.dense_leg_degraded is True
+    assert writer.records[0].dense_leg_degraded is True
+
+
+@pytest.mark.asyncio
+async def test_compose_not_degraded_on_normal_retrieval() -> None:
+    """A healthy dense leg leaves dense_leg_degraded False on response and trace."""
+    writer = _RecordingWriter()
+    frag = fake_fragment("f1", "execution", skill="sk-a")
+    domain = RetrievalResult(candidates=[frag], eligible_count=1, retrieval_ms=10)
+    orch = _FakeOrchestrator(domain, _empty_system(), writer)
+
+    result = await orch.compose(_req())
+
+    assert result.dense_leg_degraded is False
+    assert writer.records[0].dense_leg_degraded is False

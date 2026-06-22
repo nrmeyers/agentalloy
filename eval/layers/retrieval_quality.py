@@ -95,6 +95,7 @@ class RetrievalResult:
     mrr: float
     full_recall: bool
     compose_ms: float | None
+    dense_leg_degraded: bool
 
 
 def run(
@@ -109,6 +110,7 @@ def run(
     total_retrieved = 0
     full_recall_count = 0
     mrr_sum = 0.0
+    degraded_count = 0
 
     with httpx.Client(timeout=30.0) as client:
         for task in TASKS:
@@ -119,6 +121,12 @@ def run(
             resp.raise_for_status()
             body = resp.json()
             source = body.get("source_skills", []) or []
+            # A degraded dense leg means this task's retrieval ran on BM25 only —
+            # the metrics below measure the fallback, not the hybrid pipeline.
+            degraded = bool(body.get("dense_leg_degraded", False))
+            degraded_count += int(degraded)
+            if degraded:
+                print(f"  [DEGRADED] {task.task_id}: dense leg skipped — BM25-only result")
             gold = list(task.gold_skills)
 
             hits = sum(1 for g in gold if g in source)
@@ -150,6 +158,7 @@ def run(
                     mrr=mrr,
                     full_recall=full,
                     compose_ms=body.get("compose_ms"),
+                    dense_leg_degraded=degraded,
                 )
             )
             print(
@@ -184,6 +193,7 @@ def run(
         "mean_mrr": mean_mrr,
         "full_recall_count": full_recall_count,
         "contamination_count": contamination_count,
+        "dense_leg_degraded_count": degraded_count,
         "per_task": [
             {
                 "task_id": r.task_id,
@@ -195,6 +205,7 @@ def run(
                 "mrr": r.mrr,
                 "full_recall": r.full_recall,
                 "compose_ms": r.compose_ms,
+                "dense_leg_degraded": r.dense_leg_degraded,
             }
             for r in rows
         ],
@@ -213,6 +224,12 @@ def run(
     print(f"mean MRR       = {mean_mrr:.3f}")
     print(f"full-recall    = {full_recall_count}/{len(rows)}")
     print(f"contamination  = {contamination_count}")
+    print(f"dense-degraded = {degraded_count}/{len(rows)}")
+    if degraded_count:
+        print(
+            f"!! WARNING: {degraded_count} task(s) ran with a degraded dense leg — "
+            "these metrics reflect the BM25 fallback, not the hybrid pipeline."
+        )
     print(f"wrote: {out_path}")
 
     return summary

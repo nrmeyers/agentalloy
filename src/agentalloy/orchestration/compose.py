@@ -105,6 +105,12 @@ class ComposeOrchestrator:
         system_fragment_ids = [f.fragment_id for f in system.candidates]
         system_applied = bool(system.candidates)
         retrieval_error_code: str | None = None
+        # Degraded = the dense leg didn't really run: an embedding failure
+        # (500 / circuit-open) fell back to BM25, or the bounded query was empty.
+        # Either way it's a silent quality drop unless we record it on the trace.
+        dense_leg_degraded = (
+            isinstance(retrieval, EmbeddingErrorResult) or retrieval.dense_leg_degraded
+        )
 
         # Stage B (LM fragment re-rank) outcome — present only on a successful
         # RetrievalResult; the BM25-only/error fallback never runs Stage B.
@@ -142,6 +148,7 @@ class ComposeOrchestrator:
                     lm_assist_outcome=lm_assist_outcome,
                     lm_assist_model=lm_assist_model,
                     requesting_agent=req.requesting_agent,
+                    dense_leg_degraded=dense_leg_degraded,
                 )
             )
             return EmptyResult(
@@ -150,6 +157,7 @@ class ComposeOrchestrator:
                 system_fragments=system_fragment_ids,
                 system_skills_applied=system_applied,
                 recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
+                dense_leg_degraded=dense_leg_degraded,
             )
 
         output = _format_fragments(system.candidates, retrieval.candidates)
@@ -203,6 +211,7 @@ class ComposeOrchestrator:
                 lm_assist_outcome=lm_assist_outcome,
                 lm_assist_model=lm_assist_model,
                 requesting_agent=req.requesting_agent,
+                dense_leg_degraded=dense_leg_degraded,
             )
         )
         return ComposedResult(
@@ -222,6 +231,7 @@ class ComposeOrchestrator:
                 total_ms=elapsed_ms,
             ),
             recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
+            dense_leg_degraded=dense_leg_degraded,
         )
 
     async def retrieve(self, req: ComposeRequest) -> RetrievalResult | EmbeddingErrorResult:

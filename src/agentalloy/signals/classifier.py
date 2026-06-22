@@ -385,7 +385,7 @@ def _intent_similarity(
             texts=[f"search_query: {query}"] + [f"search_query: {r}" for r in refs],
         )
     except Exception as exc:
-        _log.debug("embed call failed: %s", exc)
+        _log.warning("phase-gate embed failed; gate -> UNKNOWN (transition may not fire): %s", exc)
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
     qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant
@@ -410,7 +410,7 @@ def _topic_similarity(
             texts=[f"search_query: {query}"] + [f"search_query: {t}" for t in topics],
         )
     except Exception as exc:
-        _log.debug("embed call failed: %s", exc)
+        _log.warning("phase-gate embed failed; gate -> UNKNOWN (transition may not fire): %s", exc)
         return PredicateResult.UNKNOWN
     query_vec = vecs[0]
     qn = math.sqrt(sum(x * x for x in query_vec))  # query norm is loop-invariant

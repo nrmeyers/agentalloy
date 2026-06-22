@@ -70,6 +70,7 @@ class TelemetryRecord:
     tokens_flat_equivalent: int = 0
     lm_assist_outcome: str = "disabled"
     lm_assist_model: str | None = None
+    dense_leg_degraded: bool = False
 
 
 class TelemetryWriter(Protocol):
@@ -156,6 +157,7 @@ class DuckDBTelemetryWriter:
             tokens_flat_equivalent=record.tokens_flat_equivalent,
             lm_assist_outcome=record.lm_assist_outcome,
             lm_assist_model=record.lm_assist_model,
+            dense_leg_degraded=record.dense_leg_degraded,
         )
 
 
