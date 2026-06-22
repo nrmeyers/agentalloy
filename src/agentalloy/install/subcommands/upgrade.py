@@ -408,9 +408,7 @@ def _upgrade_container(
     return actions, warnings
 
 
-def _recreate_container(
-    image: str | None, state: dict[str, Any]
-) -> tuple[list[str], list[str]]:
+def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Recreate the container with *this* code's spec, then verify it took.
 
     Skips image pull and CLI swap — it is the recreate half only, invoked either
@@ -455,9 +453,17 @@ def _verify_container_spec(runtime: str, cr: Any) -> list[str]:
     # primary success signal.
     try:
         out = subprocess.run(
-            [runtime, "inspect", "agentalloy", "--format",
-             "{{range .Mounts}}{{.Destination}} {{end}}"],
-            capture_output=True, text=True, timeout=30, check=False,
+            [
+                runtime,
+                "inspect",
+                "agentalloy",
+                "--format",
+                "{{range .Mounts}}{{.Destination}} {{end}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return []
