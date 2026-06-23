@@ -64,9 +64,7 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
     # functional one rather than blindly assuming podman. The trailing "podman"
     # only guards against ``None.split()`` when nothing is detectable at all.
     runtime = (
-        state.get("runtime_binary")
-        or container_runtime._detect_runtime_binary()
-        or "podman"
+        state.get("runtime_binary") or container_runtime._detect_runtime_binary() or "podman"
     ).split()[0]
     container_name = state.get("container_name") or "agentalloy"
 

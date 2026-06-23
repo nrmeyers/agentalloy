@@ -435,7 +435,11 @@ class TestContainerRuntimeSelection:
                 patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
                 patch.object(mod, "_detect_functional_runtimes", return_value=[]),
                 patch.object(mod, "_detect_runtime_binary", return_value="podman"),
-                patch.object(mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))),
+                patch.object(
+                    mod,
+                    "_print",
+                    side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a)),
+                ),
             ):
                 cfg = mod.SetupConfig(non_interactive=True)
                 rc = mod._run_container_flow(cfg, 0.0)
@@ -456,7 +460,11 @@ class TestContainerRuntimeSelection:
                 patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
                 patch.object(mod, "_detect_functional_runtimes", return_value=[]),
                 patch.object(mod, "_detect_runtime_binary", return_value=None),
-                patch.object(mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))),
+                patch.object(
+                    mod,
+                    "_print",
+                    side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a)),
+                ),
             ):
                 cfg = mod.SetupConfig(non_interactive=True)
                 rc = mod._run_container_flow(cfg, 0.0)
@@ -474,9 +482,7 @@ class TestContainerRuntimeSelection:
         try:
             with (
                 patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
-                patch.object(
-                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
-                ),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["podman", "docker"]),
                 patch.object(mod, "_prompt_numbered", return_value="docker") as prompt,
                 patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
                 # Decline the CPU-only prompt so the flow bails right after selection.
@@ -499,9 +505,7 @@ class TestContainerRuntimeSelection:
         try:
             with (
                 patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
-                patch.object(
-                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
-                ),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["podman", "docker"]),
                 patch.object(mod, "_prompt_numbered") as prompt,
                 patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
                 patch("builtins.input", return_value="n"),  # bail at CPU prompt after selection
@@ -527,7 +531,9 @@ class TestContainerRuntimeSelection:
                 patch.object(mod, "_detect_functional_runtimes", return_value=["docker"]),
                 patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
                 patch.object(
-                    mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))
+                    mod,
+                    "_print",
+                    side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a)),
                 ),
             ):
                 cfg = mod.SetupConfig(non_interactive=True, runtime_binary="podman")
@@ -550,13 +556,17 @@ class TestContainerRuntimeSelection:
                 patch.object(mod, "_detect_functional_runtimes", return_value=["docker"]),
                 patch.object(mod.shutil, "which", side_effect=lambda n: None),
                 patch.object(
-                    mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))
+                    mod,
+                    "_print",
+                    side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a)),
                 ),
             ):
                 cfg = mod.SetupConfig(non_interactive=True, runtime_binary="podman")
                 rc = mod._run_container_flow(cfg, 0.0)
             assert rc == 1
-            assert any("not on" in line.lower() and "path" in line.lower() for line in prints), prints
+            assert any("not on" in line.lower() and "path" in line.lower() for line in prints), (
+                prints
+            )
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
@@ -596,9 +606,7 @@ class TestContainerRuntimeSelection:
                     "run_preflight",
                     side_effect=self._preflight(container_fatal=True),
                 ),
-                patch.object(
-                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
-                ),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["podman", "docker"]),
                 patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
                 patch.object(sys.stdin, "isatty", lambda: False),
             ):
