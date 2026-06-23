@@ -59,9 +59,7 @@ class _Spy(ComposeOrchestrator):
 
     async def retrieve(self, req: ComposeRequest) -> RetrievalResult:  # noqa: ARG002
         self.domain_called = True
-        return RetrievalResult(
-            candidates=[_domain_frag("d1")], eligible_count=1, retrieval_ms=1
-        )
+        return RetrievalResult(candidates=[_domain_frag("d1")], eligible_count=1, retrieval_ms=1)
 
     async def retrieve_system(self, req: ComposeRequest) -> SystemRetrievalResult:  # noqa: ARG002
         self.system_called = True

@@ -104,8 +104,10 @@ class ComposeOrchestrator:
         # in as an empty result so the downstream telemetry/format paths are uniform.
         want_domain = req.legs != "system"
         want_system = req.legs != "domain"
-        retrieval = await self.retrieve(req) if want_domain else RetrievalResult(
-            candidates=[], eligible_count=0, retrieval_ms=0
+        retrieval = (
+            await self.retrieve(req)
+            if want_domain
+            else RetrievalResult(candidates=[], eligible_count=0, retrieval_ms=0)
         )
         system = (
             await self.retrieve_system(req)
