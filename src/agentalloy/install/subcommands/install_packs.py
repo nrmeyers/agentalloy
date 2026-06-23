@@ -51,6 +51,7 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
     # cold path; install_packs is also imported by tests that don't need
     # container plumbing).
     from agentalloy.install.container_service import is_in_container  # noqa: PLC0415
+    from agentalloy.install.subcommands import container_runtime  # noqa: PLC0415
 
     if is_in_container():
         return None
@@ -59,7 +60,14 @@ def _maybe_route_to_container(args: argparse.Namespace) -> int | None:
     if state.get("deployment") != "container":
         return None
 
-    runtime = (state.get("runtime_binary") or "podman").split()[0]
+    # Prefer the runtime recorded at install time; if state lacks it, detect a
+    # functional one rather than blindly assuming podman. The trailing "podman"
+    # only guards against ``None.split()`` when nothing is detectable at all.
+    runtime = (
+        state.get("runtime_binary")
+        or container_runtime._detect_runtime_binary()
+        or "podman"
+    ).split()[0]
     container_name = state.get("container_name") or "agentalloy"
 
     packs = getattr(args, "packs", None)
@@ -866,7 +874,8 @@ def _run_container_guard(
             if not ok:
                 print(
                     "[agentalloy] WARNING: Failed to restart service after install-packs. "
-                    "Run `podman restart agentalloy` manually.",
+                    "Restart the container manually "
+                    "(`docker restart agentalloy` or `podman restart agentalloy`).",
                     file=sys.stderr,
                 )
         if native_unit_stopped:

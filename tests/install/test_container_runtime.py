@@ -24,47 +24,123 @@ from agentalloy.install.subcommands import container_runtime
 # ---------------------------------------------------------------------------
 
 
+def _which_for(*present: str):
+    """Return a shutil.which side_effect that reports only ``present`` binaries."""
+    return lambda name: f"/usr/bin/{name}" if name in present else None
+
+
+def _functional_only(*functional: str):
+    """Return a _runtime_is_functional side_effect for the given working binaries."""
+    return lambda binary: binary in functional
+
+
 class TestDetectRuntimeBinary:
-    """UT-1: _detect_runtime_binary() returns podman/docker/None based on PATH."""
+    """UT-1: _detect_runtime_binary() prefers a functional runtime, podman first."""
 
     def test_returns_podman_when_only_podman_on_path(self):
-        """When only podman exists on PATH, returns 'podman'."""
-        with patch.object(shutil, "which") as mock_which:
-            mock_which.side_effect = lambda x: "podman" if x == "podman" else None
-            result = container_runtime._detect_runtime_binary()
-            assert result == "podman"
+        """When only podman exists on PATH (and works), returns 'podman'."""
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman")),
+            patch.object(
+                container_runtime, "_runtime_is_functional", side_effect=_functional_only("podman")
+            ),
+        ):
+            assert container_runtime._detect_runtime_binary() == "podman"
 
     def test_returns_docker_when_only_docker_on_path(self):
-        """When only docker exists on PATH, returns 'docker'."""
-        with patch.object(shutil, "which") as mock_which:
-            mock_which.side_effect = lambda x: "docker" if x == "docker" else None
-            result = container_runtime._detect_runtime_binary()
-            assert result == "docker"
+        """When only docker exists on PATH (and works), returns 'docker'."""
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("docker")),
+            patch.object(
+                container_runtime, "_runtime_is_functional", side_effect=_functional_only("docker")
+            ),
+        ):
+            assert container_runtime._detect_runtime_binary() == "docker"
 
     def test_returns_none_when_neither_on_path(self):
         """When neither podman nor docker exists on PATH, returns None."""
+        with (
+            patch.object(shutil, "which", return_value=None),
+            patch.object(container_runtime, "_runtime_is_functional", return_value=False),
+        ):
+            assert container_runtime._detect_runtime_binary() is None
+
+    def test_priority_podman_over_docker_when_both_functional(self):
+        """When both podman and docker work, returns 'podman' (preference)."""
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman", "docker")),
+            patch.object(container_runtime, "_runtime_is_functional", return_value=True),
+        ):
+            assert container_runtime._detect_runtime_binary() == "podman"
+
+    def test_prefers_functional_docker_over_present_but_broken_podman(self):
+        """Regression (macOS): podman CLI present but no machine, docker works → docker.
+
+        This is the bug that picked podman by presence and ignored a working
+        Docker Desktop.
+        """
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman", "docker")),
+            patch.object(
+                container_runtime, "_runtime_is_functional", side_effect=_functional_only("docker")
+            ),
+        ):
+            assert container_runtime._detect_runtime_binary() == "docker"
+
+    def test_falls_back_to_first_present_when_none_functional(self):
+        """Both present but neither responds → first present (podman) for a useful error."""
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman", "docker")),
+            patch.object(container_runtime, "_runtime_is_functional", return_value=False),
+        ):
+            assert container_runtime._detect_runtime_binary() == "podman"
+
+
+class TestDetectFunctionalRuntimes:
+    """_detect_functional_runtimes(): present-and-working only, podman first."""
+
+    def test_filters_out_present_but_nonfunctional(self):
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman", "docker")),
+            patch.object(
+                container_runtime, "_runtime_is_functional", side_effect=_functional_only("docker")
+            ),
+        ):
+            assert container_runtime._detect_functional_runtimes() == ["docker"]
+
+    def test_returns_both_in_preference_order(self):
+        with (
+            patch.object(shutil, "which", side_effect=_which_for("podman", "docker")),
+            patch.object(container_runtime, "_runtime_is_functional", return_value=True),
+        ):
+            assert container_runtime._detect_functional_runtimes() == ["podman", "docker"]
+
+    def test_empty_when_none_present(self):
         with patch.object(shutil, "which", return_value=None):
-            result = container_runtime._detect_runtime_binary()
-            assert result is None
+            assert container_runtime._detect_functional_runtimes() == []
 
-    def test_priority_podman_over_docker(self):
-        """When both podman and docker exist, returns 'podman' (priority)."""
-        with patch.object(shutil, "which", return_value="/usr/bin/fake"):
-            result = container_runtime._detect_runtime_binary()
-            assert result == "podman"
 
-    def test_calls_which_in_order_podman_then_docker(self):
-        """Verifies the search order: podman first, then docker."""
-        call_order = []
+class TestRuntimeIsFunctional:
+    """_runtime_is_functional(): `<binary> info` return code drives the verdict."""
 
-        def mock_which(name):
-            call_order.append(name)
-            return None
+    def test_true_on_exit_zero(self):
+        with patch.object(subprocess, "run", return_value=MagicMock(returncode=0)) as run:
+            assert container_runtime._runtime_is_functional("docker") is True
+        assert run.call_args.args[0] == ["docker", "info"]
 
-        with patch.object(shutil, "which", side_effect=mock_which):
-            container_runtime._detect_runtime_binary()
+    def test_false_on_nonzero_exit(self):
+        with patch.object(subprocess, "run", return_value=MagicMock(returncode=125)):
+            assert container_runtime._runtime_is_functional("podman") is False
 
-        assert call_order == ["podman", "docker"]
+    def test_false_on_timeout(self):
+        with patch.object(
+            subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="podman info", timeout=15)
+        ):
+            assert container_runtime._runtime_is_functional("podman") is False
+
+    def test_false_on_oserror(self):
+        with patch.object(subprocess, "run", side_effect=OSError("boom")):
+            assert container_runtime._runtime_is_functional("podman") is False
 
 
 # ---------------------------------------------------------------------------

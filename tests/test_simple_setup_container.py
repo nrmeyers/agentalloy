@@ -322,3 +322,186 @@ class TestInteractiveContainerCpuWarning:
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
+
+
+# ---------------------------------------------------------------------------
+# Container runtime selection (functional probe + multi-runtime choice)
+# ---------------------------------------------------------------------------
+
+
+class TestContainerRuntimeSelection:
+    """`_run_container_flow` selects among *functional* runtimes and prompts on ties."""
+
+    @staticmethod
+    def _xdg(tmp_path: Path) -> None:
+        config_dir = tmp_path / ".config"
+        data_dir = tmp_path / ".local" / "share"
+        config_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True)
+        os.environ["XDG_CONFIG_HOME"] = str(config_dir)
+        os.environ["XDG_DATA_HOME"] = str(data_dir)
+
+    @staticmethod
+    def _preflight(*, container_fatal: bool = False):
+        """Stub preflight.run_preflight: early always passes; container optionally fatal."""
+
+        def _run(*, phase: str = "early", **_kw):
+            if phase == "container" and container_fatal:
+                return {
+                    "checks": [
+                        {
+                            "name": "runtime_binary",
+                            "passed": False,
+                            "severity": "fatal",
+                            "error": "stub",
+                            "remediation": "",
+                        }
+                    ]
+                }
+            return {"checks": []}
+
+        return _run
+
+    def test_no_functional_runtime_but_present_reports_not_responding(self, tmp_path: Path):
+        """podman present but no machine, docker absent → bail with 'not responding'."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        prints: list[str] = []
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=[]),
+                patch.object(mod, "_detect_runtime_binary", return_value="podman"),
+                patch.object(mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert any("not responding" in line for line in prints), prints
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_no_runtime_present_reports_neither_found(self, tmp_path: Path):
+        """Neither runtime on PATH → bail with 'Neither ... found'."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        prints: list[str] = []
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=[]),
+                patch.object(mod, "_detect_runtime_binary", return_value=None),
+                patch.object(mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert any("Neither" in line for line in prints), prints
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_multiple_functional_runtimes_prompt_choice(self, tmp_path: Path):
+        """Interactive, both runtimes work → user's choice becomes cfg.runtime_binary."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(
+                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
+                ),
+                patch.object(mod, "_prompt_numbered", return_value="docker") as prompt,
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                # Decline the CPU-only prompt so the flow bails right after selection.
+                patch("builtins.input", return_value="n"),
+            ):
+                cfg = mod.SetupConfig(non_interactive=False)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1  # cancelled at CPU prompt
+            assert cfg.runtime_binary == "docker"
+            prompt.assert_called_once()
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_explicit_runtime_flag_honored_when_functional(self, tmp_path: Path):
+        """--runtime docker (cfg.runtime_binary preset) is used even when podman also works."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(
+                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
+                ),
+                patch.object(mod, "_prompt_numbered") as prompt,
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                patch("builtins.input", return_value="n"),  # bail at CPU prompt after selection
+            ):
+                cfg = mod.SetupConfig(non_interactive=False, runtime_binary="docker")
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert cfg.runtime_binary == "docker"
+            prompt.assert_not_called()  # explicit choice → no prompt
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_explicit_runtime_flag_rejected_when_not_responding(self, tmp_path: Path):
+        """--runtime podman but its machine is down → bail, do not substitute docker."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        prints: list[str] = []
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["docker"]),
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                patch.object(
+                    mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))
+                ),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True, runtime_binary="podman")
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert any("not responding" in line for line in prints), prints
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_multiple_functional_runtimes_non_tty_picks_podman(self, tmp_path: Path):
+        """On a non-TTY both work → podman (preference) without blocking on input.
+
+        Determinism comes from `_prompt_numbered`'s own non-TTY fallback, so the
+        prompt is left unmocked here to exercise that path end-to-end.
+        """
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(
+                    mod.preflight,
+                    "run_preflight",
+                    side_effect=self._preflight(container_fatal=True),
+                ),
+                patch.object(
+                    mod, "_detect_functional_runtimes", return_value=["podman", "docker"]
+                ),
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                patch.object(sys.stdin, "isatty", lambda: False),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1  # container preflight stubbed fatal — bails after selection
+            assert cfg.runtime_binary == "podman"
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]

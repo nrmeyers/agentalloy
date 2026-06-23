@@ -58,6 +58,7 @@ except ImportError:
 from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415, F401
     _check_container_running,  # noqa: F401  # pyright: ignore[reportUnusedImport]
     _cleanup_temp_entrypoint,  # noqa: F401
+    _detect_functional_runtimes,  # noqa: F401
     _detect_runtime_binary,  # noqa: F401
     _ensure_volume,  # noqa: F401
     _generate_entrypoint,  # noqa: F401
@@ -1079,19 +1080,58 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # NOTE: container_runtime helpers are already imported at module level
     # (lines 54-67) so tests can mock them — no need to re-import here.
 
-    label = _detect_runtime_binary()
-    if label is None:
-        _print(
-            "  [red]Neither `podman` nor `docker` found on PATH.[/red]\n"
-            "  Install Podman (recommended) or Docker:\n"
-            "    Linux:   sudo apt install podman\n"
-            "    macOS:   brew install podman\n"
-            "  Verify:  podman --version"
-        )
+    requested = cfg.runtime_binary  # explicit --runtime flag, or "" for auto
+    functional = _detect_functional_runtimes()
+    if requested:
+        # An explicit choice is strict: don't silently substitute another runtime.
+        if requested in functional:
+            label = requested
+        elif shutil.which(requested) is None:
+            _print(
+                f"  [red]--runtime {requested} requested but `{requested}` is not on "
+                f"PATH.[/red]\n  Install it, or drop --runtime to auto-detect."
+            )
+            return 1
+        else:
+            _print(
+                f"  [red]--runtime {requested} requested but `{requested}` is not "
+                f"responding.[/red]\n  Start its daemon/machine and re-run setup:\n"
+                "    Podman:  podman machine start\n"
+                "    Docker:  start Docker Desktop (macOS) or "
+                "`sudo systemctl start docker` (Linux)"
+            )
+            return 1
+    elif not functional:
+        present = _detect_runtime_binary()  # present-but-non-functional, or None
+        if present is None:
+            _print(
+                "  [red]Neither `podman` nor `docker` found on PATH.[/red]\n"
+                "  Install one and re-run setup:\n"
+                "    Podman:  brew install podman  (macOS) / sudo apt install podman (Linux)\n"
+                "    Docker:  https://docs.docker.com/get-docker/"
+            )
+        else:
+            _print(
+                f"  [red]`{present}` is installed but not responding.[/red]\n"
+                "  Start its daemon/machine and re-run setup:\n"
+                "    Podman:  podman machine start\n"
+                "    Docker:  start Docker Desktop (macOS) or "
+                "`sudo systemctl start docker` (Linux)"
+            )
         return 1
+    elif len(functional) == 1:
+        label = functional[0]
+    else:
+        # More than one runtime works — let the user pick. On a non-TTY this
+        # returns the default (podman, the preferred runtime) without prompting.
+        label = _prompt_numbered(
+            "Multiple container runtimes detected — choose one:",
+            [(rt, {"podman": "Podman", "docker": "Docker"}[rt]) for rt in functional],
+            default_index=1,
+        )
     binary_path = shutil.which(label)
     assert binary_path is not None, (
-        f"{label} not found on PATH despite _detect_runtime_binary returning it"
+        f"{label} not found on PATH despite functional-runtime detection returning it"
     )
     cfg.runtime_binary = label
     _print(f"  Runtime binary: {label} at {binary_path}")
@@ -2165,6 +2205,15 @@ def add_parser(
         help="Deployment type (default: native for non-interactive, prompted interactively).",
     )
     p.add_argument(
+        "--runtime",
+        choices=["podman", "docker"],
+        default=None,
+        help=(
+            "Container runtime to use (default: auto-detect; podman preferred when both work). "
+            "Use this to choose docker non-interactively when both are installed."
+        ),
+    )
+    p.add_argument(
         "--image-tag",
         choices=["latest", "full"],
         default="latest",
@@ -2208,6 +2257,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         harness=args.harness or "manual",
         hardware_target=getattr(args, "hardware", None) or "",
         deployment=getattr(args, "deployment", None) or "",
+        runtime_binary=getattr(args, "runtime", None) or "",
         non_interactive=args.non_interactive,
         force=getattr(args, "force", False),
         acknowledge_sidecar=getattr(args, "acknowledge_sidecar", False),

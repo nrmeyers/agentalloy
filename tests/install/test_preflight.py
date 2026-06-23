@@ -304,3 +304,83 @@ class TestCheckVolumeExists:
         ):
             result = _check_volume_exists("podman")
         assert result["passed"] is True
+
+
+class TestRunPreflightContainerPhase:
+    """run_preflight(phase='container') resolves the runtime functionally."""
+
+    @staticmethod
+    def _patch_cheap_checks(stack_runtime: list[str | None]):
+        """Patch network/disk/port checks to pass and record the runtime passed to
+        the conflict/volume checks."""
+        from agentalloy.install.subcommands import preflight as pf
+
+        def _ok(name):
+            return {"name": name, "passed": True, "severity": "info", "detail": ""}
+
+        return (
+            patch.object(pf, "_check_ghcr_reachable", lambda: _ok("ghcr")),
+            patch.object(pf, "_check_disk_space", lambda: _ok("disk")),
+            patch.object(pf, "_check_port_free", lambda port: _ok("port")),
+            patch.object(
+                pf,
+                "_check_name_conflicts",
+                lambda rt: (stack_runtime.append(rt), _ok("name_conflicts"))[1],
+            ),
+            patch.object(pf, "_check_volume_exists", lambda rt: _ok("volume")),
+        )
+
+    def test_detects_functional_docker_when_runtime_none(self):
+        """runtime=None → uses the functional-aware detector (docker), not presence order."""
+        from contextlib import ExitStack
+
+        from agentalloy.install.subcommands.preflight import run_preflight
+
+        seen: list[str | None] = []
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                    return_value="docker",
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "agentalloy.install.subcommands.preflight.shutil.which",
+                    side_effect=lambda n: f"/usr/bin/{n}",
+                )
+            )
+            for cm in self._patch_cheap_checks(seen):
+                stack.enter_context(cm)
+            result = run_preflight(phase="container", runtime=None)
+
+        runtime_check = next(c for c in result["checks"] if c["name"] == "runtime_binary")
+        assert runtime_check["passed"] is True
+        assert "docker" in runtime_check["detail"]
+        assert seen == ["docker"]  # conflict check ran against docker, not a podman default
+
+    def test_skips_conflict_checks_when_no_runtime(self):
+        """No runtime detectable → fatal runtime_binary check, conflict/volume checks skipped."""
+        from contextlib import ExitStack
+
+        from agentalloy.install.subcommands.preflight import run_preflight
+
+        seen: list[str | None] = []
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+                    return_value=None,
+                )
+            )
+            for cm in self._patch_cheap_checks(seen):
+                stack.enter_context(cm)
+            result = run_preflight(phase="container", runtime=None)
+
+        names = {c["name"] for c in result["checks"]}
+        runtime_check = next(c for c in result["checks"] if c["name"] == "runtime_binary")
+        assert runtime_check["passed"] is False
+        assert runtime_check["severity"] == "fatal"
+        assert "name_conflicts" not in names
+        assert "volume" not in names
+        assert seen == []  # no podman default fabricated

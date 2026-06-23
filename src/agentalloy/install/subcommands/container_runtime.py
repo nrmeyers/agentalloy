@@ -40,22 +40,59 @@ def _print(*args: Any, **kwargs: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _detect_runtime_binary() -> str | None:
-    """Find a container runtime binary on PATH.
+def _runtime_is_functional(binary: str) -> bool:
+    """True if ``<binary> info`` succeeds — i.e. the runtime can actually reach
+    its daemon/machine.
 
-    Search order: podman (preferred), docker (fallback).
-
-    Returns
-    -------
-    str | None
-        ``"podman"`` if podman is found (regardless of docker),
-        ``"docker"`` if only docker is found,
-        ``None`` if neither is on PATH.
+    Presence on PATH is not enough: on macOS the ``podman`` CLI is commonly
+    installed (brew / leftover) without a running ``podman machine``, and
+    ``docker`` is present while Docker Desktop is stopped. ``info`` connects to
+    the backend, so it distinguishes a usable runtime from a dangling CLI.
+    ``version`` is unsuitable — podman is daemonless and ``podman version``
+    returns 0 even with no machine.
     """
-    for candidate in ("podman", "docker"):
-        if shutil.which(candidate) is not None:
-            return candidate
-    return None
+    try:
+        result = subprocess.run(
+            [binary, "info"],
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def _detect_functional_runtimes() -> list[str]:
+    """Runtimes that are both present on PATH and functional, in preference
+    order (podman first, docker fallback)."""
+    return [
+        candidate
+        for candidate in ("podman", "docker")
+        if shutil.which(candidate) is not None and _runtime_is_functional(candidate)
+    ]
+
+
+def _detect_runtime_binary() -> str | None:
+    """Best single container runtime to use.
+
+    Resolution order:
+
+    1. The first *functional* runtime (``<rt> info`` succeeds), podman preferred.
+    2. Otherwise the first runtime merely *present* on PATH, so downstream
+       preflight can emit a meaningful error instead of "neither found".
+    3. ``None`` when neither podman nor docker is on PATH.
+
+    Used by non-interactive callers (uninstall, upgrade, preflight,
+    install_packs). The interactive setup flow uses
+    :func:`_detect_functional_runtimes` directly so it can offer a choice when
+    more than one runtime works.
+    """
+    functional = _detect_functional_runtimes()
+    if functional:
+        return functional[0]
+    present = [c for c in ("podman", "docker") if shutil.which(c) is not None]
+    return present[0] if present else None
 
 
 # ---------------------------------------------------------------------------

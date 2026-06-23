@@ -1011,7 +1011,8 @@ def main(argv: list[str] | None = None) -> int:
                 if not restart_service_in_container(no_restart=False):
                     logger.warning(
                         "failed to restart agentalloy service after operation. "
-                        "Run `podman restart agentalloy` manually."
+                        "Restart the container manually "
+                        "(`docker restart agentalloy` or `podman restart agentalloy`)."
                     )
             else:
                 logger.debug("skipping container restart — no service was stopped")

@@ -416,10 +416,11 @@ def _check_runtime_binary(runtime: str | None) -> dict[str, Any]:
             started=t0,
             error="Neither `podman` nor `docker` found on PATH",
             remediation=(
-                "Install Podman (recommended) or Docker:\n"
-                "  Linux:   sudo apt install podman\n"
-                "  macOS:   brew install podman\n"
-                "  Verify:  podman --version"
+                "Install Podman or Docker, and ensure its daemon/machine is running:\n"
+                "  Podman:  brew install podman (macOS) / sudo apt install podman (Linux),"
+                " then `podman machine start`\n"
+                "  Docker:  https://docs.docker.com/get-docker/ (start Docker Desktop /"
+                " `sudo systemctl start docker`)"
             ),
         )
     binary = shutil.which(runtime)
@@ -430,7 +431,8 @@ def _check_runtime_binary(runtime: str | None) -> dict[str, Any]:
             started=t0,
             error=f"``{runtime}`` not found on PATH",
             remediation=(
-                f"Install {runtime} and ensure it is on PATH:\\n  Verify:  {runtime} --version"
+                f"Install {runtime} and ensure it is on PATH and its daemon/machine "
+                f"is running:\\n  Verify:  {runtime} info"
             ),
         )
     return _check(
@@ -642,18 +644,22 @@ def run_preflight(
         checks.append(_check_network_reachable())
         checks.append(_check_port_free(port))
     elif phase == "container":
-        # Detect runtime if not provided
+        # Detect runtime if not provided. Use the shared functional-aware
+        # detector so a present-but-non-functional podman (e.g. no machine on
+        # macOS) does not mask a working docker.
         if runtime is None:
-            for candidate in ("podman", "docker"):
-                if shutil.which(candidate) is not None:
-                    runtime = candidate
-                    break
+            from agentalloy.install.subcommands import container_runtime
+
+            runtime = container_runtime._detect_runtime_binary()
 
         checks.append(_check_runtime_binary(runtime))
         checks.append(_check_ghcr_reachable())
         checks.append(_check_disk_space())
-        checks.append(_check_name_conflicts(runtime or "podman"))
-        checks.append(_check_volume_exists(runtime or "podman"))
+        # Conflict/volume checks are meaningless without a runtime; when none was
+        # found _check_runtime_binary already records the fatal.
+        if runtime is not None:
+            checks.append(_check_name_conflicts(runtime))
+            checks.append(_check_volume_exists(runtime))
         checks.append(_check_port_free(port))
     else:  # runner
         chosen = runner or _runner_from_models_output()
