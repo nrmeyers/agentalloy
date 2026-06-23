@@ -1359,11 +1359,13 @@ class TestContainerFlow:
 
         SetupConfig, run_setup = self._import_run_setup()
 
-        # Mock compose binary detection
+        # Mock runtime detection at the seam the container flow actually uses
+        # (_detect_functional_runtimes), so the test does not depend on whether
+        # the host has a working podman/docker.
         with (
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch.object(sys.stdin, "isatty", lambda: True),
@@ -1421,8 +1423,8 @@ class TestContainerFlow:
 
         with (
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
         ):
@@ -1450,9 +1452,18 @@ class TestContainerFlow:
         """No podman/docker detected, setup exits with non-zero code."""
         SetupConfig, run_setup = self._import_run_setup()
 
-        with patch(
-            "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
-            return_value=None,
+        # No usable runtime: nothing functional, and nothing present to fall back
+        # to. Patch both seams the container flow consults so the test is
+        # independent of the host's installed runtimes.
+        with (
+            patch(
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=[],
+            ),
+            patch(
+                "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
+                return_value=None,
+            ),
         ):
             rc = run_setup(SetupConfig(deployment="container", non_interactive=True))
 
