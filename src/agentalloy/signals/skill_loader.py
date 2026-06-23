@@ -411,6 +411,9 @@ def _write_telemetry(record: dict[str, Any]) -> None:
             gates_met=record.get("gates_met", []),
             gates_unmet=record.get("gates_unmet", []),
             qwen_calls=record.get("qwen_calls", 0),
+            # Every signal subcommand is invoked at the project root, so cwd is
+            # the repo unless a caller overrides it explicitly.
+            repo=record.get("repo") or str(Path.cwd()),
         )
         append_trace(db_path, trace)
     except Exception:

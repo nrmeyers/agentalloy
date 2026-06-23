@@ -36,6 +36,7 @@ def write_proxy_trace(
     source_skill_ids: Sequence[str] | None = None,
     error_code: str | None = None,
     phase_gate_embed_failed: bool = False,
+    repo: str | None = None,
 ) -> None:
     """Write a CompositionTrace for a proxy request.
 
@@ -58,6 +59,8 @@ def write_proxy_trace(
         phase_gate_embed_failed: True when a semantic phase-gate / transition-trigger
             embed call failed this turn (gate fell open to UNKNOWN, transition may
             not have fired).
+        repo: Resolved project root (the request's cwd) this trace belongs to, so
+            telemetry can be scoped per-repo. None leaves the row unattributed.
     """
     try:
         trace = CompositionTrace(
@@ -75,6 +78,7 @@ def write_proxy_trace(
             source_skill_ids=list(source_skill_ids) if source_skill_ids else [],
             error_code=error_code,
             phase_gate_embed_failed=phase_gate_embed_failed,
+            repo=repo,
         )
         vector_store.record_composition_trace(trace)
     except Exception:  # noqa: BLE001 — soft-fail; telemetry never blocks the request

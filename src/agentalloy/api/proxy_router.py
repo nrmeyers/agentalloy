@@ -277,6 +277,9 @@ async def _write_flow_telemetry(
         return
     status = "proxy_composed" if composed else "proxy_passthrough"
     task_prompt = _extract_task_prompt(request)
+    # Resolve the per-request project root again (cheap, no I/O) so the trace is
+    # attributable to the repo it came from. Mirrors the cwd the handler resolved.
+    repo = str(resolve_working_dir(request))
     write_proxy_trace(
         vector_store,
         phase=phase or "unspecified",
@@ -290,6 +293,7 @@ async def _write_flow_telemetry(
         source_skill_ids=source_skill_ids,
         error_code=error_code,
         phase_gate_embed_failed=phase_gate_embed_failed,
+        repo=repo,
     )
 
 

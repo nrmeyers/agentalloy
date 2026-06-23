@@ -39,6 +39,7 @@ class TraceRecord(BaseModel):
     error_code: str | None
     response_size_chars: int | None
     prompt_version: str | None
+    repo: str | None = None
 
     @classmethod
     def from_trace(cls, t: CompositionTrace) -> TraceRecord:
@@ -62,6 +63,7 @@ class TraceRecord(BaseModel):
             error_code=t.error_code,
             response_size_chars=t.response_size_chars,
             prompt_version=t.prompt_version,
+            repo=t.repo,
         )
 
 
@@ -139,13 +141,13 @@ class TelemetryQuerier:
     def __init__(self, store: VectorStore) -> None:
         self._store = store
 
-    async def savings(self) -> SavingsResponse:
+    async def savings(self, repo: str | None = None) -> SavingsResponse:
         # DuckDB connection is not thread-safe; run the read off the loop.
-        data = await asyncio.to_thread(self._store.aggregate_savings)
+        data = await asyncio.to_thread(self._store.aggregate_savings, repo)
         return SavingsResponse.model_validate(data)
 
-    async def coverage(self) -> CoverageResponse:
-        data = await asyncio.to_thread(self._store.aggregate_hook_coverage)
+    async def coverage(self, repo: str | None = None) -> CoverageResponse:
+        data = await asyncio.to_thread(self._store.aggregate_hook_coverage, repo)
         return CoverageResponse.model_validate(data)
 
     async def query(
@@ -209,12 +211,19 @@ async def list_traces(
     response_model=SavingsResponse,
     summary="Token-savings aggregation across compose traces",
 )
-async def get_savings(request: Request) -> SavingsResponse:
+async def get_savings(
+    request: Request,
+    repo: str | None = Query(
+        default=None,
+        description="Scope to a project root (matches it or any subdirectory); omit for all repos.",
+    ),
+) -> SavingsResponse:
     """Return token-savings totals + per-phase breakdown from the open store.
 
     The CLI (`agentalloy telemetry savings`) calls this when the service is up,
     rather than opening the DuckDB directly — the service holds the single
-    read-write lock, so a direct open would conflict.
+    read-write lock, so a direct open would conflict. ``repo`` scopes the
+    aggregation to a single project root (the CLI's default), omitted for ``--all``.
     """
     querier: TelemetryQuerier | None = getattr(request.app.state, "telemetry_querier", None)
     if querier is None:
@@ -226,7 +235,7 @@ async def get_savings(request: Request) -> SavingsResponse:
             savings_pct=0.0,
             per_phase=[],
         )
-    return await querier.savings()
+    return await querier.savings(repo)
 
 
 @router.get(
@@ -234,10 +243,17 @@ async def get_savings(request: Request) -> SavingsResponse:
     response_model=CoverageResponse,
     summary="Hook-layer coverage: every prompt + every skill pull",
 )
-async def get_coverage(request: Request) -> CoverageResponse:
+async def get_coverage(
+    request: Request,
+    repo: str | None = Query(
+        default=None,
+        description="Scope to a project root (matches it or any subdirectory); omit for all repos.",
+    ),
+) -> CoverageResponse:
     """Return hook-layer activity counts (prompts, no-compose, system-skill pulls,
-    intake injections) grouped by event/status and per phase, from the open store."""
+    intake injections) grouped by event/status and per phase, from the open store.
+    ``repo`` scopes to a single project root (the CLI's default), omitted for ``--all``."""
     querier: TelemetryQuerier | None = getattr(request.app.state, "telemetry_querier", None)
     if querier is None:
         return CoverageResponse.empty()
-    return await querier.coverage()
+    return await querier.coverage(repo)

@@ -3,18 +3,25 @@
 Exposes two sub-verbs:
 
     agentalloy telemetry clear [--confirm]
-    agentalloy telemetry savings [--json]
+    agentalloy telemetry savings [--json] [--all]
+    agentalloy telemetry coverage [--json] [--all]
 
 ``clear`` deletes ``composition_traces`` and ``prompt_loads`` from the
 user-scoped DuckDB without touching ``fragment_embeddings`` (the corpus).
 
 ``savings`` aggregates token-savings telemetry from stored compose traces
 and prints overall totals plus a per-phase breakdown.
+
+``coverage`` reports hook-layer activity (every prompt + every skill pull).
+
+``savings`` and ``coverage`` default to the repo you're in (resolved via the
+git toplevel); pass ``--all`` to aggregate across every repo.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import sys
 from typing import Any
 
@@ -47,16 +54,18 @@ def add_parser(
 
     savings_p = sub.add_parser(
         "savings",
-        help="Show token-savings summary aggregated from compose telemetry.",
+        help="Show token-savings summary (current repo by default; --all for every repo).",
     )
     add_json_flag(savings_p)
+    _add_scope_flag(savings_p)
     savings_p.set_defaults(func=_run_savings)
 
     coverage_p = sub.add_parser(
         "coverage",
-        help="Show hook-layer coverage: every prompt + every skill pull recorded.",
+        help="Show hook-layer coverage (current repo by default; --all for every repo).",
     )
     add_json_flag(coverage_p)
+    _add_scope_flag(coverage_p)
     coverage_p.set_defaults(func=_run_coverage)
 
     p.set_defaults(func=_dispatch)
@@ -64,6 +73,54 @@ def add_parser(
 
 def _dispatch(args: argparse.Namespace) -> int:
     return args.func(args)
+
+
+def _add_scope_flag(p: argparse.ArgumentParser) -> None:
+    """Add ``--all`` (aggregate every repo); default scope is the current repo."""
+    p.add_argument(
+        "--all",
+        dest="all_repos",
+        action="store_true",
+        help="Aggregate across all repos. Default: only the repo you're in.",
+    )
+
+
+def _current_repo_key() -> str:
+    """Resolve the project root used to scope telemetry to "this repo".
+
+    Prefers the git toplevel so the scope covers the whole repo even when the
+    command (or the recorded trace) came from a subdirectory — the store filter
+    matches the root or anything nested under it. Falls back to the process cwd
+    when this is not a git checkout.
+    """
+    import subprocess
+    from pathlib import Path
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        top = out.stdout.strip()
+        if out.returncode == 0 and top:
+            return str(Path(top))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return str(Path.cwd())
+
+
+def _resolve_scope(args: argparse.Namespace) -> str | None:
+    """Return the repo filter for this invocation: None for ``--all``, else the
+    current repo key."""
+    return None if getattr(args, "all_repos", False) else _current_repo_key()
+
+
+def _scope_label(repo: str | None) -> str:
+    """Human-readable scope banner shown above savings/coverage output."""
+    return "all repos" if repo is None else f"this repo · {repo}"
 
 
 def _run_clear(args: argparse.Namespace) -> int:
@@ -136,17 +193,20 @@ def _service_port() -> int:
     return install_state.validate_port(install_state.load_state().get("port", 47950))
 
 
-def _fetch_savings_via_api(port: int) -> dict[str, Any] | None:
+def _fetch_savings_via_api(port: int, repo: str | None = None) -> dict[str, Any] | None:
     """GET /telemetry/savings from the running service; None on any failure.
 
     Returns the same dict shape as ``VectorStore.aggregate_savings()`` so the
-    existing renderer works unchanged.
+    existing renderer works unchanged. ``repo`` scopes to one project root.
     """
     import json
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     url = f"http://127.0.0.1:{port}/telemetry/savings"
+    if repo is not None:
+        url += "?" + urllib.parse.urlencode({"repo": repo})
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
             if resp.status != 200:
@@ -166,11 +226,15 @@ def _run_savings(args: argparse.Namespace) -> int:
     """
     from agentalloy.install import server_proc
 
+    repo = _resolve_scope(args)
+    render = functools.partial(_render_savings, repo=repo)
+
     port = _service_port()
     if server_proc.port_reachable(port):
-        result = _fetch_savings_via_api(port)
+        result = _fetch_savings_via_api(port, repo)
         if result is not None:
-            write_result(result, args, human_fn=_render_savings)
+            result["repo"] = repo
+            write_result(result, args, human_fn=render)
             return 0
         # Port is open but the API didn't answer (e.g. an older service without
         # this endpoint). Don't attempt a direct open — it would hit the lock.
@@ -193,20 +257,26 @@ def _run_savings(args: argparse.Namespace) -> int:
     settings = get_settings()
     vs = open_or_create(settings.duckdb_path)
     try:
-        result = vs.aggregate_savings()
+        result = vs.aggregate_savings(repo)
     finally:
         vs.close()
 
-    write_result(result, args, human_fn=_render_savings)
+    result["repo"] = repo
+    write_result(result, args, human_fn=render)
     return 0
 
 
-def _render_savings(result: dict[str, Any]) -> None:
+def _render_savings(result: dict[str, Any], repo: str | None = None) -> None:
     """Render token-savings aggregation in human-readable format."""
     total = int(result["total_composes"])
     if total == 0:
-        print_rich("\n  [bold]Token Savings[/bold]\n")
-        print_rich("  No compose traces recorded yet.")
+        print_rich("\n  [bold]Token Savings[/bold]")
+        print_rich(f"  [dim]{_scope_label(repo)}[/dim]\n")
+        if repo is not None:
+            print_rich("  No compose traces recorded for this repo yet.")
+            print_rich("  [dim]Run with --all to see every repo.[/dim]")
+        else:
+            print_rich("  No compose traces recorded yet.")
         print_rich()
         return
 
@@ -215,7 +285,8 @@ def _render_savings(result: dict[str, Any]) -> None:
     tokens_saved = int(result["tokens_saved"])
     savings_pct = float(result["savings_pct"])
 
-    print_rich("\n  [bold]Token Savings Summary[/bold]\n")
+    print_rich("\n  [bold]Token Savings Summary[/bold]")
+    print_rich(f"  [dim]{_scope_label(repo)}[/dim]\n")
     print_rich(f"  Total composes:          {total:,}")
     print_rich(f"  Tokens returned:         {tokens_returned:,}")
     print_rich(f"  Flat-injection equiv:    {tokens_flat:,}")
@@ -247,16 +318,20 @@ def _render_savings(result: dict[str, Any]) -> None:
     print_rich()
 
 
-def _fetch_coverage_via_api(port: int) -> dict[str, Any] | None:
+def _fetch_coverage_via_api(port: int, repo: str | None = None) -> dict[str, Any] | None:
     """GET /telemetry/coverage from the running service; None on any failure.
 
     Returns the same dict shape as ``VectorStore.aggregate_hook_coverage()``.
+    ``repo`` scopes to one project root.
     """
     import json
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     url = f"http://127.0.0.1:{port}/telemetry/coverage"
+    if repo is not None:
+        url += "?" + urllib.parse.urlencode({"repo": repo})
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
             if resp.status != 200:
@@ -275,11 +350,15 @@ def _run_coverage(args: argparse.Namespace) -> int:
     """
     from agentalloy.install import server_proc
 
+    repo = _resolve_scope(args)
+    render = functools.partial(_render_coverage, repo=repo)
+
     port = _service_port()
     if server_proc.port_reachable(port):
-        result = _fetch_coverage_via_api(port)
+        result = _fetch_coverage_via_api(port, repo)
         if result is not None:
-            write_result(result, args, human_fn=_render_coverage)
+            result["repo"] = repo
+            write_result(result, args, human_fn=render)
             return 0
         print(
             "ERROR: the agentalloy service is running but its /telemetry/coverage API "
@@ -299,20 +378,26 @@ def _run_coverage(args: argparse.Namespace) -> int:
     settings = get_settings()
     vs = open_or_create(settings.duckdb_path)
     try:
-        result = vs.aggregate_hook_coverage()
+        result = vs.aggregate_hook_coverage(repo)
     finally:
         vs.close()
 
-    write_result(result, args, human_fn=_render_coverage)
+    result["repo"] = repo
+    write_result(result, args, human_fn=render)
     return 0
 
 
-def _render_coverage(result: dict[str, Any]) -> None:
+def _render_coverage(result: dict[str, Any], repo: str | None = None) -> None:
     """Render hook-layer coverage in human-readable format."""
     prompts = int(result.get("prompts_total", 0))
-    print_rich("\n  [bold]Hook Coverage[/bold]  [dim](every prompt + every skill pull)[/dim]\n")
+    print_rich("\n  [bold]Hook Coverage[/bold]  [dim](every prompt + every skill pull)[/dim]")
+    print_rich(f"  [dim]{_scope_label(repo)}[/dim]\n")
     if prompts == 0 and not result.get("by_event"):
-        print_rich("  No hook activity recorded yet.")
+        if repo is not None:
+            print_rich("  No hook activity recorded for this repo yet.")
+            print_rich("  [dim]Run with --all to see every repo.[/dim]")
+        else:
+            print_rich("  No hook activity recorded yet.")
         print_rich()
         return
 
