@@ -39,9 +39,16 @@ contract_template: |
 
   # {{task_slug}}
 
-  ## Scope in a sentence
+  ## Task
 
-  <what this changes, and the boundary of "this">
+  <one self-contained build task — what to implement and the boundary of "this".
+  This body IS the retrieval prompt: the proxy composes the skills that match it
+  and front-loads them before you code, so describe the work concretely (the
+  component, the behavior, the tech surface), not just a pointer to tasks.md.>
+
+  ## Test cases
+
+  <the test-plan.md cases this task must turn green, named by acceptance (AC-N).>
 
   ## Plan
 
@@ -51,7 +58,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight, contract-driven build executing strict TDD (red → green → refactor) against the design's test-plan.md, work the tasks top to bottom, scope-honest; drop the overview filler, the standalone PostToolUse section (folded to one line), and the runtime-injected eval block"
+change_summary: "two-tier injection: build no longer authors contracts (design emits one per task); walk the per-task build contracts with `agentalloy task next`, which front-loads each task's domain skills + the task itself before coding — no skill-selection reasoning; contract body is now the retrieval prompt (a real task description, not a tasks.md pointer); strict TDD against test-plan.md unchanged"
 raw_prose: |
   # SDD — Build
 
@@ -65,17 +72,21 @@ raw_prose: |
   Read `docs/design/<slug>/tasks.md` (your worklist), `test-plan.md` (the unit
   cases each task must pass), and `approach.md` (the how + decisions you're
   implementing against), plus `docs/spec/<slug>.md` (the acceptance behind it
-  all). Take the tasks in order; pull in the folder's component files as the
-  task you're on references them.
+  all). Design already wrote one build contract per task into
+  `.agentalloy/contracts/build/` — `agentalloy task status` lists them in order.
 
-  ## 2. Open a build contract
+  ## 2. Pull the next task's skills, then work it
 
-      agentalloy contract init --phase build --slug <task-slug>
+  Don't author contracts here — design did. For each task, top to bottom:
 
-  Fill `domain_tags` and `scope.touches/avoids`. Writing it triggers the hook to
-  inject the domain skills matching your tags on the next turn — the help
-  arrives automatically. (If it doesn't: `agentalloy compose --contract
-  .agentalloy/contracts/build/<slug>.md`.)
+      agentalloy task next
+
+  That advances the work-item cursor; on the next turn the proxy front-loads the
+  domain skills matching that task **plus the task itself**, before you write a
+  line. You don't decide which skills you need — they arrive with the task. Then
+  implement it test-first (§3). One `task next` per task; `agentalloy task status`
+  shows where you are. (If the skills don't arrive: `agentalloy compose --contract
+  .agentalloy/contracts/build/<file>.md`.)
 
   ## 3. TDD: red → green → refactor, one case at a time
 
@@ -103,6 +114,15 @@ raw_prose: |
   Every case in `test-plan.md` is a passing test (plus the edges you added), the
   full suite is green with no regressions, and the work lives under `src/` with
   tests under `tests/`.
+
+  Then seed **qa's work-item** — the contract review opens on:
+
+      agentalloy contract init --phase qa --slug <task-slug>
+
+  Fill `domain_tags` with the *verification surface* (the tech qa will probe —
+  the risk areas you touched, the test types that matter here) and write the body
+  as what to verify for this feature; set `scope.touches`. That body is qa's
+  retrieval prompt, so review opens already primed with the right testing skills.
 
   Then advance yourself — don't wait to be told. With the suite green, run
   `agentalloy phase set qa` and carry on into review. If anything's unresolved —

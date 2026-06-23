@@ -56,7 +56,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: resume-aware intake front door + full/fast routing decision
+change_summary: "two-tier cascade: intake authors the next phase's work-item contract (contracts/spec/ or contracts/sdd-fast/) with the work's technology domain_tags + a concrete request body that becomes that phase's retrieval prompt — prior-authors-next, so each phase opens already primed; resume-aware front door + full/fast routing unchanged"
 raw_prose: |
   # SDD — Intake
 
@@ -91,19 +91,25 @@ raw_prose: |
   bounded — and if `sdd-fast` turns out harder than it looked, it bails back to
   `spec`, so under-calling it isn't a trap.
 
-  ## 3. Contract + route
+  ## 3. Hand off the next phase's work-item
 
-  Capture the agreed scope and the route, then write the contract:
+  Intake doesn't keep a contract of its own — it writes the **work-item the next
+  phase picks up**, into that phase's contract folder:
 
-      agentalloy contract init --phase intake --slug <task-slug> --route <full|fast>
+      agentalloy contract init --phase spec --slug <task-slug>       # full lane
+      # or, for the fast lane:
+      agentalloy contract init --phase sdd-fast --slug <task-slug>
 
-  Fill `domain_tags` and `scope.touches` honestly — they focus retrieval
-  downstream. Writing the contract completes intake. Advance to the route you
-  agreed and carry on: `agentalloy phase set spec` for the full lane, or
-  `agentalloy phase set sdd-fast` for the fast lane. (The contract write also
-  advances on the next turn, so the new phase opens either way; running it
-  yourself just keeps you moving now.) Stop here only if the route itself is
-  genuinely unclear — surface that and let the user make the call.
+  Fill `domain_tags` with the work's *technology surface* (the concrete tech it
+  touches — not process words like "spec" or "build") and write the body as a
+  concrete restatement of what the user wants. That body becomes the next phase's
+  retrieval prompt: on entry the proxy front-loads the skills matching it, so the
+  next phase starts already primed. Set `scope.touches` too. Writing the contract
+  completes intake. Advance to the route you agreed: `agentalloy phase set spec`
+  for the full lane, or `agentalloy phase set sdd-fast` for the fast lane. (The
+  contract write also advances on the next turn, so the new phase opens either
+  way; running it yourself just keeps you moving now.) Stop here only if the route
+  itself is genuinely unclear — surface that and let the user make the call.
 
   ## Not this
 

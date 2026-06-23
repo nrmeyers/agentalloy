@@ -293,14 +293,16 @@ class TestContractRoute:
 
 
 class TestIntakeRouteHint:
-    """_intake_route_hint reads the active intake contract's route → next-phase hint."""
+    """_intake_route_hint selects the route from where intake authored the next
+    phase's work-item: contracts/sdd-fast/ → fast lane; contracts/spec/ → full."""
 
     def test_fast_contract_hints_sdd_fast(self, tmp_path: Path) -> None:
         from agentalloy.signals.skill_loader import _intake_route_hint
 
+        # Intake wrote the work-item into the fast-lane folder.
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
-            phase="intake",
+            tmp_path / ".agentalloy" / "contracts" / "sdd-fast" / "t.md",
+            phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
         assert _intake_route_hint(tmp_path) == "sdd-fast"
@@ -308,9 +310,10 @@ class TestIntakeRouteHint:
     def test_full_contract_hints_none(self, tmp_path: Path) -> None:
         from agentalloy.signals.skill_loader import _intake_route_hint
 
+        # Full lane: the work-item lands in contracts/spec/, no fast folder.
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
-            phase="intake",
+            tmp_path / ".agentalloy" / "contracts" / "spec" / "t.md",
+            phase="spec",
             extra_fields={"route": "full"},
         )
         assert _intake_route_hint(tmp_path) is None

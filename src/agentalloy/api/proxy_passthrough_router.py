@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -99,39 +100,64 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
 async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> str:
     """Compose the prose block to inject, or "".
 
-    Two independent parts, each gated separately:
+    Three independent parts, each gated separately:
 
     - **Eval advisory** — emitted whenever the gate eval produced advisories
       (a transition trigger fired). Light; may recur across turns.
-    - **Orientation/domain block** — the orchestrator output, emitted only on an
-      *entry* turn (``signal.announce``). Heavy; emitted once per phase entry so
-      it does not flood every steady-state turn.
+    - **Tier 1 (phase-entry announce)** — the workflow skill's operating prose for
+      the phase + its phase-scoped system prose. Emitted once per phase entry
+      (``signal.announce``). How to operate here; never carries domain skills.
+    - **Tier 2 (per work-item)** — the domain skills for the current work-item
+      contract (``signal.current_contract``), keyed off its task, not the phase.
+      Emitted once per work-item (``signal.announce_cursor``): phase entry, or an
+      ``agentalloy task next``.
 
-    Returns the two parts joined, or "" when neither has content.
+    Returns the parts joined, or "" when none has content.
     """
+    phase = signal.phase
+    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+
     advisory_block = ""
     if signal.advisories:
         advisory_block = (
             "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
         )
 
-    domain_output = ""
+    # Tier 1: workflow prose (operating instructions) + system-only compose.
+    tier1 = ""
     if signal.announce:
-        phase = signal.phase
-        compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
-        compose_req = ComposeRequest(
-            task=signal.task or "",
-            phase=compose_phase,
-            domain_tags=signal.domain_tags or None,
-        )
+        parts: list[str] = []
+        if signal.workflow_prose:
+            parts.append(signal.workflow_prose.strip())
         try:
-            result = await orchestrator.compose(compose_req)
-            domain_output = "" if isinstance(result, EmptyResult) else result.output
+            system_req = ComposeRequest(
+                task=signal.task or f"Entering {compose_phase}.",
+                phase=compose_phase,
+                legs="system",
+            )
+            result = await orchestrator.compose(system_req)
+            if not isinstance(result, EmptyResult) and result.output:
+                parts.append(result.output)
         except Exception:
-            logger.warning("Composition failed -- passing through unchanged", exc_info=True)
-            domain_output = ""
+            logger.warning("Tier 1 system compose failed -- workflow prose only", exc_info=True)
+        tier1 = "\n\n".join(parts)
 
-    return "\n\n".join(p for p in (advisory_block, domain_output) if p)
+    # Tier 2: domain skills for the current work-item contract.
+    tier2 = ""
+    if signal.announce_cursor and signal.current_contract:
+        try:
+            from agentalloy.api.compose_models import compose_request_from_contract
+            from agentalloy.contracts import parse_contract
+
+            contract = parse_contract(Path(signal.current_contract))
+            domain_req = compose_request_from_contract(contract, legs="domain")
+            result = await orchestrator.compose(domain_req)
+            tier2 = "" if isinstance(result, EmptyResult) else result.output
+        except Exception:
+            logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
+            tier2 = ""
+
+    return "\n\n".join(p for p in (advisory_block, tier1, tier2) if p)
 
 
 async def _maybe_inject(

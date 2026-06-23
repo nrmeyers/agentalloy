@@ -28,9 +28,12 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _intake_route_hint,
     _load_workflow_skill_for_phase,
     _read_announced,
+    _read_composed,
+    _read_cursor,
     _read_lifecycle_mode,
     _read_phase,
     _write_announced_atomic,
+    _write_composed_atomic,
     _write_phase_atomic,
 )
 
@@ -50,11 +53,20 @@ class SignalResult:
     task: str | None = None
     domain_tags: list[str] | None = field(default_factory=lambda: list[str]())
 
-    # True when this request is the first one in *phase* (the phase changed since
-    # we last announced), so the orientation/domain block should be emitted. When
-    # False, only gate advisories (if any) are injected — the heavy block is
-    # suppressed to keep steady-state turns quiet. See `_read_announced`.
+    # Tier 1 (phase-entry announce). True when this request is the first one in
+    # *phase* (the phase changed since we last announced), so the workflow + system
+    # prose for the phase is emitted exactly once. `workflow_prose` is that phase's
+    # operating instructions (the workflow skill's raw_prose). See `_read_announced`.
     announce: bool = False
+    workflow_prose: str | None = None
+
+    # Tier 2 (per-work-item domain). `current_contract` is the absolute path to the
+    # work-item contract whose domain skills should be composed (body → prompt,
+    # domain_tags → BM25 steer). `announce_cursor` is True when the cursor changed
+    # since we last composed it (phase entry, or an `agentalloy task next`), so the
+    # task's domain block fires exactly once per work-item. See `_read_composed`.
+    current_contract: str | None = None
+    announce_cursor: bool = False
 
     # Optional signal-layer metadata (for telemetry)
     pre_filter_matched: str | None = None
@@ -84,6 +96,43 @@ def _extract_task_from_messages(request: ProxyRequest) -> str | None:
         if joined:
             return joined
     return None
+
+
+def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path | None]:
+    """Resolve the current work-item contract for Tier 2 domain composition.
+
+    Returns ``(contract_id, abs_path)`` where ``contract_id`` is the cursor's
+    canonical value used for cadence (the contracts-relative posix path, e.g.
+    ``build/01-cache.md``) and ``abs_path`` is the file to compose.
+
+    Work-items for a phase live in ``.agentalloy/contracts/<phase>/`` and are
+    authored by the *prior* phase (the cascade hand-off). Resolution:
+
+    1. An explicit ``.agentalloy/cursor`` (set by ``agentalloy task next``) wins,
+       when it resolves to a file under ``.agentalloy/contracts/``.
+    2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
+       (the common single-item phase: spec/design/qa/ship).
+    3. Two or more, no cursor → a fan-out phase (build): don't guess which task is
+       current — stay silent until ``task next`` sets the cursor.
+    4. None → ``(None, None)``; Tier 2 stays silent.
+    """
+    from agentalloy.contracts import list_contracts_for_phase
+
+    contracts_root = (cwd / ".agentalloy" / "contracts").resolve()
+    cursor = _read_cursor(cwd)
+    if cursor:
+        candidate = (contracts_root / cursor).resolve()
+        # Containment guard: a stale/hostile cursor must not read outside the tree.
+        if candidate.is_file() and candidate.is_relative_to(contracts_root):
+            return candidate.relative_to(contracts_root).as_posix(), candidate
+        logger.warning("cursor %r does not resolve to a contract file; using phase default", cursor)
+
+    in_phase = list_contracts_for_phase(cwd, phase)
+    if len(in_phase) != 1:
+        # 0 → nothing to compose; ≥2 → fan-out, wait for the cursor.
+        return None, None
+    only = in_phase[0].resolve()
+    return only.relative_to(contracts_root).as_posix(), only
 
 
 async def evaluate_signal(
@@ -218,14 +267,20 @@ async def evaluate_signal(
 
         await asyncio.to_thread(_run_gates)
 
-    # 7. Decide. Inject when this is an entry turn (announce the phase) OR the
-    #    eval produced advisories (a trigger fired and the gate has guidance).
-    #    Neither → a quiet steady-state turn: forward unchanged.
-    if not (announce or advisories):
-        # A quiet turn: no entry to announce and no advisory to surface. When a
-        # clean transition fired this turn (phase written, no advisory), carry the
-        # gate metadata so telemetry still records the eval even though nothing is
-        # injected — the new phase announces on the next turn.
+    # 7. Tier 2 cadence: resolve the current work-item contract and decide whether
+    #    its domain block fires. Tier 2 fires when the cursor changed since we last
+    #    composed it — on phase entry (the incoming contract becomes current) or an
+    #    `agentalloy task next`. Domain retrieval is keyed to the contract's task,
+    #    NEVER the workflow's static process tags (which only ever emptied results).
+    contract_id, contract_path = _resolve_current_contract(cwd, phase)
+    announce_cursor = contract_id is not None and _read_composed(cwd) != contract_id
+
+    # 8. Decide. Inject when this is a phase-entry turn (Tier 1), a new work-item
+    #    turn (Tier 2), OR the eval produced advisories. None → quiet passthrough.
+    if not (announce or announce_cursor or advisories):
+        # A quiet turn. When a clean transition fired this turn (phase written, no
+        # advisory), carry the gate metadata so telemetry still records the eval
+        # even though nothing is injected — the new phase announces next turn.
         return SignalResult(
             should_compose=False,
             phase=phase,
@@ -235,22 +290,28 @@ async def evaluate_signal(
             qwen_calls=qwen_calls,
         )
 
-    # Record the announce now so the next turn in this phase stays quiet. The
-    # signal layer owns all `.agentalloy/` state transitions; if the composed
-    # block later turns out empty, re-announcing would inject nothing anyway, so
-    # marking it at decision time is safe.
+    # Record cadence state now so the next turn stays quiet. The signal layer owns
+    # all `.agentalloy/` state transitions; marking at decision time is safe — if a
+    # block later turns out empty, re-firing would inject nothing anyway.
     if announce:
         try:
             _write_announced_atomic(cwd, phase)
         except OSError as e:
             logger.warning("Failed to write announced file: %s", e)
+    if announce_cursor and contract_id is not None:
+        try:
+            _write_composed_atomic(cwd, contract_id)
+        except OSError as e:
+            logger.warning("Failed to write composed file: %s", e)
 
     return SignalResult(
         should_compose=True,
         announce=announce,
+        workflow_prose=skill.get("raw_prose") if announce else None,
+        current_contract=str(contract_path) if announce_cursor and contract_path else None,
+        announce_cursor=announce_cursor,
         phase=phase,
         task=task,
-        domain_tags=skill.get("domain_tags"),
         pre_filter_matched=match.detail if match is not None else None,
         gates_met=gates_met,
         gates_unmet=gates_unmet,

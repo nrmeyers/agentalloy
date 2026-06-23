@@ -7,9 +7,12 @@ them to document the contract via OpenAPI.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from agentalloy.contracts import Contract
 
 # intake/spec/design/build/qa/ship are the full SDD lifecycle; sdd-fast is the
 # fast-lane route (one compressed pass) intake can branch to.
@@ -86,6 +89,14 @@ class ComposeRequest(BaseModel):
             "distinguishable from direct /compose calls."
         ),
     )
+    # Two-tier injection: which retrieval legs to assemble into ``output``.
+    # "both" (default) = system + domain (direct /compose). "system" = Tier 1
+    # phase-entry announce (system prose only; domain suppressed). "domain" =
+    # Tier 2 per-work-item (domain only; system already announced in Tier 1).
+    legs: Literal["both", "system", "domain"] = Field(
+        default="both",
+        description="Retrieval legs to assemble: both | system (Tier 1) | domain (Tier 2).",
+    )
     # Contract integration (Phase 2)
     contract_path: str | None = Field(
         default=None,
@@ -122,6 +133,34 @@ class ComposeRequest(BaseModel):
             except Exception:
                 return None
         return None
+
+
+def compose_request_from_contract(
+    contract: Contract,
+    *,
+    legs: Literal["both", "system", "domain"] = "both",
+    requesting_agent: str = "post_tool_use",
+) -> ComposeRequest:
+    """Map a parsed :class:`~agentalloy.contracts.Contract` to a ComposeRequest.
+
+    Single source of truth for the contract→retrieval mapping, shared by the
+    ``/compose/from-contract`` endpoint (``legs="both"``) and the proxy's Tier 2
+    per-work-item injection (``legs="domain"``):
+
+    - ``contract.body`` → ``task`` (the retrieval prompt; the design-authored task
+      itself), falling back to ``task_slug`` for a body-less contract.
+    - ``contract.domain_tags`` → ``contract_tags`` (a BM25 steer, **not** the hard
+      ``domain_tags`` filter — that filter is what emptied retrieval when fed the
+      workflow's static process tags).
+    """
+    return ComposeRequest(
+        task=contract.body or contract.task_slug,
+        phase=contract.phase,  # type: ignore[arg-type]
+        contract_tags=contract.domain_tags,
+        contract_path=str(contract.path),
+        requesting_agent=requesting_agent,
+        legs=legs,
+    )
 
 
 class LatencyBreakdown(BaseModel):

@@ -55,7 +55,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight verify+review gate: full quality bar (suite incl. integration, lint, types) → spec/non-goals/drift check → severity-labelled multi-axis review, recorded to docs/qa/<slug>.md; remediation routes by cause (code defect → build, design flaw → design, spec gap → spec, nits in place) with the report as the worklist and QA never editing src/; drop the change-sizing/description/multi-model sections, ASCII diagrams, the corrupted dead-code block, and the runtime-injected eval block"
+change_summary: "two-tier cascade: qa reads its incoming work-item from contracts/qa/ (build authored) and, on a clean report, seeds ship's work-item in contracts/ship/ with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (docs/qa/<slug>.md) and route-by-cause remediation"
 raw_prose: |
   # SDD — QA (Verify and Review)
 
@@ -66,8 +66,10 @@ raw_prose: |
 
   ## 1. Run the full bar
 
-  Run everything — the **CI** system skill names the exact commands — and record
-  the real results, not "should pass":
+  Read your work-item contract first (`.agentalloy/contracts/qa/<slug>.md`, which
+  build authored — the proxy front-loaded the verification skills for it on
+  entry). Then run everything — the **CI** system skill names the exact commands
+  — and record the real results, not "should pass":
 
   - the **whole** test suite, integration included (build only proved the units)
   - the linter — clean
@@ -110,11 +112,21 @@ raw_prose: |
   Write the verdict to **`docs/qa/<slug>.md`** with `## Checks` (the suite, lint,
   and type results) and `## Review` (the findings + the spec/non-goals verdict).
   A clean report — green bar, every AC met, no open Critical or required finding
-  — clears the way to ship. Advance yourself: `agentalloy phase set ship`, and
-  go straight into delivery. Don't wait to be told; a clean report *is* the
-  signal. The phase guard refuses the jump until `docs/qa/<slug>.md` exists with
-  its `## Checks` and `## Review` sections, so a premature `phase set` just names
-  what's missing.
+  — clears the way to ship.
+
+  On a clean report, seed **ship's work-item** before you go:
+
+      agentalloy contract init --phase ship --slug <task-slug>
+
+  Fill `domain_tags` with the *delivery surface* (release, changelog, migration,
+  rollout — whatever shipping this touches) and write the body as what to ship
+  and how to make it reversible. That body is ship's retrieval prompt, so
+  delivery opens already primed.
+
+  Advance yourself: `agentalloy phase set ship`, and go straight into delivery.
+  Don't wait to be told; a clean report *is* the signal. The phase guard refuses
+  the jump until `docs/qa/<slug>.md` exists with its `## Checks` and `## Review`
+  sections, so a premature `phase set` just names what's missing.
 
   Anything open routes by *cause*, and you don't fix code here: the report is
   the worklist for the phase that does. Don't advance to ship with an open

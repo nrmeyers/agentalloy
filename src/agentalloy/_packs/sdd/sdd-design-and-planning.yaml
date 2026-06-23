@@ -66,7 +66,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight, contract-driven design (read-only; approach-with-rationale → vertical slices → unit test cases designed up front); fan out into a per-slug folder (approach.md + tasks.md + test-plan.md + component files as needed) build executes test-first, gated on all three load-bearing files; drop the concatenated planning skill, ASCII graphs, sizing/plan templates, and the runtime-injected eval block"
+change_summary: "two-tier injection hand-off: design now emits one build contract per task (§6) with the task's technology domain_tags + a self-contained task body that becomes build's retrieval prompt — so build walks them with `task next` and the matching skills front-load automatically; keeps the read-only approach→slices→test-cases design fanned into the per-slug docs/design folder gated on all three load-bearing files"
 raw_prose: |
   # SDD — Design
 
@@ -78,8 +78,10 @@ raw_prose: |
 
   ## 1. Start from the spec
 
-  Read `docs/spec/<slug>.md` and the spec contract — acceptance and non-goals
-  are fixed; you don't reopen them. Then read the code you'll touch: existing
+  Read `docs/spec/<slug>.md` and your work-item contract
+  (`.agentalloy/contracts/design/<slug>.md`, which spec authored — the proxy
+  already front-loaded its design skills on entry); acceptance and non-goals are
+  fixed, you don't reopen them. Then read the code you'll touch: existing
   patterns, conventions, the seams you'll extend. Design fits the codebase you
   have, not the one you'd draw fresh.
 
@@ -123,21 +125,32 @@ raw_prose: |
 
   Add more files as the work needs them — a data model, an interface contract, a
   subsystem's design — one file per concern, in the same folder. Don't cram a
-  large design into one file; don't split a small one for the sake of it. Then
-  seed the contract (machine-read fields only):
+  large design into one file; don't split a small one for the sake of it.
 
-      agentalloy contract init --phase design --slug <task-slug>
+  ## 6. Emit one build contract per task
 
-  Fill `domain_tags` and `scope.touches/avoids`. The folder completes design.
+  This is the hand-off that makes build effortless. For each task in `tasks.md`,
+  write a build contract — design is the cheap place to do this, with the whole
+  plan in front of you:
 
-  Then advance yourself — the moment all three files are written and the plan is
-  unambiguous, run `agentalloy phase set build` and start working `tasks.md` top
-  to bottom, turning each task's test cases red-then-green. Don't wait to be
-  told. If the design still has an open question — an approach you haven't
-  committed to, a slice you can't yet test — **stop and surface it** instead of
-  advancing. The phase guard refuses the jump until `approach.md`, `tasks.md`,
-  and `test-plan.md` all exist with their required sections, so a premature
-  `phase set` just names what's missing.
+      agentalloy contract init --phase build --slug <NN-task-slug>   # NN = 01, 02, … sets order
+
+  In each, fill `domain_tags` with that task's *technology surface* — the
+  concrete tech the task touches (`pytest`, `fastapi`, `duckdb`, `async`), **not**
+  process words (`build`, `coding`) — and write the `## Task` body as a
+  self-contained description of what to implement. That body becomes build's
+  retrieval prompt: the proxy composes the skills matching it and front-loads
+  them with the task, so build never has to decide what it needs. Set
+  `scope.touches/avoids` and name the `## Test cases` (the test-plan.md cases by
+  AC-N). The contracts sort by their `NN-` prefix — that's build's worklist order.
+
+  Then advance yourself — the moment the three design files exist and every task
+  has a build contract, run `agentalloy phase set build` and work the contracts
+  top to bottom with `agentalloy task next`. Don't wait to be told. If the design
+  still has an open question — an approach you haven't committed to, a slice you
+  can't yet test — **stop and surface it** instead of advancing. The phase guard
+  refuses the jump until `approach.md`, `tasks.md`, and `test-plan.md` all exist
+  with their required sections, so a premature `phase set` just names what's missing.
 
   ## Not this
 

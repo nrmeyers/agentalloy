@@ -11,6 +11,7 @@ from agentalloy.api.compose_models import (
     ComposeRequest,
     EmptyResult,
     ErrorResponse,
+    compose_request_from_contract,
 )
 from agentalloy.orchestration.compose import ComposeOrchestrator
 
@@ -115,13 +116,9 @@ async def compose_from_contract(
             detail={"error": "contract_invalid", "issues": issues},
         )
 
-    compose_req = ComposeRequest(
-        task=contract.body or contract.task_slug,
-        phase=contract.phase,  # type: ignore[arg-type]
-        contract_tags=contract.domain_tags,
-        contract_path=str(safe_path),
-        # Tag the origin so PostToolUse-driven composes are distinguishable in
-        # telemetry from direct /compose calls (lands in trace.correlation_id).
-        requesting_agent="post_tool_use",
-    )
+    # Shared contract→request mapping (see compose_models). The endpoint composes
+    # both legs; the proxy's Tier 2 path uses the same helper with legs="domain".
+    # Origin tag "post_tool_use" lands in trace.correlation_id to distinguish
+    # contract-driven composes from direct /compose calls.
+    compose_req = compose_request_from_contract(contract, legs="both")
     return await orchestrator.compose(compose_req)

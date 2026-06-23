@@ -55,7 +55,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "rewrite as a tight, contract-driven spec (assumptions → checkable acceptance → explicit non-goals, docs/spec/<slug>.md); drop the concatenated source skills, ASCII pipeline, six-area template, and the runtime-injected eval block"
+change_summary: "two-tier cascade: spec reads its incoming work-item from contracts/spec/ (intake authored) and hands off by seeding design's work-item in contracts/design/ with the design-surface domain_tags + a body that becomes design's retrieval prompt; spec doc stays the single acceptance source (assumptions → checkable acceptance → non-goals, docs/spec/<slug>.md)"
 raw_prose: |
   # SDD — Spec
 
@@ -67,8 +67,10 @@ raw_prose: |
 
   ## 1. Start from the contract
 
-  Read `.agentalloy/contracts/intake/<slug>.md` — you already have the request
-  and the agreed scope. Sharpen what's there; don't re-interview from scratch.
+  Read `.agentalloy/contracts/spec/<slug>.md` — the work-item intake handed you
+  (the request and agreed scope), and the domain skills the proxy already
+  front-loaded from it on entry. Sharpen what's there; don't re-interview from
+  scratch.
 
   ## 2. Surface your assumptions first
 
@@ -98,16 +100,21 @@ raw_prose: |
 
   ## 5. Write it + hand off
 
-  Two artifacts, each with one job. The **contract** carries what the machinery
-  reads — seed it, reusing the intake slug so the work chains:
+  The **spec doc** is the deliverable and the single source of truth for
+  acceptance — write it to **`docs/spec/<task-slug>.md`** with
+  `## Acceptance Criteria` and `## Out of Scope`. That file completes spec.
 
-      agentalloy contract init --phase spec --slug <task-slug>
+  Then seed **design's work-item** — the contract the design phase opens on,
+  reusing the slug so the work chains:
 
-  Fill `domain_tags` (they focus retrieval) and `scope.touches/avoids` (they
-  bound where you work). The **spec doc** is the deliverable and the single
-  source of truth for acceptance — write it to **`docs/spec/<task-slug>.md`**
-  with `## Acceptance Criteria` and `## Out of Scope`. Don't copy acceptance
-  back into the contract; one home, no drift. That file completes spec.
+      agentalloy contract init --phase design --slug <task-slug>
+
+  Fill `domain_tags` with the *design surface* (the tech and patterns design will
+  reason about — `caching`, `async`, `postgres-schema`, not process words) and
+  write the body as what design must produce for this feature; set
+  `scope.touches/avoids`. That body is design's retrieval prompt, so on entry the
+  proxy front-loads the matching skills. Don't copy acceptance into it — the spec
+  doc is acceptance's one home, no drift.
 
   Then advance yourself — don't wait to be told. The moment the spec is written
   and unambiguous, run `agentalloy phase set design` and carry straight on into

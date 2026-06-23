@@ -51,13 +51,17 @@ def _read_announced(tmp_path: Path) -> str | None:
 
 
 def _skill(
-    keywords: list[str], phases: list[str] | None = None, domain_tags: list[str] | None = None
+    keywords: list[str],
+    phases: list[str] | None = None,
+    domain_tags: list[str] | None = None,
+    raw_prose: str = "Workflow operating instructions for this phase.",
 ) -> dict[str, Any]:
     return {
         "signal_keywords": keywords,
         "exit_gates": {},
         "applies_to_phases": phases or ["build"],
         "domain_tags": domain_tags,
+        "raw_prose": raw_prose,
     }
 
 
@@ -271,12 +275,19 @@ class TestEvaluateSignal:
         assert result.should_compose is False
         assert result.task is None
 
-    def test_domain_tags_from_skill_on_announce(self, tmp_path: Path) -> None:
-        _set_phase(tmp_path, "build")  # entry → announce carries the skill's tags
+    def test_announce_carries_workflow_prose_not_workflow_tags(self, tmp_path: Path) -> None:
+        """Tier 1 announce carries the workflow skill's prose; it must NOT source
+        domain_tags from the workflow skill (those static process tags were the
+        hard filter that emptied retrieval). Domain is Tier 2's job (the contract)."""
+        _set_phase(tmp_path, "build")  # entry → Tier 1 announce
         with (
             mock.patch(
                 "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
-                return_value=_skill(["test"], domain_tags=["auth", "payments"]),
+                return_value=_skill(
+                    ["test"],
+                    domain_tags=["spec-driven-development", "coding"],
+                    raw_prose="Build: work tasks.md top to bottom.",
+                ),
             ),
             mock.patch(
                 "agentalloy.api.proxy_signal.check_transition_trigger",
@@ -286,7 +297,12 @@ class TestEvaluateSignal:
             result = asyncio.run(evaluate_signal(_req("run tests"), tmp_path))
         assert result.should_compose is True
         assert result.announce is True
-        assert result.domain_tags == ["auth", "payments"]
+        assert result.workflow_prose == "Build: work tasks.md top to bottom."
+        # The workflow's static process tags never become a retrieval filter.
+        assert result.domain_tags == []
+        # No contract present → no work-item to compose yet.
+        assert result.announce_cursor is False
+        assert result.current_contract is None
 
 
 class TestAnnounceCadence:
@@ -407,3 +423,75 @@ class TestMissingProjectRootWarning:
             result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
         assert result.should_compose is False
         assert not any("not visible to the proxy" in r.getMessage() for r in caplog.records)
+
+
+def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
+    d = tmp_path / ".agentalloy" / "contracts" / phase
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.md").write_text(
+        f"---\nphase: {phase}\ntask_slug: {name}\ndomain_tags: [pytest]\n---\n# {name}\nbody\n"
+    )
+
+
+def _set_state(tmp_path: Path, name: str, value: str) -> None:
+    d = tmp_path / ".agentalloy"
+    d.mkdir(exist_ok=True)
+    (d / name).write_text(f"{value}\n")
+
+
+class TestTier2Cadence:
+    """`.agentalloy/cursor` vs `.agentalloy/composed` govern per-work-item domain
+    injection (Tier 2), independent of the phase announce (Tier 1)."""
+
+    def _run(self, tmp_path: Path):
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=_skill(["test"]),
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ),
+        ):
+            return asyncio.run(evaluate_signal(_req("work the task"), tmp_path))
+
+    def test_tier2_fires_on_entry_with_incoming_contract(self, tmp_path: Path) -> None:
+        # Fresh build entry with an incoming contract → both tiers fire.
+        _set_phase(tmp_path, "build")
+        _seed_contract(tmp_path, "build", "01-cache")
+        result = self._run(tmp_path)
+        assert result.announce is True  # Tier 1
+        assert result.announce_cursor is True  # Tier 2
+        assert result.current_contract is not None
+        assert result.current_contract.endswith("build/01-cache.md")
+        # Composed cadence recorded so the next steady turn stays quiet.
+        from agentalloy.signals.skill_loader import _read_composed
+
+        assert _read_composed(tmp_path) == "build/01-cache.md"
+
+    def test_tier2_quiet_after_compose(self, tmp_path: Path) -> None:
+        # Already announced + already composed this cursor, no trigger → quiet.
+        _set_phase(tmp_path, "build")
+        _seed_contract(tmp_path, "build", "01-cache")
+        _set_announced(tmp_path, "build")
+        _set_state(tmp_path, "composed", "build/01-cache.md")
+        result = self._run(tmp_path)
+        assert result.should_compose is False
+        assert result.announce is False
+        assert result.announce_cursor is False
+
+    def test_tier2_refires_after_task_next(self, tmp_path: Path) -> None:
+        # Cursor advanced to a new task (task next), phase already announced →
+        # Tier 1 stays quiet, Tier 2 fires for the new work-item only.
+        _set_phase(tmp_path, "build")
+        _seed_contract(tmp_path, "build", "01-cache")
+        _seed_contract(tmp_path, "build", "02-api")
+        _set_announced(tmp_path, "build")
+        _set_state(tmp_path, "composed", "build/01-cache.md")
+        _set_state(tmp_path, "cursor", "build/02-api.md")
+        result = self._run(tmp_path)
+        assert result.should_compose is True
+        assert result.announce is False
+        assert result.announce_cursor is True
+        assert result.current_contract.endswith("build/02-api.md")

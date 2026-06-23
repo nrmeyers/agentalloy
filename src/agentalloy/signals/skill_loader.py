@@ -29,9 +29,13 @@ __all__ = [
     "_load_workflow_skill_for_phase",
     "_load_workflow_skill_from_packs",
     "_read_announced",
+    "_read_composed",
+    "_read_cursor",
     "_read_lifecycle_mode",
     "_read_phase",
     "_write_announced_atomic",
+    "_write_composed_atomic",
+    "_write_cursor_atomic",
     "_write_lifecycle_mode",
     "_write_phase_atomic",
     "_write_telemetry",
@@ -108,38 +112,82 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
 # durable state here, not in the request body.
 
 
-def _read_announced(project_root: Path) -> str | None:
-    """Read the last-announced phase from ``.agentalloy/announced``.
+def _read_state(project_root: Path, name: str) -> str | None:
+    """Read a single-line ``.agentalloy/<name>`` cadence-state file.
 
-    Returns ``None`` when the file is absent, unreadable, or empty — which the
-    proxy treats as "nothing announced yet", so the current phase announces.
+    Returns ``None`` when the file is absent, unreadable, or empty. Shared by the
+    announce-state (``announced``), the work-item cursor (``cursor``), and the
+    last-composed cursor (``composed``) — all single-value durable cadence keys.
     """
-    announced_file = project_root / ".agentalloy" / "announced"
-    if not announced_file.exists():
+    state_file = project_root / ".agentalloy" / name
+    if not state_file.exists():
         return None
     try:
-        return announced_file.read_text(encoding="utf-8").strip() or None
+        return state_file.read_text(encoding="utf-8").strip() or None
     except OSError:
         return None
 
 
-def _write_announced_atomic(project_root: Path, phase: str) -> None:
-    """Atomically record *phase* as the last-announced phase.
+def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
+    """Atomically write *value* to ``.agentalloy/<name>``.
 
     Mirrors ``_write_phase_atomic``: a per-writer temp file + ``os.replace`` so
     the watcher and the async proxy never leave a half-written file when they
     race without a shared lock.
     """
-    announced_file = project_root / ".agentalloy" / "announced"
-    announced_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = announced_file.with_name(f"announced.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    state_file = project_root / ".agentalloy" / name
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state_file.with_name(f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        tmp.write_text(f"{phase}\n", encoding="utf-8")
-        os.replace(tmp, announced_file)
+        tmp.write_text(f"{value}\n", encoding="utf-8")
+        os.replace(tmp, state_file)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+def _read_announced(project_root: Path) -> str | None:
+    """Read the last-announced phase from ``.agentalloy/announced``.
+
+    ``None`` (absent/unreadable/empty) means "nothing announced yet", so the
+    current phase announces (Tier 1: workflow + system prose).
+    """
+    return _read_state(project_root, "announced")
+
+
+def _write_announced_atomic(project_root: Path, phase: str) -> None:
+    """Atomically record *phase* as the last-announced phase (Tier 1 cadence)."""
+    _write_state_atomic(project_root, "announced", phase)
+
+
+def _read_cursor(project_root: Path) -> str | None:
+    """Read the current work-item cursor from ``.agentalloy/cursor``.
+
+    The value is a contract id relative to ``.agentalloy/contracts/`` (e.g.
+    ``build/cache-write.md``). ``None`` means no explicit cursor — the proxy
+    falls back to the phase's incoming contract.
+    """
+    return _read_state(project_root, "cursor")
+
+
+def _write_cursor_atomic(project_root: Path, cursor: str) -> None:
+    """Atomically set the current work-item cursor (advanced by ``task next``)."""
+    _write_state_atomic(project_root, "cursor", cursor)
+
+
+def _read_composed(project_root: Path) -> str | None:
+    """Read the last-composed cursor from ``.agentalloy/composed``.
+
+    Records the cursor whose Tier 2 (domain) block was last injected. Tier 2
+    fires once per work-item: when ``composed != cursor``.
+    """
+    return _read_state(project_root, "composed")
+
+
+def _write_composed_atomic(project_root: Path, cursor: str) -> None:
+    """Atomically record *cursor* as the last-composed work-item (Tier 2 cadence)."""
+    _write_state_atomic(project_root, "composed", cursor)
 
 
 # ---------------------------------------------------------------------------
@@ -256,26 +304,20 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
 
 
 def _intake_route_hint(project_root: Path) -> str | None:
-    """Next-phase hint when leaving intake, from the active intake contract's route.
+    """Next-phase hint when leaving intake.
 
-    Returns ``"sdd-fast"`` when the contract chose the fast lane, else ``None``
-    (the linear graph then advances intake → spec). Best-effort: any read/parse
-    failure falls back to the default full route.
+    Under the prior-authors-next cascade, intake writes the next phase's work-item
+    contract into that phase's folder: the full lane lands in ``contracts/spec/``,
+    the fast lane in ``contracts/sdd-fast/``. The fast folder's presence selects
+    the fast route; otherwise the linear graph advances intake → spec. Best-effort:
+    any read failure falls back to the default full route.
     """
-    contracts_dir = project_root / ".agentalloy" / "contracts" / "intake"
-    if not contracts_dir.is_dir():
-        return None
+    fast_dir = project_root / ".agentalloy" / "contracts" / "sdd-fast"
     try:
-        from agentalloy.contracts import parse_contract
-
-        md = sorted(contracts_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if fast_dir.is_dir() and any(fast_dir.glob("*.md")):
+            return "sdd-fast"
     except OSError:
         return None
-    for path in md:
-        try:
-            return "sdd-fast" if parse_contract(path).route == "fast" else None
-        except Exception:
-            continue
     return None
 
 

@@ -98,9 +98,19 @@ class ComposeOrchestrator:
 
     async def compose(self, req: ComposeRequest) -> ComposedResult | EmptyResult:
         start_ns = time.perf_counter_ns()
-        retrieval, system = await asyncio.gather(
-            self.retrieve(req),
-            self.retrieve_system(req),
+        # Two-tier injection: assemble only the requested legs. Tier 1 (announce)
+        # wants system prose only; Tier 2 (per work-item) wants domain only. The
+        # suppressed leg is skipped entirely — no wasted embed/rerank — and stands
+        # in as an empty result so the downstream telemetry/format paths are uniform.
+        want_domain = req.legs != "system"
+        want_system = req.legs != "domain"
+        retrieval = await self.retrieve(req) if want_domain else RetrievalResult(
+            candidates=[], eligible_count=0, retrieval_ms=0
+        )
+        system = (
+            await self.retrieve_system(req)
+            if want_system
+            else SystemRetrievalResult(candidates=[], applied_skill_ids=[], retrieval_ms=0)
         )
         system_fragment_ids = [f.fragment_id for f in system.candidates]
         system_applied = bool(system.candidates)
@@ -130,7 +140,10 @@ class ComposeOrchestrator:
                 "BM25-only" if retrieval.candidates else "empty-result",
             )
 
-        if not retrieval.candidates:
+        # A domain-bearing compose with no domain hits is "empty". A system-only
+        # Tier 1 announce never takes this branch — its output is the system prose
+        # (plus the workflow prose the router prepends), domain intentionally absent.
+        if want_domain and not retrieval.candidates:
             elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
             self._telemetry.write(
                 TelemetryRecord(
