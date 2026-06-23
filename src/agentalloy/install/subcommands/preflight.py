@@ -435,6 +435,24 @@ def _check_runtime_binary(runtime: str | None) -> dict[str, Any]:
                 f"is running:\\n  Verify:  {runtime} info"
             ),
         )
+    # Presence on PATH is not enough: the daemon/machine must be reachable.
+    # A podman CLI with no running machine (or docker with Desktop stopped) is
+    # on PATH but unusable — fail here so the remediation actually matches.
+    from agentalloy.install.subcommands import container_runtime
+
+    if not container_runtime._runtime_is_functional(runtime):
+        return _check(
+            "runtime_binary",
+            passed=False,
+            started=t0,
+            error=f"``{runtime}`` is installed but not responding",
+            remediation=(
+                f"Start the {runtime} daemon/machine, then re-run:\\n"
+                "  Podman:  podman machine start\\n"
+                "  Docker:  start Docker Desktop (macOS) or `sudo systemctl start docker`"
+                f" (Linux)\\n  Verify:  {runtime} info"
+            ),
+        )
     return _check(
         "runtime_binary",
         passed=True,

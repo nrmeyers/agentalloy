@@ -192,26 +192,59 @@ class TestCheckRuntimeBinary:
     """UT-11, UT-12, UT-13: _check_runtime_binary() — podman preferred, docker fallback."""
 
     def test_podman_on_path_passes(self):
-        """UT-11: _check_runtime_binary() passes when podman on PATH."""
+        """UT-11: _check_runtime_binary() passes when podman is on PATH and functional."""
         from agentalloy.install.subcommands.preflight import _check_runtime_binary
 
-        with patch(
-            "agentalloy.install.subcommands.preflight.shutil.which", return_value="/usr/bin/podman"
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight.shutil.which",
+                return_value="/usr/bin/podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                return_value=True,
+            ),
         ):
             result = _check_runtime_binary("podman")
         assert result["passed"] is True
         assert "podman" in result["detail"]
 
     def test_only_docker_on_path_passes(self):
-        """UT-12: _check_runtime_binary() passes when only docker on PATH."""
+        """UT-12: _check_runtime_binary() passes when docker is on PATH and functional."""
         from agentalloy.install.subcommands.preflight import _check_runtime_binary
 
-        with patch(
-            "agentalloy.install.subcommands.preflight.shutil.which", return_value="/usr/bin/docker"
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight.shutil.which",
+                return_value="/usr/bin/docker",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                return_value=True,
+            ),
         ):
             result = _check_runtime_binary("docker")
         assert result["passed"] is True
         assert "docker" in result["detail"]
+
+    def test_present_but_not_functional_fails(self):
+        """_check_runtime_binary() fails when the runtime is on PATH but not responding."""
+        from agentalloy.install.subcommands.preflight import _check_runtime_binary
+
+        with (
+            patch(
+                "agentalloy.install.subcommands.preflight.shutil.which",
+                return_value="/usr/bin/podman",
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                return_value=False,
+            ),
+        ):
+            result = _check_runtime_binary("podman")
+        assert result["passed"] is False
+        assert result["severity"] == "fatal"
+        assert "not responding" in result["error"]
 
     def test_neither_binary_fails(self):
         """UT-13: _check_runtime_binary() fails when neither podman nor docker on PATH."""
@@ -348,6 +381,12 @@ class TestRunPreflightContainerPhase:
                 patch(
                     "agentalloy.install.subcommands.preflight.shutil.which",
                     side_effect=lambda n: f"/usr/bin/{n}",
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "agentalloy.install.subcommands.container_runtime._runtime_is_functional",
+                    return_value=True,
                 )
             )
             for cm in self._patch_cheap_checks(seen):

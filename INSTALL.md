@@ -448,6 +448,8 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 > | `ghcr.io/nrmeyers/agentalloy:latest` | ~300 MB | Not included | General users with network access. The model is pulled at first container start. |
 > | `ghcr.io/nrmeyers/agentalloy:full` | ~975 MB | Pre-baked GGUFs (`nomic-embed-text-v1.5.Q8_0.gguf` + `Qwen3-Reranker-0.6B-Q8_0.gguf`) | Air-gapped/enterprise environments that need the models baked into the image. |
 >
+> **Container deployments require a running container runtime — Docker or Podman.** Setup probes the runtime with `<runtime> info` (not just a PATH check), so a `podman`/`docker` CLI on PATH whose daemon/machine isn't running — e.g. no `podman machine` started (common on macOS), or Docker Desktop stopped — does **not** count as usable. Auto-detection prefers Podman and falls back to Docker; when both work you're prompted to choose. Pass `--runtime {podman,docker}` to select one non-interactively. If you pick Container and no usable runtime is found, setup tells you to install Docker or Podman and re-run setup, or (in interactive mode) offers to switch to a Native install on the spot.
+>
 > Select the variant with `--image-tag` during setup:
 > ```bash
 > # Lightweight (default) — model downloaded at first start
@@ -455,6 +457,9 @@ The subcommand detects the available service manager (systemd/launchd) or contai
 >
 > # Full — model pre-pulled into the image
 > agentalloy setup --deployment container --image-tag full
+>
+> # Force a specific runtime when both Docker and Podman are present
+> agentalloy setup --deployment container --runtime podman
 > ```
 >
 > Setup pulls the image directly — no repo checkout, no build context, and no `git` required. For air-gapped environments, use `--image-path` to deploy from a local tarball (produced via `podman save`).

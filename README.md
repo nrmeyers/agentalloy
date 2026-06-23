@@ -64,8 +64,8 @@ agentalloy setup
 
 The wizard detects your hardware, downloads the GGUF models, starts the embed + reranker servers, lets you pick skill packs, wires your IDE harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**; both choices run the same wizard:
 
-- **Native** *(recommended)* — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
-- **Container** — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly (`--image-path` for a local tarball), **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface.
+- **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly (`--image-path` for a local tarball), **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (a `podman` CLI on PATH with no started `podman machine`, or a stopped Docker Desktop, does not count). If no usable runtime is found, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
+- **Native** — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
 
 > **Already using Ollama?** Ollama was dropped as a runtime in v1.3.1 — AgentAlloy now uses `llama-server`. You can still point `RUNTIME_EMBED_BASE_URL` at any OpenAI-compatible 768-dim `nomic-embed-text-v1.5` endpoint you already run.
 
@@ -78,8 +78,10 @@ Skip the wizard with flags:
 ```bash
 # native
 agentalloy setup -n --hardware nvidia --packs all --harness claude-code
-# container
+# container (auto-detects the runtime; podman preferred when both work)
 agentalloy setup -n --deployment container --harness claude-code
+# container, pinning the runtime non-interactively
+agentalloy setup -n --deployment container --runtime docker --harness claude-code
 # sidecar harnesses (cursor, windsurf, github-copilot, gemini-cli) also need --acknowledge-sidecar:
 agentalloy setup -n --hardware nvidia --packs all --harness cursor --acknowledge-sidecar
 ```
@@ -156,11 +158,11 @@ Your agent calls `/compose`, gets back the relevant raw skill prose, and assembl
 
 ## Container deployment
 
-AgentAlloy can run as a single container (setup option #2) that bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the llama.cpp toolchain copied from `ghcr.io/ggml-org/llama.cpp:full` — the recommended deployment when you want zero host-side inference dependencies. The image is pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`); the full container runbook lives in [INSTALL.md](INSTALL.md).
+AgentAlloy can run as a single container (setup option #1, the default) that bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the llama.cpp toolchain copied from `ghcr.io/ggml-org/llama.cpp:full` — the recommended deployment when you want zero host-side inference dependencies. The image is pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`); the full container runbook lives in [INSTALL.md](INSTALL.md).
 
 The setup wizard:
 
-1. **Detects** your container runtime (`podman` preferred, `docker` fallback).
+1. **Detects** a usable container runtime — installed *and* running (detection runs `<runtime> info`, not just a PATH check). `podman` is preferred, `docker` is the fallback; when both work you're prompted to choose (or pass `--runtime {podman,docker}`). If none is usable, setup stops with install instructions, or offers to switch to Native interactively.
 2. **Pulls** the pre-built image from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`).
 3. **Creates** a named volume `agentalloy-data` for persistent corpus data.
 4. **Runs** the container with volume mounts, env vars, and port mapping.

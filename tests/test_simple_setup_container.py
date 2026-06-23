@@ -329,8 +329,70 @@ class TestInteractiveContainerCpuWarning:
 # ---------------------------------------------------------------------------
 
 
+class TestDeploymentPromptOrder:
+    """Container is listed first (option 1) and is the default."""
+
+    def test_container_is_first_and_default(self):
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        captured: dict[str, object] = {}
+
+        def fake_prompt(title, options, default_index):
+            captured["options"] = options
+            captured["default_index"] = default_index
+            return options[default_index - 1][0]
+
+        with patch.object(mod, "_prompt_numbered", side_effect=fake_prompt):
+            chosen = mod._prompt_deployment()
+
+        values = [opt[0] for opt in captured["options"]]
+        assert values == ["container", "native"], values
+        assert captured["default_index"] == 1
+        assert chosen == "container"
+
+
 class TestContainerRuntimeSelection:
     """`_run_container_flow` selects among *functional* runtimes and prompts on ties."""
+
+    def test_switch_to_native_when_no_runtime_and_user_opts_in(self, tmp_path: Path):
+        """Interactive, no runtime → offer native; 'y' returns the switch sentinel."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=[]),
+                patch.object(mod, "_detect_runtime_binary", return_value=None),
+                patch.object(sys.stdin, "isatty", lambda: True),
+                patch("builtins.input", return_value="y"),
+            ):
+                cfg = mod.SetupConfig(non_interactive=False)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == mod._SWITCH_TO_NATIVE
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_no_switch_when_user_declines(self, tmp_path: Path):
+        """Interactive, no runtime, user declines the native fallback → exit 1."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=[]),
+                patch.object(mod, "_detect_runtime_binary", return_value=None),
+                patch.object(sys.stdin, "isatty", lambda: True),
+                patch("builtins.input", return_value="n"),
+            ):
+                cfg = mod.SetupConfig(non_interactive=False)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
 
     @staticmethod
     def _xdg(tmp_path: Path) -> None:
@@ -399,7 +461,7 @@ class TestContainerRuntimeSelection:
                 cfg = mod.SetupConfig(non_interactive=True)
                 rc = mod._run_container_flow(cfg, 0.0)
             assert rc == 1
-            assert any("Neither" in line for line in prints), prints
+            assert any("neither" in line.lower() for line in prints), prints
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
@@ -472,6 +534,48 @@ class TestContainerRuntimeSelection:
                 rc = mod._run_container_flow(cfg, 0.0)
             assert rc == 1
             assert any("not responding" in line for line in prints), prints
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_explicit_runtime_flag_rejected_when_not_on_path(self, tmp_path: Path):
+        """--runtime podman but podman is not installed → bail, do not substitute docker."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        prints: list[str] = []
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["docker"]),
+                patch.object(mod.shutil, "which", side_effect=lambda n: None),
+                patch.object(
+                    mod, "_print", side_effect=lambda *a, **k: prints.append(" ".join(str(x) for x in a))
+                ),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True, runtime_binary="podman")
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert any("not on" in line.lower() and "path" in line.lower() for line in prints), prints
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
+    def test_non_interactive_never_switches_to_native(self, tmp_path: Path):
+        """Non-interactive with no runtime returns 1 (never the switch sentinel)."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        self._xdg(tmp_path)
+        try:
+            with (
+                patch.object(mod.preflight, "run_preflight", side_effect=self._preflight()),
+                patch.object(mod, "_detect_functional_runtimes", return_value=[]),
+                patch.object(mod, "_detect_runtime_binary", return_value=None),
+            ):
+                cfg = mod.SetupConfig(non_interactive=True)
+                rc = mod._run_container_flow(cfg, 0.0)
+            assert rc == 1
+            assert rc != mod._SWITCH_TO_NATIVE
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]

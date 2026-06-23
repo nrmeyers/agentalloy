@@ -574,6 +574,34 @@ class TestAddParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["setup", "--image-tag", "invalid-tag"])
 
+    def test_parser_accepts_runtime(self):
+        """argparse accepts --runtime {podman,docker}."""
+        import argparse
+
+        from agentalloy.install.subcommands.simple_setup import add_parser
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="subcommand")
+        add_parser(subparsers)
+
+        args = parser.parse_args(["setup", "--runtime", "docker"])
+        assert args.runtime == "docker"
+        # Default is None (auto-detect) when the flag is omitted.
+        assert parser.parse_args(["setup"]).runtime is None
+
+    def test_parser_rejects_invalid_runtime(self):
+        """argparse rejects --runtime values not in choices."""
+        import argparse
+
+        from agentalloy.install.subcommands.simple_setup import add_parser
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="subcommand")
+        add_parser(subparsers)
+
+        with pytest.raises(SystemExit):
+            parser.parse_args(["setup", "--runtime", "containerd"])
+
 
 class TestRunFromArgs:
     """Test the argparse -> SetupConfig bridge."""
@@ -623,6 +651,27 @@ class TestRunFromArgs:
         assert cfg.image_tag == "ghcr.io/nrmeyers/agentalloy:full"
         assert cfg.runner == "llama-server"
         assert cfg.port == 50000
+
+    def test_runtime_flows_to_config(self):
+        import argparse
+
+        args = argparse.Namespace(
+            runner=None,
+            model=None,
+            port=None,
+            mode=None,
+            packs=None,
+            harness=None,
+            non_interactive=True,
+            image_tag="latest",
+            image_path=None,
+            runtime="docker",
+        )
+        with patch("agentalloy.install.subcommands.simple_setup.run_setup", return_value=0) as mock:
+            rc = _run_from_args(args)
+        assert rc == 0
+        cfg = mock.call_args[0][0]
+        assert cfg.runtime_binary == "docker"
 
     def test_upstream_flags_flow_to_config(self):
         import argparse
@@ -1234,7 +1283,7 @@ class TestPromptDeployment:
     """Test _prompt_deployment helper."""
 
     def test_prompt_deployment_default_container(self, monkeypatch: pytest.MonkeyPatch):
-        """_prompt_deployment returns 'container' by default (index 2)."""
+        """_prompt_deployment returns 'container' by default (option 1)."""
         import sys
 
         from agentalloy.install.subcommands.simple_setup import _prompt_deployment  # type: ignore[attr-defined]
@@ -1244,7 +1293,18 @@ class TestPromptDeployment:
         assert result == "container"
 
     def test_prompt_deployment_native_choice(self, monkeypatch: pytest.MonkeyPatch):
-        """User can choose 'native' by entering '1'."""
+        """User can choose 'native' by entering '2' (container is now option 1)."""
+        import sys
+
+        from agentalloy.install.subcommands.simple_setup import _prompt_deployment  # type: ignore[attr-defined]
+
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr("builtins.input", lambda _: "2")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
+        result = _prompt_deployment()
+        assert result == "native"
+
+    def test_prompt_deployment_container_choice(self, monkeypatch: pytest.MonkeyPatch):
+        """User can choose 'container' by entering '1'."""
         import sys
 
         from agentalloy.install.subcommands.simple_setup import _prompt_deployment  # type: ignore[attr-defined]
@@ -1252,7 +1312,7 @@ class TestPromptDeployment:
         monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
         monkeypatch.setattr("builtins.input", lambda _: "1")  # pyright: ignore[reportUnknownLambdaType, reportUnknownArgumentType]
         result = _prompt_deployment()
-        assert result == "native"
+        assert result == "container"
 
 
 class TestContainerFlow:
@@ -1324,6 +1384,36 @@ class TestContainerFlow:
         assert rc == 0
         # pull_models should NOT be called (container handles its own model)
         # The container flow has different steps than native
+
+    def test_switch_to_native_sentinel_intercepted(self, tmp_state_dir: tuple[Path, Path]):
+        """When _run_container_flow returns the switch sentinel, run_setup flips to
+        native and continues — the sentinel never leaks as the exit code."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        SetupConfig, run_setup = self._import_run_setup()
+
+        class _ReachedNative(Exception):
+            pass
+
+        real_print = mod._print
+
+        def fake_print(*args, **kwargs):
+            if args and "agentalloy setup" in str(args[0]) and "bold" in str(args[0]):
+                raise _ReachedNative
+            return real_print(*args, **kwargs)
+
+        cfg = SetupConfig(deployment="container", non_interactive=True)
+        with (
+            patch.object(mod, "_run_container_flow", return_value=mod._SWITCH_TO_NATIVE),
+            patch.object(mod, "_print", side_effect=fake_print),
+            patch("agentalloy.install.subcommands.detect.run", return_value=0),
+        ):
+            with pytest.raises(_ReachedNative):
+                run_setup(cfg)
+
+        # Interception flipped the deployment to native before entering its flow.
+        assert cfg.deployment == "native"
+        assert cfg.runtime_binary == ""
 
     def test_container_flow_records_state(self, tmp_state_dir: tuple[Path, Path]):
         """Container setup records deployment, image_tag, runtime_binary in state."""

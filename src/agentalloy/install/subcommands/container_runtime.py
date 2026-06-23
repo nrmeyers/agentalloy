@@ -54,6 +54,7 @@ def _runtime_is_functional(binary: str) -> bool:
     try:
         result = subprocess.run(
             [binary, "info"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=15,
             check=False,

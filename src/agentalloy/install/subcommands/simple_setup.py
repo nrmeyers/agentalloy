@@ -245,6 +245,12 @@ _HW_LABELS: dict[str, str] = {
 # hardware difference is handled via -ngl at server start, not preset env).
 _VALID_PRESETS = frozenset(_HW_LABELS)
 
+# Internal sentinel returned by _run_container_flow when the user, faced with a
+# missing/unusable container runtime, opts to fall back to a native install.
+# run_setup intercepts it and continues the native flow; it is never returned
+# to the OS as an exit code.
+_SWITCH_TO_NATIVE = -99
+
 
 def _resolve_preset(cfg: SetupConfig) -> str:
     """Resolve the write-env preset from the hardware target.
@@ -426,22 +432,47 @@ def _prompt_harness() -> str:
 
 
 def _prompt_deployment() -> str:
-    """Prompt for deployment type: native or container.
+    """Prompt for deployment type: container or native.
 
-    Default is "container" (index 2) as it is the recommended option
-    for new installs.
+    Container is listed first (option 1) and is the default, as it is the
+    recommended option for new installs.
     """
     return _prompt_numbered(
         "Select deployment type:",
         [
-            ("native", "Native  — runs directly on this host (systemd or manual)"),
             (
                 "container",
                 "Container — single container pulled from GHCR (recommended for new installs)",
             ),
+            ("native", "Native  — runs directly on this host (systemd or manual)"),
         ],
-        default_index=2,
+        default_index=1,
     )
+
+
+def _offer_switch_to_native(cfg: SetupConfig) -> bool:
+    """Ask whether to fall back to a native install when no container runtime is
+    usable. Interactive only — non-interactive runs keep the fail-fast behavior.
+
+    Returns True if the user opts to switch to native.
+    """
+    # Match the other prompt helpers: never block on input when there's no TTY,
+    # even if --non-interactive wasn't passed (piped stdin / CI). A bare input()
+    # there would raise EOFError and abort setup with a traceback.
+    if cfg.non_interactive or not sys.stdin.isatty():
+        return False
+    try:
+        ans = (
+            input(
+                "  Install a container runtime (Docker or Podman) and re-run, or switch "
+                "to a native install now? [switch to native: y / N]: "
+            )
+            .strip()
+            .lower()
+        )
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return ans in ("y", "yes")
 
 
 def _discover_packs() -> dict[str, dict[str, Any]]:
@@ -1091,7 +1122,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
                 f"  [red]--runtime {requested} requested but `{requested}` is not on "
                 f"PATH.[/red]\n  Install it, or drop --runtime to auto-detect."
             )
-            return 1
+            return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
         else:
             _print(
                 f"  [red]--runtime {requested} requested but `{requested}` is not "
@@ -1100,25 +1131,26 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
                 "    Docker:  start Docker Desktop (macOS) or "
                 "`sudo systemctl start docker` (Linux)"
             )
-            return 1
+            return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
     elif not functional:
         present = _detect_runtime_binary()  # present-but-non-functional, or None
         if present is None:
             _print(
-                "  [red]Neither `podman` nor `docker` found on PATH.[/red]\n"
-                "  Install one and re-run setup:\n"
+                "  [red]Container deployment needs a container runtime, but neither "
+                "`podman` nor `docker` was found on PATH.[/red]\n"
+                "  Install one (then re-run setup):\n"
                 "    Podman:  brew install podman  (macOS) / sudo apt install podman (Linux)\n"
                 "    Docker:  https://docs.docker.com/get-docker/"
             )
         else:
             _print(
                 f"  [red]`{present}` is installed but not responding.[/red]\n"
-                "  Start its daemon/machine and re-run setup:\n"
+                "  Start its daemon/machine, then re-run setup:\n"
                 "    Podman:  podman machine start\n"
                 "    Docker:  start Docker Desktop (macOS) or "
                 "`sudo systemctl start docker` (Linux)"
             )
-        return 1
+        return _SWITCH_TO_NATIVE if _offer_switch_to_native(cfg) else 1
     elif len(functional) == 1:
         label = functional[0]
     else:
@@ -1658,7 +1690,15 @@ def run_setup(cfg: SetupConfig) -> int:
         cfg.deployment = "native"  # non-interactive default
 
     if cfg.deployment == "container":
-        return _run_container_flow(cfg, t0)
+        rc = _run_container_flow(cfg, t0)
+        if rc != _SWITCH_TO_NATIVE:
+            return rc
+        # No usable container runtime — user chose to fall back to native.
+        # cfg is untouched at this point (the switch happens before any
+        # container-specific overrides), so continue into the native flow.
+        cfg.deployment = "native"
+        cfg.runtime_binary = ""
+        _print("\n  [yellow]Switching to a native install.[/yellow]")
 
     # -- Phase 1: Gather config --
 
