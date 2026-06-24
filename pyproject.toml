@@ -72,6 +72,12 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "SIM"]
 # by design (mapped to specific HTTP response codes in the contract).
 ignore = ["E501", "N818", "SIM117", "N806"]
 
+[tool.ruff.lint.per-file-ignores]
+# conftest sets sys.path (so tests can import the eval/ package under
+# pytest --import-mode=importlib) before its own imports run — module-level
+# imports after that setup are intentional, not E402 violations.
+"tests/conftest.py" = ["E402"]
+
 [tool.ruff.lint.flake8-bugbear]
 # Depends/Query/Header/Body are the standard FastAPI default-argument idiom.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
