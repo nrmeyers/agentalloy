@@ -161,6 +161,10 @@ def test_native_ordering_uv_tool():
         patch.object(up, "_start_service", side_effect=lambda: calls.append("start")),
         patch.object(up, "_run_cli", side_effect=rec_cli),
         patch.object(up.subprocess, "run", side_effect=rec_run),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=100,
+        ),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
 
@@ -214,6 +218,45 @@ def test_native_dim_mismatch_declined_warns():
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=False)
     assert any("re-embed skipped" in w for w in warnings)
+
+
+def test_native_empty_corpus_after_upgrade_warns():
+    """install-packs 'succeeds' but the corpus didn't populate → loud warning
+    (so _run returns a non-clean status), mirroring setup's #261 guard."""
+    state = {"installed_packs": ["core"]}
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=0,
+        ),
+    ):
+        actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
+    assert any("corpus is missing or empty after upgrade" in w for w in warnings)
+
+
+def test_native_populated_corpus_no_warning():
+    """A healthy corpus after upgrade adds no corpus warning."""
+    state = {"installed_packs": ["core"]}
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=300,
+        ),
+    ):
+        actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
+    assert not any("corpus is missing or empty" in w for w in warnings)
 
 
 def test_native_swap_failure_aborts():

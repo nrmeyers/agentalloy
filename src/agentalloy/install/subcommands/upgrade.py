@@ -301,6 +301,20 @@ def _upgrade_native(
     else:
         actions.append("re-ingested packs")
 
+    # Guard: ingest/re-embed reported done — verify the corpus actually populated.
+    # install-packs only re-embeds on a dimension mismatch, so a silently empty
+    # corpus would otherwise restart the service on a half-upgrade. A warning here
+    # makes `_run` return a non-clean status (mirrors setup's #261 guard).
+    from agentalloy.install.subcommands import seed_corpus
+
+    skill_count = seed_corpus.corpus_skill_count()
+    if skill_count < seed_corpus.MIN_SKILL_COUNT:
+        warnings.append(
+            f"corpus is missing or empty after upgrade ({skill_count} skills "
+            f"embedded, expected >= {seed_corpus.MIN_SKILL_COUNT}) — run "
+            f"`agentalloy reembed --force` then `agentalloy doctor`"
+        )
+
     # corpus schema migrations + model-drift report. Capture the JSON output so it
     # does not spill to the terminal; surface only its warnings, cleanly.
     upd = _run_cli(["update", "--json"], check=False, capture=True)

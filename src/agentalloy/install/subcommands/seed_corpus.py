@@ -29,6 +29,24 @@ EXPECTED_CORPUS_SCHEMA_VERSION = CORPUS_SCHEMA_VERSION
 MIN_SKILL_COUNT = 25
 
 
+def corpus_skill_count() -> int:
+    """Embedded-skill count in the user corpus; 0 if absent/empty/unreadable.
+
+    Shared post-install/upgrade guard seam: callers compare against
+    ``MIN_SKILL_COUNT`` to catch a silent half-install (install-packs reports
+    success but the corpus never populated). Never raises.
+    """
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not (duck_path.exists() and ladybug_path.exists()):
+        return 0
+    try:
+        return int(_check_duckdb(duck_path).get("skill_count") or 0)
+    except Exception:
+        return 0
+
+
 def _check_duckdb(duck_path: Path) -> dict[str, Any]:
     """Query DuckDB for skill/fragment counts, embedding metadata, and embedded
     schema_version (if the ``corpus_meta`` table is present).

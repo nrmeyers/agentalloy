@@ -1640,19 +1640,10 @@ def _offer_provision_runner(cfg: SetupConfig, preset: str) -> bool:
 def _corpus_skill_count() -> int:
     """Embedded-skill count in the user corpus; 0 if absent/empty/unreadable.
 
-    Isolated as a module-level function so the post-install corpus guard has a
-    single patchable seam (tests that mock the install steps stub this).
+    Kept as a module-level seam (tests stub this) — delegates to the shared
+    :func:`seed_corpus.corpus_skill_count` used by both setup and upgrade.
     """
-    corpus = install_state.corpus_dir()
-    duck_path = corpus / "skills.duck"
-    ladybug_path = corpus / "ladybug"
-    if not (duck_path.exists() and ladybug_path.exists()):
-        return 0
-    try:
-        meta = seed_corpus._check_duckdb(duck_path)  # pyright: ignore[reportPrivateUsage]
-        return int(meta.get("skill_count") or 0)
-    except Exception:
-        return 0
+    return seed_corpus.corpus_skill_count()
 
 
 def _teardown_prior_deployment(prior_state: dict[str, Any], prior_deployment: str) -> int:

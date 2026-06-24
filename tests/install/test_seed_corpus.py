@@ -15,6 +15,7 @@ import pytest
 from agentalloy.install.subcommands.seed_corpus import (
     SCHEMA_VERSION,
     check_corpus,
+    corpus_skill_count,
     run,
 )
 
@@ -195,3 +196,29 @@ class TestDurationTracking:
         result = check_corpus(repo_root)
         assert "duration_ms" in result
         assert isinstance(result["duration_ms"], int)
+
+
+class TestCorpusSkillCount:
+    """Shared post-install/upgrade guard seam (used by setup #261 and upgrade)."""
+
+    def test_zero_when_corpus_absent(self, repo_root: Path, user_corpus: Path) -> None:
+        # user_corpus dir exists but holds no skills.duck / ladybug
+        assert corpus_skill_count() == 0
+
+    def test_returns_skill_count_when_populated(self, user_corpus: Path) -> None:
+        (user_corpus / "skills.duck").write_bytes(b"fake")
+        (user_corpus / "ladybug").mkdir()
+        with patch(
+            "agentalloy.install.subcommands.seed_corpus._check_duckdb",
+            return_value={"skill_count": 142},
+        ):
+            assert corpus_skill_count() == 142
+
+    def test_zero_when_check_raises(self, user_corpus: Path) -> None:
+        (user_corpus / "skills.duck").write_bytes(b"fake")
+        (user_corpus / "ladybug").mkdir()
+        with patch(
+            "agentalloy.install.subcommands.seed_corpus._check_duckdb",
+            side_effect=RuntimeError("corrupt"),
+        ):
+            assert corpus_skill_count() == 0
