@@ -657,6 +657,22 @@ def _container_read_file(runtime: str, container_name: str, path: str) -> str | 
     return proc.stdout if proc.returncode == 0 else None
 
 
+def _container_image(runtime: str, container_name: str) -> str | None:
+    """Return the image the container is actually running, or None on failure."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [runtime, "inspect", "-f", "{{.Config.Image}}", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
 def _dep_status(health: dict[str, Any], name: str) -> str | None:
     """Pull dependencies.<name>.status out of a /health body."""
     deps = health.get("dependencies")
@@ -694,12 +710,14 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
             t0=t0,
         )
 
+    # Report the image actually running, not the (possibly stale) state field.
+    running_image = _container_image(runtime, container_name) or st.get("image_tag", "?")
     checks: list[dict[str, Any]] = [
         {
             "name": "container",
             "passed": True,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "detail": f"{container_name} running ({st.get('image_tag', '?')})",
+            "detail": f"{container_name} running ({running_image})",
         }
     ]
 

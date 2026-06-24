@@ -436,6 +436,19 @@ def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[
         return actions, warnings
     actions.append("recreated container")
     warnings.extend(_verify_container_spec(runtime, cr))
+    # Record the image we actually ran. doctor's container check and the next
+    # upgrade's _target_image() base both read state["image_tag"]; leaving it at
+    # ":latest" after pinning to a versioned tag is misleading and loses the
+    # -full variant across upgrades.
+    if image and state.get("image_tag") != image:
+        from agentalloy.install import state as install_state
+
+        state["image_tag"] = image
+        try:
+            install_state.save_state(state)
+            actions.append(f"pinned image_tag -> {image}")
+        except OSError as exc:  # noqa: BLE001
+            warnings.append(f"could not persist image_tag: {exc}")
     return actions, warnings
 
 

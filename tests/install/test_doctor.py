@@ -668,6 +668,9 @@ def _stamp() -> str:
     )
 
 
+_CONTAINER_IMAGE = "agentalloy.install.subcommands.doctor._container_image"
+
+
 class TestContainerDoctor:
     _ST = {
         "deployment": "container",
@@ -676,6 +679,13 @@ class TestContainerDoctor:
         "image_tag": "ghcr.io/nrmeyers/agentalloy:latest",
         "port": 47950,
     }
+
+    @pytest.fixture(autouse=True)
+    def _patch_container_image(self) -> Any:
+        # _run_doctor_container inspects the live image; pin it so tests don't
+        # shell out to a real runtime.
+        with patch(_CONTAINER_IMAGE, return_value="ghcr.io/nrmeyers/agentalloy:3.2.3"):
+            yield
 
     def _healthy_patches(self) -> Any:
         from contextlib import ExitStack
@@ -707,6 +717,15 @@ class TestContainerDoctor:
         } <= names
         corpus_count = next(c for c in result["checks"] if c["name"] == "corpus_count")
         assert corpus_count["passed"] is True
+
+    def test_container_check_reports_live_image_not_stale_state(self) -> None:
+        # state pins :latest but the container runs :3.2.3 — doctor must show the
+        # live image, not the stale state field.
+        with self._healthy_patches():
+            result = _run_doctor_container(self._ST)
+        container = next(c for c in result["checks"] if c["name"] == "container")
+        assert "3.2.3" in container["detail"]
+        assert ":latest" not in container["detail"]
 
     def test_run_doctor_routes_to_container(self) -> None:
         with self._healthy_patches():

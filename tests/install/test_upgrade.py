@@ -317,6 +317,7 @@ def test_container_recreates_with_versioned_image():
         patch.object(up, "_detect_install_method", return_value="source"),  # skip CLI swap
         patch.object(cr, "_pull_image", return_value=0) as pull,
         patch.object(cr, "_run_container", return_value=0) as run_ct,
+        patch("agentalloy.install.state.save_state") as save,
     ):
         actions, warnings = up._upgrade_container("v2.2.1", state, assume_yes=True)
 
@@ -327,6 +328,10 @@ def test_container_recreates_with_versioned_image():
     assert "entrypoint" not in run_ct.call_args.kwargs
     assert any("recreated container" in a for a in actions)
     assert not warnings
+    # install-state image_tag is pinned to the image we actually ran (preserving
+    # the -full variant), so doctor + the next upgrade's base reflect reality.
+    assert state["image_tag"] == "ghcr.io/nrmeyers/agentalloy:2.2.1-full"
+    save.assert_called_once()
 
 
 def test_container_pull_failure_aborts_before_cli_swap():
