@@ -647,6 +647,11 @@ _FILE_EXISTS = "agentalloy.install.subcommands.doctor._container_file_exists"
 _READ_FILE = "agentalloy.install.subcommands.doctor._container_read_file"
 _PACK_MANIFESTS = "agentalloy.install.subcommands.doctor._check_pack_manifests"
 _ORPHANS = "agentalloy.install.subcommands.doctor._check_orphans"
+_DIAG = "agentalloy.install.subcommands.doctor._fetch_diagnostics"
+
+
+def _healthy_diag() -> dict[str, Any]:
+    return {"skill_count": 30, "embedded_vector_count": 412, "embedding_dim": 768}
 
 
 def _healthy_body() -> dict[str, Any]:
@@ -692,6 +697,7 @@ class TestContainerDoctor:
             patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True})
         )
         stack.enter_context(patch(_ORPHANS, return_value={"name": "orphans", "passed": True}))
+        stack.enter_context(patch(_DIAG, return_value=_healthy_diag()))
         return stack
 
     def test_healthy_container_all_pass(self) -> None:
@@ -699,7 +705,16 @@ class TestContainerDoctor:
             result = _run_doctor_container(self._ST)
         assert result["all_checks_passed"] is True
         names = {c["name"] for c in result["checks"]}
-        assert {"container", "service", "embed_runtime", "corpus_files", "corpus_stamp"} <= names
+        assert {
+            "container",
+            "service",
+            "embed_runtime",
+            "corpus_files",
+            "corpus_stamp",
+            "corpus_count",
+        } <= names
+        corpus_count = next(c for c in result["checks"] if c["name"] == "corpus_count")
+        assert corpus_count["passed"] is True
 
     def test_run_doctor_routes_to_container(self) -> None:
         with self._healthy_patches():
@@ -725,6 +740,7 @@ class TestContainerDoctor:
             patch(_READ_FILE, return_value=_stamp()),
             patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
             patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(_DIAG, return_value=_healthy_diag()),
         ):
             result = _run_doctor_container(self._ST)
         assert result["all_checks_passed"] is False
@@ -739,6 +755,7 @@ class TestContainerDoctor:
             patch(_READ_FILE, return_value=None),
             patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
             patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(_DIAG, return_value=_healthy_diag()),
         ):
             result = _run_doctor_container(self._ST)
         assert result["all_checks_passed"] is False
@@ -755,11 +772,77 @@ class TestContainerDoctor:
             patch(_READ_FILE, return_value=_stamp()),
             patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
             patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(_DIAG, return_value=_healthy_diag()),
         ):
             result = _run_doctor_container(self._ST)
         assert result["all_checks_passed"] is False
         embed = next(c for c in result["checks"] if c["name"] == "embed_runtime")
         assert embed["passed"] is False
+
+    def test_low_corpus_count_fails(self) -> None:
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=_healthy_body()),
+            patch(_FILE_EXISTS, return_value=True),
+            patch(_READ_FILE, return_value=_stamp()),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(
+                _DIAG,
+                return_value={
+                    "skill_count": 3,
+                    "embedded_vector_count": 10,
+                    "embedding_dim": 768,
+                },
+            ),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        cc = next(c for c in result["checks"] if c["name"] == "corpus_count")
+        assert cc["passed"] is False
+        assert "skill_count" in cc["error"]
+
+    def test_zero_vectors_fails(self) -> None:
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=_healthy_body()),
+            patch(_FILE_EXISTS, return_value=True),
+            patch(_READ_FILE, return_value=_stamp()),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(
+                _DIAG,
+                return_value={
+                    "skill_count": 30,
+                    "embedded_vector_count": 0,
+                    "embedding_dim": 768,
+                },
+            ),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        cc = next(c for c in result["checks"] if c["name"] == "corpus_count")
+        assert cc["passed"] is False
+        assert "embedded_vector_count" in cc["error"]
+
+    def test_diagnostics_endpoint_404_warns_not_fails(self) -> None:
+        # Older image (version skew): /diagnostics/corpus 404s → _fetch_diagnostics
+        # returns None. corpus_count must DEGRADE to a warn-pass, not hard-fail.
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=_healthy_body()),
+            patch(_FILE_EXISTS, return_value=True),
+            patch(_READ_FILE, return_value=_stamp()),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+            patch(_DIAG, return_value=None),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is True
+        cc = next(c for c in result["checks"] if c["name"] == "corpus_count")
+        assert cc["passed"] is True
+        assert cc["severity"] == "warn"
+        assert "unavailable" in cc["detail"]
 
     def test_repair_does_not_touch_host(self) -> None:
         """Container repair must NOT run host install-packs/reembed; it advises recreate."""

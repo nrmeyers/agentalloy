@@ -121,6 +121,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Expose for proxy router dependencies
     app.state.embed_client = embed_client
     app.state.vector_store = vector_store
+    # Expose the live LadybugStore so read-only diagnostics (e.g. corpus
+    # counts) can reuse the lock-holding connection instead of opening a new
+    # one (which would deadlock against this process's own file lock).
+    app.state.store = store
 
     # Async client for embed proxy passthrough
     import contextlib as _ctx

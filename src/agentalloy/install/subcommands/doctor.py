@@ -619,6 +619,24 @@ def _fetch_health(port: int) -> dict[str, Any] | None:
     return body if isinstance(body, dict) else None
 
 
+def _fetch_diagnostics(port: int) -> dict[str, Any] | None:
+    """GET {port}/diagnostics/corpus and return the parsed body.
+
+    Returns ``None`` when the endpoint is unreachable OR returns a non-200
+    (an ``HTTPError`` — e.g. a 404 from an older image that predates this
+    endpoint — is a subclass of ``URLError`` and is caught here). Callers must
+    treat ``None`` as "endpoint unavailable" and degrade gracefully rather than
+    hard-fail; provenance is still covered by corpus_files / corpus_stamp.
+    """
+    try:
+        req = Request(f"http://localhost:{port}/diagnostics/corpus", method="GET")
+        with urlopen(req, timeout=5) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+    except (URLError, OSError, json.JSONDecodeError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
 def _container_file_exists(runtime: str, container_name: str, path: str) -> bool:
     """True if ``path`` exists and is non-empty inside the container."""
     import subprocess
@@ -795,6 +813,50 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 "passed": True,
                 "severity": "warn",
                 "detail": "No corpus-stamp.json in volume (provenance unknown)",
+            }
+        )
+
+    # corpus_count — the service holds the DB locks, so it (not doctor) can
+    # count rows. Query its /diagnostics/corpus endpoint. Older images predate
+    # this endpoint and 404 → degrade to a warn-pass (corpus_files / corpus_stamp
+    # already cover provenance) rather than hard-failing on version skew.
+    diag = _fetch_diagnostics(port)
+    if diag is None:
+        checks.append(
+            {
+                "name": "corpus_count",
+                "passed": True,
+                "severity": "warn",
+                "detail": (
+                    "/diagnostics/corpus unavailable (older image or version skew); "
+                    "corpus_files/corpus_stamp cover provenance"
+                ),
+            }
+        )
+    else:
+        skill_count = diag.get("skill_count")
+        vector_count = diag.get("embedded_vector_count")
+        skill_ok = isinstance(skill_count, int) and skill_count >= _MIN_SKILL_COUNT
+        vector_ok = isinstance(vector_count, int) and vector_count > 0
+        passed = skill_ok and vector_ok
+        errors: list[str] = []
+        if not skill_ok:
+            errors.append(f"skill_count {skill_count} < {_MIN_SKILL_COUNT}")
+        if not vector_ok:
+            errors.append(f"embedded_vector_count {vector_count} <= 0")
+        checks.append(
+            {
+                "name": "corpus_count",
+                "passed": passed,
+                "detail": (
+                    f"skills={skill_count} vectors={vector_count} dim={diag.get('embedding_dim')}"
+                    if passed
+                    else None
+                ),
+                "error": None if passed else "; ".join(errors),
+                "remediation": None
+                if passed
+                else "Re-run the installer to reseed/reindex the corpus volume.",
             }
         )
 
