@@ -92,6 +92,12 @@ class CompositionTrace:
     # None on legacy rows recorded before repo attribution shipped — they show
     # up only in the all-repos view, never under a specific repo filter.
     repo: str | None = None
+    # Per-session attribution: the session key this trace belongs to and how it
+    # was derived ("header" = an explicit harness session-id header; "fingerprint"
+    # = sha1 of the first user message, the fallback for header-less harnesses).
+    # None on legacy rows. Makes "was this session oriented for this phase?" queryable.
+    session_key: str | None = None
+    session_source: str | None = None
     selected_fragment_ids: list[str] = field(default_factory=lambda: [])
     source_skill_ids: list[str] = field(default_factory=lambda: [])
     system_skill_ids: list[str] = field(default_factory=lambda: [])
@@ -208,7 +214,9 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     lm_assist_model VARCHAR,
     dense_leg_degraded BOOLEAN NOT NULL DEFAULT FALSE,
     phase_gate_embed_failed BOOLEAN NOT NULL DEFAULT FALSE,
-    repo VARCHAR
+    repo VARCHAR,
+    session_key VARCHAR,
+    session_source VARCHAR
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
@@ -662,8 +670,8 @@ class VectorStore:
                 contract_path, contract_tags, bm25_source, reranked,
                 tokens_returned, tokens_flat_equivalent,
                 lm_assist_outcome, lm_assist_model, dense_leg_degraded,
-                phase_gate_embed_failed, repo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                phase_gate_embed_failed, repo, session_key, session_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -701,6 +709,8 @@ class VectorStore:
                 trace.dense_leg_degraded,
                 trace.phase_gate_embed_failed,
                 trace.repo,
+                trace.session_key,
+                trace.session_source,
             ],
         )
 
@@ -731,7 +741,7 @@ class VectorStore:
                    contract_path, contract_tags, bm25_source, reranked,
                    tokens_returned, tokens_flat_equivalent,
                    lm_assist_outcome, lm_assist_model, dense_leg_degraded,
-                   phase_gate_embed_failed, repo
+                   phase_gate_embed_failed, repo, session_key, session_source
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -775,6 +785,8 @@ class VectorStore:
                 dense_leg_degraded=bool(r[32]),
                 phase_gate_embed_failed=bool(r[33]),
                 repo=r[34],
+                session_key=r[35],
+                session_source=r[36],
             )
             for r in rows
         ]
@@ -985,6 +997,8 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("dense_leg_degraded", "BOOLEAN", "DEFAULT FALSE"),
     ("phase_gate_embed_failed", "BOOLEAN", "DEFAULT FALSE"),
     ("repo", "VARCHAR", ""),
+    ("session_key", "VARCHAR", ""),
+    ("session_source", "VARCHAR", ""),
 )
 
 
@@ -1035,10 +1049,14 @@ def _apply_migrations(conn: duckdb.DuckDBPyConnection) -> None:
         with contextlib.suppress(Exception):
             conn.execute(stmt)
 
-    # Index on the late-added repo column — created here, not in the DDL, because
-    # the column may not exist yet when the DDL runs against a pre-existing table.
+    # Indexes on late-added columns — created here, not in the DDL, because the
+    # column may not exist yet when the DDL runs against a pre-existing table.
     with contextlib.suppress(Exception):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_repo ON composition_traces(repo)")
+    with contextlib.suppress(Exception):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_traces_session ON composition_traces(session_key)"
+        )
 
 
 def open_or_create(path: str | Path) -> VectorStore:

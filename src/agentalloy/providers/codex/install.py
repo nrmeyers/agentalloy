@@ -54,6 +54,11 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     config_path = Path.home() / ".codex" / "config.toml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Tokenless on purpose: this is a USER-scoped config (one ~/.codex/config.toml
+    # for every repo), so it cannot carry a per-repo /proj/<token>. Per-repo
+    # resolution comes from the env_builder instead (it bakes encode_proj_token of
+    # the launch cwd into OPENAI_BASE_URL, which overrides this file). A direct
+    # `codex` launch relying solely on this file is not repo-disambiguated.
     proxy_url = f"http://localhost:{port}/v1"
 
     # Build the TOML config block WITHOUT sentinel markers.

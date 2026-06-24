@@ -37,6 +37,8 @@ def write_proxy_trace(
     error_code: str | None = None,
     phase_gate_embed_failed: bool = False,
     repo: str | None = None,
+    session_key: str | None = None,
+    session_source: str | None = None,
 ) -> None:
     """Write a CompositionTrace for a proxy request.
 
@@ -79,6 +81,8 @@ def write_proxy_trace(
             error_code=error_code,
             phase_gate_embed_failed=phase_gate_embed_failed,
             repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         vector_store.record_composition_trace(trace)
     except Exception:  # noqa: BLE001 — soft-fail; telemetry never blocks the request

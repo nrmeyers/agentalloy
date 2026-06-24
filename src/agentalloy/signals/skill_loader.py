@@ -29,6 +29,7 @@ __all__ = [
     "_load_workflow_skill_for_phase",
     "_load_workflow_skill_from_packs",
     "_read_announced",
+    "_read_announced_state",
     "_read_composed",
     "_read_cursor",
     "_read_lifecycle_mode",
@@ -147,18 +148,52 @@ def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
         raise
 
 
-def _read_announced(project_root: Path) -> str | None:
-    """Read the last-announced phase from ``.agentalloy/announced``.
+# Cap on how many distinct session keys we remember as "already oriented" for a
+# phase. Bounds the announced file and lets a few concurrent sessions in the same
+# repo+phase coexist without re-announcing each other every turn (LRU-ish: oldest
+# dropped first). New phases reset the set.
+_MAX_ANNOUNCED_SESSIONS = 8
 
-    ``None`` (absent/unreadable/empty) means "nothing announced yet", so the
-    current phase announces (Tier 1: workflow + system prose).
+
+def _read_announced_state(project_root: Path) -> tuple[str | None, list[str]]:
+    """Read ``.agentalloy/announced`` as ``(phase, [session_keys])``.
+
+    The file stores ``"<phase>\\t<key1>,<key2>,..."`` — the phase plus the set of
+    sessions already oriented for it — so orientation is keyed per *(phase,
+    session)*: a new session on an already-announced phase still re-orients, while
+    a session already in the set stays quiet. A legacy bare-``phase`` file (no tab)
+    parses to ``(phase, [])``, so the next real request re-announces once (benign).
+    ``(None, [])`` means nothing announced yet.
     """
-    return _read_state(project_root, "announced")
+    raw = _read_state(project_root, "announced")
+    if raw is None:
+        return None, []
+    phase, _, keys_csv = raw.partition("\t")
+    keys = [k for k in keys_csv.split(",") if k]
+    return (phase or None), keys
 
 
-def _write_announced_atomic(project_root: Path, phase: str) -> None:
-    """Atomically record *phase* as the last-announced phase (Tier 1 cadence)."""
-    _write_state_atomic(project_root, "announced", phase)
+def _read_announced(project_root: Path) -> str | None:
+    """Read just the last-announced phase from ``.agentalloy/announced``.
+
+    ``None`` (absent/unreadable/empty) means "nothing announced yet". Kept as the
+    phase-only view over :func:`_read_announced_state` for callers/tests that only
+    care about the phase.
+    """
+    return _read_announced_state(project_root)[0]
+
+
+def _write_announced_atomic(
+    project_root: Path, phase: str, session_keys: list[str] | None = None
+) -> None:
+    """Atomically record *(phase, session_keys)* as announced (Tier 1 cadence).
+
+    Writes ``"<phase>\\t<key1>,<key2>,..."``; a bare ``phase`` when no session keys
+    (back-compat with the historical single-value format).
+    """
+    keys = [k for k in (session_keys or []) if k]
+    value = f"{phase}\t{','.join(keys)}" if keys else phase
+    _write_state_atomic(project_root, "announced", value)
 
 
 def _read_cursor(project_root: Path) -> str | None:

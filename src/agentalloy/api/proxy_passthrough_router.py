@@ -34,6 +34,7 @@ from agentalloy.api.proxy_context import decode_proj_token
 from agentalloy.api.proxy_injection import inject_into_anthropic_messages
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import get_embed_client, get_orchestrator_for_proxy
+from agentalloy.api.proxy_session import extract_session_header
 from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
 
 if TYPE_CHECKING:
@@ -135,7 +136,12 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
                 phase=compose_phase,
                 legs="system",
             )
-            result = await orchestrator.compose(system_req)
+            result = await orchestrator.compose(
+                system_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+            )
             if not isinstance(result, EmptyResult) and result.output:
                 parts.append(result.output)
         except Exception:
@@ -151,7 +157,12 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
 
             contract = parse_contract(Path(signal.current_contract))
             domain_req = compose_request_from_contract(contract, legs="domain")
-            result = await orchestrator.compose(domain_req)
+            result = await orchestrator.compose(
+                domain_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+            )
             tier2 = "" if isinstance(result, EmptyResult) else result.output
         except Exception:
             logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
@@ -165,15 +176,18 @@ async def _maybe_inject(
     token: str,
     embed_client: EmbedClient | None,
     orchestrator: ComposeOrchestrator | None,
+    session_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Run signal → compose → inject for this repo. Return a new payload, or None.
 
     Returns None when nothing was injected (skip / no-op). Raising is fine — the
-    caller treats any exception as "forward the original unchanged".
+    caller treats any exception as "forward the original unchanged". ``session_id``
+    is the harness session-id header (Claude Code's ``x-claude-code-session-id``),
+    used to key per-session orientation.
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
-        _proxy_request_from_anthropic(payload), project_dir, embed_client
+        _proxy_request_from_anthropic(payload), project_dir, embed_client, session_id
     )
     if not (signal.should_compose and signal.phase and orchestrator is not None):
         return None
@@ -246,7 +260,8 @@ async def passthrough_anthropic_messages(
 
     if payload is not None:
         try:
-            injected = await _maybe_inject(payload, token, embed_client, orchestrator)
+            session_id = extract_session_header(inbound_headers)
+            injected = await _maybe_inject(payload, token, embed_client, orchestrator, session_id)
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
         except Exception:

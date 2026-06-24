@@ -12,15 +12,17 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from agentalloy.api.proxy_context import read_phase, resolve_working_dir
+from agentalloy.api.proxy_context import decode_proj_token, read_phase, resolve_working_dir
 from agentalloy.api.proxy_injection import compose_and_inject
 from agentalloy.api.proxy_models import ProxyRequest
+from agentalloy.api.proxy_session import extract_session_header, resolve_session_key
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.api.proxy_telemetry import write_proxy_trace
 from agentalloy.api.upstream.error_sse import error_sse_plain
@@ -271,15 +273,20 @@ async def _write_flow_telemetry(
     error_code: str | None = None,
     source_skill_ids: list[str] | None = None,
     phase_gate_embed_failed: bool = False,
+    repo: str | None = None,
+    session_key: str | None = None,
+    session_source: str | None = None,
 ) -> None:
-    """Write a telemetry trace for the full proxy request flow."""
+    """Write a telemetry trace for the full proxy request flow.
+
+    ``repo`` and ``session_*`` are the values the handler already resolved (the
+    handler may have used a /proj/<token> override, so they're passed in rather
+    than recomputed here).
+    """
     if vector_store is None:
         return
     status = "proxy_composed" if composed else "proxy_passthrough"
     task_prompt = _extract_task_prompt(request)
-    # Resolve the per-request project root again (cheap, no I/O) so the trace is
-    # attributable to the repo it came from. Mirrors the cwd the handler resolved.
-    repo = str(resolve_working_dir(request))
     write_proxy_trace(
         vector_store,
         phase=phase or "unspecified",
@@ -292,6 +299,8 @@ async def _write_flow_telemetry(
         total_latency_ms=latency_ms,
         source_skill_ids=source_skill_ids,
         error_code=error_code,
+        session_key=session_key,
+        session_source=session_source,
         phase_gate_embed_failed=phase_gate_embed_failed,
         repo=repo,
     )
@@ -303,9 +312,11 @@ async def _write_flow_telemetry(
 
 
 @router.post("/v1/chat/completions", response_model=None)
+@router.post("/proj/{token}/v1/chat/completions", response_model=None)
 async def proxy_chat_completions(
     request: ProxyRequest,
     fastapi_request: Request,
+    token: str | None = None,
     upstream: httpx.AsyncClient | None = Depends(get_upstream_client),
     embed_client: EmbedClient | None = Depends(get_embed_client),
     vector_store: VectorStore | None = Depends(get_vector_store),
@@ -331,14 +342,30 @@ async def proxy_chat_completions(
         return _upstream_not_configured_error()
 
     # --- Step 1-2: Resolve context ---
-    cwd = resolve_working_dir(request)
+    # When the OpenAI base URL carries a /proj/<token> discriminator (the same
+    # realpath-baked token the Anthropic passthrough uses), decode it to the repo;
+    # otherwise fall back to the metadata.cwd / env / process-cwd chain.
+    cwd_override: Path | None = None
+    if token:
+        try:
+            cwd_override = decode_proj_token(token)
+        except ValueError:
+            cwd_override = None
+    cwd = resolve_working_dir(request, cwd_override)
     phase = read_phase(cwd)
+    repo = str(cwd)
+
+    # Per-session orientation key: explicit harness header (e.g. Claude Code's
+    # x-claude-code-session-id) else the conversation fingerprint. Drives the
+    # announce cadence and is stamped onto telemetry.
+    session_id = extract_session_header(fastapi_request.headers)
+    session_key, session_source = resolve_session_key(request, session_id)
 
     # --- Step 3: Signal layer ---
     signal_result = None
     composed = False
     try:
-        signal_result = await evaluate_signal(request, cwd, embed_client)
+        signal_result = await evaluate_signal(request, cwd, embed_client, session_id)
     except Exception:
         logger.warning("Signal evaluation failed -- passing through", exc_info=True)
 
@@ -391,6 +418,9 @@ async def proxy_chat_completions(
             latency_ms=None,  # streaming latency tracked separately
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _stream_upstream_response(upstream, payload)
 
@@ -414,6 +444,9 @@ async def proxy_chat_completions(
             error_code=error_code,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.TimeoutException as e:
@@ -433,6 +466,9 @@ async def proxy_chat_completions(
             error_code=error_code,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.RequestError as e:
@@ -452,6 +488,9 @@ async def proxy_chat_completions(
             error_code=error_code,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.HTTPError as e:
@@ -471,6 +510,9 @@ async def proxy_chat_completions(
             error_code=error_code,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _upstream_unavailable_error(str(e))
 
@@ -491,6 +533,9 @@ async def proxy_chat_completions(
             error_code=error_code,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         return _upstream_unavailable_error(f"HTTP {resp.status_code}")
 
@@ -511,6 +556,9 @@ async def proxy_chat_completions(
             latency_ms=latency_ms,
             source_skill_ids=source_skill_ids,
             phase_gate_embed_failed=gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
@@ -533,6 +581,9 @@ async def proxy_chat_completions(
         latency_ms=latency_ms,
         source_skill_ids=source_skill_ids,
         phase_gate_embed_failed=gate_embed_failed,
+        repo=repo,
+        session_key=session_key,
+        session_source=session_source,
     )
 
     return JSONResponse(
@@ -542,11 +593,18 @@ async def proxy_chat_completions(
 
 
 @router.post("/v1/embeddings", response_model=None)
+@router.post("/proj/{token}/v1/embeddings", response_model=None)
 async def proxy_embeddings(
     request: Request,
+    token: str | None = None,
     embed_async_client: httpx.AsyncClient | None = Depends(get_embed_async_client),
 ):
-    """Forward /v1/embeddings to the embed server."""
+    """Forward /v1/embeddings to the embed server.
+
+    The ``/proj/<token>`` variant exists so an OpenAI harness wired with a
+    ``.../proj/<token>/v1`` base URL reaches embeddings too (the token is
+    irrelevant here — embeddings carry no repo context — but the path must match).
+    """
     if embed_async_client is None:
         return JSONResponse(
             status_code=503,

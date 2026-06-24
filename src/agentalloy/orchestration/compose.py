@@ -96,7 +96,17 @@ class ComposeOrchestrator:
     def lm(self, client: EmbedClient) -> None:
         self._lm = client
 
-    async def compose(self, req: ComposeRequest) -> ComposedResult | EmptyResult:
+    async def compose(
+        self,
+        req: ComposeRequest,
+        *,
+        repo: str | None = None,
+        session_key: str | None = None,
+        session_source: str | None = None,
+    ) -> ComposedResult | EmptyResult:
+        # repo / session_* are per-request attribution stamped onto the telemetry
+        # trace (proxy paths pass them from the signal layer; direct /compose omits
+        # them). They never affect retrieval — purely telemetry.
         start_ns = time.perf_counter_ns()
         # Two-tier injection: assemble only the requested legs. Tier 1 (announce)
         # wants system prose only; Tier 2 (per work-item) wants domain only. The
@@ -157,6 +167,9 @@ class ComposeOrchestrator:
                     domain_fragment_ids=[],
                     system_fragment_ids=system_fragment_ids,
                     source_skill_ids=[],
+                    repo=repo,
+                    session_key=session_key,
+                    session_source=session_source,
                     latency_retrieval_ms=retrieval.retrieval_ms,
                     latency_total_ms=elapsed_ms,
                     error_payload=retrieval_error_code,
@@ -227,6 +240,9 @@ class ComposeOrchestrator:
                 lm_assist_model=lm_assist_model,
                 requesting_agent=req.requesting_agent,
                 dense_leg_degraded=dense_leg_degraded,
+                repo=repo,
+                session_key=session_key,
+                session_source=session_source,
             )
         )
         return ComposedResult(

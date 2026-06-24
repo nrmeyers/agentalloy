@@ -48,7 +48,10 @@ class TestOpenclawHarnessSpec(TestCase):
         spec = REGISTRY["openclaw"]
         env = spec.env_builder(47950)
         self.assertIsInstance(env, dict)
-        self.assertEqual(env["OPENAI_BASE_URL"], "http://localhost:47950/v1")
+        # Per-repo /proj/<token> discriminator baked from cwd, then /v1.
+        base = env["OPENAI_BASE_URL"]
+        self.assertTrue(base.startswith("http://localhost:47950/proj/"), base)
+        self.assertTrue(base.endswith("/v1"), base)
         self.assertEqual(env["OPENAI_API_KEY"], "agentalloy")
 
     def test_openclaw_install_writer_callable(self):

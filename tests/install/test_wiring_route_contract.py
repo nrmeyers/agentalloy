@@ -47,6 +47,11 @@ def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:
     routes = _app_route_paths()
     for harness, key in (("codex", "OPENAI_BASE_URL"), ("openclaw", "OPENAI_BASE_URL")):
         env = REGISTRY[harness].env_builder(47950)
-        # OpenAI-style SDKs request {base}/chat/completions (base includes /v1).
-        full = _base_path(env, key) + "/chat/completions"
+        base = _base_path(env, key)  # /proj/<token>/v1
+        assert base.startswith("/proj/"), f"{harness}: expected /proj/<token> base, got {base!r}"
+        # OpenAI-style SDKs request {base}/chat/completions. The tokenized route is
+        # templated on the discriminator, so normalize the concrete token to {token}.
+        parts = (base + "/chat/completions").split("/")
+        parts[2] = "{token}"
+        full = "/".join(parts)
         assert full in routes, f"{harness}: {full} is not a served route"

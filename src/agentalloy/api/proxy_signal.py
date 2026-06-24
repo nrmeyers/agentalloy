@@ -19,15 +19,17 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.api.proxy_models import ProxyRequest
+from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
 from agentalloy.signals.prefilter import PreFilterMatch
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
+    _MAX_ANNOUNCED_SESSIONS,
     _build_predicate_context,
     _intake_route_hint,
     _load_workflow_skill_for_phase,
-    _read_announced,
+    _read_announced_state,
     _read_composed,
     _read_cursor,
     _read_lifecycle_mode,
@@ -83,6 +85,14 @@ class SignalResult:
     # Human-facing gate advisories (e.g. "intent fired but the exit artifact is
     # missing"). Surfaced to the agent alongside composed skills.
     advisories: list[str] = field(default_factory=lambda: list[str]())
+
+    # Per-request attribution for telemetry: the resolved repo (str(cwd)) and the
+    # session this request belongs to (key + how it was derived). The compose path
+    # stamps these onto the trace so coverage/savings are queryable per-repo and
+    # per-session. See ``agentalloy.api.proxy_session``.
+    repo: str | None = None
+    session_key: str | None = None
+    session_source: str | None = None
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
@@ -145,6 +155,7 @@ async def evaluate_signal(
     request: ProxyRequest,
     cwd: Path,
     embed_client: EmbedClient | None = None,
+    session_id: str | None = None,
 ) -> SignalResult:
     """Evaluate the signal layer for an incoming proxy request.
 
@@ -202,10 +213,23 @@ async def evaluate_signal(
 
     task = _extract_task_from_messages(request)
 
+    # Per-request attribution (repo + session), resolved once and carried on the
+    # result so the compose path can stamp it onto telemetry. The session key also
+    # drives the announce cadence below.
+    repo = str(cwd)
+    session_key, session_source = resolve_session_key(request, session_id)
+
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
     if skill is None:
-        return SignalResult(should_compose=False, phase=phase, task=task)
+        return SignalResult(
+            should_compose=False,
+            phase=phase,
+            task=task,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
+        )
 
     signal_keywords: list[str] = skill.get("signal_keywords") or []
     exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
@@ -218,16 +242,19 @@ async def evaluate_signal(
         # Proxy has no file/tool events — only prompt text
     )
 
-    # 4. Announce cadence: a phase's orientation/domain block is emitted exactly
-    #    once on entry. `.agentalloy/announced` records the last phase we
-    #    announced; when it no longer matches the current phase (fresh wire, or a
-    #    transition advanced us here) this is an entry turn and we announce. Turns
-    #    in the middle of a phase do not re-announce — that every-turn re-compose
-    #    (intake especially, which used to bypass the trigger and compose
-    #    unconditionally) was the flood this replaces. Cadence lives in durable
-    #    state, not in the request body: Claude Code never echoes an injected
-    #    marker back, so the old marker-echo dedup was structurally dead.
-    announce = _read_announced(cwd) != phase
+    # 4. Announce cadence: a phase's orientation block is emitted once per
+    #    (phase, session). `.agentalloy/announced` records the last phase AND the
+    #    session key we announced for; we announce when either changed — a fresh
+    #    wire / a transition (phase differs) OR a new session on the same phase
+    #    (session key differs). Keying on the session, not just the phase, fixes a
+    #    new session joining an already-announced phase getting no orientation
+    #    (the marker is per-repo, not per-session). Mid-session same-phase turns
+    #    match on both and stay quiet — the every-turn flood this replaces.
+    last_phase, last_sessions = _read_announced_state(cwd)
+    phase_changed = last_phase != phase
+    # With a session key: announce on a new phase OR a session not yet oriented for
+    # this phase. Without one (no user text): phase-only cadence (announce on entry).
+    announce = (phase_changed or session_key not in last_sessions) if session_key else phase_changed
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
@@ -302,14 +329,26 @@ async def evaluate_signal(
             gates_unmet=gates_unmet,
             qwen_calls=qwen_calls,
             phase_gate_embed_failed=phase_gate_embed_failed,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
         )
 
     # Record cadence state now so the next turn stays quiet. The signal layer owns
     # all `.agentalloy/` state transitions; marking at decision time is safe — if a
-    # block later turns out empty, re-firing would inject nothing anyway.
+    # block later turns out empty, re-firing would inject nothing anyway. A phase
+    # entry resets the oriented-session set; a new session on the same phase is
+    # appended (capped, oldest dropped) so the same session stays quiet while a new
+    # one re-announces, and a couple of concurrent sessions don't thrash.
     if announce:
+        if phase_changed:
+            new_sessions = [session_key] if session_key else []
+        elif session_key:
+            new_sessions = [*last_sessions, session_key][-_MAX_ANNOUNCED_SESSIONS:]
+        else:
+            new_sessions = last_sessions
         try:
-            _write_announced_atomic(cwd, phase)
+            _write_announced_atomic(cwd, phase, new_sessions)
         except OSError as e:
             logger.warning("Failed to write announced file: %s", e)
     if announce_cursor and contract_id is not None:
@@ -332,4 +371,7 @@ async def evaluate_signal(
         qwen_calls=qwen_calls,
         advisories=advisories,
         phase_gate_embed_failed=phase_gate_embed_failed,
+        repo=repo,
+        session_key=session_key,
+        session_source=session_source,
     )

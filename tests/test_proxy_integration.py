@@ -67,7 +67,7 @@ def _make_mock_orchestrator(
     """Create a mock ComposeOrchestrator that returns a predefined result."""
     mock = MagicMock(spec=ComposeOrchestrator)
 
-    async def mock_compose(req: Any) -> Any:
+    async def mock_compose(req: Any, **_kwargs: object) -> Any:
         if raise_exc:
             raise raise_exc
         if compose_output is None:

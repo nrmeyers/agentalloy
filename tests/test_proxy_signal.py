@@ -38,16 +38,29 @@ def _set_phase(tmp_path: Path, phase: str) -> None:
     (phase_dir / "phase").write_text(f"phase: {phase}\n")
 
 
-def _set_announced(tmp_path: Path, phase: str) -> None:
-    """Mark *phase* as already announced, so the turn is steady-state (not entry)."""
+# A stable session id used across a "session"'s turns. Orientation is now keyed
+# per (phase, session): seeding the announced set with this and passing it as the
+# evaluate_signal session_id makes a turn steady-state (already oriented).
+SESSION = "sess-test"
+
+
+def _set_announced(tmp_path: Path, phase: str, *sessions: str) -> None:
+    """Mark *phase* already announced for *sessions* (steady-state, not entry).
+
+    Defaults to :data:`SESSION` so the matching ``session_id=SESSION`` turn is quiet.
+    """
     d = tmp_path / ".agentalloy"
     d.mkdir(exist_ok=True)
-    (d / "announced").write_text(f"{phase}\n")
+    keys = ",".join(sessions or (SESSION,))
+    (d / "announced").write_text(f"{phase}\t{keys}\n")
 
 
 def _read_announced(tmp_path: Path) -> str | None:
+    """Return the announced *phase* (the announced file stores ``phase\\tkeys``)."""
     f = tmp_path / ".agentalloy" / "announced"
-    return f.read_text().strip() if f.exists() else None
+    if not f.exists():
+        return None
+    return f.read_text().strip().partition("\t")[0] or None
 
 
 def _skill(
@@ -155,11 +168,11 @@ class TestEvaluateSignal:
                 return_value=None,
             ),
         ):
-            first = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
-            second = asyncio.run(evaluate_signal(_req("still here"), tmp_path))
-            third = asyncio.run(evaluate_signal(_req("and again"), tmp_path))
+            first = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id=SESSION))
+            second = asyncio.run(evaluate_signal(_req("still here"), tmp_path, session_id=SESSION))
+            third = asyncio.run(evaluate_signal(_req("and again"), tmp_path, session_id=SESSION))
         assert first.should_compose is True and first.announce is True
-        assert second.should_compose is False  # already announced → quiet
+        assert second.should_compose is False  # already announced (same session) → quiet
         assert third.should_compose is False
 
     def test_already_announced_trigger_miss_is_passthrough(self, tmp_path: Path) -> None:
@@ -175,7 +188,9 @@ class TestEvaluateSignal:
                 return_value=None,
             ),
         ):
-            result = asyncio.run(evaluate_signal(_req("just writing code"), tmp_path))
+            result = asyncio.run(
+                evaluate_signal(_req("just writing code"), tmp_path, session_id=SESSION)
+            )
         assert result.should_compose is False
         assert result.announce is False
         assert result.phase == "build"
@@ -199,7 +214,9 @@ class TestEvaluateSignal:
                 return_value=_advisory(["produce docs/spec/*.md to advance"]),
             ),
         ):
-            result = asyncio.run(evaluate_signal(_req("are we done?"), tmp_path))
+            result = asyncio.run(
+                evaluate_signal(_req("are we done?"), tmp_path, session_id=SESSION)
+            )
         assert result.should_compose is True
         assert result.announce is False  # eval block, not orientation
         assert result.advisories == ["produce docs/spec/*.md to advance"]
@@ -281,7 +298,7 @@ class TestEvaluateSignal:
             ),
             mock.patch("agentalloy.api.proxy_signal._write_phase_atomic") as mock_write,
         ):
-            result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path))
+            result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION))
         assert result.should_compose is False  # nothing to inject this turn
         mock_write.assert_called_once_with(tmp_path, "qa")
         assert result.gates_met == ["test_passed", "lint_clean"]  # carried for telemetry
@@ -509,7 +526,7 @@ class TestTier2Cadence:
                 return_value=None,
             ),
         ):
-            return asyncio.run(evaluate_signal(_req("work the task"), tmp_path))
+            return asyncio.run(evaluate_signal(_req("work the task"), tmp_path, session_id=SESSION))
 
     def test_tier2_fires_on_entry_with_incoming_contract(self, tmp_path: Path) -> None:
         # Fresh build entry with an incoming contract → both tiers fire.

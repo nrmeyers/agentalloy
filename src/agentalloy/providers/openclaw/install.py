@@ -81,6 +81,11 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     """
     config_path = Path.home() / ".openclaw" / "plugins.json"
 
+    # Tokenless on purpose: this is a USER-scoped config (one ~/.openclaw/plugins.json
+    # for every repo), so it cannot carry a per-repo /proj/<token>. Per-repo
+    # resolution comes from the env_builder instead (it bakes encode_proj_token of
+    # the launch cwd into OPENAI_BASE_URL). A direct openclaw launch relying solely
+    # on this file is not repo-disambiguated.
     proxy_url = f"http://localhost:{port}/v1"
 
     # Build the plugin entry

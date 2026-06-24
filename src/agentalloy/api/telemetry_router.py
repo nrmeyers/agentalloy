@@ -40,6 +40,8 @@ class TraceRecord(BaseModel):
     response_size_chars: int | None
     prompt_version: str | None
     repo: str | None = None
+    session_key: str | None = None
+    session_source: str | None = None
 
     @classmethod
     def from_trace(cls, t: CompositionTrace) -> TraceRecord:
@@ -64,6 +66,8 @@ class TraceRecord(BaseModel):
             response_size_chars=t.response_size_chars,
             prompt_version=t.prompt_version,
             repo=t.repo,
+            session_key=t.session_key,
+            session_source=t.session_source,
         )
 
 

@@ -71,6 +71,12 @@ class TelemetryRecord:
     lm_assist_outcome: str = "disabled"
     lm_assist_model: str | None = None
     dense_leg_degraded: bool = False
+    # Per-request attribution carried from the signal layer (proxy paths set these;
+    # direct /compose leaves them None). repo = resolved project root; session_key /
+    # session_source = the session this compose belongs to and how it was derived.
+    repo: str | None = None
+    session_key: str | None = None
+    session_source: str | None = None
 
 
 class TelemetryWriter(Protocol):
@@ -158,6 +164,9 @@ class DuckDBTelemetryWriter:
             lm_assist_outcome=record.lm_assist_outcome,
             lm_assist_model=record.lm_assist_model,
             dense_leg_degraded=record.dense_leg_degraded,
+            repo=record.repo,
+            session_key=record.session_key,
+            session_source=record.session_source,
         )
 
 

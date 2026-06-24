@@ -19,7 +19,7 @@ class _NoopOrchestrator(ComposeOrchestrator):
     def __init__(self) -> None:
         self._assembly_model = "noop"
 
-    async def compose(self, req: ComposeRequest) -> EmptyResult:
+    async def compose(self, req: ComposeRequest, **_kwargs: object) -> EmptyResult:
         return EmptyResult(
             task=req.task,
             phase=req.phase,

@@ -90,7 +90,7 @@ def _make_app(
 def _orchestrator(output: str) -> ComposeOrchestrator:
     mock = MagicMock(spec=ComposeOrchestrator)
 
-    async def compose(req: Any) -> ComposedResult:
+    async def compose(req: Any, **_kwargs: object) -> ComposedResult:
         return ComposedResult(
             task=getattr(req, "task", "t"),
             phase=getattr(req, "phase", "build"),

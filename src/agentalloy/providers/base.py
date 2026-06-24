@@ -90,6 +90,12 @@ class HarnessSpec:
     protocol: Protocol
     env_builder: HarnessSpecEnvBuilder
     install_writer: HarnessSpecInstallWriter | None = None
+    # HTTP header this harness sends carrying a stable per-session id, if any
+    # (e.g. claude-code → ``x-claude-code-session-id``). The proxy probes the
+    # union of these across the registry to key per-session orientation; None
+    # means this harness sends no session header and the proxy falls back to a
+    # conversation fingerprint. See ``agentalloy.api.proxy_session``.
+    session_header: str | None = None
 
 
 # ---------------------------------------------------------------------------

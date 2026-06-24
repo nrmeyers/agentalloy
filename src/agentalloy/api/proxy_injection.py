@@ -168,7 +168,12 @@ async def compose_and_inject(
         )
 
     try:
-        result = await orchestrator.compose(compose_req)
+        result = await orchestrator.compose(
+            compose_req,
+            repo=signal.repo,
+            session_key=signal.session_key,
+            session_source=signal.session_source,
+        )
         domain_output = "" if isinstance(result, EmptyResult) else result.output
     except Exception:
         logger.warning("Composition failed -- passing through unchanged", exc_info=True)

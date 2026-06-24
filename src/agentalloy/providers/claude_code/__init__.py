@@ -60,4 +60,7 @@ REGISTRY["claude-code"] = HarnessSpec(
     protocol=Protocol.ANTHROPIC,
     env_builder=_env_builder,
     install_writer=_install_writer,
+    # Claude Code sends a stable per-session id header; the proxy keys per-session
+    # orientation off it (see anthropic_passthrough.forward_headers).
+    session_header="x-claude-code-session-id",
 )

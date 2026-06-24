@@ -79,7 +79,11 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     conf_path = root / ".aider.conf.yml"
     original_conf = _capture_original(conf_path)
 
-    proxy_url = f"http://localhost:{port}/v1"
+    # Per-repo /proj/<token> discriminator (realpath of root) so the proxy resolves
+    # this repo's phase/lifecycle — parity with the Anthropic path.
+    from agentalloy.api.proxy_context import encode_proj_token
+
+    proxy_url = f"http://localhost:{port}/proj/{encode_proj_token(root)}/v1"
     block_lines = [
         _SENTINEL_BEGIN,
         f"openai-api-base: {proxy_url}",

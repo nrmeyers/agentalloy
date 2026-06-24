@@ -307,9 +307,13 @@ class TestOpenHarnesses:
         assert result["integration_vector"] == "proxy"
         settings = tmp_path / ".cline" / "settings.json"
         assert settings.exists()
+        from agentalloy.api.proxy_context import encode_proj_token
+
         config = json.loads(settings.read_text())
         assert config["apiProvider"] == "openai"
-        assert config["apiBaseUrl"] == "http://localhost:8000/v1"
+        assert (
+            config["apiBaseUrl"] == f"http://localhost:8000/proj/{encode_proj_token(tmp_path)}/v1"
+        )
         assert config["apiKey"] == "agentalloy"
         assert config["model"] == "agentalloy-proxy"
 
@@ -327,11 +331,15 @@ class TestOpenHarnesses:
 
         wire_compat("cline", port=9999, root=tmp_path)
 
+        from agentalloy.api.proxy_context import encode_proj_token
+
         config = json.loads((settings_dir / "settings.json").read_text())
 
         # Verify proxy fields are present
         assert config["apiProvider"] == "openai"
-        assert config["apiBaseUrl"] == "http://localhost:9999/v1"
+        assert (
+            config["apiBaseUrl"] == f"http://localhost:9999/proj/{encode_proj_token(tmp_path)}/v1"
+        )
         assert config["apiKey"] == "agentalloy"
         assert config["model"] == "agentalloy-proxy"
 

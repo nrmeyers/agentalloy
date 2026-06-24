@@ -26,9 +26,17 @@ def _env_builder(port: int) -> dict[str, str]:
     """Build environment dict for the codex subprocess.
 
     Sets OPENAI_BASE_URL so codex routes API calls through the AgentAlloy proxy.
+    The base URL carries the per-repo ``/proj/<token>`` discriminator (realpath of
+    cwd) so the proxy resolves this repo's phase/lifecycle — parity with the
+    Anthropic path.
     """
+    from pathlib import Path
+
+    from agentalloy.api.proxy_context import encode_proj_token
+
+    token = encode_proj_token(Path.cwd())
     return {
-        "OPENAI_BASE_URL": f"http://localhost:{port}/v1",
+        "OPENAI_BASE_URL": f"http://localhost:{port}/proj/{token}/v1",
         "OPENAI_API_KEY": "agentalloy",
     }
 
