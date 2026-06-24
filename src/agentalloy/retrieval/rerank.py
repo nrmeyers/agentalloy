@@ -34,7 +34,11 @@ _MAX_TOKENS = 512
 _FAILURE_THRESHOLD = 3
 _COOLDOWN_SECONDS = 60.0
 
-_DEFAULT_TIMEOUT_MS = 150
+# 600ms budget before the rerank stage trips its circuit-breaker and falls
+# through to the deterministic order. Raised from 150ms: a cold/loaded CPU
+# reranker (llama-server) routinely crossed it, disabling the stage.
+# Override with RUNTIME_RERANK_TIMEOUT_MS.
+_DEFAULT_TIMEOUT_MS = 600
 _DEFAULT_MAX_PAIRS = 32
 
 

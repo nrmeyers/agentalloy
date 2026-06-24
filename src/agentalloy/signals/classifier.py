@@ -136,7 +136,10 @@ _DEFAULT_RERANK_THRESHOLD = 0.45
 # listening there the intent scorer silently fell through to the cosine floor.
 _DEFAULT_RERANK_URL = "http://127.0.0.1:47952"
 _DEFAULT_RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
-_DEFAULT_RERANK_TIMEOUT_MS = 300
+# 600ms budget before the intent reranker falls through to the cosine floor.
+# Raised from 300ms to match Stage A/B: a cold/loaded CPU reranker crossed it.
+# Override with SIGNAL_INTENT_RERANK_TIMEOUT_MS.
+_DEFAULT_RERANK_TIMEOUT_MS = 600
 
 # Negation / cancellation cues that contradict an apparent finished/approved/
 # redirect reading. The cross-encoder fires on the surface cue word ("done",
