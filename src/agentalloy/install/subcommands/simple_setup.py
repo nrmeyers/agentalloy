@@ -1557,16 +1557,11 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         env_fp, f"RUNTIME_PORT={cfg.port}\n"
     )
 
-    # 11. Run verify
-    _print("  [dim]-> Verifying installation[/dim]")
-    rc = verify.run(_build_namespace(cfg))
-    if rc not in (0, 4):
-        _print("  [red]Validation failed.[/red]")
-        _report_verify_failures()
-        return rc
-    _print("  [green]  All checks passed.[/green]")
-
-    # 12. Wire harness (if selected)
+    # 11. Wire harness (if selected) — BEFORE verify, so verify's
+    # harness_config_present check inspects a freshly-wired harness. (The native
+    # flow wires before verifying too; the container flow historically verified
+    # first, which false-passed on a fresh install — empty harness_files_written —
+    # and failed on an overwrite that carried the prior run's recorded files.)
     if cfg.harness and cfg.harness != "manual":
         _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
         # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
@@ -1585,6 +1580,15 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
             return rc
         _print("  [green]  Done.[/green]")
+
+    # 12. Run verify
+    _print("  [dim]-> Verifying installation[/dim]")
+    rc = verify.run(_build_namespace(cfg))
+    if rc not in (0, 4):
+        _print("  [red]Validation failed.[/red]")
+        _report_verify_failures()
+        return rc
+    _print("  [green]  All checks passed.[/green]")
 
     # -- Done --
     _print(

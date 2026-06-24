@@ -744,3 +744,23 @@ class TestReconcileNativePortHolder:
             patch(self._PROMPT, return_value="y"),
         ):
             assert _reconcile_native_port_holder(self._cfg()) == 1
+
+
+class TestContainerFlowWiresBeforeVerify:
+    """Regression: the container flow must wire the harness BEFORE running verify,
+    so verify's harness_config_present check inspects a freshly-wired harness.
+
+    Historically the container flow verified first, which false-passed on a fresh
+    install (empty harness_files_written) and FAILED on an overwrite that carried
+    the prior run's recorded files (the #261 overwrite-in-place path exposed it).
+    """
+
+    def test_wire_harness_precedes_verify_in_container_flow(self):
+        import inspect
+
+        from agentalloy.install.subcommands import simple_setup as mod
+
+        source = inspect.getsource(mod._run_container_flow)
+        wire_idx = source.index("-> Wiring harness")
+        verify_idx = source.index("-> Verifying installation")
+        assert wire_idx < verify_idx, "container flow must wire the harness before verifying it"
