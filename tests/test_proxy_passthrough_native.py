@@ -276,3 +276,88 @@ def test_tc13_lifecycle_off_skips_compose_per_repo(tmp_path: Path) -> None:
     # lifecycle=off → no composition → original body forwarded (resolved per-repo,
     # from the URL token, not the proxy's cwd).
     assert json.loads(captured["body"]) == body
+
+
+# --------------------------------------------------------------------------- #
+# Cadence markers are committed only after a confirmed, non-empty injection.
+# Regression guard for the "marker-before-inject" bug: a degraded compose used to
+# record the phase as oriented while injecting nothing, permanently burning it.
+# --------------------------------------------------------------------------- #
+
+
+def _announced_file(tmp_path: Path) -> str | None:
+    f = tmp_path / ".agentalloy" / "announced"
+    return f.read_text().strip() if f.exists() else None
+
+
+def test_announce_marker_committed_after_delivery(tmp_path: Path) -> None:
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("ORIENTATION-PROSE"))
+    # Entry turn with a pending marker and real orientation prose → Tier 1 delivers.
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="the real task",
+        workflow_prose="operate like so",
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    # The block reached upstream AND the marker is committed for (phase, session).
+    assert b"operate like so" in captured["body"]
+    assert _announced_file(tmp_path) == "build\tsess-1"
+
+
+def test_announce_marker_not_committed_when_compose_degrades(tmp_path: Path) -> None:
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    # No workflow prose + the system leg composes to empty → nothing to inject.
+    app = _make_app(captured, orchestrator=_orchestrator(""))
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="t",
+        workflow_prose=None,
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    # Original body forwarded unchanged AND the marker is NOT burned → re-announces.
+    assert json.loads(captured["body"]) == _anthropic_body()
+    assert _announced_file(tmp_path) is None
+
+
+def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: Path) -> None:
+    # Tier 1 composes real orientation text, but the request has NO user message, so
+    # inject_into_anthropic_messages returns the payload UNCHANGED (nowhere to inject).
+    # The block never reached Claude → the marker must NOT be committed, so the next
+    # turn re-announces instead of the session being silently burned.
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("ORIENTATION-PROSE"))
+    body: dict[str, Any] = {
+        "model": "claude-test",
+        "max_tokens": 100,
+        "system": "SYSTEM-CACHED-BLOCK",
+        "messages": [{"role": "assistant", "content": "no user turn here"}],
+        "stream": False,
+    }
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="t",
+        workflow_prose="operate like so",
+        pending_announce=("build", ["sess-1"]),
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=body)
+    assert resp.status_code == 200
+    # Body forwarded unchanged (nothing injected) AND the marker is NOT burned.
+    assert json.loads(captured["body"]) == body
+    assert _announced_file(tmp_path) is None

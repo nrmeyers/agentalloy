@@ -384,6 +384,15 @@ async def proxy_chat_completions(
             )
             modified_request = request
 
+    # No `commit_markers` here by design. This OpenAI-translation path injects only
+    # domain skills + eval advisories via `compose_and_inject`; it does not emit the
+    # Tier 1 orientation block or the per-contract Tier 2 cursor block, so it owns
+    # neither the `announced` nor the `composed` cadence. `evaluate_signal` no longer
+    # writes those markers either, so this path simply never touches them — the
+    # announce/cursor cadence is committed only on the Anthropic passthrough path
+    # that actually delivers those blocks. (OpenAI-harness orientation parity is a
+    # separate, tracked gap.)
+
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).
     gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False

@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -35,7 +36,7 @@ from agentalloy.api.proxy_injection import inject_into_anthropic_messages
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_router import get_embed_client, get_orchestrator_for_proxy
 from agentalloy.api.proxy_session import extract_session_header
-from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
+from agentalloy.api.proxy_signal import SignalResult, commit_markers, evaluate_signal
 
 if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
@@ -98,13 +99,39 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
     return ProxyRequest(model=model if isinstance(model, str) else "unknown", messages=messages)
 
 
-async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> str:
-    """Compose the prose block to inject, or "".
+@dataclass
+class _ComposedBlock:
+    """Result of :func:`_compose_block`: the text plus per-tier commit signals.
+
+    These report what was *composed*. The caller pairs them with whether the block
+    was actually injected (delivery) before committing a marker — composing text the
+    request then drops (no user message, malformed content) must NOT burn the marker.
+
+    - ``tier1_text``: the Tier 1 orientation block carried real text — its marker may
+      be committed once that text is delivered.
+    - ``cursor_terminal``: the Tier 2 domain leg reached a *terminal* state (delivered
+      skills OR composed to a clean empty result, NOT a transient compose error). A
+      cleanly-empty Tier 2 has nothing to deliver, so its cursor commits even without
+      an injection — that is what stops a contract with genuinely no domain skills
+      from re-firing every turn.
+    - ``cursor_text``: the Tier 2 leg produced non-empty domain text — when True the
+      cursor marker additionally requires delivery, so an undelivered domain block
+      re-fires next turn instead of being silently lost.
+    """
+
+    text: str
+    tier1_text: bool
+    cursor_terminal: bool
+    cursor_text: bool
+
+
+async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> _ComposedBlock:
+    """Compose the prose block to inject.
 
     Three independent parts, each gated separately:
 
     - **Eval advisory** — emitted whenever the gate eval produced advisories
-      (a transition trigger fired). Light; may recur across turns.
+      (a transition trigger fired). Light; may recur across turns; carries no marker.
     - **Tier 1 (phase-entry announce)** — the workflow skill's operating prose for
       the phase + its phase-scoped system prose. Emitted once per phase entry
       (``signal.announce``). How to operate here; never carries domain skills.
@@ -113,7 +140,9 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
       Emitted once per work-item (``signal.announce_cursor``): phase entry, or an
       ``agentalloy task next``.
 
-    Returns the parts joined, or "" when none has content.
+    Returns a :class:`_ComposedBlock` whose ``text`` is the parts joined (``""``
+    when none has content) and whose flags tell the caller which cadence markers
+    are safe to commit post-injection.
     """
     phase = signal.phase
     compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
@@ -148,8 +177,12 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
             logger.warning("Tier 1 system compose failed -- workflow prose only", exc_info=True)
         tier1 = "\n\n".join(parts)
 
-    # Tier 2: domain skills for the current work-item contract.
+    # Tier 2: domain skills for the current work-item contract. `tier2_terminal`
+    # distinguishes "composed to a clean result" (delivered text OR a legitimate
+    # empty — the cursor is done) from "the compose leg threw" (transient — leave
+    # the cursor unmarked so it re-fires next turn).
     tier2 = ""
+    tier2_terminal = False
     if signal.announce_cursor and signal.current_contract:
         try:
             from agentalloy.api.compose_models import compose_request_from_contract
@@ -164,11 +197,19 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
                 session_source=signal.session_source,
             )
             tier2 = "" if isinstance(result, EmptyResult) else result.output
+            tier2_terminal = True
         except Exception:
             logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
             tier2 = ""
+            tier2_terminal = False
 
-    return "\n\n".join(p for p in (advisory_block, tier1, tier2) if p)
+    text = "\n\n".join(p for p in (advisory_block, tier1, tier2) if p)
+    return _ComposedBlock(
+        text=text,
+        tier1_text=bool(tier1),
+        cursor_terminal=tier2_terminal,
+        cursor_text=bool(tier2),
+    )
 
 
 async def _maybe_inject(
@@ -192,16 +233,35 @@ async def _maybe_inject(
     if not (signal.should_compose and signal.phase and orchestrator is not None):
         return None
 
-    # Cadence lives in `.agentalloy/announced` (durable, owned by the signal
-    # layer), not in the request body. The old marker-echo dedup here was
-    # structurally dead — Claude Code never persists an injected marker back into
-    # the next request, so it never matched — and is gone. The signal layer has
-    # already decided this turn warrants injection (entry announce and/or eval
-    # advisory); we just compose and inject.
-    block = await _compose_block(signal, orchestrator)
-    if not block:
-        return None
-    return inject_into_anthropic_messages(payload, block, phase=signal.phase)
+    # Cadence lives in `.agentalloy/{announced,composed}` (durable), not in the
+    # request body. The signal layer decided this turn warrants injection but
+    # deliberately did NOT commit the markers — we do that here, only after compose
+    # tells us what was actually emitted, so a degraded compose (embed down) or an
+    # empty block never records the phase/work-item as delivered. The old
+    # marker-echo dedup here was structurally dead (Claude Code never persists an
+    # injected marker back into the next request) and is gone.
+    composed = await _compose_block(signal, orchestrator)
+    injected = (
+        inject_into_anthropic_messages(payload, composed.text, phase=signal.phase)
+        if composed.text
+        else None
+    )
+    # `inject_into_anthropic_messages` returns a NEW dict on a real injection and the
+    # SAME `payload` object on every no-op (no user message, already-present marker,
+    # malformed/unknown content shape). Identity, not None-ness, is what proves the
+    # block actually reached the request — so a turn that composed text but couldn't
+    # inject it does NOT burn the marker and re-announces next turn.
+    delivered = injected is not None and injected is not payload
+    commit_markers(
+        project_dir,
+        signal,
+        # Tier 1: commit only once the orientation text is actually delivered.
+        announce_emitted=composed.tier1_text and delivered,
+        # Tier 2: a cleanly-empty terminal commits regardless (nothing to deliver);
+        # a terminal that produced text commits only once that text is delivered.
+        cursor_emitted=composed.cursor_terminal and (delivered or not composed.cursor_text),
+    )
+    return injected
 
 
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:

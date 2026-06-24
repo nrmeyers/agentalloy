@@ -94,6 +94,18 @@ class SignalResult:
     session_key: str | None = None
     session_source: str | None = None
 
+    # Deferred cadence markers. The signal layer DECIDES what to record but no
+    # longer writes `.agentalloy/{announced,composed}` itself — committing at
+    # decision time burned a session whenever the later compose/inject produced
+    # nothing (embed down, empty block, soft-fail to the original body): the phase
+    # was recorded as oriented while the agent got no orientation, and Tier 1 never
+    # re-fired. The injection path commits these only after the matching block is
+    # actually emitted — see :func:`commit_markers`. ``pending_announce`` is
+    # ``(phase, session_keys)`` for the announced file; ``pending_composed`` is the
+    # cursor id for the composed file.
+    pending_announce: tuple[str, list[str]] | None = None
+    pending_composed: str | None = None
+
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
     """Extract the first user message text as the task prompt.
@@ -334,12 +346,16 @@ async def evaluate_signal(
             session_source=session_source,
         )
 
-    # Record cadence state now so the next turn stays quiet. The signal layer owns
-    # all `.agentalloy/` state transitions; marking at decision time is safe — if a
-    # block later turns out empty, re-firing would inject nothing anyway. A phase
-    # entry resets the oriented-session set; a new session on the same phase is
-    # appended (capped, oldest dropped) so the same session stays quiet while a new
-    # one re-announces, and a couple of concurrent sessions don't thrash.
+    # Compute cadence state but DO NOT commit it here. Writing the markers at
+    # decision time burned a session whenever the later compose/inject produced
+    # nothing (embed down, empty block, soft-fail to the original body): the phase
+    # was recorded as oriented while the agent received no orientation, and Tier 1
+    # never re-fired. The injection path commits these only after the matching block
+    # is actually emitted (see `commit_markers`). A phase entry resets the
+    # oriented-session set; a new session on the same phase is appended (capped,
+    # oldest dropped) so the same session stays quiet while a new one re-announces,
+    # and a couple of concurrent sessions don't thrash.
+    pending_announce: tuple[str, list[str]] | None = None
     if announce:
         if phase_changed:
             new_sessions = [session_key] if session_key else []
@@ -347,15 +363,8 @@ async def evaluate_signal(
             new_sessions = [*last_sessions, session_key][-_MAX_ANNOUNCED_SESSIONS:]
         else:
             new_sessions = last_sessions
-        try:
-            _write_announced_atomic(cwd, phase, new_sessions)
-        except OSError as e:
-            logger.warning("Failed to write announced file: %s", e)
-    if announce_cursor and contract_id is not None:
-        try:
-            _write_composed_atomic(cwd, contract_id)
-        except OSError as e:
-            logger.warning("Failed to write composed file: %s", e)
+        pending_announce = (phase, new_sessions)
+    pending_composed = contract_id if (announce_cursor and contract_id is not None) else None
 
     return SignalResult(
         should_compose=True,
@@ -374,4 +383,42 @@ async def evaluate_signal(
         repo=repo,
         session_key=session_key,
         session_source=session_source,
+        pending_announce=pending_announce,
+        pending_composed=pending_composed,
     )
+
+
+def commit_markers(
+    project_root: Path,
+    signal: SignalResult,
+    *,
+    announce_emitted: bool,
+    cursor_emitted: bool,
+) -> None:
+    """Commit the deferred Tier 1 / Tier 2 cadence markers after injection.
+
+    The injection path calls this once it knows what was actually emitted, so a
+    degraded compose (embed down) or a soft-fail to the original body never records
+    a phase/work-item as delivered when the agent got nothing.
+
+    - ``announce_emitted``: the Tier 1 orientation block carried real text and was
+      injected → commit ``pending_announce`` to ``.agentalloy/announced``.
+    - ``cursor_emitted``: the Tier 2 domain leg reached a *terminal* state — it
+      delivered skills or composed to a clean empty result, NOT a transient compose
+      error → commit ``pending_composed`` to ``.agentalloy/composed`` so a work-item
+      with genuinely no domain skills does not re-fire every turn.
+
+    No-op when the corresponding ``pending_*`` is unset (the signal did not decide
+    to announce / advance the cursor this turn).
+    """
+    if announce_emitted and signal.pending_announce is not None:
+        phase, sessions = signal.pending_announce
+        try:
+            _write_announced_atomic(project_root, phase, sessions)
+        except OSError as e:
+            logger.warning("Failed to write announced file: %s", e)
+    if cursor_emitted and signal.pending_composed is not None:
+        try:
+            _write_composed_atomic(project_root, signal.pending_composed)
+        except OSError as e:
+            logger.warning("Failed to write composed file: %s", e)
