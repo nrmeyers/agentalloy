@@ -47,14 +47,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Open the runtime store + Ollama client for the app lifetime.
+    """Open the runtime store + embedding client for the app lifetime.
 
     Loads the active-skill cache at startup (NXS-777).  If loading fails the
     app still starts — ``app.state.runtime`` is ``None`` and the health
     endpoint reflects ``unavailable`` while runtime handlers 503.
 
     In tests we override ``get_orchestrator`` via ``app.dependency_overrides``
-    so no real LadybugDB or Ollama connection is created.
+    so no real LadybugDB or embedding connection is created.
     """
     settings = get_settings()
     settings.ensure_data_dirs()
@@ -197,7 +197,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     """Build the FastAPI app.
 
     ``use_default_lifespan=False`` skips the production lifespan (which opens
-    LadybugDB and the Ollama client). Tests pass ``False`` and wire their own
+    LadybugDB and the embedding client). Tests pass ``False`` and wire their own
     dependency overrides via ``app.dependency_overrides``.
     """
     app = FastAPI(

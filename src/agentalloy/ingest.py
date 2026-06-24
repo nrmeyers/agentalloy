@@ -5,7 +5,7 @@ Usage::
     python -m agentalloy.ingest <review.yaml> [--force] [--yes]
 
 The review YAML is produced by the Skill Authoring Agent. It covers both domain
-and system skills. No Ollama is required; fragment embeddings are initialised to
+and system skills. No live embedder is required; fragment embeddings are initialised to
 zero and can be populated by a separate re-embed pass.
 
 Exit codes

@@ -8,7 +8,7 @@ scoped).
 Backends
 --------
 * **cosine** — replicates ``classifier._intent_similarity`` exactly: embeds the
-  utterance + each intent's reference phrases via the live Ollama embedder and
+  utterance + each intent's reference phrases via the live llama-server embedder and
   takes max cosine per intent. Operating threshold 0.75 (the production value).
   Reuses ``classifier._INTENT_REFERENCES`` and ``classifier._cosine`` directly.
 * **reranker** — the *production* signal-layer reranker backend. Builds the same
@@ -35,7 +35,7 @@ Usage
     uv run python -m eval.intent_bench
     uv run python -m eval.intent_bench --limit 20        # quick smoke
 
-Requires the live embedder (Ollama :11434) and reranker (llama-server :60001).
+Requires the live embedder (llama-server :47951) and reranker (llama-server :47952).
 """
 
 from __future__ import annotations
@@ -70,10 +70,10 @@ INTENTS = ["completion", "approval", "redirection"]
 LABELS = [*INTENTS, "none"]
 DIFFICULTIES = ["clear", "paraphrase", "negation", "scoped"]
 
-_EMBED_URL = "http://localhost:11434"
-_EMBED_MODEL = "qwen3-embedding:0.6b"
-_RERANK_URL = "http://127.0.0.1:60001"
-_RERANK_MODEL = "qwen3-reranker-0.6b"
+_EMBED_URL = "http://localhost:47951"
+_EMBED_MODEL = "nomic-embed-text-v1.5"
+_RERANK_URL = "http://127.0.0.1:47952"
+_RERANK_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 _COSINE_THRESHOLD = 0.75
 
 DATA_PATH = Path(__file__).parent / "intent_bench_data.yaml"

@@ -63,7 +63,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 ┌──────────────────────────────────────────────────────────────┐
 │  Upstream LLM                                                │
 │                                                              │
-│  OpenAI, Anthropic, or any local LLM (e.g. Ollama)            │
+│  OpenAI, Anthropic, or any local LLM (e.g. llama-server)     │
 │  Receives: original request + AgentAlloy system prompt        │
 │  Response: passed back to harness unchanged                   │
 └──────────────────────────────────────────────────────────────┘
@@ -76,7 +76,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 Configured in `~/.config/agentalloy/.env`:
 
 ```
-UPSTREAM_URL=http://localhost:11434
+UPSTREAM_URL=http://localhost:47951
 UPSTREAM_MODEL=qwen/qwen2.5-coder-14b
 UPSTREAM_API_KEY=***
 ```

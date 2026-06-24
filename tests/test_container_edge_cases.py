@@ -648,10 +648,6 @@ class TestNonInteractiveMode:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -704,7 +700,6 @@ class TestNonInteractiveMode:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -770,10 +765,6 @@ class TestNonInteractiveMode:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -821,7 +812,6 @@ class TestNonInteractiveMode:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -885,10 +875,6 @@ class TestCancelDuringCPUWarning:
     )
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -923,7 +909,6 @@ class TestCancelDuringCPUWarning:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -983,10 +968,6 @@ class TestCancelDuringCPUWarning:
         return_value=Path("/tmp/entry.sh"),
     )
     @patch("agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint")
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -1022,7 +1003,6 @@ class TestCancelDuringCPUWarning:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -1087,10 +1067,6 @@ class TestCancelDuringReview:
     )
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -1125,7 +1101,6 @@ class TestCancelDuringReview:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -1173,10 +1148,6 @@ class TestCancelDuringReview:
     )
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -1211,7 +1182,6 @@ class TestCancelDuringReview:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -1259,10 +1229,6 @@ class TestCancelDuringReview:
     )
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -1297,7 +1263,6 @@ class TestCancelDuringReview:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,
@@ -1345,10 +1310,6 @@ class TestCancelDuringReview:
     )
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
-    @patch(
-        "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-        return_value=("test-project", "test-project_default"),
-    )
     @patch("agentalloy.install.state.load_state", return_value={})
     @patch("agentalloy.install.state.save_state")
     @patch("agentalloy.install.state.user_config_dir", return_value=Path("/tmp/.config/agentalloy"))
@@ -1383,7 +1344,6 @@ class TestCancelDuringReview:
         mock_config,
         mock_save,
         mock_load,
-        mock_inspect,
         mock_wait,
         mock_quiet,
         mock_log_path,

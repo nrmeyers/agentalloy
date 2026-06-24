@@ -8,9 +8,9 @@ Usage::
     python -m agentalloy.authoring run <source-dir> --single-skill  # per-skill convergence
     python -m agentalloy.authoring summary                      # print pipeline state
 
-The swap-batched ``run`` is designed for single-GPU hosts that share an Ollama
-endpoint between author and critic. It warms the right model once per phase
-(author → critic → author → ...) so each batch hits a fully resident model.
+The swap-batched ``run`` is designed for single-GPU hosts that share a
+llama-server endpoint between author and critic, processing each phase
+(author → critic → author → ...) in a batch to amortise model-swap overhead.
 
 After ``qa`` or ``run``, the operator reviews ``pending-review/*.yaml`` and
 the sibling ``.qa.md`` reports, then runs::
@@ -32,7 +32,6 @@ from agentalloy.authoring.paths import PipelinePaths, default_paths
 from agentalloy.authoring.pipeline import SkillResult, run_per_skill, summarize_results
 from agentalloy.authoring.qa_gate import GateResult, run_qa
 from agentalloy.config import get_settings
-from agentalloy.lm_client import warmup_ollama
 from agentalloy.storage.ladybug import LadybugStore
 from agentalloy.storage.vector_store import open_or_create
 
@@ -75,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Swap-batched pipeline (default): author-all → swap → qa-all → swap → "
             "revise-all. Designed for single-GPU hosts where author/critic can't "
-            "coexist. Warms the right Ollama model before each phase."
+            "coexist, batching each phase to amortise model-swap overhead."
         ),
     )
     p_run.add_argument("source_dir", help="Directory containing SKILL.md files")
@@ -97,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument(
         "--no-warmup",
         action="store_true",
-        help="Skip Ollama model warmup before each phase (LM Studio / non-Ollama backends).",
+        help="Skip the per-phase model-load log line (llama-server loads models at startup).",
     )
 
     sub.add_parser("summary", help="Report current pipeline state")
@@ -187,9 +186,8 @@ def _cmd_run_batched(
     """Swap-batched pipeline: author-all → swap → qa-all → swap → revise-all.
 
     Designed for single-GPU hosts where author and critic models can't coexist.
-    Before each phase, fires an Ollama warmup against the model that phase
-    needs — the first call after a swap takes ~20s for a 20GB GGUF, so doing
-    it once per phase (instead of once per skill) keeps wall-clock sane.
+    Each phase runs as a batch so the model swap happens once per phase instead
+    of once per skill, keeping wall-clock sane.
 
     A partial Author failure (``EXIT_RUNTIME``) does NOT short-circuit the rest
     of the pipeline — drafts that *did* make it into pending-qa still get
@@ -201,11 +199,7 @@ def _cmd_run_batched(
     def _warm(role: str, base_url: str, model: str) -> None:
         if not warmup:
             return
-        logger.info("warmup: loading %s model %r on %s", role, model, base_url)
-        try:
-            warmup_ollama(base_url, model)
-        except Exception as e:  # noqa: BLE001 — surface but continue
-            logger.warning("warmup failed (continuing): %s", e)
+        logger.info("phase: %s model %r on %s", role, model, base_url)
 
     _warm("author", ac.lm_base_url, ac.model)
     rc = _cmd_author(source_dir, repo_root, paths)

@@ -1,6 +1,6 @@
 """NXS-792: end-to-end acceptance tests for the Skill Authoring Agent flow.
 
-Covers the full ingest-and-retrieve cycle without Ollama:
+Covers the full ingest-and-retrieve cycle without a live embedder:
   - Bootstrap loader seeds the Skill Authoring Agent fixture
   - System review YAML loads via ingest and is retrievable via GET /skills/{id}
   - Domain review YAML loads via ingest and is retrievable via GET /skills/{id}
@@ -8,7 +8,7 @@ Covers the full ingest-and-retrieve cycle without Ollama:
   - Validation failures block load (spot-checked; exhaustive coverage in
     test_bootstrap.py and test_ingest.py)
 
-Compose-via-ingested-skills requires Ollama for vector retrieval and is
+Compose-via-ingested-skills requires a live embedder for vector retrieval and is
 covered by the golden path integration tests.
 """
 

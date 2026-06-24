@@ -92,10 +92,6 @@ def _all_common_patches(tmp_path: Path):
             "agentalloy.install.subcommands.simple_setup._container_setup_log_path",
             return_value=tmp_path / "setup.log",
         ),
-        patch(
-            "agentalloy.install.subcommands.simple_setup._inspect_ollama_project",
-            return_value=("test-project", "test-project_default"),
-        ),
         patch("agentalloy.install.state.load_state", return_value={}),
         patch("agentalloy.install.state.save_state"),
         patch(

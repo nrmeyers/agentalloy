@@ -701,7 +701,7 @@ def run_preflight(
         elif chosen == "llama-server":
             checks.append(_check_llama_server_present())
             # _check_llama_server_reachable omitted: llama-server is started by
-            # start-embed-server (later in the pipeline), not pre-running like ollama.
+            # start-embed-server (later in the pipeline), not pre-running.
         elif chosen == "fastflowlm":
             checks.append(_check_fastflowlm_present())
         else:

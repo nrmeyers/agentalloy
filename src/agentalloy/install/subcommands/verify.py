@@ -87,7 +87,7 @@ def _check_embedding_via_diagnostics(
     """Read embedder status from /diagnostics/runtime.
 
     Used by container deployments where the host can't reach the embedder
-    directly (Ollama runs inside the agentalloy container). The
+    directly (llama-server runs inside the agentalloy container). The
     diagnostics endpoint reports the same embedding_runtime dep status the
     agentalloy service uses internally — "ok" means the service successfully
     embedded against the configured backend at startup or last refresh.
@@ -125,8 +125,8 @@ def _check_embedding_via_diagnostics(
         "duration_ms": int((time.monotonic() - t0) * 1000),
         "error": f"embedding_runtime status={status!r} (via /diagnostics/runtime)",
         "remediation": (
-            "Bundled Ollama isn't healthy yet. Check the container logs — "
-            "e.g. `podman logs agentalloy` (Ollama runs inside the same "
+            "Bundled llama-server isn't healthy yet. Check the container logs — "
+            "e.g. `podman logs agentalloy` (llama-server runs inside the same "
             "container; substitute `docker` if you're on Docker)."
         ),
     }
@@ -156,7 +156,7 @@ def _check_embedding_endpoint_reachable(embed_url: str) -> dict[str, Any]:
             "passed": False,
             "duration_ms": duration,
             "error": f"GET {url} returned {status}",
-            "remediation": f"Check that Ollama is running at {embed_url}",
+            "remediation": f"Check that the embed llama-server is running at {embed_url}",
         }
     except (URLError, OSError, TimeoutError) as exc:
         duration = int((time.monotonic() - t0) * 1000)
@@ -165,7 +165,11 @@ def _check_embedding_endpoint_reachable(embed_url: str) -> dict[str, Any]:
             "passed": False,
             "duration_ms": duration,
             "error": str(exc),
-            "remediation": "Start Ollama with `ollama serve`, then re-run verify",
+            "remediation": (
+                "Start the embed llama-server (e.g. `llama-server --embeddings "
+                "--pooling mean --ctx-size 2048 --ubatch-size 2048 --port 47951`), "
+                "then re-run verify"
+            ),
         }
 
 
@@ -189,7 +193,7 @@ def _check_embedding_expected_dim(embed_url: str, model: str) -> dict[str, Any]:
                 "passed": False,
                 "duration_ms": duration,
                 "error": "No embeddings returned",
-                "remediation": f"Ensure model '{model}' is pulled: `ollama pull {model}`",
+                "remediation": f"Ensure the embed llama-server is serving the '{model}' GGUF.",
             }
         dim = len(embeddings[0].get("embedding", []))
         duration = int((time.monotonic() - t0) * 1000)
@@ -214,7 +218,7 @@ def _check_embedding_expected_dim(embed_url: str, model: str) -> dict[str, Any]:
             "passed": False,
             "duration_ms": duration,
             "error": str(exc),
-            "remediation": f"Ensure Ollama is running and model '{model}' is pulled.",
+            "remediation": f"Ensure the embed llama-server is running and serving the '{model}' GGUF.",
         }
 
 
@@ -797,7 +801,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     diag = _probe_diagnostics(port)
 
     # Container deployments: the host can't reach the embedder directly
-    # (Ollama runs inside the agentalloy container). Both embedding checks
+    # (llama-server runs inside the agentalloy container). Both embedding checks
     # collapse to a single source — the embedding_runtime dep status exposed
     # via /diagnostics/runtime, which the agentalloy service computes from
     # its actual embed probes inside the container.

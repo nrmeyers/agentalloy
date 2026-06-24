@@ -221,7 +221,7 @@ class SetupConfig:
     upstream_api_key: str = ""
 
     # Resolved during execution -- not user-facing.
-    detected_runner: str | None = None  # from detect.json (e.g. "ollama", "llama-server")
+    detected_runner: str | None = None  # from detect.json (e.g. "llama-server")
     recommended_host: str | None = None  # from recommend-host-targets.json
     models_output: dict[str, Any] = field(default_factory=dict)  # type: ignore[type-arg]
 
@@ -650,7 +650,7 @@ def _prompt_upstream(cfg: SetupConfig) -> None:
 
     cfg.upstream_url = _prompt_context(
         "  Upstream URL",
-        "  Base URL of the upstream LLM (e.g. http://localhost:11434 for Ollama, https://api.openai.com for OpenAI)",
+        "  Base URL of the upstream LLM (e.g. http://localhost:47951 for a local llama-server, https://api.openai.com for OpenAI)",
         default=cfg.upstream_url or "",
     )
     cfg.upstream_model = _prompt_context(
@@ -897,53 +897,6 @@ def _run_quiet(
             _print(f"  [dim]  | {line}[/dim]")
         _print(f"  [dim]  Full output: {log_file}[/dim]")
     return result.returncode
-
-
-def _inspect_ollama_project(binary_path: str) -> tuple[str, str]:
-    """Return (compose_project, network_name) inferred from the running
-    agentalloy-ollama container.
-
-    podman-compose names the default network ``{project}_default`` where
-    ``project`` defaults to the compose-file dir basename or
-    ``COMPOSE_PROJECT_NAME``. Hardcoding ``agentalloy_default`` breaks when
-    the user clones into a differently-named dir. Instead, ask podman for
-    the truth: ollama is already up by the time we hit step 9, and its
-    labels + network attachments carry the actual project name.
-
-    Falls back to ``("agentalloy", "agentalloy_default")`` if inspection
-    fails — matches the previous hardcoded behavior so we never block setup
-    on a missing field, just degrade gracefully.
-    """
-    fallback = ("agentalloy", "agentalloy_default")
-    try:
-        result = subprocess.run(  # noqa: S603 — fixed argv, binary_path from shutil.which
-            [
-                binary_path,
-                "inspect",
-                "agentalloy-ollama",
-                "--format",
-                '{{ index .Config.Labels "com.docker.compose.project" }}'
-                "\t"
-                "{{ range $k, $_ := .NetworkSettings.Networks }}{{ $k }}\n{{ end }}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return fallback
-    if result.returncode != 0:
-        return fallback
-    raw = result.stdout.strip()
-    if not raw or "\t" not in raw:
-        return fallback
-    project, _, networks_blob = raw.partition("\t")
-    project = project.strip() or fallback[0]
-    networks = [n.strip() for n in networks_blob.splitlines() if n.strip()]
-    # Prefer the default network for this project; fall back to first attached.
-    target = f"{project}_default"
-    network = target if target in networks else (networks[0] if networks else fallback[1])
-    return (project, network)
 
 
 # Fixed container names declared in compose.yaml via `container_name:`.
@@ -1239,15 +1192,15 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
 
     # 2b. Container = CPU-only, on every host. GPU passthrough is intentionally
     # out of scope: nvidia needs nvidia-container-toolkit + deploy.resources,
-    # AMD needs ROCm device mounts + a ROCm Ollama image, and Docker Desktop
+    # AMD needs ROCm device mounts + a ROCm llama-server image, and Docker Desktop
     # on macOS cannot pass Metal through at all. Users who want GPU should
-    # choose the native install. The bundled Ollama sidecar handles inference
+    # choose the native install. The bundled llama-server handles inference
     # on CPU using the nomic-embed-text-v1.5 model — functional for embeddings
     # but slower than GPU.
     _print(
         "\n  [yellow]Note — container deployment is CPU-only on every host.[/yellow]\n"
         "  GPU acceleration (NVIDIA/AMD/Apple Metal) only works with a native\n"
-        "  install. The bundled Ollama runs on CPU; for a 600M embedding model\n"
+        "  install. The bundled llama-server runs on CPU; for a 600M embedding model\n"
         "  on short text this is functional but noticeably slower than GPU.\n"
         "  If you want GPU acceleration, cancel and re-run setup choosing the\n"
         "  native deployment."
@@ -1286,7 +1239,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print("  [green]  Preflight (container) passed.[/green]")
 
     # 5. Set fixed values (container mode overrides)
-    cfg.runner = "ollama"
+    cfg.runner = "llama-server"
     cfg.port = 47950
     cfg.mode = "manual"
     cfg.deployment = "container"
@@ -1406,18 +1359,17 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # bootstrap sequence internally (in order):
     #
     #   1. Run DB schema migrations  (agentalloy-init equivalent)
-    #   2. Start Ollama and wait for it to be healthy
-    #   3. Pull the embedding model  (ollama-pull equivalent)
+    #   2. Start the llama-servers and wait for them to be healthy
+    #   3. Download the GGUF models   (if missing)
     #   4. Install skill packs       (if cfg.packs is non-empty)
     #   5. Start uvicorn
     #
-    # This replaces the old multi-container compose model
-    # (agentalloy-init, ollama, ollama-pull, agentalloy) with a single
+    # This replaces the old multi-container compose model with a single
     # container.  The entrypoint script's sequential flow (set -e) ensures
-    # no race conditions between steps — migrations finish before ollama
-    # starts, ollama is healthy before the model is pulled, the model is
-    # cached before packs are installed, and uvicorn only starts after all
-    # bootstrap steps succeed.
+    # no race conditions between steps — migrations finish before the
+    # llama-servers start, they are healthy before the models are downloaded,
+    # the models are cached before packs are installed, and uvicorn only
+    # starts after all bootstrap steps succeed.
     log_path = _container_setup_log_path()
     _print("[bold]Running container setup...[/bold]")
     _print(f"  [dim]Full setup log: {log_path}[/dim]")
@@ -1507,7 +1459,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         elapsed = int(evt.get("elapsed") or 0)
         # Model download phase — show as a distinct status.
         # The entrypoint writes {"phase": "model_pull", "model": "...", ...}
-        # to .bootstrap-progress before running ollama pull.
+        # to .bootstrap-progress before downloading the GGUF model.
         phase = extra.get("phase") or progress.get("phase")
         if phase == "model_pull":
             model = current or progress.get("model", "")

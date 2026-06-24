@@ -164,7 +164,7 @@ AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
 ```
 
 Requires a running AgentAlloy service and an agent model behind any
-OpenAI-compatible endpoint (LM Studio, Ollama, llama-server).
+OpenAI-compatible endpoint (LM Studio, llama-server).
 
 ## Retrieval Recall (Layer 1)
 
