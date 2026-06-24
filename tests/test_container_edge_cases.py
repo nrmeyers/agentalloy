@@ -827,7 +827,7 @@ class TestNonInteractiveMode:
         mock_generate_entrypoint,
         mock_cleanup_entrypoint,
     ):
-        """Non-interactive container mode sets runner=ollama, port=47950, mode=manual, harness=manual."""
+        """Non-interactive container mode sets runner=llama-server, port=47950, mode=manual, harness=manual."""
         from agentalloy.install.subcommands.simple_setup import (
             SetupConfig,
             _run_container_flow,
