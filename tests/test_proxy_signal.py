@@ -150,7 +150,11 @@ class TestEvaluateSignal:
         assert result.announce is True
         assert result.phase == "build"
         mock_trigger.assert_called_once()  # consulted, not bypassed
-        assert _read_announced(tmp_path) == "build"  # recorded so the next turn is quiet
+        # The decision is captured as a pending marker; evaluate_signal no longer
+        # writes `.agentalloy/announced` itself — the injection path commits it only
+        # after the orientation block is actually delivered.
+        assert result.pending_announce is not None and result.pending_announce[0] == "build"
+        assert _read_announced(tmp_path) is None
 
     def test_intake_entry_announces_once_then_quiet(self, tmp_path: Path) -> None:
         """Intake announces on the first prompt, then stops — no every-turn flood.
@@ -169,6 +173,10 @@ class TestEvaluateSignal:
             ),
         ):
             first = asyncio.run(evaluate_signal(_req("hi"), tmp_path, session_id=SESSION))
+            # Simulate the injection path committing after the first turn delivers.
+            proxy_signal.commit_markers(
+                tmp_path, first, announce_emitted=True, cursor_emitted=False
+            )
             second = asyncio.run(evaluate_signal(_req("still here"), tmp_path, session_id=SESSION))
             third = asyncio.run(evaluate_signal(_req("and again"), tmp_path, session_id=SESSION))
         assert first.should_compose is True and first.announce is True
@@ -398,7 +406,10 @@ class TestAnnounceCadence:
             result = asyncio.run(evaluate_signal(_req("anything"), tmp_path))
         assert result.should_compose is True
         assert result.announce is True
-        assert _read_announced(tmp_path) == "qa"
+        # The re-announce decision targets qa; the on-disk marker is untouched by
+        # evaluate_signal (still the stale "build") until the injection path commits.
+        assert result.pending_announce is not None and result.pending_announce[0] == "qa"
+        assert _read_announced(tmp_path) == "build"
 
     def test_announce_not_written_when_skill_missing(self, tmp_path: Path) -> None:
         # Skill load fails before the announce decision → no announced marker is
@@ -537,10 +548,12 @@ class TestTier2Cadence:
         assert result.announce_cursor is True  # Tier 2
         assert result.current_contract is not None
         assert result.current_contract.endswith("build/01-cache.md")
-        # Composed cadence recorded so the next steady turn stays quiet.
+        # Tier 2 cadence is recorded as a pending marker; evaluate_signal no longer
+        # writes `.agentalloy/composed` — the injection path commits it post-delivery.
         from agentalloy.signals.skill_loader import _read_composed
 
-        assert _read_composed(tmp_path) == "build/01-cache.md"
+        assert result.pending_composed == "build/01-cache.md"
+        assert _read_composed(tmp_path) is None
 
     def test_tier2_quiet_after_compose(self, tmp_path: Path) -> None:
         # Already announced + already composed this cursor, no trigger → quiet.

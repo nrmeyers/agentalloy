@@ -22,7 +22,7 @@ from agentalloy.api.proxy_session import (
     resolve_session_key,
     session_header_names,
 )
-from agentalloy.api.proxy_signal import evaluate_signal
+from agentalloy.api.proxy_signal import commit_markers, evaluate_signal
 from agentalloy.storage.vector_store import CompositionTrace, VectorStore, open_or_create
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,17 @@ def _skill() -> dict[str, object]:
     }
 
 
-def _eval(req: ProxyRequest, tmp_path: Path, session_id: str | None = None):  # type: ignore[no-untyped-def]
+def _eval(
+    req: ProxyRequest, tmp_path: Path, session_id: str | None = None, *, deliver: bool = True
+):  # type: ignore[no-untyped-def]
+    """Evaluate the signal, then (by default) commit the deferred cadence markers.
+
+    ``evaluate_signal`` no longer writes ``.agentalloy/{announced,composed}`` itself —
+    the injection path commits them only after a non-empty block is delivered. These
+    cadence tests assert the once-then-quiet behavior, which only holds when delivery
+    happened, so ``_eval`` simulates that commit. Pass ``deliver=False`` to model a
+    degraded turn (compose produced nothing) that must NOT burn the session.
+    """
     with (
         mock.patch(
             "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
@@ -65,7 +75,15 @@ def _eval(req: ProxyRequest, tmp_path: Path, session_id: str | None = None):  # 
             return_value=None,
         ),
     ):
-        return asyncio.run(evaluate_signal(req, tmp_path, session_id=session_id))
+        result = asyncio.run(evaluate_signal(req, tmp_path, session_id=session_id))
+    if deliver:
+        commit_markers(
+            tmp_path,
+            result,
+            announce_emitted=result.announce,
+            cursor_emitted=result.announce_cursor,
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +171,21 @@ def test_concurrent_sessions_do_not_thrash(tmp_path: Path) -> None:
     # both, so they don't re-announce each other every turn.
     assert _eval(_req("a"), tmp_path, session_id="A").announce is False
     assert _eval(_req("b"), tmp_path, session_id="B").announce is False
+    assert _eval(_req("a"), tmp_path, session_id="A").announce is False
+
+
+def test_degraded_turn_does_not_burn_session(tmp_path: Path) -> None:
+    # The regression this guards: evaluate_signal must NOT record a session as
+    # oriented when the turn delivered nothing (embed down / empty block / soft-fail
+    # to the original body). Such a turn re-announces until one actually delivers —
+    # the marker is committed only by the injection path, post-delivery.
+    _set_phase(tmp_path, "build")
+    # Two degraded turns in a row (no commit) keep announcing — the session is not burned.
+    assert _eval(_req("a"), tmp_path, session_id="A", deliver=False).announce is True
+    assert _eval(_req("a"), tmp_path, session_id="A", deliver=False).announce is True
+    # A delivered turn commits the marker...
+    assert _eval(_req("a"), tmp_path, session_id="A", deliver=True).announce is True
+    # ...and only then does the session go quiet.
     assert _eval(_req("a"), tmp_path, session_id="A").announce is False
 
 
