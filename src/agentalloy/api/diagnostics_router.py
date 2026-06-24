@@ -20,6 +20,7 @@ from agentalloy.reads.active import get_active_skills
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.runtime_state import RuntimeCache
 from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.vector_store import EMBEDDING_DIM
 
 router = APIRouter()
 
@@ -75,6 +76,21 @@ class RuntimeDiagnosticsResponse(BaseModel):
     runtime_state: list[SkillVersionEntry]
     consistency: ConsistencyReport
     dependency_readiness: DependencyReadiness
+
+
+class CorpusDiagnosticsResponse(BaseModel):
+    """Cheap, read-only corpus counts reported off the live store handles.
+
+    The running service holds the Ladybug(Kuzu)/DuckDB file locks, so a
+    container-side ``doctor`` cannot open the DBs to count rows. This endpoint
+    reads the counts off the long-lived connections already held on
+    ``app.state``. The underlying queries are read-only ``COUNT`` scans, which
+    are thread-safe to run alongside the request/response loop.
+    """
+
+    skill_count: int
+    embedded_vector_count: int
+    embedding_dim: int | None
 
 
 class DiagnosticsChecker:
@@ -229,3 +245,44 @@ async def runtime_diagnostics(request: Request) -> RuntimeDiagnosticsResponse:
             ),
         )
     return await checker.check()
+
+
+@router.get(
+    "/diagnostics/corpus",
+    response_model=CorpusDiagnosticsResponse,
+    summary="Corpus counts (skills, embedded vectors, embedding dim) off the live store handles",
+)
+async def corpus_diagnostics(request: Request) -> CorpusDiagnosticsResponse:
+    """Report corpus counts using the long-lived store handles on app.state.
+
+    Each count is guarded independently: a single failing store yields 0/null
+    for that field while the others are still reported. The endpoint never 500s.
+    """
+    state = request.app.state
+
+    skill_count = 0
+    store: LadybugStore | None = getattr(state, "store", None)
+    if store is not None:
+        try:
+            rows = store.execute("MATCH (s:Skill) RETURN count(s)")
+            if rows and rows[0]:
+                skill_count = int(rows[0][0])
+        except Exception:
+            skill_count = 0
+
+    embedded_vector_count = 0
+    embedding_dim: int | None = None
+    vector_store = getattr(state, "vector_store", None)
+    if vector_store is not None:
+        try:
+            embedded_vector_count = int(vector_store.count_embeddings())
+            embedding_dim = EMBEDDING_DIM
+        except Exception:
+            embedded_vector_count = 0
+            embedding_dim = None
+
+    return CorpusDiagnosticsResponse(
+        skill_count=skill_count,
+        embedded_vector_count=embedded_vector_count,
+        embedding_dim=embedding_dim,
+    )
