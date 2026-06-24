@@ -57,11 +57,9 @@ except ImportError:
 # These are re-exported for test mocking via the module scope (not inside run_setup).
 from agentalloy.install.subcommands.container_runtime import (  # noqa: PLC0415, F401
     _check_container_running,  # noqa: F401  # pyright: ignore[reportUnusedImport]
-    _cleanup_temp_entrypoint,  # noqa: F401
     _detect_functional_runtimes,  # noqa: F401
     _detect_runtime_binary,  # noqa: F401
     _ensure_volume,  # noqa: F401
-    _generate_entrypoint,  # noqa: F401
     _list_conflicting_containers,  # noqa: F401
     _pull_image,  # noqa: F401
     _run_container,  # noqa: F401
