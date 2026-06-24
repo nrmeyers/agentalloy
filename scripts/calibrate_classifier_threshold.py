@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Calibrate the classifier similarity threshold against a held-out fixture set.
 
 Usage:

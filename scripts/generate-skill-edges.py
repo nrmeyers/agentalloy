@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Propose skill-to-skill graph edges for the pack corpus (one-off tooling).
 
 For every pack skill (``src/agentalloy/_packs/*/<skill>.yaml``) this script:
