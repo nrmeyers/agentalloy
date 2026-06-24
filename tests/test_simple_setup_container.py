@@ -7,7 +7,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from agentalloy.install.subcommands.simple_setup import SetupConfig
+from agentalloy.install.subcommands.simple_setup import (
+    SetupConfig,
+    _reconcile_native_port_holder,
+)
 
 # ---------------------------------------------------------------------------
 # UT-21: SetupConfig no longer has compose_binary or compose_file attributes
@@ -617,3 +620,90 @@ class TestContainerRuntimeSelection:
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
+
+
+# ---------------------------------------------------------------------------
+# Native :47950 holder reconciliation before `podman run` (container collision)
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileNativePortHolder:
+    """Container setup reclaims a NATIVE agentalloy holder of the host port before
+    `podman run`, but never a foreign process or podman's own rootlessport forwarder."""
+
+    _PH = "agentalloy.install.server_proc.port_holder_cmdline"
+    _RC = "agentalloy.install.server_proc.reclaim_stale_port"
+    _PRINT = "agentalloy.install.subcommands.simple_setup._print"
+    _PROMPT = "agentalloy.install.subcommands.simple_setup._prompt"
+
+    def _cfg(self, *, non_interactive: bool = False) -> SetupConfig:
+        return SetupConfig(port=47950, non_interactive=non_interactive)
+
+    def test_free_port_proceeds(self) -> None:
+        with (
+            patch(self._PH, return_value=(None, "")),
+            patch(self._RC) as reclaim,
+            patch(self._PRINT),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 0
+        reclaim.assert_not_called()
+
+    def test_native_holder_interactive_reclaim(self) -> None:
+        with (
+            patch(self._PH, return_value=(99, "python -m uvicorn agentalloy.app")),
+            patch(self._RC, return_value=99) as reclaim,
+            patch(self._PRINT),
+            patch(self._PROMPT, return_value="y"),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 0
+        reclaim.assert_called_once()
+
+    def test_native_holder_declined_aborts(self) -> None:
+        with (
+            patch(self._PH, return_value=(99, "uvicorn agentalloy.app")),
+            patch(self._RC) as reclaim,
+            patch(self._PRINT),
+            patch(self._PROMPT, return_value="n"),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 1
+        reclaim.assert_not_called()
+
+    def test_native_holder_non_interactive_auto_reclaims(self) -> None:
+        with (
+            patch(self._PH, return_value=(99, "uvicorn agentalloy.app")),
+            patch(self._RC, return_value=99) as reclaim,
+            patch(self._PRINT),
+            patch(self._PROMPT) as prompt,
+        ):
+            assert _reconcile_native_port_holder(self._cfg(non_interactive=True)) == 0
+        reclaim.assert_called_once()
+        prompt.assert_not_called()
+
+    def test_foreign_holder_aborts_without_killing(self) -> None:
+        with (
+            patch(self._PH, return_value=(77, "/usr/bin/some-other-server --port 47950")),
+            patch(self._RC) as reclaim,
+            patch(self._PRINT),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 1
+        reclaim.assert_not_called()
+
+    def test_rootlessport_forwarder_skipped(self) -> None:
+        # podman's own forwarder for a container the sweep already cleared — leave it
+        # and proceed (the port frees as that container goes down).
+        with (
+            patch(self._PH, return_value=(55, "rootlessport --child-ip 10.0.2.100")),
+            patch(self._RC) as reclaim,
+            patch(self._PRINT),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 0
+        reclaim.assert_not_called()
+
+    def test_reclaim_failure_aborts(self) -> None:
+        with (
+            patch(self._PH, return_value=(99, "uvicorn agentalloy.app")),
+            patch(self._RC, return_value=None),
+            patch(self._PRINT),
+            patch(self._PROMPT, return_value="y"),
+        ):
+            assert _reconcile_native_port_holder(self._cfg()) == 1

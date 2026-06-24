@@ -103,6 +103,20 @@ def _read_cmdline(pid: int) -> str:
     return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
 
 
+def port_holder_cmdline(port: int, host: str = DEFAULT_HOST) -> tuple[int | None, str]:
+    """Return ``(pid, cmdline)`` of the process LISTENing on ``host:port``.
+
+    ``(None, "")`` when the port is free. The cmdline (space-joined
+    ``/proc/<pid>/cmdline``) lets a caller *classify* the holder before deciding to
+    reclaim it — e.g. our own native ``uvicorn agentalloy.app`` vs a foreign process
+    vs podman's ``rootlessport`` forwarder for an already-running container.
+    """
+    pid = find_listening_pid(port, host=host)
+    if pid is None:
+        return None, ""
+    return pid, _read_cmdline(pid)
+
+
 def reclaim_stale_port(
     port: int, match_substrings: list[str], host: str = DEFAULT_HOST
 ) -> int | None:
@@ -121,10 +135,9 @@ def reclaim_stale_port(
     """
     if not match_substrings:  # never kill an arbitrary holder
         return None
-    pid = find_listening_pid(port, host=host)
+    pid, cmdline = port_holder_cmdline(port, host=host)
     if pid is None:
         return None
-    cmdline = _read_cmdline(pid)
     if not cmdline or not all(s in cmdline for s in match_substrings):
         return None  # free, or a foreign holder — leave it alone
     try:
