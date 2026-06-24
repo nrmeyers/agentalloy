@@ -1637,6 +1637,124 @@ def _offer_provision_runner(cfg: SetupConfig, preset: str) -> bool:
     return False
 
 
+def _corpus_skill_count() -> int:
+    """Embedded-skill count in the user corpus; 0 if absent/empty/unreadable.
+
+    Isolated as a module-level function so the post-install corpus guard has a
+    single patchable seam (tests that mock the install steps stub this).
+    """
+    corpus = install_state.corpus_dir()
+    duck_path = corpus / "skills.duck"
+    ladybug_path = corpus / "ladybug"
+    if not (duck_path.exists() and ladybug_path.exists()):
+        return 0
+    try:
+        meta = seed_corpus._check_duckdb(duck_path)  # pyright: ignore[reportPrivateUsage]
+        return int(meta.get("skill_count") or 0)
+    except Exception:
+        return 0
+
+
+def _teardown_prior_deployment(prior_state: dict[str, Any], prior_deployment: str) -> int:
+    """Stop and remove a prior install's RUNTIME (servers/containers/services).
+
+    Leaves the installed CLI package and the user's code/repos untouched — this
+    is the in-place overwrite/switch path, not a full uninstall. Foreign
+    processes are never killed (the reap/teardown primitives spare them).
+    """
+    if prior_deployment == "container":
+        from agentalloy.install.subcommands import uninstall
+
+        _print("  [dim]-> Removing the previous container[/dim]")
+        warnings: list[str] = []
+        uninstall._stop_container_stack(prior_state, warnings)  # pyright: ignore[reportPrivateUsage]
+        for w in warnings:
+            _print(f"  [yellow]  {w}[/yellow]")
+        _print("  [green]  Done.[/green]")
+    else:  # native
+        from agentalloy.install import runtime_artifacts
+
+        _print("  [dim]-> Stopping the previous native runtime[/dim]")
+        actions = runtime_artifacts.reap(scope="all")
+        for a in actions:
+            if a.op == "warn_foreign":
+                _print(f"  [yellow]  {a.summary}[/yellow]")
+        _print("  [green]  Done.[/green]")
+    return 0
+
+
+def _reconcile_prior_install(
+    cfg: SetupConfig,
+    prior_state: dict[str, Any],
+    prior_deployment: Any,
+    datastore_initialized: bool,
+) -> int:
+    """Detect a prior install and offer to overwrite / switch deployment in place.
+
+    Returns 0 to proceed with setup, or EXIT_NOOP when the user (or a
+    non-interactive run without ``--force``) declines — leaving the prior install
+    untouched. On accept, tears down the prior runtime and sets ``cfg.force`` so
+    the downstream steps overwrite rather than no-op.
+    """
+    from agentalloy.install.__main__ import EXIT_NOOP
+
+    prior_is_deployment = prior_deployment in ("native", "container")
+    if not prior_is_deployment and not datastore_initialized:
+        return 0  # nothing to reconcile — fresh host
+
+    new_deployment = cfg.deployment or "native"
+    switching = prior_is_deployment and prior_deployment != new_deployment
+
+    if switching:
+        _print(
+            f"\n[yellow]Found an existing [bold]{prior_deployment}[/bold] install; "
+            f"you chose [bold]{new_deployment}[/bold]. Setup can switch it in "
+            f"place.[/yellow]"
+        )
+    elif prior_is_deployment:
+        _print(
+            f"\n[yellow]Found an existing [bold]{prior_deployment}[/bold] install. "
+            f"Setup can overwrite it in place.[/yellow]"
+        )
+    else:
+        _print(
+            "\n[yellow]AgentAlloy is already initialized for this profile. Setup "
+            "can overwrite it in place.[/yellow]"
+        )
+    _print(
+        "  [dim]This stops and removes the previous runtime "
+        "(servers/containers/services) and re-runs setup — no separate "
+        "`uninstall` needed. Your code and repos are untouched.[/dim]"
+    )
+
+    if cfg.force:
+        proceed = True
+    elif cfg.non_interactive:
+        _print(
+            "  [yellow]Existing install present — re-run with `--force` to "
+            "overwrite non-interactively. Leaving it untouched.[/yellow]"
+        )
+        return EXIT_NOOP
+    else:
+        verb = "Switch" if switching else "Overwrite"
+        ans = _prompt(f"  {verb} the existing install and continue?", default="y")
+        proceed = ans.strip().lower() in ("", "y", "yes")
+
+    if not proceed:
+        _print("  [yellow]Setup cancelled — existing install left untouched.[/yellow]")
+        return EXIT_NOOP
+
+    if prior_is_deployment:
+        rc = _teardown_prior_deployment(prior_state, str(prior_deployment))
+        if rc != 0:
+            return rc
+
+    # Overwrite is now authoritative: let downstream steps re-run rather than
+    # short-circuit on the already-initialized datastore / cached step results.
+    cfg.force = True
+    return 0
+
+
 def run_setup(cfg: SetupConfig) -> int:
     """Execute the simple interactive setup flow.
 
@@ -1647,11 +1765,14 @@ def run_setup(cfg: SetupConfig) -> int:
     4. Execute install steps
     5. Validate
     """
-    from agentalloy.install.__main__ import EXIT_NOOP
-
     t0 = time.monotonic()
 
-    # -- Profile detection and refuse-if-existing check --
+    # -- Profile detection + prior-install discovery --
+    # We no longer hard-refuse when a prior install exists; instead we discover
+    # it here and — once the deployment choice is known — offer to overwrite it
+    # or switch deployment modes in place (see _reconcile_prior_install), so the
+    # user doesn't have to uninstall + force-reinstall + re-run setup by hand.
+    datastore_initialized = False
     try:
         from agentalloy.profiles import (
             _ensure_profile_dir,  # pyright: ignore[reportPrivateUsage]
@@ -1662,28 +1783,22 @@ def run_setup(cfg: SetupConfig) -> int:
         active_profile = detect_profile()
         ds_path = active_profile.datastore_path
 
-        if ds_path.exists() and not getattr(cfg, "force", False):
+        if ds_path.exists():
             try:
                 import duckdb
 
                 con = duckdb.connect(str(ds_path), read_only=True)
-                has_skills = (
+                datastore_initialized = (
                     con.execute("SELECT 1 FROM profile_skills LIMIT 1").fetchone() is not None
                 )
                 con.close()
             except Exception:
-                has_skills = False
-
-            if has_skills:
-                _print(
-                    f"\n[yellow]AgentAlloy is already initialized for profile "
-                    f"'{active_profile.name}' (datastore: {ds_path}). "
-                    f"Use 'agentalloy update' to refresh defaults or "
-                    f"'agentalloy reset' to wipe and reinstall.[/yellow]"
-                )
-                return EXIT_NOOP
+                datastore_initialized = False
     except ImportError:
         active_profile = None  # type: ignore[assignment]
+
+    prior_state = install_state.load_state()
+    prior_deployment = prior_state.get("deployment")
 
     # -- Phase 0: Auto-detect hardware --
 
@@ -1721,6 +1836,11 @@ def run_setup(cfg: SetupConfig) -> int:
         pass  # from CLI flag
     else:
         cfg.deployment = "native"  # non-interactive default
+
+    # -- Reconcile a prior install (overwrite / native↔container switch) --
+    rc = _reconcile_prior_install(cfg, prior_state, prior_deployment, datastore_initialized)
+    if rc != 0:
+        return rc
 
     if cfg.deployment == "container":
         rc = _run_container_flow(cfg, t0)
@@ -2098,6 +2218,24 @@ def run_setup(cfg: SetupConfig) -> int:
         _print(f"  [red]  install-packs failed (exit {rc}).[/red]")
         return rc
     _print("  [green]  Done.[/green]")
+
+    # Guard: install-packs reported success — verify the corpus actually
+    # populated. A silent half-install (embed step skipped/NOOP, or written to a
+    # different data dir) would otherwise leave an absent/empty corpus that only
+    # surfaces later in `doctor` as "corpus DB absent". Fail loudly here instead.
+    corpus_skill_count = _corpus_skill_count()
+    if corpus_skill_count < seed_corpus.MIN_SKILL_COUNT:
+        _print(
+            f"  [red]  install-packs reported success but the corpus at "
+            f"{install_state.corpus_dir()} is missing or empty "
+            f"({corpus_skill_count} skills embedded, expected "
+            f">= {seed_corpus.MIN_SKILL_COUNT}) — the install is incomplete.[/red]"
+        )
+        _print(
+            "  [red]  Re-run `agentalloy install-packs`; if it persists, run "
+            "`agentalloy doctor` and share the output.[/red]"
+        )
+        return 1
 
     # Step h: Enable service
     _print("  [dim]-> Enabling service[/dim]")

@@ -87,6 +87,16 @@ class MockSetup:
         }
         self.patchers.append(pf)
 
+        # The steps above are mocked, so no real corpus is built — stub the
+        # post-install corpus guard with a healthy count so the orchestration
+        # tests reach the later steps. Tests that exercise the guard override it.
+        cc = patch(
+            "agentalloy.install.subcommands.simple_setup._corpus_skill_count",
+            return_value=100,
+        )
+        self.mocks["_corpus_skill_count"] = cc.start()
+        self.patchers.append(cc)
+
     def teardown(self):
         for p in self.patchers:
             p.stop()
@@ -375,6 +385,15 @@ class TestSimpleSetupExecution:
         rc = run_setup(setup_config(non_interactive=True))
         assert rc == 0
         self.mock.mocks["start_rerank_server"].assert_called_once()
+
+    def test_run_setup_fails_loudly_when_corpus_empty(self, tmp_state_dir: tuple[Path, Path]):
+        """install-packs 'succeeds' but leaves an empty corpus → setup aborts
+        before enable-service instead of reporting a half-install as done."""
+        self.mock.mocks["_corpus_skill_count"].return_value = 0
+        setup_config, run_setup = self._import_run_setup()
+        rc = run_setup(setup_config(non_interactive=True))
+        assert rc == 1
+        self.mock.mocks["enable_service"].assert_not_called()
 
     def test_run_setup_all_steps_called(self, tmp_state_dir: tuple[Path, Path]):
         """Full setup flow runs all expected steps."""
@@ -830,6 +849,77 @@ class TestHardwareTargetCaseInsensitive:
 # ---------------------------------------------------------------------------
 
 
+class TestReconcilePriorInstall:
+    """Prior-install detection: overwrite / native↔container switch in place."""
+
+    def test_fresh_host_proceeds_without_teardown(self):
+        from agentalloy.install.subcommands.simple_setup import _reconcile_prior_install
+
+        cfg = SetupConfig(deployment="native", non_interactive=True)
+        rc = _reconcile_prior_install(cfg, {"deployment": None}, None, False)
+        assert rc == 0
+        assert cfg.force is False  # nothing to overwrite
+
+    def test_non_interactive_without_force_declines(self):
+        from agentalloy.install.__main__ import EXIT_NOOP
+        from agentalloy.install.subcommands.simple_setup import _reconcile_prior_install
+
+        cfg = SetupConfig(deployment="container", non_interactive=True)
+        rc = _reconcile_prior_install(cfg, {"deployment": "native"}, "native", True)
+        assert rc == EXIT_NOOP
+
+    def test_force_switch_container_to_native_tears_down_container(self):
+        from agentalloy.install.subcommands import simple_setup as ss
+
+        cfg = SetupConfig(deployment="native", non_interactive=True, force=True)
+        with patch(
+            "agentalloy.install.subcommands.uninstall._stop_container_stack",
+            return_value=[],
+        ) as stop:
+            rc = ss._reconcile_prior_install(
+                cfg, {"deployment": "container", "container_name": "agentalloy"}, "container", True
+            )
+        assert rc == 0
+        stop.assert_called_once()
+        assert cfg.force is True
+
+    def test_force_native_prior_reaps_runtime(self):
+        from agentalloy.install.subcommands import simple_setup as ss
+
+        cfg = SetupConfig(deployment="container", non_interactive=True, force=True)
+        with patch("agentalloy.install.runtime_artifacts.reap", return_value=[]) as reap:
+            rc = ss._reconcile_prior_install(cfg, {"deployment": "native"}, "native", True)
+        assert rc == 0
+        reap.assert_called_once()
+        assert reap.call_args.kwargs.get("scope") == "all"
+
+    def test_interactive_decline_leaves_install_untouched(self):
+        from agentalloy.install.__main__ import EXIT_NOOP
+        from agentalloy.install.subcommands import simple_setup as ss
+
+        cfg = SetupConfig(deployment="native")  # interactive
+        with (
+            patch.object(ss, "_prompt", return_value="n"),
+            patch("agentalloy.install.runtime_artifacts.reap", return_value=[]) as reap,
+        ):
+            rc = ss._reconcile_prior_install(cfg, {"deployment": "native"}, "native", True)
+        assert rc == EXIT_NOOP
+        reap.assert_not_called()  # declined → no teardown
+
+    def test_interactive_accept_overwrite_same_mode(self):
+        from agentalloy.install.subcommands import simple_setup as ss
+
+        cfg = SetupConfig(deployment="native")
+        with (
+            patch.object(ss, "_prompt", return_value="y"),
+            patch("agentalloy.install.runtime_artifacts.reap", return_value=[]) as reap,
+        ):
+            rc = ss._reconcile_prior_install(cfg, {"deployment": "native"}, "native", True)
+        assert rc == 0
+        reap.assert_called_once()
+        assert cfg.force is True
+
+
 class TestPackDiscovery:
     """Test _discover_packs and _prompt_for_packs helpers."""
 
@@ -954,6 +1044,12 @@ class TestPackDiscovery:
                     "warn_failures": [],
                 }
                 self.patchers.append(pf)
+                cc = patch(
+                    "agentalloy.install.subcommands.simple_setup._corpus_skill_count",
+                    return_value=100,
+                )
+                self.mocks["_corpus_skill_count"] = cc.start()
+                self.patchers.append(cc)
 
             def teardown(self):
                 for p in self.patchers:
