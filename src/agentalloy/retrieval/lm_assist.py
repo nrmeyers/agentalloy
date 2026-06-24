@@ -53,7 +53,11 @@ logger = logging.getLogger(__name__)
 # pointed at an unrelated local service. Stage B is off by default (LM_ASSIST),
 # but when enabled it shares the same reranker as the signal intent scorer.
 _DEFAULT_URL = "http://127.0.0.1:47952"
-_DEFAULT_TIMEOUT_MS = 300
+# 600ms budget before Stage B times out and falls through to deterministic
+# retrieval. Raised from 300ms: a cold/loaded reranker (CPU llama-server, longer
+# fragments) routinely crossed 300ms and passed through, so the stage rarely ran.
+# Override with LM_ASSIST_TIMEOUT_MS.
+_DEFAULT_TIMEOUT_MS = 600
 _DEFAULT_KEEP_THRESHOLD = 0.05
 _DEFAULT_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 # Cap on fragments scored per composition — the design's "top ~12 fragments".
