@@ -249,7 +249,14 @@ def _probe_gpu_devices(binary: Path) -> list[str]:
     out = f"{proc.stdout or ''}\n{proc.stderr or ''}"
     devices: list[str] = []
     for line in out.splitlines():
-        if re.match(r"\s*(?:Vulkan|CUDA|ROCm|HIP|Metal|SYCL)\d+\s*:", line):
+        # `llama-server --list-devices` prints `  <NAME>: <description> (...)`.
+        # Device names are backend-prefixed with a device index, e.g. `CUDA0`,
+        # `Vulkan0`, `ROCm0`, `SYCL0`. Apple's Metal backend names its device
+        # `MTL0` (ggml macro `GGML_METAL_NAME "MTL"`), NOT `Metal` — older
+        # single-device builds emit a bare `Metal` with no index. Match both
+        # spellings and make the index optional so Apple Silicon isn't wrongly
+        # reported as "no GPU device" (→ false CPU-only / inert `-ngl` warning).
+        if re.match(r"\s*(?:Vulkan|CUDA|ROCm|HIP|Metal|MTL|SYCL)\d*\s*:", line):
             devices.append(line.strip())
     return devices
 

@@ -1094,6 +1094,35 @@ class TestGpuProvisioning:
         assert len(devices) == 2
         assert devices[0].startswith("Vulkan0:")
 
+    def test_probe_gpu_devices_parses_metal_mtl(self, tmp_path: Path) -> None:
+        """Apple Silicon: llama.cpp names its Metal device `MTL0`, not `Metal0`.
+
+        Regression: the probe regex only matched `Metal\\d+:`, so Apple Silicon
+        was wrongly reported as "no GPU device" → false CPU-only / inert `-ngl`
+        warning on macOS native installs.
+        """
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        out = "Available devices:\n  MTL0: Apple M2 Pro (21845 MiB, 21845 MiB free)\n"
+        with patch.object(pm.subprocess, "run", return_value=MagicMock(stdout=out, stderr="")):
+            devices = pm._probe_gpu_devices(tmp_path / "llama-server")
+        assert len(devices) == 1
+        assert devices[0].startswith("MTL0:")
+
+    def test_probe_gpu_devices_parses_bare_metal(self, tmp_path: Path) -> None:
+        """Older single-device builds emit a bare `Metal:` with no index."""
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands import pull_models as pm
+
+        out = "Available devices:\n  Metal: Apple M1 (10922 MiB, 10922 MiB free)\n"
+        with patch.object(pm.subprocess, "run", return_value=MagicMock(stdout=out, stderr="")):
+            devices = pm._probe_gpu_devices(tmp_path / "llama-server")
+        assert len(devices) == 1
+        assert devices[0].startswith("Metal:")
+
     def test_probe_gpu_devices_empty_on_cpu_only(self, tmp_path: Path) -> None:
         from unittest.mock import MagicMock
 
