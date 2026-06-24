@@ -11,6 +11,7 @@ import argparse
 import sys
 
 from agentalloy.install import server_proc
+from agentalloy.install.subcommands import server_container
 
 EXIT_OK = 0
 EXIT_USER = 1
@@ -40,7 +41,11 @@ def add_parser(
 
 
 def _run(args: argparse.Namespace) -> int:
-    port = args.port if args.port is not None else server_proc.configured_port()
+    target = server_proc.resolve_deployment(args.port)
+    if target.deployment == "container":
+        return _run_container(args, target)
+
+    port = target.port
 
     try:
         pid = server_proc.start_background(port, host=args.host)
@@ -68,3 +73,22 @@ def _run(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return EXIT_OK
+
+
+def _run_container(args: argparse.Namespace, target: server_proc.DeploymentTarget) -> int:
+    """Container leg: start the (baked-entrypoint) container and await /health."""
+    code, payload = server_container.run_start(target, wait=args.wait)
+    action = payload.get("action")
+    if action == "already_running":
+        print(
+            f"server-start: container '{target.container_name}' already running on :{target.port}",
+            file=sys.stderr,
+        )
+    elif action == "started":
+        print(
+            f"server-start: started container '{target.container_name}'; ready on :{target.port}",
+            file=sys.stderr,
+        )
+    if payload.get("error"):
+        print(f"server-start: {payload['error']}", file=sys.stderr)
+    return code

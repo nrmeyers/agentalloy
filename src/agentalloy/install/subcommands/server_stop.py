@@ -12,6 +12,7 @@ from typing import Any
 
 from agentalloy.install import server_proc
 from agentalloy.install.output import add_json_flag, write_result
+from agentalloy.install.subcommands import server_container
 
 EXIT_OK = 0
 EXIT_USER = 1
@@ -47,7 +48,16 @@ def _render_human(payload: dict[str, Any]) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
-    port = args.port if args.port is not None else server_proc.configured_port()
+    target = server_proc.resolve_deployment(args.port)
+    if target.deployment == "container":
+        code, payload = server_container.run_stop(target, timeout=args.timeout)
+        if code == EXIT_USER and payload.get("error"):
+            print(f"server-stop: {payload['error']}", file=sys.stderr)
+            return code
+        write_result(payload, args, human_fn=_render_human)
+        return code
+
+    port = target.port
     pid = server_proc.find_listening_pid(port)
     if pid is None:
         # Nothing listening is the desired post-condition of stop —

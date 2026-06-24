@@ -11,6 +11,7 @@ from typing import Any
 
 from agentalloy.install import server_proc
 from agentalloy.install.output import add_json_flag, write_result
+from agentalloy.install.subcommands import server_container
 
 
 def add_parser(
@@ -26,36 +27,48 @@ def add_parser(
 
 
 def _render_human(payload: dict[str, Any]) -> None:
-    """Render server status in human-readable format."""
+    """Render server status in human-readable format (native + container)."""
     from agentalloy.install.output import print_rich
 
     print_rich("\n  [bold]Server Status[/bold]\n")
 
     port = payload.get("port", "N/A")
-    pid = payload.get("pid")
     reachable = payload.get("reachable", False)
 
-    # Port
     print_rich(f"  Port: {port}")
 
-    # PID
-    if pid is not None:
-        print_rich(f"  PID:  {pid}")
+    if payload.get("deployment") == "container":
+        # Container leg: report runtime + container state instead of host PID.
+        print_rich(f"  Mode: container ({payload.get('runtime', 'unknown')})")
+        print_rich(f"  Container: {payload.get('container', 'agentalloy')}")
+        print_rich(f"  State: {payload.get('state', 'unknown')}")
     else:
-        print_rich("  PID:  [dim]no process[/dim]")
+        pid = payload.get("pid")
+        if pid is not None:
+            print_rich(f"  PID:  {pid}")
+        else:
+            print_rich("  PID:  [dim]no process[/dim]")
 
-    # Reachability
     reach_status = "[green]reachable[/green]" if reachable else "[red]not reachable[/red]"
     print_rich(f"  Status: {reach_status}")
 
-    # Log path
-    log_path = payload.get("log_path", "N/A")
-    print_rich(f"  Log:  {log_path}")
+    if payload.get("error"):
+        print_rich(f"  [red]error[/red] {payload['error']}")
+
+    if payload.get("deployment") != "container":
+        log_path = payload.get("log_path", "N/A")
+        print_rich(f"  Log:  {log_path}")
 
     print_rich()
 
 
 def _run(args: argparse.Namespace) -> int:
+    target = server_proc.resolve_deployment(args.port)
+    if target.deployment == "container":
+        payload = server_container.status(target)
+        write_result(payload, args, human_fn=_render_human)
+        return 0
+
     info = server_proc.server_info(port=args.port)
     payload = {
         "port": info.port,

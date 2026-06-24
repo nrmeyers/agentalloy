@@ -42,10 +42,93 @@ class ServerLifecycleError(RuntimeError):
     """User-correctable lifecycle failures (port in use, no such process, etc.)."""
 
 
+DEFAULT_CONTAINER_NAME = "agentalloy"
+
+
+@dataclass(frozen=True)
+class DeploymentTarget:
+    """Resolved lifecycle context for the four ``server-*`` verbs.
+
+    ``deployment`` is ``"container"`` or ``"native"`` (a missing/None value in
+    state is treated as native — that's the historical host-only behavior). When
+    container, ``runtime`` is the resolved podman/docker binary and
+    ``container_name`` the inspect target; both are unused on the native leg.
+    """
+
+    deployment: str
+    port: int
+    runtime: str | None
+    container_name: str
+
+
 def configured_port() -> int:
     """Read the configured server port from install state; fall back to 47950."""
     st = install_state.load_state()
     return install_state.validate_port(st.get("port", DEFAULT_PORT_FALLBACK))
+
+
+def resolve_deployment(port_override: int | None = None) -> DeploymentTarget:
+    """Resolve ``(deployment, runtime, container_name, port)`` from install state.
+
+    Shared by all four ``server-*`` verbs so they branch consistently. On a
+    container deployment, ``runtime_binary`` from state is preferred; if it is
+    missing we fall back to :func:`_detect_runtime_binary` so a state file that
+    predates the field still works. ``runtime`` may be ``None`` here — the caller
+    surfaces the "no runtime" error so it can phrase remediation per-verb.
+
+    ``port_override`` (the verb's ``--port`` flag) wins over state, matching the
+    native path where ``--port`` overrides ``configured_port()``.
+    """
+    st = install_state.load_state()
+    deployment = st.get("deployment") or "native"
+
+    if port_override is not None:
+        port = install_state.validate_port(port_override)
+    else:
+        port = install_state.validate_port(st.get("port", DEFAULT_PORT_FALLBACK))
+
+    if deployment != "container":
+        return DeploymentTarget("native", port, None, DEFAULT_CONTAINER_NAME)
+
+    name = st.get("container_name") or DEFAULT_CONTAINER_NAME
+    runtime = st.get("runtime_binary")
+    if not runtime:
+        # Imported lazily: the container_runtime module pulls in heavier deps
+        # and we only need it on the container leg.
+        from agentalloy.install.subcommands.container_runtime import _detect_runtime_binary
+
+        runtime = _detect_runtime_binary()
+    return DeploymentTarget("container", port, runtime, name)
+
+
+def health_ready(port: int, timeout_s: float, host: str = DEFAULT_HOST) -> bool:
+    """Poll ``http://{host}:{port}/health`` until it returns 2xx or we time out.
+
+    Used as the container-leg readiness probe: a started container's mapped port
+    accepts TCP connections (``wait_until_listening``) before uvicorn is actually
+    serving, so we additionally require the HTTP ``/health`` endpoint to answer.
+    Falls back to a plain reachability result if ``urllib`` raises for any
+    non-HTTP reason within the window.
+    """
+    import urllib.error
+    import urllib.request
+
+    deadline = time.monotonic() + timeout_s
+    url = f"http://{host}:{port}/health"
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2.0) as resp:  # noqa: S310 — fixed localhost URL
+                if 200 <= resp.status < 300:
+                    return True
+        except urllib.error.HTTPError as e:
+            # Endpoint answered (e.g. 503 during bootstrap) — server is up enough
+            # to route; treat a definitive HTTP response as "process is serving".
+            if e.code < 500:
+                return True
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+        time.sleep(START_POLL_INTERVAL_S)
+    return False
 
 
 def find_listening_pid(port: int, host: str = DEFAULT_HOST) -> int | None:
