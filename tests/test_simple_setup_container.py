@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from agentalloy.install.subcommands.simple_setup import (
     SetupConfig,
@@ -72,7 +72,7 @@ class TestSetupConfigNoComposeAttributes:
 
 
 # ---------------------------------------------------------------------------
-# UT-22: Container mode sets runner=ollama, port=47950, mode=manual, harness=manual
+# UT-22: Container mode sets runner=llama-server, port=47950, mode=manual
 # ---------------------------------------------------------------------------
 
 
@@ -81,14 +81,23 @@ class TestContainerModeFixedValues:
 
     When deployment=container, the wizard overrides user-chosen values to
     enforce a consistent, supported configuration:
-    - runner is always ollama
+    - runner is always llama-server (the sole inference runner)
     - port is always 47950
     - mode is always manual (no systemd for containers)
-    - harness is always manual (container handles IDE integration)
+    - deployment is always container
     """
 
     def test_container_flow_sets_fixed_values(self, tmp_path: Path):
-        """_run_container_flow sets runner=ollama, port=47950, mode=manual, harness=manual."""
+        """The REAL _run_container_flow overrides runner=llama-server, port=47950, mode=manual.
+
+        This exercises the actual function: every side-effecting boundary call
+        (preflight, runtime detection, native-port reconciliation, container
+        sweep/pull/run, readiness wait) is mocked so the flow reaches the
+        "Set fixed values" block and beyond. We stop it just past the image
+        pull (which we force to fail) so no real container work happens — the
+        config overrides are already applied by then. The assertions check the
+        config the real code mutated, not a hand-rolled stand-in.
+        """
         import agentalloy.install.subcommands.simple_setup as mod
 
         SetupConfig, _run_container_flow = (
@@ -104,45 +113,65 @@ class TestContainerModeFixedValues:
         os.environ["XDG_DATA_HOME"] = str(data_dir)
 
         try:
-            # Mock _run_container_flow to verify it sets the right config values
-            # before it tries to execute (which would require many local mocks)
+            cfg = SetupConfig(
+                deployment="native",  # non-container starting values, to prove override
+                runner="lm-studio",
+                port=9999,
+                mode="persistent",
+                harness="claude-code",
+                non_interactive=True,  # skip the CPU-only / confirm input() prompts
+            )
 
-            def mock_container_flow(cfg: SetupConfig, t0: float) -> int:
-                """Simulate what _run_container_flow does: override config values."""
-                cfg.runner = "ollama"
-                cfg.port = 47950
-                cfg.mode = "manual"
-                cfg.harness = "manual"
-                return 0
+            with (
+                # preflight passes for every phase (no fatal checks)
+                patch.object(mod.preflight, "run_preflight", return_value={"checks": []}),
+                # exactly one functional runtime → no prompt
+                patch.object(mod, "_detect_functional_runtimes", return_value=["podman"]),
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                # the native :47950 holder reconciliation is a no-op (port free)
+                patch.object(mod, "_reconcile_native_port_holder", return_value=0),
+                # no stale containers to sweep
+                patch.object(mod, "_list_project_containers", return_value=[]),
+                patch.object(mod, "_list_conflicting_containers", return_value=[]),
+                # stop right after the overrides: fail the image pull so the flow
+                # returns 1 without doing real container/volume/readiness work.
+                patch.object(mod, "_pull_image", return_value=1) as pull,
+                patch.object(mod, "_ensure_volume") as ensure_volume,
+                patch.object(mod, "_run_container") as run_container,
+                patch.object(mod, "_wait_for_readiness") as wait,
+            ):
+                rc = _run_container_flow(cfg, 0.0)
 
-            with patch.object(mod, "_run_container_flow", side_effect=mock_container_flow):
-                # For UT-22 we verify the config override behavior
-                # by calling the mock directly with a config that has non-container defaults
-                cfg = SetupConfig(
-                    deployment="native",  # Start with native defaults
-                    runner="lm-studio",
-                    port=9999,
-                    mode="persistent",
-                    harness="claude-code",
-                    non_interactive=True,
-                )
+            # Flow bailed at the (mocked-to-fail) image pull, after the overrides.
+            assert rc == 1
+            pull.assert_called_once()
+            # We never reached the real container start / readiness wait.
+            ensure_volume.assert_not_called()
+            run_container.assert_not_called()
+            wait.assert_not_called()
 
-                # The _run_container_flow function should override these
-                # when deployment="container"
-                # We verify the override logic by checking the config after
-                # the mock sets the values
-                mock_container_flow(cfg, 0.0)
-
-                assert cfg.runner == "ollama", f"Expected runner='ollama', got '{cfg.runner}'"
-                assert cfg.port == 47950, f"Expected port=47950, got {cfg.port}"
-                assert cfg.mode == "manual", f"Expected mode='manual', got '{cfg.mode}'"
-                assert cfg.harness == "manual", f"Expected harness='manual', got '{cfg.harness}'"
+            # The REAL "Set fixed values" block mutated cfg:
+            assert cfg.runner == "llama-server", (
+                f"Expected runner='llama-server', got '{cfg.runner}'"
+            )
+            assert cfg.port == 47950, f"Expected port=47950, got {cfg.port}"
+            assert cfg.mode == "manual", f"Expected mode='manual', got '{cfg.mode}'"
+            assert cfg.deployment == "container", (
+                f"Expected deployment='container', got '{cfg.deployment}'"
+            )
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
 
     def test_native_mode_does_not_override(self, tmp_path: Path):
-        """Native mode preserves user-chosen values."""
+        """Native run_setup forces runner=llama-server but preserves user mode/harness.
+
+        Native mode does NOT apply the container overrides (which would force
+        mode=manual). It does force the sole runner (llama-server) and rejects
+        any other --runner value. This exercises the REAL run_setup: it gathers
+        config, then we let it bail at the (mocked-to-fail) early preflight so
+        the assertions read the config the real code set, with no install work.
+        """
         import agentalloy.install.subcommands.simple_setup as mod
 
         SetupConfig, run_setup = mod.SetupConfig, mod.run_setup
@@ -154,37 +183,45 @@ class TestContainerModeFixedValues:
         os.environ["XDG_CONFIG_HOME"] = str(config_dir)
         os.environ["XDG_DATA_HOME"] = str(data_dir)
 
+        # A fatal early-preflight result so run_setup returns 1 right after the
+        # config-gathering phase (Phase 3, step a) without any real install work.
+        fatal_preflight = {
+            "checks": [
+                {
+                    "name": "port_free",
+                    "passed": False,
+                    "severity": "fatal",
+                    "error": "stub",
+                    "remediation": "",
+                }
+            ]
+        }
+
         try:
             with (
-                patch("agentalloy.install.subcommands.detect.run") as mock_detect,
-                patch(
-                    "agentalloy.install.subcommands.preflight.run_preflight",
-                    return_value={"checks": [], "fatal_failures": [], "warn_failures": []},
-                ),
-                patch("subprocess.run") as mock_run,
+                patch.object(mod.detect, "run", return_value=0),
+                patch.object(mod.preflight, "run_preflight", return_value=fatal_preflight),
                 patch.object(sys.stdin, "isatty", lambda: False),
             ):
-                mock_detect.return_value = {"runner": "ollama"}
-                mock_result = MagicMock()
-                mock_result.returncode = 0
-                mock_result.stdout = ""
-                mock_result.stderr = ""
-                mock_run.return_value = mock_result
-
                 cfg = SetupConfig(
                     deployment="native",
-                    runner="ollama",
+                    # llama-server is the sole accepted runner; any other value is
+                    # rejected by run_setup. None is also accepted (defaults to it).
+                    runner="llama-server",
                     port=47950,
                     mode="persistent",
                     harness="claude-code",
                     non_interactive=True,
                 )
-                run_setup(cfg)
+                rc = run_setup(cfg)
 
-                # Native mode should preserve user values
-                assert cfg.runner == "ollama"
-                assert cfg.mode == "persistent"
-                assert cfg.harness == "claude-code"
+            # Bailed at the fatal early preflight in Phase 3 (after config gather).
+            assert rc == 1
+            # Native mode forces the sole runner but preserves user mode/harness
+            # (it does NOT apply the container override of mode=manual).
+            assert cfg.runner == "llama-server"
+            assert cfg.mode == "persistent"
+            assert cfg.harness == "claude-code"
         finally:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]

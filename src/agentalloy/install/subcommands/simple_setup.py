@@ -98,11 +98,13 @@ def _image_variant_label(image_ref: str) -> str:
 
 
 def _check_network_speed() -> tuple[str, int]:
-    """Measure network speed to ollama.ai and return (warning_message, adjusted_timeout).
+    """Measure network speed to huggingface.co and return (warning_message, adjusted_timeout).
 
-    Performs a quick download of the ollama.ai landing page (~50 KB) and
-    estimates the effective bandwidth. Used to warn users on slow networks
-    and to adjust the readiness timeout for first-run model downloads.
+    Performs a quick download of the huggingface.co landing page (~50 KB) and
+    estimates the effective bandwidth. huggingface.co is the host the GGUF
+    models are actually pulled from, so it is the representative probe target.
+    Used to warn users on slow networks and to adjust the readiness timeout
+    for first-run model downloads.
 
     Returns
     -------
@@ -112,7 +114,7 @@ def _check_network_speed() -> tuple[str, int]:
     """
     try:
         t0 = time.monotonic()
-        with urllib.request.urlopen("https://ollama.ai/", timeout=5) as resp:
+        with urllib.request.urlopen("https://huggingface.co/", timeout=5) as resp:
             body = resp.read()
         elapsed = time.monotonic() - t0
         # bits / seconds / 1e6 = Mbps. (Was /1024 → kbit/s mislabeled as Mbps,
