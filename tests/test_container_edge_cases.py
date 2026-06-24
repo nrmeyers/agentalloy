@@ -519,6 +519,29 @@ class TestRootlessPodman:
             finally:
                 entrypoint.unlink(missing_ok=True)
 
+    def test_docker_full_path_omits_replace_flag(self):
+        """Docker invoked by resolved path (e.g. macOS /usr/local/bin/docker)
+        must NOT get the Podman-only `--replace` flag, and must `rm -f` first.
+
+        Regression: the install flow passes `shutil.which("docker")` (a full
+        path), and an exact `runtime == "docker"` check classified it as
+        non-Docker → emitted `--replace` → `docker run` failed with
+        "unknown flag: --replace".
+        """
+        with patch("agentalloy.install.subcommands.container_runtime.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            from agentalloy.install.subcommands.container_runtime import _run_container
+
+            result = _run_container("/usr/local/bin/docker", "")
+            assert result == 0
+
+            calls = [c.args[0] for c in mock_run.call_args_list]
+            # The pre-run `rm -f agentalloy` cleanup fires for Docker.
+            assert ["/usr/local/bin/docker", "rm", "-f", "agentalloy"] in calls
+            # The actual `run` command carries no --replace.
+            run_cmd = next(c for c in calls if "run" in c)
+            assert "--replace" not in run_cmd
+
     def test_podman_volume_mount_rootless(self):
         """Rootless Podman can mount volumes with correct syntax."""
         with patch("agentalloy.install.subcommands.container_runtime.subprocess.run") as mock_run:

@@ -730,7 +730,13 @@ def _run_container(
 
     # `--replace` is a Podman extension; Docker does not support it.
     # For Docker, explicitly remove any existing container before running.
-    if runtime == "docker":
+    # Compare on the basename: callers pass either the bare label ("docker") or
+    # the resolved `shutil.which` path (e.g. "/usr/local/bin/docker" on macOS,
+    # "/opt/homebrew/bin/docker" on Apple Silicon), and an exact-string check
+    # against "docker" wrongly classifies the path as non-Docker → emits the
+    # Podman-only `--replace` and `docker run` fails with "unknown flag".
+    is_docker = Path(runtime).name == "docker"
+    if is_docker:
         subprocess.run(
             [runtime, "rm", "-f", "agentalloy"],
             check=False,
@@ -740,7 +746,7 @@ def _run_container(
     cmd = [
         runtime,
         "run",
-        *(["--replace"] if runtime != "docker" else []),
+        *([] if is_docker else ["--replace"]),
         "-d",
         # restart-on-boot parity with the retired compose path (which set
         # `restart: unless-stopped`); the single-container model is the
