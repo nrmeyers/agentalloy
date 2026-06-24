@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -75,57 +75,26 @@ class TestCheckEmbedServer:
         with patch(
             "agentalloy.install.subcommands.doctor.urlopen", side_effect=URLError("refused")
         ):
-            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
+            result = _check_embed_server("http://localhost:47951", "nomic-embed-text-v1.5")
         assert result["passed"] is False
         assert result["name"] == "embed_server"
         assert "remediation" in result
 
-    def test_server_reachable_no_tags_passes(self) -> None:
+    def test_server_reachable_passes(self) -> None:
         mock_resp = MagicMock()
         mock_resp.read.return_value = b""
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
-        # First call (base URL) succeeds; second call (/api/tags) raises URLError
-        with patch(
-            "agentalloy.install.subcommands.doctor.urlopen",
-            side_effect=[mock_resp, URLError("not found")],
-        ):
-            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
+        with patch("agentalloy.install.subcommands.doctor.urlopen", return_value=mock_resp):
+            result = _check_embed_server("http://localhost:47951", "nomic-embed-text-v1.5")
         assert result["passed"] is True
 
-    def test_model_not_listed_warns(self) -> None:
-        root_resp = MagicMock()
-        root_resp.read.return_value = b""
-        root_resp.__enter__ = MagicMock(return_value=root_resp)
-        root_resp.__exit__ = MagicMock(return_value=False)
-        tags_resp = MagicMock()
-        tags_resp.read.return_value = json.dumps({"models": [{"name": "other-model"}]}).encode()
-        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
-        tags_resp.__exit__ = MagicMock(return_value=False)
-        with patch(
-            "agentalloy.install.subcommands.doctor.urlopen",
-            side_effect=[root_resp, tags_resp],
-        ):
-            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
-        assert result["passed"] is True
-        assert result.get("severity") == "warn"
-
-    def test_model_listed_passes(self) -> None:
-        root_resp = MagicMock()
-        root_resp.read.return_value = b""
-        root_resp.__enter__ = MagicMock(return_value=root_resp)
-        root_resp.__exit__ = MagicMock(return_value=False)
-        tags_resp = MagicMock()
-        tags_resp.read.return_value = json.dumps(
-            {"models": [{"name": "nomic-embed-text-v1.5"}]}
-        ).encode()
-        tags_resp.__enter__ = MagicMock(return_value=tags_resp)
-        tags_resp.__exit__ = MagicMock(return_value=False)
-        with patch(
-            "agentalloy.install.subcommands.doctor.urlopen",
-            side_effect=[root_resp, tags_resp],
-        ):
-            result = _check_embed_server("http://localhost:11434", "nomic-embed-text-v1.5")
+    def test_server_http_status_to_get_passes(self) -> None:
+        # llama-server returns HTTP 415 to a GET (it wants POST) — that's an HTTP
+        # status response, so the server is UP. Must not be a false negative.
+        http_415 = HTTPError("http://localhost:47951", 415, "Unsupported Media Type", {}, None)
+        with patch("agentalloy.install.subcommands.doctor.urlopen", side_effect=http_415):
+            result = _check_embed_server("http://localhost:47951", "nomic-embed-text-v1.5")
         assert result["passed"] is True
         assert result.get("severity") != "warn"
 
@@ -314,6 +283,21 @@ class TestCheckService:
         assert result["passed"] is True
         assert result.get("severity") != "warn"
 
+    def test_service_up_healthy_passes(self) -> None:
+        # /health emits "healthy" (not "ok") when all deps are ok — must be clean.
+        body = json.dumps(
+            {"status": "healthy", "dependencies": {"runtime_store": {"status": "ok"}}}
+        ).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("agentalloy.install.subcommands.doctor.urlopen", return_value=mock_resp):
+            result = _check_service(47950)
+        assert result["passed"] is True
+        assert result.get("severity") != "warn"
+        assert "healthy" in result["detail"]
+
     def test_service_up_degraded_warns(self) -> None:
         body = json.dumps({"status": "degraded"}).encode()
         mock_resp = MagicMock()
@@ -332,6 +316,14 @@ class TestCheckService:
 
 
 class TestCheckPackManifests:
+    @pytest.fixture(autouse=True)
+    def _warm_pack_validation_import(self) -> None:
+        # _check_pack_manifests lazily does `from agentalloy.pack_validation import …`
+        # (via install_pack). These tests patch sys.modules['agentalloy'] with a
+        # MagicMock, which breaks that lazy import unless the submodule is already
+        # cached — warm it here so the test is self-contained (not order-dependent).
+        import agentalloy.pack_validation  # noqa: F401
+
     def test_valid_manifests_pass(self, tmp_path: Path) -> None:
         # _packs lives next to the agentalloy package __init__.py
         pkg_dir = tmp_path / "agentalloy"

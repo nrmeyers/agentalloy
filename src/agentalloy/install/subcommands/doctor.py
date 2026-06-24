@@ -6,7 +6,7 @@ Two deployment modes (read from ``install-state.json``):
 **Host** — ten checks against host-local resources:
 
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
- 2. embed_server    — GET {RUNTIME_EMBED_BASE_URL} reachable; model listed (warn, not fail)
+ 2. embed_server    — embed llama-server reachable on RUNTIME_EMBED_BASE_URL
  3. corpus_files    — ladybug/ + skills.duck present at corpus_dir()
  4. ladybug_schema  — Skill table exists; lock-held → report PID + stop-service remediation
  5. corpus_count    — skill count >= 25 (LadybugDB); embedded-vector count > 0 (DuckDB)
@@ -38,7 +38,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from agentalloy.install import state as install_state
@@ -92,12 +92,17 @@ def _check_config() -> dict[str, Any]:
 
 
 def _check_embed_server(base_url: str, model: str) -> dict[str, Any]:
-    """Check 2: embed server reachable; model listed via /api/tags (best-effort warn)."""
+    """Check 2: embed llama-server reachable on RUNTIME_EMBED_BASE_URL."""
     t0 = time.monotonic()
     try:
         req = Request(base_url, method="GET")
         with urlopen(req, timeout=5) as resp:  # noqa: S310
             resp.read()
+    except HTTPError:
+        # An HTTP status response (e.g. llama-server's 415 to a GET — it wants
+        # POST on /v1/embeddings) proves the server is reachable. Only a
+        # transport-level failure means it's down.
+        pass
     except (URLError, OSError) as exc:
         return {
             "name": "embed_server",
@@ -105,42 +110,16 @@ def _check_embed_server(base_url: str, model: str) -> dict[str, Any]:
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "error": f"Cannot reach {base_url}: {exc}",
             "remediation": (
-                "Start the embedding server (e.g. `ollama serve`) and ensure "
+                "Start the embedding llama-server and ensure "
                 f"RUNTIME_EMBED_BASE_URL={base_url!r} is correct in .env"
             ),
         }
-
-    # Best-effort: check /api/tags for model presence (Ollama-specific; warn only)
-    tags_url = base_url.rstrip("/") + "/api/tags"
-    try:
-        req2 = Request(tags_url, method="GET")
-        with urlopen(req2, timeout=5) as resp2:  # noqa: S310
-            body = json.loads(resp2.read())
-        models = [m.get("name", "") for m in (body.get("models") or [])]
-        listed = any(model in m for m in models)
-        if not listed:
-            return {
-                "name": "embed_server",
-                "passed": True,
-                "severity": "warn",
-                "duration_ms": int((time.monotonic() - t0) * 1000),
-                "detail": f"Server reachable but model {model!r} not found in /api/tags",
-                "remediation": f"Pull the model: `ollama pull {model}`",
-            }
-        return {
-            "name": "embed_server",
-            "passed": True,
-            "duration_ms": int((time.monotonic() - t0) * 1000),
-            "detail": f"Server reachable; model {model!r} listed",
-        }
-    except (URLError, OSError, json.JSONDecodeError):
-        # Non-Ollama server or /api/tags unavailable — server is up, model check skipped
-        return {
-            "name": "embed_server",
-            "passed": True,
-            "duration_ms": int((time.monotonic() - t0) * 1000),
-            "detail": f"Server reachable at {base_url} (model listing not available)",
-        }
+    return {
+        "name": "embed_server",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"Server reachable at {base_url} (embed model {model!r})",
+    }
 
 
 def _check_corpus_files(cdir: Path) -> dict[str, Any]:
@@ -377,19 +356,29 @@ def _check_service(port: int) -> dict[str, Any]:
         req = Request(url, method="GET")
         with urlopen(req, timeout=5) as resp:  # noqa: S310
             body = json.loads(resp.read())
-        if body.get("status") == "ok":
+        # /health emits OverallStatus "healthy" when all dependencies are ok
+        # ("ok" is only used at the per-dependency level). Treat both as clean.
+        status = body.get("status")
+        if status in ("ok", "healthy"):
             return {
                 "name": "service",
                 "passed": True,
                 "duration_ms": int((time.monotonic() - t0) * 1000),
-                "detail": f"Service up on port {port}, status=ok",
+                "detail": f"Service up on port {port}, status={status}",
             }
+        deps = body.get("dependencies")
+        deps_summary = (
+            "; "
+            + ", ".join(f"{k}={v.get('status')}" for k, v in deps.items() if isinstance(v, dict))
+            if isinstance(deps, dict)
+            else ""
+        )
         return {
             "name": "service",
             "passed": True,
             "severity": "warn",
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "detail": f"Service up but degraded: {body}",
+            "detail": f"Service up but degraded: status={status}{deps_summary}",
             "remediation": f"Check service logs. Port {port}.",
         }
     except (URLError, OSError):
