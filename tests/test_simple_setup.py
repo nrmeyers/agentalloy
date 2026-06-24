@@ -1796,7 +1796,7 @@ class TestContainerFlow:
         self, tmp_state_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
     ):
         """If _run_container fails, the flow returns exit code 1 and
-        state is not saved. The entrypoint is cleaned up regardless."""
+        state is not saved."""
         SetupConfig, run_setup = self._import_run_setup()
 
         def run_side_effect(argv: Any, **kwargs: Any) -> Any:
@@ -1870,13 +1870,23 @@ class TestContainerFlow:
             and c.args[0][1] == "run"
         ]
         assert len(run_calls) >= 1
-        # AGENTALLOY_PACKS env var is no longer used — packs are baked into
-        # the entrypoint script via _generate_entrypoint(packs).  Verify the
-        # entrypoint path is mounted (it contains the packs list).
-        entrypoint_mounted = any(
-            "/app/entrypoint.sh" in str(arg) for call_args in run_calls for arg in call_args
+        # The container runs the image's baked /app/entrypoint.sh and reads the
+        # pack list from the AGENTALLOY_PACKS env var — no host entrypoint
+        # bind-mount (that temp file was deleted post-install, breaking
+        # start/reboot). Verify packs are passed via env and nothing mounts
+        # /app/entrypoint.sh.
+        packs_in_env = any(
+            str(arg) == "-e"
+            and i + 1 < len(call_args)
+            and str(call_args[i + 1]) == "AGENTALLOY_PACKS=go"
+            for call_args in run_calls
+            for i, arg in enumerate(call_args)
         )
-        assert entrypoint_mounted, "entrypoint.sh should be mounted in the container"
+        assert packs_in_env, "AGENTALLOY_PACKS=go should be passed to the container run"
+        entrypoint_mounted = any(
+            ":/app/entrypoint.sh:ro" in str(arg) for call_args in run_calls for arg in call_args
+        )
+        assert not entrypoint_mounted, "host entrypoint.sh must NOT be bind-mounted"
 
     def test_container_flow_non_interactive_no_packs_uses_defaults(
         self, tmp_state_dir: tuple[Path, Path]
