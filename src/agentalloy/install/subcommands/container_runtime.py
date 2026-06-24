@@ -651,7 +651,6 @@ def resolve_projects_root() -> Path:
 
 def _run_container(
     runtime: str,
-    entrypoint: Path,
     packs: str,
     image_ref: str | None = None,
     projects_root: Path | None = None,
@@ -666,18 +665,26 @@ def _run_container(
     * Volume mount: the projects root (``resolve_projects_root()``) bind-mounted
       ``rw`` at the identical host path, so the proxy can read each repo's
       ``.agentalloy/`` phase state and write phase transitions back.
-    * Env vars: ``ENTRYPOINT``, ``LADYBUG_DB_PATH``,
+    * Env vars: ``AGENTALLOY_PACKS``, ``LADYBUG_DB_PATH``,
       ``DUCKDB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
+
+    The container runs the image's **baked** ``/app/entrypoint.sh`` (the
+    ENTRYPOINT/CMD declared in the Containerfile) — we deliberately do NOT
+    bind-mount a host-generated entrypoint. A host bind-mount source is deleted
+    after install, which made ``{runtime} start agentalloy`` (and the declared
+    ``--restart unless-stopped`` on reboot) fail: the missing mount source left
+    ``/app/entrypoint.sh`` empty and the container exited immediately. The baked
+    script reads the pack list from the ``AGENTALLOY_PACKS`` env var instead, so
+    the container is fully self-contained and survives ``start`` / reboot.
 
     Parameters
     ----------
     runtime : str
         Container runtime binary (e.g. ``"podman"`` or ``"docker"``).
-    entrypoint : Path
-        Path to the generated entrypoint script (mounted as a volume).
     packs : str
-        Comma-separated list of packs to install.
+        Comma-separated list of packs to install. Passed to the baked entrypoint
+        via the ``AGENTALLOY_PACKS`` env var.
     image_ref : str | None
         Image reference to run. Defaults to ``ghcr.io/nrmeyers/agentalloy:latest``.
 
@@ -687,7 +694,7 @@ def _run_container(
         Exit code from the runtime command.
     """
     env = {
-        "ENTRYPOINT": str(entrypoint),
+        "AGENTALLOY_PACKS": packs,
         "LADYBUG_DB_PATH": "/app/data/ladybug",
         "DUCKDB_PATH": "/app/data/skills.duck",
         "LOG_LEVEL": "info",
@@ -747,11 +754,8 @@ def _run_container(
         "-v",
         "agentalloy-data:/app/data",
         *projects_mount,
-        "-v",
-        f"{entrypoint}:/app/entrypoint.sh:ro",
         *env_cmd,
         image,
-        "/app/entrypoint.sh",
     ]
 
     try:

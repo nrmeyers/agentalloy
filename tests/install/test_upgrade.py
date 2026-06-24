@@ -316,13 +316,15 @@ def test_container_recreates_with_versioned_image():
     with (
         patch.object(up, "_detect_install_method", return_value="source"),  # skip CLI swap
         patch.object(cr, "_pull_image", return_value=0) as pull,
-        patch.object(cr, "_generate_entrypoint", return_value="/tmp/entry.sh"),
         patch.object(cr, "_run_container", return_value=0) as run_ct,
     ):
         actions, warnings = up._upgrade_container("v2.2.1", state, assume_yes=True)
 
     pull.assert_called_once_with("podman", "ghcr.io/nrmeyers/agentalloy:2.2.1-full")
     assert run_ct.call_args.kwargs["image_ref"] == "ghcr.io/nrmeyers/agentalloy:2.2.1-full"
+    # The recreate must NOT generate a host entrypoint (temp-leak fix) — packs
+    # are delivered via env to the baked /app/entrypoint.sh.
+    assert "entrypoint" not in run_ct.call_args.kwargs
     assert any("recreated container" in a for a in actions)
     assert not warnings
 
@@ -400,7 +402,6 @@ def test_container_recreate_source_stays_in_process():
     with (
         patch.object(up, "_detect_install_method", return_value="source"),
         patch.object(cr, "_pull_image", return_value=0),
-        patch.object(cr, "_generate_entrypoint", return_value="/tmp/entry.sh"),
         patch.object(cr, "_run_container", return_value=0) as run_ct,
         patch.object(up, "_run_cli") as run_cli,  # must NOT shell out for source
         patch.object(up, "_verify_container_spec", return_value=[]),

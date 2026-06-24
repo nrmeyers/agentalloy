@@ -382,8 +382,6 @@ class TestRunContainerBindHint:
     """
 
     def test_rc_126_without_stderr_prints_hint(self, tmp_path: Path):
-        entrypoint = tmp_path / "entrypoint.sh"
-        entrypoint.write_text("#!/bin/bash\n")
         err = subprocess.CalledProcessError(126, ["podman", "run"])  # stderr=None
         printed: list[str] = []
         with (
@@ -396,13 +394,11 @@ class TestRunContainerBindHint:
                 side_effect=lambda msg: printed.append(str(msg)),
             ),
         ):
-            rc = container_runtime._run_container("podman", entrypoint, "")
+            rc = container_runtime._run_container("podman", "")
         assert rc == 126
         assert any("port" in p.lower() and "ps -a" in p for p in printed)
 
     def test_other_failure_rc_does_not_print_hint(self, tmp_path: Path):
-        entrypoint = tmp_path / "entrypoint.sh"
-        entrypoint.write_text("#!/bin/bash\n")
         err = subprocess.CalledProcessError(1, ["podman", "run"])  # stderr=None
         printed: list[str] = []
         with (
@@ -415,7 +411,7 @@ class TestRunContainerBindHint:
                 side_effect=lambda msg: printed.append(str(msg)),
             ),
         ):
-            rc = container_runtime._run_container("podman", entrypoint, "")
+            rc = container_runtime._run_container("podman", "")
         assert rc == 1
         assert not any("ps -a" in p for p in printed)
 
@@ -541,9 +537,7 @@ class TestListConflictingContainers:
 class TestProjectsRootMount:
     """_run_container bind-mounts resolve_projects_root() rw at its identical path."""
 
-    def _run(self, tmp_path: Path) -> list[str]:
-        entrypoint = tmp_path / "entrypoint.sh"
-        entrypoint.write_text("#!/bin/bash\n")
+    def _run(self, tmp_path: Path, packs: str = "") -> list[str]:
         captured: list[str] = []
 
         def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
@@ -556,7 +550,7 @@ class TestProjectsRootMount:
             "agentalloy.install.subcommands.container_runtime.subprocess.run",
             side_effect=_fake_run,
         ):
-            rc = container_runtime._run_container("podman", entrypoint, "")
+            rc = container_runtime._run_container("podman", packs)
         assert rc == 0
         return captured
 
@@ -582,3 +576,60 @@ class TestProjectsRootMount:
         import os
 
         assert container_runtime.resolve_projects_root() == Path(os.path.realpath(Path.home()))
+
+
+# ---------------------------------------------------------------------------
+# Restartable container: the baked /app/entrypoint.sh runs (no host bind-mount),
+# packs are delivered via the AGENTALLOY_PACKS env var. A host-generated
+# entrypoint bind-mount source is deleted after install, which broke
+# `podman start agentalloy` / reboot (the declared --restart unless-stopped).
+# ---------------------------------------------------------------------------
+
+
+class TestRestartableEntrypoint:
+    """_run_container must NOT bind-mount a host entrypoint; packs go via env."""
+
+    def _argv(self, packs: str, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        # Pin the projects root so the mount line is deterministic.
+        monkeypatch.delenv("AGENTALLOY_PROJECTS_ROOT", raising=False)
+        captured: list[str] = []
+
+        def _fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd[:2] == ["podman", "run"]:
+                captured.clear()
+                captured.extend(cmd)
+            return MagicMock(returncode=0)
+
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=_fake_run,
+        ):
+            rc = container_runtime._run_container("podman", packs)
+        assert rc == 0
+        return captured
+
+    def test_no_entrypoint_bind_mount(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cmd = self._argv("rust,python", monkeypatch)
+        # No host-generated entrypoint bind-mount and no /app/entrypoint.sh arg
+        # override — the image's baked ENTRYPOINT/CMD runs instead.
+        assert not any(":/app/entrypoint.sh:ro" in arg for arg in cmd)
+        assert "/app/entrypoint.sh" not in cmd
+
+    def test_packs_passed_via_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cmd = self._argv("rust,python", monkeypatch)
+        # -e AGENTALLOY_PACKS=rust,python must be present as adjacent argv pair.
+        assert "-e" in cmd
+        assert "AGENTALLOY_PACKS=rust,python" in cmd
+        idx = cmd.index("AGENTALLOY_PACKS=rust,python")
+        assert cmd[idx - 1] == "-e"
+
+    def test_empty_packs_still_sets_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Empty packs still passes the (empty) env var; the baked entrypoint
+        # falls back to always-on packs when AGENTALLOY_PACKS is empty.
+        cmd = self._argv("", monkeypatch)
+        assert "AGENTALLOY_PACKS=" in cmd
+
+    def test_restart_policy_preserved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cmd = self._argv("", monkeypatch)
+        idx = cmd.index("--restart")
+        assert cmd[idx + 1] == "unless-stopped"

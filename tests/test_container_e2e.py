@@ -300,11 +300,12 @@ class TestFullContainerSetup:
           1. _detect_runtime_binary -> "podman"
           2. _pull_image(runtime)
           3. _ensure_volume(runtime)
-          4. _generate_entrypoint(packs)
-          5. _run_container(runtime, entrypoint, packs)
+          4. _run_container(runtime, packs)
 
-        Note: _cleanup_temp_entrypoint is only called on failure; on success
-        it is skipped, so it does not appear in the call order here.
+        The container runs the image's baked /app/entrypoint.sh and reads packs
+        from the AGENTALLOY_PACKS env var, so the flow no longer generates a
+        host entrypoint temp file (_generate_entrypoint / _cleanup_temp_entrypoint
+        are not part of the run path).
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -340,23 +341,16 @@ class TestFullContainerSetup:
                         "agentalloy.install.subcommands.container_runtime._ensure_volume",
                         side_effect=make_tracker("_ensure_volume"),
                     ),
-                    patch(
-                        "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
-                        side_effect=lambda packs: (
-                            call_order.append("_generate_entrypoint"),
-                            Path("/tmp/entry.sh"),
-                        )[1],
-                    ),
                 ],
             )
 
             assert rc == 0
-            # Verify the expected call order
+            # Verify the expected call order. No _generate_entrypoint: the
+            # container runs the image's baked entrypoint with AGENTALLOY_PACKS.
             assert call_order == [
                 "_detect_runtime_binary",
                 "_pull_image",
                 "_ensure_volume",
-                "_generate_entrypoint",
                 "_run_container",
             ], f"Expected container_runtime calls in order, got: {call_order}"
 
@@ -423,31 +417,26 @@ class TestModelPullBootstrap:
     (not in the setup flow).
     """
 
-    def test_entrypoint_is_generated_with_packs(self):
-        """The entrypoint script is generated and passed to _run_container."""
+    def test_packs_are_passed_to_run_container(self):
+        """Packs flow to _run_container (delivered to the baked entrypoint via env)."""
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
 
-            entrypoint_packs = []
+            run_container_packs = []
 
-            def capture_generate_entrypoint(packs):
-                entrypoint_packs.append(packs)
-                return Path("/tmp/entry.sh")
+            def capture_run_container(runtime, packs, *args, **kwargs):
+                run_container_packs.append(packs)
+                return 0
 
             rc = _run_container_flow_all_mocked(
                 tmp_path,
-                extra_patches=[
-                    patch(
-                        "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
-                        side_effect=capture_generate_entrypoint,
-                    ),
-                ],
+                mock_overrides={"run_container": capture_run_container},
             )
 
             assert rc == 0
-            assert len(entrypoint_packs) == 1
-            # Entry point is called with the packs string from config
-            assert entrypoint_packs[0] == ""
+            assert len(run_container_packs) == 1
+            # _run_container is called with the packs string from config.
+            assert run_container_packs[0] == ""
 
     def test_model_download_step_is_executed_in_entrypoint(self):
         """The entrypoint script contains the GGUF download step.

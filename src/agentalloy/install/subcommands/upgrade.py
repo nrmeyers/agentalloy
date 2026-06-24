@@ -427,8 +427,11 @@ def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[
     image = image or _target_image(state.get("image_tag"), None)
 
     packs = _installed_packs(state)
-    entrypoint = cr._generate_entrypoint(packs)
-    if cr._run_container(runtime, entrypoint, packs, image_ref=image) != 0:
+    # Runs the image's baked /app/entrypoint.sh with AGENTALLOY_PACKS — no
+    # host-generated entrypoint bind-mount. This both makes the container
+    # survive `start`/reboot and fixes the prior temp-file leak: the old path
+    # called _generate_entrypoint (a NamedTemporaryFile) but never cleaned it up.
+    if cr._run_container(runtime, packs, image_ref=image) != 0:
         warnings.append("container recreate failed")
         return actions, warnings
     actions.append("recreated container")

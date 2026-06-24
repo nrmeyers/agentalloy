@@ -1435,7 +1435,10 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # under /app/data/models inside this volume across restarts.
     _ensure_volume(binary_path)
 
-    # 7c. Generate the entrypoint script and start the container.
+    # 7c. Start the container. It runs the image's baked /app/entrypoint.sh and
+    # picks up the pack list from the AGENTALLOY_PACKS env var — we no longer
+    # bind-mount a host-generated entrypoint (that temp file was deleted after
+    # install, which broke `start`/reboot since the mount source vanished).
     # The GGUF models live in the agentalloy-data volume (not the host home),
     # so we can't cheaply tell first-run from a restart here — surface the
     # first-run timing once; restarts skip the download (entrypoint checks the
@@ -1446,11 +1449,9 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         "published images ship a prebuilt skill corpus, locally built images "
         "also build the corpus, adding 20+ min on CPU; restarts: 30-60s)...[/dim]"
     )
-    entrypoint = _generate_entrypoint(cfg.packs)
-    rc = _run_container(binary_path, entrypoint, cfg.packs)
+    rc = _run_container(binary_path, cfg.packs)
     if rc != 0:
         return rc
-    _cleanup_temp_entrypoint(entrypoint)
     _print("  [green]  Done.[/green]")
 
     # 10. Wait for container readiness (fast-start uvicorn serves /readiness
