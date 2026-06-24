@@ -78,6 +78,24 @@ class TestFindListeningPid:
 
 
 # ---------------------------------------------------------------------------
+# port_holder_cmdline — classify a port holder (reclaim_stale_port covered below)
+# ---------------------------------------------------------------------------
+
+
+class TestPortHolderCmdline:
+    def test_free_port_returns_none_empty(self) -> None:
+        with patch.object(server_proc, "find_listening_pid", return_value=None):
+            assert server_proc.port_holder_cmdline(47950) == (None, "")
+
+    def test_returns_pid_and_cmdline(self) -> None:
+        with (
+            patch.object(server_proc, "find_listening_pid", return_value=4242),
+            patch.object(server_proc, "_read_cmdline", return_value="uvicorn agentalloy.app"),
+        ):
+            assert server_proc.port_holder_cmdline(47950) == (4242, "uvicorn agentalloy.app")
+
+
+# ---------------------------------------------------------------------------
 # stop — real child-process signaling
 # ---------------------------------------------------------------------------
 

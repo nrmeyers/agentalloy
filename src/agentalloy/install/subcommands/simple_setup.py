@@ -1081,6 +1081,77 @@ def _remove_containers(binary_path: str, names: list[str]) -> bool:
     return not final
 
 
+def _reconcile_native_port_holder(cfg: SetupConfig) -> int:
+    """Detect + reconcile a NATIVE process holding the container's host port.
+
+    A native ``uvicorn agentalloy.app`` (a prior native install, or a stale one left
+    by ``uv tool install --force``) bound to ``127.0.0.1:<port>`` shadows the
+    container: the container publishes ``0.0.0.0:<port>`` but loopback traffic still
+    reaches the native process — which has no in-container embed/reranker backend, so
+    composition silently degrades. The container sweep above only removes our
+    *containers*; this catches the *native* holder before ``podman run`` so the bind
+    doesn't fail cryptically (or, worse, succeed-but-shadowed).
+
+    Reclaims only a holder whose cmdline matches our own signature; never kills a
+    foreign process or podman's own forwarder. Returns 0 to proceed, 1 to abort.
+    """
+    from agentalloy.install import server_proc
+    from agentalloy.install.runtime_artifacts import RUNTIME_PORTS, SERVICE_PORT
+
+    pid, cmdline = server_proc.port_holder_cmdline(cfg.port)
+    if pid is None:
+        return 0  # port is free — nothing to reconcile
+
+    # Our native-service signature (uvicorn + agentalloy.app) for the service port.
+    signature = next((list(m) for p, m in RUNTIME_PORTS if p == SERVICE_PORT), [])
+    is_ours = bool(cmdline) and bool(signature) and all(s in cmdline for s in signature)
+
+    if not is_ours:
+        # podman's rootlessport forwarder for a container we already cleared above
+        # frees the port momentarily; a genuinely foreign holder does not. Never kill
+        # either — but refuse to proceed into a doomed `podman run` against a foreign
+        # holder, with an actionable message instead of "address already in use".
+        if "rootlessport" in cmdline:
+            return 0
+        _print(f"[yellow]Port {cfg.port} is held by an unrelated process (pid {pid}):[/yellow]")
+        _print(f"  [dim]{cmdline[:100]}[/dim]")
+        _print(
+            f"  [yellow]The container must publish port {cfg.port}. Free it or pick "
+            "another port, then re-run setup.[/yellow]"
+        )
+        return 1
+
+    _print(f"[bold]A native AgentAlloy service is holding port {cfg.port}:[/bold]")
+    _print(f"  - pid {pid}  [dim]({cmdline[:100]})[/dim]")
+    _print(
+        "  [dim]The container can't own the port while this native process is bound — "
+        "loopback traffic would reach it instead of the container, which has no embed/"
+        "reranker backend (those run inside the container).[/dim]"
+    )
+    if cfg.non_interactive:
+        _print("  [dim]non-interactive: reclaiming automatically[/dim]")
+        confirm = "y"
+    else:
+        confirm = _prompt("  Stop it and continue?", default="Y").strip().lower()
+    if confirm not in ("", "y", "yes"):
+        _print(
+            "[yellow]Setup cancelled. Stop the native service first "
+            "(`agentalloy disable`) or keep the native install instead.[/yellow]"
+        )
+        return 1
+
+    reclaimed = server_proc.reclaim_stale_port(cfg.port, signature)
+    if reclaimed is None:
+        _print(
+            f"  [red]Could not stop pid {pid} on port {cfg.port} (it may have exited, or the "
+            f"signal was denied). Stop it manually (e.g. `kill {pid}`) or run "
+            "`agentalloy disable`, then re-run setup.[/red]"
+        )
+        return 1
+    _print("  [green]  Reclaimed.[/green]\n")
+    return 0
+
+
 def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     """Execute the container deployment flow.
 
@@ -1276,6 +1347,15 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print("[yellow]Setup cancelled.[/yellow]")
             return 1
     _print()
+
+    # 6.4. A native AgentAlloy service (or a stale one from `uv tool install --force`)
+    # bound to the host port shadows the container: it publishes 0.0.0.0:<port> but
+    # loopback traffic still reaches the native process (which has no in-container
+    # embed/reranker). Reconcile it FIRST — before the container sweep below — so an
+    # abort here never tears down existing containers and leaves a half-installed state.
+    native_rc = _reconcile_native_port_holder(cfg)
+    if native_rc != 0:
+        return native_rc
 
     # 6.5. Check for stale containers from a prior project run.
     # Two sweeps are merged:
