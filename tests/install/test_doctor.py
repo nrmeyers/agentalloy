@@ -21,6 +21,8 @@ from agentalloy.install.subcommands.doctor import (
     _check_pack_manifests,  # pyright: ignore[reportPrivateUsage]
     _check_service,  # pyright: ignore[reportPrivateUsage]
     _repair,  # pyright: ignore[reportPrivateUsage]
+    _repair_container,  # pyright: ignore[reportPrivateUsage]
+    _run_doctor_container,  # pyright: ignore[reportPrivateUsage]
     run_doctor,
 )
 
@@ -153,7 +155,9 @@ class TestCheckCorpusFiles:
 
 class TestCheckLadybugSchema:
     def test_schema_missing_fails(self, tmp_path: Path) -> None:
-        # Passing a path to a non-existent DB will raise when we try to open it
+        # DB file present but the Skill table is missing — the open succeeds, the
+        # query raises. (File must exist or the absent-corpus guard fires first.)
+        (tmp_path / "ladybug").write_bytes(b"")
         with patch("agentalloy.storage.ladybug.LadybugStore") as mock_cls:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
@@ -166,6 +170,7 @@ class TestCheckLadybugSchema:
         assert "remediation" in result
 
     def test_lock_held_sets_flag(self, tmp_path: Path) -> None:
+        (tmp_path / "ladybug").write_bytes(b"")
         with patch("agentalloy.storage.ladybug.LadybugStore") as mock_cls:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
@@ -178,6 +183,7 @@ class TestCheckLadybugSchema:
         assert "remediation" in result
 
     def test_schema_ok_passes(self, tmp_path: Path) -> None:
+        (tmp_path / "ladybug").write_bytes(b"")
         with patch("agentalloy.storage.ladybug.LadybugStore") as mock_cls:
             mock_store = MagicMock()
             mock_store.__enter__ = MagicMock(return_value=mock_store)
@@ -195,6 +201,8 @@ class TestCheckLadybugSchema:
 
 class TestCheckCorpusCount:
     def test_empty_corpus_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "ladybug").write_bytes(b"")
+        (tmp_path / "skills.duck").write_bytes(b"")
         with (
             patch("agentalloy.storage.ladybug.LadybugStore") as mock_cls,
             patch("agentalloy.storage.vector_store.open_or_create") as mock_oc,
@@ -211,6 +219,8 @@ class TestCheckCorpusCount:
         assert result["passed"] is False
 
     def test_populated_corpus_passes(self, tmp_path: Path) -> None:
+        (tmp_path / "ladybug").write_bytes(b"")
+        (tmp_path / "skills.duck").write_bytes(b"")
         with (
             patch("agentalloy.storage.ladybug.LadybugStore") as mock_cls,
             patch("agentalloy.storage.vector_store.open_or_create") as mock_oc,
@@ -601,3 +611,163 @@ class TestRepairNoop:
         }
         rc = _repair(result)
         assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Stub-creation guard (host mode): absent corpus must not create empty DB files
+# ---------------------------------------------------------------------------
+
+
+class TestNoStubCreation:
+    def test_ladybug_schema_absent_creates_no_stub(self, tmp_path: Path) -> None:
+        ladybug = tmp_path / "ladybug"
+        result = _check_ladybug_schema(str(ladybug))
+        assert result["passed"] is False
+        assert "absent" in result["error"].lower()
+        assert not ladybug.exists()
+
+    def test_corpus_count_absent_creates_no_stub(self, tmp_path: Path) -> None:
+        ladybug = tmp_path / "ladybug"
+        duckdb = tmp_path / "skills.duck"
+        result = _check_corpus_count(str(ladybug), str(duckdb))
+        assert result["passed"] is False
+        assert "absent" in result["error"].lower()
+        assert not ladybug.exists()
+        assert not duckdb.exists()
+
+
+# ---------------------------------------------------------------------------
+# Container deployment: verify via /health + volume inspection (not delegation)
+# ---------------------------------------------------------------------------
+
+
+_CONTAINER_STATE = "agentalloy.install.subcommands.container_runtime._container_state"
+_HEALTH = "agentalloy.install.subcommands.doctor._fetch_health"
+_FILE_EXISTS = "agentalloy.install.subcommands.doctor._container_file_exists"
+_READ_FILE = "agentalloy.install.subcommands.doctor._container_read_file"
+_PACK_MANIFESTS = "agentalloy.install.subcommands.doctor._check_pack_manifests"
+_ORPHANS = "agentalloy.install.subcommands.doctor._check_orphans"
+
+
+def _healthy_body() -> dict[str, Any]:
+    return {
+        "status": "healthy",
+        "dependencies": {
+            "runtime_store": {"status": "ok"},
+            "telemetry_store": {"status": "ok"},
+            "embedding_runtime": {"status": "ok"},
+            "runtime_cache": {"status": "ok"},
+        },
+    }
+
+
+def _stamp() -> str:
+    return json.dumps(
+        {
+            "embedding_model": "nomic-embed-text-v1.5.Q8_0.gguf",
+            "embedding_dim": 768,
+            "built_at": "2026-06-23T10:03:24+00:00",
+        }
+    )
+
+
+class TestContainerDoctor:
+    _ST = {
+        "deployment": "container",
+        "runtime_binary": "podman",
+        "container_name": "agentalloy",
+        "image_tag": "ghcr.io/nrmeyers/agentalloy:latest",
+        "port": 47950,
+    }
+
+    def _healthy_patches(self) -> Any:
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+        stack.enter_context(patch(_CONTAINER_STATE, return_value="running"))
+        stack.enter_context(patch(_HEALTH, return_value=_healthy_body()))
+        stack.enter_context(patch(_FILE_EXISTS, return_value=True))
+        stack.enter_context(patch(_READ_FILE, return_value=_stamp()))
+        stack.enter_context(
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True})
+        )
+        stack.enter_context(patch(_ORPHANS, return_value={"name": "orphans", "passed": True}))
+        return stack
+
+    def test_healthy_container_all_pass(self) -> None:
+        with self._healthy_patches():
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is True
+        names = {c["name"] for c in result["checks"]}
+        assert {"container", "service", "embed_runtime", "corpus_files", "corpus_stamp"} <= names
+
+    def test_run_doctor_routes_to_container(self) -> None:
+        with self._healthy_patches():
+            with patch(
+                "agentalloy.install.subcommands.doctor.install_state.load_state",
+                return_value=self._ST,
+            ):
+                result = run_doctor()
+        assert result["all_checks_passed"] is True
+
+    def test_not_running_fails_clean(self) -> None:
+        with patch(_CONTAINER_STATE, return_value="exited"):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        assert result["checks"][0]["name"] == "container"
+        assert "not running" in result["checks"][0]["error"]
+
+    def test_unreachable_service_fails(self) -> None:
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=None),
+            patch(_FILE_EXISTS, return_value=True),
+            patch(_READ_FILE, return_value=_stamp()),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        svc = next(c for c in result["checks"] if c["name"] == "service")
+        assert svc["passed"] is False
+
+    def test_missing_corpus_fails(self) -> None:
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=_healthy_body()),
+            patch(_FILE_EXISTS, return_value=False),
+            patch(_READ_FILE, return_value=None),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        corpus = next(c for c in result["checks"] if c["name"] == "corpus_files")
+        assert corpus["passed"] is False
+
+    def test_degraded_embed_runtime_fails(self) -> None:
+        body = _healthy_body()
+        body["dependencies"]["embedding_runtime"] = {"status": "down"}
+        with (
+            patch(_CONTAINER_STATE, return_value="running"),
+            patch(_HEALTH, return_value=body),
+            patch(_FILE_EXISTS, return_value=True),
+            patch(_READ_FILE, return_value=_stamp()),
+            patch(_PACK_MANIFESTS, return_value={"name": "pack_manifests", "passed": True}),
+            patch(_ORPHANS, return_value={"name": "orphans", "passed": True}),
+        ):
+            result = _run_doctor_container(self._ST)
+        assert result["all_checks_passed"] is False
+        embed = next(c for c in result["checks"] if c["name"] == "embed_runtime")
+        assert embed["passed"] is False
+
+    def test_repair_does_not_touch_host(self) -> None:
+        """Container repair must NOT run host install-packs/reembed; it advises recreate."""
+        result = {
+            "all_checks_passed": False,
+            "checks": [{"name": "corpus_files", "passed": False, "error": "x"}],
+        }
+        with patch("subprocess.run") as mock_run:
+            rc = _repair_container(result, self._ST)
+        assert rc == 1
+        mock_run.assert_not_called()

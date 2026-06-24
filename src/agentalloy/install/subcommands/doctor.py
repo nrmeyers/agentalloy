@@ -1,7 +1,9 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false
 """``doctor`` subcommand — diagnose and optionally repair a broken install.
 
-Ten checks covering the full install surface:
+Two deployment modes (read from ``install-state.json``):
+
+**Host** — ten checks against host-local resources:
 
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
  2. embed_server    — GET {RUNTIME_EMBED_BASE_URL} reachable; model listed (warn, not fail)
@@ -14,8 +16,18 @@ Ten checks covering the full install surface:
  9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
 10. orphans         — stray runtime processes / dangling shim on host (warn, not fail)
 
-``--repair``:  migrate → install-packs → reembed → re-diagnose (in that order).
-Lock-held aborts repair immediately — repair must not kill processes.
+``--repair`` (host):  migrate → install-packs → reembed → re-diagnose (in that
+order). Lock-held aborts repair immediately — repair must not kill processes.
+
+**Container** (``deployment == container``) — the corpus/config/embed resources
+live inside the container/volume and the *running* service holds the DB file
+locks, so the host checks above don't apply and a nested in-container doctor
+can't open the locked stores. Instead verify liveness via ``/health`` (whose
+dependency report exercises the corpus store + embed runtime) plus direct
+volume inspection: container · service · embed_runtime · corpus_files ·
+corpus_stamp · pack_manifests (host) · orphans (host). ``--repair`` is not
+available — the fix for a seeded container is to recreate it. See
+``_run_doctor_container``.
 """
 
 from __future__ import annotations
@@ -158,6 +170,18 @@ def _check_ladybug_schema(ladybug_path: str) -> dict[str, Any]:
     t0 = time.monotonic()
     from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, LadybugStore, is_lock_held_error
 
+    # Guard: LadybugStore.open() creates an empty DB file as a side effect. Don't
+    # leave a stub behind when the corpus is genuinely absent — report and bail.
+    if not Path(ladybug_path).exists():
+        return {
+            "name": "ladybug_schema",
+            "passed": False,
+            "lock_held": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Corpus DB absent: {ladybug_path}",
+            "remediation": "Run `agentalloy install-packs` to populate the corpus.",
+        }
+
     try:
         with LadybugStore(ladybug_path) as store:
             rows = store.execute("MATCH (s:Skill) RETURN count(s) LIMIT 1")
@@ -197,6 +221,18 @@ def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
     t0 = time.monotonic()
     from agentalloy.storage.ladybug import LadybugStore, is_lock_held_error
     from agentalloy.storage.vector_store import open_or_create
+
+    # Guard: both LadybugStore.open() and open_or_create() create empty DB files
+    # as a side effect. Don't leave stubs behind when the corpus is absent.
+    missing = [p for p in (ladybug_path, duckdb_path) if not Path(p).exists()]
+    if missing:
+        return {
+            "name": "corpus_count",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": f"Corpus DB absent: {', '.join(missing)}",
+            "remediation": "Run `agentalloy install-packs` to populate the corpus.",
+        }
 
     skill_count = 0
     vec_count = 0
@@ -534,7 +570,248 @@ def _check_pack_manifests() -> dict[str, Any]:
 
 
 def run_doctor() -> dict[str, Any]:
-    """Run all 10 doctor checks. Returns a result dict."""
+    """Run all doctor checks. Returns a result dict.
+
+    For ``deployment == container`` installs the runtime resources live inside
+    the container/volume, not on the host, and the *running* service holds the
+    Ladybug/DuckDB file locks — so the host DB/config/embed checks can't apply
+    and a nested in-container doctor can't open the locked stores either.
+    Instead the container path verifies liveness via ``/health`` (whose
+    dependency report already exercises the corpus store + embed runtime) plus
+    direct volume inspection, and reuses the host wiring checks.
+    """
+    st = install_state.load_state()
+    if st.get("deployment") == "container":
+        return _run_doctor_container(st)
+    return _run_doctor_host()
+
+
+# Data dir inside the container — set by the entrypoint via LADYBUG_DB_PATH /
+# DUCKDB_PATH (container_runtime._run_container).
+_CONTAINER_DATA_DIR = "/app/data"
+
+
+def _container_fail(error: str, remediation: str, t0: float) -> dict[str, Any]:
+    """Build the single failing ``container`` check returned on a fatal error."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "all_checks_passed": False,
+        "checks": [
+            {
+                "name": "container",
+                "passed": False,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+                "error": error,
+                "remediation": remediation,
+            }
+        ],
+    }
+
+
+def _fetch_health(port: int) -> dict[str, Any] | None:
+    """GET {port}/health and return the parsed body, or None if unreachable."""
+    try:
+        req = Request(f"http://localhost:{port}/health", method="GET")
+        with urlopen(req, timeout=5) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+    except (URLError, OSError, json.JSONDecodeError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _container_file_exists(runtime: str, container_name: str, path: str) -> bool:
+    """True if ``path`` exists and is non-empty inside the container."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [runtime, "exec", container_name, "test", "-s", path],
+            capture_output=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+    return proc.returncode == 0
+
+
+def _container_read_file(runtime: str, container_name: str, path: str) -> str | None:
+    """Return the contents of ``path`` inside the container, or None on failure."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [runtime, "exec", container_name, "cat", path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _dep_status(health: dict[str, Any], name: str) -> str | None:
+    """Pull dependencies.<name>.status out of a /health body."""
+    deps = health.get("dependencies")
+    if not isinstance(deps, dict):
+        return None
+    dep = deps.get(name)
+    return dep.get("status") if isinstance(dep, dict) else None
+
+
+def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
+    """Verify a container deployment via /health + volume inspection.
+
+    The running service owns the DB file locks, so the corpus is verified
+    indirectly: ``/health``'s ``runtime_store`` dependency proves Ladybug is
+    readable, ``embedding_runtime`` proves the embed server answers, and the
+    corpus files are confirmed present in the volume by an ``exec test``.
+    """
+    from agentalloy.install.subcommands.container_runtime import _container_state
+
+    t0 = time.monotonic()
+    runtime = st.get("runtime_binary") or "podman"
+    container_name = st.get("container_name") or "agentalloy"
+    port = install_state.validate_port(st.get("port", 47950))
+
+    # Preflight: container must be running.
+    state = _container_state(runtime, container_name)
+    if state != "running":
+        return _container_fail(
+            error=f"Container {container_name!r} is not running ({state or 'not found'})",
+            remediation=(
+                f"Recreate it by re-running the installer, or `{runtime} start {container_name}` "
+                "(note: a bare start may exit if the temp entrypoint was cleaned up). "
+                "Then re-run `agentalloy doctor`."
+            ),
+            t0=t0,
+        )
+
+    checks: list[dict[str, Any]] = [
+        {
+            "name": "container",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"{container_name} running ({st.get('image_tag', '?')})",
+        }
+    ]
+
+    health = _fetch_health(port)
+
+    # service — for a container the service is the reason it exists, so an
+    # unreachable /health is a hard failure (unlike the host path).
+    if health is None:
+        checks.append(
+            {
+                "name": "service",
+                "passed": False,
+                "error": f"Service /health unreachable on port {port}",
+                "remediation": f"Check the container: `{runtime} logs {container_name}`.",
+            }
+        )
+    else:
+        status = health.get("status")
+        healthy = status in ("ok", "healthy")
+        deps = health.get("dependencies", {})
+        summary = (
+            ", ".join(f"{k}={v.get('status')}" for k, v in deps.items() if isinstance(v, dict))
+            if isinstance(deps, dict)
+            else ""
+        )
+        checks.append(
+            {
+                "name": "service",
+                "passed": bool(healthy),
+                "detail": f"status={status}; {summary}" if healthy else None,
+                "error": None if healthy else f"Service degraded: {health}",
+                "remediation": None if healthy else f"`{runtime} logs {container_name}`.",
+            }
+        )
+
+    # embed_runtime — trust the service's own dependency probe rather than
+    # hitting :47951 (a GET returns 415 from llama-server, a false negative).
+    embed_status = _dep_status(health, "embedding_runtime") if health else None
+    checks.append(
+        {
+            "name": "embed_runtime",
+            "passed": embed_status == "ok",
+            "detail": f"embedding_runtime={embed_status}" if embed_status == "ok" else None,
+            "error": None if embed_status == "ok" else f"embedding_runtime status={embed_status}",
+            "remediation": (
+                None
+                if embed_status == "ok"
+                else f"Embed server not ready; check `{runtime} logs {container_name}`."
+            ),
+        }
+    )
+
+    # corpus_files — confirm the seeded DBs are present and non-empty in the volume.
+    ladybug = f"{_CONTAINER_DATA_DIR}/ladybug"
+    duckdb = f"{_CONTAINER_DATA_DIR}/skills.duck"
+    missing = [
+        p for p in (ladybug, duckdb) if not _container_file_exists(runtime, container_name, p)
+    ]
+    checks.append(
+        {
+            "name": "corpus_files",
+            "passed": not missing,
+            "detail": f"ladybug + skills.duck present in volume at {_CONTAINER_DATA_DIR}"
+            if not missing
+            else None,
+            "error": None if not missing else f"Missing/empty corpus files: {', '.join(missing)}",
+            "remediation": None
+            if not missing
+            else "Re-run the installer to reseed the corpus volume.",
+        }
+    )
+
+    # corpus_stamp — provenance + embedding dim (replaces the lock-bound
+    # ladybug_schema/corpus_count/embedding_dim checks). Absent stamp is a warn.
+    stamp_raw = _container_read_file(
+        runtime, container_name, f"{_CONTAINER_DATA_DIR}/corpus-stamp.json"
+    )
+    stamp = None
+    if stamp_raw:
+        try:
+            parsed = json.loads(stamp_raw)
+            stamp = parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            stamp = None
+    if stamp:
+        checks.append(
+            {
+                "name": "corpus_stamp",
+                "passed": True,
+                "detail": (
+                    f"model={stamp.get('embedding_model')} dim={stamp.get('embedding_dim')} "
+                    f"built={stamp.get('built_at')}"
+                ),
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "corpus_stamp",
+                "passed": True,
+                "severity": "warn",
+                "detail": "No corpus-stamp.json in volume (provenance unknown)",
+            }
+        )
+
+    # Host-side checks: pack manifests (bundled in the host package) and wiring.
+    checks.append(_check_pack_manifests())
+    checks.append(_check_orphans())
+
+    all_passed = all(c["passed"] for c in checks)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "all_checks_passed": all_passed,
+        "checks": checks,
+    }
+
+
+def _run_doctor_host() -> dict[str, Any]:
+    """Run all 10 doctor checks against host-local resources."""
     from agentalloy.config import get_settings
     from agentalloy.install.state import corpus_dir, env_path, parse_env_file
 
@@ -585,8 +862,42 @@ def run_doctor() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _repair_container(result: dict[str, Any], st: dict[str, Any]) -> int:
+    """Container deployments are not host-repairable.
+
+    The corpus is seeded into the image/volume and the running service holds the
+    DB locks, so host ``install-packs``/``reembed`` would be wrong (host) or
+    conflict (in-container, lock-held). Surface the failures and point at the
+    correct remedy — recreating the container — rather than acting on the host.
+    """
+    container_name = st.get("container_name") or "agentalloy"
+
+    if result["all_checks_passed"]:
+        print_rich("[green]All checks passed — nothing to repair.[/green]")
+        return 0
+
+    failed = [c for c in result["checks"] if not c.get("passed", True)]
+    print_rich("[yellow]Container deployment — automatic repair is not available.[/yellow]")
+    print_rich("")
+    for c in failed:
+        print_rich(f"  [red]FAIL[/red] {c['name']}: {c.get('error', '')}")
+        rem = c.get("remediation")
+        if rem:
+            print_rich(f"        {rem}")
+    print_rich("")
+    print_rich(
+        "[bold]Recommended:[/bold] recreate the container by re-running the installer "
+        f"(reseeds the corpus volume and regenerates the entrypoint for {container_name!r})."
+    )
+    return 1
+
+
 def _repair(result: dict[str, Any]) -> int:
     """Execute repair sequence for failed checks. Returns 0 on success."""
+    st = install_state.load_state()
+    if st.get("deployment") == "container":
+        return _repair_container(result, st)
+
     checks_by_name = {c["name"]: c for c in result["checks"]}
 
     # Lock-held: abort immediately — must not kill processes
