@@ -33,7 +33,8 @@ _PHASE_GRAPH: dict[str, str] = {
     "design": "build",
     "build": "qa",
     "qa": "ship",
-    "sdd-fast": "ship",  # fast lane: one compressed pass, then hand to ship
+    "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
+    #                    the standard qa → ship verification + delivery
     "ship": "ship",  # terminal
 }
 

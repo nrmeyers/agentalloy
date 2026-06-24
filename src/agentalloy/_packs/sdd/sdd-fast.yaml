@@ -1,6 +1,6 @@
 skill_id: sdd-fast
 canonical_name: SDD — Fast Lane (sdd-fast)
-description: "One compressed spec-build-test-deliver pass for clearly-bounded work intake routed to the fast lane: keep the rigor, drop the ceremony, and bail to full SDD (spec) if it turns out harder than judged."
+description: "One compressed spec+design+build pass for a single, clearly-bounded task intake routed to the fast lane, then merge into the standard qa → ship: keep the rigor, drop the ceremony, and bail to full SDD (spec) if it turns out harder than judged."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -15,10 +15,17 @@ applies_to_phases:
 exit_gates:
   all_of:
     - artifact_exists:
-        path: "src/**"
+        path: docs/fast/*.md
     - artifact_contains:
+        path: docs/fast/*.md
+        sections:
+          - Acceptance Criteria
+          - Approach
+          - Test Cases
+    - artifact_exists:
+        path: "src/**"
+    - artifact_exists:
         path: "tests/**/*.py"
-        sections: []
 signal_keywords:
   - tests pass
   - ready to ship
@@ -51,33 +58,44 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: fast-lane workflow — compressed spec-build-test-deliver with bail-to-spec escape hatch
+change_summary: fast-lane workflow — compressed spec+design+build for a single task (no build loop), merging into the standard qa → ship; bail-to-spec escape hatch
 raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
-  You're on the fast lane: one compressed pass — spec → build → test → deliver —
-  for work intake judged clearly bounded. Keep the rigor; drop the ceremony.
+  You're on the fast lane: one compressed pass — spec → design → build → test —
+  for a single, clearly-bounded task. It's the full lifecycle's spec + design +
+  build collapsed into one pass (no build loop — one task, done once), then it
+  merges into the **standard** `qa → ship`. Keep the rigor; drop the ceremony.
 
   ## One pass
 
-  1. **Spec-in-a-line.** State the change and its acceptance in a sentence or two
-     (you already have the intake contract — don't re-document it). If you can't
-     state "done" crisply, that's the signal you're on the wrong lane — bail.
-  2. **Build.** Make the change, one concern at a time. Stay inside the
-     contract's `scope.touches`; if you find yourself spreading wider, bail.
-  3. **Test.** Add or update the tests that prove the acceptance, and run them
-     green.
-  4. **Hand to ship.** Once the change is made and the tests pass, advance
-     yourself — `agentalloy phase set ship` — and carry on into the PR /
-     delivery. Don't wait to be told. The phase guard refuses the jump until
-     code exists under `src/` and a test under `tests/`, so a premature
-     `phase set` just tells you what's still missing.
+  Capture the compressed spec + design in a single brief at `docs/fast/<slug>.md`
+  with three headings — `## Acceptance Criteria`, `## Approach`, `## Test Cases` —
+  the same load-bearing sections the full lane spreads across spec and design,
+  just collapsed. Then build against it.
+
+  1. **Acceptance Criteria.** State crisply what "done" means. If you can't, that's
+     the signal you're on the wrong lane — bail.
+  2. **Approach.** The single shape of the change in a few lines. If it needs real
+     multi-step design or a task breakdown, bail.
+  3. **Build.** Make the one change, staying inside the contract's
+     `scope.touches`. No build loop — if it fragments into multiple tasks or
+     spreads wider than scoped, bail.
+  4. **Test Cases.** Write the tests that prove the acceptance, and run them green.
+  5. **Hand to QA.** Once `docs/fast/<slug>.md` carries the three sections, code
+     exists under `src/`, and a test under `tests/`, advance yourself —
+     `agentalloy phase set qa` — into the **standard** verification + ship. Don't
+     wait to be told. The phase guard refuses the jump until those exist, so a
+     premature `phase set` just tells you what's still missing.
+
+  Fast does *not* shortcut QA or ship: a small change still needs real
+  verification. From `qa` on, you're on the same gates as the full lane.
 
   ## Bail to full SDD
 
-  The fast lane is a bet that this is simple. If it turns out to need real
-  design, touches more than you scoped, or the acceptance got fuzzy, **stop and
-  bail**:
+  The fast lane is a bet that this is one simple task. If it turns out to need real
+  design, touches more than you scoped, fragments into multiple tasks, or the
+  acceptance got fuzzy, **stop and bail**:
 
       agentalloy phase set spec
 

@@ -61,8 +61,11 @@ class Contract:
     related_contracts: list[Path]
     created_at: datetime | None
     body: str
-    # Workflow route chosen at intake: "full" (spec→…→ship) or "fast" (sdd-fast).
-    # The intake→next transition reads this to branch the phase graph.
+    # Workflow route chosen at intake: "full" (spec→design→build→qa→ship) or
+    # "fast" (sdd-fast→qa→ship). Authoritative routing signal: the intake→next
+    # transition reads this field (via _intake_route_hint) to branch the phase
+    # graph, falling back to contract-folder presence only when no intake
+    # contract is readable.
     route: str = "full"
 
 

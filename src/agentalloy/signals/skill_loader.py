@@ -338,15 +338,48 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
     return _load_workflow_skill_from_packs(phase)
 
 
-def _intake_route_hint(project_root: Path) -> str | None:
-    """Next-phase hint when leaving intake.
+def _read_intake_route(project_root: Path) -> str | None:
+    """The ``route`` field declared by the intake contract, or ``None``.
 
-    Under the prior-authors-next cascade, intake writes the next phase's work-item
-    contract into that phase's folder: the full lane lands in ``contracts/spec/``,
-    the fast lane in ``contracts/sdd-fast/``. The fast folder's presence selects
-    the fast route; otherwise the linear graph advances intake → spec. Best-effort:
-    any read failure falls back to the default full route.
+    Reads the newest contract under ``.agentalloy/contracts/intake/`` and returns
+    its ``route`` (``"full"`` | ``"fast"``). Best-effort: any failure (no dir, no
+    contract, malformed frontmatter, unreadable) returns ``None``. Never raises.
     """
+    intake_dir = project_root / ".agentalloy" / "contracts" / "intake"
+    try:
+        candidates = sorted(intake_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        from agentalloy.contracts import parse_contract
+
+        return parse_contract(candidates[0]).route
+    except Exception:
+        return None
+
+
+def _intake_route_hint(project_root: Path) -> str | None:
+    """Next-phase hint when leaving intake — the intake contract's ``route`` rules.
+
+    Routing is authoritative on the intake contract's ``route`` field: ``fast``
+    selects the compressed ``sdd-fast`` lane, ``full`` (the default) advances the
+    linear graph intake → spec. The field is trusted directly — intake's exit gate
+    is route-agnostic (``contracts/**/*.md``), so the destination phase composes
+    against whatever work-item exists.
+
+    When no intake contract is readable, fall back to the prior-authors-next
+    cascade signal: the presence of a ``contracts/sdd-fast/`` work-item selects the
+    fast route. Best-effort; any read failure falls back to the default full route.
+    """
+    route = _read_intake_route(project_root)
+    if route == "fast":
+        return "sdd-fast"
+    if route == "full":
+        return None
+
+    # No readable intake contract: fall back to directory-presence (cascade).
     fast_dir = project_root / ".agentalloy" / "contracts" / "sdd-fast"
     try:
         if fast_dir.is_dir() and any(fast_dir.glob("*.md")):

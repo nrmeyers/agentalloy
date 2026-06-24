@@ -25,7 +25,7 @@ _FORWARD: dict[str, list[str]] = {
     "sdd-design-and-planning.yaml": ["phase set build"],
     "sdd-build.yaml": ["phase set qa"],
     "sdd-verify-and-review.yaml": ["phase set ship"],
-    "sdd-fast.yaml": ["phase set ship"],
+    "sdd-fast.yaml": ["phase set qa"],  # fast merges into the standard qa → ship
     "sdd-deliver-and-ship.yaml": ["phase set intake"],  # the user-confirmed reset
 }
 

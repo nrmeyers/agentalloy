@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentalloy.signals.gates import (
+    _PHASE_GRAPH,
     _near_miss_candidates,
     aggregate,
     decide_transition,
@@ -185,6 +186,61 @@ def test_decide_transition_no_advisory_at_terminal_phase(tmp_path: Path):
     decision = decide_transition("ship", gate_spec, ctx)
     assert decision.should_transition is False
     assert decision.advisories == []
+
+
+# --- fast lane: sdd-fast → qa ----------------------------------------------
+
+# The sdd-fast exit gate (mirrors src/agentalloy/_packs/sdd/sdd-fast.yaml):
+# a combined fast brief carrying the compressed spec+design sections, plus
+# the build's code and tests.
+_SDD_FAST_GATE = {
+    "all_of": [
+        {"artifact_exists": {"path": "docs/fast/*.md"}},
+        {
+            "artifact_contains": {
+                "path": "docs/fast/*.md",
+                "sections": ["Acceptance Criteria", "Approach", "Test Cases"],
+            }
+        },
+        {"artifact_exists": {"path": "src/**"}},
+        {"artifact_exists": {"path": "tests/**/*.py"}},
+    ]
+}
+
+
+def _seed_fast_artifacts(tmp_path: Path, *, sections: list[str]) -> None:
+    fast = tmp_path / "docs" / "fast"
+    fast.mkdir(parents=True)
+    body = "\n".join(f"## {s}\n\ncontent\n" for s in sections)
+    (fast / "task.md").write_text(body, encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "impl.py").write_text("x = 1\n", encoding="utf-8")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_impl.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+
+def test_phase_graph_sdd_fast_routes_to_qa():
+    """The fast lane merges into the standard qa → ship, not straight to ship."""
+    assert _PHASE_GRAPH["sdd-fast"] == "qa"
+
+
+def test_decide_transition_sdd_fast_to_qa(tmp_path: Path):
+    """Fast brief (all three sections) + code + tests advances sdd-fast → qa."""
+    ctx = _ctx(tmp_path, phase="sdd-fast")
+    _seed_fast_artifacts(tmp_path, sections=["Acceptance Criteria", "Approach", "Test Cases"])
+    decision = decide_transition("sdd-fast", _SDD_FAST_GATE, ctx)
+    assert decision.should_transition is True
+    assert decision.to_phase == "qa"
+
+
+def test_decide_transition_sdd_fast_missing_section_blocks(tmp_path: Path):
+    """A fast brief missing the Approach section does not advance to qa."""
+    ctx = _ctx(tmp_path, phase="sdd-fast")
+    _seed_fast_artifacts(tmp_path, sections=["Acceptance Criteria", "Test Cases"])
+    decision = decide_transition("sdd-fast", _SDD_FAST_GATE, ctx)
+    assert decision.should_transition is False
+    assert decision.to_phase is None
 
 
 # --- near-miss deliverable detection ---------------------------------------

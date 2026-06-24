@@ -293,13 +293,48 @@ class TestContractRoute:
 
 
 class TestIntakeRouteHint:
-    """_intake_route_hint selects the route from where intake authored the next
-    phase's work-item: contracts/sdd-fast/ → fast lane; contracts/spec/ → full."""
+    """_intake_route_hint is authoritative on the intake contract's ``route`` field:
+    ``fast`` → sdd-fast lane, ``full`` → full lane (spec). When no intake contract is
+    readable it falls back to the prior-authors-next cascade (contracts/sdd-fast/)."""
 
-    def test_fast_contract_hints_sdd_fast(self, tmp_path: Path) -> None:
+    def _write_intake(self, tmp_path: Path, route: str) -> None:
+        _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
+            phase="intake",
+            extra_fields={"route": route},
+        )
+
+    def test_fast_route_field_hints_sdd_fast(self, tmp_path: Path) -> None:
+        """route: fast is honored from the field alone — no sdd-fast/ folder needed."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        # Intake wrote the work-item into the fast-lane folder.
+        self._write_intake(tmp_path, "fast")
+        assert _intake_route_hint(tmp_path) == "sdd-fast"
+
+    def test_full_route_field_hints_none(self, tmp_path: Path) -> None:
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        self._write_intake(tmp_path, "full")
+        assert _intake_route_hint(tmp_path) is None
+
+    def test_full_route_field_wins_over_stray_fast_folder(self, tmp_path: Path) -> None:
+        """The field is authoritative: route: full → full lane even if a stray
+        contracts/sdd-fast/ work-item exists (inverse-disagreement guard)."""
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        self._write_intake(tmp_path, "full")
+        _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / "sdd-fast" / "stray.md",
+            phase="sdd-fast",
+            extra_fields={"route": "fast"},
+        )
+        assert _intake_route_hint(tmp_path) is None
+
+    def test_no_intake_contract_falls_back_to_fast_folder(self, tmp_path: Path) -> None:
+        """Cascade fallback preserved: no intake contract + a sdd-fast/ work-item
+        → fast lane."""
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
         _write_contract(
             tmp_path / ".agentalloy" / "contracts" / "sdd-fast" / "t.md",
             phase="sdd-fast",
@@ -307,15 +342,14 @@ class TestIntakeRouteHint:
         )
         assert _intake_route_hint(tmp_path) == "sdd-fast"
 
-    def test_full_contract_hints_none(self, tmp_path: Path) -> None:
+    def test_malformed_intake_contract_falls_back(self, tmp_path: Path) -> None:
+        """A malformed intake contract doesn't raise; falls back to directory
+        presence (here: none) → full lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        # Full lane: the work-item lands in contracts/spec/, no fast folder.
-        _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "spec" / "t.md",
-            phase="spec",
-            extra_fields={"route": "full"},
-        )
+        bad = tmp_path / ".agentalloy" / "contracts" / "intake" / "bad.md"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text("no frontmatter here\n", encoding="utf-8")
         assert _intake_route_hint(tmp_path) is None
 
     def test_no_contract_hints_none(self, tmp_path: Path) -> None:
