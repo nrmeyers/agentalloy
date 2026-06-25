@@ -6,6 +6,9 @@ defaults:
   SIGNAL_INTENT_BACKEND: "reranker"
   SIGNAL_INTENT_RERANK_URL: "http://127.0.0.1:47952"
   SIGNAL_INTENT_RERANK_MODEL: "Qwen3-Reranker-0.6B-Q8_0.gguf"
+  # Stage B compose fragment re-ranker (lm_assist.py) — explicitly off on cpu:
+  # no GPU to score the real fragments inside the budget. GPU presets set arbitrate.
+  LM_ASSIST: "off"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"
   BOUNCE_BUDGET: "3"

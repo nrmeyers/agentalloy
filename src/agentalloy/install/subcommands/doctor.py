@@ -64,8 +64,8 @@ def _check_config() -> dict[str, Any]:
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "error": f".env not found at {env_file}",
             "remediation": (
-                "Run `agentalloy write-env` to create the config file, "
-                "or copy one of the .env.* presets: `cp .env.cpu .env`"
+                "Run `agentalloy write-env --preset <cpu|nvidia|radeon|apple-silicon>` "
+                "to render the config file from its hardware preset."
             ),
         }
     env = install_state.parse_env_file(env_file)

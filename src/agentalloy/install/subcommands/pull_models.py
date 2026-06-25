@@ -905,7 +905,7 @@ def ensure_runner_binary(*, interactive: bool, preset: str = "cpu") -> dict[str,
     Public entry over the internal provisioning ``pull-models`` performs, so the
     setup wizard can offer to provision the runner at the preflight gate — where
     a fresh host has no binary yet — instead of dead-ending. ``preset`` is the
-    hardware preset (e.g. ``"nvidia"``/``"strix-point"``/``"cpu"``); it's
+    hardware preset (e.g. ``"nvidia"``/``"radeon"``/``"cpu"``); it's
     normalized to a GPU/CPU asset target internally. Returns
     ``{success, binary_path, error, hint, warning?}`` (the internal shape).
     """

@@ -1,12 +1,20 @@
-"""Config-consistency guards — the cheapest tests that would have caught the
-60001-vs-47952 reranker-port bug.
+"""Config-consistency guards — the cheapest tests that catch cross-file drift.
 
-The reranker endpoint is defined in three places: the ``lm_assist`` code default,
-the ``classifier`` code default, and every shipped ``.env`` preset. Each one
-looked fine in isolation, so 2200 unit tests stayed green while they pointed at
-three different ports. These tests assert the files *agree with each other* and
-that the dead ``60001`` port can never silently return. They parse the real
-files, not mocks — the bug lived in the drift *between* files.
+Two drift bugs motivate this file, both of the same shape: a value that looked
+fine in isolation disagreed with the *same* value somewhere else, so thousands
+of unit tests stayed green while the files pointed different directions.
+
+1. The reranker endpoint (``lm_assist`` default, ``classifier`` default, and
+   every shipped preset) once pointed at three different ports — the dead
+   ``60001`` leaked through because no preset set it.
+2. ``LM_ASSIST`` (Stage B compose re-ranker) lived only in a parallel, *non-
+   functional* set of root ``.env.*`` reference files; the **preset YAMLs that
+   ``write-env`` actually renders from never set it**, so every generated ``.env``
+   — GPU included — silently fell back to the code default ``off``.
+
+The fix for (2) made ``src/agentalloy/install/presets/*.yaml`` the single source
+of truth and deleted the root mirrors. These tests assert directly against that
+source: the files ``write-env`` ships, not a mirror that can drift from it.
 """
 
 from __future__ import annotations
@@ -17,23 +25,42 @@ from urllib.parse import urlparse
 import pytest
 
 from agentalloy.install import state as install_state
+from agentalloy.install.subcommands import write_env
 from agentalloy.retrieval import lm_assist
 from agentalloy.signals import classifier
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_RERANK_PORT = 47952
 _DEAD_RERANK_PORT = 60001  # old default; pointed at an unrelated local service
-_PRESETS = (
-    ".env.cpu",
-    ".env.nvidia",
-    ".env.apple-silicon",
-    ".env.strix-point",
-    ".env.example",
-)
+
+# The hardware presets write-env renders the user .env from (the single source
+# of truth). Named by hardware target only — see write_env.VALID_PRESETS.
+_HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
+
+# Expected Stage B posture per preset: GPU presets enable the compose re-ranker
+# (budget headroom to score real fragments), cpu leaves it off.
+_LM_ASSIST_BY_PRESET = {
+    "cpu": "off",
+    "nvidia": "arbitrate",
+    "radeon": "arbitrate",
+    "apple-silicon": "arbitrate",
+}
+
+# The .env.example template documents every knob; it's not a per-hardware source
+# of truth (its LM_ASSIST is a template default), but it must still never carry
+# the dead reranker port and must agree on the canonical port in reranker mode.
+_ENV_TEMPLATE = ".env.example"
 
 
 def _port(url: str) -> int | None:
     return urlparse(url).port
+
+
+def test_hw_presets_match_write_env() -> None:
+    # Guard against a rename/move silently skipping the parametrized cases below
+    # and reporting all-green coverage of nothing.
+    assert set(_HW_PRESETS) == set(write_env.VALID_PRESETS)
+    assert set(_LM_ASSIST_BY_PRESET) == set(_HW_PRESETS)
 
 
 def test_code_reranker_defaults_agree() -> None:
@@ -52,35 +79,64 @@ def test_code_reranker_default_is_canonical_port() -> None:
         assert str(_DEAD_RERANK_PORT) not in url
 
 
-def test_at_least_one_preset_exists() -> None:
-    # Guard against the parametrized test silently skipping every case (e.g. if
-    # the presets are renamed/moved) and reporting all-green coverage of nothing.
-    assert any((_REPO_ROOT / p).exists() for p in _PRESETS)
-
-
-@pytest.mark.parametrize("preset", _PRESETS)
+@pytest.mark.parametrize("preset", _HW_PRESETS)
 def test_preset_reranker_url_matches_code_default(preset: str) -> None:
-    path = _REPO_ROOT / preset
-    if not path.exists():
-        pytest.skip(f"{preset} not present")
-    env = install_state.parse_env_file(path)
+    defaults = write_env._load_preset(preset)
 
     # The dead port must never reappear in any value of any preset.
-    for key, val in env.items():
-        assert str(_DEAD_RERANK_PORT) not in val, (
+    for key, val in defaults.items():
+        assert str(_DEAD_RERANK_PORT) not in str(val), (
             f"{preset}:{key} resurrects the dead :{_DEAD_RERANK_PORT} reranker port"
         )
 
-    backend = env.get("SIGNAL_INTENT_BACKEND", "reranker").strip().lower()
-    url = env.get("SIGNAL_INTENT_RERANK_URL")
+    backend = str(defaults.get("SIGNAL_INTENT_BACKEND", "reranker")).strip().lower()
+    url = defaults.get("SIGNAL_INTENT_RERANK_URL")
 
     if backend == "cosine":
-        # cosine presets legitimately ship no reranker URL (e.g. strix-point NPU box).
+        # cosine presets legitimately ship no reranker URL (embedder-based floor).
         return
 
     # reranker-mode presets MUST set the URL — the original bug was that NO preset
     # set it, so the code default (then 60001) leaked through unnoticed.
     assert url is not None, f"{preset} is reranker-mode but sets no SIGNAL_INTENT_RERANK_URL"
-    assert _port(url) == _CANONICAL_RERANK_PORT, (
+    assert _port(str(url)) == _CANONICAL_RERANK_PORT, (
         f"{preset}: {url} is not the canonical reranker port"
+    )
+
+
+@pytest.mark.parametrize("preset", _HW_PRESETS)
+def test_preset_lm_assist_posture(preset: str) -> None:
+    # The whole point: LM_ASSIST must be present (absence = the bug) and match the
+    # hardware posture — GPU presets arbitrate, cpu off.
+    defaults = write_env._load_preset(preset)
+    expected = _LM_ASSIST_BY_PRESET[preset]
+    actual = defaults.get("LM_ASSIST")
+    assert actual == expected, (
+        f"{preset}: LM_ASSIST is {actual!r}, expected {expected!r} "
+        f"(missing → silently falls back to the code default 'off')"
+    )
+    if expected == "arbitrate":
+        # GPU presets raise the 600ms code default for headroom.
+        assert defaults.get("LM_ASSIST_TIMEOUT_MS") == "1500", (
+            f"{preset}: arbitrate preset should set LM_ASSIST_TIMEOUT_MS=1500"
+        )
+
+
+def test_env_template_reranker_url_is_canonical() -> None:
+    path = _REPO_ROOT / _ENV_TEMPLATE
+    assert path.exists(), f"{_ENV_TEMPLATE} is the documented template and must exist"
+    env = install_state.parse_env_file(path)
+
+    for key, val in env.items():
+        assert str(_DEAD_RERANK_PORT) not in val, (
+            f"{_ENV_TEMPLATE}:{key} resurrects the dead :{_DEAD_RERANK_PORT} reranker port"
+        )
+
+    backend = env.get("SIGNAL_INTENT_BACKEND", "reranker").strip().lower()
+    if backend == "cosine":
+        return
+    url = env.get("SIGNAL_INTENT_RERANK_URL")
+    assert url is not None, f"{_ENV_TEMPLATE} is reranker-mode but sets no SIGNAL_INTENT_RERANK_URL"
+    assert _port(url) == _CANONICAL_RERANK_PORT, (
+        f"{_ENV_TEMPLATE}: {url} is not the canonical reranker port"
     )

@@ -36,10 +36,6 @@ tests/
 .env
 .env.local
 .env.*.local
-.env.cpu
-.env.apple-silicon
-.env.nvidia
-.env.strix-point
 .env.example
 
 # IDE

@@ -6,6 +6,12 @@ defaults:
   SIGNAL_INTENT_BACKEND: "reranker"
   SIGNAL_INTENT_RERANK_URL: "http://127.0.0.1:47952"
   SIGNAL_INTENT_RERANK_MODEL: "Qwen3-Reranker-0.6B-Q8_0.gguf"
+  # Stage B compose fragment re-ranker (lm_assist.py) — on for GPU presets,
+  # off for cpu (can't score real fragments inside the budget). 1500ms gives
+  # GPU headroom over the 600ms code default. On a shared-VRAM APU iGPU this
+  # contends with the embedder + intent reranker; drop to off if the budget bites.
+  LM_ASSIST: "arbitrate"
+  LM_ASSIST_TIMEOUT_MS: "1500"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"
   BOUNCE_BUDGET: "3"

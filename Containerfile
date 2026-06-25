@@ -90,7 +90,7 @@ RUN uv sync --frozen --no-dev
 # llama-server runs CPU-only (the entrypoint launches it without -ngl and there
 # is no GPU passthrough), so scoring the ~12 candidate fragments per compose
 # exceeds the latency budget, times out, and fails open. GPU *native* installs
-# enable it via .env.nvidia / .env.apple-silicon.
+# enable it via their hardware preset (nvidia / radeon / apple-silicon).
 ENV LADYBUG_DB_PATH=/app/data/ladybug \
     DUCKDB_PATH=/app/data/skills.duck \
     LOG_LEVEL=INFO \
