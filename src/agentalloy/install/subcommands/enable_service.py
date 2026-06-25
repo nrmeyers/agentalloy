@@ -243,6 +243,35 @@ def _ngl_for_target(target: str | None) -> int:
     return _NGL_BY_TARGET.get(target or "cpu", _DEFAULT_NGL)
 
 
+def _resolve_preset(st: dict[str, Any]) -> str | None:
+    """Resolve the hardware preset that selects ``-ngl`` for the persistent
+    embed/reranker llama-servers.
+
+    The preset (cpu/apple-silicon/nvidia/radeon) is written to
+    ``recommend-models.json`` by ``recommend-models`` and read from there by the
+    setup-time launchers (``start-embed-server`` / ``start-rerank-server``). It
+    is NOT persisted to install state, so reading ``st.get("preset")`` always
+    resolved to ``None`` — and the persistent LaunchAgents/systemd units were
+    registered without ``-ngl`` (CPU-only) on every GPU host, contradicting the
+    setup-time launch and the renderers' documented offload intent.
+
+    Resolve from recommend-models.json first (the same source the launchers
+    use); fall back to install state, then ``None`` (→ CPU, the safe default).
+    """
+    models_fp = install_state.outputs_dir() / "recommend-models.json"
+    data: dict[str, Any] = {}
+    try:
+        loaded = json.loads(models_fp.read_text())
+        if isinstance(loaded, dict):
+            data = loaded
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    preset = data.get("preset")
+    if isinstance(preset, str) and preset.strip():
+        return preset.strip().lower()
+    return st.get("preset")
+
+
 def _model_path(model_file: str) -> Path:
     return install_state.user_data_dir() / "models" / model_file
 
@@ -694,7 +723,7 @@ def run(args: argparse.Namespace) -> int:
     port = install_state.validate_port(
         args.port if args.port is not None else st.get("port", 47950)
     )
-    preset: str | None = st.get("preset")
+    preset: str | None = _resolve_preset(st)
 
     mode = args.mode
     if mode is None:

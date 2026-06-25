@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentalloy.install import state as install_state
 from agentalloy.install.subcommands.enable_service import (
     _detect_os,  # pyright: ignore[reportPrivateUsage]
     _native_available,  # pyright: ignore[reportPrivateUsage]
+    _ngl_for_target,  # pyright: ignore[reportPrivateUsage]
     _poll_health,  # pyright: ignore[reportPrivateUsage]
     _read_env_file,  # pyright: ignore[reportPrivateUsage]
     _render_launchd_plist,  # pyright: ignore[reportPrivateUsage]
@@ -17,6 +20,7 @@ from agentalloy.install.subcommands.enable_service import (
     _render_llama_launchd_plist,  # pyright: ignore[reportPrivateUsage]
     _render_llama_rerank_unit,  # pyright: ignore[reportPrivateUsage]
     _render_systemd_unit,  # pyright: ignore[reportPrivateUsage]
+    _resolve_preset,  # pyright: ignore[reportPrivateUsage]
     _write_llama_launchd_agents,  # pyright: ignore[reportPrivateUsage]
     enable_service,
 )
@@ -133,6 +137,49 @@ class TestRenderLlamaUnits:
         rerank = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"))
         assert "-ngl" not in embed
         assert "-ngl" not in rerank
+
+
+class TestResolvePreset:
+    """Regression coverage for the hardware-preset resolution that selects -ngl.
+
+    The persistent embed/reranker units were registered CPU-only on every GPU
+    host because ``enable-service`` read the preset from ``st.get("preset")`` —
+    a key install state never writes — so it always resolved to ``None``. The
+    preset actually lives in recommend-models.json (the source the setup-time
+    launchers read). These tests pin that resolution.
+    """
+
+    def _write_recommend_models(self, preset: str) -> None:
+        out = install_state.outputs_dir()
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "recommend-models.json").write_text(json.dumps({"preset": preset}))
+
+    def test_reads_preset_from_recommend_models(self) -> None:
+        self._write_recommend_models("apple-silicon")
+        # Install state has no "preset" key (the historical bug); resolution
+        # must come from recommend-models.json, not fall through to None.
+        assert _resolve_preset({"port": 47950}) == "apple-silicon"
+
+    def test_resolved_gpu_preset_yields_offload(self) -> None:
+        """End-to-end: a GPU preset in recommend-models.json must drive -ngl > 0."""
+        for preset in ("apple-silicon", "nvidia", "radeon"):
+            self._write_recommend_models(preset)
+            assert _ngl_for_target(_resolve_preset({})) == 999
+
+    def test_cpu_preset_keeps_offload_off(self) -> None:
+        self._write_recommend_models("cpu")
+        assert _ngl_for_target(_resolve_preset({})) == 0
+
+    def test_falls_back_to_state_then_none(self) -> None:
+        # No recommend-models.json present -> fall back to install state, then None.
+        assert _resolve_preset({"preset": "nvidia"}) == "nvidia"
+        assert _resolve_preset({}) is None
+
+    def test_malformed_recommend_models_falls_back(self) -> None:
+        out = install_state.outputs_dir()
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "recommend-models.json").write_text("{not json")
+        assert _resolve_preset({"preset": "radeon"}) == "radeon"
 
 
 class TestRenderLaunchdPlist:
