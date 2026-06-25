@@ -102,11 +102,38 @@ def eval_artifact_absent(args: dict[str, Any], ctx: PredicateContext) -> Predica
     return PredicateResult.UNKNOWN
 
 
+def _section_present(section: str, headings: list[str]) -> bool:
+    """Whether a required ``section`` is present among markdown ``headings``,
+    tolerating a trailing qualifier on the heading.
+
+    A required section matches a heading when they are equal, or when the heading
+    begins with the section name followed by a word boundary (a non-alphanumeric
+    char). So ``## Out of Scope (this phase)``, ``## Tasks (8)``,
+    ``## Review — notes`` and ``## Acceptance Criteria:`` all satisfy their bare
+    section names, while ``Reviewer`` does not satisfy ``Review`` nor
+    ``Subtasks`` satisfy ``Tasks``. Matching is case-insensitive.
+
+    This keeps SDD phase gates from blocking an otherwise-complete exit artifact
+    over a cosmetic heading suffix (a real footgun: authors naturally write
+    ``## Out of Scope (this phase)``).
+    """
+    want = section.strip().casefold()
+    if not want:
+        return False
+    for h in headings:
+        hf = h.casefold()
+        if hf == want or (hf.startswith(want) and not hf[len(want)].isalnum()):
+            return True
+    return False
+
+
 def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
     """Check whether artifact files contain specified sections or regex patterns.
 
     Semantics: ALL files matching the pattern must pass ALL checks.
-    - ``sections``: every listed section heading must appear in every file.
+    - ``sections``: every listed section heading must appear in every file. A
+      heading satisfies a section name even with a trailing qualifier
+      (case-insensitive, word-boundary — see ``_section_present``).
     - ``pattern``: the regex must match in every file.
     Returns NOT_MET if any file fails any check, MET if all files pass all checks,
     UNKNOWN on IO failure.
@@ -127,11 +154,11 @@ def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> Predi
             return PredicateResult.UNKNOWN
 
         if sections is not None:
-            # Parse markdown headings
-            headings = {
+            # Parse markdown ATX headings (strip leading #'s and surrounding space).
+            headings = [
                 line.lstrip("#").strip() for line in content.splitlines() if line.startswith("#")
-            }
-            if not all(s in headings for s in sections):
+            ]
+            if not all(_section_present(s, headings) for s in sections):
                 return PredicateResult.NOT_MET
 
         if regex_pattern is not None:

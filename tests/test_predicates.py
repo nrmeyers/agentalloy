@@ -129,6 +129,39 @@ def test_artifact_contains_missing_section(tmp_path: Path):
     assert result == NOT_MET
 
 
+def test_artifact_contains_section_with_trailing_qualifier(tmp_path: Path):
+    # A heading with a trailing qualifier still satisfies the bare section name —
+    # the exact-match brittleness that silently blocked phase transitions.
+    f = tmp_path / "spec.md"
+    f.write_text("## Acceptance Criteria\n\nx\n\n## Out of Scope (this phase)\n\ny\n")
+    ctx = _ctx(tmp_path)
+    result = eval_artifact_contains(
+        {"path": "spec.md", "sections": ["Acceptance Criteria", "Out of Scope"]},
+        ctx,
+    )
+    assert result == MET
+
+
+def test_artifact_contains_section_case_insensitive(tmp_path: Path):
+    f = tmp_path / "spec.md"
+    f.write_text("## acceptance criteria\n\nx\n\n## OUT OF SCOPE:\n\ny\n")
+    ctx = _ctx(tmp_path)
+    result = eval_artifact_contains(
+        {"path": "spec.md", "sections": ["Acceptance Criteria", "Out of Scope"]},
+        ctx,
+    )
+    assert result == MET
+
+
+def test_artifact_contains_section_word_boundary_not_fooled(tmp_path: Path):
+    # A heading that merely shares a prefix (no word boundary) must NOT satisfy
+    # the section: "Reviewer Notes" does not provide a "Review" section.
+    f = tmp_path / "qa.md"
+    f.write_text("## Reviewer Notes\n\nx\n")
+    ctx = _ctx(tmp_path)
+    assert eval_artifact_contains({"path": "qa.md", "sections": ["Review"]}, ctx) == NOT_MET
+
+
 def test_artifact_contains_pattern(tmp_path: Path):
     f = tmp_path / "code.py"
     f.write_text("def hello():\n    pass\n")
