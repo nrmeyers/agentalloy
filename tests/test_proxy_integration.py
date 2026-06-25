@@ -14,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from pathlib import Path
@@ -34,10 +35,18 @@ def _make_mock_upstream(
     status_code: int = 200,
     stream_chunks: list[str] | None = None,
     raise_exc: Exception | None = None,
+    captured: dict[str, Any] | None = None,
 ) -> httpx.AsyncClient:
-    """Create an httpx.AsyncClient with MockTransport for the upstream LLM."""
+    """Create an httpx.AsyncClient with MockTransport for the upstream LLM.
+
+    When *captured* is supplied, the forwarded JSON payload is recorded into it
+    under ``"payload"`` so tests can assert what was actually sent upstream.
+    """
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if captured is not None and request.content:
+            with contextlib.suppress(ValueError):
+                captured["payload"] = json.loads(request.content.decode())
         if raise_exc:
             # MockTransport can't raise, so we return an error response
             raise raise_exc
@@ -99,6 +108,7 @@ def _make_app(
     raise_upstream: Exception | None = None,
     upstream_status: int = 200,
     stream_chunks: list[str] | None = None,
+    captured: dict[str, Any] | None = None,
 ) -> Any:
     """Create a test app with all proxy dependencies wired."""
     app = create_app(use_default_lifespan=False)
@@ -123,6 +133,7 @@ def _make_app(
         status_code=upstream_status,
         stream_chunks=stream_chunks,
         raise_exc=raise_upstream,
+        captured=captured,
     )
 
     # Embed client (mock)
@@ -177,16 +188,24 @@ class TestFullProxyFlow:
         assert trace.status == "proxy_passthrough"
 
     def test_signal_match_compose_and_inject(self, tmp_path: Path) -> None:
-        """Signal match -> compose -> inject into system message -> forward."""
+        """Signal match -> compose -> inject into LAST USER message -> forward.
+
+        Parity with the Anthropic passthrough: the composed block lands in the
+        last user message (phase-stamped), and the system message stays
+        byte-identical (prompt-cache safe).
+        """
         compose_output = "# Skill: Test\nAlways be helpful."
         orchestrator = _make_mock_orchestrator(compose_output=compose_output)
-        app = _make_app(mock_orchestrator=orchestrator)
+        captured: dict[str, Any] = {}
+        app = _make_app(mock_orchestrator=orchestrator, captured=captured)
 
-        # Override signal evaluation to simulate match
+        # announce=True + workflow_prose so the Tier 1 orientation block composes.
         signal_result = SignalResult(
             should_compose=True,
+            announce=True,
             phase="build",
             task="implement feature",
+            workflow_prose="operate like so",
             pre_filter_matched="prompt_keyword",
             gates_met=["test_passed"],
         )
@@ -213,6 +232,16 @@ class TestFullProxyFlow:
         body = resp.json()
         assert body["choices"][0]["message"]["content"] == "Test response"
 
+        # The composed block landed in the LAST user message, phase-stamped.
+        sent = captured["payload"]
+        last_user = sent["messages"][-1]
+        assert last_user["role"] == "user"
+        assert "phase=build" in last_user["content"]
+        assert compose_output in last_user["content"]
+        # System message is byte-identical (untouched).
+        assert sent["messages"][0]["role"] == "system"
+        assert sent["messages"][0]["content"] == "You are an assistant."
+
         # Telemetry should show composed status
         app.state.vector_store.record_composition_trace.assert_called_once()
         trace = app.state.vector_store.record_composition_trace.call_args[0][0]
@@ -223,8 +252,11 @@ class TestFullProxyFlow:
         orchestrator = _make_mock_orchestrator(raise_exc=RuntimeError("compose error"))
         app = _make_app(mock_orchestrator=orchestrator)
 
+        # announce=True drives the Tier 1 compose call, which raises -> _compose_block
+        # swallows it (no workflow prose either) -> empty block -> passthrough.
         signal_result = SignalResult(
             should_compose=True,
+            announce=True,
             phase="build",
             task="implement feature",
             pre_filter_matched="prompt_keyword",

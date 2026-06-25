@@ -1,0 +1,177 @@
+"""Shared inject+commit seam for both proxy surfaces.
+
+Both live proxy surfaces — the native Anthropic passthrough
+(``/proj/<token>/v1/messages``) and the OpenAI-compatible chat-completions
+endpoint — run an identical ``compose → inject → commit_markers`` cycle. The
+*decision* logic (``evaluate_signal`` in :mod:`agentalloy.api.proxy_signal`) is
+already shared; this module unifies the *inject + commit* wiring so both
+surfaces share one cadence-marker implementation.
+
+:func:`apply_signal` composes the 3-tier block once, hands the text to a
+surface-specific ``inject`` callable, and commits the announce/cursor markers
+gated on confirmed delivery — composing text the request then drops (no user
+message, malformed content) must NOT burn the marker. The compose helper
+(:func:`_compose_block`) and its result (:class:`_ComposedBlock`) live here too,
+imported back by the passthrough router.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from agentalloy.api.compose_models import ComposeRequest, EmptyResult, Phase
+from agentalloy.api.proxy_signal import SignalResult, commit_markers
+
+if TYPE_CHECKING:
+    from agentalloy.orchestration.compose import ComposeOrchestrator
+
+logger = logging.getLogger(__name__)
+
+_VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+
+
+@dataclass
+class _ComposedBlock:
+    """Result of :func:`_compose_block`: the text plus per-tier commit signals.
+
+    These report what was *composed*. The caller pairs them with whether the block
+    was actually injected (delivery) before committing a marker — composing text the
+    request then drops (no user message, malformed content) must NOT burn the marker.
+
+    - ``tier1_text``: the Tier 1 orientation block carried real text — its marker may
+      be committed once that text is delivered.
+    - ``cursor_terminal``: the Tier 2 domain leg reached a *terminal* state (delivered
+      skills OR composed to a clean empty result, NOT a transient compose error). A
+      cleanly-empty Tier 2 has nothing to deliver, so its cursor commits even without
+      an injection — that is what stops a contract with genuinely no domain skills
+      from re-firing every turn.
+    - ``cursor_text``: the Tier 2 leg produced non-empty domain text — when True the
+      cursor marker additionally requires delivery, so an undelivered domain block
+      re-fires next turn instead of being silently lost.
+    """
+
+    text: str
+    tier1_text: bool
+    cursor_terminal: bool
+    cursor_text: bool
+
+
+async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> _ComposedBlock:
+    """Compose the prose block to inject.
+
+    Three independent parts, each gated separately:
+
+    - **Eval advisory** — emitted whenever the gate eval produced advisories
+      (a transition trigger fired). Light; may recur across turns; carries no marker.
+    - **Tier 1 (phase-entry announce)** — the workflow skill's operating prose for
+      the phase + its phase-scoped system prose. Emitted once per phase entry
+      (``signal.announce``). How to operate here; never carries domain skills.
+    - **Tier 2 (per work-item)** — the domain skills for the current work-item
+      contract (``signal.current_contract``), keyed off its task, not the phase.
+      Emitted once per work-item (``signal.announce_cursor``): phase entry, or an
+      ``agentalloy task next``.
+
+    Returns a :class:`_ComposedBlock` whose ``text`` is the parts joined (``""``
+    when none has content) and whose flags tell the caller which cadence markers
+    are safe to commit post-injection.
+    """
+    phase = signal.phase
+    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+
+    advisory_block = ""
+    if signal.advisories:
+        advisory_block = (
+            "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
+        )
+
+    # Tier 1: workflow prose (operating instructions) + system-only compose.
+    tier1 = ""
+    if signal.announce:
+        parts: list[str] = []
+        if signal.workflow_prose:
+            parts.append(signal.workflow_prose.strip())
+        try:
+            system_req = ComposeRequest(
+                task=signal.task or f"Entering {compose_phase}.",
+                phase=compose_phase,
+                legs="system",
+            )
+            result = await orchestrator.compose(
+                system_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+            )
+            if not isinstance(result, EmptyResult) and result.output:
+                parts.append(result.output)
+        except Exception:
+            logger.warning("Tier 1 system compose failed -- workflow prose only", exc_info=True)
+        tier1 = "\n\n".join(parts)
+
+    # Tier 2: domain skills for the current work-item contract. `tier2_terminal`
+    # distinguishes "composed to a clean result" (delivered text OR a legitimate
+    # empty — the cursor is done) from "the compose leg threw" (transient — leave
+    # the cursor unmarked so it re-fires next turn).
+    tier2 = ""
+    tier2_terminal = False
+    if signal.announce_cursor and signal.current_contract:
+        try:
+            from agentalloy.api.compose_models import compose_request_from_contract
+            from agentalloy.contracts import parse_contract
+
+            contract = parse_contract(Path(signal.current_contract))
+            domain_req = compose_request_from_contract(contract, legs="domain")
+            result = await orchestrator.compose(
+                domain_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+            )
+            tier2 = "" if isinstance(result, EmptyResult) else result.output
+            tier2_terminal = True
+        except Exception:
+            logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
+            tier2 = ""
+            tier2_terminal = False
+
+    text = "\n\n".join(p for p in (advisory_block, tier1, tier2) if p)
+    return _ComposedBlock(
+        text=text,
+        tier1_text=bool(tier1),
+        cursor_terminal=tier2_terminal,
+        cursor_text=bool(tier2),
+    )
+
+
+async def apply_signal[T](
+    *,
+    project_root: Path,
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
+    inject: Callable[[str], T | None],
+    delivered: Callable[[T], bool],
+) -> T | None:
+    """Shared inject+commit seam for both proxy surfaces.
+
+    Composes the 3-tier block, injects it via the surface-specific ``inject``
+    (which returns the new request/payload, or None on a no-op), and commits the
+    announce/cursor markers gated on confirmed delivery — identical cadence
+    semantics to the passthrough's prior inline logic. Returns whatever ``inject``
+    returned (None when there was nothing to compose or nothing was delivered-worthy).
+    """
+    composed = await _compose_block(signal, orchestrator)
+    if not composed.text:
+        return None
+    injected = inject(composed.text)
+    was_delivered = injected is not None and delivered(injected)
+    commit_markers(
+        project_root,
+        signal,
+        announce_emitted=composed.tier1_text and was_delivered,
+        cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
+    )
+    return injected

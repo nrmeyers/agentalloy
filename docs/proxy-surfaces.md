@@ -86,6 +86,17 @@ still served; bare `/v1/messages` now 404; `ruff`/`pyright` clean.
 
 ## Phase 2 — Bridge passthrough↔OpenAI parity
 
+**Resolved & implemented.** A shared `apply_signal` seam now lives in
+`api/proxy_apply.py` (alongside the lifted `_compose_block`/`_ComposedBlock`); both routers call
+it to run `compose → inject → commit_markers` with identical delivery-gated cadence. The OpenAI
+surface now injects into the **last user message** (system block byte-identical, prompt-cache safe)
+via a new typed `inject_into_openai_messages`, replacing the old system-message `compose_and_inject`
+(removed). Marker keying uses the per-request project dir, which resolves on the OpenAI path via the
+`/proj/<token>` discriminator (baked by the codex/openclaw env-builders) or the cwd/metadata
+fallback — so `.agentalloy/{announced,composed}` keying needed no change. The
+`openai-harnesses-tokenless` assumption is obsolete: the `/proj/{token}/v1/chat/completions` route
+already exists.
+
 ### The gap
 
 The OpenAI path (`proxy_router.py`) runs `evaluate_signal` but injects into the **system** message
@@ -186,9 +197,9 @@ marker helpers (`api/proxy_injection.py`).
 
 | Phase | Scope | Status |
 |---|---|---|
-| 0 | This doc | in progress |
-| 1 | Remove dead bare `/v1/messages` surface | pending |
-| 2 | Passthrough↔OpenAI injection/marker parity | pending |
+| 0 | This doc | done |
+| 1 | Remove dead bare `/v1/messages` surface | done |
+| 2 | Passthrough↔OpenAI injection/marker parity | done |
 | 3 | Phase-drift 5-feature design on both surfaces | pending |
 
 **Delivery:** one branch, commits sequenced 1 → 2 → 3, a single PR carrying all three + this doc,

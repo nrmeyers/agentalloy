@@ -19,8 +19,9 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from agentalloy.api.proxy_apply import apply_signal
 from agentalloy.api.proxy_context import decode_proj_token, read_phase, resolve_working_dir
-from agentalloy.api.proxy_injection import compose_and_inject
+from agentalloy.api.proxy_injection import inject_into_openai_messages
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import extract_session_header, resolve_session_key
 from agentalloy.api.proxy_signal import evaluate_signal
@@ -370,28 +371,47 @@ async def proxy_chat_completions(
         logger.warning("Signal evaluation failed -- passing through", exc_info=True)
 
     # --- Step 4: Compose + inject (if signal matched) ---
+    # Same `evaluate_signal → compose → inject → commit_markers` cycle as the
+    # Anthropic passthrough, via the shared `apply_signal` seam. Injection lands in
+    # the LAST user message (the system block stays byte-identical for prompt-cache
+    # safety); markers are committed only after a confirmed, non-empty injection, so
+    # a degraded compose never burns the announce/cursor cadence.
     modified_request = request
     source_skill_ids: list[str] | None = None
-    if signal_result is not None and signal_result.should_compose and orchestrator is not None:
+    if (
+        signal_result is not None
+        and signal_result.should_compose
+        and signal_result.phase
+        and orchestrator is not None
+    ):
+        phase = signal_result.phase
         try:
-            modified_request = await compose_and_inject(request, signal_result, orchestrator)
-            # Check if injection actually happened (messages differ)
-            if modified_request is not request:
+
+            def _inject_openai(text: str) -> ProxyRequest | None:
+                new_msgs = inject_into_openai_messages(request.messages, text, phase=phase)
+                return (
+                    request.model_copy(update={"messages": new_msgs})
+                    if new_msgs is not None
+                    else None
+                )
+
+            injected = await apply_signal(
+                project_root=cwd,
+                signal=signal_result,
+                orchestrator=orchestrator,
+                inject=_inject_openai,
+                # The OpenAI injector returns None on every no-op, so a non-None
+                # result IS the delivery proof — no identity test needed here.
+                delivered=lambda _out: True,
+            )
+            if injected is not None:
+                modified_request = injected
                 composed = True
         except Exception:
             logger.warning(
                 "Composition/injection failed -- passing through unchanged", exc_info=True
             )
             modified_request = request
-
-    # No `commit_markers` here by design. This OpenAI-translation path injects only
-    # domain skills + eval advisories via `compose_and_inject`; it does not emit the
-    # Tier 1 orientation block or the per-contract Tier 2 cursor block, so it owns
-    # neither the `announced` nor the `composed` cadence. `evaluate_signal` no longer
-    # writes those markers either, so this path simply never touches them — the
-    # announce/cursor cadence is committed only on the Anthropic passthrough path
-    # that actually delivers those blocks. (OpenAI-harness orientation parity is a
-    # separate, tracked gap.)
 
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).
