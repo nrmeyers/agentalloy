@@ -423,6 +423,95 @@ class TestUnwirePerRepoScoping:
 
 
 # ---------------------------------------------------------------------------
+# Full uninstall must strip the Claude Code settings.local.json proxy carrier
+# from EVERY recorded repo — not just cwd. That file is not in the harness
+# suffix allowlist, so the harness walk never touches it; only the per-repo
+# proxy sweep does. Guards the 'uninstall leaves other repos pointing at a dead
+# proxy' gap.
+# ---------------------------------------------------------------------------
+
+
+class TestUninstallSweepsAllRepoSettings:
+    def _seed_settings(self, repo: Path) -> Path:
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "pyproject.toml").write_text("")
+        s = repo / ".claude" / "settings.local.json"
+        s.parent.mkdir(parents=True, exist_ok=True)
+        s.write_text(
+            json.dumps(
+                {
+                    "env": {"ANTHROPIC_BASE_URL": "http://localhost:47950/proj/TOKEN"},
+                    "permissions": {"allow": ["Bash"]},
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        return s
+
+    def _carrier_entry(self, repo: Path) -> dict[str, object]:
+        return {
+            "path": str(repo / ".agentalloy" / "claude-code-env.sh"),
+            "repo_root": str(repo),
+            "action": "wrote_new_file",
+            "harness": "claude-code",
+        }
+
+    def test_full_uninstall_strips_settings_in_all_repos(
+        self, tmp_path: Path, _fake_home_for_wiring: Path
+    ) -> None:
+        from agentalloy.install.subcommands.uninstall import uninstall
+
+        repo_a, repo_b = tmp_path / "repoA", tmp_path / "repoB"
+        sa, sb = self._seed_settings(repo_a), self._seed_settings(repo_b)
+        st = install_state.load_state(repo_a)
+        st["harness_files_written"] = [self._carrier_entry(repo_a), self._carrier_entry(repo_b)]
+        install_state.save_state(st, repo_a)
+
+        uninstall(
+            force=True,
+            root=repo_a,
+            all_repos=True,
+            remove_user_state=False,
+            remove_env=False,
+            stop_services=False,
+        )
+
+        for s in (sa, sb):
+            data = json.loads(s.read_text())
+            assert "ANTHROPIC_BASE_URL" not in data.get("env", {}), (
+                f"{s} still wired at a dead proxy after full uninstall"
+            )
+            assert data.get("permissions"), f"{s} lost unrelated user settings"
+
+    def test_per_repo_unwire_leaves_other_repo_settings(
+        self, tmp_path: Path, _fake_home_for_wiring: Path
+    ) -> None:
+        # all_repos=False (the `unwire` verb) must touch ONLY cwd's settings.
+        from agentalloy.install.subcommands.uninstall import uninstall
+
+        repo_a, repo_b = tmp_path / "repoA", tmp_path / "repoB"
+        sa, sb = self._seed_settings(repo_a), self._seed_settings(repo_b)
+        st = install_state.load_state(repo_a)
+        st["harness_files_written"] = [self._carrier_entry(repo_b)]
+        install_state.save_state(st, repo_a)
+
+        uninstall(
+            force=True,
+            root=repo_a,
+            all_repos=False,
+            remove_user_state=False,
+            remove_env=False,
+            stop_services=False,
+        )
+
+        assert "ANTHROPIC_BASE_URL" not in json.loads(sa.read_text()).get("env", {})
+        assert json.loads(sb.read_text())["env"]["ANTHROPIC_BASE_URL"].endswith("/proj/TOKEN"), (
+            "per-repo unwire must NOT touch another repo's settings"
+        )
+
+
+# ---------------------------------------------------------------------------
 # User-scope symlink-escape: a prefix that symlinks out of HOME must not
 # redirect a deletion to an arbitrary file (defense-in-depth parity with the
 # repo-scoped escape checks).

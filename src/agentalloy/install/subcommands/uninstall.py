@@ -758,6 +758,63 @@ def _remove_uv_tool() -> dict[str, Any]:
     return _remove_uv_tool_internal()
 
 
+def _unwire_repo_local(
+    repo_root: Path, handled_paths: set[str]
+) -> tuple[list[Path], list[dict[str, Any]]]:
+    """Surgical per-repo proxy + lifecycle teardown for a single wired repo.
+
+    Strips the AgentAlloy proxy wiring the harness walk can't reach — the
+    aider / opencode / cline configs and, above all, the Claude Code
+    ``.claude/settings.local.json`` ``env.ANTHROPIC_BASE_URL`` carrier (which is
+    not in the harness suffix allowlist, so the walk never sees it) — then drops
+    the repo-local ``.agentalloy/{phase,config}`` lifecycle state and an empty
+    ``.agentalloy/`` husk. Every ``_unwire_proxy_*`` is itself surgical and
+    idempotent: it no-ops when its file is absent or the value isn't ours, so
+    sweeping this across every recorded repo is safe and self-guarding (a
+    tampered ``repo_root`` simply targets a path that doesn't exist → no-op).
+
+    Returns ``(proxy_paths_removed, files_removed_records)``.
+    """
+    proxy_removed: list[Path] = []
+    files_removed: list[dict[str, Any]] = []
+    # Skip anything the harness walk already restored via original_content.
+    if str(repo_root / ".aider.conf.yml") not in handled_paths:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(repo_root))
+    opencode_env = str(repo_root / ".opencode" / ".agentalloy-env")
+    opencode_prompt = str(repo_root / ".opencode" / "system-prompt.md")
+    if opencode_env not in handled_paths and opencode_prompt not in handled_paths:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(repo_root))
+    if str(repo_root / ".cline" / "settings.json") not in handled_paths:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(repo_root))
+    if str(repo_root / ".claude" / "settings.local.json") not in handled_paths:
+        proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(repo_root))
+
+    # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config).
+    # Contracts under .agentalloy/contracts/ are user work and are preserved.
+    for _name in ("phase", "config"):
+        _state_file = repo_root / ".agentalloy" / _name
+        if _state_file.exists():
+            try:
+                _state_file.unlink()
+                files_removed.append(
+                    {"path": str(_state_file), "action": "removed_lifecycle_state"}
+                )
+            except OSError:
+                pass
+
+    # Leave no empty husk: drop .agentalloy/ once its env + lifecycle files are
+    # gone, but only if genuinely empty — a non-empty rmdir raises OSError, which
+    # preserves user work (e.g. .agentalloy/contracts/) untouched.
+    _agentalloy_dir = repo_root / ".agentalloy"
+    if _agentalloy_dir.is_dir():
+        try:
+            _agentalloy_dir.rmdir()
+            files_removed.append({"path": str(_agentalloy_dir), "action": "removed_empty_dir"})
+        except OSError:
+            pass
+    return proxy_removed, files_removed
+
+
 def uninstall(
     remove_data: bool = False,
     force: bool = False,
@@ -1061,49 +1118,39 @@ def uninstall(
     # Each proxy-wired harness has its own uninstall function in uninstall_proxy
     proxy_removed: list[Path] = []
 
-    # Repo-scope proxies: safe to run on any per-repo unwire
+    # Repo-scope proxies + lifecycle state: safe to run on any per-repo unwire.
+    #
+    # A FULL uninstall (all_repos) must sweep EVERY repo recorded in state, not
+    # just cwd. The surgical configs below — above all the Claude Code
+    # settings.local.json env.ANTHROPIC_BASE_URL carrier, which is NOT in the
+    # harness suffix allowlist and so is invisible to the harness walk above —
+    # are otherwise left behind in every OTHER wired repo, pointing its harness
+    # at a proxy that ceases to exist once "the rest" of teardown (services,
+    # state, CLI) completes. Symmetric intent with the all_repos harness walk:
+    # once the CLI is gone the user can no longer `cd && unwire` elsewhere.
     if remove_wiring:
-        # Skip proxy unwiring for paths already handled by harness loop's original_content restore
-        if str(root / ".aider.conf.yml") not in handled_paths:
-            proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(root))
-        opencode_env = str(root / ".opencode" / ".agentalloy-env")
-        opencode_prompt = str(root / ".opencode" / "system-prompt.md")
-        if opencode_env not in handled_paths and opencode_prompt not in handled_paths:
-            proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(root))
-        if str(root / ".cline" / "settings.json") not in handled_paths:
-            proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(root))
-        # claude-code auto-load carrier: strip env.ANTHROPIC_BASE_URL from
-        # .claude/settings.local.json (surgical — preserves the user's other
-        # settings). Repo-scoped, symmetric with `_wire_proxy_claude_code`.
-        if str(root / ".claude" / "settings.local.json") not in handled_paths:
-            proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(root))
-
-        # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config).
-        # Symmetric with wiring so a later re-wire starts clean — the dogfood
-        # found a fresh wire inheriting a leftover `build` phase. Contracts under
-        # .agentalloy/contracts/ are user work and are preserved.
-        for _name in ("phase", "config"):
-            _state_file = root / ".agentalloy" / _name
-            if _state_file.exists():
+        repo_targets: list[Path] = [root]
+        if all_repos:
+            seen_roots: set[Path] = set()
+            with contextlib.suppress(OSError):
+                seen_roots.add(root.resolve())
+            for entry in harness_entries:
+                rr = entry.get("repo_root")
+                if not (isinstance(rr, str) and rr):
+                    continue
+                rr_path = Path(rr)
                 try:
-                    _state_file.unlink()
-                    files_removed.append(
-                        {"path": str(_state_file), "action": "removed_lifecycle_state"}
-                    )
+                    rr_resolved = rr_path.resolve()
                 except OSError:
-                    pass
-
-        # Leave no empty husk: once the env file (harness-record loop) and the
-        # lifecycle state above are gone, drop .agentalloy/ itself — but only if
-        # it is genuinely empty. A non-empty rmdir raises OSError, which preserves
-        # user work (e.g. .agentalloy/contracts/) untouched.
-        _agentalloy_dir = root / ".agentalloy"
-        if _agentalloy_dir.is_dir():
-            try:
-                _agentalloy_dir.rmdir()
-                files_removed.append({"path": str(_agentalloy_dir), "action": "removed_empty_dir"})
-            except OSError:
-                pass
+                    continue
+                if rr_resolved in seen_roots:
+                    continue
+                seen_roots.add(rr_resolved)
+                repo_targets.append(rr_path)
+        for _repo in repo_targets:
+            _pr, _fr = _unwire_repo_local(_repo, handled_paths)
+            proxy_removed.extend(_pr)
+            files_removed.extend(_fr)
 
     # User-scope proxies: only run during a global (all_repos) uninstall to avoid
     # removing global home-dir config when unwiring an unrelated repo.
