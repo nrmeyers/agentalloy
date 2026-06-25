@@ -140,7 +140,12 @@ _SESSION_START_EPOCH = time.time()
 
 
 def _proc_start_epoch(pid: int) -> float | None:
-    """Best-effort process start time (epoch seconds) via /proc. None if unknown."""
+    """Best-effort process start time (epoch seconds). None if unknown.
+
+    Reads /proc on Linux; falls back to ``ps -o etime=`` on platforms without
+    /proc (macOS/BSD), so the port-cleanup fixture can still distinguish a
+    session-leaked server from a developer's pre-existing one.
+    """
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
         # Field 22 (starttime, clock ticks since boot); fields 1-2 are
@@ -150,7 +155,45 @@ def _proc_start_epoch(pid: int) -> float | None:
             btime = next(int(ln.split()[1]) for ln in f if ln.startswith("btime"))
         return btime + ticks / os.sysconf("SC_CLK_TCK")
     except (OSError, ValueError, IndexError, StopIteration):
+        return _ps_start_epoch(pid)
+
+
+def _parse_etime(etime: str) -> float | None:
+    """Parse a ps ``etime`` field ([[DD-]HH:]MM:SS) into elapsed seconds."""
+    if not etime:
         return None
+    try:
+        days = 0
+        if "-" in etime:
+            d, etime = etime.split("-", 1)
+            days = int(d)
+        parts = [int(p) for p in etime.split(":")]
+        if len(parts) == 2:
+            hours, mins, secs = 0, parts[0], parts[1]
+        elif len(parts) == 3:
+            hours, mins, secs = parts
+        else:
+            return None
+    except ValueError:
+        return None
+    return days * 86400 + hours * 3600 + mins * 60 + secs
+
+
+def _ps_start_epoch(pid: int) -> float | None:
+    """Start time via ``ps -o etime=`` (elapsed time) for non-/proc platforms.
+
+    macOS/BSD ps has no ``etimes`` (epoch) keyword, but ``etime`` (elapsed,
+    locale-independent) is portable; subtract it from now for the start epoch.
+    """
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "etime=", "-p", str(pid)],
+            text=True,
+        ).strip()
+    except (subprocess.SubprocessError, OSError):
+        return None
+    elapsed = _parse_etime(out)
+    return time.time() - elapsed if elapsed is not None else None
 
 
 def _kill_port(port: int) -> None:
