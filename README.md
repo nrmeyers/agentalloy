@@ -400,7 +400,6 @@ Each subcommand emits structured JSON on stdout; pair with `jq` for scripting.
 AgentAlloy serves both OpenAI-compatible and Anthropic Messages API endpoints through the proxy:
 
 - `POST /proj/{token}/v1/messages` — native Anthropic passthrough (Claude Code); auth-transparent, per-repo `{token}` discriminator, no translation
-- `POST /v1/messages` — Anthropic→OpenAI translation shim (for Anthropic-format callers on an OpenAI upstream, e.g. Cline)
 - `POST /v1/chat/completions` — OpenAI-compatible proxy
 - `POST /compose` — Manual skill composition
 - `GET /health` — Liveness probe

@@ -1,7 +1,6 @@
 """Native Anthropic Messages passthrough (the ``/proj/<token>/v1/messages`` path).
 
-Unlike the ``_anthropic_to_openai`` translation shim at bare ``/v1/messages``,
-this path does **no** translation. It:
+This path does **no** Anthropic↔OpenAI translation. It:
 
 1. decodes the ``/proj/<token>`` discriminator → the per-repo project dir,
 2. runs the signal layer + compose engine for that repo's phase,
