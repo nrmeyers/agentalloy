@@ -9,6 +9,8 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentalloy.install.subcommands.uninstall import (
     _remove_sentinel_block,  # type: ignore[attr-defined]
     _extract_sentinel_content,  # type: ignore[attr-defined]
@@ -18,6 +20,20 @@ from agentalloy.install.subcommands.uninstall import (
     _remove_agentalloy_cache,  # type: ignore[attr-defined]
     _COMPOSE_NAMED_VOLUMES,  # type: ignore[attr-defined]
 )
+
+
+@pytest.fixture(autouse=True)
+def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """uninstall() resolves ``~/.agentalloy/claude-code-env.sh`` and the
+    claude-code settings via ``Path.home()`` and DELETES them — every test in
+    this module must see a throwaway home, or the suite destroys the developer's
+    real wiring (tripwire: ``_guard_real_home_wiring`` in tests/conftest.py).
+    Mirrors the fixture in test_adversarial.py / test_wire_harness.py."""
+    home = tmp_path / "fake-home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
 
 # Typed helper for mock_which.side_effect to avoid pyright reportUnknownLambdaType
 WhichSideEffect = Callable[[str], str | None]
