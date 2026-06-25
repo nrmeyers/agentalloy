@@ -146,7 +146,12 @@ def find_listening_pid(port: int, host: str = DEFAULT_HOST) -> int | None:
             check=False,
             timeout=2.0,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, UnicodeDecodeError):
+    except FileNotFoundError:
+        # No iproute2 (e.g. macOS/BSD): fall back to lsof. Other errors below
+        # (timeout, decode) are treated as "couldn't tell" → None, matching the
+        # Linux behavior, so we only switch tools when ss is genuinely absent.
+        return _find_listening_pid_lsof(port)
+    except (subprocess.TimeoutExpired, UnicodeDecodeError):
         return None
     if result.returncode != 0:
         return None
@@ -164,6 +169,30 @@ def find_listening_pid(port: int, host: str = DEFAULT_HOST) -> int | None:
     return None
 
 
+def _find_listening_pid_lsof(port: int) -> int | None:
+    """Listening PID via ``lsof`` for platforms without ``ss`` (macOS/BSD).
+
+    ``lsof -t`` prints one PID per line; ``-iTCP:<port> -sTCP:LISTEN`` scopes it
+    to listeners on the port. Returns the first PID, or None on any failure.
+    """
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return None
+    if result.returncode != 0:
+        return None
+    for token in result.stdout.split():
+        if token.isdigit():
+            return int(token)
+    return None
+
+
 def port_reachable(port: int, host: str = DEFAULT_HOST, timeout_s: float = 1.0) -> bool:
     """TCP-connect probe. True if the port accepts connections."""
     try:
@@ -175,15 +204,37 @@ def port_reachable(port: int, host: str = DEFAULT_HOST, timeout_s: float = 1.0) 
 
 
 def _read_cmdline(pid: int) -> str:
-    """Return ``/proc/<pid>/cmdline`` as a space-joined string ('' if unreadable).
+    """Return the process command line as a space-joined string ('' if unknown).
 
-    The file is NUL-separated; we join args with spaces for substring matching.
+    Reads ``/proc/<pid>/cmdline`` (NUL-separated) on Linux; falls back to
+    ``ps -o command=`` on platforms without ``/proc`` (macOS/BSD), so the
+    signature match that gates ``reclaim_stale_port`` still works there.
     """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
-        return ""
+        # No /proc/<pid>/cmdline: a vanished pid on Linux, or no /proc at all.
+        if Path("/proc").is_dir():
+            return ""
+        return _ps_cmdline(pid)
     return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+
+
+def _ps_cmdline(pid: int) -> str:
+    """Command line via ``ps -o command=`` for platforms without ``/proc``.
+
+    ``command`` carries the full argv on macOS/BSD (and Linux), which is what
+    the ``reclaim_stale_port`` signature match needs. '' on any failure.
+    """
+    try:
+        out = subprocess.check_output(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return ""
+    return out.strip()
 
 
 def port_holder_cmdline(port: int, host: str = DEFAULT_HOST) -> tuple[int | None, str]:
@@ -349,7 +400,8 @@ def _pid_alive(pid: int) -> bool:
 
     ``os.kill(pid, 0)`` returns success for zombies (terminated but unreaped
     children of the caller), which would make ``stop()`` incorrectly escalate
-    to SIGKILL. We read ``/proc/<pid>/status`` and treat state ``Z`` as dead.
+    to SIGKILL. We therefore confirm the process state: ``/proc`` is authoritative
+    on Linux, and ``ps`` answers on platforms without ``/proc`` (macOS/BSD).
     """
     try:
         os.kill(pid, 0)
@@ -357,12 +409,52 @@ def _pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    # Process table entry exists; check it's not a zombie.
+    # os.kill proved a table entry existed at the probe. /proc is authoritative
+    # on Linux, so a non-zombie state there means alive. Without /proc we must
+    # re-derive liveness from ps — and crucially treat a pid ps can no longer
+    # find as NOT alive: our own ps subprocess can trip subprocess._cleanup(),
+    # which waitpid()s a tracked child and so reaps the very zombie we are
+    # checking, turning it from "Z" into fully gone between the two calls.
+    if Path("/proc").is_dir():
+        return not _pid_is_zombie(pid)
+    return _ps_pid_alive(pid)
+
+
+def _pid_is_zombie(pid: int) -> bool:
+    """True iff ``pid`` is a zombie, via ``/proc/<pid>/status`` (Linux).
+
+    Returns ``False`` when the status can't be read (a vanished pid is not a
+    zombie; the os.kill probe in the caller remains the existence check).
+    """
     try:
         status = Path(f"/proc/{pid}/status").read_text()
-    except (FileNotFoundError, PermissionError):
-        return True
+    except OSError:
+        return False
     for line in status.splitlines():
         if line.startswith("State:"):
-            return "Z" not in line
-    return True
+            return "Z" in line
+    return False
+
+
+def _ps_pid_alive(pid: int) -> bool:
+    """Liveness via ``ps`` for platforms without ``/proc`` (macOS/BSD).
+
+    ``ps -o state=`` prints the state code with no header. A pid ps cannot find
+    (non-zero exit or empty output) has exited or been reaped → not alive; a
+    leading ``Z`` is a zombie → not alive; anything else is alive. A ``ps``
+    failure is reported as alive (indeterminate), so ``stop()`` still escalates
+    to SIGKILL rather than declaring a live process dead.
+    """
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return True
+    state = result.stdout.strip()
+    if result.returncode != 0 or not state:
+        return False
+    return not state.startswith("Z")

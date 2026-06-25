@@ -10,6 +10,8 @@ import os
 import time
 from unittest.mock import patch
 
+import pytest
+
 from tests import conftest as root_conftest
 
 _SS_LINE = 'LISTEN 0 2048 127.0.0.1:47950 0.0.0.0:* users:(("python",pid=4242,fd=13))\n'
@@ -19,6 +21,25 @@ def test_proc_start_epoch_resolves_own_pid() -> None:
     started = root_conftest._proc_start_epoch(os.getpid())
     assert started is not None
     assert started <= time.time()
+
+
+def test_parse_etime_formats() -> None:
+    # ps `etime` is [[DD-]HH:]MM:SS — portable across Linux and macOS/BSD,
+    # which is why _proc_start_epoch uses it (macOS ps has no `etimes`).
+    assert root_conftest._parse_etime("00:00") == 0
+    assert root_conftest._parse_etime("01:30") == 90
+    assert root_conftest._parse_etime("01:02:03") == 3723
+    assert root_conftest._parse_etime("2-03:04:05") == 2 * 86400 + 3 * 3600 + 4 * 60 + 5
+    assert root_conftest._parse_etime("") is None
+    assert root_conftest._parse_etime("garbage") is None
+
+
+def test_ps_start_epoch_uses_etime(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Pin the macOS/BSD fallback: ps reports 60s elapsed → start ≈ now - 60.
+    monkeypatch.setattr(root_conftest.subprocess, "check_output", lambda *a, **k: "01:00\n")
+    started = root_conftest._ps_start_epoch(4242)
+    assert started is not None
+    assert abs((time.time() - 60) - started) < 5
 
 
 def _run_kill_port_with(start_epoch: float | None) -> list[int]:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -34,6 +35,24 @@ def _ss_result(stdout: str, returncode: int = 0) -> subprocess.CompletedProcess[
     return subprocess.CompletedProcess(args=["ss"], returncode=returncode, stdout=stdout, stderr="")
 
 
+def _cmd_dispatch(**by_tool: Any) -> Any:
+    """Build a subprocess.run side_effect that routes by argv[0] (ss vs lsof).
+
+    Each value is either an Exception to raise or a CompletedProcess to return.
+    Lets a single patch model "ss is absent but lsof answers" without a real OS.
+    """
+
+    def _run(cmd: list[str], *_a: Any, **_k: Any) -> Any:
+        spec = by_tool.get(cmd[0])
+        if spec is None:
+            raise AssertionError(f"unexpected command: {cmd!r}")
+        if isinstance(spec, BaseException):
+            raise spec
+        return spec
+
+    return _run
+
+
 class TestFindListeningPid:
     def test_extracts_pid_from_typical_ss_line(self) -> None:
         stdout = 'LISTEN 0 2048 127.0.0.1:47950 0.0.0.0:* users:(("python",pid=1234,fd=5))\n'
@@ -48,8 +67,12 @@ class TestFindListeningPid:
         with patch("subprocess.run", return_value=_ss_result("", returncode=1)):
             assert server_proc.find_listening_pid(47950) is None
 
-    def test_returns_none_when_ss_missing(self) -> None:
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+    def test_returns_none_when_ss_and_lsof_missing(self) -> None:
+        # ss absent → lsof tried; lsof absent too → None (e.g. a stripped host).
+        with patch(
+            "subprocess.run",
+            side_effect=_cmd_dispatch(ss=FileNotFoundError(), lsof=FileNotFoundError()),
+        ):
             assert server_proc.find_listening_pid(47950) is None
 
     def test_returns_none_on_ss_timeout(self) -> None:
@@ -75,6 +98,215 @@ class TestFindListeningPid:
         )
         with patch("subprocess.run", return_value=_ss_result(stdout)):
             assert server_proc.find_listening_pid(47950) == 100
+
+    def test_does_not_call_lsof_when_ss_present(self) -> None:
+        # Linux invariant: a working ss must fully resolve the lookup; lsof is
+        # never consulted (so Linux behavior is unchanged by the fallback).
+        with patch(
+            "subprocess.run",
+            side_effect=_cmd_dispatch(ss=_ss_result(""), lsof=AssertionError("lsof must not run")),
+        ):
+            assert server_proc.find_listening_pid(47950) is None
+
+
+class TestFindListeningPidLsofFallback:
+    """ss is Linux-only (iproute2); macOS/BSD fall back to lsof."""
+
+    def test_falls_back_to_lsof_when_ss_absent(self) -> None:
+        with patch(
+            "subprocess.run",
+            side_effect=_cmd_dispatch(
+                ss=FileNotFoundError(),
+                lsof=subprocess.CompletedProcess(["lsof"], 0, "4242\n", ""),
+            ),
+        ):
+            assert server_proc.find_listening_pid(47950) == 4242
+
+    def test_lsof_no_listener_returns_none(self) -> None:
+        with patch(
+            "subprocess.run",
+            side_effect=_cmd_dispatch(
+                ss=FileNotFoundError(),
+                lsof=subprocess.CompletedProcess(["lsof"], 1, "", ""),
+            ),
+        ):
+            assert server_proc.find_listening_pid(47950) is None
+
+    def test_lsof_picks_first_pid(self) -> None:
+        # lsof -t emits one PID per line (e.g. IPv4 + IPv6 holders).
+        with patch(
+            "subprocess.run",
+            side_effect=_cmd_dispatch(
+                ss=FileNotFoundError(),
+                lsof=subprocess.CompletedProcess(["lsof"], 0, "100\n101\n", ""),
+            ),
+        ):
+            assert server_proc.find_listening_pid(47950) == 100
+
+
+# ---------------------------------------------------------------------------
+# _read_cmdline — /proc on Linux, ps fallback without /proc (macOS/BSD)
+# ---------------------------------------------------------------------------
+
+
+class TestReadCmdline:
+    def test_proc_present_unreadable_pid_returns_empty_no_ps(self) -> None:
+        # Linux invariant: when /proc exists but the pid's cmdline is gone, we
+        # return "" and never shell out to ps.
+        with (
+            patch.object(server_proc.Path, "read_bytes", side_effect=FileNotFoundError),
+            patch.object(server_proc.Path, "is_dir", return_value=True),
+            patch.object(
+                server_proc.subprocess, "check_output", side_effect=AssertionError("no ps on Linux")
+            ),
+        ):
+            assert server_proc._read_cmdline(4242) == ""
+
+    def test_falls_back_to_ps_without_proc(self) -> None:
+        with (
+            patch.object(server_proc.Path, "read_bytes", side_effect=FileNotFoundError),
+            patch.object(server_proc.Path, "is_dir", return_value=False),
+            patch.object(
+                server_proc.subprocess,
+                "check_output",
+                return_value="uvicorn agentalloy.app --port 47950\n",
+            ),
+        ):
+            assert server_proc._read_cmdline(4242) == "uvicorn agentalloy.app --port 47950"
+
+    def test_ps_cmdline_empty_on_failure(self) -> None:
+        with patch.object(server_proc.subprocess, "check_output", side_effect=FileNotFoundError):
+            assert server_proc._ps_cmdline(4242) == ""
+
+
+# ---------------------------------------------------------------------------
+# _pid_is_zombie — /proc on Linux, ps fallback without /proc (macOS/BSD)
+# ---------------------------------------------------------------------------
+
+
+class TestPidIsZombie:
+    """_pid_is_zombie is the Linux /proc-based zombie check."""
+
+    def test_proc_zombie_state_detected(self) -> None:
+        with patch.object(
+            server_proc.Path, "read_text", return_value="Name:\tx\nState:\tZ (zombie)\n"
+        ):
+            assert server_proc._pid_is_zombie(4242) is True
+
+    def test_proc_running_state_not_zombie(self) -> None:
+        with patch.object(
+            server_proc.Path, "read_text", return_value="Name:\tx\nState:\tS (sleeping)\n"
+        ):
+            assert server_proc._pid_is_zombie(4242) is False
+
+    def test_unreadable_status_not_zombie(self) -> None:
+        # A vanished pid (no /proc/<pid>/status) is not a zombie.
+        with patch.object(server_proc.Path, "read_text", side_effect=FileNotFoundError):
+            assert server_proc._pid_is_zombie(4242) is False
+
+
+class TestPsPidAlive:
+    """_ps_pid_alive is the macOS/BSD liveness check (no /proc)."""
+
+    def _ps(self, stdout: str, rc: int = 0) -> Any:
+        return subprocess.CompletedProcess(["ps"], rc, stdout, "")
+
+    def test_running_state_is_alive(self) -> None:
+        with patch.object(server_proc.subprocess, "run", return_value=self._ps("Ss\n")):
+            assert server_proc._ps_pid_alive(4242) is True
+
+    def test_zombie_state_is_not_alive(self) -> None:
+        with patch.object(server_proc.subprocess, "run", return_value=self._ps("Z+\n")):
+            assert server_proc._ps_pid_alive(4242) is False
+
+    def test_gone_pid_is_not_alive(self) -> None:
+        # The reaping race: ps no longer finds the pid (empty / non-zero exit).
+        # This MUST read as not-alive — "ps can't find it" is not "still running".
+        with patch.object(server_proc.subprocess, "run", return_value=self._ps("", rc=1)):
+            assert server_proc._ps_pid_alive(4242) is False
+
+    def test_ps_failure_assumes_alive(self) -> None:
+        # Indeterminate (ps missing/timeout) → assume alive so stop() escalates
+        # rather than declaring a live process dead.
+        with patch.object(server_proc.subprocess, "run", side_effect=FileNotFoundError):
+            assert server_proc._ps_pid_alive(4242) is True
+
+
+class TestPidAlivePlatformDispatch:
+    def test_no_proc_reaped_zombie_reads_not_alive(self) -> None:
+        # End-to-end regression for the macOS reaping race: os.kill(0) still
+        # succeeds (table entry lingers), /proc is absent, and ps now reports the
+        # pid as gone. _pid_alive must return False, not True.
+        with (
+            patch.object(server_proc.os, "kill", return_value=None),
+            patch.object(server_proc.Path, "is_dir", return_value=False),
+            patch.object(
+                server_proc.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(["ps"], 1, "", ""),
+            ),
+        ):
+            assert server_proc._pid_alive(4242) is False
+
+    def test_proc_present_uses_proc_not_ps(self) -> None:
+        # Linux invariant: with /proc present, liveness comes from /proc and ps
+        # is never consulted.
+        with (
+            patch.object(server_proc.os, "kill", return_value=None),
+            patch.object(server_proc.Path, "is_dir", return_value=True),
+            patch.object(server_proc.Path, "read_text", return_value="State:\tS (sleeping)\n"),
+            patch.object(
+                server_proc.subprocess, "run", side_effect=AssertionError("no ps on Linux")
+            ),
+        ):
+            assert server_proc._pid_alive(4242) is True
+
+
+# ---------------------------------------------------------------------------
+# Real-process exercise of the macOS/BSD fallbacks.
+#
+# The classes above mock subprocess so the parsing runs everywhere. These pin
+# the fallbacks against the actual OS — lsof/ps vs a real listener/process — so
+# a parser that drifts from real tool output is caught. Skipped where the tool
+# is unavailable, so they're safe on any runner.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="lsof not available")
+class TestLsofAgainstRealListener:
+    def test_lsof_finds_real_listener_pid(self) -> None:
+        # Child binds an ephemeral port and reports it on stdout, so there is
+        # no bind-race between picking the port and the child owning it.
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import socket,time\n"
+                "s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen()\n"
+                "print(s.getsockname()[1], flush=True)\n"
+                "time.sleep(30)\n",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert child.stdout is not None
+            port = int(child.stdout.readline().strip())
+            # Exercises the real lsof fallback (the path macOS/BSD always take).
+            assert server_proc._find_listening_pid_lsof(port) == child.pid
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
+
+
+@pytest.mark.skipif(shutil.which("ps") is None, reason="ps not available")
+class TestPsAgainstRealProcess:
+    def test_ps_cmdline_of_self_contains_python(self) -> None:
+        assert "python" in server_proc._ps_cmdline(os.getpid()).lower()
+
+    def test_ps_reports_self_alive(self) -> None:
+        # The live test process is obviously running (not gone, not a zombie).
+        assert server_proc._ps_pid_alive(os.getpid()) is True
 
 
 # ---------------------------------------------------------------------------
@@ -136,17 +368,27 @@ class TestStop:
     def test_sigkill_escalation_on_unresponsive_process(self) -> None:
         # Spawn a child that ignores SIGTERM. timeout_s is short so we
         # don't make the test sluggish; SIGKILL is unblockable.
+        #
+        # The child prints "ready" only AFTER installing the SIG_IGN handler,
+        # and we block on that line before signaling. A fixed sleep here was
+        # flaky: on a loaded/cold host, Python startup can exceed it, so SIGTERM
+        # landed before the handler was installed and the default disposition
+        # killed the child → stop() returned "term" instead of "kill".
         script = (
-            "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(30)\n"
+            "import signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
+            "time.sleep(30)\n"
         )
         proc = subprocess.Popen(
             [sys.executable, "-c", script],
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            text=True,
         )
         try:
-            # Give the child a moment to install the signal handler.
-            time.sleep(0.3)
+            assert proc.stdout is not None
+            assert proc.stdout.readline().strip() == "ready"  # handler is installed
             outcome = server_proc.stop(proc.pid, timeout_s=0.5)
             assert outcome == "kill"
             # Reap the zombie so pytest doesn't warn.
