@@ -85,9 +85,16 @@ RUN uv sync --frozen --no-dev
 # the embed server on 47951 (RUNTIME_EMBED_BASE_URL) and the reranker server
 # on 47952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
 # the GGUFs the entrypoint downloads into /app/data/models.
+#
+# LM_ASSIST (Stage B fragment reranker) stays OFF in the container: the bundled
+# llama-server runs CPU-only (the entrypoint launches it without -ngl and there
+# is no GPU passthrough), so scoring the ~12 candidate fragments per compose
+# exceeds the latency budget, times out, and fails open. GPU *native* installs
+# enable it via .env.nvidia / .env.apple-silicon.
 ENV LADYBUG_DB_PATH=/app/data/ladybug \
     DUCKDB_PATH=/app/data/skills.duck \
     LOG_LEVEL=INFO \
+    LM_ASSIST=off \
     RUNTIME_EMBED_BASE_URL=http://localhost:47951 \
     RUNTIME_EMBEDDING_MODEL=nomic-embed-text-v1.5.Q8_0.gguf \
     SIGNAL_INTENT_BACKEND=reranker \
