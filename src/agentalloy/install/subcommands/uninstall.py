@@ -759,7 +759,11 @@ def _remove_uv_tool() -> dict[str, Any]:
 
 
 def _unwire_repo_local(
-    repo_root: Path, handled_paths: set[str]
+    repo_root: Path,
+    handled_paths: set[str],
+    *,
+    harness: str | None = None,
+    remove_lifecycle: bool = True,
 ) -> tuple[list[Path], list[dict[str, Any]]]:
     """Surgical per-repo proxy + lifecycle teardown for a single wired repo.
 
@@ -773,24 +777,46 @@ def _unwire_repo_local(
     sweeping this across every recorded repo is safe and self-guarding (a
     tampered ``repo_root`` simply targets a path that doesn't exist → no-op).
 
+    ``harness`` scopes the proxy-carrier removal to a single harness's carrier
+    (``None`` removes every harness's, the unscoped path). ``remove_lifecycle``
+    gates the shared ``.agentalloy/{phase,config}`` + empty-husk teardown — the
+    caller sets it False when another harness still owns this repo, so the
+    workflow state survives a per-harness unwire.
+
     Returns ``(proxy_paths_removed, files_removed_records)``.
     """
     proxy_removed: list[Path] = []
     files_removed: list[dict[str, Any]] = []
-    # Skip anything the harness walk already restored via original_content.
-    if str(repo_root / ".aider.conf.yml") not in handled_paths:
+    # Skip anything the harness walk already restored via original_content, and —
+    # under a per-harness unwire — anything belonging to a different harness.
+    if _harness_match(harness, "aider") and str(repo_root / ".aider.conf.yml") not in handled_paths:
         proxy_removed.extend(uninstall_proxy._unwire_proxy_aider(repo_root))
     opencode_env = str(repo_root / ".opencode" / ".agentalloy-env")
     opencode_prompt = str(repo_root / ".opencode" / "system-prompt.md")
-    if opencode_env not in handled_paths and opencode_prompt not in handled_paths:
+    if (
+        _harness_match(harness, "opencode")
+        and opencode_env not in handled_paths
+        and opencode_prompt not in handled_paths
+    ):
         proxy_removed.extend(uninstall_proxy._unwire_proxy_opencode(repo_root))
-    if str(repo_root / ".cline" / "settings.json") not in handled_paths:
+    if (
+        _harness_match(harness, "cline")
+        and str(repo_root / ".cline" / "settings.json") not in handled_paths
+    ):
         proxy_removed.extend(uninstall_proxy._unwire_proxy_cline(repo_root))
-    if str(repo_root / ".claude" / "settings.local.json") not in handled_paths:
+    if (
+        _harness_match(harness, "claude-code")
+        and str(repo_root / ".claude" / "settings.local.json") not in handled_paths
+    ):
         proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(repo_root))
 
-    # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config).
+    # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config) is
+    # shared across every harness wired into this repo (one workflow machine per
+    # repo). Only tear it down when no other harness remains (remove_lifecycle).
     # Contracts under .agentalloy/contracts/ are user work and are preserved.
+    if not remove_lifecycle:
+        return proxy_removed, files_removed
+
     for _name in ("phase", "config"):
         _state_file = repo_root / ".agentalloy" / _name
         if _state_file.exists():
@@ -815,6 +841,75 @@ def _unwire_repo_local(
     return proxy_removed, files_removed
 
 
+def _harness_match(target: str | None, this: str | None) -> bool:
+    """True when ``this`` harness is in scope for a teardown filtered by ``target``.
+
+    ``target is None`` is the unscoped path (every harness in scope) and matches
+    anything. Otherwise only the named harness matches — used to skip another
+    harness's carriers during a per-harness ``unwire --harness <name>``.
+    """
+    return target is None or target == this
+
+
+def _harness_in(target: str | None, names: tuple[str, ...]) -> bool:
+    """Like :func:`_harness_match` but for a carrier owned by any of several harnesses."""
+    return target is None or target in names
+
+
+def _resolves_equal(a: str | Path, b: Path) -> bool:
+    """Path equality by resolved target; False if either side can't resolve."""
+    try:
+        return Path(a).resolve() == b
+    except OSError:
+        return False
+
+
+def _harnesses_in_repo(
+    entries: list[dict[str, Any]], repo_root: Path, *, exclude: str | None = None
+) -> set[str]:
+    """Distinct harness names with a recorded carrier under ``repo_root``.
+
+    ``exclude`` drops one harness (the one being unwired) so the caller can ask
+    "does any OTHER harness still own this repo?" — which decides whether the
+    repo's shared lifecycle state survives a per-harness unwire.
+    """
+    repo_resolved = repo_root.resolve()
+    found: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        harness = entry.get("harness")
+        rr = entry.get("repo_root")
+        if not (isinstance(harness, str) and harness and isinstance(rr, str)):
+            continue
+        if harness == exclude:
+            continue
+        if _resolves_equal(rr, repo_resolved):
+            found.add(harness)
+    return found
+
+
+def _harness_in_other_repos(
+    entries: list[dict[str, Any]], harness: str, *, this_repo: Path
+) -> bool:
+    """True if ``harness`` has a carrier recorded for some repo other than ``this_repo``.
+
+    Guards the shared user-scope config (``~/.hermes/config.yaml``,
+    ``~/.agentalloy/claude-code-env.sh``): a per-harness unwire only removes it
+    when this is the last repo using that harness ("last repo out").
+    """
+    this_resolved = this_repo.resolve()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("harness") != harness:
+            continue
+        rr = entry.get("repo_root")
+        if isinstance(rr, str) and rr and not _resolves_equal(rr, this_resolved):
+            return True
+    return False
+
+
 def uninstall(
     remove_data: bool = False,
     force: bool = False,
@@ -826,6 +921,7 @@ def uninstall(
     remove_models: bool = False,
     remove_wiring: bool = True,
     stop_services: bool | None = None,
+    harness: str | None = None,
 ) -> dict[str, Any]:
     """Remove harness wiring, .env, and state. Returns contract-shaped result.
 
@@ -840,6 +936,13 @@ def uninstall(
     teardown — once the CLI is gone the user can no longer ``cd && unwire``
     into other repos). The ``unwire`` callsite passes ``all_repos=False``
     to preserve cwd-only semantics.
+
+    ``harness`` scopes the teardown to a single harness when set (the
+    ``unwire --harness <name>`` path). Only that harness's carriers are
+    removed; other harnesses wired in the same repo, and the repo's shared
+    lifecycle state, are left intact. The shared user-scope config for the
+    named harness is removed only when no other recorded repo still wires it.
+    ``None`` (the default) keeps the unscoped behavior — every harness in scope.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
@@ -954,6 +1057,11 @@ def uninstall(
     # can skip them to avoid double-processing.
     handled_paths: set[str] = set()
     for entry in harness_entries:
+        # Per-harness unwire: skip carriers recorded for a different harness so
+        # the named teardown leaves every other wired harness intact. None (the
+        # unscoped path) matches every entry.
+        if not _harness_match(harness, entry.get("harness")):
+            continue
         raw_path = entry.get("path")
         if not isinstance(raw_path, str) or not raw_path:
             warnings.append(f"Skipping harness entry with non-string path: {entry!r}")
@@ -1148,21 +1256,38 @@ def uninstall(
                 seen_roots.add(rr_resolved)
                 repo_targets.append(rr_path)
         for _repo in repo_targets:
-            _pr, _fr = _unwire_repo_local(_repo, handled_paths)
+            # Lifecycle state (.agentalloy/phase, config) is shared by every
+            # harness wired into a repo. On a per-harness unwire, keep it while
+            # any OTHER harness still owns the repo; drop it only when this is the
+            # last harness out (or on the unscoped path, harness is None).
+            remove_lifecycle = harness is None or not _harnesses_in_repo(
+                harness_entries, _repo, exclude=harness
+            )
+            _pr, _fr = _unwire_repo_local(
+                _repo, handled_paths, harness=harness, remove_lifecycle=remove_lifecycle
+            )
             proxy_removed.extend(_pr)
             files_removed.extend(_fr)
 
-    # User-scope proxies: only run during a global (all_repos) uninstall to avoid
-    # removing global home-dir config when unwiring an unrelated repo.
-    if remove_wiring and all_repos:
+    # User-scope proxies (shared home-dir config). A global (all_repos) teardown
+    # always sweeps them. A per-harness unwire removes only the named harness's
+    # shared config, and only when this is the LAST repo wiring it ("last repo
+    # out") — otherwise the harness is left working in the user's other repos.
+    # Plain per-repo unwire (no harness, no --all) never touches home-dir config.
+    last_repo_for_harness = (
+        harness is not None
+        and not all_repos
+        and not _harness_in_other_repos(harness_entries, harness, this_repo=root)
+    )
+    if remove_wiring and (all_repos or last_repo_for_harness):
         hermes_config = Path.home() / ".hermes" / "config.yaml"
-        if str(hermes_config) not in handled_paths:
+        if _harness_match(harness, "hermes-agent") and str(hermes_config) not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_hermes_agent("user", root))
         claude_env = Path.home() / ".agentalloy" / "claude-code-env.sh"
-        if str(claude_env) not in handled_paths:
+        if _harness_match(harness, "claude-code") and str(claude_env) not in handled_paths:
             proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code(root))
         # Also remove hook entries from settings.json (legacy path)
-        if all_repos:
+        if _harness_match(harness, "claude-code"):
             settings_removed = uninstall_proxy._unwire_claude_code_hooks_settings_json()
             for sr in settings_removed:
                 files_removed.append(sr)
@@ -1181,7 +1306,12 @@ def uninstall(
 
     # 2. Handle Continue.dev marker cleanup (markdown injection variant)
     continuerc = root / ".continuerc.json"
-    if remove_wiring and continuerc.exists() and str(continuerc) not in handled_paths:
+    if (
+        remove_wiring
+        and _harness_in(harness, ("continue-closed", "continue-local"))
+        and continuerc.exists()
+        and str(continuerc) not in handled_paths
+    ):
         try:
             config = json.loads(continuerc.read_text())
             modified = False
@@ -1231,7 +1361,12 @@ def uninstall(
 
     # 2b. Handle Cursor MCP config cleanup (.cursor/mcp.json)
     cursor_mcp = root / ".cursor" / "mcp.json"
-    if remove_wiring and cursor_mcp.exists() and str(cursor_mcp) not in handled_paths:
+    if (
+        remove_wiring
+        and _harness_match(harness, "cursor")
+        and cursor_mcp.exists()
+        and str(cursor_mcp) not in handled_paths
+    ):
         try:
             cfg = json.loads(cursor_mcp.read_text())
             servers = cfg.get("mcpServers")
@@ -1252,7 +1387,12 @@ def uninstall(
 
     # 2c. Handle user-scoped Claude Code MCP config (~/.claude/mcp_servers.json)
     claude_mcp = Path.home() / ".claude" / "mcp_servers.json"
-    if remove_wiring and claude_mcp.exists() and str(claude_mcp) not in handled_paths:
+    if (
+        remove_wiring
+        and _harness_match(harness, "claude-code")
+        and claude_mcp.exists()
+        and str(claude_mcp) not in handled_paths
+    ):
         try:
             cfg = json.loads(claude_mcp.read_text())
             servers = cfg.get("mcpServers")
@@ -1273,7 +1413,12 @@ def uninstall(
 
     # 3. Handle aider config cleanup
     aider_conf = root / ".aider.conf.yml"
-    if remove_wiring and aider_conf.exists() and str(aider_conf) not in handled_paths:
+    if (
+        remove_wiring
+        and _harness_match(harness, "aider")
+        and aider_conf.exists()
+        and str(aider_conf) not in handled_paths
+    ):
         content = aider_conf.read_text()
         aider_begin = "# <!-- BEGIN agentalloy install -->"
         aider_end = "# <!-- END agentalloy install -->"
@@ -1380,6 +1525,29 @@ def uninstall(
             details = cli_install_result.get("details", "")
             if details:
                 warnings.append(details)
+
+    # 8b. Prune the unwired harness's entries from install-state so a later
+    # per-harness unwire computes an accurate "remaining harnesses" set (full
+    # teardown deletes the whole state dir in step 7, so it needs no pruning).
+    # Match the harness and — unless this was an all-repos sweep — only entries
+    # belonging to the cwd repo. Idempotent: a second run finds nothing to prune.
+    if harness is not None and remove_wiring and not remove_user_state:
+        existing: list[dict[str, Any]] = st.get("harness_files_written", []) or []
+        kept: list[dict[str, Any]] = []
+        pruned = 0
+        for entry in existing:
+            if not isinstance(entry, dict):
+                kept.append(entry)
+                continue
+            rr = entry.get("repo_root")
+            same_repo = isinstance(rr, str) and bool(rr) and _resolves_equal(rr, root_resolved)
+            if entry.get("harness") == harness and (all_repos or same_repo):
+                pruned += 1
+                continue
+            kept.append(entry)
+        if pruned:
+            st["harness_files_written"] = kept
+            install_state.save_state(st)
 
     # Build result: use new key name, keep deprecated alias for one release.
     # 9. Return result dict

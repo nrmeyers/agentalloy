@@ -40,6 +40,9 @@ agentalloy setup
 
 # Once per repo — wire this project to the service. Auto-detects the harness.
 cd ~/dev/some-project && agentalloy wire
+# Drive the repo from more than one harness? Wire them together (repeatable):
+#   agentalloy wire --harness claude-code --harness hermes-agent
+# Later, drop just one with: agentalloy unwire --harness claude-code
 
 # If you chose manual mode during setup, start the service now:
 agentalloy serve
@@ -524,8 +527,9 @@ Operator commands the user can run later (these are NOT part of this runbook —
 |---|---|
 | `agentalloy status` | Show user state + wired repos + service reachability |
 | `agentalloy serve` | Start the service in foreground (terminal must stay open) |
-| `agentalloy wire` | Wire the current repo (cwd) to the service |
-| `agentalloy unwire` | Remove sentinels from the current repo only (keeps user state, `.env`, and corpus) |
+| `agentalloy wire` | Wire the current repo (cwd) to the service. `--harness` is repeatable/comma-tolerant — `agentalloy wire --harness claude-code --harness hermes-agent` wires several at once for a repo you drive from more than one harness |
+| `agentalloy wire --list` | List the harnesses wired in the current repo (with lifecycle mode + phase) |
+| `agentalloy unwire` | Remove sentinels from the current repo only (keeps user state, `.env`, and corpus). `--harness <name>` unwires just that one harness, leaving any other wired harness and the repo's shared `.agentalloy/{phase,config}` lifecycle state intact; the harness's shared user-scope config is removed only on the last repo using it |
 | `agentalloy doctor` | Runtime health check on demand |
 | `agentalloy update` | Migrate corpus in place after a version bump |
 | `agentalloy install-pack <name>` | Add a published skill pack to the user corpus |

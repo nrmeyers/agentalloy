@@ -45,9 +45,21 @@ def add_parser(
     )
     p.add_argument(
         "--harness",
-        choices=sorted(VALID_HARNESSES),
+        action="append",
         default=None,
-        help="Force a specific harness. Default: auto-detect from cwd.",
+        metavar="NAME",
+        help=(
+            "Force a specific harness. Repeatable and comma-tolerant — "
+            "`--harness claude-code --harness hermes-agent` or "
+            "`--harness claude-code,hermes-agent` wires both. "
+            f"Default: auto-detect from cwd. Choices: {', '.join(sorted(VALID_HARNESSES))}."
+        ),
+    )
+    p.add_argument(
+        "--list",
+        action="store_true",
+        dest="list_wired",
+        help="List the harnesses wired in this repo (with lifecycle mode + phase) and exit.",
     )
     p.add_argument(
         "--port",
@@ -155,13 +167,13 @@ def _seed_entry_phase(root: Path) -> str | None:
 
 def _render_human(result: dict[str, Any]) -> None:
     """Render wire harness result in human-readable format."""
-    harness = result.get("harness", "unknown")
+    harnesses = result.get("harnesses") or [result.get("harness", "unknown")]
     files_written = result.get("files_written", [])
     files_modified = result.get("files_modified", [])
     total = len(files_written) + len(files_modified)
 
     print_rich("\n  [bold]Wire Harness[/bold]\n")
-    print_rich(f"  Harness: [bold]{harness}[/bold]")
+    print_rich(f"  Harness: [bold]{', '.join(harnesses)}[/bold]")
     print_rich(f"  Files: {total}")
 
     for f in files_written:
@@ -442,19 +454,98 @@ def _persist_extra_records(root: Path, harness: str, records: list[WireRecord]) 
     install_state.save_state(st, root)
 
 
+def _normalize_harnesses(raw: list[str] | str | None) -> list[str]:
+    """Flatten ``--harness`` values: repeatable AND comma-tolerant.
+
+    ``--harness a --harness b`` and ``--harness a,b`` both yield ``["a", "b"]``.
+    Order is preserved and duplicates are dropped. Validation against
+    ``VALID_HARNESSES`` is left to the caller so it can emit a friendly error.
+    A bare string (a direct ``argparse.Namespace`` built in tests/callers, vs.
+    the ``action="append"`` list the CLI produces) is treated as one value.
+    """
+    if not raw:
+        return []
+    items = [raw] if isinstance(raw, str) else raw
+    out: list[str] = []
+    for item in items:
+        for part in item.split(","):
+            name = part.strip()
+            if name and name not in out:
+                out.append(name)
+    return out
+
+
+def _list_wired(args: argparse.Namespace, cwd: Path) -> int:
+    """Print the harnesses wired in ``cwd`` plus the repo's lifecycle + phase."""
+    from agentalloy.install.subcommands.phase import _read_phase
+    from agentalloy.signals.skill_loader import _read_lifecycle_mode
+
+    st = install_state.load_state()
+    entries: list[dict[str, Any]] = st.get("harness_files_written") or []
+    wired: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        repo_root = entry.get("repo_root")
+        harness = entry.get("harness")
+        if not (isinstance(repo_root, str) and isinstance(harness, str) and harness):
+            continue
+        try:
+            same_repo = Path(repo_root).resolve() == cwd
+        except OSError:
+            continue
+        if same_repo and harness not in wired:
+            wired.append(harness)
+
+    phase_info = _read_phase(cwd)
+    result = {
+        "repo_root": str(cwd),
+        "harnesses": wired,
+        "lifecycle_mode": _read_lifecycle_mode(cwd),
+        "phase": phase_info.get("phase") if isinstance(phase_info, dict) else None,
+    }
+    write_result(result, args, human_fn=_render_wired_list)
+    return 0
+
+
+def _render_wired_list(result: dict[str, Any]) -> None:
+    """Human render for ``wire --list``."""
+    wired = result.get("harnesses") or []
+    print_rich("\n  [bold]Wired harnesses[/bold]\n")
+    if wired:
+        for harness in wired:
+            print_rich(f"    [green]•[/green] {harness}")
+    else:
+        print_rich("    [dim]none wired in this repo[/dim]")
+    print_rich(f"\n  Lifecycle: [bold]{result.get('lifecycle_mode', 'off')}[/bold]")
+    print_rich(f"  Phase: {result.get('phase') or '[dim]none[/dim]'}\n")
+
+
 def _run(args: argparse.Namespace) -> int:
     cwd = Path.cwd().resolve()
-    harness = args.harness or _detect_harness(cwd)
-    if harness is None:
-        print(
-            "ERROR: Could not detect a harness in the current directory.",
-            file=sys.stderr,
-        )
-        print(
-            f"FIX:   Pass --harness explicitly. Choices: {', '.join(sorted(VALID_HARNESSES))}.",
-            file=sys.stderr,
-        )
+
+    if getattr(args, "list_wired", False):
+        return _list_wired(args, cwd)
+
+    harnesses = _normalize_harnesses(args.harness)
+    invalid = [h for h in harnesses if h not in VALID_HARNESSES]
+    if invalid:
+        print(f"ERROR: Unknown harness(es): {', '.join(invalid)}.", file=sys.stderr)
+        print(f"FIX:   Choices: {', '.join(sorted(VALID_HARNESSES))}.", file=sys.stderr)
         return 1
+    if not harnesses:
+        detected = _detect_harness(cwd)
+        if detected is None:
+            print(
+                "ERROR: Could not detect a harness in the current directory.",
+                file=sys.stderr,
+            )
+            print(
+                f"FIX:   Pass --harness explicitly. Choices: {', '.join(sorted(VALID_HARNESSES))}.",
+                file=sys.stderr,
+            )
+            return 1
+        harnesses = [detected]
 
     if args.port is not None:
         port = install_state.validate_port(args.port)
@@ -462,19 +553,23 @@ def _run(args: argparse.Namespace) -> int:
         st = install_state.load_state()
         port = install_state.validate_port(st.get("port", 47950))
 
-    resolve_via(harness, getattr(args, "via", None))  # validated; always proxy
-    result = wire_harness(harness, port=port, root=cwd, force=args.force)
-
-    # Resolve and persist the per-repo lifecycle mode the proxy reads on every
-    # turn. `off` lets a repo with its own agents/workflows opt out of the
-    # intake front-door and phase forcing (the collision this guards).
+    # Lifecycle mode + phase are repo-global — one workflow machine per repo,
+    # regardless of how many harnesses point at the proxy. Resolve and seed them
+    # ONCE, before wiring any carrier, so wiring a second harness never re-runs
+    # (or clobbers) the first's lifecycle decision.
     from agentalloy.signals.skill_loader import _write_lifecycle_mode
 
-    mode, detected = _resolve_lifecycle_mode(args, cwd)
+    mode, detected_workflow = _resolve_lifecycle_mode(args, cwd)
     _write_lifecycle_mode(cwd, mode)
-    result["lifecycle_mode"] = mode
-    if detected:
-        result["custom_workflow_detected"] = detected
+
+    result: dict[str, Any] = {
+        "harnesses": [],
+        "files_written": [],
+        "files_modified": [],
+        "lifecycle_mode": mode,
+    }
+    if detected_workflow:
+        result["custom_workflow_detected"] = detected_workflow
 
     if mode == "full":
         # Activate this repo: seed the entry phase so composition engages on the
@@ -497,30 +592,44 @@ def _run(args: argparse.Namespace) -> int:
             phase_file.unlink()
             result["stale_phase_cleared"] = True
 
-    # Repo-local instruction shaping (claude-code only). Best-effort — wiring
-    # already succeeded, so never fail it over these. 1b soft note is full-only
-    # (AgentAlloy driving); 1c clean-room is opt-in via --clean-room.
-    extra: list[WireRecord] = []
-    if harness == "claude-code":
-        clean_room = bool(getattr(args, "clean_room", False))
-        if mode == "full":
-            note = _write_soft_precedence_note(cwd)
-            if note is not None:
-                extra.append(note)
-                result["soft_precedence_note"] = note.path
-        # Both the (full-mode) status line and the (opt-in) clean-room excludes
-        # live in .claude/settings.json — written together in a single record so
-        # unwire reverses them as one and neither captures the other as "original".
-        settings_rec = _write_claude_settings(
-            cwd, statusline=(mode == "full"), clean_room=clean_room
-        )
-        if settings_rec is not None:
-            extra.append(settings_rec)
+    # Wire each requested harness's carrier in turn. Carriers are disjoint across
+    # harnesses, and _persist_extra_records merges state by path, so stacking a
+    # second harness leaves the first's records intact.
+    for harness in harnesses:
+        resolve_via(harness, getattr(args, "via", None))  # validated; always proxy
+        r = wire_harness(harness, port=port, root=cwd, force=args.force)
+        result["harnesses"].append(harness)
+        result["files_written"].extend(r.get("files_written") or [])
+        result["files_modified"].extend(r.get("files_modified") or [])
+
+        # Repo-local instruction shaping (claude-code only). Best-effort — wiring
+        # already succeeded, so never fail it over these. 1b soft note is full-only
+        # (AgentAlloy driving); 1c clean-room is opt-in via --clean-room.
+        extra: list[WireRecord] = []
+        if harness == "claude-code":
+            clean_room = bool(getattr(args, "clean_room", False))
             if mode == "full":
-                result["statusline"] = _STATUSLINE_COMMAND
-            if clean_room:
-                result["clean_room_excludes"] = settings_rec.path
-    _persist_extra_records(cwd, harness, extra)
+                note = _write_soft_precedence_note(cwd)
+                if note is not None:
+                    extra.append(note)
+                    result["soft_precedence_note"] = note.path
+            # Both the (full-mode) status line and the (opt-in) clean-room excludes
+            # live in .claude/settings.json — written together in a single record so
+            # unwire reverses them as one and neither captures the other as "original".
+            settings_rec = _write_claude_settings(
+                cwd, statusline=(mode == "full"), clean_room=clean_room
+            )
+            if settings_rec is not None:
+                extra.append(settings_rec)
+                if mode == "full":
+                    result["statusline"] = _STATUSLINE_COMMAND
+                if clean_room:
+                    result["clean_room_excludes"] = settings_rec.path
+        _persist_extra_records(cwd, harness, extra)
+
+    # Back-compat: keep the scalar `harness` key for existing callers / single
+    # render path; a comma-joined string when several were wired at once.
+    result["harness"] = harnesses[0] if len(harnesses) == 1 else ", ".join(harnesses)
 
     # Restore data (original_content) is already persisted to install-state.json
     # by the wiring functions above; strip it from the command output so a prior

@@ -19,6 +19,7 @@ import argparse
 
 from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
 from agentalloy.install.subcommands.uninstall import uninstall
+from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
 
 
 def add_parser(
@@ -39,6 +40,14 @@ def add_parser(
         dest="all_repos",
         help="Unwire every repo's harness wiring (and shared user-scope configs), "
         "not just the current repo. Still keeps user state, .env, corpus, and services.",
+    )
+    p.add_argument(
+        "--harness",
+        choices=sorted(VALID_HARNESSES),
+        default=None,
+        help="Unwire only this harness; leave any other wired harness and the repo's "
+        "shared lifecycle state (.agentalloy/phase, config) intact. Combine with --all "
+        "to unwire this harness across every recorded repo.",
     )
     add_json_flag(p)
     p.set_defaults(func=_run)
@@ -64,6 +73,10 @@ def _run(args: argparse.Namespace) -> int:
         stop_services=False,
         remove_models=False,
         remove_wiring=True,
+        # When set, scope the teardown to a single harness: leave any other wired
+        # harness and the repo's shared lifecycle state (.agentalloy/phase, config)
+        # in place. None == today's behavior (every harness in scope).
+        harness=getattr(args, "harness", None),
     )
     write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Unwire"))
     return 0

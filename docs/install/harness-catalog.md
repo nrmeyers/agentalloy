@@ -18,9 +18,12 @@ github-copilot) receive a proxy instruction block explaining the proxy is active
 
 ### Wiring modes
 
-`agentalloy wire` always uses proxy wiring (its only flags are `--harness`, `--port`,
-`--via proxy`, `--force`, `--lifecycle-mode`, `--clean-room`, `--json`). The `--legacy`
-and `--mcp-fallback` flags below live on **`agentalloy wire-harness`**, not on `wire`.
+`agentalloy wire` always uses proxy wiring (its flags are `--harness`, `--port`,
+`--via proxy`, `--force`, `--lifecycle-mode`, `--clean-room`, `--list`, `--json`). The
+`--legacy` and `--mcp-fallback` flags below live on **`agentalloy wire-harness`**, not on
+`wire`. `--harness` is repeatable and comma-tolerant
+(`--harness claude-code --harness hermes-agent` or `--harness claude-code,hermes-agent`);
+`wire --list` prints the harnesses currently wired in the cwd repo.
 
 | `wire-harness` flag | Behavior |
 |------|----------|
@@ -42,6 +45,23 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
 | `codex` | `~/.codex/config.toml` | `apiBaseUrl` (sentinel-bounded block) | P1 |
 | `openclaw` | `~/.openclaw/plugins.json` | agentalloy plugin entry (proxy base URL) | P1 |
+
+#### Multiple harnesses per repo
+
+A repo can carry several harness carriers at once — e.g. you drive it from both Claude
+Code and Hermes. The carriers are disjoint (`.claude/settings.local.json` vs.
+`~/.hermes/config.yaml`), so wiring a second harness never disturbs the first, and
+`install-state.json#harness_files_written` tags every entry with its `harness` + `repo_root`.
+
+The SDD lifecycle is **shared** across a repo's harnesses — there is one
+`.agentalloy/{phase,config}` per repo, not one per harness. Consequences:
+
+- `agentalloy unwire --harness <name>` removes only that harness's carriers and **keeps**
+  the lifecycle state while any other harness still owns the repo. The state files (and the
+  empty `.agentalloy/` husk) are removed only when the last harness is unwired.
+- A harness's shared **user-scope** config (`~/.hermes/config.yaml`,
+  `~/.agentalloy/claude-code-env.sh`) is removed only on the **last repo** wiring that
+  harness, so a per-harness unwire in one repo never breaks it in your other repos.
 
 ### Anthropic Messages Router
 
