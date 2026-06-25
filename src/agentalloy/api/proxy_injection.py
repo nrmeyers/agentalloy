@@ -21,6 +21,9 @@ inject_into_openai_messages
     Inject into the last user message of a ``list[ProxyMessage]``.
 anthropic_marker_begin / ANTHROPIC_MARKER_END
     Phase-stamped workflow markers shared by both injectors.
+BANNER_MARKER_BEGIN / BANNER_MARKER_END
+    Non-phase-stamped markers for the one-line per-turn phase banner
+    (``kind="banner"``: strip-and-replaced every carrier turn).
 anthropic_has_marker
     Cadence helper: is a matching marker already present in a payload?
 """
@@ -58,6 +61,14 @@ ANTHROPIC_MARKER_END = "<!-- END AGENTALLOY-CONTEXT -->"
 # session.
 SYSTEM_MARKER_BEGIN = "<!-- BEGIN AGENTALLOY-SYSTEM -->"
 SYSTEM_MARKER_END = "<!-- END AGENTALLOY-SYSTEM -->"
+
+# Banner markers are NOT phase-stamped: the one-line phase banner is strip-and-replaced
+# on EVERY carrier turn (the progress count changes turn to turn), so a single
+# non-phase-stamped marker family lets the prior banner be removed without knowing the
+# phase it carried. Distinct from the workflow and system families so the banner never
+# disturbs those blocks.
+BANNER_MARKER_BEGIN = "<!-- BEGIN AGENTALLOY-BANNER -->"
+BANNER_MARKER_END = "<!-- END AGENTALLOY-BANNER -->"
 
 # Matches the phase value inside a workflow begin marker.
 _WORKFLOW_BEGIN_PREFIX = "<!-- BEGIN AGENTALLOY-CONTEXT phase="
@@ -105,6 +116,11 @@ def _strip_workflow_block(text: str) -> str:
     if phase is None:
         return text
     return _strip_block(text, anthropic_marker_begin(phase), ANTHROPIC_MARKER_END)
+
+
+def _strip_banner_block(text: str) -> str:
+    """Remove the banner block from *text* (the markers are not phase-stamped)."""
+    return _strip_block(text, BANNER_MARKER_BEGIN, BANNER_MARKER_END)
 
 
 def _block_text(begin: str, block: str, end: str) -> str:
@@ -192,6 +208,12 @@ def inject_into_anthropic_messages(
         Uses ``SYSTEM_MARKER_BEGIN`` .. ``SYSTEM_MARKER_END``. Injected at most
         once per session: if any user message already carries a system marker,
         the payload is returned unchanged.
+    ``kind == "banner"``:
+        Uses ``BANNER_MARKER_BEGIN`` .. ``BANNER_MARKER_END``. NOT idempotent:
+        any existing banner block is stripped and a fresh one appended last every
+        time (the progress count changes turn to turn). ``phase`` is unused for the
+        marker (the family is not phase-stamped). The workflow and system blocks are
+        never touched.
     """
     raw = payload.get("messages")
     if not isinstance(raw, list):
@@ -207,6 +229,9 @@ def inject_into_anthropic_messages(
         # Once per session: any existing system marker short-circuits.
         if anthropic_has_marker(payload, kind="system"):
             return payload
+    elif kind == "banner":
+        begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
+        # Strip-and-replace every turn: no idempotent short-circuit.
     else:
         begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
         # Idempotent: current-phase block already present.
@@ -222,7 +247,12 @@ def inject_into_anthropic_messages(
     new_content: str | list[dict[str, Any]]
 
     if isinstance(content, str):
-        stripped = _strip_workflow_block(content) if kind == "workflow" else content
+        if kind == "workflow":
+            stripped = _strip_workflow_block(content)
+        elif kind == "banner":
+            stripped = _strip_banner_block(content)
+        else:
+            stripped = content
         new_content = f"{stripped}\n\n{new_block}" if stripped else new_block
     elif isinstance(content, list):
         raw_blocks = cast("list[Any]", content)
@@ -230,6 +260,9 @@ def inject_into_anthropic_messages(
         if kind == "workflow":
             # Drop any stale workflow text-block, then append the fresh one.
             blocks = [b for b in blocks if not _text_block_contains(b, _workflow_begin_any())]
+        elif kind == "banner":
+            # Drop any prior banner text-block, then append the fresh one.
+            blocks = [b for b in blocks if not _text_block_contains(b, BANNER_MARKER_BEGIN)]
         new_content = [*blocks, {"type": "text", "text": new_block}]
     else:
         # Unexpected content shape -- leave the payload untouched.
@@ -267,20 +300,34 @@ def inject_into_openai_messages(
     - no ``role == "user"`` message,
     - the target already carries the current-phase begin marker (idempotent),
     - an unexpected content shape (neither ``str`` nor block ``list``).
+
+    ``kind == "banner"`` uses the non-phase-stamped banner markers and is NOT
+    idempotent: any existing banner block is stripped and a fresh one appended last
+    every time (the progress count changes turn to turn), so it returns ``None`` only
+    on no-user-message or an unexpected content shape. The workflow and system blocks
+    are never touched.
     """
     idx = _last_user_message_index(messages)
     if idx is None:
         return None
 
-    begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
+    if kind == "banner":
+        begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
+    else:
+        begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
     target = messages[idx]
     content = target.content
 
     # Idempotent: current-phase block already present in the target.
     if isinstance(content, str):
-        if begin in content:
+        if kind != "banner" and begin in content:
             return None
-        stripped = _strip_workflow_block(content) if kind == "workflow" else content
+        if kind == "workflow":
+            stripped = _strip_workflow_block(content)
+        elif kind == "banner":
+            stripped = _strip_banner_block(content)
+        else:
+            stripped = content
         new_block = _block_text(begin, block, end)
         new_content: str | list[dict[str, Any]] = (
             f"{stripped}\n\n{new_block}" if stripped else new_block
@@ -289,11 +336,14 @@ def inject_into_openai_messages(
         # ProxyMessage.content is str | list[dict[str, Any]] | None, so the list
         # branch is already list[dict[str, Any]] — no cast needed.
         blocks = content
-        if any(_text_block_contains(b, begin) for b in blocks):
+        if kind != "banner" and any(_text_block_contains(b, begin) for b in blocks):
             return None
         if kind == "workflow":
             # Drop any stale workflow text-block, then append the fresh one.
             blocks = [b for b in blocks if not _text_block_contains(b, _workflow_begin_any())]
+        elif kind == "banner":
+            # Drop any prior banner text-block, then append the fresh one.
+            blocks = [b for b in blocks if not _text_block_contains(b, BANNER_MARKER_BEGIN)]
         new_block = _block_text(begin, block, end)
         new_content = [*blocks, {"type": "text", "text": new_block}]
     else:

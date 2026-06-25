@@ -12,6 +12,8 @@ from typing import Any
 
 from agentalloy.api.proxy_injection import (
     ANTHROPIC_MARKER_END,
+    BANNER_MARKER_BEGIN,
+    BANNER_MARKER_END,
     SYSTEM_MARKER_BEGIN,
     SYSTEM_MARKER_END,
     anthropic_has_marker,
@@ -22,6 +24,8 @@ from agentalloy.api.proxy_injection import (
 from agentalloy.api.proxy_models import ProxyMessage
 
 ANTHRO_BLOCK = "# Workflow prose\nDo the design work."
+BANNER_1 = "[agentalloy · build] MUST produce x before advancing · 1/2 sections (missing: B)"
+BANNER_2 = "[agentalloy · build] MUST produce x before advancing · 2/2 sections"
 
 
 def _text_blocks(content: Any) -> list[dict[str, Any]]:
@@ -382,3 +386,194 @@ class TestOpenAIInjection:
     def test_none_content_returns_none(self) -> None:
         messages = [ProxyMessage(role="user", content=None)]
         assert inject_into_openai_messages(messages, ANTHRO_BLOCK, phase="design") is None
+
+
+class TestAnthropicBannerInjection:
+    """``kind="banner"`` on the Anthropic surface: strip-and-replace every turn,
+    non-phase-stamped markers, appended last, never disturbing workflow/system."""
+
+    def test_banner_injects_into_last_user_string(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": "SYS",
+            "messages": [
+                {"role": "user", "content": "earlier"},
+                {"role": "user", "content": "latest user"},
+            ],
+        }
+        result = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        last = result["messages"][1]["content"]
+        assert BANNER_MARKER_BEGIN in last
+        assert BANNER_MARKER_END in last
+        assert BANNER_1 in last
+        # Banner appended LAST (freshest position), original text preserved first.
+        assert last.startswith("latest user")
+        assert last.rstrip().endswith(BANNER_MARKER_END)
+        # Not phase-stamped: no workflow marker introduced.
+        assert anthropic_marker_begin("build") not in last
+        # Earlier message + system untouched, original not mutated.
+        assert result["messages"][0]["content"] == "earlier"
+        assert result["system"] == "SYS"
+        assert payload["messages"][1]["content"] == "latest user"
+
+    def test_banner_injects_into_last_user_list(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            ],
+        }
+        result = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        content = result["messages"][0]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "hi"}
+        assert BANNER_1 in _joined_text(content)
+        assert BANNER_MARKER_BEGIN in _joined_text(content)
+
+    def test_second_banner_strip_replaces_no_stacking_string(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        once = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        twice = inject_into_anthropic_messages(once, BANNER_2, phase="build", kind="banner")
+        content = twice["messages"][0]["content"]
+        # Exactly one banner block remains, carrying the NEW text.
+        assert content.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_2 in content
+        assert BANNER_1 not in content
+        # Original user text still present and first.
+        assert content.startswith("hi")
+
+    def test_second_banner_strip_replaces_no_stacking_list(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        }
+        once = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        twice = inject_into_anthropic_messages(once, BANNER_2, phase="build", kind="banner")
+        content = twice["messages"][0]["content"]
+        joined = _joined_text(content)
+        assert joined.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_2 in joined
+        assert BANNER_1 not in joined
+        # The plain "hi" block survives.
+        assert {"type": "text", "text": "hi"} in content
+
+    def test_banner_coexists_with_workflow_block_string(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        wf = inject_into_anthropic_messages(payload, ANTHRO_BLOCK, phase="build")
+        both = inject_into_anthropic_messages(wf, BANNER_1, phase="build", kind="banner")
+        content = both["messages"][0]["content"]
+        # Both blocks present, each exactly once, untouched.
+        assert content.count(anthropic_marker_begin("build")) == 1
+        assert ANTHRO_BLOCK in content
+        assert content.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_1 in content
+        # A fresh banner replaces only the banner; the workflow block stays put.
+        again = inject_into_anthropic_messages(both, BANNER_2, phase="build", kind="banner")
+        c2 = again["messages"][0]["content"]
+        assert c2.count(anthropic_marker_begin("build")) == 1
+        assert ANTHRO_BLOCK in c2
+        assert c2.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_2 in c2 and BANNER_1 not in c2
+
+    def test_banner_coexists_with_workflow_block_list(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        }
+        wf = inject_into_anthropic_messages(payload, ANTHRO_BLOCK, phase="build")
+        both = inject_into_anthropic_messages(wf, BANNER_1, phase="build", kind="banner")
+        content = both["messages"][0]["content"]
+        joined = _joined_text(content)
+        assert joined.count(anthropic_marker_begin("build")) == 1
+        assert ANTHRO_BLOCK in joined
+        assert joined.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_1 in joined
+
+    def test_banner_no_user_message_returns_unchanged(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "messages": [{"role": "assistant", "content": "a"}],
+        }
+        result = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        assert result == payload
+
+    def test_banner_does_not_touch_top_level_system(self) -> None:
+        payload: dict[str, Any] = {
+            "model": "claude",
+            "system": [{"type": "text", "text": "cached system"}],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        result = inject_into_anthropic_messages(payload, BANNER_1, phase="build", kind="banner")
+        assert result["system"] == [{"type": "text", "text": "cached system"}]
+
+
+class TestOpenAIBannerInjection:
+    """``kind="banner"`` on the OpenAI surface: strip-and-replace, returns a new
+    list or None on no-op (no user message / bad content shape)."""
+
+    def test_banner_injects_into_last_user_string(self) -> None:
+        messages = [
+            ProxyMessage(role="system", content="SYS"),
+            ProxyMessage(role="user", content="latest user"),
+        ]
+        result = inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner")
+        assert result is not None
+        last = result[1].content
+        assert isinstance(last, str)
+        assert BANNER_MARKER_BEGIN in last and BANNER_1 in last
+        assert last.startswith("latest user")
+        # System message untouched, input not mutated.
+        assert result[0].content == "SYS"
+        assert messages[1].content == "latest user"
+
+    def test_second_banner_strip_replaces_no_stacking(self) -> None:
+        messages = [ProxyMessage(role="user", content="hi")]
+        once = inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner")
+        assert once is not None
+        twice = inject_into_openai_messages(once, BANNER_2, phase="build", kind="banner")
+        assert twice is not None
+        content = twice[0].content
+        assert isinstance(content, str)
+        assert content.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_2 in content and BANNER_1 not in content
+        assert content.startswith("hi")
+
+    def test_second_banner_strip_replaces_no_stacking_list(self) -> None:
+        messages = [ProxyMessage(role="user", content=[{"type": "text", "text": "hi"}])]
+        once = inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner")
+        assert once is not None
+        twice = inject_into_openai_messages(once, BANNER_2, phase="build", kind="banner")
+        assert twice is not None
+        content = twice[0].content
+        assert isinstance(content, list)
+        joined = _openai_text(content)
+        assert joined.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_2 in joined and BANNER_1 not in joined
+        assert {"type": "text", "text": "hi"} in content
+
+    def test_banner_coexists_with_workflow_block(self) -> None:
+        messages = [ProxyMessage(role="user", content="hi")]
+        wf = inject_into_openai_messages(messages, ANTHRO_BLOCK, phase="build")
+        assert wf is not None
+        both = inject_into_openai_messages(wf, BANNER_1, phase="build", kind="banner")
+        assert both is not None
+        content = both[0].content
+        assert isinstance(content, str)
+        assert content.count(anthropic_marker_begin("build")) == 1
+        assert ANTHRO_BLOCK in content
+        assert content.count(BANNER_MARKER_BEGIN) == 1
+        assert BANNER_1 in content
+
+    def test_banner_no_user_message_returns_none(self) -> None:
+        messages = [ProxyMessage(role="assistant", content="a")]
+        assert inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner") is None
+
+    def test_banner_none_content_returns_none(self) -> None:
+        messages = [ProxyMessage(role="user", content=None)]
+        assert inject_into_openai_messages(messages, BANNER_1, phase="build", kind="banner") is None

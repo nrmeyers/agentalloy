@@ -376,6 +376,10 @@ async def proxy_chat_completions(
     # the LAST user message (the system block stays byte-identical for prompt-cache
     # safety); markers are committed only after a confirmed, non-empty injection, so
     # a degraded compose never burns the announce/cursor cadence.
+    # `current` tracks the latest request across two independent injections (workflow
+    # block, then the per-turn banner). `composed` flips ONLY for the workflow block —
+    # the banner is a recency anchor and must not register as a composition in telemetry.
+    current = request
     modified_request = request
     source_skill_ids: list[str] | None = None
     if (
@@ -386,11 +390,12 @@ async def proxy_chat_completions(
     ):
         phase = signal_result.phase
         try:
+            before = current
 
             def _inject_openai(text: str) -> ProxyRequest | None:
-                new_msgs = inject_into_openai_messages(request.messages, text, phase=phase)
+                new_msgs = inject_into_openai_messages(before.messages, text, phase=phase)
                 return (
-                    request.model_copy(update={"messages": new_msgs})
+                    before.model_copy(update={"messages": new_msgs})
                     if new_msgs is not None
                     else None
                 )
@@ -405,13 +410,34 @@ async def proxy_chat_completions(
                 delivered=lambda _out: True,
             )
             if injected is not None:
-                modified_request = injected
+                current = injected
                 composed = True
         except Exception:
             logger.warning(
                 "Composition/injection failed -- passing through unchanged", exc_info=True
             )
-            modified_request = request
+            current = request
+
+    # Per-turn banner — appended LAST so it is the freshest text. Runs even when
+    # should_compose is False (a banner-only turn), so it sits OUTSIDE the compose
+    # guard. Carrier-gated upstream: evaluate_signal only sets `banner` on a carrier
+    # turn. The banner must NOT flip `composed` (telemetry tracks composition, not the
+    # recency anchor). Soft: any failure leaves `current` unchanged.
+    if (
+        signal_result is not None
+        and signal_result.banner is not None
+        and signal_result.phase is not None
+    ):
+        try:
+            new_msgs = inject_into_openai_messages(
+                current.messages, signal_result.banner, phase=signal_result.phase, kind="banner"
+            )
+            if new_msgs is not None:
+                current = current.model_copy(update={"messages": new_msgs})
+        except Exception:
+            logger.warning("Banner injection failed -- skipping banner", exc_info=True)
+
+    modified_request = current
 
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).

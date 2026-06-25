@@ -25,6 +25,7 @@ from agentalloy.signals.predicates import (
     eval_phase_not_in,
     eval_tool_use_about_to_fire,
     evaluate_predicate,
+    section_completeness,
 )
 
 MET = PredicateResult.MET
@@ -376,3 +377,69 @@ def test_predicate_returns_unknown_on_io_error(tmp_path: Path):
     with patch("agentalloy.signals.predicates._read_file", return_value=None):
         result = eval_artifact_contains({"path": "spec.md", "pattern": "x"}, ctx)
     assert result == UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# section_completeness — banner progress helper
+# ---------------------------------------------------------------------------
+
+
+def test_section_completeness_all_present(tmp_path: Path):
+    (tmp_path / "spec.md").write_text("# Title\n## Acceptance Criteria\nx\n## Out of Scope\ny\n")
+    present, total, missing = section_completeness(
+        "spec.md", ["Acceptance Criteria", "Out of Scope"], tmp_path
+    )
+    assert (present, total, missing) == (2, 2, [])
+
+
+def test_section_completeness_some_missing_reports_in_order(tmp_path: Path):
+    # Only the second required section is present → present=1, missing keeps decl order.
+    (tmp_path / "spec.md").write_text("# Title\n## Out of Scope\ny\n")
+    present, total, missing = section_completeness(
+        "spec.md", ["Acceptance Criteria", "Out of Scope"], tmp_path
+    )
+    assert present == 1
+    assert total == 2
+    assert missing == ["Acceptance Criteria"]
+
+
+def test_section_completeness_tolerates_trailing_qualifier(tmp_path: Path):
+    # `_section_present` matching: a trailing qualifier still satisfies the bare name.
+    (tmp_path / "spec.md").write_text("## Acceptance Criteria:\n## Out of Scope (this phase)\n")
+    present, total, missing = section_completeness(
+        "spec.md", ["Acceptance Criteria", "Out of Scope"], tmp_path
+    )
+    assert (present, total, missing) == (2, 2, [])
+
+
+def test_section_completeness_missing_file_returns_all_missing(tmp_path: Path):
+    # No file matches the glob → (0, total, all required) by definition; never raises.
+    present, total, missing = section_completeness(
+        "docs/spec/*.md", ["Acceptance Criteria", "Out of Scope"], tmp_path
+    )
+    assert present == 0
+    assert total == 2
+    assert missing == ["Acceptance Criteria", "Out of Scope"]
+
+
+def test_section_completeness_glob_uses_first_match(tmp_path: Path):
+    (tmp_path / "docs" / "spec").mkdir(parents=True)
+    (tmp_path / "docs" / "spec" / "a.md").write_text("## Acceptance Criteria\n")
+    present, total, missing = section_completeness(
+        "docs/spec/*.md", ["Acceptance Criteria", "Out of Scope"], tmp_path
+    )
+    assert present == 1
+    assert total == 2
+    assert missing == ["Out of Scope"]
+
+
+def test_section_completeness_no_required_sections(tmp_path: Path):
+    # Empty requirement list → (0, 0, []); the banner caller then appends no progress.
+    assert section_completeness("anything.md", [], tmp_path) == (0, 0, [])
+
+
+def test_section_completeness_unreadable_file_returns_all_missing(tmp_path: Path):
+    (tmp_path / "spec.md").write_text("## Acceptance Criteria\n")
+    with patch("agentalloy.signals.predicates._read_file", return_value=None):
+        present, total, missing = section_completeness("spec.md", ["Acceptance Criteria"], tmp_path)
+    assert (present, total, missing) == (0, 1, ["Acceptance Criteria"])

@@ -59,6 +59,11 @@ change_summary: "two-tier cascade: qa reads its incoming work-item from contract
 raw_prose: |
   # SDD — QA (Verify and Review)
 
+  **Checkpoint first.** You MUST confirm the implementation (`src/`) and its tests (`tests/`) exist
+  before reviewing — if they do not, you skipped build; STOP and go back. You MUST record the gate
+  results in `docs/qa/<slug>.md` (**Checks** + **Review**). You MUST NOT add features or new scope
+  here — QA verifies, it does not build.
+
   Build proved each task green against its designed cases. QA is the wider net:
   the whole change at once, not one task at a time — does it actually do what
   spec promised, does the *full* suite pass, and does it clear the bar a human

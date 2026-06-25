@@ -59,6 +59,12 @@ change_summary: "two-tier cascade: spec reads its incoming work-item from contra
 raw_prose: |
   # SDD — Spec
 
+  **Checkpoint first.** You MUST confirm intake's contract exists under
+  `.agentalloy/contracts/` before scoping — if it does not, you skipped intake; STOP and go back.
+  You MUST write `docs/spec/<slug>.md` with its **Acceptance Criteria** and **Out of Scope**
+  sections. You MUST NOT design solutions or touch `src/` here — spec settles *what* and *done*,
+  never *how*.
+
   Intake handed you a contract: the *what*, and a decision that this needs the
   full lane. Your job is the highest-leverage step in the pipeline — turn that
   fuzzy "what" into a spec precise enough that design and build can't drift:

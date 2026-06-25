@@ -62,6 +62,11 @@ change_summary: fast-lane workflow — compressed spec+design+build for a single
 raw_prose: |
   # SDD — Fast Lane (sdd-fast)
 
+  **Checkpoint first.** The fast lane compresses spec + design + build into one pass, but you MUST
+  still write `docs/fast/<slug>.md` (**Acceptance Criteria**, **Approach**, **Test Cases**) before
+  coding, and you MUST prove the work with tests under `tests/` before ship. You MUST NOT skip the
+  acceptance and test cases just because the lane is fast — fast is not unspecified.
+
   You're on the fast lane: one compressed pass — spec → design → build → test —
   for a single, clearly-bounded task. It's the full lifecycle's spec + design +
   build collapsed into one pass (no build loop — one task, done once), then it

@@ -62,6 +62,11 @@ change_summary: "two-tier injection: build no longer authors contracts (design e
 raw_prose: |
   # SDD — Build
 
+  **Checkpoint first.** You MUST confirm `docs/design/<slug>/{approach,tasks,test-plan}.md` exist
+  before writing any code — if they do not, you skipped design; STOP and go back. You MUST work the
+  design's task slices as written and prove each with a test. You MUST NOT invent new architecture
+  or acceptance here — if you are making those decisions, you are in the wrong phase.
+
   Spec said *what*, design said *how* and *in what order*. Build is execution:
   work the design's task slices, one at a time, each proven by a test before you
   move on. No new decisions here — if you're inventing architecture or

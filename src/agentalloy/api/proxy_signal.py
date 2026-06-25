@@ -23,7 +23,12 @@ from agentalloy.api.proxy_session import resolve_session_key
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.signals.classifier import check_transition_trigger
 from agentalloy.signals.gates import INTAKE_PHASE, decide_transition
-from agentalloy.signals.prefilter import PreFilterMatch
+from agentalloy.signals.predicates import section_completeness
+from agentalloy.signals.prefilter import (
+    PreFilterMatch,
+    _extract_gate_paths,  # type: ignore[reportPrivateUsage]
+    _extract_gate_sections,  # type: ignore[reportPrivateUsage]
+)
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _MAX_ANNOUNCED_SESSIONS,
     _build_predicate_context,
@@ -37,6 +42,7 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _write_announced_atomic,
     _write_composed_atomic,
     _write_phase_atomic,
+    exit_gates_for_phase,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,6 +99,14 @@ class SignalResult:
     repo: str | None = None
     session_key: str | None = None
     session_source: str | None = None
+
+    # Per-turn phase banner: a compact ONE-LINE recency anchor injected into the
+    # trailing user message on EVERY carrier turn (independent of should_compose /
+    # announce / cursor — it fires even when no workflow block is composed). Keeps the
+    # active phase + its required artifact + section progress in the freshest position.
+    # Set only on a carrier turn with a known phase under the active lifecycle mode;
+    # None otherwise (and on any soft failure while building it). See `build_banner`.
+    banner: str | None = None
 
     # Deferred cadence markers. The signal layer DECIDES what to record but no
     # longer writes `.agentalloy/{announced,composed}` itself — committing at
@@ -161,6 +175,114 @@ def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path |
         return None, None
     only = in_phase[0].resolve()
     return only.relative_to(contracts_root).as_posix(), only
+
+
+# Per-phase banner directive — the imperative core of the per-turn recency banner,
+# keyed by SDD phase. Hand-tuned here because the pack corpus loads through a DuckDB
+# schema that carries no banner column; the gate-path derivation below is the fallback
+# for an unrecognized phase. Mirrors the MUST/MUST-NOT framing of each phase's orientation.
+_PHASE_BANNER_DIRECTIVE: dict[str, str] = {
+    "intake": "MUST capture the request as a contract (.agentalloy/contracts/) before any spec, design, or code",
+    "spec": "MUST write docs/spec/<slug>.md (Acceptance Criteria + Out of Scope) before designing or coding",
+    "design": "MUST write docs/design/<slug>/{approach,tasks,test-plan}.md before any src/ code",
+    "build": "MUST work the design's tasks with tests — no new architecture or acceptance decisions here",
+    "qa": "MUST record docs/qa/<slug>.md (Checks + Review) before shipping",
+    "ship": "MUST write docs/ship/<slug>.md (Summary + Rollback); ship only what QA approved",
+    "sdd-fast": "MUST write docs/fast/<slug>.md (Acceptance + Approach + Test Cases) and pass tests before ship",
+}
+
+
+def build_banner(
+    phase: str,
+    exit_gates: dict[str, Any],
+    project_root: Path,
+) -> str:
+    """Build the compact one-line phase banner for *phase*.
+
+    Format: ``[agentalloy · {phase}] {directive}{progress}``.
+
+    - **directive**: the hand-tuned :data:`_PHASE_BANNER_DIRECTIVE` entry for the phase;
+      for an unrecognized phase, the fallback ``MUST produce {artifact} before advancing``
+      where ``{artifact}`` is the first ``path`` glob from the exit gate (via
+      :func:`_extract_gate_paths`), or ``MUST satisfy the {phase} exit gate before
+      advancing`` when no path is derivable.
+    - **progress**: appended only when the gate declares required sections AND the
+      artifact file exists — `` · {present}/{total} sections`` plus
+      `` (missing: {first_missing})`` when any are missing. Computed via
+      :func:`section_completeness`, whose file I/O is fully wrapped, so a missing or
+      unreadable artifact contributes no progress suffix.
+
+    Cheap and soft: all derivation is wrapped so a malformed gate or unreadable
+    artifact yields a best-effort banner rather than raising.
+    """
+    directive = _PHASE_BANNER_DIRECTIVE.get(phase)
+    if directive is None:
+        try:
+            paths = _extract_gate_paths(exit_gates)
+        except Exception:
+            paths = []
+        directive = (
+            f"MUST produce {paths[0]} before advancing"
+            if paths
+            else f"MUST satisfy the {phase} exit gate before advancing"
+        )
+
+    # progress: present/total sections + first-missing, only when the artifact exists.
+    progress = ""
+    try:
+        sections = _extract_gate_sections(exit_gates)
+        paths = _extract_gate_paths(exit_gates)
+        if sections and paths:
+            present, total, missing = section_completeness(paths[0], sections, project_root)
+            # Only show progress once the artifact exists — section_completeness reports
+            # (0, total, all) for a missing/unreadable file, which we suppress so the
+            # banner doesn't claim "0/N sections" before the artifact is even created.
+            artifact_exists = bool(_glob_first_exists(paths[0], project_root))
+            if artifact_exists and total:
+                progress = f" · {present}/{total} sections"
+                if missing:
+                    progress += f" (missing: {missing[0]})"
+    except Exception:
+        progress = ""
+
+    return f"[agentalloy · {phase}] {directive}{progress}"
+
+
+def _banner_for_turn(
+    is_carrier: bool,
+    phase: str,
+    exit_gates: dict[str, Any],
+    project_root: Path,
+) -> str | None:
+    """The per-turn banner string, or None.
+
+    Returns the built banner only on a carrier turn (``is_carrier``) with a known
+    *phase*; None otherwise. Independent of the announce/cursor cadence. Soft: any
+    failure building the banner yields None rather than propagating — the banner is a
+    recency-anchor nicety and must never break ``evaluate_signal``. The caller has
+    already established the active (``full``) lifecycle mode and a valid phase.
+    """
+    if not is_carrier:
+        return None
+    try:
+        return build_banner(phase, exit_gates, project_root)
+    except Exception:
+        logger.debug("banner build failed for phase=%s", phase, exc_info=True)
+        return None
+
+
+def _glob_first_exists(path_glob: str, project_root: Path) -> bool:
+    """True if at least one file matches ``path_glob`` under ``project_root``.
+
+    Soft: any IO failure yields False so the banner's progress suffix is suppressed
+    rather than raising.
+    """
+    try:
+        from agentalloy.signals.predicates import _glob_files  # type: ignore[reportPrivateUsage]
+
+        return bool(_glob_files(project_root, path_glob))
+    except Exception:
+        return False
 
 
 async def evaluate_signal(
@@ -246,10 +368,15 @@ async def evaluate_signal(
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
     if skill is None:
+        # No DuckDB/packs workflow skill for the phase. We can't compose, but a
+        # carrier turn still gets a best-effort banner from the packaged exit gate
+        # (corpus-free) so the recency anchor survives a missing profile skill.
+        fallback_gates = exit_gates_for_phase(phase) or {}
         return SignalResult(
             should_compose=False,
             phase=phase,
             task=task,
+            banner=_banner_for_turn(is_carrier, phase, fallback_gates, cwd),
             repo=repo,
             session_key=session_key,
             session_source=session_source,
@@ -257,6 +384,12 @@ async def evaluate_signal(
 
     signal_keywords: list[str] = skill.get("signal_keywords") or []
     exit_gates: dict[str, Any] = skill.get("exit_gates") or {}
+
+    # Per-turn banner (recency anchor). Built once here for every carrier turn under
+    # the active lifecycle mode + a valid phase; independent of should_compose /
+    # announce / cursor, so it threads onto every return below — quiet passthrough,
+    # compose, or no-skill. Soft: never raises.
+    banner = _banner_for_turn(is_carrier, phase, exit_gates, cwd)
 
     # 3. Build predicate context
     ctx = _build_predicate_context(
@@ -356,6 +489,7 @@ async def evaluate_signal(
             should_compose=False,
             phase=phase,
             task=task,
+            banner=banner,
             gates_met=gates_met,
             gates_unmet=gates_unmet,
             qwen_calls=qwen_calls,
@@ -393,6 +527,7 @@ async def evaluate_signal(
         announce_cursor=announce_cursor,
         phase=phase,
         task=task,
+        banner=banner,
         pre_filter_matched=match.detail if match is not None else None,
         gates_met=gates_met,
         gates_unmet=gates_unmet,

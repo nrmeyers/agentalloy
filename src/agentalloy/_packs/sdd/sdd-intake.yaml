@@ -60,6 +60,10 @@ change_summary: "two-tier cascade: intake authors the next phase's work-item con
 raw_prose: |
   # SDD — Intake
 
+  **You MUST NOT design, plan, or write code in this phase.** Intake produces exactly one
+  artifact — the contract under `.agentalloy/contracts/` — and nothing else. If you catch
+  yourself proposing a solution, STOP: that is spec/design work, and you have not earned it yet.
+
   You open every session. Before any work, settle two things: **what are we
   doing**, and **how much process does it need**.
 

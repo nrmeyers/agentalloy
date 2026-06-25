@@ -70,6 +70,12 @@ change_summary: "two-tier injection hand-off: design now emits one build contrac
 raw_prose: |
   # SDD — Design
 
+  **Checkpoint first.** You MUST confirm `docs/spec/<slug>.md` exists and carries its
+  **Acceptance Criteria** before designing — if it does not, you skipped spec; STOP and write it.
+  You MUST NOT write any `src/` code in this phase: design produces documents only
+  (`docs/design/<slug>/{approach,tasks,test-plan}.md`). If you are editing source, you are in the
+  wrong phase.
+
   Spec settled *what* and *done*. Design settles *how* — the approach, the
   decisions you're committing to, and an ordered plan build can execute without
   re-deciding anything. Skipping straight to code is the classic SDD failure:

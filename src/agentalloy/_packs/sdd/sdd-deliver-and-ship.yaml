@@ -55,6 +55,11 @@ change_summary: "two-tier cascade: ship reads its incoming work-item from contra
 raw_prose: |
   # SDD — Ship (Deliver)
 
+  **Checkpoint first.** You MUST confirm QA signed off (`docs/qa/<slug>.md`, the bar green and the
+  review clean) before shipping — if not, you skipped QA; STOP and go back. You MUST write
+  `docs/ship/<slug>.md` with its **Summary** and **Rollback**, and you MUST ship only what QA
+  approved — no last-minute changes that never went through the gate.
+
   QA signed off: the bar is green and the review is clean. Ship delivers that
   verified change — a pull request a human can review and trust, a record of
   what shipped, and a way back if it goes wrong. You're packaging work that's

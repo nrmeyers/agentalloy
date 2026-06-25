@@ -123,8 +123,18 @@ The passthrough has all of this. Parity = both surfaces run the identical
 Detection + correction, proxy-only, harness-agnostic. **No prevention** — the passthrough relays raw
 bytes, so the proxy cannot intercept a write before it executes or synthesize a `tool_result`. The
 bad write/advance has already landed; the proxy corrects on the **next** carrier turn and relies on
-the model to obey (revert). The five layers stack to raise adherence without a hard stop. Built on
-the Phase-2 shared seam so all five run on passthrough **and** OpenAI.
+the model to obey (revert). The layers stack to raise adherence without a hard stop. Built on the
+Phase-2 shared seam so they run on passthrough **and** OpenAI.
+
+> **Scope decision (this PR): passive-first.** Only the cheap, zero-false-positive layers ship now —
+> forceful MUST/MUST NOT corpus language, the predecessor self-check (Feature 5), the per-turn banner
+> (Feature 1), and within-phase progress (Feature 4b). These directly attack the observed bug (a
+> model that drifts despite seeing orientation) with no per-turn tool-use parsing and no false-positive
+> surface. The **reactive** layers below — scold-after-stray (Feature 2), artifact-as-key
+> (Feature 3), drift-intent escalation (Feature 4a), the `recent_tool_use` plumbing, and the
+> `gate_strictness` config — are **DEFERRED to a tracked follow-up**, to be added only if real-world
+> testing shows the passive layers are insufficient. The full design is retained below as the spec
+> for that follow-up.
 
 ### The five layers
 

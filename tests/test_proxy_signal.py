@@ -586,3 +586,173 @@ class TestTier2Cadence:
         assert result.announce is False
         assert result.announce_cursor is True
         assert result.current_contract.endswith("build/02-api.md")
+
+
+def _gates_with_sections() -> dict[str, Any]:
+    """An exit-gate spec mirroring the spec phase: a path glob + required sections."""
+    return {
+        "all_of": [
+            {"artifact_exists": {"path": "docs/spec/*.md"}},
+            {
+                "artifact_contains": {
+                    "path": "docs/spec/*.md",
+                    "sections": ["Acceptance Criteria", "Out of Scope"],
+                }
+            },
+        ]
+    }
+
+
+class TestExtractGateSections:
+    """`_extract_gate_sections` pulls `artifact_contains.sections` from a gate spec."""
+
+    def test_pulls_sections_in_order(self) -> None:
+        from agentalloy.signals.prefilter import _extract_gate_sections
+
+        assert _extract_gate_sections(_gates_with_sections()) == [
+            "Acceptance Criteria",
+            "Out of Scope",
+        ]
+
+    def test_empty_when_no_artifact_contains(self) -> None:
+        from agentalloy.signals.prefilter import _extract_gate_sections
+
+        assert _extract_gate_sections({"artifact_exists": {"path": "x.md"}}) == []
+        assert _extract_gate_sections({}) == []
+
+    def test_dedups_repeated_sections(self) -> None:
+        from agentalloy.signals.prefilter import _extract_gate_sections
+
+        spec = {
+            "any_of": [
+                {"artifact_contains": {"path": "a.md", "sections": ["A", "B"]}},
+                {"artifact_contains": {"path": "b.md", "sections": ["B", "C"]}},
+            ]
+        }
+        assert _extract_gate_sections(spec) == ["A", "B", "C"]
+
+
+class TestBuildBanner:
+    """`build_banner` renders the one-line `[agentalloy · {phase}] {directive}{progress}`."""
+
+    def test_directive_from_phase_map(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        # A known SDD phase uses its hand-tuned MUST directive; no artifact yet → no
+        # progress suffix.
+        banner = build_banner("spec", _gates_with_sections(), tmp_path)
+        assert banner == (
+            "[agentalloy · spec] MUST write docs/spec/<slug>.md "
+            "(Acceptance Criteria + Out of Scope) before designing or coding"
+        )
+
+    def test_unknown_phase_falls_back_to_gate_path(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        # An unrecognized phase derives the directive from the first gate path.
+        banner = build_banner("mystery", {"artifact_exists": {"path": "out.md"}}, tmp_path)
+        assert banner == "[agentalloy · mystery] MUST produce out.md before advancing"
+
+    def test_unknown_phase_no_path_falls_back_to_satisfy_gate(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("mystery", {}, tmp_path)
+        assert (
+            banner == "[agentalloy · mystery] MUST satisfy the mystery exit gate before advancing"
+        )
+
+    def test_progress_appended_when_artifact_exists(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        (tmp_path / "docs" / "spec").mkdir(parents=True)
+        (tmp_path / "docs" / "spec" / "f.md").write_text("# T\n## Acceptance Criteria\nx\n")
+        banner = build_banner("spec", _gates_with_sections(), tmp_path)
+        assert "1/2 sections" in banner
+        assert "(missing: Out of Scope)" in banner
+
+    def test_full_progress_no_missing_suffix(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        (tmp_path / "docs" / "spec").mkdir(parents=True)
+        (tmp_path / "docs" / "spec" / "f.md").write_text(
+            "## Acceptance Criteria\nx\n## Out of Scope\ny\n"
+        )
+        banner = build_banner("spec", _gates_with_sections(), tmp_path)
+        assert banner.endswith("2/2 sections")
+        assert "missing" not in banner
+
+    def test_no_progress_without_required_sections(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        # Gate has a path but no `sections` → no progress suffix even if file exists.
+        (tmp_path / "out.md").write_text("# T\n## Anything\n")
+        banner = build_banner("mystery", {"artifact_exists": {"path": "out.md"}}, tmp_path)
+        assert banner == "[agentalloy · mystery] MUST produce out.md before advancing"
+
+
+class TestEvaluateSignalBanner:
+    """`evaluate_signal` sets `banner` on carrier turns under the active mode only."""
+
+    def test_carrier_turn_sets_banner(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value={
+                    "signal_keywords": [],
+                    "exit_gates": _gates_with_sections(),
+                    "applies_to_phases": ["spec"],
+                    "raw_prose": "spec prose",
+                },
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ),
+        ):
+            result = asyncio.run(evaluate_signal(_req("work"), tmp_path))
+        assert result.banner is not None
+        assert result.banner.startswith("[agentalloy · spec]")
+
+    def test_tool_less_request_leaves_banner_none(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value={
+                    "signal_keywords": [],
+                    "exit_gates": _gates_with_sections(),
+                    "applies_to_phases": ["spec"],
+                    "raw_prose": "spec prose",
+                },
+            ),
+            mock.patch(
+                "agentalloy.api.proxy_signal.check_transition_trigger",
+                return_value=None,
+            ),
+        ):
+            # tools=None → non-carrier → no banner.
+            result = asyncio.run(evaluate_signal(_req("work", tools=False), tmp_path))
+        assert result.banner is None
+
+    def test_lifecycle_off_leaves_banner_none(self, tmp_path: Path) -> None:
+        d = tmp_path / ".agentalloy"
+        d.mkdir()
+        (d / "phase").write_text("phase: spec\n")
+        (d / "config").write_text("lifecycle_mode: off\n")
+        result = asyncio.run(evaluate_signal(_req("work"), tmp_path))
+        assert result.should_compose is False
+        assert result.banner is None
+
+    def test_banner_set_even_when_no_workflow_skill(self, tmp_path: Path) -> None:
+        # No profile/packs skill for the phase, but a carrier turn still gets a
+        # best-effort banner derived from the packaged exit gate (corpus-free).
+        _set_phase(tmp_path, "spec")
+        with mock.patch(
+            "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+            return_value=None,
+        ):
+            result = asyncio.run(evaluate_signal(_req("work"), tmp_path))
+        assert result.should_compose is False
+        assert result.banner is not None
+        assert result.banner.startswith("[agentalloy · spec]")

@@ -332,6 +332,62 @@ def test_announce_marker_not_committed_when_compose_degrades(tmp_path: Path) -> 
     assert _announced_file(tmp_path) is None
 
 
+# --------------------------------------------------------------------------- #
+# Per-turn phase banner (Anthropic surface).
+# The banner injects on EVERY carrier turn into the last user message, AFTER any
+# workflow block, leaving the cached system block byte-identical. It fires even on
+# a banner-only turn (no announce / no workflow block).
+# --------------------------------------------------------------------------- #
+
+_BANNER = "[agentalloy · build] MUST produce out.md before advancing · 1/2 sections (missing: B)"
+
+
+def test_banner_only_turn_injects_into_last_user(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("SHOULD-NOT-APPEAR"))
+    # should_compose=False → no workflow block; banner set → banner-only injection.
+    signal = SignalResult(should_compose=False, phase="build", task="t", banner=_BANNER)
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    sent = json.loads(captured["body"])
+    last_user = sent["messages"][-1]
+    assert last_user["role"] == "user"
+    assert _BANNER in last_user["content"]
+    assert "BEGIN AGENTALLOY-BANNER" in last_user["content"]
+    # No workflow composition happened.
+    assert "SHOULD-NOT-APPEAR" not in last_user["content"]
+    assert "phase=build" not in last_user["content"]
+    # System block byte-identical.
+    assert sent["system"] == "SYSTEM-CACHED-BLOCK"
+
+
+def test_banner_appended_after_workflow_block(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("INJECTED-PROSE"))
+    signal = SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="the real task",
+        workflow_prose="operate like so",
+        banner=_BANNER,
+    )
+    with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    sent = json.loads(captured["body"])
+    content = sent["messages"][-1]["content"]
+    # Both blocks present; the banner is the freshest (last) text.
+    assert "INJECTED-PROSE" in content
+    assert "phase=build" in content
+    assert _BANNER in content
+    assert content.rstrip().endswith("<!-- END AGENTALLOY-BANNER -->")
+    assert content.count("BEGIN AGENTALLOY-BANNER") == 1
+    # System untouched.
+    assert sent["system"] == "SYSTEM-CACHED-BLOCK"
+
+
 def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: Path) -> None:
     # Tier 1 composes real orientation text, but the request has NO user message, so
     # inject_into_anthropic_messages returns the payload UNCHANGED (nowhere to inject).

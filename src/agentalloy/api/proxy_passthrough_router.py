@@ -129,29 +129,54 @@ async def _maybe_inject(
     signal = await evaluate_signal(
         _proxy_request_from_anthropic(payload), project_dir, embed_client, session_id
     )
-    if not (signal.should_compose and signal.phase and orchestrator is not None):
-        return None
 
-    # Cadence lives in `.agentalloy/{announced,composed}` (durable), not in the
-    # request body. The signal layer decided this turn warrants injection but
-    # deliberately did NOT commit the markers — `apply_signal` does that, only after
-    # compose tells it what was actually emitted, so a degraded compose (embed down)
-    # or an empty block never records the phase/work-item as delivered.
-    #
-    # `inject_into_anthropic_messages` returns a NEW dict on a real injection and the
-    # SAME `payload` object on every no-op (no user message, already-present marker,
-    # malformed/unknown content shape). Identity, not None-ness, is what proves the
-    # block actually reached the request — so `delivered` is the identity test and a
-    # turn that composed text but couldn't inject it does NOT burn the marker.
-    phase = signal.phase
-    injected = await apply_signal(
-        project_root=project_dir,
-        signal=signal,
-        orchestrator=orchestrator,
-        inject=lambda text: inject_into_anthropic_messages(payload, text, phase=phase),
-        delivered=lambda out: out is not payload,
-    )
-    return injected
+    # Two independent injections, both landing in the last user message:
+    #   1. the workflow/cursor block (gated on should_compose), and
+    #   2. the per-turn phase banner (signal.banner), which fires on EVERY carrier turn
+    #      even when no workflow block is composed.
+    # The banner injects AFTER the workflow block so it is the freshest text. We track
+    # the latest payload across both and return it iff anything was injected (else None
+    # → the caller forwards the original verbatim).
+    current = payload
+
+    # 1. Workflow/cursor block via the shared seam (cadence-marker committing).
+    if signal.should_compose and signal.phase and orchestrator is not None:
+        # Cadence lives in `.agentalloy/{announced,composed}` (durable), not in the
+        # request body. The signal layer decided this turn warrants injection but
+        # deliberately did NOT commit the markers — `apply_signal` does that, only
+        # after compose tells it what was actually emitted, so a degraded compose
+        # (embed down) or an empty block never records the phase/work-item as
+        # delivered.
+        #
+        # `inject_into_anthropic_messages` returns a NEW dict on a real injection and
+        # the SAME object on every no-op (no user message, already-present marker,
+        # malformed/unknown content shape). Identity, not None-ness, proves the block
+        # reached the request — so `delivered` is the identity test and a turn that
+        # composed text but couldn't inject it does NOT burn the marker.
+        phase = signal.phase
+        before = current
+        injected = await apply_signal(
+            project_root=project_dir,
+            signal=signal,
+            orchestrator=orchestrator,
+            inject=lambda text: inject_into_anthropic_messages(before, text, phase=phase),
+            delivered=lambda out: out is not before,
+        )
+        if injected is not None:
+            current = injected
+
+    # 2. Per-turn banner — strip-and-replace, appended LAST so it is the freshest text.
+    #    Carrier-gated upstream: evaluate_signal only sets `banner` on a carrier turn,
+    #    so a tool-less background request gets banner=None and injects nothing here.
+    #    Independent of should_compose: it fires even on a banner-only turn.
+    if signal.banner is not None and signal.phase is not None:
+        bannered = inject_into_anthropic_messages(
+            current, signal.banner, phase=signal.phase, kind="banner"
+        )
+        if bannered is not current:
+            current = bannered
+
+    return current if current is not payload else None
 
 
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:

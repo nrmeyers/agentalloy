@@ -35,6 +35,40 @@ def _extract_gate_paths(gate_spec: Any) -> list[str]:
     return paths
 
 
+def _extract_gate_sections(gate_spec: Any) -> list[str]:
+    """Walk gate_spec recursively and collect all `artifact_contains.sections` values.
+
+    Sibling of :func:`_extract_gate_paths`: where that pulls every ``path`` glob, this
+    pulls the required markdown-heading sections an ``artifact_contains`` gate declares.
+    Returns the section names in declaration order (first-seen wins for the dedup), so
+    the banner's progress suffix can report ``present/total`` against the same sections
+    the exit gate checks. An ``artifact_contains`` with no ``sections`` contributes
+    nothing; a missing/garbled spec yields ``[]``.
+    """
+    sections: list[str] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        contains = gate_d.get("artifact_contains")
+        if isinstance(contains, dict):
+            raw_sections = cast(dict[str, Any], contains).get("sections")
+            if isinstance(raw_sections, list):
+                for s in cast(list[Any], raw_sections):
+                    if isinstance(s, str) and s not in sections:
+                        sections.append(s)
+        for k, v in gate_d.items():
+            if k != "artifact_contains":
+                for s in _extract_gate_sections(v):
+                    if s not in sections:
+                        sections.append(s)
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            for s in _extract_gate_sections(item):
+                if s not in sections:
+                    sections.append(s)
+    return sections
+
+
 def _extract_gate_tools(gate_spec: Any) -> list[str]:
     """Walk gate_spec recursively and collect all `tools` list values."""
     tools: list[str] = []

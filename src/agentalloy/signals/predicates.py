@@ -155,9 +155,7 @@ def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> Predi
 
         if sections is not None:
             # Parse markdown ATX headings (strip leading #'s and surrounding space).
-            headings = [
-                line.lstrip("#").strip() for line in content.splitlines() if line.startswith("#")
-            ]
+            headings = _parse_markdown_headings(content)
             if not all(_section_present(s, headings) for s in sections):
                 return PredicateResult.NOT_MET
 
@@ -169,6 +167,57 @@ def eval_artifact_contains(args: dict[str, Any], ctx: PredicateContext) -> Predi
                 return PredicateResult.UNKNOWN
 
     return PredicateResult.MET
+
+
+def _parse_markdown_headings(content: str) -> list[str]:
+    """Extract ATX markdown headings (leading ``#``s + surrounding space stripped).
+
+    The same parse :func:`eval_artifact_contains` uses, factored out so the banner's
+    section-completeness count scores against an identical view of the artifact.
+    """
+    return [line.lstrip("#").strip() for line in content.splitlines() if line.startswith("#")]
+
+
+def section_completeness(
+    path_glob: str,
+    required_sections: list[str],
+    project_root: Path,
+) -> tuple[int, int, list[str]]:
+    """How many ``required_sections`` are present in the artifact at ``path_glob``.
+
+    Returns ``(present, total, missing)`` where ``total`` is ``len(required_sections)``,
+    ``present`` is the count of required sections found as markdown headings in the
+    FIRST file matching ``path_glob`` (relative to ``project_root``), and ``missing`` is
+    the required sections not found, in declaration order. Section matching reuses
+    :func:`_section_present` (case-insensitive, trailing-qualifier tolerant), the same
+    rule the ``artifact_contains`` exit gate applies.
+
+    File I/O is fully wrapped: a missing glob match or an unreadable file yields
+    ``(0, total, required_sections)`` — i.e. no progress, every section "missing" —
+    so the banner never raises and a not-yet-created artifact simply shows 0 present.
+    Never raises.
+    """
+    total = len(required_sections)
+    if total == 0:
+        return 0, 0, []
+    try:
+        files = _glob_files(project_root, path_glob)
+        if not files:
+            return 0, total, list(required_sections)
+        content = _read_file(files[0])
+        if content is None:
+            return 0, total, list(required_sections)
+        headings = _parse_markdown_headings(content)
+        present_count = 0
+        missing: list[str] = []
+        for section in required_sections:
+            if _section_present(section, headings):
+                present_count += 1
+            else:
+                missing.append(section)
+        return present_count, total, missing
+    except Exception:
+        return 0, total, list(required_sections)
 
 
 def eval_artifact_size_min(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
