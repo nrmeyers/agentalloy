@@ -25,10 +25,16 @@ from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.prefilter import PreFilterMatch
 
 
-def _req(prompt: str) -> ProxyRequest:
+def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
+    # Carries a tool array by default: the carrier-request gate in evaluate_signal
+    # only announces / advances the cursor for tool-carrying (genuine agent) turns.
+    # Pass tools=False to model a background micro-request that must not burn markers.
     return ProxyRequest(
         model="gpt-4",
         messages=[ProxyMessage(role="user", content=prompt)],
+        tools=[{"name": "Read", "description": "read a file", "input_schema": {}}]
+        if tools
+        else None,
     )
 
 

@@ -231,6 +231,18 @@ async def evaluate_signal(
     repo = str(cwd)
     session_key, session_source = resolve_session_key(request, session_id)
 
+    # Carrier-request gate. A harness reuses one session id across BOTH its main
+    # agent loop AND background micro-requests — Claude Code sends
+    # `x-claude-code-session-id` on its quota ping and its title / topic-detection
+    # haiku calls too. Those auxiliary requests ship no tool array. Because the
+    # one-shot orientation (Tier 1) and work-item cursor (Tier 2) markers are keyed
+    # on the session, whichever request reaches the proxy first burns them — and when
+    # a tool-less ping wins the race, the real conversation is recorded as oriented
+    # while the agent got nothing (the exact recurring "no orientation block" bug).
+    # Only a genuine agent turn — one that carries its tool definitions — may
+    # announce or advance the cursor; background requests fall through to passthrough.
+    is_carrier = bool(request.tools)
+
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
     if skill is None:
@@ -266,7 +278,11 @@ async def evaluate_signal(
     phase_changed = last_phase != phase
     # With a session key: announce on a new phase OR a session not yet oriented for
     # this phase. Without one (no user text): phase-only cadence (announce on entry).
-    announce = (phase_changed or session_key not in last_sessions) if session_key else phase_changed
+    # Gated on `is_carrier` so a background micro-request never burns the marker — the
+    # orientation waits for the next real agent turn instead of being lost to a ping.
+    announce = is_carrier and (
+        (phase_changed or session_key not in last_sessions) if session_key else phase_changed
+    )
 
     # 5. Transition trigger (reranker-primary intent, deterministic floor). Runs
     #    for every phase, including intake — there is no unconditional bypass. On
@@ -325,7 +341,10 @@ async def evaluate_signal(
     #    `agentalloy task next`. Domain retrieval is keyed to the contract's task,
     #    NEVER the workflow's static process tags (which only ever emptied results).
     contract_id, contract_path = _resolve_current_contract(cwd, phase)
-    announce_cursor = contract_id is not None and _read_composed(cwd) != contract_id
+    # Same carrier gate as Tier 1: a tool-less background request must not burn the
+    # work-item cursor marker (which would silently drop the domain block from the
+    # real turn that follows).
+    announce_cursor = is_carrier and contract_id is not None and _read_composed(cwd) != contract_id
 
     # 8. Decide. Inject when this is a phase-entry turn (Tier 1), a new work-item
     #    turn (Tier 2), OR the eval produced advisories. None → quiet passthrough.

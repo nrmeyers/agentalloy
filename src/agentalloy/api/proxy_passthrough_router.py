@@ -74,9 +74,12 @@ def get_passthrough_client(request: Request) -> AnthropicPassthroughClient | Non
 def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
     """Build a minimal ProxyRequest for the signal layer.
 
-    The signal layer only reads user-message text (to derive the task prompt);
-    Anthropic message content (str or a list of content blocks) maps straight
-    onto ``ProxyMessage.content``. The top-level Anthropic ``system`` field is
+    The signal layer reads user-message text (to derive the task prompt) and the
+    presence of a tool array (to tell a real agent turn from a background
+    micro-request — see the carrier gate in ``evaluate_signal``). Anthropic message
+    content (str or a list of content blocks) maps straight onto
+    ``ProxyMessage.content``; the top-level Anthropic ``tools`` array maps onto
+    ``ProxyRequest.tools``. The top-level Anthropic ``system`` field is
     intentionally ignored here.
     """
     messages: list[ProxyMessage] = []
@@ -96,7 +99,13 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
             )
             messages.append(ProxyMessage(role=role, content=usable))
     model = payload.get("model")
-    return ProxyRequest(model=model if isinstance(model, str) else "unknown", messages=messages)
+    raw_tools = payload.get("tools")
+    tools = cast("list[dict[str, Any]]", raw_tools) if isinstance(raw_tools, list) else None
+    return ProxyRequest(
+        model=model if isinstance(model, str) else "unknown",
+        messages=messages,
+        tools=tools,
+    )
 
 
 @dataclass

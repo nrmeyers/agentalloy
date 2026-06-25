@@ -431,3 +431,32 @@ class TestEmbeddingsPassthrough:
         assert resp.status_code == 503
         body = resp.json()
         assert body["error"]["code"] == "embed_not_configured"
+
+
+class TestAnthropicConverter:
+    """`_proxy_request_from_anthropic` maps the fields the signal layer reads."""
+
+    def test_maps_tools_for_carrier_gate(self) -> None:
+        # The carrier-request gate keys on ProxyRequest.tools; the converter must
+        # surface the Anthropic top-level `tools` array so a real agent turn is
+        # distinguishable from a tool-less background micro-request.
+        from agentalloy.api.proxy_passthrough_router import _proxy_request_from_anthropic
+
+        payload: dict[str, Any] = {
+            "model": "claude-opus-4-8",
+            "messages": [{"role": "user", "content": "do the thing"}],
+            "tools": [{"name": "Read", "description": "read", "input_schema": {}}],
+        }
+        req = _proxy_request_from_anthropic(payload)
+        assert req.tools is not None and len(req.tools) == 1
+        assert bool(req.tools) is True  # carrier
+
+    def test_no_tools_yields_none(self) -> None:
+        from agentalloy.api.proxy_passthrough_router import _proxy_request_from_anthropic
+
+        payload: dict[str, Any] = {
+            "model": "claude-haiku-4-5",
+            "messages": [{"role": "user", "content": "quota"}],
+        }
+        req = _proxy_request_from_anthropic(payload)
+        assert req.tools is None  # background request → not a carrier

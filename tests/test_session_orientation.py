@@ -30,11 +30,21 @@ from agentalloy.storage.vector_store import CompositionTrace, VectorStore, open_
 # ---------------------------------------------------------------------------
 
 
-def _req(*user_texts: str) -> ProxyRequest:
-    """A request whose messages are the given user turns (in order)."""
+def _req(*user_texts: str, tools: bool = True) -> ProxyRequest:
+    """A request whose messages are the given user turns (in order).
+
+    Carries a tool array by default, modelling a genuine agent turn — the
+    carrier-request gate in ``evaluate_signal`` only announces / advances the cursor
+    for tool-carrying requests. Pass ``tools=False`` to model a harness background
+    micro-request (quota ping, title / topic-detection haiku call) that shares the
+    session id but must never burn a cadence marker.
+    """
     return ProxyRequest(
         model="gpt-4",
         messages=[ProxyMessage(role="user", content=t) for t in user_texts],
+        tools=[{"name": "Read", "description": "read a file", "input_schema": {}}]
+        if tools
+        else None,
     )
 
 
@@ -187,6 +197,30 @@ def test_degraded_turn_does_not_burn_session(tmp_path: Path) -> None:
     assert _eval(_req("a"), tmp_path, session_id="A", deliver=True).announce is True
     # ...and only then does the session go quiet.
     assert _eval(_req("a"), tmp_path, session_id="A").announce is False
+
+
+def test_background_request_does_not_announce_or_burn(tmp_path: Path) -> None:
+    # The recurring "no orientation block" bug: a harness reuses one session id for
+    # its main loop AND background micro-requests (Claude Code's quota ping, title /
+    # topic-detection calls). Those carry no tools. A tool-less request must NOT
+    # announce and must NOT burn the session marker, so the real agent turn that
+    # follows still gets oriented.
+    _set_phase(tmp_path, "build")
+    # Background ping for session A arrives first (tool-less) — stays quiet, no burn.
+    assert _eval(_req("quota", tools=False), tmp_path, session_id="A").announce is False
+    assert _eval(_req("quota", tools=False), tmp_path, session_id="A").announce is False
+    # The real agent turn for the SAME session still announces (marker not burned).
+    assert _eval(_req("real task"), tmp_path, session_id="A").announce is True
+    # ...then goes quiet as usual.
+    assert _eval(_req("real task"), tmp_path, session_id="A").announce is False
+
+
+def test_background_request_does_not_advance_cursor(tmp_path: Path) -> None:
+    # The Tier 2 sibling of the gate: a tool-less background request must not advance
+    # the work-item cursor either, or the domain block would be silently dropped from
+    # the carrier turn that follows.
+    _set_phase(tmp_path, "build")
+    assert _eval(_req("quota", tools=False), tmp_path, session_id="A").announce_cursor is False
 
 
 def test_fingerprint_session_reorients_when_first_message_changes(tmp_path: Path) -> None:
