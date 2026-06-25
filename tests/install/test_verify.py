@@ -360,8 +360,8 @@ class TestPortAvailableHealthStatus:
     returns `"healthy"` / `"degraded"` / `"unavailable"`.
     """
 
-    @patch("agentalloy.install.subcommands.verify.urlopen")
-    @patch("agentalloy.install.subcommands.verify.socket.socket")
+    @patch("agentalloy.install.port_guard.urlopen")
+    @patch("agentalloy.install.port_guard.socket.socket")
     def test_healthy_status_passes(self, mock_sock: MagicMock, mock_urlopen: MagicMock) -> None:
         # Mock the TCP connect_ex to return 0 (port in use).
         sock_inst = MagicMock()
@@ -380,8 +380,8 @@ class TestPortAvailableHealthStatus:
         result = _check_port_available(47950)
         assert result["passed"] is True
 
-    @patch("agentalloy.install.subcommands.verify.urlopen")
-    @patch("agentalloy.install.subcommands.verify.socket.socket")
+    @patch("agentalloy.install.port_guard.urlopen")
+    @patch("agentalloy.install.port_guard.socket.socket")
     def test_degraded_status_passes(self, mock_sock: MagicMock, mock_urlopen: MagicMock) -> None:
         sock_inst = MagicMock()
         sock_inst.connect_ex.return_value = 0
@@ -399,8 +399,8 @@ class TestPortAvailableHealthStatus:
         result = _check_port_available(47950)
         assert result["passed"] is True
 
-    @patch("agentalloy.install.subcommands.verify.urlopen")
-    @patch("agentalloy.install.subcommands.verify.socket.socket")
+    @patch("agentalloy.install.port_guard.urlopen")
+    @patch("agentalloy.install.port_guard.socket.socket")
     def test_unavailable_status_fails(self, mock_sock: MagicMock, mock_urlopen: MagicMock) -> None:
         sock_inst = MagicMock()
         sock_inst.connect_ex.return_value = 0

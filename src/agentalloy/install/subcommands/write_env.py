@@ -22,6 +22,7 @@ from typing import Any
 
 import yaml
 
+from agentalloy.install import port_guard
 from agentalloy.install import state as install_state
 
 SCHEMA_VERSION = 1
@@ -94,6 +95,60 @@ def _parse_overrides(override_args: list[str] | None) -> dict[str, str]:
     return overrides
 
 
+def _validate_port_choice(port: int, values: dict[str, str]) -> None:
+    """Reject a service ``--port`` that collides with a reserved or foreign port.
+
+    Two independent gates:
+
+    (a) Reserved-port collision — a pure VALUE comparison against the embed and
+        reranker ports, enforced unconditionally. Those servers are NOT running
+        at write-env time, so an occupancy probe would report them free and let
+        a self-colliding port (e.g. the embed port 47951) slip through. The
+        collision must be caught by comparing values, not by checking what's
+        bound.
+
+    (b) In-use collision — only when the user chose a NON-default port. Probes
+        the port: a free port or one already held by agentalloy's own service is
+        fine; a foreign listener is refused. The default port is exempt — it may
+        legitimately be held by a prior agentalloy instance, which
+        ``server_proc.reclaim_stale_port`` reclaims at serve time.
+    """
+    # (a) Reserved-port collision — always enforced, independent of runtime state.
+    reserved = port_guard.reserved_ports(values)
+    if port in reserved:
+        role = reserved[port]
+        print(
+            f"ERROR: --port {port} is reserved for the {role} server",
+            file=sys.stderr,
+        )
+        print(
+            f"CAUSE: agentalloy runs the {role} server on port {port}; the API "
+            f"service cannot share it.",
+            file=sys.stderr,
+        )
+        print(
+            f"FIX:   Choose a different --port (the embed and reranker ports, "
+            f"e.g. {', '.join(str(p) for p in sorted(reserved))}, are off-limits).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    # (b) In-use collision — only for a non-default port.
+    if port == DEFAULT_PORT:
+        return
+    status, detail = port_guard.classify_port(port)
+    if status in ("free", "ours"):
+        return
+    print(f"ERROR: --port {port} is already in use", file=sys.stderr)
+    print(f"CAUSE: {detail}", file=sys.stderr)
+    print(
+        f"FIX:   Stop the process bound to port {port} "
+        f"(try `lsof -i :{port}` to identify it), or pass a different --port.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def _render_env(values: dict[str, str], preset: str, port: int) -> str:
     """Render .env file content from the merged values dict."""
     lines = [
@@ -116,6 +171,14 @@ def write_env(
 ) -> dict[str, Any]:
     """Generate and write the .env file. Returns the contract-shaped result."""
     env_path = install_state.env_path()
+
+    # Build the merged values and validate the port choice BEFORE touching the
+    # filesystem, so a rejected port leaves no backup/partial .env behind.
+    defaults = _load_preset(preset)
+    values: dict[str, str] = dict(defaults)
+    if overrides:
+        values.update(overrides)
+    _validate_port_choice(port, values)
 
     # Read existing .env once — used for both backup and sentinel check.
     original_content: str | None = env_path.read_text() if env_path.exists() else None
@@ -149,15 +212,6 @@ def write_env(
 
         with __import__("contextlib").suppress(NotImplementedError, OSError):
             _os.chmod(_backup_path, 0o600)
-
-    defaults = _load_preset(preset)
-
-    # Apply overrides on top of preset defaults
-    values: dict[str, str] = dict(defaults)
-
-    # Apply overrides
-    if overrides:
-        values.update(overrides)
 
     content = _render_env(values, preset, port)
     install_state._atomic_write(env_path, content)  # pyright: ignore[reportPrivateUsage]

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from agentalloy.install import port_guard
 from agentalloy.install.subcommands.write_env import (
     _SENTINEL,  # pyright: ignore[reportPrivateUsage]
     DEFAULT_PORT,
@@ -23,6 +24,12 @@ from agentalloy.install.subcommands.write_env import (
 def repo_root(tmp_path: Path) -> Path:
     (tmp_path / "pyproject.toml").write_text("")
     return tmp_path
+
+
+@pytest.fixture()
+def port_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat any probed port as free so a custom --port doesn't hit the network."""
+    monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("free", "stub free"))
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +69,7 @@ class TestPortRecording:
         result = write_env("cpu", root=repo_root)
         assert result["port"] == DEFAULT_PORT
 
-    def test_custom_port(self, repo_root: Path) -> None:
+    def test_custom_port(self, repo_root: Path, port_free: None) -> None:
         result = write_env("cpu", port=9090, root=repo_root)
         assert result["port"] == 9090
 
@@ -116,7 +123,7 @@ class TestEnvFileHandling:
         content = env_path.read_text()
         assert _SENTINEL in content
 
-    def test_overwrites_own_env(self, repo_root: Path) -> None:
+    def test_overwrites_own_env(self, repo_root: Path, port_free: None) -> None:
         write_env("cpu", root=repo_root)
         # Second write should succeed (same sentinel)
         result = write_env("cpu", port=9090, root=repo_root)
@@ -156,3 +163,69 @@ class TestWriteEnvSchema:
         assert "preset" in result
         assert "port" in result
         assert "values_written" in result
+
+
+# ---------------------------------------------------------------------------
+# Port-choice validation (reserved-port + in-use guards)
+# ---------------------------------------------------------------------------
+
+
+class TestPortValidation:
+    def test_embed_port_rejected_even_when_free(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reserved check is value-based, not occupancy-based: even with the
+        # probe reporting "free", the embed port must be refused.
+        monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("free", "stub"))
+        with pytest.raises(SystemExit):
+            write_env("cpu", port=47951, root=repo_root)
+
+    def test_rerank_port_rejected_even_when_free(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("free", "stub"))
+        with pytest.raises(SystemExit):
+            write_env("cpu", port=47952, root=repo_root)
+
+    def test_reserved_port_honors_override(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("free", "stub"))
+        # Relocate the embed server to 48000 — now 48000 is reserved and the
+        # stale constant 47951 is free for the API.
+        overrides = {"RUNTIME_EMBED_BASE_URL": "http://localhost:48000"}
+        with pytest.raises(SystemExit):
+            write_env("cpu", port=48000, overrides=overrides, root=repo_root)
+        result = write_env("cpu", port=47951, overrides=overrides, root=repo_root)
+        assert result["port"] == 47951
+
+    def test_custom_free_port_succeeds(self, repo_root: Path, port_free: None) -> None:
+        result = write_env("cpu", port=9090, root=repo_root)
+        assert result["port"] == 9090
+
+    def test_custom_foreign_port_rejected(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("foreign", "stub"))
+        with pytest.raises(SystemExit):
+            write_env("cpu", port=9090, root=repo_root)
+
+    def test_custom_port_held_by_agentalloy_succeeds(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reconfiguring a live install: the port is "ours" → allowed.
+        monkeypatch.setattr(port_guard, "classify_port", lambda port, **kw: ("ours", "stub"))
+        result = write_env("cpu", port=9090, root=repo_root)
+        assert result["port"] == 9090
+
+    def test_default_port_skips_in_use_check(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The default port is exempt from the in-use probe — classify_port must
+        # not even be consulted.
+        def _boom(port: int, **kw: object) -> tuple[str, str]:
+            raise AssertionError("classify_port should not run for the default port")
+
+        monkeypatch.setattr(port_guard, "classify_port", _boom)
+        result = write_env("cpu", port=DEFAULT_PORT, root=repo_root)
+        assert result["port"] == DEFAULT_PORT

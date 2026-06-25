@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from agentalloy.install import port_guard
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, write_result
 from agentalloy.storage.vector_store import EMBEDDING_DIM
@@ -560,93 +560,58 @@ def _check_harness_config_url(st: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_port_available(port: int) -> dict[str, Any]:
-    """Check 8: Port is free or already bound by agentalloy."""
+    """Check 8: Port is free or already bound by agentalloy.
+
+    Delegates the socket + ``/health`` classification to the shared
+    ``port_guard.classify_port`` (also used by ``write-env``) and maps its
+    status onto this check's contract dict.
+    """
     t0 = time.monotonic()
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(2)
-            result = s.connect_ex(("127.0.0.1", port))
-        duration = int((time.monotonic() - t0) * 1000)
-        if result != 0:
-            # Port is free
-            return {
-                "name": "runtime_port_available",
-                "passed": True,
-                "duration_ms": duration,
-                "detail": f"Port {port} is available",
-            }
-        # Port is in use — check if it's agentalloy via /health
-        try:
-            req = Request(f"http://localhost:{port}/health", method="GET")
-            with urlopen(req, timeout=5) as resp:  # noqa: S310
-                body = json.loads(resp.read())
-            # /health uses three-state status: "healthy" (all-green),
-            # "degraded" (embed/telemetry down but service is bound), or
-            # "unavailable". Both healthy and degraded mean a agentalloy
-            # server holds the port — the check's actual question.
-            if body.get("status") in ("healthy", "degraded"):
-                return {
-                    "name": "runtime_port_available",
-                    "passed": True,
-                    "duration_ms": int((time.monotonic() - t0) * 1000),
-                    "detail": (
-                        f"Port {port} is already bound by agentalloy "
-                        f"(status={body.get('status')!r})"
-                    ),
-                }
-            # /health responded but with non-ok status — foreign service
-            return {
-                "name": "runtime_port_available",
-                "passed": False,
-                "duration_ms": int((time.monotonic() - t0) * 1000),
-                "error": (
-                    f"Port {port} is bound by a service that returned status={body.get('status')!r}"
-                ),
-                "remediation": (
-                    f"Stop the foreign service on port {port}, or re-run "
-                    f"`python -m agentalloy.install write-env --port <other-port>` "
-                    f"and `wire-harness` to reconfigure for a different port."
-                ),
-            }
-        except json.JSONDecodeError as exc:
-            # /health responded but body wasn't JSON — likely agentalloy
-            # serving an older/error response, or a foreign service
-            # returning HTML. Don't tell the user to kill the process
-            # without diagnostics; surface the parse failure directly.
-            return {
-                "name": "runtime_port_available",
-                "passed": False,
-                "duration_ms": int((time.monotonic() - t0) * 1000),
-                "error": f"Port {port} /health returned non-JSON response: {exc}",
-                "remediation": (
-                    f"Probe `curl http://localhost:{port}/health` to see the response. "
-                    f"If it's agentalloy, restart the service; if foreign, free the port."
-                ),
-            }
-        except Exception as exc:
-            # urlopen URLError, ConnectionRefusedError, timeout, etc. —
-            # something accepted the TCP connect but isn't speaking HTTP
-            # the way we expect.
-            return {
-                "name": "runtime_port_available",
-                "passed": False,
-                "duration_ms": int((time.monotonic() - t0) * 1000),
-                "error": f"Port {port} is bound by a non-agentalloy process ({exc})",
-                "remediation": (
-                    f"Stop the foreign process on port {port} (try `lsof -i :{port}` to identify it), "
-                    f"or re-run `python -m agentalloy.install write-env --port <other-port>` "
-                    f"and `wire-harness` to reconfigure."
-                ),
-            }
+        status, detail = port_guard.classify_port(port)
     except OSError as exc:
-        duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "runtime_port_available",
             "passed": False,
-            "duration_ms": duration,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
             "error": str(exc),
             "remediation": f"Port {port} check failed",
         }
+    duration = int((time.monotonic() - t0) * 1000)
+    if status in ("free", "ours"):
+        # Both free and a agentalloy-held port satisfy the check's question.
+        return {
+            "name": "runtime_port_available",
+            "passed": True,
+            "duration_ms": duration,
+            "detail": detail,
+        }
+    if status == "foreign_nonjson":
+        # /health responded but body wasn't JSON — surface the parse failure
+        # rather than telling the user to kill a possibly-agentalloy process.
+        remediation = (
+            f"Probe `curl http://localhost:{port}/health` to see the response. "
+            f"If it's agentalloy, restart the service; if foreign, free the port."
+        )
+    elif status == "foreign_nonhttp":
+        remediation = (
+            f"Stop the foreign process on port {port} (try `lsof -i :{port}` to identify it), "
+            f"or re-run `python -m agentalloy.install write-env --port <other-port>` "
+            f"and `wire-harness` to reconfigure."
+        )
+    else:  # "foreign"
+        remediation = (
+            f"Stop the foreign service on port {port}, or re-run "
+            f"`python -m agentalloy.install write-env --port <other-port>` "
+            f"and `wire-harness` to reconfigure for a different port."
+        )
+    return {
+        "name": "runtime_port_available",
+        "passed": False,
+        "duration_ms": duration,
+        "error": detail,
+        "remediation": remediation,
+    }
 
 
 def _check_reranker_reachable(env: dict[str, str]) -> dict[str, Any]:
