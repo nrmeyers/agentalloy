@@ -47,12 +47,16 @@ def add_parser(
         "--harness",
         action="append",
         default=None,
-        metavar="NAME",
+        # Validation lives in _normalize_harnesses (so `--harness a,b` splits
+        # before checking), not argparse `choices` — but render the choice list
+        # as the metavar so `wire --help` still advertises the `{a,b,...}` group
+        # (harness-catalog docs + scripts/cleanroom-smoke.sh enumerate from it).
+        metavar="{" + ",".join(sorted(VALID_HARNESSES)) + "}",
         help=(
             "Force a specific harness. Repeatable and comma-tolerant — "
             "`--harness claude-code --harness hermes-agent` or "
             "`--harness claude-code,hermes-agent` wires both. "
-            f"Default: auto-detect from cwd. Choices: {', '.join(sorted(VALID_HARNESSES))}."
+            "Default: auto-detect from cwd."
         ),
     )
     p.add_argument(
