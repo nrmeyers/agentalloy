@@ -168,7 +168,18 @@ def parse_contract(path: Path) -> Contract:
     for r in related_raw:
         rp = Path(str(r))
         if not rp.is_absolute():
-            rp = path.parent / rp
+            candidate = path.parent / rp
+            # Accept either convention: a path relative to THIS contract's directory
+            # (e.g. ``../intake/x.md``) OR a repo-root-relative path (e.g.
+            # ``.agentalloy/contracts/intake/x.md``). When the contract-dir join is
+            # missing, retry against the repo root (the dir that contains ``.agentalloy``)
+            # so neither form is a spurious "related contract not found".
+            if not candidate.exists():
+                for parent in path.resolve().parents:
+                    if (parent / ".agentalloy").is_dir() and (parent / rp).exists():
+                        candidate = parent / rp
+                        break
+            rp = candidate
         related_contracts.append(rp)
 
     # created_at — optional; fall back to file mtime

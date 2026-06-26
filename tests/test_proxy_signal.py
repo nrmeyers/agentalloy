@@ -603,6 +603,27 @@ def _gates_with_sections() -> dict[str, Any]:
     }
 
 
+def _design_gates() -> dict[str, Any]:
+    """Mirror the real design exit gate: three docs each in their OWN file (one section
+    apiece) plus the section-less build-contract checkpoint."""
+    return {
+        "all_of": [
+            {"artifact_exists": {"path": "docs/design/**/approach.md"}},
+            {"artifact_contains": {"path": "docs/design/**/approach.md", "sections": ["Approach"]}},
+            {"artifact_exists": {"path": "docs/design/**/tasks.md"}},
+            {"artifact_contains": {"path": "docs/design/**/tasks.md", "sections": ["Tasks"]}},
+            {"artifact_exists": {"path": "docs/design/**/test-plan.md"}},
+            {
+                "artifact_contains": {
+                    "path": "docs/design/**/test-plan.md",
+                    "sections": ["Test Cases"],
+                }
+            },
+            {"artifact_exists": {"path": ".agentalloy/contracts/build/*.md"}},
+        ]
+    }
+
+
 class TestExtractGateSections:
     """`_extract_gate_sections` pulls `artifact_contains.sections` from a gate spec."""
 
@@ -689,6 +710,64 @@ class TestBuildBanner:
         banner = build_banner("mystery", {"artifact_exists": {"path": "out.md"}}, tmp_path)
         assert banner == "[agentalloy · mystery] MUST produce out.md before advancing"
 
+    def _write_design_docs(self, tmp_path: Path, *, slug: str, which: set[str]) -> None:
+        d = tmp_path / "docs" / "design" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        files = {
+            "approach": ("approach.md", "## Approach"),
+            "tasks": ("tasks.md", "## Tasks"),
+            "test-plan": ("test-plan.md", "## Test Cases"),
+        }
+        for key in which:
+            name, heading = files[key]
+            (d / name).write_text(f"# {slug}\n{heading}\n\nbody\n")
+
+    def test_sections_scored_per_gate_against_own_file(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        # Each required heading lives in ITS OWN file. The fixed banner scores each
+        # section against its gate's path → 3/3, no missing. (The old bug scored all
+        # three against approach.md only and reported "1/3 (missing: Tasks)".)
+        self._write_design_docs(tmp_path, slug="feat", which={"approach", "tasks", "test-plan"})
+        banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
+        assert "3/3 sections" in banner
+        assert "missing" not in banner
+
+    def test_missing_sections_joined_across_files(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        # Only approach.md written → Tasks and Test Cases both missing, both shown.
+        self._write_design_docs(tmp_path, slug="feat", which={"approach"})
+        banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
+        assert "1/3 sections" in banner
+        assert "(missing: Tasks, Test Cases)" in banner
+
+    def test_build_contract_checkpoint_surfaced_then_cleared(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        self._write_design_docs(tmp_path, slug="feat", which={"approach", "tasks", "test-plan"})
+        banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
+        assert "· 0 build contracts (need ≥1)" in banner
+        # Satisfied once any build contract exists → the checkpoint line disappears.
+        bc = tmp_path / ".agentalloy" / "contracts" / "build"
+        bc.mkdir(parents=True)
+        (bc / "01-task.md").write_text("x")
+        banner2 = build_banner("design", _design_gates(), tmp_path, slug="feat")
+        assert "build contracts" not in banner2
+
+    def test_slug_resolved_in_directive(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _design_gates(), tmp_path, slug="calendar-web-ui")
+        assert "docs/design/calendar-web-ui/" in banner
+        assert "<slug>" not in banner
+
+    def test_slug_left_literal_when_unknown(self, tmp_path: Path) -> None:
+        from agentalloy.api.proxy_signal import build_banner
+
+        banner = build_banner("design", _design_gates(), tmp_path)
+        assert "<slug>" in banner
+
 
 class TestEvaluateSignalBanner:
     """`evaluate_signal` sets `banner` on carrier turns under the active mode only."""
@@ -756,3 +835,72 @@ class TestEvaluateSignalBanner:
         assert result.should_compose is False
         assert result.banner is not None
         assert result.banner.startswith("[agentalloy · spec]")
+
+
+class TestBannerCadence:
+    """The per-turn banner is throttled to once every N carrier turns (token saving)."""
+
+    @staticmethod
+    def _spec_skill(phases: list[str]) -> dict[str, Any]:
+        return {
+            "signal_keywords": [],
+            "exit_gates": _gates_with_sections(),
+            "applies_to_phases": phases,
+            "raw_prose": "p",
+        }
+
+    def test_throttled_to_default_cadence_of_five(self, tmp_path: Path) -> None:
+        # Emits on the phase's first carrier turn (count 0) and again every 5th turn,
+        # not on every turn.
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._spec_skill(["spec"]),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            emitted = [
+                asyncio.run(evaluate_signal(_req("same task"), tmp_path, session_id=SESSION)).banner
+                is not None
+                for _ in range(6)
+            ]
+        assert emitted == [True, False, False, False, False, True]
+
+    def test_re_emits_on_phase_change_within_cadence(self, tmp_path: Path) -> None:
+        # A phase change resets the cadence so the banner re-fires on phase entry even
+        # before the next tick (it aligns with the once-per-phase orientation block).
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._spec_skill(["spec", "design"]),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            b1 = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+            b2 = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+            _set_phase(tmp_path, "design")
+            b3 = asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+        assert b1 is not None  # turn 1 (count 0) emits
+        assert b2 is None  # turn 2 (count 1) suppressed
+        assert b3 is not None and b3.startswith("[agentalloy · design]")  # reset + emit
+
+    def test_env_override_restores_every_turn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENTALLOY_BANNER_TURN_CADENCE", "1")
+        _set_phase(tmp_path, "spec")
+        with (
+            mock.patch(
+                "agentalloy.api.proxy_signal._load_workflow_skill_for_phase",
+                return_value=self._spec_skill(["spec"]),
+            ),
+            mock.patch("agentalloy.api.proxy_signal.check_transition_trigger", return_value=None),
+        ):
+            emitted = [
+                asyncio.run(evaluate_signal(_req("x"), tmp_path, session_id=SESSION)).banner
+                is not None
+                for _ in range(3)
+            ]
+        assert emitted == [True, True, True]

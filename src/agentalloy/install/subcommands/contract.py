@@ -113,18 +113,40 @@ def _render_init(result: dict[str, Any]) -> None:
     print_rich(f"  Phase: {result['phase']}")
     print_rich(f"  Slug: {result['task_slug']}")
     print_rich("  [green]Created[/green]")
+    scaffolded = result.get("scaffolded") or []
+    if scaffolded:
+        print_rich("\n  [bold]Scaffolded docs[/bold] (with required headings)")
+        for path in scaffolded:
+            print_rich(f"  [green]+[/green] {path}")
     print_rich()
 
 
 def _init(args: argparse.Namespace) -> int:
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
-    phase: str = args.phase
+    project_root = _repo_root()
+
+    # --phase defaults to the active phase in .agentalloy/phase when omitted, so only
+    # --slug is required in the common case (the phase is already tracked).
+    phase: str | None = args.phase
+    if phase is None:
+        from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
+            _read_phase,
+        )
+
+        phase = _read_phase(project_root)
+        if phase is None:
+            print(
+                "  [error] No --phase given and no active phase in .agentalloy/phase. "
+                "Pass --phase explicitly.",
+                file=sys.stderr,
+            )
+            return 1
+
     slug: str = args.slug
     route: str = getattr(args, "route", "full")
     force: bool = getattr(args, "force", False)
 
-    project_root = _repo_root()
     contracts_dir = project_root / ".agentalloy" / "contracts" / phase
     contracts_dir.mkdir(parents=True, exist_ok=True)
     target = contracts_dir / f"{slug}.md"
@@ -172,9 +194,70 @@ def _init(args: argparse.Namespace) -> int:
     )
 
     target.write_text(content, encoding="utf-8")
-    result = {"path": str(target), "phase": phase, "task_slug": slug}
+
+    # Scaffold the phase's exit-gate doc files (e.g. design's approach/tasks/test-plan)
+    # seeded with the exact `## Section` headings the gate requires, so the agent doesn't
+    # have to read the skill YAML to discover them. Derived from the gate spec (single
+    # source of truth); never overwrites an existing file.
+    scaffolded = _scaffold_phase_docs(phase, slug, project_root)
+
+    result = {
+        "path": str(target),
+        "phase": phase,
+        "task_slug": slug,
+        "scaffolded": scaffolded,
+    }
     write_result(result, args, human_fn=_render_init)
     return 0
+
+
+def _concretize_glob(path_glob: str, slug: str) -> str | None:
+    """Resolve a gate path glob to a concrete repo-relative file path for *slug*.
+
+    Substitutes a literal ``<slug>`` placeholder and a ``**`` directory segment with the
+    slug (``docs/design/**/approach.md`` -> ``docs/design/<slug>/approach.md``). Returns
+    None when wildcards remain after substitution (an ambiguous/multi-match glob such as
+    ``.agentalloy/contracts/build/*.md`` must not be scaffolded to a single file).
+    """
+    concrete = path_glob.replace("<slug>", slug)
+    concrete = "/".join(slug if seg == "**" else seg for seg in concrete.split("/"))
+    if "*" in concrete:
+        return None
+    return concrete
+
+
+def _scaffold_phase_docs(phase: str, slug: str, project_root: Path) -> list[str]:
+    """Create stub docs for each ``artifact_contains`` gate of *phase*, with headings.
+
+    Returns the repo-relative paths actually created — skips files that already exist and
+    globs that don't resolve to a single concrete path. Soft: any failure returns the
+    paths created so far rather than raising (scaffolding is a convenience, not a gate).
+    """
+    created: list[str] = []
+    try:
+        from agentalloy.signals.prefilter import (  # pyright: ignore[reportPrivateUsage]
+            _extract_artifact_contains_specs,
+        )
+        from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+        gates = exit_gates_for_phase(phase) or {}
+        title = slug.replace("-", " ").title()
+        for path_glob, sections in _extract_artifact_contains_specs(gates):
+            concrete = _concretize_glob(path_glob, slug)
+            if concrete is None:
+                continue
+            target = project_root / concrete
+            if target.exists():
+                continue
+            lines = [f"# {title}", ""]
+            for section in sections:
+                lines += [f"## {section}", "", f"<{section.lower()} goes here>", ""]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            created.append(concrete)
+    except Exception:
+        pass
+    return created
 
 
 def _load_contract_template(phase: str) -> str | None:
@@ -269,7 +352,11 @@ def add_parser(
     init_p = sub.add_parser(
         "init", help="Scaffold a contract from the active workflow skill's template."
     )
-    init_p.add_argument("--phase", required=True, help="Phase (e.g. build, spec, design).")
+    init_p.add_argument(
+        "--phase",
+        default=None,
+        help="Phase (e.g. build, spec, design). Defaults to the active phase in .agentalloy/phase.",
+    )
     init_p.add_argument("--slug", required=True, help="Task slug (kebab-case identifier).")
     init_p.add_argument(
         "--route",

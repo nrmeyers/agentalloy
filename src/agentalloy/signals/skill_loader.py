@@ -224,6 +224,40 @@ def _write_composed_atomic(project_root: Path, cursor: str) -> None:
     _write_state_atomic(project_root, "composed", cursor)
 
 
+def _read_banner_turn(project_root: Path) -> tuple[str | None, str | None, int]:
+    """Read ``.agentalloy/banner-turns`` as ``(phase, session_key, count)``.
+
+    Stores ``"<phase>\\t<session_key>\\t<count>"`` — the carrier-turn counter that
+    paces the per-turn banner (emit once every N turns rather than every turn).
+    ``(None, None, 0)`` when absent/unreadable/malformed, which the caller treats as
+    a fresh start (count 0 → emit the banner this turn).
+    """
+    raw = _read_state(project_root, "banner-turns")
+    if raw is None:
+        return None, None, 0
+    parts = raw.split("\t")
+    if len(parts) != 3:
+        return None, None, 0
+    phase, session_key, count_str = parts
+    try:
+        count = int(count_str)
+    except ValueError:
+        count = 0
+    return (phase or None), (session_key or None), count
+
+
+def _write_banner_turn_atomic(
+    project_root: Path, phase: str, session_key: str | None, count: int
+) -> None:
+    """Atomically record the banner carrier-turn counter for *(phase, session_key)*.
+
+    Written eagerly at evaluate time (not via the deferred commit seam): the banner is
+    best-effort and the commit path is a no-op on quiet/banner-only turns, so a one-off
+    miscount on an upstream error is harmless.
+    """
+    _write_state_atomic(project_root, "banner-turns", f"{phase}\t{session_key or ''}\t{count}")
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle mode helpers (per-repo deferral)
 # ---------------------------------------------------------------------------

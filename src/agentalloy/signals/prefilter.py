@@ -74,6 +74,76 @@ def _extract_gate_sections(gate_spec: Any) -> list[str]:
     return sections
 
 
+def _extract_artifact_contains_specs(gate_spec: Any) -> list[tuple[str, list[str]]]:
+    """Pair EACH ``artifact_contains`` gate's ``path`` with ITS OWN ``sections``.
+
+    Unlike :func:`_extract_gate_sections` (which flattens every section name across all
+    gates into one list), this keeps each gate's ``path`` glob bound to the sections that
+    gate actually declares — so the banner can score each artifact against its own
+    required headings instead of checking every section against the first path only (the
+    bug this fixes). Order follows declaration; an ``artifact_contains`` lacking a string
+    ``path`` or a non-empty list of string ``sections`` is skipped.
+    """
+    specs: list[tuple[str, list[str]]] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        contains = gate_d.get("artifact_contains")
+        if isinstance(contains, dict):
+            c = cast(dict[str, Any], contains)
+            path = c.get("path")
+            raw_sections = c.get("sections")
+            if isinstance(path, str) and isinstance(raw_sections, list):
+                sections = [s for s in cast(list[Any], raw_sections) if isinstance(s, str)]
+                if sections:
+                    specs.append((path, sections))
+        for k, v in gate_d.items():
+            if k != "artifact_contains":
+                specs.extend(_extract_artifact_contains_specs(v))
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            specs.extend(_extract_artifact_contains_specs(item))
+    return specs
+
+
+def _extract_artifact_exists_paths(gate_spec: Any) -> list[str]:
+    """Walk gate_spec recursively and collect the ``path`` of every ``artifact_exists`` gate."""
+    paths: list[str] = []
+    if isinstance(gate_spec, dict):
+        gate_d: dict[str, Any] = cast(dict[str, Any], gate_spec)
+        exists = gate_d.get("artifact_exists")
+        if isinstance(exists, dict):
+            p = cast(dict[str, Any], exists).get("path")
+            if isinstance(p, str):
+                paths.append(p)
+        for k, v in gate_d.items():
+            if k != "artifact_exists":
+                paths.extend(_extract_artifact_exists_paths(v))
+    elif isinstance(gate_spec, list):
+        gate_l: list[Any] = cast(list[Any], gate_spec)
+        for item in gate_l:
+            paths.extend(_extract_artifact_exists_paths(item))
+    return paths
+
+
+def _extract_exists_only_paths(gate_spec: Any) -> list[str]:
+    """Paths guarded by an ``artifact_exists`` gate with NO sibling ``artifact_contains``.
+
+    In the SDD gates each doc file carries both an ``artifact_exists`` and an
+    ``artifact_contains`` for the same glob; a pure checkpoint like the design phase's
+    ``.agentalloy/contracts/build/*.md`` build-contract requirement has only
+    ``artifact_exists``. Returning the exists-only paths lets the banner surface that
+    requirement (otherwise invisible until the gate fails) without duplicating the
+    section-bearing doc gates. Order follows declaration, deduped.
+    """
+    contains_paths = {p for p, _ in _extract_artifact_contains_specs(gate_spec)}
+    out: list[str] = []
+    for p in _extract_artifact_exists_paths(gate_spec):
+        if p not in contains_paths and p not in out:
+            out.append(p)
+    return out
+
+
 def _extract_gate_tools(gate_spec: Any) -> list[str]:
     """Walk gate_spec recursively and collect all `tools` list values."""
     tools: list[str] = []
