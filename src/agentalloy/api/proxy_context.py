@@ -9,13 +9,18 @@ from __future__ import annotations
 import base64
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
+
+import yaml
 
 from agentalloy.api.proxy_models import ProxyRequest
 
 logger = logging.getLogger(__name__)
 
 PHASE_FILE = Path(".agentalloy") / "phase"
+UPSTREAM_FILE = Path(".agentalloy") / "upstream"
 
 
 def encode_proj_token(project_dir: Path | str) -> str:
@@ -92,3 +97,62 @@ def read_phase(cwd: Path) -> str | None:
     )
 
     return _read_phase(cwd)
+
+
+@dataclass(frozen=True)
+class Upstream:
+    """A harness's captured upstream LLM, read from ``.agentalloy/upstream``.
+
+    ``url`` and ``model`` are what the proxy forwards to; ``key_env`` is the
+    *name* of the environment variable holding the upstream API key (never the
+    secret itself — the proxy resolves it from its own process env at request
+    time, so no credential is written into the repo).
+    """
+
+    url: str
+    model: str
+    key_env: str | None = None
+
+
+def read_upstream(cwd: Path) -> Upstream | None:
+    """Read the captured upstream from *cwd*/.agentalloy/upstream.
+
+    The file is YAML written by ``agentalloy add <harness>``::
+
+        url: http://host:port/v1
+        model: some-model
+        key_env: OPENAI_API_KEY   # optional; env-var name, not the secret
+
+    Returns ``None`` when the file is absent, empty, malformed, or missing the
+    required ``url``/``model`` keys — callers then fall back to the global
+    upstream. Never raises on a bad file; a per-repo override must never take
+    down the proxy.
+    """
+    path = cwd / UPSTREAM_FILE
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as e:
+        logger.warning("could not read %s: %s", path, e)
+        return None
+
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError as e:
+        logger.warning("malformed %s: %s", path, e)
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    data = cast("dict[str, object]", parsed)
+
+    url = data.get("url")
+    model = data.get("model")
+    if not isinstance(url, str) or not url or not isinstance(model, str) or not model:
+        logger.warning("%s missing required url/model", path)
+        return None
+
+    key_env_raw = data.get("key_env")
+    key_env = key_env_raw if isinstance(key_env_raw, str) and key_env_raw else None
+
+    return Upstream(url=url.rstrip("/"), model=model, key_env=key_env)

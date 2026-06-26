@@ -10,6 +10,7 @@ Composition failures soft-fail: request passes through unchanged.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
@@ -20,7 +21,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from agentalloy.api.proxy_apply import InjectOutcome, apply_signal, commit_outcome
-from agentalloy.api.proxy_context import decode_proj_token, read_phase, resolve_working_dir
+from agentalloy.api.proxy_context import (
+    decode_proj_token,
+    read_phase,
+    read_upstream,
+    resolve_working_dir,
+)
 from agentalloy.api.proxy_injection import inject_into_openai_messages
 from agentalloy.api.proxy_models import ProxyRequest
 from agentalloy.api.proxy_session import extract_session_header, resolve_session_key
@@ -90,6 +96,64 @@ def get_settings_for_proxy(request: Request) -> AppSettings:
 
 
 # ---------------------------------------------------------------------------
+# Upstream resolution (per-repo .agentalloy/upstream → global fallback)
+# ---------------------------------------------------------------------------
+
+
+def _get_or_create_upstream_client(
+    app: Any, base_url: str, api_key: str | None
+) -> httpx.AsyncClient:
+    """Return a cached httpx client for *base_url* (per-repo upstream).
+
+    Cached on ``app.state.upstream_client_cache`` keyed by ``base_url`` so each
+    distinct captured upstream reuses one connection pool. The client carries no
+    ``base_url`` of its own — callers post absolute URLs — so a harness upstream
+    served under a subpath (``…/v1``) is preserved verbatim rather than mangled
+    by httpx base-path joining. Closed on lifespan shutdown.
+    """
+    cache: dict[str, httpx.AsyncClient] | None = getattr(app.state, "upstream_client_cache", None)
+    if cache is None:
+        cache = {}
+        app.state.upstream_client_cache = cache
+    client = cache.get(base_url)
+    if client is None:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        client = httpx.AsyncClient(
+            headers=headers,
+            timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0),
+        )
+        cache[base_url] = client
+    return client
+
+
+def _resolve_upstream(
+    app: Any,
+    cwd: Path,
+    default_client: httpx.AsyncClient | None,
+    default_model: str,
+) -> tuple[httpx.AsyncClient, str, str] | None:
+    """Resolve ``(client, chat_completions_url, model)`` for a request.
+
+    A per-repo ``.agentalloy/upstream`` (captured by ``agentalloy add``) wins:
+    the proxy adopts the harness's own upstream, forwarding to
+    ``<url>/chat/completions`` with the API key read from the named env var at
+    request time. Otherwise falls back to the global lifespan-scoped client
+    (``default_client``, posting the relative ``/v1/chat/completions``). Returns
+    ``None`` only when neither resolves — the caller then 503s.
+    """
+    up = read_upstream(cwd)
+    if up is not None:
+        api_key = os.environ.get(up.key_env) if up.key_env else None
+        client = _get_or_create_upstream_client(app, up.url, api_key)
+        return client, f"{up.url}/chat/completions", up.model
+    if default_client is not None:
+        return default_client, "/v1/chat/completions", default_model
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Error responses
 # ---------------------------------------------------------------------------
 
@@ -125,10 +189,15 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
 
 def _stream_upstream_response(
     upstream: httpx.AsyncClient,
+    chat_url: str,
     payload: dict[str, Any],
     on_status: Callable[[int], None] = lambda _status: None,
 ) -> StreamingResponse:
     """Forward a streaming (SSE) response from the upstream LLM.
+
+    ``chat_url`` is the chat-completions endpoint — relative (``/v1/chat/...``)
+    for the global client, absolute (``<captured>/chat/completions``) for a
+    per-repo adopted upstream.
 
     ``on_status`` is invoked once with the upstream status as soon as the stream
     opens (before any chunk relays), so the caller can commit cadence markers
@@ -137,7 +206,7 @@ def _stream_upstream_response(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+            async with upstream.stream("POST", chat_url, json=payload) as resp:
                 on_status(resp.status_code)
                 if resp.status_code >= 500:
                     logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
@@ -347,9 +416,6 @@ async def proxy_chat_completions(
     """
     start_time = time.monotonic()
 
-    if upstream is None:
-        return _upstream_not_configured_error()
-
     # --- Step 1-2: Resolve context ---
     # When the OpenAI base URL carries a /proj/<token> discriminator (the same
     # realpath-baked token the Anthropic passthrough uses), decode it to the repo;
@@ -363,6 +429,16 @@ async def proxy_chat_completions(
     cwd = resolve_working_dir(request, cwd_override)
     phase = read_phase(cwd)
     repo = str(cwd)
+
+    # Resolve the upstream to forward to: a per-repo .agentalloy/upstream (adopted
+    # from the harness's own config by `agentalloy add`) wins, else the global
+    # lifespan client. 503 only when neither resolves.
+    resolved_upstream = _resolve_upstream(
+        fastapi_request.app, cwd, upstream, settings.upstream_model
+    )
+    if resolved_upstream is None:
+        return _upstream_not_configured_error()
+    upstream_client, chat_url, upstream_model = resolved_upstream
 
     # Per-session orientation key: explicit harness header (e.g. Claude Code's
     # x-claude-code-session-id) else the conversation fingerprint. Drives the
@@ -462,7 +538,7 @@ async def proxy_chat_completions(
 
     # --- Step 5: Forward to upstream ---
     try:
-        payload = _build_payload(modified_request, settings.upstream_model)
+        payload = _build_payload(modified_request, upstream_model)
     except ValueError as e:
         return JSONResponse(
             status_code=503,
@@ -494,11 +570,11 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
         )
-        return _stream_upstream_response(upstream, payload, on_status=_commit)
+        return _stream_upstream_response(upstream_client, chat_url, payload, on_status=_commit)
 
     # Non-streaming: forward and return JSON
     try:
-        resp = await upstream.post("/v1/chat/completions", json=payload)
+        resp = await upstream_client.post(chat_url, json=payload)
     except httpx.ConnectError as e:
         logger.warning("Upstream connection failed: %s", e)
         error_code = "upstream_connect_error"

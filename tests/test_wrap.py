@@ -288,7 +288,7 @@ class TestRun:
                 return_value=True,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": []},
             ),
         ):
@@ -328,7 +328,7 @@ class TestRun:
                 return_value=True,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -350,7 +350,7 @@ class TestRun:
                 "agentalloy.install.subcommands.wrap.server_proc.start_background",
             ) as mock_start,
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -370,7 +370,7 @@ class TestRun:
                 return_value=9999,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -393,7 +393,7 @@ class TestRun:
                 return_value=9999,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -417,7 +417,7 @@ class TestRun:
                 return_value=9999,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -449,7 +449,7 @@ class TestRun:
                 return_value=True,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -485,7 +485,7 @@ class TestRun:
                 return_value=True,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -544,7 +544,7 @@ class TestIntegration:
                 return_value=9999,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(
@@ -574,7 +574,7 @@ class TestIntegration:
                 return_value=9999,
             ),
             patch(
-                "agentalloy.install.subcommands.wrap.wire_harness",
+                "agentalloy.install.subcommands.wrap._wire_harness_core",
                 return_value={"files_written": [], "harness": "claude-code"},
             ),
             patch(

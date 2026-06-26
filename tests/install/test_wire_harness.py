@@ -878,21 +878,20 @@ class TestProxyWiring:
         assert "localhost:6666" in content
         assert "proxy" in content.lower()
 
-    def test_hermes_agent_proxy_user_scope(
+    def test_hermes_agent_proxy_is_repo_local(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """hermes-agent default proxy wiring with user scope writes to ~/.hermes/config.yaml."""
+        """hermes-agent ignores scope and wires the repo-local carrier, not the global config."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         monkeypatch.setattr(Path, "home", lambda: fake_home)
 
         result = wire_compat("hermes-agent", port=3333, root=tmp_path, scope="user")
         assert result["integration_vector"] == "proxy"
-        config = fake_home / ".hermes" / "config.yaml"
-        assert config.exists()
-        content = config.read_text()
-        assert "localhost:3333" in content
-        assert "custom_providers" in content
+        repo_config = tmp_path / ".hermes" / "config.yaml"
+        assert repo_config.exists()
+        assert "localhost:3333" in repo_config.read_text()
+        assert not (fake_home / ".hermes" / "config.yaml").exists()
 
     def test_mcp_only_with_proxy_rejected(self, repo_root: Path) -> None:
         """mcp-only harness is rejected (blocked by top-level check)."""

@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import cast
 
+import yaml
+
+from agentalloy.api.proxy_context import Upstream
 from agentalloy.install.sentinel_utils import replace_marked_block
 from agentalloy.providers.base import WireRecord, sdd_instructions_markdown
 
@@ -35,6 +39,43 @@ def _inject_sentinel_block(existing: str, block: str) -> str:
     validates BEGIN-before-END ordering and duplicate counts.
     """
     return replace_marked_block(existing, block, _SENTINEL_BEGIN, _SENTINEL_END)
+
+
+def extract_upstream(root: Path) -> Upstream | None:
+    """Recover the upstream LLM from the user's global ``~/.hermes/config.yaml``.
+
+    Hermes stores its active endpoint as ``model.base_url`` + ``model.default``
+    (its ``provider: custom`` OpenAI-wire path — e.g. a local llama-server). The
+    proxy adopts that so ``agentalloy add hermes-agent`` needs no upstream
+    re-entry. ``root`` is unused: hermes config is home-scoped, not per-repo.
+
+    Returns ``None`` when the config is absent/malformed or lacks a usable
+    ``model.base_url`` / model name.
+    """
+    config_path = Path.home() / ".hermes" / "config.yaml"
+    try:
+        raw = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    model = cast("dict[str, object]", parsed).get("model")
+    if not isinstance(model, dict):
+        return None
+    model_block = cast("dict[str, object]", model)
+    base_url = model_block.get("base_url")
+    name = model_block.get("default") or model_block.get("model")
+    if not isinstance(base_url, str) or not base_url:
+        return None
+    if not isinstance(name, str) or not name:
+        return None
+    # Hermes' custom/openai-api providers authenticate via OPENAI_API_KEY; keyless
+    # local servers (llama-server) leave it unset, which the proxy tolerates.
+    return Upstream(url=base_url.rstrip("/"), model=name, key_env="OPENAI_API_KEY")
 
 
 def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[WireRecord]:

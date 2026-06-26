@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from agentalloy.api.proxy_context import Upstream
+
 
 # ---------------------------------------------------------------------------
 # Capability enum
@@ -70,6 +72,13 @@ HarnessSpecEnvBuilder = Callable[[int], dict[str, str]]
 HarnessSpecInstallWriter = Callable[[int, "Path", bool], "list[WireRecord]"]
 """Run the full install/wire for a harness, returning the records of files touched."""
 
+HarnessSpecUpstreamExtractor = Callable[["Path"], "Upstream | None"]
+"""Read a harness's own config and return the upstream LLM it points at, if any.
+
+Used by ``agentalloy add <harness>`` so the proxy can *adopt* the harness's
+existing upstream (forwarding there transparently) instead of making the user
+re-declare it. Returns None when no upstream can be determined."""
+
 
 @dataclass(frozen=True)
 class HarnessSpec:
@@ -82,6 +91,8 @@ class HarnessSpec:
         protocol:            the LLM protocol the harness speaks.
         env_builder:         callable that returns env vars for a given port.
         install_writer:      callable that runs full wiring; returns WireRecords.
+        upstream_extractor:  callable that reads the harness's own config and
+                             returns its upstream LLM, for ``agentalloy add``.
     """
 
     name: str
@@ -96,6 +107,10 @@ class HarnessSpec:
     # means this harness sends no session header and the proxy falls back to a
     # conversation fingerprint. See ``agentalloy.api.proxy_session``.
     session_header: str | None = None
+    # Reads the harness's own config to recover the upstream LLM it points at,
+    # so ``agentalloy add <harness>`` can adopt it without the user re-declaring
+    # it. None means this harness exposes no discoverable upstream.
+    upstream_extractor: HarnessSpecUpstreamExtractor | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +189,10 @@ def sdd_instructions_markdown(port: int) -> str:
     same drift that bit the ``Phases:`` line. Proxy-wired harnesses
     (claude-code and the OpenAI-compatible ones) get it via per-turn
     workflow-skill injection instead.
+
+    hermes-agent is dual: its persistent ``SOUL.md`` block (this prose) is the
+    global/unwired fallback, while ``agentalloy add hermes-agent`` makes it a
+    per-repo proxy-wired harness that also gets the per-turn injection.
 
     Callers that need YAML frontmatter (cursor, windsurf) prepend their own;
     this returns just the body.

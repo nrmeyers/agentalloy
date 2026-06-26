@@ -19,6 +19,7 @@ import argparse
 import sys
 
 from agentalloy.install.subcommands import (
+    add,
     cleanup,
     compose,
     contract,
@@ -78,6 +79,7 @@ _SUBCOMMANDS = [
     # User-facing verbs first — these are what end users typically run.
     preflight,
     simple_setup,
+    add,
     profile,
     customize,
     reset,

@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import NATIVE_PASSTHROUGH_HARNESSES, PROXY_UNABLE_HARNESSES
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import (
     detect,
@@ -40,11 +39,8 @@ from agentalloy.install.subcommands import (
     start_embed_server,
     start_rerank_server,
     verify,
-    wire_harness,
     write_env,
 )
-from agentalloy.install.subcommands.wire import resolve_via
-from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
 
 try:
     from rich.console import Console  # type: ignore[import-untyped]
@@ -406,31 +402,6 @@ def _prompt_hardware(default: str) -> str:
     )
 
 
-_HARNESS_OPTIONS: list[tuple[str, str]] = [
-    ("claude-code", "Claude Code CLI (Anthropic)"),
-    ("gemini-cli", "Gemini CLI (Google)"),
-    ("cursor", "Cursor IDE"),
-    ("windsurf", "Windsurf IDE"),
-    ("github-copilot", "GitHub Copilot (VS Code)"),
-    ("hermes-agent", "Hermes Agent"),
-    ("continue-closed", "Continue.dev extension"),
-    ("opencode", "OpenCode (with local LLM)"),
-    ("aider", "Aider"),
-    ("cline", "Cline"),
-    ("manual", "manual — skip (configure later)"),
-]
-
-
-def _prompt_harness() -> str:
-    # Default is "manual" — the last entry.
-    default_index = len(_HARNESS_OPTIONS)
-    return _prompt_numbered(
-        "Select IDE harness:",
-        _HARNESS_OPTIONS,
-        default_index=default_index,
-    )
-
-
 def _prompt_deployment() -> str:
     """Prompt for deployment type: container or native.
 
@@ -645,73 +616,18 @@ def _derive_host_target(detect_data: dict[str, Any]) -> str:
     return "cpu"
 
 
-def _prompt_upstream(cfg: SetupConfig) -> None:
-    """Interactive prompts to capture upstream LLM configuration."""
-    _print("\n  [bold]Upstream LLM (proxy target)[/bold]")
-    _print("  [dim]The AgentAlloy proxy forwards requests to this LLM.[/dim]")
-
-    cfg.upstream_url = _prompt_context(
-        "  Upstream URL",
-        "  Base URL of the upstream LLM (e.g. http://localhost:47951 for a local llama-server, https://api.openai.com for OpenAI)",
-        default=cfg.upstream_url or "",
-    )
-    cfg.upstream_model = _prompt_context(
-        "  Upstream model",
-        "  Model name to pass to the upstream LLM (e.g. qwen3-14b)",
-        default=cfg.upstream_model or "",
-    )
-    cfg.upstream_api_key = _prompt_context(
-        "  Upstream API key",
-        "  API key for the upstream LLM (leave blank for local runners)",
-        default=cfg.upstream_api_key or "",
-    )
-
-
-def _test_upstream_endpoint(cfg: SetupConfig) -> bool:
-    """Validate the upstream LLM connection by hitting /v1/models.
-
-    Returns True if the endpoint responds successfully, False otherwise.
-    A missing or empty api key is accepted (local runners may not require one).
-    """
-    url = (cfg.upstream_url or "").rstrip("/")
-    if not url:
-        _print("  [yellow]No upstream URL set — skipping validation.[/yellow]")
-        return False
-
-    models_url = f"{url}/models"
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if cfg.upstream_api_key:
-        headers["Authorization"] = f"Bearer {cfg.upstream_api_key}"
-
-    req = urllib.request.Request(models_url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            if resp.status == 200:
-                _print(f"  [green]Upstream LLM reachable at {models_url}[/green]")
-                return True
-            _print(f"  [yellow]Upstream returned HTTP {resp.status} — continuing anyway.[/yellow]")
-            return False
-    except Exception as exc:
-        _print(f"  [yellow]Upstream LLM not reachable ({exc}) — continuing anyway.[/yellow]")
-        _print(f"  [dim]Start the upstream LLM and verify: curl {models_url}[/dim]")
-        return False
-
-
 def _write_upstream_env(cfg: SetupConfig) -> None:
-    """Append/update upstream LLM vars in the existing .env file.
+    """Persist the optional global upstream LLM vars to .env (idempotent).
 
-    Reads the current .env, removes any existing UPSTREAM_* lines, then
-    appends the three upstream vars. This is idempotent and safe to call
-    multiple times.
+    Harness selection + upstream adoption now live in the per-repo ``agentalloy
+    add`` command (it writes ``.agentalloy/upstream``, which the proxy prefers).
+    The global ``UPSTREAM_*`` is only the proxy's last-resort fallback, so setup
+    writes it solely when one was passed explicitly via ``--upstream-*`` /
+    ``$UPSTREAM_*``.
     """
     env_fp = install_state.env_path()
 
-    # Capture original .env content for backup/restore (only on first call)
-    original_content = None
-    if env_fp.exists():
-        original_content = env_fp.read_text()
-
-    # Persist to state if this is the first backup
+    original_content = env_fp.read_text() if env_fp.exists() else None
     if original_content is not None:
         st = install_state.load_state()
         if st.get("env_original_content") is None:
@@ -719,19 +635,15 @@ def _write_upstream_env(cfg: SetupConfig) -> None:
             install_state.save_state(st)
 
     existing = env_fp.read_text(encoding="utf-8") if env_fp.exists() else ""
-
-    # Remove any existing upstream lines
     filtered_lines = [
         line
         for line in existing.splitlines()
         if not line.startswith(("UPSTREAM_URL=", "UPSTREAM_MODEL=", "UPSTREAM_API_KEY="))
     ]
-
-    # Append the three upstream vars
     filtered_lines.append(f"UPSTREAM_URL={cfg.upstream_url}")
     filtered_lines.append(f"UPSTREAM_MODEL={cfg.upstream_model}")
     filtered_lines.append(f"UPSTREAM_API_KEY={cfg.upstream_api_key}")
-    filtered_lines.append("")  # trailing newline
+    filtered_lines.append("")
 
     install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
         env_fp, "\n".join(filtered_lines)
@@ -1274,15 +1186,9 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
             _print(f"  [yellow]Unknown pack(s) skipped: {sorted(_unknown)}[/yellow]")
         cfg.packs = ",".join(_valid)
 
-    # 5c. Harness selection — before container setup so the user can
-    # cancel before waiting for the model download.
-    if not cfg.non_interactive:
-        cfg.harness = _prompt_harness()
-    else:
-        h = (cfg.harness or "manual").strip().lower()
-        if h == "continue":
-            h = "continue-closed"
-        cfg.harness = h
+    # 5c. Engine-only setup. Harness wiring moved to the per-repo `agentalloy add
+    # <harness>` command (it adopts the harness's own upstream), so setup no longer
+    # prompts for a harness.
 
     # 6. Show summary
     _print("\n[dim]" + "─" * 40)
@@ -1292,7 +1198,6 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     _print(f"  Image:        {cfg.image_tag} ({_image_variant_label(cfg.image_tag)})")
     _print(f"  Port:         {cfg.port}")
     _print(f"  Packs:        {cfg.packs or '(always-on only)'}")
-    _print(f"  Harness:      {cfg.harness}")
 
     if not cfg.non_interactive:
         confirm = input("  Confirm and continue? [Y/n]: ").strip().lower()
@@ -1557,29 +1462,8 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         env_fp, f"RUNTIME_PORT={cfg.port}\n"
     )
 
-    # 11. Wire harness (if selected) — BEFORE verify, so verify's
-    # harness_config_present check inspects a freshly-wired harness. (The native
-    # flow wires before verifying too; the container flow historically verified
-    # first, which false-passed on a fresh install — empty harness_files_written —
-    # and failed on an overwrite that carried the prior run's recorded files.)
-    if cfg.harness and cfg.harness != "manual":
-        _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
-        # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
-        # use legacy markdown-injection so we don't write a misleading
-        # proxy-instruction.md file that claims traffic flows through the proxy.
-        # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
-        rc = wire_harness.run(
-            _build_namespace(
-                cfg,
-                harness=cfg.harness,
-                force=False,
-                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
-            )
-        )
-        if rc not in (0, 4):
-            _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
-            return rc
-        _print("  [green]  Done.[/green]")
+    # 11. Harness wiring is per-repo: run `agentalloy add <harness>` in each repo
+    # (it adopts the harness's own upstream). Setup installs the engine only.
 
     # 12. Run verify
     _print("  [dim]-> Verifying installation[/dim]")
@@ -1931,96 +1815,15 @@ def run_setup(cfg: SetupConfig) -> int:
     except Exception as exc:  # noqa: BLE001 — best-effort
         _print(f"  [yellow]  warning: could not persist pack selection ({exc}).[/yellow]")
 
-    # 7. Harness
-    if not cfg.non_interactive:
-        cfg.harness = _prompt_harness()
-    else:
-        h = (cfg.harness or "manual").strip().lower()
-        if h == "continue":
-            h = "continue-closed"
-        cfg.harness = h
-
-    if cfg.harness not in VALID_HARNESSES:
-        _print(
-            f"  [red]Invalid harness: {cfg.harness}. "
-            f"Choices: {', '.join(sorted(VALID_HARNESSES))}[/red]"
-        )
-        return 1
-    _print(f"  Harness: {cfg.harness}")
-
-    # Sidecar harness guardrail: these harnesses can't be proxy-wired (they
-    # don't honor base-URL overrides), so AgentAlloy falls back to a static
-    # rules file kept current by a watcher. System-skill gating degrades to
-    # advisory. Non-interactive installs must explicitly acknowledge that with
-    # --acknowledge-sidecar; interactive installs get a y/n prompt.
-    # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
-    if cfg.harness in PROXY_UNABLE_HARNESSES:
-        sidecar_msg = (
-            f"\n  [yellow]Sidecar harness selected: {cfg.harness}[/yellow]\n"
-            "  This harness cannot be proxy-wired (it does not honor OpenAI/Anthropic\n"
-            "  base-URL overrides). AgentAlloy falls back to a static rules file kept\n"
-            "  current by a file-watching sidecar. System skill enforcement is\n"
-            "  advisory-only; phase transitions require the watcher to be running.\n"
-            "  See docs/sidecar-experience.md for the full picture."
-        )
-        if cfg.non_interactive:
-            if not cfg.acknowledge_sidecar:
-                _print(sidecar_msg)
-                _print("  [red]Non-interactive sidecar setup requires --acknowledge-sidecar.[/red]")
-                return 1
-        else:
-            _print(sidecar_msg)
-            ans = _prompt_context("  Continue with sidecar harness?", "y/n", default="n")
-            if (ans or "n").strip().lower() != "y":
-                _print("  [yellow]Setup cancelled.[/yellow]")
-                return 0
+    # 7. Engine-only setup. Harness selection + upstream adoption moved to the
+    # per-repo `agentalloy add <harness>` command, which discovers each harness's
+    # upstream from its own config — so setup no longer prompts for a harness or an
+    # upstream LLM. ``cfg.upstream_*`` stays as an optional global fallback (via
+    # --upstream-* / $UPSTREAM_*) for the proxy's last-resort upstream.
 
     # Resolve preset from explicit choices (after all user input)
     preset = _resolve_preset(cfg)
     # Preset is an internal write-env detail; not shown to the user.
-
-    # Resolve the integration vector the same way `wire` does: every harness
-    # resolves to 'proxy' (including claude-code, which is now proxy-wired).
-    # Sidecar harnesses resolve to 'proxy' too but can't actually be intercepted,
-    # so they're excluded below. Only genuinely proxy-wired harnesses need an
-    # upstream LLM target.
-    via = resolve_via(cfg.harness, None) if cfg.harness != "manual" else "manual"
-    # The OpenAI-style upstream (UPSTREAM_URL/MODEL/KEY) applies only to harnesses
-    # that route through the OpenAI-compatible bridge. Native-passthrough harnesses
-    # (claude-code) forward the caller's own credential to ANTHROPIC_UPSTREAM_URL
-    # and never use UPSTREAM_URL, so they must not be prompted for it.
-    uses_proxy = (
-        via == "proxy"
-        and cfg.harness not in PROXY_UNABLE_HARNESSES
-        and cfg.harness not in NATIVE_PASSTHROUGH_HARNESSES
-    )
-
-    # 8. Upstream LLM — only relevant when the harness actually routes through the
-    # proxy. Sidecar harnesses fall back to a static rules file and don't forward
-    # through the proxy, so prompting for an upstream target would be confusing
-    # and unused.
-    if uses_proxy:
-        if not cfg.non_interactive:
-            _prompt_upstream(cfg)
-        # In non-interactive mode, upstream_url/model/api_key come from SetupConfig
-        # defaults (which may be pre-set by the caller). We don't require them to be
-        # set — the proxy can be configured later via env vars.
-        _print(f"  Upstream URL:   {cfg.upstream_url or '(not set)'}")
-        _print(f"  Upstream model: {cfg.upstream_model or '(not set)'}")
-    elif cfg.harness in NATIVE_PASSTHROUGH_HARNESSES:
-        if not cfg.non_interactive:
-            _print(
-                "  [dim]Claude Code uses the native Anthropic passthrough — it forwards your "
-                "own credential to api.anthropic.com (set ANTHROPIC_UPSTREAM_URL to chain). "
-                "No upstream LLM prompt needed.[/dim]"
-            )
-    elif cfg.harness == "manual":
-        if not cfg.non_interactive:
-            _print("  [dim]Harness 'manual' selected — skipping upstream LLM prompt.[/dim]")
-    elif not cfg.non_interactive:
-        _print(
-            f"  [dim]Harness '{cfg.harness}' does not route through the proxy. Skipping upstream LLM prompt.[/dim]"
-        )
 
     # -- Phase 2: Summary confirmation --
 
@@ -2031,7 +1834,6 @@ def run_setup(cfg: SetupConfig) -> int:
     _print(f"  Port:       {cfg.port}")
     _print(f"  Mode:       {cfg.mode}")
     _print(f"  Packs:      {cfg.packs or '(always-on only)'}")
-    _print(f"  Harness:    {cfg.harness}")
 
     hw_label = _HW_LABELS.get(cfg.hardware_target, cfg.hardware_target)
     detected = cfg.recommended_host or "cpu"
@@ -2130,11 +1932,10 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step c2: Write upstream LLM vars to .env (only for proxy-wired harnesses;
-    # sidecar harnesses never forward through the proxy, so an upstream target
-    # is meaningless for them).
-    if uses_proxy:
-        _print("  [dim]-> Writing upstream LLM config[/dim]")
+    # Optional global upstream fallback: persist only when one was passed
+    # explicitly (per-repo `agentalloy add` adoption is the primary path).
+    if cfg.upstream_url:
+        _print("  [dim]-> Writing optional global upstream fallback[/dim]")
         _write_upstream_env(cfg)
         _print("  [green]  Done.[/green]")
 
@@ -2241,25 +2042,9 @@ def run_setup(cfg: SetupConfig) -> int:
         return rc
     _print("  [green]  Done.[/green]")
 
-    # Step i: Wire harness (if requested)
-    if cfg.harness and cfg.harness != "manual":
-        _print(f"  [dim]-> Wiring harness ({cfg.harness})[/dim]")
-        # Sidecar harnesses (Cursor, Windsurf, etc.) can't be proxy-wired —
-        # use legacy markdown-injection so we don't write a misleading
-        # proxy-instruction.md file that claims traffic flows through the proxy.
-        # Uses PROXY_UNABLE_HARNESSES from agentalloy.install
-        rc = wire_harness.run(
-            _build_namespace(
-                cfg,
-                harness=cfg.harness,
-                force=False,
-                legacy=cfg.harness in PROXY_UNABLE_HARNESSES,
-            )
-        )
-        if rc not in (0, 4):
-            _print(f"  [red]  wire-harness failed (exit {rc}).[/red]")
-            return rc
-        _print("  [green]  Done.[/green]")
+    # Harness wiring is per-repo: run `agentalloy add <harness>` in each repo.
+    # It points the harness at the proxy and adopts the harness's own upstream,
+    # so setup installs the engine only.
 
     # -- Phase 4: Validate --
 
@@ -2274,11 +2059,6 @@ def run_setup(cfg: SetupConfig) -> int:
     # Embedding endpoint smoke test
     _print("\n[dim]Testing embed endpoint...[/dim]")
     _test_embed_endpoint(cfg)
-
-    # Upstream LLM connectivity check (non-blocking)
-    if cfg.upstream_url:
-        _print("\n[dim]Testing upstream LLM endpoint...[/dim]")
-        _test_upstream_endpoint(cfg)
 
     # -- Done --
 

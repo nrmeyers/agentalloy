@@ -25,8 +25,6 @@ from agentalloy.install.subcommands.simple_setup import (
     _run_from_args as _run_from_args,  # type: ignore[attr-defined]
     _build_namespace as _build_namespace,  # type: ignore[attr-defined]
     _test_embed_endpoint as _test_embed_endpoint,  # type: ignore[attr-defined]
-    _prompt_upstream as _prompt_upstream,  # type: ignore[attr-defined]
-    _test_upstream_endpoint as _test_upstream_endpoint,  # type: ignore[attr-defined]
     _write_upstream_env as _write_upstream_env,  # type: ignore[attr-defined]
     SetupConfig,
 )
@@ -70,7 +68,6 @@ class MockSetup:
             "enable_service",
             "write_env",
             "verify",
-            "wire_harness",
         ):
             mp = patch(f"{self._get_patch_path(name)}.run")
             self.mocks[name] = mp.start()
@@ -424,83 +421,35 @@ class TestSimpleSetupExecution:
         assert rc == 0
         self.mock.mocks["pull_models"].assert_called_once()
 
-    def test_run_setup_wires_harness_when_specified(self, tmp_state_dir: tuple[Path, Path]):
-        """Setup wires the harness when a non-manual harness is selected."""
+    def test_run_setup_never_wires_a_harness(self, tmp_state_dir: tuple[Path, Path]):
+        """Setup is engine-only: harness wiring moved to per-repo `agentalloy add`,
+        so setup completes without touching any harness — even when one is passed."""
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        assert not hasattr(mod, "wire_harness")  # the import is gone
         setup_config, run_setup = self._import_run_setup()
         rc = run_setup(setup_config(harness="claude-code", non_interactive=True))
         assert rc == 0
-        self.mock.mocks["wire_harness"].assert_called_once()
 
-    def test_run_setup_skips_harness_when_manual(self, tmp_state_dir: tuple[Path, Path]):
-        """Setup does not call wire_harness when harness is 'manual'."""
-        setup_config, run_setup = self._import_run_setup()
-        rc = run_setup(setup_config(harness="manual", non_interactive=True))
-        assert rc == 0
-        self.mock.mocks["wire_harness"].assert_not_called()
-
-    def _run_interactive_until_confirm(self, harness: str):
-        """Drive the interactive flow up to the final confirm prompt.
-
-        All interactive prompts are mocked so the gather phase completes;
-        `_prompt_harness` returns *harness* and the final confirm returns 'n'
-        so `run_setup` aborts (rc == 1) right after the upstream-LLM block —
-        letting us observe whether `_prompt_upstream`/`_write_upstream_env` ran
-        without executing the full install pipeline.
-
-        Returns (rc, prompt_upstream_mock, write_upstream_mock).
-        """
-        import agentalloy.install.subcommands.simple_setup as mod
-
-        with (
-            patch.object(mod, "_prompt_deployment", return_value="native"),
-            patch.object(mod, "_prompt_hardware", side_effect=lambda default: default),
-            patch.object(mod, "_prompt_mode", return_value="manual"),
-            patch.object(mod, "_prompt_for_packs", return_value=""),
-            patch.object(
-                mod, "_prompt_context", side_effect=lambda text, context, default="": default
-            ),
-            patch.object(mod, "_prompt_harness", return_value=harness),
-            # Final "Confirm and continue?" -> 'n' aborts after the upstream block.
-            patch.object(mod, "_prompt", return_value="n"),
-            patch.object(mod, "_prompt_upstream") as prompt_upstream,
-            patch.object(mod, "_write_upstream_env") as write_upstream,
-        ):
-            rc = mod.run_setup(mod.SetupConfig(non_interactive=False))
-        return rc, prompt_upstream, write_upstream
-
-    def test_interactive_proxy_harness_prompts_for_upstream(self, tmp_state_dir: tuple[Path, Path]):
-        """A genuinely proxy-wired harness still prompts for the upstream LLM."""
-        rc, prompt_upstream, _ = self._run_interactive_until_confirm("opencode")
-        assert rc == 1
-        prompt_upstream.assert_called_once()
-
-    def test_proxy_harness_writes_upstream_env(self, tmp_state_dir: tuple[Path, Path]):
-        """Non-interactive proxy harness setup still writes upstream LLM .env vars."""
+    def test_run_setup_writes_global_upstream_fallback_when_provided(
+        self, tmp_state_dir: tuple[Path, Path]
+    ):
+        """An explicit --upstream-* still lands in .env as the optional global fallback."""
         import agentalloy.install.subcommands.simple_setup as mod
 
         with patch.object(mod, "_write_upstream_env") as write_upstream:
-            rc = mod.run_setup(mod.SetupConfig(harness="opencode", non_interactive=True))
+            rc = mod.run_setup(
+                mod.SetupConfig(non_interactive=True, upstream_url="http://up:8080/v1")
+            )
         assert rc == 0
         write_upstream.assert_called_once()
 
-    def test_native_passthrough_harness_skips_upstream_prompt(
-        self, tmp_state_dir: tuple[Path, Path]
-    ):
-        """claude-code uses the native Anthropic passthrough — it forwards the caller's
-        own credential to ANTHROPIC_UPSTREAM_URL and never uses the OpenAI UPSTREAM_URL,
-        so the wizard must NOT prompt for it (regression: 3.0.0 wrongly prompted)."""
-        rc, prompt_upstream, _ = self._run_interactive_until_confirm("claude-code")
-        assert rc == 1
-        prompt_upstream.assert_not_called()
-
-    def test_native_passthrough_harness_skips_write_upstream_env(
-        self, tmp_state_dir: tuple[Path, Path]
-    ):
-        """Non-interactive claude-code setup does not write the OpenAI upstream .env vars."""
+    def test_run_setup_skips_upstream_env_when_absent(self, tmp_state_dir: tuple[Path, Path]):
+        """No upstream provided → setup writes no global UPSTREAM_* (per-repo `add` adopts it)."""
         import agentalloy.install.subcommands.simple_setup as mod
 
         with patch.object(mod, "_write_upstream_env") as write_upstream:
-            rc = mod.run_setup(mod.SetupConfig(harness="claude-code", non_interactive=True))
+            rc = mod.run_setup(mod.SetupConfig(non_interactive=True))
         assert rc == 0
         write_upstream.assert_not_called()
 
@@ -1030,7 +979,6 @@ class TestPackDiscovery:
                     "enable_service",
                     "write_env",
                     "verify",
-                    "wire_harness",
                 ):
                     mp = patch(f"agentalloy.install.subcommands.{name}.run")
                     self.mocks[name] = mp.start()
@@ -1087,78 +1035,6 @@ class TestPackDiscovery:
 # ---------------------------------------------------------------------------
 # Harness validation
 # ---------------------------------------------------------------------------
-
-
-class TestHarnessValidation:
-    """Test harness input validation and aliases."""
-
-    @pytest.fixture(autouse=True)
-    def _mocks(self, tmp_state_dir: tuple[Path, Path]):
-        self.mock = MockSetup()
-        self.mock.setup_all()
-        self.tmp_config, self.tmp_data = tmp_state_dir
-        outputs_patch = patch(
-            "agentalloy.install.state.outputs_dir",
-            return_value=self.tmp_data / "outputs",
-        )
-        self.mock.patchers.append(outputs_patch)
-        self.mock.mocks["_outputs_dir"] = outputs_patch.start()
-        (self.tmp_data / "outputs").mkdir(parents=True, exist_ok=True)
-        yield
-        self.mock.teardown()
-
-    def test_valid_harness_accepted(self, tmp_state_dir: tuple[Path, Path]):
-        """Valid harness name passes through run_setup."""
-        setup_config_cls, run_setup_fn = self._import_run_setup()
-        rc = run_setup_fn(setup_config_cls(harness="claude-code", non_interactive=True))
-        assert rc == 0
-
-    def test_invalid_harness_rejected(self, tmp_state_dir: tuple[Path, Path]):
-        """Invalid harness name is rejected."""
-        setup_config_cls, run_setup_fn = self._import_run_setup()
-        rc = run_setup_fn(setup_config_cls(harness="invalid-harness", non_interactive=True))
-        assert rc == 1
-
-    def test_continue_alias_normalized(self):
-        """'continue' alias is normalized to 'continue-closed'."""
-        mock = MockSetup()
-        mock.setup_all()
-        try:
-            import agentalloy.install.subcommands.simple_setup as mod
-
-            cfg = mod.SetupConfig(harness="continue", non_interactive=True)
-            # Harness normalization happens before execution
-            h = cfg.harness.strip().lower()
-            if h == "continue":
-                cfg.harness = "continue-closed"
-            assert cfg.harness == "continue-closed"
-        finally:
-            mock.teardown()
-
-    def test_known_harnesses_in_valid_set(self):
-        """All harnesses from registry are in VALID_HARNESSES."""
-        from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
-
-        expected = {
-            "claude-code",
-            "gemini-cli",
-            "cursor",
-            "windsurf",
-            "github-copilot",
-            "hermes-agent",
-            "opencode",
-            "aider",
-            "cline",
-            "continue-closed",
-            "continue-local",
-            "manual",
-        }
-        assert expected.issubset(VALID_HARNESSES)
-
-    def _import_run_setup(self):
-        import agentalloy.install.subcommands.simple_setup as mod
-
-        return mod.SetupConfig, mod.run_setup
 
 
 # ---------------------------------------------------------------------------
@@ -2083,42 +1959,6 @@ class TestDeploymentCliFlag:
 # ---------------------------------------------------------------------------
 
 
-class TestPromptUpstream:
-    """Test _prompt_upstream captures the three upstream fields."""
-
-    def test_prompt_upstream_uses_defaults_non_tty(self):
-        """_prompt_upstream returns defaults in non-TTY mode."""
-        cfg = SetupConfig(
-            upstream_url="http://localhost:2099",
-            upstream_model="",
-            upstream_api_key="",
-        )
-        with patch.object(sys.stdin, "isatty", return_value=False):
-            _prompt_upstream(cfg)
-        assert cfg.upstream_url == "http://localhost:2099"
-
-    def test_prompt_upstream_updates_cfg_fields(self):
-        """_prompt_upstream writes user input into cfg fields."""
-        cfg = SetupConfig()
-        responses = iter(["http://llm.example.com/v1", "my-model", "sk-abc123"])
-        with (
-            patch.object(sys.stdin, "isatty", return_value=True),
-            patch("builtins.input", side_effect=lambda _: next(responses)),
-        ):
-            _prompt_upstream(cfg)
-        assert cfg.upstream_url == "http://llm.example.com/v1"
-        assert cfg.upstream_model == "my-model"
-        assert cfg.upstream_api_key == "sk-abc123"
-
-    def test_prompt_upstream_accepts_empty_api_key(self):
-        """_prompt_upstream accepts an empty API key (for local runners)."""
-        cfg = SetupConfig(upstream_url="http://localhost:2099", upstream_model="qwen3")
-        # Empty response = accept default (which is empty)
-        with patch.object(sys.stdin, "isatty", return_value=False):
-            _prompt_upstream(cfg)
-        assert cfg.upstream_api_key == ""
-
-
 class TestWriteUpstreamEnv:
     """Test _write_upstream_env writes/updates upstream vars in .env."""
 
@@ -2197,79 +2037,6 @@ class TestWriteUpstreamEnv:
 
         content = (tmp_path / ".env").read_text()
         assert "UPSTREAM_API_KEY=" in content
-
-
-class TestTestUpstreamEndpoint:
-    """Test _test_upstream_endpoint validates the upstream LLM connection."""
-
-    def test_returns_true_on_200(self, tmp_path: Path):
-        """Returns True when upstream /v1/models responds with 200."""
-        cfg = SetupConfig(
-            upstream_url="http://localhost:2099",
-            upstream_model="qwen3",
-            upstream_api_key="sk-test",
-        )
-        mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.status = 200
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = _test_upstream_endpoint(cfg)
-        assert result is True
-
-    def test_returns_false_on_connection_error(self):
-        """Returns False (non-blocking) when upstream is unreachable."""
-        cfg = SetupConfig(
-            upstream_url="http://unreachable-host:9999/v1",
-            upstream_model="qwen3",
-            upstream_api_key="",
-        )
-        with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
-            result = _test_upstream_endpoint(cfg)
-        assert result is False
-
-    def test_returns_false_when_url_empty(self):
-        """Returns False when upstream URL is not set."""
-        cfg = SetupConfig(upstream_url="", upstream_model="qwen3", upstream_api_key="")
-        result = _test_upstream_endpoint(cfg)
-        assert result is False
-
-    def test_returns_false_on_non_200(self):
-        """Returns False when upstream returns non-200 HTTP status."""
-        cfg = SetupConfig(
-            upstream_url="http://localhost:2099",
-            upstream_model="qwen3",
-            upstream_api_key="",
-        )
-        mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_resp.status = 503
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = _test_upstream_endpoint(cfg)
-        assert result is False
-
-    def test_includes_auth_header_when_api_key_set(self):
-        """Sends Authorization: Bearer header when api key is configured."""
-        cfg = SetupConfig(
-            upstream_url="http://localhost:2099",
-            upstream_model="qwen3",
-            upstream_api_key="sk-mysecret",
-        )
-        captured_requests: list[Any] = []
-
-        def fake_urlopen(req: Any, timeout: int = 10) -> Any:
-            captured_requests.append(req)
-            raise OSError("not really connecting")
-
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            _test_upstream_endpoint(cfg)
-
-        assert len(captured_requests) == 1
-        auth = captured_requests[0].get_header("Authorization")
-        assert auth == "Bearer sk-mysecret"
 
 
 class TestSetupConfigUpstreamDefaults:

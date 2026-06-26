@@ -31,7 +31,10 @@ from typing import Any
 from agentalloy.install import server_proc
 from agentalloy.install import state as install_state
 from agentalloy.install.output import print_rich, print_rich_stderr
-from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES, wire_harness
+from agentalloy.install.subcommands.wire_harness import (
+    VALID_HARNESSES,
+    _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
+)
 from agentalloy.providers import REGISTRY
 
 # PID file location (under user data dir)
@@ -220,7 +223,7 @@ def _run(args: argparse.Namespace) -> int:
     _out(f"  Wiring harness '{harness}' via {via} ...")
 
     # Proxy wiring — the only transport (claude-code included).
-    result = wire_harness(
+    result = _wire_harness_core(
         harness,
         port=port,
         root=cwd,

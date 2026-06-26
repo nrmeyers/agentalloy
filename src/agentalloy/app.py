@@ -152,6 +152,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     app.state.upstream_client = upstream_client
 
+    # Per-repo upstream clients (adopted from a harness's own config via
+    # `agentalloy add` → .agentalloy/upstream). Lazily populated per distinct
+    # captured base_url by the proxy router; closed alongside the global client.
+    app.state.upstream_client_cache = {}
+
     # Native Anthropic passthrough client (the /proj/<token>/v1/messages path).
     # Always constructed (default upstream https://api.anthropic.com). It holds
     # NO Anthropic credential — it forwards the caller's own, verbatim.
@@ -167,7 +172,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Guard each close independently: a failure in one (e.g. an in-flight
         # passthrough request at shutdown) must not skip the rest and leak the
         # DuckDB / LadybugDB connections.
-        for aclient in (embed_async_client, upstream_client):
+        cached_upstreams = list(getattr(app.state, "upstream_client_cache", {}).values())
+        for aclient in (embed_async_client, upstream_client, *cached_upstreams):
             if aclient is not None:
                 with suppress(Exception):
                     await aclient.aclose()

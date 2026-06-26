@@ -113,16 +113,28 @@ def _unwire_proxy_aider(root: Path) -> list[Path]:
 
 
 def _unwire_proxy_hermes_agent(scope: str, root: Path) -> list[Path]:
-    """Remove hermes-agent proxy config from config.yaml."""
-    config_path = Path.home() / ".hermes" / "config.yaml" if scope == "user" else root / "AGENTS.md"
-    if not config_path.exists():
-        return []
-    content = config_path.read_text()
-    new_content = _remove_sentinel_block(content)
-    if new_content != content:
-        config_path.write_text(new_content)
-        return [config_path]
-    return []
+    """Strip *legacy* hermes-agent proxy blocks (migration cleanup).
+
+    The current per-repo carrier (``<root>/.hermes/config.yaml`` +
+    ``.hermes/.agentalloy-env``) is reversed by the generic WireRecord walk, and
+    ``.agentalloy/upstream`` is torn down with the rest of the repo lifecycle
+    state. This only removes blocks written by *older* installs: a sentinel block
+    inside the user's real global ``~/.hermes/config.yaml`` (old user scope) and a
+    prose block in ``<root>/AGENTS.md`` (old repo scope). It strips the block
+    only — it never deletes the user's global config. ``scope`` is unused; both
+    legacy locations are checked unconditionally and missing files are skipped.
+    """
+    _ = scope
+    removed: list[Path] = []
+    for legacy in (Path.home() / ".hermes" / "config.yaml", root / "AGENTS.md"):
+        if not legacy.exists():
+            continue
+        content = legacy.read_text()
+        new_content = _remove_sentinel_block(content)
+        if new_content != content:
+            legacy.write_text(new_content)
+            removed.append(legacy)
+    return removed
 
 
 def _unwire_proxy_opencode(root: Path) -> list[Path]:

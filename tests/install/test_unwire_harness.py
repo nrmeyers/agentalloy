@@ -75,7 +75,8 @@ class TestWireMultiple:
         rc = wire._run(_wire(["claude-code", "hermes-agent"]))
         assert rc == 0
         assert (repo_root / ".claude" / "settings.local.json").exists()
-        assert _block_present(Path.home() / ".hermes" / "config.yaml")
+        # hermes is per-repo: its carrier is the repo-local .hermes/, not a global block.
+        assert (repo_root / ".hermes" / "config.yaml").exists()
         assert _wired_harnesses(repo_root) == {"claude-code", "hermes-agent"}
 
     def test_comma_separated_harness_wires_both(
@@ -119,7 +120,7 @@ class TestUnwireSingleHarness:
     ) -> None:
         monkeypatch.chdir(repo_root)
         wire._run(_wire(["claude-code", "hermes-agent"]))
-        hermes_cfg = Path.home() / ".hermes" / "config.yaml"
+        hermes_cfg = repo_root / ".hermes" / "config.yaml"
         phase = repo_root / ".agentalloy" / "phase"
         config = repo_root / ".agentalloy" / "config"
         assert phase.exists() and config.exists()
@@ -132,8 +133,8 @@ class TestUnwireSingleHarness:
         assert not (repo_root / ".claude" / "settings.local.json").exists()
         assert not (repo_root / ".agentalloy" / "claude-code-env.sh").exists()
         assert not (repo_root / ".claude" / "CLAUDE.md").exists()
-        # ...Hermes + the shared lifecycle state survive...
-        assert _block_present(hermes_cfg), "hermes carrier must survive a claude-code unwire"
+        # ...Hermes (repo-local carrier) + the shared lifecycle state survive...
+        assert hermes_cfg.exists(), "hermes carrier must survive a claude-code unwire"
         assert phase.exists(), "lifecycle phase must survive while hermes remains wired"
         assert config.exists()
         # ...and state now lists only the remaining harness.
@@ -149,8 +150,8 @@ class TestUnwireSingleHarness:
         unwire._run(_unwire("claude-code"))
         unwire._run(_unwire("hermes-agent"))
 
-        # Last harness out: the shared lifecycle state + empty husk go too.
-        assert not _block_present(Path.home() / ".hermes" / "config.yaml")
+        # Last harness out: the repo-local hermes carrier + lifecycle state + husk go too.
+        assert not (repo_root / ".hermes" / "config.yaml").exists()
         assert not (repo_root / ".agentalloy" / "phase").exists()
         assert not (repo_root / ".agentalloy").exists()
         assert _wired_harnesses(repo_root) == set()
@@ -170,12 +171,12 @@ class TestUnwireSingleHarness:
 
 
 # ---------------------------------------------------------------------------
-# shared user-scope config: last repo out
+# per-repo isolation: each repo owns an independent hermes carrier
 # ---------------------------------------------------------------------------
 
 
-class TestSharedUserScopeLastRepoOut:
-    def test_shared_hermes_config_survives_until_last_repo(
+class TestPerRepoIsolation:
+    def test_hermes_carriers_are_independent_per_repo(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         repo_a = tmp_path / "repo-a"
@@ -183,22 +184,21 @@ class TestSharedUserScopeLastRepoOut:
         for r in (repo_a, repo_b):
             r.mkdir()
             (r / "pyproject.toml").write_text("")
-        hermes_cfg = Path.home() / ".hermes" / "config.yaml"
 
         monkeypatch.chdir(repo_a)
         wire._run(_wire("hermes-agent"))
         monkeypatch.chdir(repo_b)
         wire._run(_wire("hermes-agent"))
-        assert _block_present(hermes_cfg)
         capsys.readouterr()
 
-        # Unwiring hermes from repo A must NOT pull the shared config out from
-        # under repo B.
+        cfg_a = repo_a / ".hermes" / "config.yaml"
+        cfg_b = repo_b / ".hermes" / "config.yaml"
+        assert cfg_a.exists() and cfg_b.exists()
+        # Each carries its own /proj/<token>, so the two configs differ.
+        assert cfg_a.read_text() != cfg_b.read_text()
+
+        # Unwiring hermes from repo A must NOT touch repo B's independent carrier.
         monkeypatch.chdir(repo_a)
         unwire._run(_unwire("hermes-agent"))
-        assert _block_present(hermes_cfg), "shared config must survive while repo B wires hermes"
-
-        # Repo B is the last one out — now the shared config goes.
-        monkeypatch.chdir(repo_b)
-        unwire._run(_unwire("hermes-agent"))
-        assert not _block_present(hermes_cfg), "last repo out removes the shared config"
+        assert not cfg_a.exists(), "repo A's carrier is removed"
+        assert cfg_b.exists(), "repo B's carrier is untouched"

@@ -810,14 +810,15 @@ def _unwire_repo_local(
     ):
         proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(repo_root))
 
-    # Repo-local lifecycle state seeded by `wire` (.agentalloy/phase + config) is
-    # shared across every harness wired into this repo (one workflow machine per
-    # repo). Only tear it down when no other harness remains (remove_lifecycle).
-    # Contracts under .agentalloy/contracts/ are user work and are preserved.
+    # Repo-local lifecycle state seeded by `wire`/`add` (.agentalloy/phase,
+    # config, upstream) is shared across every harness wired into this repo (one
+    # workflow machine per repo). Only tear it down when no other harness remains
+    # (remove_lifecycle). Contracts under .agentalloy/contracts/ are user work and
+    # are preserved.
     if not remove_lifecycle:
         return proxy_removed, files_removed
 
-    for _name in ("phase", "config"):
+    for _name in ("phase", "config", "upstream"):
         _state_file = repo_root / ".agentalloy" / _name
         if _state_file.exists():
             try:
@@ -1023,6 +1024,8 @@ def uninstall(
         ".aider.conf.yml",
         ".agentalloy-aider-instructions.md",
         ".opencode/system-prompt.md",
+        ".hermes/config.yaml",  # hermes per-repo proxy carrier (HERMES_HOME)
+        ".hermes/.agentalloy-env",  # hermes HERMES_HOME activation env file
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
         "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
         ".cline/settings.json",  # Cline proxy config

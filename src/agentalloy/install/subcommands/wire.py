@@ -21,7 +21,7 @@ from agentalloy.install.subcommands.wire_harness import (
     SENTINEL_BEGIN,
     SENTINEL_END,
     VALID_HARNESSES,
-    wire_harness,
+    _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.providers.base import WireRecord
 from agentalloy.signals.skill_loader import LIFECYCLE_MODES
@@ -531,6 +531,12 @@ def _run(args: argparse.Namespace) -> int:
     if getattr(args, "list_wired", False):
         return _list_wired(args, cwd)
 
+    print(
+        "[AgentAlloy] `wire` is deprecated; use `agentalloy add <harness>` "
+        "(same per-repo interception, and it adopts the harness's upstream).",
+        file=sys.stderr,
+    )
+
     harnesses = _normalize_harnesses(args.harness)
     invalid = [h for h in harnesses if h not in VALID_HARNESSES]
     if invalid:
@@ -599,9 +605,15 @@ def _run(args: argparse.Namespace) -> int:
     # Wire each requested harness's carrier in turn. Carriers are disjoint across
     # harnesses, and _persist_extra_records merges state by path, so stacking a
     # second harness leaves the first's records intact.
+    from agentalloy.install.subcommands.add import capture_upstream
+
     for harness in harnesses:
         resolve_via(harness, getattr(args, "via", None))  # validated; always proxy
-        r = wire_harness(harness, port=port, root=cwd, force=args.force)
+        r = _wire_harness_core(harness, port=port, root=cwd, force=args.force)
+        # Adopt the harness's own upstream (same transparent-interception step as
+        # `add`) so a wired harness forwards where it already pointed. No-op for
+        # harnesses without an extractor (e.g. claude-code, auth-transparent).
+        capture_upstream(harness, cwd)
         result["harnesses"].append(harness)
         result["files_written"].extend(r.get("files_written") or [])
         result["files_modified"].extend(r.get("files_modified") or [])

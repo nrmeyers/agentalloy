@@ -358,11 +358,46 @@ def wire_harness(
     legacy: bool = False,
     scope: str = "user",
 ) -> dict[str, Any]:
-    """Wire the specified harness. Returns contract-shaped result.
+    """Deprecated public alias for :func:`_wire_harness_core`.
 
     .. deprecated::
         This function is deprecated.  Use
         ``agentalloy.providers.REGISTRY[harness].install_writer`` instead.
+
+    Internal product callers (``add``, ``wire``, ``wrap``) call
+    :func:`_wire_harness_core` directly so the canonical ``add`` verb does not
+    trip this warning; this shim remains only for external/legacy callers.
+    """
+    warnings.warn(
+        "wire_harness() is deprecated; use agentalloy.providers.REGISTRY "
+        "instead. This module will be removed in a future release.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _wire_harness_core(
+        harness,
+        port=port,
+        root=root,
+        force=force,
+        mcp_fallback=mcp_fallback,
+        legacy=legacy,
+        scope=scope,
+    )
+
+
+def _wire_harness_core(
+    harness: str,
+    port: int = 47950,
+    root: Path | None = None,
+    force: bool = False,
+    mcp_fallback: bool = False,
+    legacy: bool = False,
+    scope: str = "user",
+) -> dict[str, Any]:
+    """Wire the specified harness. Returns contract-shaped result.
+
+    The actual wiring mechanism, shared by ``add``/``wire``/``wrap``. (The
+    public :func:`wire_harness` is a deprecated warning shim over this.)
 
     If the target file already has a sentinel block and the inner content's
     sha256 differs from what install-state.json recorded (i.e., the user
@@ -376,12 +411,6 @@ def wire_harness(
     If ``legacy=True``, uses the old markdown-injection wiring path instead
     of the default proxy model. Orthogonal to ``--mcp-fallback``.
     """
-    warnings.warn(
-        "wire_harness() is deprecated; use agentalloy.providers.REGISTRY "
-        "instead. This module will be removed in a future release.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     if scope not in ("user", "repo"):
@@ -1005,78 +1034,83 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
 
 
 def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
-    """Wire Hermes Agent to use the AgentAlloy proxy.
+    """Wire Hermes Agent to use the AgentAlloy proxy (per-repo interception).
 
-    User scope: writes a ``custom_providers`` entry to ~/.hermes/config.yaml
-    so the Hermes agent can pick up the proxy as a named provider.
+    Hermes config is home-scoped (``~/.hermes/config.yaml``) with no per-repo
+    form, but the proxy needs a per-repo ``/proj/<token>`` discriminator. So we
+    isolate per repo via ``HERMES_HOME``: a repo-local ``.hermes/`` the user
+    activates by sourcing ``.hermes/.agentalloy-env`` before running hermes there.
 
-    Repo scope: writes a compact sentinel-bounded proxy-mode instruction to
-    AGENTS.md so agents reading that file know to use the proxy.
+    The repo-local ``config.yaml`` is a copy of the user's global one with only
+    the ``model`` block redirected at the proxy, so their other tuning survives.
+    Where the proxy then *forwards* (upstream adoption) is handled separately by
+    ``agentalloy add`` writing ``.agentalloy/upstream``.
+
+    ``scope`` is ignored: hermes is inherently per-repo (like claude-code), so it
+    always wires the repo-local carrier at *root*.
     """
-    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
-    sentinel_end = "# <!-- END agentalloy install -->"
+    import yaml
 
-    if scope == "user":
-        config_path = Path.home() / ".hermes" / "config.yaml"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+    from agentalloy.api.proxy_context import encode_proj_token
 
-        proxy_block_lines = [
-            sentinel_begin,
-            "custom_providers:",
-            "  agentalloy:",
-            f"    base_url: http://localhost:{port}/v1",
-            "    api_key: agentalloy",
-            sentinel_end,
-        ]
-        block = "\n".join(proxy_block_lines)
-        original_content = _capture_original(config_path)
+    _ = scope
+    token = encode_proj_token(root)
+    proxy_base = f"http://localhost:{port}/proj/{token}/v1"
 
-        if config_path.exists():
-            content = config_path.read_text()
-            if sentinel_begin in content and sentinel_end in content:
-                begin_idx = content.index(sentinel_begin)
-                end_idx = content.index(sentinel_end) + len(sentinel_end)
-                if end_idx < len(content) and content[end_idx] == "\n":
-                    end_idx += 1
-                content = content[:begin_idx] + block + "\n" + content[end_idx:]
-            else:
-                if content and not content.endswith("\n"):
-                    content += "\n"
-                content += block + "\n"
-        else:
-            content = block + "\n"
+    # Start from the user's global config so their non-endpoint settings survive
+    # under HERMES_HOME; fall back to a minimal config if there is none.
+    global_config = Path.home() / ".hermes" / "config.yaml"
+    config: dict[str, Any] = {}
+    if global_config.exists():
+        try:
+            loaded = yaml.safe_load(global_config.read_text())
+            if isinstance(loaded, dict):
+                config = loaded
+        except yaml.YAMLError:
+            config = {}
 
-        install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
-        return [
-            {
-                "path": str(config_path),
-                "action": "injected_block",
-                "sentinel_begin": sentinel_begin,
-                "sentinel_end": sentinel_end,
-                "content_sha256": _sha256(block),
-                **({"original_content": original_content} if original_content is not None else {}),
-            }
-        ]
+    model = config.get("model")
+    if not isinstance(model, dict):
+        model = {}
+    model["provider"] = "custom"
+    model["base_url"] = proxy_base
+    model["default"] = "agentalloy-proxy"
+    config["model"] = model
 
-    # Repo scope: write a proxy instruction block to AGENTS.md
-    agents_md = root / "AGENTS.md"
-    original_content = _capture_original(agents_md)
-    instruction = (
-        f"## AgentAlloy proxy\n\n"
-        f"An AgentAlloy proxy is running at `http://localhost:{port}/v1`.\n"
-        "Configure your agent to use it as its API base.\n"
-    )
-    existing = agents_md.read_text() if agents_md.exists() else ""
-    result_content = _inject_sentinel_block(existing, instruction)
-    install_state._atomic_write(agents_md, result_content)  # pyright: ignore[reportPrivateUsage]
-    return [
+    records: list[dict[str, Any]] = []
+
+    repo_config = root / ".hermes" / "config.yaml"
+    repo_config.parent.mkdir(parents=True, exist_ok=True)
+    original_config = _capture_original(repo_config)
+    config_text = yaml.safe_dump(config, sort_keys=False)
+    install_state._atomic_write(repo_config, config_text)  # pyright: ignore[reportPrivateUsage]
+    records.append(
         {
-            "path": str(agents_md),
-            "action": "injected_block",
-            "content_sha256": _sha256(instruction.strip()),
-            **({"original_content": original_content} if original_content is not None else {}),
+            "path": str(repo_config),
+            "action": "wrote_new_file" if original_config is None else "replaced_file",
+            "content_sha256": _sha256(config_text),
+            **({"original_content": original_config} if original_config is not None else {}),
         }
-    ]
+    )
+
+    env_path = root / ".hermes" / ".agentalloy-env"
+    original_env = _capture_original(env_path)
+    env_text = 'export HERMES_HOME="$PWD/.hermes"\n'
+    install_state._atomic_write(env_path, env_text)  # pyright: ignore[reportPrivateUsage]
+    records.append(
+        {
+            "path": str(env_path),
+            "action": "wrote_new_file" if original_env is None else "replaced_file",
+            "content_sha256": _sha256(env_text),
+            **({"original_content": original_env} if original_env is not None else {}),
+        }
+    )
+
+    print(
+        "[AgentAlloy] Activate proxy: source .hermes/.agentalloy-env",
+        file=sys.stderr,
+    )
+    return records
 
 
 def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
