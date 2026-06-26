@@ -1,5 +1,7 @@
 # LM-assist: a sub-1B intent layer riding alongside the embedder
 
+> **Historical design doc — kept for rationale.** For the *current* runtime configuration of the intent and LM-assist layers, see [`.env.example`](../.env.example) (§ Signal intent reranker, § LM-assist) and [operator.md](operator.md) § Signal Intent. Note the policy that landed after this was written: `LM_ASSIST` is `arbitrate` on the GPU presets and `off` on cpu/container.
+
 Status: **shipped (current as of v3.3.5).** Originally a design sketch
 (2026-06-12); the slices it scoped are now in the codebase, each fail-open to the
 deterministic path. Since v2.4.0 the signals-layer intent reranker is the

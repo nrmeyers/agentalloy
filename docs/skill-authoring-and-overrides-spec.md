@@ -1,5 +1,7 @@
 # Skill Authoring and Overrides Spec
 
+> **Historical design spec — partially shipped.** The **override system** described here ships today as `agentalloy customize` (per-profile / per-project skill overrides that survive upgrades); see [INSTALL.md](../INSTALL.md) and [profiles-and-overrides.md](profiles-and-overrides.md) for current usage. The **authoring pipeline** half is the target design and is still under redesign — treat it as intent, not a description of the current tool.
+
 This document describes the skill authoring pipeline used to produce and validate shipped skill packs, and the override system that lets users customize system and workflow skills without forking.
 
 ## Skill Classes

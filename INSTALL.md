@@ -59,7 +59,7 @@ Once installed, move an existing install to the latest tagged release with one c
 ```bash
 agentalloy upgrade            # detects native vs container; swaps, refreshes corpus if needed, restarts, verifies
 agentalloy upgrade --check    # report current vs latest release, change nothing
-agentalloy upgrade --ref v3.3.5   # pin a specific release (rollback/testing)
+agentalloy upgrade --ref <tag>    # pin a specific release, e.g. roll back to a known-good tag
 agentalloy upgrade --dismiss  # mute the new-release nudge until a newer release lands
 ```
 
@@ -91,7 +91,7 @@ For a missing `uv`, **stop and ask the user to install it** — see https://docs
 
 `llama-server` (the llama.cpp inference server) is the sole inference runner — there is no runner selection. The setup wizard manages two `llama-server` instances for you: an embed server on **47951** and an intent reranker server on **47952**. After setup, verify with `llama-server --version` (and confirm `~/.local/bin` is on your `$PATH`).
 
-> **Migration from an existing Ollama install:** Ollama was dropped as a runtime in v1.3.1 — AgentAlloy now serves embeddings via `llama-server` only. AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 768-dim vectors (`nomic-embed-text-v1.5`, mean-pooled, with the `search_query: ` / `search_document: ` prefixes applied), you can point AgentAlloy at it instead of the managed llama-server.
+> **Migration from an existing Ollama install:** AgentAlloy serves embeddings via `llama-server`, not Ollama. AgentAlloy never binds Ollama's `11434`, so an existing Ollama install keeps running untouched. The runtime honors `RUNTIME_EMBED_BASE_URL`, so if you already serve an OpenAI-compatible embedding endpoint that returns 768-dim vectors (`nomic-embed-text-v1.5`, mean-pooled, with the `search_query: ` / `search_document: ` prefixes applied), you can point AgentAlloy at it instead of the managed llama-server.
 
 > **Upgrading to v2.0 (breaking, corpus-incompatible):** v2.0 switches the embedder from `qwen3-embedding:0.6b` (1024-dim) to `nomic-embed-text-v1.5` (768-dim). Any corpus built before v2.0 is at the wrong dimension, so a startup `EmbeddingDimMismatch` guard will refuse to load it — switching embed models requires a re-embed, not a config change. Existing 1024-dim corpora must be rebuilt. To migrate, either rebuild the corpus in place:
 >
@@ -339,7 +339,7 @@ If the bulk re-embed fails partway (e.g., the embedding server crashes mid-run),
 > agentalloy write-env --preset <chosen-preset>
 > ```
 
-(Substitute the preset name from step 4's `preset` field, e.g., `apple-silicon`.) The `.env` is written to `${XDG_CONFIG_HOME:-~/.config}/agentalloy/.env` with mode `0600` (owner read/write only).
+(Substitute the preset name from step 4's `preset` field — one of `cpu`, `nvidia`, `radeon`, `apple-silicon` — e.g., `apple-silicon`.) The `.env` is written to `${XDG_CONFIG_HOME:-~/.config}/agentalloy/.env` with mode `0600` (owner read/write only).
 
 If the user wants a non-default port (because 47950 is taken on their machine), pass `--port <n>`. Otherwise let it default to 47950.
 
@@ -524,6 +524,8 @@ State summary:
 
 **To check status across all wired repos:** `agentalloy status` shows the user state, which repos are wired, the corpus location, and whether the service is reachable.
 
+**What happens after wiring:** once a repo is wired, the agent's behavior is driven by the SDD phase lifecycle (`intake → spec → design → build → qa → ship`, plus the `sdd-fast` lane). See [How it works](README.md#how-it-works-phases-contracts-signal-layer) in the README for what each phase does.
+
 Operator commands the user can run later (these are NOT part of this runbook — they're for reference):
 
 | Command | What it does |
@@ -533,11 +535,15 @@ Operator commands the user can run later (these are NOT part of this runbook —
 | `agentalloy wire` | Wire the current repo (cwd) to the service. `--harness` is repeatable/comma-tolerant — `agentalloy wire --harness claude-code --harness hermes-agent` wires several at once for a repo you drive from more than one harness |
 | `agentalloy wire --list` | List the harnesses wired in the current repo (with lifecycle mode + phase) |
 | `agentalloy unwire` | Remove sentinels from the current repo only (keeps user state, `.env`, and corpus). `--harness <name>` unwires just that one harness, leaving any other wired harness and the repo's shared `.agentalloy/{phase,config}` lifecycle state intact; the harness's shared user-scope config is removed only on the last repo using it |
+| `agentalloy add <harness>` | Adopt one harness's own upstream LLM (read from its config) and wire it through the proxy, per-repo — for a repo that should talk to a different model than your global default |
+| `agentalloy worktree <harness> <branch>` | Create a git worktree for `<branch>` and wire `<harness>` through the proxy in it (`-b` to create the branch) — run several agent sessions on one repo in parallel, each with its own phase |
 | `agentalloy doctor` | Runtime health check on demand |
 | `agentalloy update` | Migrate corpus in place after a version bump |
 | `agentalloy install-pack <name>` | Add a published skill pack to the user corpus |
+| `agentalloy customize <list\|edit\|diff\|reset>` | View and override individual system/workflow skills, per profile or per project. Overrides survive upgrades; `agentalloy customize revalidate` re-checks them against newly shipped skills and disables any that drifted |
 | `agentalloy reset-step <name>` | Clear a specific install step (escape hatch for changing config without full uninstall) |
 | `agentalloy cleanup` | Reap orphaned runtime artifacts (stale processes, service units, dangling shim) — foreign-safe recovery. `--deep` escalates to a full, state-independent host sanitize — see below |
+| `agentalloy upgrade` | Pull and install the latest release — native: re-install + re-ingest packs + revalidate overrides; container: pull + recreate. `--check` previews the release first; `--dismiss` mutes the update nudge. See [Upgrading](#upgrading) |
 | `agentalloy uninstall` | Full teardown — see below for exactly what's removed |
 
 ### Container operational commands

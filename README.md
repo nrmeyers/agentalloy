@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage, a fragment re-ranker, ships off (it measured no lift over deterministic selection). The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
+Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage — a local fragment re-ranker that only reorders candidates and fails open — stays off on CPU installs and is enabled only on the GPU presets, where there's headroom for it. The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -92,7 +92,7 @@ The wizard detects your hardware, downloads the GGUF models, starts the embed + 
 - **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly, **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (a `podman` CLI on PATH with no started `podman machine`, or a stopped Docker Desktop, does not count). If no usable runtime is found, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
 - **Native** — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
 
-> **Already using Ollama?** Ollama was dropped as a runtime in v1.3.1 — AgentAlloy now uses `llama-server`. You can still point `RUNTIME_EMBED_BASE_URL` at any OpenAI-compatible 768-dim `nomic-embed-text-v1.5` endpoint you already run.
+> **Already using Ollama?** AgentAlloy runs on `llama-server`, not Ollama. You can still point `RUNTIME_EMBED_BASE_URL` at any OpenAI-compatible 768-dim `nomic-embed-text-v1.5` endpoint you already run.
 
 For the full step-by-step runbook (and air-gapped installs), see **[INSTALL.md](INSTALL.md)**. Just want to see it work first? [Run the demo](#demo).
 
@@ -124,7 +124,7 @@ agentalloy upgrade --dismiss  # silence the new-release nudge until a newer one 
 agentalloy --version          # what you're on now
 ```
 
-You don't have to remember to check: the running service polls GitHub for a newer release at most once a day (its only outbound call, fail-silent, opt out with `AGENTALLOY_RELEASE_CHECK=0`) and surfaces a glanceable nudge on the status line (`↑3.8.0`), in `agentalloy status`, and at server-start.
+You don't have to remember to check: the running service polls GitHub for a newer release at most once a day (its only outbound call, fail-silent, opt out with `AGENTALLOY_RELEASE_CHECK=0`) and surfaces a glanceable nudge — an `↑` with the new version — on the status line, in `agentalloy status`, and at server-start.
 
 When you run `agentalloy upgrade`, a **preflight** shows the release title, notes link, and version bump (patch/minor/major) — plus a heads-up if you have customized skills that will be re-validated — then asks you to confirm before anything is swapped. Native installs re-install from the newest tagged release; container installs pull the matching image and recreate (the corpus self-heals from the image's prebuilt seed). A major-version embedding change triggers a one-time re-embed — you're prompted for that too (`--yes` to auto-confirm both prompts, `--ref vX.Y.Z` to pin a specific release).
 
@@ -133,8 +133,8 @@ When you run `agentalloy upgrade`, a **preflight** shows the release title, note
 Independent of deployment, composition is **deterministic by default**. Three runtime levers — env vars in `~/.config/agentalloy/.env`, not wizard prompts — tune how much optional assistance is in the loop. Each default is the one the benchmarks earned (see [BENCHMARKS.md](BENCHMARKS.md)); the model-backed ones fail open to the deterministic path when their model is unavailable:
 
 - **`SIGNAL_INTENT_BACKEND` — default `reranker` (on).** Detects phase-transition intent from natural language — *"looks right, now the design"* advances `spec → design` with no rigid keyword. As of v2.4.0 this is the **primary phase-transition trigger** (the reranker beats cosine on intent: per-intent macro-F1 0.24 → 0.69). It needs a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (default `127.0.0.1:47952`) — **the setup wizard provisions and starts one for you**. If that server is down, the gates fall open to the cosine floor (functional, less precise); set `SIGNAL_INTENT_BACKEND=cosine` to opt out explicitly. `agentalloy verify` and `agentalloy doctor` report whether it's live.
-- **`LM_ASSIST` — default `off`.** The composition fragment re-ranker (`=arbitrate` to enable). Off by default because it measured **no lift** over deterministic selection on the domain benchmark (it tied, and trailed slightly with a wider candidate pool).
-- **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off for the same reason: **no measured lift**.
+- **`LM_ASSIST` — `arbitrate` on the GPU presets, `off` on cpu / container.** The composition fragment re-ranker. The GPU presets (nvidia / radeon / apple-silicon) turn it on; cpu and container leave it off, because scoring the ~12 candidate fragments only fits the latency budget on a GPU reranker — on CPU it would exceed the budget and fail open. It always degrades to deterministic selection when the reranker is unavailable.
+- **`RETRIEVAL_GRAPH_EXPAND` — default `off`.** Deterministic skill-graph edge expansion (`=on` to enable). Off by default because it showed **no measured lift**.
 
 See [docs/lm-assist-design.md](docs/lm-assist-design.md) for the design and [docs/operator.md](docs/operator.md) for the config reference.
 
@@ -250,7 +250,7 @@ Three small artifacts on disk drive everything AgentAlloy does. None of them bel
 .agentalloy/phase       →  phase: build
 ```
 
-A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
+A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Small, low-risk tasks can take the **fast lane** — at intake the agent routes to `sdd-fast`, a single compressed spec-design-build phase, giving `intake → sdd-fast → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
 
 The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `off` stays wired but composes nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
 
@@ -397,9 +397,13 @@ The `agentalloy` CLI handles install, service management, phase control, and com
 ```bash
 agentalloy setup                          # Interactive install wizard
 agentalloy wire --harness <name>          # Wire a harness (--lifecycle-mode full|off, --clean-room)
+agentalloy unwire [--harness <name>]      # Remove wiring (one harness in this repo; --all for every repo)
+agentalloy add <harness>                  # Adopt a harness's own upstream + wire it through the proxy (per-repo)
+agentalloy worktree <harness> <branch> -b # Create a git worktree + wire it (parallel agent sessions)
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy compose --contract <path>      # One-shot composition
+agentalloy customize <list|edit|diff|reset>  # Manage per-profile / per-project skill overrides
 agentalloy doctor                         # Diagnose install issues
 agentalloy upgrade                        # Upgrade to the latest release (--check to preview, --dismiss to mute the nudge)
 agentalloy cleanup                        # Reap orphaned runtimes; --deep fully sanitizes the host
@@ -485,8 +489,9 @@ Query via `GET /telemetry/traces` and `GET /telemetry/coverage`; the CLI exposes
 
 ## Configuration
 
-Runtime environment variables are written automatically by `agentalloy write-env` to `~/.config/agentalloy/.env`. Key variables:
+Runtime environment variables are written automatically by `agentalloy write-env --preset <cpu|nvidia|radeon|apple-silicon>` to `~/.config/agentalloy/.env` (the preset matches your hardware; the files under `src/agentalloy/install/presets/` are the source of truth). Key variables:
 
+- `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` — the global-fallback upstream LLM the proxy forwards to (a per-repo `agentalloy add` overrides these for that repo)
 - `RUNTIME_EMBED_BASE_URL` — embedding endpoint (default: embed llama-server at `http://localhost:47951`)
 - `RUNTIME_EMBEDDING_MODEL` — embedding model (default: `nomic-embed-text-v1.5.Q8_0.gguf`)
 - `PROFILE_ROOT` — per-profile datastores

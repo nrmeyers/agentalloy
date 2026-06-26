@@ -13,7 +13,7 @@ The Anthropic surface is a single native passthrough (the bare `/v1/messages` An
 
 - **Native Anthropic passthrough** (`POST /proj/{token}/v1/messages`) — the primary Claude Code path. Composes and injects AgentAlloy context into the **last user message**, leaves the top-level `system` block byte-unchanged (so prompt caching survives), then forwards the request **verbatim** to a configurable Anthropic upstream and relays the response (raw SSE byte relay when streaming). **No Anthropic↔OpenAI translation.** See [Native Anthropic Passthrough](#native-anthropic-passthrough) below.
 
-AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST=arbitrate`, default `off` — measured no lift over deterministic selection on the domain benchmark, so it stays off). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
+AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST`, `arbitrate` on the GPU presets and `off` on cpu/container — scoring the candidate fragments only fits the latency budget on a GPU reranker). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
 
 ## Architecture
 
@@ -75,16 +75,16 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 Configured in `~/.config/agentalloy/.env`:
 
 ```
-UPSTREAM_URL=http://localhost:11434/v1
-UPSTREAM_MODEL=qwen/qwen2.5-coder-14b
+UPSTREAM_URL=http://localhost:8080/v1
+UPSTREAM_MODEL=your-model-name
 UPSTREAM_API_KEY=***
 ```
 
-- `UPSTREAM_URL` — base URL of the generative LLM provider (OpenAI-compatible `/v1` endpoint) the proxy forwards chat completions to. No default (empty until configured); point it at your model runner or a hosted provider — **not** the embedding server on `47951`. The example above uses a local OpenAI-compatible runner.
+- `UPSTREAM_URL` — base URL of the generative LLM provider (OpenAI-compatible `/v1` endpoint) the proxy forwards chat completions to. No default (empty until configured); point it at your model runner or a hosted provider — **not** the embedding server on `47951`. The example above is a local OpenAI-compatible runner.
 - `UPSTREAM_MODEL` — model name to forward requests to
 - `UPSTREAM_API_KEY` — API key for the upstream provider (optional for local runners)
 
-These are set during `agentalloy setup` and read by the proxy at startup. The harness never sees these values — it only talks to localhost:47950.
+These `.env` values are the **global fallback**. A per-repo upstream captured by `agentalloy add <harness>` is written to that repo's `.agentalloy/upstream` and **wins** over them for requests from that repo — so one machine can forward different repos to different models. These are set during `agentalloy setup` (or per repo via `agentalloy add`) and read by the proxy at startup. The harness never sees any of these values — it only talks to `localhost:47950`.
 
 ### Working Directory
 

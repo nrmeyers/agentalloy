@@ -2,6 +2,8 @@
 
 Operator guide for AgentAlloy. Covers key concepts, terminology, system architecture, configuration, and customization for operators who install, maintain, and extend their AgentAlloy instance.
 
+> For the step-by-step install runbook, the full `agentalloy` command reference (`add`, `worktree`, `customize`, `cleanup`/`cleanup --deep`, per-harness `wire`/`unwire`, …), and container operations (the `ghcr.io/nrmeyers/agentalloy` image, ports `47950`/`47951`/`47952`, and corpus volume self-heal on reuse), see **[INSTALL.md](../INSTALL.md)**.
+
 ## Key Concepts and Terminology
 
 ### Packs
@@ -203,7 +205,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 **Optional flag-gated steps** (all off by default, all fail open to the deterministic path above when the local model or graph is unavailable):
 
 - **Graph expansion** (`RETRIEVAL_GRAPH_EXPAND=on`, default off): splices `requires`-edge neighbors of the top ranked skills into the candidate set before selection.
-- **Stage B LM fragment re-rank** (`LM_ASSIST=arbitrate`, default `off`): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top ~12 fragments (pairwise yes/no logprobs over `/v1/completions`); on a HIT it replaces deterministic selection with the fragments scoring above `LM_ASSIST_KEEP_THRESHOLD`. On disabled/timeout/error, deterministic selection runs unchanged.
+- **Stage B LM fragment re-rank** (`LM_ASSIST=arbitrate` on the GPU presets, `off` on cpu/container): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top ~12 fragments (pairwise yes/no logprobs over `/v1/completions`); on a HIT it replaces deterministic selection with the fragments scoring above `LM_ASSIST_KEEP_THRESHOLD`. On disabled/timeout/error, deterministic selection runs unchanged.
 
 ### Embedding Model
 
@@ -228,7 +230,7 @@ The proxy records its activity so every prompt and every skill pull is attributa
 
 ### Config File
 
-User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced into the service process; honors `XDG_CONFIG_HOME`). Runtime data — corpus, per-profile datastores, profiles registry — lives under `~/.local/share/agentalloy/` (honors `XDG_DATA_HOME`). The `.env` is written by `agentalloy install write-env --preset <name>` from a hardware preset; the keys it manages (the override allow-list in `install/subcommands/write_env.py`, mapping to `Settings` fields in `config.py`) are:
+User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced into the service process; honors `XDG_CONFIG_HOME`). Runtime data — corpus, per-profile datastores, profiles registry — lives under `~/.local/share/agentalloy/` (honors `XDG_DATA_HOME`). The `.env` is written by `agentalloy write-env --preset <name>` from a hardware preset; the keys it manages (the override allow-list in `install/subcommands/write_env.py`, mapping to `Settings` fields in `config.py`) are:
 
 - `LADYBUG_DB_PATH` — LadybugDB (skill graph) location
 - `DUCKDB_PATH` — DuckDB (vector + FTS + traces) location
@@ -241,7 +243,7 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 - `BOUNCE_BUDGET` — re-bounce budget
 - `LOG_LEVEL` — service log level
 
-Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/vector_store.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding uses the bare env vars `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` (see Environment Variables below).
+Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/vector_store.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding uses the bare env vars `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` as the **global fallback**; a per-repo upstream captured by `agentalloy add` (written to that repo's `.agentalloy/upstream`) **overrides** them for requests from that repo (see Environment Variables below).
 
 ### Profiles Config
 
