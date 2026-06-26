@@ -12,6 +12,12 @@ requires: []
 always_apply: false
 applies_to_phases:
   - intake
+# Load-bearing command tokens not derivable from exit_gates: the forward routes
+# out of intake. A customization may reword the prose but must keep these
+# verbatim, or the phase machine has no documented way to advance.
+prose_invariants:
+  - "agentalloy phase set spec"
+  - "agentalloy phase set sdd-fast"
 exit_gates:
   artifact_exists:
     path: ".agentalloy/contracts/**/*.md"

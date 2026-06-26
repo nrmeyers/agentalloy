@@ -13,6 +13,10 @@ requires: []
 always_apply: false
 applies_to_phases:
   - qa
+# Load-bearing command token not derivable from exit_gates: the forward advance
+# to ship. A customization may reword the prose but must keep it verbatim.
+prose_invariants:
+  - "agentalloy phase set ship"
 exit_gates:
   all_of:
     - artifact_exists:

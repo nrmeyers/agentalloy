@@ -13,6 +13,12 @@ requires: []
 always_apply: false
 applies_to_phases:
   - design
+# Load-bearing command tokens not derivable from exit_gates: how the agent works
+# the build contracts and advances. A customization may reword the prose but must
+# keep these verbatim.
+prose_invariants:
+  - "agentalloy phase set build"
+  - "agentalloy task next"
 exit_gates:
   all_of:
     - artifact_exists:

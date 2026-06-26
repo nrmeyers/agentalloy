@@ -13,6 +13,11 @@ requires: []
 always_apply: false
 applies_to_phases:
   - ship
+# Load-bearing command token not derivable from exit_gates: how the next cycle is
+# started after shipping. A customization may reword the prose but must keep it
+# verbatim.
+prose_invariants:
+  - "agentalloy phase set intake"
 exit_gates:
   all_of:
     - artifact_exists:
