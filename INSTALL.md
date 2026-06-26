@@ -60,8 +60,11 @@ Once installed, move an existing install to the latest tagged release with one c
 agentalloy upgrade            # detects native vs container; swaps, refreshes corpus if needed, restarts, verifies
 agentalloy upgrade --check    # report current vs latest release, change nothing
 agentalloy upgrade --ref v3.3.5   # pin a specific release (rollback/testing)
+agentalloy upgrade --dismiss  # mute the new-release nudge until a newer release lands
 ```
 
+- **Notification**: the running service checks GitHub for a newer release at most once a day — its only outbound call, fail-silent, and opt-out with `AGENTALLOY_RELEASE_CHECK=0`. When one is available you'll see a `↑<version>` badge on the status line, a row in `agentalloy status`, and a line at server-start. None of this is on the request path; the per-turn surfaces only read a cached result.
+- **Preflight**: `agentalloy upgrade` (interactive) fetches the release title/notes/URL and the version bump (patch/minor/major), warns if you have customized skills that will be re-validated, and asks you to confirm before any swap. `--yes` skips the prompt; `--json`/`--quiet` are non-interactive.
 - **Native**: stops the service, re-installs from the release tag (`uv tool install --force git+…@<tag>`), re-ingests changed packs, restarts, and verifies. If the embedding model/dimension changed (a major version), it prompts before the full re-embed (`--yes` auto-confirms; `~30–40 min` on CPU).
 - **Container**: pulls the matching image and recreates the container. The image entrypoint re-seeds the corpus from its prebuilt seed when `corpus-stamp.json` differs (`packs_hash` / `embedding_dim`) — seconds, no re-embed.
 - A source/editable checkout is left alone — update it with `git pull` (then `uv sync`).

@@ -9,6 +9,8 @@ recreate (incl. `-full` tag preservation).
 
 from __future__ import annotations
 
+import argparse
+import json
 import subprocess
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -38,20 +40,6 @@ def test_parse_semver_orders_correctly():
     assert up._parse_semver("v2.3.0") > up._parse_semver("v2.2.9")
     assert up._parse_semver("v2.2.1") == up._parse_semver("2.2.1")
     assert up._parse_semver("v2.2.0") < up._parse_semver("v2.2.1")
-
-
-def test_latest_release_tag_parses_tag_name():
-    resp = MagicMock()
-    resp.read.return_value = b'{"tag_name": "v2.3.0", "name": "x"}'
-    resp.__enter__ = lambda s: resp
-    resp.__exit__ = lambda *a: False
-    with patch.object(up.urllib.request, "urlopen", return_value=resp):
-        assert up._latest_release_tag() == "v2.3.0"
-
-
-def test_latest_release_tag_offline_returns_none():
-    with patch.object(up.urllib.request, "urlopen", side_effect=OSError("offline")):
-        assert up._latest_release_tag() is None
 
 
 def test_is_dim_mismatch():
@@ -488,3 +476,74 @@ def test_verify_container_spec_warns_only_on_confirmed_missing_mount():
     # '/' root was already refused at run time -> nothing to assert
     cr.resolve_projects_root.return_value = "/"
     assert up._verify_container_spec("podman", cr) == []
+
+
+# --- preflight + dismiss (release-notification surface) ---------------------
+
+
+def _ns(**kw: Any) -> argparse.Namespace:
+    return argparse.Namespace(**kw)
+
+
+def test_preflight_decline_aborts_without_swap():
+    with (
+        patch.object(up, "_current_version", return_value="3.7.0"),
+        patch.object(up, "_latest_release_tag", return_value="v3.8.0"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_preflight_confirm", return_value=False) as confirm,
+        patch.object(up, "_upgrade_native") as native,
+    ):
+        result = up.upgrade(interactive=True)
+    confirm.assert_called_once()
+    native.assert_not_called()
+    assert "upgrade declined by user" in result["actions"]
+    assert "new_version" not in result
+
+
+def test_preflight_skipped_when_not_interactive():
+    with (
+        patch.object(up, "_current_version", return_value="3.7.0"),
+        patch.object(up, "_latest_release_tag", return_value="v3.8.0"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_preflight_confirm") as confirm,
+        patch.object(up, "_upgrade_native", return_value=(["swapped"], [])),
+        patch.object(up, "_installed_version_via_cli", return_value="3.8.0"),
+    ):
+        result = up.upgrade(interactive=False)
+    confirm.assert_not_called()
+    assert result["new_version"] == "3.8.0"
+
+
+def test_preflight_skipped_with_assume_yes():
+    with (
+        patch.object(up, "_current_version", return_value="3.7.0"),
+        patch.object(up, "_latest_release_tag", return_value="v3.8.0"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_preflight_confirm") as confirm,
+        patch.object(up, "_upgrade_native", return_value=([], [])),
+        patch.object(up, "_installed_version_via_cli", return_value="3.8.0"),
+    ):
+        up.upgrade(interactive=True, assume_yes=True)
+    confirm.assert_not_called()
+
+
+def test_customized_skill_count_counts_non_default():
+    rows = [{"layer": "default"}, {"layer": "profile"}, {"layer": "project"}, {"layer": "default"}]
+    with patch.object(up, "_run_cli", return_value=_proc(0, stdout=json.dumps(rows))):
+        assert up._customized_skill_count() == 2
+
+
+def test_customized_skill_count_quiet_on_failure():
+    with patch.object(up, "_run_cli", return_value=_proc(1, stdout="boom")):
+        assert up._customized_skill_count() == 0
+
+
+def test_dismiss_writes_dismissed_version(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
+    from agentalloy.install import release_check as rc
+
+    rc._write_cache({"enabled": True, "latest_tag": "v3.9.0", "dismissed_version": None})
+    code = up._dismiss(_ns(dismiss=True, quiet=True, json=False))
+    assert code == 0
+    assert rc.read_cache()["dismissed_version"] == "v3.9.0"

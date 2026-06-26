@@ -30,49 +30,41 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import runtime_artifacts
+from agentalloy.install import release_check, runtime_artifacts
 from agentalloy.install import state as install_state
-from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.install.output import (
+    add_json_flag,
+    print_rich,
+    print_rich_stderr,
+    should_output_human,
+    write_result,
+)
+
+# All GitHub-API + version-parsing code lives in release_check (the single
+# module that owns the service's only outbound call). Alias to the existing
+# private names so the call sites below — and the tests that monkeypatch them —
+# are unchanged.
+from agentalloy.install.release_check import current_version as _current_version
+from agentalloy.install.release_check import fetch_latest_tag as _latest_release_tag
+from agentalloy.install.release_check import parse_semver as _parse_semver
 
 SCHEMA_VERSION = 1
 STEP_NAME = "upgrade"
 
-_REPO = "nrmeyers/agentalloy"
 _GIT_URL = "https://github.com/nrmeyers/agentalloy.git"
-_RELEASES_API = f"https://api.github.com/repos/{_REPO}/releases/latest"
 # Substrings that mark an embedding-dimension mismatch surfaced by install-packs
 # or the startup guard — the signal that a full re-embed is required.
 _DIM_MISMATCH_MARKERS = ("embedding_dim", "EmbeddingDimMismatch", "-dim embeddings", "dimension")
+# Release-notes lines shown in the preflight card before linking out for the rest.
+_NOTES_PREVIEW_LINES = 12
 
 
 # ---------------------------------------------------------------------------
-# Version helpers
+# Version helpers (defined in release_check; imported above)
 # ---------------------------------------------------------------------------
-
-
-def _parse_semver(value: str) -> tuple[int, int, int]:
-    """Parse ``vX.Y.Z`` / ``X.Y.Z`` into a comparable tuple (extras ignored)."""
-    core = value.strip().lstrip("vV").split("-", 1)[0].split("+", 1)[0]
-    nums: list[int] = []
-    for part in core.split(".")[:3]:
-        try:
-            nums.append(int(part))
-        except ValueError:
-            nums.append(0)
-    while len(nums) < 3:
-        nums.append(0)
-    return (nums[0], nums[1], nums[2])
-
-
-def _current_version() -> str:
-    from agentalloy import __version__
-
-    return __version__
 
 
 def _installed_version_via_cli() -> str | None:
@@ -90,21 +82,6 @@ def _installed_version_via_cli() -> str | None:
     # Output format: "agentalloy X.Y.Z"
     parts = (proc.stdout or "").strip().split()
     return parts[-1] if parts else None
-
-
-def _latest_release_tag(timeout: float = 10.0) -> str | None:
-    """Return the newest release tag (e.g. ``v2.2.1``), or ``None`` if unreachable."""
-    req = urllib.request.Request(
-        _RELEASES_API,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "agentalloy-upgrade"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — fixed https URL
-            payload: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError):
-        return None
-    tag = payload.get("tag_name")
-    return tag if isinstance(tag, str) and tag else None
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +513,80 @@ def _verify_container_spec(runtime: str, cr: Any) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Preflight (interactive)
+# ---------------------------------------------------------------------------
+
+
+def _customized_skill_count() -> int:
+    """How many skills the user has overridden (profile or project layer).
+
+    Best-effort and quiet: shells ``customize list --json`` (a bare list of rows
+    each carrying a ``layer`` of project/profile/default) and counts the
+    non-default rows. Any failure → 0, so the preflight never blocks on it.
+    """
+    try:
+        proc = _run_cli(["customize", "list", "--json"], capture=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if proc.returncode != 0:
+        return 0
+    try:
+        rows: Any = json.loads(proc.stdout or "null")
+    except (json.JSONDecodeError, ValueError):
+        return 0
+    if isinstance(rows, dict):  # tolerate a wrapped {"skills": [...]} shape
+        rows = rows.get("skills")
+    if not isinstance(rows, list):
+        return 0
+    return sum(
+        1 for r in rows if isinstance(r, dict) and r.get("layer") not in (None, "", "default")
+    )
+
+
+def _preflight_confirm(current: str, target: str, ref: str | None, deployment: str) -> bool:
+    """Show a release card on stderr and gate the swap on an interactive yes.
+
+    Fetches the release detail fresh — the one place that wants the notes/URL,
+    pulled at the moment of intent — and surfaces the v3.7.0 consequence: user
+    customizations are re-validated on upgrade. Returns True to proceed, False
+    to abort with no swap. Routed to stderr so ``--json`` stdout stays clean.
+    """
+    bump = release_check.bump_type(current, target)
+    suffix = f"  ({bump})" if bump else ""
+    target_disp = target.lstrip("v") or target
+    print_rich_stderr(f"\n  [bold]Upgrade {current} → {target_disp}[/bold]{suffix}")
+    print_rich_stderr(f"  [dim]deployment: {deployment}[/dim]")
+
+    info = release_check.fetch_release_info(ref=ref)
+    if info:
+        if info["name"]:
+            print_rich_stderr(f"  {info['name']}")
+        if info["published_at"]:
+            print_rich_stderr(f"  [dim]published {info['published_at'][:10]}[/dim]")
+        if info["html_url"]:
+            print_rich_stderr(f"  [dim]{info['html_url']}[/dim]")
+        content = [ln for ln in info["body"].splitlines() if ln.strip()]
+        shown = content[:_NOTES_PREVIEW_LINES]
+        if shown:
+            print_rich_stderr("")
+            for ln in shown:
+                print_rich_stderr(f"  │ {ln}")
+            if len(content) > _NOTES_PREVIEW_LINES and info["html_url"]:
+                print_rich_stderr(f"  [dim]… full notes: {info['html_url']}[/dim]")
+    else:
+        print_rich_stderr("  [dim]release notes unavailable (offline?)[/dim]")
+
+    customized = _customized_skill_count()
+    if customized:
+        print_rich_stderr(
+            f"\n  [yellow]![/yellow] {customized} customized skill(s) will be re-validated "
+            "against the new release; stale overrides are disabled (preserved) with a warning."
+        )
+    print_rich_stderr("")
+    return _confirm(f"  Proceed with upgrade to {target}?", assume_yes=False)
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -546,8 +597,15 @@ def upgrade(
     check: bool = False,
     force: bool = False,
     assume_yes: bool = False,
+    interactive: bool = False,
 ) -> dict[str, Any]:
-    """Resolve the latest release and apply it for the recorded deployment."""
+    """Resolve the latest release and apply it for the recorded deployment.
+
+    ``interactive`` defaults to False so programmatic callers never block on
+    stdin or hit the network for release notes; the CLI (``_run``) opts in via
+    ``should_output_human``. When interactive and not ``assume_yes``, a preflight
+    card + confirm gate runs before any swap; declining returns with no changes.
+    """
     t0 = time.monotonic()
     current = _current_version()
     latest = _latest_release_tag()
@@ -588,6 +646,19 @@ def upgrade(
     state = install_state.load_state()
     deployment = state.get("deployment") or "native"
     summary["deployment"] = deployment
+
+    # Interactive preflight: show what's changing + a confirm gate before any
+    # swap. Skipped under --json/--quiet (interactive=False) and --yes
+    # (assume_yes); short-circuits so the card only renders when it will prompt.
+    declined = (
+        interactive
+        and not assume_yes
+        and not _preflight_confirm(current, target_ref, ref, deployment)
+    )
+    if declined:
+        summary["actions"].append("upgrade declined by user")
+        summary["duration_ms"] = int((time.monotonic() - t0) * 1000)
+        return summary
 
     if deployment == "container":
         actions, warnings = _upgrade_container(target_ref, state, assume_yes=assume_yes)
@@ -636,6 +707,11 @@ def add_parser(
         help="Target a specific release tag (e.g. v2.2.0) instead of the latest.",
     )
     p.add_argument(
+        "--dismiss",
+        action="store_true",
+        help="Silence the new-release notice for the current latest until a newer one lands.",
+    )
+    p.add_argument(
         "--recreate-only",
         action="store_true",
         help=argparse.SUPPRESS,  # internal: post-swap recreate run by the new CLI
@@ -665,14 +741,42 @@ def _render_human(result: dict[str, Any]) -> None:
         for w in warnings:
             print_rich(f"  [yellow]![/yellow] {w}")
 
-    if result.get("new_version"):
+    if result.get("dismissed_version") is not None:
+        print_rich(
+            f"  Dismissed: [bold]{result['dismissed_version']}[/bold] (until a newer release)"
+        )
+    elif result.get("new_version"):
         print_rich(f"\n  Now on: [bold]{result.get('new_version')}[/bold]")
     elif result.get("update_available"):
         print_rich("\n  [dim]Run without --check to apply.[/dim]")
     print_rich()
 
 
+def _dismiss(args: argparse.Namespace) -> int:
+    """Mark the latest known release as dismissed so the badge stops nagging."""
+    latest = release_check.read_cache().get("latest_tag") or _latest_release_tag()
+    result: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "current_version": _current_version(),
+        "latest_release": latest,
+        "dismissed_version": None,
+        "actions": [],
+        "warnings": [],
+    }
+    if isinstance(latest, str) and latest:
+        release_check.dismiss(latest)
+        result["dismissed_version"] = latest
+        result["actions"].append(f"dismissed {latest}")
+    else:
+        result["warnings"].append("no known release to dismiss")
+    write_result(result, args, human_fn=_render_human)
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
+    if getattr(args, "dismiss", False):
+        return _dismiss(args)
+
     # Internal post-swap entry: recreate the container only (no pull, no CLI swap).
     # This is what `_upgrade_container` shells after the swap so the spec is baked
     # by the freshly-installed code rather than the stale orchestrating process.
@@ -695,6 +799,7 @@ def _run(args: argparse.Namespace) -> int:
         check=getattr(args, "check", False),
         force=getattr(args, "force", False),
         assume_yes=getattr(args, "yes", False),
+        interactive=should_output_human(args),
     )
     write_result(result, args, human_fn=_render_human)
     # Non-zero only when an action was attempted and something went wrong.

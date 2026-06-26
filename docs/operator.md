@@ -272,6 +272,11 @@ profiles:
 | `SIGNAL_INTENT_RERANK_URL` | Reranker llama-server URL | `http://127.0.0.1:47952` |
 | `SIGNAL_INTENT_RERANK_MODEL` | Reranker model (GGUF) | `Qwen3-Reranker-0.6B-Q8_0.gguf` |
 | `RUNTIME_DIVERSITY_SELECTION` | Diversity mode | `on` |
+| `AGENTALLOY_RELEASE_CHECK` | New-release check: the service polls the GitHub releases API at most once a day (its only outbound call, fail-silent) and caches the result for the status-line badge, `agentalloy status`, and the server-start line. Set `0`/`off` to disable. | `1` |
+
+### Release-update check
+
+The check is the one place the otherwise-offline service reaches the network. It is a single throttled producer (`install/release_check.py`, run from a background task in the app `lifespan`) writing a small cache at `${XDG_DATA_HOME:-~/.local/share}/agentalloy/release-check.json`; every consumer (status line, `agentalloy status`, server-start) only reads that cache, so nothing on the request path ever blocks on it. `agentalloy upgrade` (interactive) shows a preflight card — release title/notes/URL, the version bump, and a heads-up about customized skills that will be re-validated — and confirms before swapping. `agentalloy upgrade --dismiss` mutes the nudge for the current latest until a newer release lands.
 
 ## Customization
 

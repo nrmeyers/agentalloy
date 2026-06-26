@@ -90,13 +90,30 @@ def _find_phase(start: Path) -> str | None:
         seen += 1
 
 
+def _release_badge() -> str:
+    """A compact ``  ↑<version>`` suffix when a newer release is available, else "".
+
+    Cache-only (never touches the network) and fully fail-silent so it can never
+    break the per-turn status line. The producer is the running service.
+    """
+    try:
+        from agentalloy.install import release_check  # noqa: PLC0415 — keep import off cold paths
+
+        info = release_check.notice()
+        if not info:
+            return ""
+        return f"  ↑{info['latest'].lstrip('v')}"
+    except Exception:
+        return ""
+
+
 def render_statusline(root: Path | None) -> str:
     """The status-line string for *root* (cwd when None), or "" when inactive."""
     start = root or _cwd_from_stdin() or Path(os.getcwd())
     phase = _find_phase(start)
     if not phase:
         return ""
-    return f"{_PREFIX} ▸ {phase}"
+    return f"{_PREFIX} ▸ {phase}{_release_badge()}"
 
 
 def add_parser(

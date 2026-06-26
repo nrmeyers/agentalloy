@@ -99,6 +99,29 @@ def _orphan_summary() -> str:
     return summary
 
 
+def _release_snapshot() -> dict[str, Any]:
+    """Current vs latest-known release for the dashboard. Best-effort.
+
+    Triggers a throttled ``refresh`` (a no-op within the check interval) so an
+    on-demand ``status`` stays fresh even when the service isn't running, then
+    reads the cache. Any failure resolves to "latest unknown".
+    """
+    try:
+        from agentalloy.install import release_check  # noqa: PLC0415
+
+        release_check.refresh()
+        info = release_check.notice()
+        cache = release_check.read_cache()
+        return {
+            "current": release_check.current_version(),
+            "latest": cache.get("latest_tag"),
+            "update_available": bool(info),
+            "bump_type": info["bump_type"] if info else None,
+        }
+    except Exception:
+        return {"current": None, "latest": None, "update_available": False, "bump_type": None}
+
+
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
@@ -153,6 +176,20 @@ def _render_human(snapshot: dict[str, Any]) -> None:
     orphans = snapshot.get("orphans", "none")
     orphan_status = "[green]none[/green]" if orphans == "none" else f"[yellow]{orphans}[/yellow]"
     print_rich(f"\n  Orphans: {orphan_status}")
+
+    # Release
+    release = snapshot.get("release", {})
+    current = release.get("current") or "unknown"
+    if release.get("update_available"):
+        rel = (
+            f"[yellow]↑ {release.get('latest')} available[/yellow] "
+            f"({release.get('bump_type')}) — run `agentalloy upgrade`"
+        )
+    elif release.get("latest"):
+        rel = "[green]up to date[/green]"
+    else:
+        rel = "[dim]latest unknown[/dim]"
+    print_rich(f"\n  Release: {current} — {rel}")
 
     # Wired repos
     repos = snapshot.get("wired_repos", [])
@@ -245,6 +282,7 @@ def _run(args: argparse.Namespace) -> int:
             "reachable_on_loopback": service_reachable,
         },
         "orphans": _orphan_summary(),
+        "release": _release_snapshot(),
         "wired_repos": [
             {
                 "repo_root": repo_root,

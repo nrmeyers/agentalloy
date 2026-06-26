@@ -18,6 +18,30 @@ EXIT_USER = 1
 EXIT_SYSTEM = 2
 
 
+def _print_release_notice() -> None:
+    """Surface a cached new-release nudge (+ a one-time opt-out hint) on stderr
+    after a successful start. Cache-only, best-effort, never raises.
+    """
+    try:
+        from agentalloy.install import release_check  # noqa: PLC0415 — keep off the cold path
+
+        if release_check.take_optout_notice():
+            print(
+                "server-start: agentalloy checks for new releases (~daily); "
+                "disable with AGENTALLOY_RELEASE_CHECK=0",
+                file=sys.stderr,
+            )
+        info = release_check.notice()
+        if info:
+            print(
+                f"server-start: agentalloy {info['latest'].lstrip('v')} available "
+                f"({info['bump_type']}) — run 'agentalloy upgrade'",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass
+
+
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
@@ -72,6 +96,7 @@ def _run(args: argparse.Namespace) -> int:
         f"{server_proc.server_log_path()})",
         file=sys.stderr,
     )
+    _print_release_notice()
     return EXIT_OK
 
 
@@ -91,4 +116,6 @@ def _run_container(args: argparse.Namespace, target: server_proc.DeploymentTarge
         )
     if payload.get("error"):
         print(f"server-start: {payload['error']}", file=sys.stderr)
+    elif code == EXIT_OK:
+        _print_release_notice()
     return code

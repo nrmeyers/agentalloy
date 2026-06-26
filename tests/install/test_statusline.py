@@ -27,8 +27,47 @@ def _phase(root: Path, phase: str) -> None:
 
 
 class TestRenderStatusline:
-    def test_renders_active_phase(self, tmp_path: Path) -> None:
+    def test_renders_active_phase(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Isolate the release-check cache (under XDG_DATA_HOME) so no badge is
+        # appended — this asserts the bare phase line.
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
         _phase(tmp_path, "build")
+        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
+
+    def test_badge_appended_when_update_available(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install import release_check
+
+        _phase(tmp_path, "build")
+        monkeypatch.setattr(
+            release_check,
+            "notice",
+            lambda: {"current": "3.7.0", "latest": "v3.8.0", "bump_type": "minor"},
+        )
+        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build  ↑3.8.0"
+
+    def test_no_badge_when_up_to_date(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install import release_check
+
+        _phase(tmp_path, "build")
+        monkeypatch.setattr(release_check, "notice", lambda: None)
+        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
+
+    def test_badge_fail_silent_on_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.install import release_check
+
+        def _boom() -> dict[str, str]:
+            raise RuntimeError("kaboom")
+
+        _phase(tmp_path, "build")
+        monkeypatch.setattr(release_check, "notice", _boom)
+        # The badge must never break the per-turn status line.
         assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
 
     def test_empty_when_no_phase(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -120,10 +120,13 @@ Move to the latest release in one command — it detects your deployment, swaps 
 ```bash
 agentalloy upgrade            # native or container — auto-detected
 agentalloy upgrade --check    # report current vs latest, change nothing
+agentalloy upgrade --dismiss  # silence the new-release nudge until a newer one lands
 agentalloy --version          # what you're on now
 ```
 
-Native installs re-install from the newest tagged release; container installs pull the matching image and recreate (the corpus self-heals from the image's prebuilt seed). A major-version embedding change triggers a one-time re-embed — you're prompted first (`--yes` to auto-confirm, `--ref vX.Y.Z` to pin a specific release).
+You don't have to remember to check: the running service polls GitHub for a newer release at most once a day (its only outbound call, fail-silent, opt out with `AGENTALLOY_RELEASE_CHECK=0`) and surfaces a glanceable nudge on the status line (`↑3.8.0`), in `agentalloy status`, and at server-start.
+
+When you run `agentalloy upgrade`, a **preflight** shows the release title, notes link, and version bump (patch/minor/major) — plus a heads-up if you have customized skills that will be re-validated — then asks you to confirm before anything is swapped. Native installs re-install from the newest tagged release; container installs pull the matching image and recreate (the corpus self-heals from the image's prebuilt seed). A major-version embedding change triggers a one-time re-embed — you're prompted for that too (`--yes` to auto-confirm both prompts, `--ref vX.Y.Z` to pin a specific release).
 
 ### Runtime toggles (set by what they measured)
 
@@ -385,7 +388,7 @@ agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy doctor                         # Diagnose install issues
-agentalloy upgrade                        # Upgrade to the latest release (--check to preview)
+agentalloy upgrade                        # Upgrade to the latest release (--check to preview, --dismiss to mute the nudge)
 agentalloy --version                      # Print the installed version
 ```
 

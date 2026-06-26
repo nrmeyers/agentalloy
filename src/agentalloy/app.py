@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -29,6 +30,7 @@ from agentalloy.api.telemetry_router import TelemetryQuerier
 from agentalloy.api.telemetry_router import router as telemetry_router
 from agentalloy.config import get_settings
 from agentalloy.embed_provider import EmbedClient, get_embed_client
+from agentalloy.install import release_check
 from agentalloy.orchestration.compose import (
     AssemblyStageError,
     ComposeOrchestrator,
@@ -42,6 +44,20 @@ from agentalloy.storage.vector_store import VectorStore, open_or_create
 from agentalloy.telemetry import DuckDBTelemetryWriter
 
 logger = logging.getLogger(__name__)
+
+
+async def _release_check_loop() -> None:
+    """Refresh the release-update cache on a slow cadence, off the request path.
+
+    Runs ``release_check.refresh`` (a blocking urllib call) in a worker thread so
+    the event loop never blocks, swallowing every error so a flaky network or
+    disk can't take the service down. Propagates ``CancelledError`` to stop.
+    """
+    await asyncio.sleep(release_check.INITIAL_DELAY_SECONDS)
+    while True:
+        with suppress(Exception):
+            await asyncio.to_thread(release_check.refresh)
+        await asyncio.sleep(release_check.CHECK_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
@@ -163,9 +179,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     anthropic_passthrough_client = AnthropicPassthroughClient(settings.anthropic_upstream_url)
     app.state.anthropic_passthrough_client = anthropic_passthrough_client
 
+    # Background release-update check — the service's only outbound call, kept
+    # off the request path. Throttled (once per CHECK_INTERVAL_SECONDS), fail-
+    # silent, opt-out via AGENTALLOY_RELEASE_CHECK=0. The initial delay lets a
+    # briefly-lived app (TestClient / integration run) cancel it before it ever
+    # touches the network.
+    app.state.release_check_task = asyncio.create_task(_release_check_loop())
+
     try:
         yield
     finally:
+        task = getattr(app.state, "release_check_task", None)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
