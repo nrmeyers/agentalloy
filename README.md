@@ -389,6 +389,7 @@ agentalloy phase [set|clear]              # Bare prints current phase; set/clear
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy doctor                         # Diagnose install issues
 agentalloy upgrade                        # Upgrade to the latest release (--check to preview, --dismiss to mute the nudge)
+agentalloy cleanup                        # Reap orphaned runtimes; --deep fully sanitizes the host
 agentalloy --version                      # Print the installed version
 ```
 

@@ -537,6 +537,7 @@ Operator commands the user can run later (these are NOT part of this runbook —
 | `agentalloy update` | Migrate corpus in place after a version bump |
 | `agentalloy install-pack <name>` | Add a published skill pack to the user corpus |
 | `agentalloy reset-step <name>` | Clear a specific install step (escape hatch for changing config without full uninstall) |
+| `agentalloy cleanup` | Reap orphaned runtime artifacts (stale processes, service units, dangling shim) — foreign-safe recovery. `--deep` escalates to a full, state-independent host sanitize — see below |
 | `agentalloy uninstall` | Full teardown — see below for exactly what's removed |
 
 ### Container operational commands
@@ -626,6 +627,26 @@ For container deployments (`--deployment container`), `agentalloy uninstall` als
 - Cleans up harness wiring and state files (same as the native model).
 
 To keep the corpus and downloaded GGUFs, use the default uninstall (or `--preset keep-data`) — both preserve the named volume while removing wiring and `.env`.
+
+### Cleanup — recover orphans or sanitize the host
+
+`agentalloy uninstall` is *state-driven*: it removes what `install-state.json` records. Across repeated install/uninstall churn the state can drift or be lost, leaving artifacts behind. `agentalloy cleanup` is the recovery verb for that, and `--deep` is the full, **state-independent** sanitizer.
+
+**`agentalloy cleanup`** (default) reaps orphaned *runtime* artifacts in one foreign-safe pass: our own stale processes squatting a runtime port (47950/47951/47952) with no live supervisor, stale systemd user units / launchd LaunchAgents, and a dangling `~/.local/bin/llama-server` shim. `--dry-run` prints the plan; `--yes` skips the confirm. A *foreign* process holding one of our ports is reported but never killed, and your own `llama-server` on PATH is never removed.
+
+**`agentalloy cleanup --deep`** (alias `--all`) escalates to a full host sanitize that discovers artifacts by their **known absolute locations** rather than from install-state — so it catches the leftovers a state-driven teardown misses. It removes, state-independently:
+
+- everything the bare cleanup does, **plus** orphaned `llama-server` processes whose command line references the agentalloy data dir (launched outside the service manager / on a non-standard port);
+- the `agentalloy` container, the `agentalloy-data` volume, and the image — probed by fixed name on **both** podman and docker, regardless of what the state records;
+- per-repo proxy carriers — every repo recorded in state, **plus** a bounded `$HOME` scan for stray `.claude/settings.local.json` carriers in repos the state never tracked (the documented leftover gap);
+- the agentalloy directories: `${XDG_DATA_HOME}/agentalloy/` (corpus, models, llama.cpp runtime, logs), `~/.cache/agentalloy`, `~/.agentalloy`, and `${XDG_CONFIG_HOME}/agentalloy/` (`.env` + `install-state.json`, removed last so the wiring sweep can read state first).
+
+It prints a full plan and asks to confirm unless `--yes`; `--dry-run` previews without touching anything. **Foreign-safety holds throughout**: a `llama-server`, binary, or GGUF that predates AgentAlloy is never removed (process kills are cmdline-signature-gated, the shim is sentinel-gated, the `$HOME` scan only matches carriers whose `ANTHROPIC_BASE_URL` points at our proxy, and only agentalloy-namespaced directories are deleted). The `agentalloy` CLI itself is **not** removed — `cleanup --deep` prints the matching `uv tool uninstall agentalloy` / `pipx uninstall agentalloy` hint so you can finish that step.
+
+**Blank-slate one-liner** (for testers reinstalling from scratch):
+```bash
+agentalloy cleanup --deep --yes
+```
 
 ---
 

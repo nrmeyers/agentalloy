@@ -69,7 +69,26 @@ container, `podman logs -f agentalloy`.
 Another instance of AgentAlloy is running, or another service is using the default port.
 
 **Fix:** Run `agentalloy write-env --preset <preset> --port <n>` with a different port, then re-run
-`agentalloy wire` to update harness configs.
+`agentalloy wire` to update harness configs. If the holder is a *stale* AgentAlloy process (e.g. a
+`llama-server` left over from a previous run), `agentalloy cleanup` reclaims it without touching
+foreign processes.
+
+### `uninstall` left artifacts behind / orphaned runtimes
+
+Repeated install/uninstall cycles — or a lost `install-state.json` — can strand artifacts that the
+*state-driven* `uninstall` and bare `cleanup` don't see: an orphaned `llama-server`, a
+container/volume corpse from an interrupted container install, a `.claude/settings.local.json` proxy
+carrier in a repo the state never recorded, or a downloaded model.
+
+**Fix (recover):** `agentalloy cleanup` reaps orphaned processes (47950/47951/47952), stale service
+units, and a dangling `~/.local/bin/llama-server` shim — foreign-safe (a process you didn't start is
+never killed).
+
+**Fix (blank slate):** `agentalloy cleanup --deep` (preview with `--dry-run`, skip the prompt with
+`--yes`) sanitizes the host *state-independently* — discovering artifacts by their known locations,
+including the container/volume/image (podman and docker), stray proxy carriers (state repos plus a
+bounded `$HOME` scan), and the agentalloy data/config/cache directories. A `llama-server` that
+predates AgentAlloy is never touched; the CLI itself is left installed (with a hint to remove it).
 
 ### `preflight` fails with `cli_on_path`
 
