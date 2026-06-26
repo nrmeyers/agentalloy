@@ -6,10 +6,9 @@ exercise them in isolation without going through the signal CLI.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -230,41 +229,60 @@ def test_load_workflow_skill_returns_none_for_unknown_phase() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _load_workflow_skill_for_phase — duckdb path
+# _load_workflow_skill_for_phase — shipped-first lock + invariant guard
 # ---------------------------------------------------------------------------
 
 
-def test_load_workflow_skill_reads_from_duckdb(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _load_workflow_skill_for_phase
+def test_workflow_override_supplies_only_prose(tmp_path: Path) -> None:
+    """A profile override contributes raw_prose (+domain_tags); the load-bearing
+    structured fields (exit_gates etc.) are re-sourced from the shipped skill."""
+    from agentalloy.signals import skill_loader
+    from agentalloy.signals.invariants import derive_invariants
 
-    db_file = tmp_path / "profile.duck"
-    db_file.write_text("")
+    shipped = skill_loader._load_workflow_skill_from_packs("design")
+    assert shipped is not None
+    # Reworded prose that still contains every load-bearing invariant token.
+    reworded = "REWORDED design guidance. Keeps: " + " ".join(derive_invariants(shipped))
 
-    exit_gates = {"artifact_exists": {"path": "*.md"}}
-    mock_row = (
-        "sdd-qa",
-        "QA phase prose.",
-        ["qa"],
-        json.dumps(exit_gates),
-        ["done"],
-    )
-
-    mock_con = MagicMock()
-    mock_con.__enter__ = lambda s: s
-    mock_con.__exit__ = MagicMock(return_value=False)
-    mock_con.execute.return_value.fetchall.return_value = [mock_row]
-
-    with (
-        patch("agentalloy.profiles.detect_profile", return_value=None),
-        patch("agentalloy.profiles.profile_datastore_path", return_value=db_file),
-        patch("duckdb.connect", return_value=mock_con),
+    with patch.object(
+        skill_loader, "_load_workflow_prose_override", return_value=(reworded, ["t"])
     ):
-        result = _load_workflow_skill_for_phase("qa")
+        result = skill_loader._load_workflow_skill_for_phase("design")
 
     assert result is not None
-    assert result["skill_id"] == "sdd-qa"
-    assert result["exit_gates"] == exit_gates
-    assert result["signal_keywords"] == ["done"]
+    assert result["raw_prose"] == reworded  # override prose applied
+    assert result["exit_gates"] == shipped["exit_gates"]  # locked: from shipped
+    assert result["domain_tags"] == ["t"]
+
+
+def test_workflow_override_missing_invariant_falls_back_to_shipped(tmp_path: Path) -> None:
+    from agentalloy.signals import skill_loader
+    from agentalloy.signals.invariants import derive_invariants
+
+    shipped = skill_loader._load_workflow_skill_from_packs("design")
+    assert shipped is not None
+    assert derive_invariants(shipped)  # design has load-bearing tokens to drop
+
+    bad = "REWORDED but drops every load-bearing path and command."
+    with patch.object(skill_loader, "_load_workflow_prose_override", return_value=(bad, None)):
+        result = skill_loader._load_workflow_skill_for_phase("design")
+
+    assert result is not None
+    assert result["raw_prose"] == shipped["raw_prose"]  # shipped prose served
+    assert result["exit_gates"] == shipped["exit_gates"]
+
+
+def test_workflow_no_override_returns_shipped(tmp_path: Path) -> None:
+    from agentalloy.signals import skill_loader
+
+    shipped = skill_loader._load_workflow_skill_from_packs("design")
+    assert shipped is not None
+    with patch.object(skill_loader, "_load_workflow_prose_override", return_value=(None, None)):
+        result = skill_loader._load_workflow_skill_for_phase("design")
+
+    assert result is not None
+    assert result["raw_prose"] == shipped["raw_prose"]
+    assert result["exit_gates"] == shipped["exit_gates"]
 
 
 # ---------------------------------------------------------------------------

@@ -123,6 +123,81 @@ def test_validate_valid_workflow_skill():
 
 
 # ---------------------------------------------------------------------------
+# Load-bearing protection (against a real shipped default)
+# ---------------------------------------------------------------------------
+
+_WF_SKILL = "sdd-design-and-planning"
+_SYS_SKILL = "sys-ci"
+
+
+def _load_shipped(name: str) -> dict[str, Any]:
+    from agentalloy.install.subcommands.customize import (
+        _find_default_skill,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    path = _find_default_skill(name)
+    assert path is not None, f"shipped skill {name} not found"
+    data: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return data
+
+
+def test_validate_clean_prose_only_edit_passes():
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+    from agentalloy.signals.invariants import derive_invariants
+
+    data = _load_shipped(_WF_SKILL)
+    # Reword the prose but keep every load-bearing token.
+    data["raw_prose"] = "Reworded design guidance. Retains: " + " ".join(derive_invariants(data))
+    errors = _validate_skill_data(data, _WF_SKILL)
+    assert errors == []
+
+
+def test_validate_rejects_prose_dropping_invariant():
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    data = _load_shipped(_WF_SKILL)
+    data["raw_prose"] = "Reworded design guidance that omits all the load-bearing paths." * 3
+    errors = _validate_skill_data(data, _WF_SKILL)
+    assert any("load-bearing token" in e for e in errors)
+    # Names a concrete dropped token.
+    assert any("approach.md" in e for e in errors)
+
+
+def test_validate_rejects_locked_field_edit():
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    data = _load_shipped(_WF_SKILL)
+    # Keep prose valid (so only the locked-field rule can fire), but tamper a gate.
+    from agentalloy.signals.invariants import derive_invariants
+
+    data["raw_prose"] = "Reworded. Retains: " + " ".join(derive_invariants(data))
+    data["exit_gates"] = {"all_of": [{"artifact_exists": {"path": "whatever.md"}}]}
+    errors = _validate_skill_data(data, _WF_SKILL)
+    assert any("exit_gates" in e and "product-owned" in e for e in errors)
+
+
+def test_validate_allows_applies_when_edit_on_system():
+    # Guards finding A: applies_when is user-owned for system skills and must
+    # NOT be rejected as a locked field.
+    from agentalloy.install.subcommands.customize import (
+        _validate_skill_data,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    data = _load_shipped(_SYS_SKILL)
+    assert data.get("skill_class") == "system"
+    data["applies_when"] = {"all_of": [{"tool_is": {"name": "Bash"}}]}
+    errors = _validate_skill_data(data, _SYS_SKILL)
+    assert errors == []
+    assert not any("product-owned" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
 # Profile store (unit-level ingest)
 # ---------------------------------------------------------------------------
 

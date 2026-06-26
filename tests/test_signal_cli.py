@@ -445,3 +445,39 @@ def test_hook_routing_pretool_calls_evaluate_system(tmp_path: Path):
 
     assert rc == 0
     mock_es.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _guard_system_prose — runtime invariant fall-back for system overrides
+# ---------------------------------------------------------------------------
+
+
+def test_guard_system_prose_keeps_override_when_invariants_present() -> None:
+    from agentalloy.install.subcommands.signal import _guard_system_prose
+
+    shipped = {
+        "skill_id": "sys-x",
+        "raw_prose": "SHIPPED keeps foo.md",
+        "exit_gates": {"all_of": [{"artifact_exists": {"path": "docs/**/foo.md"}}]},
+    }
+    with patch("agentalloy.signals.invariants.load_shipped_skill", return_value=shipped):
+        assert _guard_system_prose("sys-x", "OVERRIDE keeps foo.md") == "OVERRIDE keeps foo.md"
+
+
+def test_guard_system_prose_falls_back_when_invariant_dropped() -> None:
+    from agentalloy.install.subcommands.signal import _guard_system_prose
+
+    shipped = {
+        "skill_id": "sys-x",
+        "raw_prose": "SHIPPED keeps foo.md",
+        "exit_gates": {"all_of": [{"artifact_exists": {"path": "docs/**/foo.md"}}]},
+    }
+    with patch("agentalloy.signals.invariants.load_shipped_skill", return_value=shipped):
+        assert _guard_system_prose("sys-x", "OVERRIDE without the token") == "SHIPPED keeps foo.md"
+
+
+def test_guard_system_prose_noop_when_no_shipped_default() -> None:
+    from agentalloy.install.subcommands.signal import _guard_system_prose
+
+    with patch("agentalloy.signals.invariants.load_shipped_skill", return_value=None):
+        assert _guard_system_prose("orphan", "OVERRIDE prose") == "OVERRIDE prose"

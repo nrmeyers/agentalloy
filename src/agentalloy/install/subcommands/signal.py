@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ try:
     from agentalloy.embed_provider import get_embed_client
 except Exception:  # pragma: no cover
     get_embed_client = None  # type: ignore[assignment,misc]
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +158,35 @@ def _evaluate_phase(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _guard_system_prose(skill_id: str, override_prose: str) -> str:
+    """Return the override prose if it retains the shipped skill's load-bearing
+    invariants, else the shipped prose (the runtime fall-back guard).
+
+    A system override owns its ``raw_prose`` and ``applies_when``, but it must
+    not drop the load-bearing tokens (file/contract paths + authored command
+    strings) the product depends on. Gate-less system skills have no invariants,
+    so this is a no-op for them (the common case). An orphaned override (skill
+    removed from ``_packs``) has no shipped default and is served as-is — the
+    upgrade re-validation is where orphans are surfaced.
+    """
+    try:
+        from agentalloy.signals.invariants import load_shipped_skill, overlay_prose
+
+        shipped = load_shipped_skill(skill_id)
+        if shipped is None:
+            return override_prose
+        eff, missing = overlay_prose(shipped, override_prose)
+        if missing:
+            logger.warning(
+                "system override for '%s' dropped load-bearing token(s) %s; serving shipped prose",
+                skill_id,
+                missing,
+            )
+        return str(eff.get("raw_prose", override_prose))
+    except Exception:
+        return override_prose
+
+
 def _evaluate_system(args: argparse.Namespace) -> int:
     tool_name = getattr(args, "tool", "") or ""
     project_root = Path.cwd()
@@ -176,10 +208,17 @@ def _evaluate_system(args: argparse.Namespace) -> int:
         if not db_path.exists():
             return 0
 
+        base = (
+            "SELECT skill_id, raw_prose, applies_when FROM profile_skills "
+            "WHERE skill_class = 'system'"
+        )
         with duckdb.connect(str(db_path), read_only=True) as con:
-            rows = con.execute(
-                "SELECT skill_id, raw_prose, applies_when FROM profile_skills WHERE skill_class = 'system'"
-            ).fetchall()
+            try:
+                # Skip overrides disabled by upgrade re-validation.
+                rows = con.execute(base + " AND enabled").fetchall()
+            except Exception:
+                # Pre-migration profile DB without the `enabled` column.
+                rows = con.execute(base).fetchall()
 
     except Exception:
         return 0
@@ -200,7 +239,8 @@ def _evaluate_system(args: argparse.Namespace) -> int:
         qwen_calls: list[int] = [0]
         result, _ = evaluate_node(gate_spec, ctx, None, qwen_calls)
         if result == PredicateResult_.MET:
-            print(f"[agentalloy-system:{skill_id}]\n{raw_prose}\n[/agentalloy-system]")
+            effective_prose = _guard_system_prose(str(skill_id), str(raw_prose))
+            print(f"[agentalloy-system:{skill_id}]\n{effective_prose}\n[/agentalloy-system]")
             _write_telemetry(
                 {
                     "task": tool_name,

@@ -430,9 +430,13 @@ def test_container_recreate_runs_under_new_cli_after_swap():
         actions, warnings = up._upgrade_container("v3.0.5", state, assume_yes=True)
 
     run_ct.assert_not_called()  # recreate did NOT happen in the stale process
-    run_cli.assert_called_once()
-    assert run_cli.call_args.args[0] == ["upgrade", "--recreate-only", "--ref", "v3.0.5"]
+    # Two post-swap child calls under the new CLI: recreate, then re-validate
+    # customizations against the new _packs.
+    assert run_cli.call_count == 2
+    assert run_cli.call_args_list[0].args[0] == ["upgrade", "--recreate-only", "--ref", "v3.0.5"]
+    assert run_cli.call_args_list[1].args[0] == ["customize", "revalidate", "--json"]
     assert any("recreated container (post-swap CLI)" in a for a in actions)
+    assert any("re-validated overrides" in a for a in actions)
     assert not warnings
 
 

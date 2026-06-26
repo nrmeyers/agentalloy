@@ -35,6 +35,11 @@ def _extract_gate_paths(gate_spec: Any) -> list[str]:
     return paths
 
 
+# Public alias: the gate-path walker is reused by the invariants module
+# (signals.invariants.derive_invariants) to derive load-bearing prose tokens.
+extract_gate_paths = _extract_gate_paths
+
+
 def _extract_gate_sections(gate_spec: Any) -> list[str]:
     """Walk gate_spec recursively and collect all `artifact_contains.sections` values.
 

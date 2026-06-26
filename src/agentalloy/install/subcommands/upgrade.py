@@ -301,6 +301,21 @@ def _upgrade_native(
     else:
         actions.append("re-ingested packs")
 
+    # Re-validate user customizations against the freshly-installed shipped skills.
+    # A version bump can change a skill's load-bearing mechanics (gates, contract
+    # paths, phase-advance commands); an override whose prose no longer carries
+    # them is disabled so the shipped version serves, surfaced as a warning. Runs
+    # as a child so it sees the NEW _packs (this process is still pre-swap code).
+    rev = _run_cli(["customize", "revalidate", "--json"], check=False, capture=True)
+    actions.append("re-validated overrides")
+    try:
+        rev_payload: dict[str, Any] = json.loads(rev.stdout or "{}")
+        rev_warnings = rev_payload.get("warnings")
+        if isinstance(rev_warnings, list):
+            warnings.extend(w for w in rev_warnings if isinstance(w, str))
+    except (json.JSONDecodeError, ValueError):
+        pass
+
     # Guard: ingest/re-embed reported done — verify the corpus actually populated.
     # install-packs only re-embeds on a dimension mismatch, so a silently empty
     # corpus would otherwise restart the service on a half-upgrade. A warning here
@@ -415,6 +430,18 @@ def _upgrade_container(
             )
         else:
             actions.append("corpus self-heals on the new entrypoint (stamp-compare re-seed)")
+        # Re-validate host-mounted customizations under the new CLI (same child
+        # call as the native path). Only after a successful swap, so it runs the
+        # new _packs; on the not-swapped fallback we'd re-derive against stale code.
+        rev = _run_cli(["customize", "revalidate", "--json"], check=False, capture=True)
+        actions.append("re-validated overrides")
+        try:
+            rev_payload: dict[str, Any] = json.loads(rev.stdout or "{}")
+            rev_warnings = rev_payload.get("warnings")
+            if isinstance(rev_warnings, list):
+                warnings.extend(w for w in rev_warnings if isinstance(w, str))
+        except (json.JSONDecodeError, ValueError):
+            pass
     else:
         a, w = _recreate_container(image, state)
         actions.extend(a)

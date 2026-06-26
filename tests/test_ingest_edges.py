@@ -95,6 +95,22 @@ def test_load_yaml_defaults_edges_empty(tmp_path: Path) -> None:
     assert record.requires == []
 
 
+def test_load_yaml_parses_prose_invariants(tmp_path: Path) -> None:
+    f = tmp_path / "s.yaml"
+    f.write_text(
+        _skill_yaml("sk-a", requires='prose_invariants: ["agentalloy task next", "tasks.md"]')
+    )
+    record = _load_yaml(f)
+    assert record.prose_invariants == ["agentalloy task next", "tasks.md"]
+
+
+def test_load_yaml_defaults_prose_invariants_empty(tmp_path: Path) -> None:
+    f = tmp_path / "s.yaml"
+    f.write_text(_skill_yaml("sk-a"))
+    record = _load_yaml(f)
+    assert record.prose_invariants == []
+
+
 # --------------------------------------------------------------------------
 # validation
 # --------------------------------------------------------------------------
@@ -125,6 +141,20 @@ def test_validate_rejects_self_edge() -> None:
 def test_validate_rejects_non_kebab_target() -> None:
     errs = _validate(_rec("sk-a", ["Sk_B!"]))
     assert any("kebab-case" in e for e in errs)
+
+
+def test_validate_rejects_blank_prose_invariant() -> None:
+    rec = _rec("sk-a", [])
+    rec.prose_invariants = ["ok", "   "]
+    errs = _validate(rec)
+    assert any("prose_invariants" in e for e in errs)
+
+
+def test_validate_accepts_prose_invariants() -> None:
+    rec = _rec("sk-a", [])
+    rec.prose_invariants = ["agentalloy task next"]
+    errs = _validate(rec)
+    assert not any("prose_invariants" in e for e in errs)
 
 
 def test_validate_accepts_valid_edges() -> None:

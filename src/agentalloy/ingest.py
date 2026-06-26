@@ -152,6 +152,13 @@ class ReviewRecord:
     # layer at runtime; validated here at ingest for structure + known predicate
     # names so a malformed gate is caught at authoring, not at phase-transition.
     exit_gates: dict[str, Any] | None = None
+    # Load-bearing prose tokens that a user customization MUST retain (command
+    # strings / paths that are not derivable from exit_gates, e.g.
+    # "agentalloy phase set build"). The customization linter checks the user's
+    # raw_prose contains every one verbatim. Derived path tokens come from
+    # exit_gates; this list is the authored supplement. Optional, backward
+    # compatible (absent = []).
+    prose_invariants: list[str] = field(default_factory=lambda: cast(list[str], []))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -627,6 +634,7 @@ def _load_yaml(path: Path) -> ReviewRecord:
         description=_str("description"),
         requires=_strlist("requires"),
         exit_gates=cast("dict[str, Any] | None", exit_gates_raw),
+        prose_invariants=_strlist("prose_invariants"),
     )
 
 
@@ -764,6 +772,10 @@ def _validate(record: ReviewRecord) -> list[str]:
     # --- exit_gates spec validation (any skill that declares one) ---
     if record.exit_gates is not None:
         errors.extend(_validate_gate_spec(record.exit_gates))
+
+    # --- prose_invariants: must be a list of non-empty literal tokens ---
+    if any(not tok.strip() for tok in record.prose_invariants):
+        errors.append("prose_invariants must not contain blank entries")
 
     return errors
 

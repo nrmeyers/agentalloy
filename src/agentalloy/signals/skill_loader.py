@@ -13,12 +13,14 @@ _load_workflow_skill_from_packs, _build_predicate_context, _write_telemetry
 from __future__ import annotations
 
 import contextlib
-import json
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agentalloy.signals.predicates import PredicateContext
@@ -288,16 +290,50 @@ def _write_lifecycle_mode(project_root: Path, mode: str) -> None:
 
 
 def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[str, Any] | None:
-    """Load the active workflow skill for the given phase from the profile datastore.
+    """Load the active workflow skill for the given phase.
 
-    Tries the DuckDB-backed profile store first; falls back to ``_packs``.
+    Shipped-first: the skill's load-bearing structured fields (``exit_gates``,
+    ``applies_to_phases``, ``contract_template``, ``signal_keywords``) ALWAYS come
+    from the shipped ``_packs`` skill — they are product-owned mechanics. A
+    profile override may contribute only ``raw_prose`` (+ ``domain_tags``), and
+    only if that prose retains every load-bearing invariant (file/contract paths
+    + authored command tokens). If the override prose drops an invariant, the
+    shipped prose is served instead (the runtime fall-back guard).
 
     Args:
         phase: The current phase (e.g. "build").
         cwd: The working directory for profile detection. Defaults to ``Path.cwd()``.
     """
+    from agentalloy.signals.invariants import overlay_prose
+
     if cwd is None:
         cwd = Path.cwd()
+    shipped = _load_workflow_skill_from_packs(phase)
+    if shipped is None:
+        return None
+
+    override_prose, override_tags = _load_workflow_prose_override(
+        str(shipped.get("skill_id", "")), cwd
+    )
+    eff, missing = overlay_prose(shipped, override_prose, override_tags)
+    if missing:
+        logger.warning(
+            "workflow override for '%s' dropped load-bearing token(s) %s; serving shipped prose",
+            shipped.get("skill_id"),
+            missing,
+        )
+    return eff
+
+
+def _load_workflow_prose_override(skill_id: str, cwd: Path) -> tuple[str | None, list[str] | None]:
+    """Return ``(raw_prose, domain_tags)`` from the active profile override for
+    ``skill_id``, or ``(None, None)`` when there is no enabled override.
+
+    Only the customizable fields are read; structured fields are deliberately
+    ignored (re-sourced from the shipped skill by the caller).
+    """
+    if not skill_id:
+        return None, None
     try:
         import duckdb
 
@@ -305,37 +341,28 @@ def _load_workflow_skill_for_phase(phase: str, cwd: Path | None = None) -> dict[
 
         profile = detect_profile(cwd=cwd)
         db_path = profile_datastore_path(profile.name if profile else "default")
-        if db_path.exists():
-            with duckdb.connect(str(db_path), read_only=True) as con:
-                row = con.execute(
-                    """
-                    SELECT skill_id, raw_prose, applies_to_phases, exit_gates, signal_keywords
-                    FROM profile_skills
-                    WHERE skill_class = 'workflow'
-                    """,
-                ).fetchall()
-            for r in row:
-                skill_id, raw_prose, applies_to_phases, exit_gates_raw, signal_keywords_raw = r
-                applies: list[str] = list(applies_to_phases or [])
-                if phase in applies:
-                    exit_gates: dict[str, Any] = {}
-                    if exit_gates_raw:
-                        import contextlib
-
-                        with contextlib.suppress(Exception):
-                            exit_gates = json.loads(exit_gates_raw)
-                    signal_keywords: list[str] = list(signal_keywords_raw or [])
-                    return {
-                        "skill_id": skill_id,
-                        "raw_prose": raw_prose,
-                        "applies_to_phases": applies,
-                        "exit_gates": exit_gates,
-                        "signal_keywords": signal_keywords,
-                    }
+        if not db_path.exists():
+            return None, None
+        base = (
+            "SELECT raw_prose, domain_tags FROM profile_skills "
+            "WHERE skill_class = 'workflow' AND skill_id = ?"
+        )
+        with duckdb.connect(str(db_path), read_only=True) as con:
+            try:
+                # Skip overrides disabled by upgrade re-validation.
+                row = con.execute(base + " AND enabled", [skill_id]).fetchone()
+            except Exception:
+                # Pre-migration profile DB without the `enabled` column.
+                row = con.execute(base, [skill_id]).fetchone()
     except Exception:
-        pass
-    # Fallback: load from _packs
-    return _load_workflow_skill_from_packs(phase)
+        return None, None
+    if not row:
+        return None, None
+    raw_prose, domain_tags = row
+    return (
+        str(raw_prose) if raw_prose is not None else None,
+        list(domain_tags) if domain_tags else None,
+    )
 
 
 def _read_intake_route(project_root: Path) -> str | None:

@@ -50,9 +50,17 @@ CREATE TABLE IF NOT EXISTS profile_skills (
     applies_to_phases VARCHAR[] DEFAULT [],
     applies_when   VARCHAR DEFAULT NULL,
     exit_gates     VARCHAR DEFAULT NULL,
-    updated_at     BIGINT NOT NULL
+    updated_at     BIGINT NOT NULL,
+    enabled        BOOLEAN DEFAULT true
 );
 """
+
+# Idempotent migration for profile DBs created before the `enabled` column
+# existed. The upgrade re-validation disables (rather than deletes) an override
+# whose prose has gone stale; runtime apply-paths filter on `enabled`.
+_PROFILE_SKILLS_MIGRATIONS = (
+    "ALTER TABLE profile_skills ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +168,37 @@ def _active_layer(layers: dict[str, Any]) -> tuple[str, Path | None]:
 # ---------------------------------------------------------------------------
 
 
+# Structured fields a workflow override is NOT allowed to change — they are the
+# load-bearing mechanics (gates, contract scaffold, phase mapping) and are always
+# re-sourced from the shipped skill at runtime, so an edit here has no effect and
+# is rejected to keep the override honest. (`applies_when` is deliberately absent:
+# it is authored at customize time for system skills, not shipped.)
+_WORKFLOW_LOCKED_FIELDS = (
+    "exit_gates",
+    "applies_to_phases",
+    "signal_keywords",
+    "contract_template",
+)
+
+
+def _norm_field(value: Any) -> str:
+    """Order-stable string form for comparing a structured field to the shipped one."""
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _locked_field_violations(data: dict[str, Any], shipped: dict[str, Any]) -> list[str]:
+    """Reject edits to product-owned workflow fields (anything != the shipped value)."""
+    out: list[str] = []
+    for field_name in _WORKFLOW_LOCKED_FIELDS:
+        if _norm_field(data.get(field_name)) != _norm_field(shipped.get(field_name)):
+            out.append(
+                f"'{field_name}' is product-owned and can't be overridden — only raw_prose "
+                f"(and domain_tags) are customizable. Revert '{field_name}' to inherit "
+                f"(or run 'agentalloy customize reset')."
+            )
+    return out
+
+
 def _validate_skill_data(data: dict[str, Any], name: str) -> list[str]:
     """Validate a skill YAML dict. Returns a list of error strings (empty = ok)."""
     errors: list[str] = []
@@ -192,6 +231,28 @@ def _validate_skill_data(data: dict[str, Any], name: str) -> list[str]:
     if skill_class == "system" and not data.get("applies_when"):
         errors.append("system skill must have 'applies_when' (non-empty object)")
 
+    # Load-bearing protection (only meaningful against a shipped default; a
+    # brand-new skill with no default skips these).
+    default_path = _find_default_skill(name)
+    if default_path is not None:
+        try:
+            shipped = _load_yaml(default_path)
+        except Exception:
+            shipped = {}
+        if shipped:
+            from agentalloy.signals.invariants import check_prose, derive_invariants
+
+            missing = check_prose(raw_prose, derive_invariants(shipped))
+            if missing:
+                errors.append(
+                    "raw_prose drops load-bearing token(s) the workflow depends on: "
+                    + ", ".join(missing)
+                    + " — keep them verbatim (you may reword around them) or "
+                    "run 'agentalloy customize reset'."
+                )
+            if skill_class == "workflow":
+                errors.extend(_locked_field_violations(data, shipped))
+
     return errors
 
 
@@ -210,6 +271,8 @@ def _open_profile_store(profile_name: str) -> Any:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(path))
     conn.execute(_PROFILE_SKILLS_DDL)
+    for migration in _PROFILE_SKILLS_MIGRATIONS:
+        conn.execute(migration)
     return conn
 
 
@@ -706,6 +769,114 @@ def _reset_skill(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _revalidate(args: argparse.Namespace) -> int:
+    """Re-validate every override against the (possibly upgraded) shipped skills.
+
+    Profile-level overrides whose prose has dropped a load-bearing invariant are
+    DISABLED (``enabled = false``) so the shipped version serves — preserved, not
+    deleted; re-enable by fixing the prose and running ``customize update``.
+    Project-level overrides are warn-only (they have no datastore row and are not
+    applied at runtime today). Intended to run as an upgrade post-step.
+    """
+    from agentalloy.signals.invariants import check_prose, derive_invariants, load_shipped_skill
+
+    warnings: list[str] = []
+    checked = 0
+    disabled = 0
+
+    # --- profile-level overrides: disable on violation ---
+    from agentalloy.profiles import list_profiles, profile_datastore_path
+
+    try:
+        profiles = list_profiles()
+    except Exception:
+        profiles = []
+    for prof in profiles:
+        pname = prof.get("name")
+        if not pname or not profile_datastore_path(pname).exists():
+            continue
+        try:
+            conn = _open_profile_store(pname)
+        except Exception:
+            continue
+        try:
+            rows = conn.execute("SELECT skill_id, raw_prose FROM profile_skills").fetchall()
+            for skill_id, raw_prose in rows:
+                checked += 1
+                shipped = load_shipped_skill(str(skill_id))
+                if shipped is None:
+                    warnings.append(
+                        f"profile '{pname}': override '{skill_id}' no longer ships "
+                        "(orphan); retained but inert."
+                    )
+                    continue
+                missing = check_prose(str(raw_prose or ""), derive_invariants(shipped))
+                if missing:
+                    conn.execute(
+                        "UPDATE profile_skills SET enabled = false WHERE skill_id = ?",
+                        [skill_id],
+                    )
+                    disabled += 1
+                    warnings.append(
+                        f"profile '{pname}': override '{skill_id}' disabled — prose dropped "
+                        f"{', '.join(missing)}; shipped version now serves. Restore the token(s) "
+                        f"and run 'agentalloy customize update {skill_id}' to re-enable."
+                    )
+        finally:
+            conn.close()
+
+    # --- project-level overrides: warn only (not applied at runtime today) ---
+    try:
+        from agentalloy.install import state as install_state
+
+        st = install_state.load_state()
+    except Exception:
+        st = {}
+    repos: set[str] = set()
+    entries = cast("list[dict[str, Any]]", st.get("harness_files_written") or [])
+    for entry in entries:
+        rr = entry.get("repo_root")
+        if rr:
+            repos.add(str(rr))
+    for repo in sorted(repos):
+        skills_dir = Path(repo) / ".agentalloy" / "skills"
+        for cls in ("system", "workflow"):
+            cls_dir = skills_dir / cls
+            if not cls_dir.is_dir():
+                continue
+            for f in sorted(cls_dir.glob("*.yaml")):
+                try:
+                    data = _load_yaml(f)
+                except Exception:
+                    continue
+                shipped = load_shipped_skill(str(data.get("skill_id") or f.stem))
+                if shipped is None:
+                    continue
+                checked += 1
+                missing = check_prose(str(data.get("raw_prose") or ""), derive_invariants(shipped))
+                if missing:
+                    warnings.append(
+                        f"project {f}: override drops {', '.join(missing)} "
+                        "(project overrides are not yet enforced at runtime)."
+                    )
+
+    result = {"checked": checked, "disabled": disabled, "warnings": warnings}
+    write_result(result, args, human_fn=_render_revalidate)
+    return 0
+
+
+def _render_revalidate(result: dict[str, Any]) -> None:
+    print_rich(
+        f"  Re-validated {result.get('checked', 0)} override(s); "
+        f"disabled {result.get('disabled', 0)}."
+    )
+    warnings = cast("list[str]", result.get("warnings") or [])
+    if warnings:
+        print_rich("\n  [bold]Warnings[/bold]")
+        for w in warnings:
+            print_rich(f"  [yellow]![/yellow] {w}")
+
+
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
@@ -753,6 +924,14 @@ def add_parser(
     rst_p.add_argument("--project", action="store_true")
     rst_p.add_argument("--yes", action="store_true", help="Skip confirmation.")
 
+    # revalidate (operator-tier: re-check every override vs the shipped skills,
+    # disabling profile overrides whose prose dropped a load-bearing invariant).
+    reval_p = sub.add_parser(
+        "revalidate",
+        help="Re-validate overrides against shipped skills; disable stale ones.",
+    )
+    add_json_flag(reval_p)
+
     p.set_defaults(func=_run)
 
 
@@ -763,6 +942,7 @@ _HANDLERS = {
     "update": _update_skill,
     "diff": _diff_skill,
     "reset": _reset_skill,
+    "revalidate": _revalidate,
 }
 
 
@@ -770,7 +950,8 @@ def _run(args: argparse.Namespace) -> int:
     cmd = getattr(args, "customize_cmd", None)
     if not cmd:
         print(
-            "  Usage: agentalloy customize {list,edit,validate,update,diff,reset}", file=sys.stderr
+            "  Usage: agentalloy customize {list,edit,validate,update,diff,reset,revalidate}",
+            file=sys.stderr,
         )
         return 1
     handler = _HANDLERS.get(cmd)
