@@ -232,6 +232,8 @@ class TestVersionGate:
         result = check_version_gate("my-pack", "1.0.0", tmp_path, entries, [])
         assert result.ok
         assert not result.skip
+        # Fresh install is not a content change — must not force re-ingest.
+        assert not result.changed
 
     def test_identical_content_same_version_is_skip(self, tmp_path: Path) -> None:
         """Same content + same version → silent skip (already_installed)."""
@@ -245,6 +247,8 @@ class TestVersionGate:
         result = check_version_gate("my-pack", "1.0.0", tmp_path, entries, installed)
         assert result.ok
         assert result.skip
+        # A no-op skip is not a content change — must not force re-ingest.
+        assert not result.changed
 
     def test_changed_content_bumped_version_is_ok(self, tmp_path: Path) -> None:
         """Different content + different version → legitimate upgrade."""
@@ -258,6 +262,10 @@ class TestVersionGate:
         result = check_version_gate("my-pack", "1.1.0", tmp_path, entries, installed)
         assert result.ok
         assert not result.skip
+        # Changed-under-bump must force re-ingest: the skill already exists in the
+        # graph, so a plain re-ingest would skip it as a duplicate and the corpus
+        # would keep serving stale prose.
+        assert result.changed
 
     def test_changed_content_same_version_fails(self, tmp_path: Path) -> None:
         """Different content + same version → hard error with actionable message."""
@@ -290,6 +298,8 @@ class TestVersionGate:
         result = check_version_gate("my-pack", "1.0.0", tmp_path, entries, installed)
         assert result.ok
         assert not result.skip
+        # Undecidable legacy state is not a known content change — don't force.
+        assert not result.changed
 
     def test_different_pack_name_not_affected(self, tmp_path: Path) -> None:
         """Only the matching pack name is compared; other packs are ignored."""
@@ -444,3 +454,80 @@ class TestInstallLocalPackGatesIntegration:
         # Should not fail at schema or version gates; outcome should be
         # already_installed (all duplicates) or ingested.
         assert result["action"] in ("already_installed", "ingested")
+
+    def test_version_bump_forces_reingest_and_invalidates_vectors(self, tmp_path: Path) -> None:
+        """A version-bumped pack with changed content force re-ingests its skills
+        AND drops their stale vectors, so the corpus stops serving old prose.
+
+        Regression: previously the version gate passed the bump through (ok=True)
+        but the per-skill ingest skipped the existing skill_id as a DUPLICATE, so
+        neither the graph prose nor the vectors updated — the bump was recorded in
+        install state but never reached the corpus.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        _write_skill_yaml(tmp_path, "good")
+        _write_pack_manifest(
+            tmp_path,
+            "test-pack",
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}],
+            version="1.1.0",
+        )
+
+        # Prior install at an OLDER version with a stale hash → gate sees a
+        # legitimate, content-changing upgrade (changed=True).
+        installed_state = {
+            "installed_packs": [
+                {
+                    "name": "test-pack",
+                    "version": "1.0.0",
+                    "content_hash": "old_hash_that_is_definitely_wrong",
+                }
+            ]
+        }
+
+        # Force re-ingest overwrites the existing skill → outcome "ingested".
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "skills.duck").touch()
+        (corpus_dir / "ladybug").mkdir()
+
+        ingest_mock = MagicMock(return_value=fake_ingest)
+        invalidate_mock = MagicMock(return_value=3)
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", ingest_mock),
+            patch.object(ip, "_invalidate_pack_vectors", invalidate_mock),
+            patch.object(ip.install_state, "load_state", return_value=installed_state),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path)
+
+        assert result["action"] == "ingested"
+        # Every skill must be ingested with force=True so the existing node is
+        # overwritten rather than skipped as a duplicate.
+        assert ingest_mock.call_count == 1
+        assert ingest_mock.call_args.kwargs["force"] is True
+        # The pack's stale vectors must be invalidated so the downstream reembed
+        # re-creates them from the new prose.
+        invalidate_mock.assert_called_once()
+        passed_entries = invalidate_mock.call_args.args[0]
+        assert any(e.get("skill_id") == "good" for e in passed_entries)

@@ -227,6 +227,7 @@ def _ingest_yaml(
     repo_root: Path,
     *,
     no_restart: bool = False,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Run the existing ingest pipeline on one YAML. Returns parsed result.
 
@@ -245,9 +246,17 @@ def _ingest_yaml(
     ``no_restart`` is passed as ``--no-restart`` to the ingest subprocess when
     True. Defense-in-depth alongside the AGENTALLOY_DB_LOCK_HELD sentinel:
     if a future caller adds ``env={}`` to subprocess.run(), the flag still fires.
+
+    ``force`` passes ``--force`` so ingest overwrites an existing skill_id
+    (DETACH-DELETE the old node/version/fragments, then re-create) instead of
+    returning ``EXIT_DUPLICATE``. Used for version-bump upgrades, where the
+    skill already exists but its content changed — without it the rewrite is
+    silently skipped and the corpus keeps serving the stale prose.
     """
     if not isinstance(no_restart, bool):
         raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
+    if not isinstance(force, bool):
+        raise TypeError(f"force must be bool, got {type(force).__name__}")
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
@@ -267,6 +276,8 @@ def _ingest_yaml(
 
     # T1: build cmd list; append --no-restart when caller owns stop/restart lifecycle.
     cmd = [sys.executable, "-m", "agentalloy.ingest", str(yaml_path), "--yes"]
+    if force:
+        cmd.append("--force")
     if no_restart:
         cmd.append("--no-restart")
 
@@ -304,6 +315,39 @@ def _ingest_yaml(
         "stdout_tail": result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "",
         "stderr_tail": result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "",
     }
+
+
+def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]], duck_path: Path) -> int:
+    """Delete DuckDB vectors for a pack's skills so the next reembed re-creates them.
+
+    Needed after a force re-ingest on a version bump: the graph nodes are rewritten
+    but their fragment_ids are positionally stable, so a non-force reembed would
+    skip them as already-embedded. Dropping the rows here makes the reembed treat
+    them as missing and re-embed from the refreshed prose.
+
+    Best-effort: a held DuckDB lock (service still running) or any store error is
+    logged and swallowed — the caller's reembed and `agentalloy reembed --force`
+    remain the backstop. Returns the number of embedding rows deleted.
+    """
+    from agentalloy.storage.vector_store import open_or_create
+
+    deleted = 0
+    try:
+        with open_or_create(duck_path) as vs:
+            for entry in skills_entries:
+                sid = str(entry.get("skill_id", ""))
+                if sid:
+                    deleted += vs.delete_skill(sid)
+    except Exception as exc:  # noqa: BLE001 — invalidation is best-effort; reembed is the backstop
+        logger.warning(
+            "could not invalidate pack vectors (run `agentalloy reembed --force` "
+            "if retrieval serves stale prose): %s",
+            exc,
+        )
+        return 0
+    if deleted:
+        logger.info("invalidated %d stale embedding(s) for version-bumped pack", deleted)
+    return deleted
 
 
 _REQUIRED_MANIFEST_FIELDS = ("name", "version", "embed_model", "embedding_dim", "skills")
@@ -598,11 +642,17 @@ def install_local_pack(
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
 
+    # Version-bump upgrade: skills already exist in the graph, so force the
+    # ingest to overwrite them — a plain re-ingest would skip each as a duplicate
+    # and the corpus would keep serving the stale prose.
+    force_reingest = version_result.changed
     ingest_results: list[dict[str, Any]] = []
     for entry in skills_entries:
         yaml_path = pack_dir / str(entry["file"])
         # T1: pass no_restart so ingest subprocess suppresses its own stop/restart.
-        ingest_results.append(_ingest_yaml(yaml_path, root, no_restart=no_restart))
+        ingest_results.append(
+            _ingest_yaml(yaml_path, root, no_restart=no_restart, force=force_reingest)
+        )
 
     new_count = sum(1 for r in ingest_results if r["outcome"] == "ingested")
     duplicate_count = sum(1 for r in ingest_results if r["outcome"] == "duplicate")
@@ -701,6 +751,15 @@ def install_local_pack(
             ),
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
+
+    # Version-bump upgrade: the force re-ingest above rewrote each skill's graph
+    # node, but DuckDB vectors are keyed by positionally-stable fragment_ids
+    # ({skill_id}-v1-f{seq}), so the downstream non-force bulk reembed treats them
+    # as already-present and skips them, leaving stale embeddings. Drop the pack's
+    # vectors here so the reembed re-creates them from the new prose. (Workflow
+    # skills carry no vectors, so this is a harmless no-op for them.)
+    if force_reingest:
+        _invalidate_pack_vectors(skills_entries, duck_path)
 
     packs.append(
         {

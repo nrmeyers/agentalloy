@@ -138,6 +138,13 @@ class VersionGateResult:
     """True when content is identical to the installed snapshot — caller
     should return ``already_installed`` without re-ingesting."""
     error: str = ""
+    changed: bool = False
+    """True when the pack was previously installed and its content changed under
+    a new version string. The skills already exist in the graph, so a plain
+    re-ingest skips them as duplicates (``ingest`` returns ``EXIT_DUPLICATE`` on
+    skill_id presence). The caller must FORCE re-ingest (overwriting the stale
+    graph) and invalidate the pack's vectors so a non-force reembed re-creates
+    them — otherwise the bump is recorded in state but never reaches the corpus."""
 
 
 def check_version_gate(
@@ -185,8 +192,10 @@ def check_version_gate(
 
     # Content differs.
     if pack_version != prior_version:
-        # Legitimate upgrade — new version string.
-        return VersionGateResult(ok=True)
+        # Legitimate upgrade — new version string. The skills already exist in
+        # the graph, so signal the caller to force-overwrite and re-embed rather
+        # than letting the per-skill ingest skip them as duplicates.
+        return VersionGateResult(ok=True, changed=True)
 
     # Content changed but version string is the same → hard error.
     error = (
