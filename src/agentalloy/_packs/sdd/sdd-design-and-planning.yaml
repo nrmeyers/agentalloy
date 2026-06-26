@@ -33,6 +33,11 @@ exit_gates:
         path: docs/design/**/test-plan.md
         sections:
           - Test Cases
+    # §6 hand-off: design must emit at least one build contract before build can
+    # walk them with `task next`. Without this floor, `phase set build` passes with
+    # zero contracts and build has no worklist (the gap that motivated this gate).
+    - artifact_exists:
+        path: .agentalloy/contracts/build/*.md
 signal_keywords:
   - done with design
   - ready to build
@@ -150,13 +155,17 @@ raw_prose: |
   `scope.touches/avoids` and name the `## Test cases` (the test-plan.md cases by
   AC-N). The contracts sort by their `NN-` prefix — that's build's worklist order.
 
-  Then advance yourself — the moment the three design files exist and every task
-  has a build contract, run `agentalloy phase set build` and work the contracts
-  top to bottom with `agentalloy task next`. Don't wait to be told. If the design
-  still has an open question — an approach you haven't committed to, a slice you
-  can't yet test — **stop and surface it** instead of advancing. The phase guard
-  refuses the jump until `approach.md`, `tasks.md`, and `test-plan.md` all exist
-  with their required sections, so a premature `phase set` just names what's missing.
+  Then advance yourself — but first **verify the hand-off is complete**: every task
+  in `tasks.md` has a matching contract in `.agentalloy/contracts/build/`. The
+  moment the three design files exist *and* that's true, run
+  `agentalloy phase set build` and work the contracts top to bottom with
+  `agentalloy task next`. Don't wait to be told. If the design still has an open
+  question — an approach you haven't committed to, a slice you can't yet test —
+  **stop and surface it** instead of advancing. The phase guard refuses the jump
+  until `approach.md`, `tasks.md`, and `test-plan.md` all exist with their required
+  sections **and at least one build contract exists under
+  `.agentalloy/contracts/build/`**, so a premature `phase set` just names what's
+  missing — including a forgotten contract.
 
   ## Not this
 

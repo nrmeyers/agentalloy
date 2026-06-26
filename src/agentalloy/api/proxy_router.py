@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +19,7 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from agentalloy.api.proxy_apply import apply_signal
+from agentalloy.api.proxy_apply import InjectOutcome, apply_signal, commit_outcome
 from agentalloy.api.proxy_context import decode_proj_token, read_phase, resolve_working_dir
 from agentalloy.api.proxy_injection import inject_into_openai_messages
 from agentalloy.api.proxy_models import ProxyRequest
@@ -124,13 +124,21 @@ def _upstream_unavailable_error(detail: str) -> JSONResponse:
 
 
 def _stream_upstream_response(
-    upstream: httpx.AsyncClient, payload: dict[str, Any]
+    upstream: httpx.AsyncClient,
+    payload: dict[str, Any],
+    on_status: Callable[[int], None] = lambda _status: None,
 ) -> StreamingResponse:
-    """Forward a streaming (SSE) response from the upstream LLM."""
+    """Forward a streaming (SSE) response from the upstream LLM.
+
+    ``on_status`` is invoked once with the upstream status as soon as the stream
+    opens (before any chunk relays), so the caller can commit cadence markers
+    2xx-gated — a 5xx open never burns the cadence.
+    """
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
             async with upstream.stream("POST", "/v1/chat/completions", json=payload) as resp:
+                on_status(resp.status_code)
                 if resp.status_code >= 500:
                     logger.warning("Upstream streaming returned HTTP %d", resp.status_code)
                     yield error_sse_plain(
@@ -382,6 +390,11 @@ async def proxy_chat_completions(
     current = request
     modified_request = request
     source_skill_ids: list[str] | None = None
+    # Deferred cadence commit: apply_signal no longer writes `.agentalloy/{announced,
+    # composed}` — we commit only after a confirmed 2xx upstream response (see
+    # `_commit` below), so a turn the model never processed (5xx/connection error)
+    # re-announces on the harness retry instead of silently dropping orientation.
+    inject_outcome: InjectOutcome[ProxyRequest] | None = None
     if (
         signal_result is not None
         and signal_result.should_compose
@@ -400,8 +413,7 @@ async def proxy_chat_completions(
                     else None
                 )
 
-            injected = await apply_signal(
-                project_root=cwd,
+            inject_outcome = await apply_signal(
                 signal=signal_result,
                 orchestrator=orchestrator,
                 inject=_inject_openai,
@@ -409,8 +421,8 @@ async def proxy_chat_completions(
                 # result IS the delivery proof — no identity test needed here.
                 delivered=lambda _out: True,
             )
-            if injected is not None:
-                current = injected
+            if inject_outcome.injected is not None:
+                current = inject_outcome.injected
                 composed = True
         except Exception:
             logger.warning(
@@ -442,6 +454,11 @@ async def proxy_chat_completions(
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).
     gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False
+
+    def _commit(status: int) -> None:
+        """Commit the deferred cadence markers, 2xx-gated. No-op if nothing composed."""
+        if inject_outcome is not None:
+            commit_outcome(cwd, inject_outcome, upstream_ok=200 <= status < 300)
 
     # --- Step 5: Forward to upstream ---
     try:
@@ -477,7 +494,7 @@ async def proxy_chat_completions(
             session_key=session_key,
             session_source=session_source,
         )
-        return _stream_upstream_response(upstream, payload)
+        return _stream_upstream_response(upstream, payload, on_status=_commit)
 
     # Non-streaming: forward and return JSON
     try:
@@ -618,6 +635,7 @@ async def proxy_chat_completions(
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
         # would json.dumps() the text, double-encoding it).
+        _commit(resp.status_code)
         return Response(
             content=resp.text,
             status_code=resp.status_code,
@@ -641,6 +659,7 @@ async def proxy_chat_completions(
         session_source=session_source,
     )
 
+    _commit(resp.status_code)
     return JSONResponse(
         status_code=resp.status_code,
         content=body,

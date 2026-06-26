@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -28,9 +29,11 @@ from fastapi.responses import StreamingResponse
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.proxy_apply import (
+    InjectOutcome,
     _compose_block,  # pyright: ignore[reportPrivateUsage]  # noqa: F401 — re-exported for callers/tests
     _ComposedBlock,  # pyright: ignore[reportPrivateUsage]  # noqa: F401 — re-exported for callers/tests
     apply_signal,
+    commit_outcome,
 )
 from agentalloy.api.proxy_context import decode_proj_token
 from agentalloy.api.proxy_injection import inject_into_anthropic_messages
@@ -111,18 +114,37 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
     )
 
 
+def _noop_status(_status: int) -> None:
+    """Default ``on_status`` for the verbatim-forward path (nothing composed)."""
+    return None
+
+
+def _commit_on_2xx(
+    project_dir: Path, outcome: InjectOutcome[dict[str, Any]]
+) -> Callable[[int], None]:
+    """Build an ``on_status`` that commits ``outcome``'s markers iff status is 2xx."""
+
+    def on_status(status: int) -> None:
+        commit_outcome(project_dir, outcome, upstream_ok=200 <= status < 300)
+
+    return on_status
+
+
 async def _maybe_inject(
     payload: dict[str, Any],
     token: str,
     embed_client: EmbedClient | None,
     orchestrator: ComposeOrchestrator | None,
     session_id: str | None = None,
-) -> dict[str, Any] | None:
-    """Run signal → compose → inject for this repo. Return a new payload, or None.
+) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None]:
+    """Run signal → compose → inject for this repo.
 
-    Returns None when nothing was injected (skip / no-op). Raising is fine — the
-    caller treats any exception as "forward the original unchanged". ``session_id``
-    is the harness session-id header (Claude Code's ``x-claude-code-session-id``),
+    Returns ``(payload_or_None, outcome_or_None)``: the new payload (None when
+    nothing was injected — skip / no-op), and the :class:`InjectOutcome` whose
+    cadence markers the caller commits *after a 2xx forward* (None when no workflow
+    block was composed). Raising is fine — the caller treats any exception as
+    "forward the original unchanged". ``session_id`` is the harness session-id
+    header (Claude Code's ``x-claude-code-session-id``),
     used to key per-session orientation.
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
@@ -138,15 +160,17 @@ async def _maybe_inject(
     # the latest payload across both and return it iff anything was injected (else None
     # → the caller forwards the original verbatim).
     current = payload
+    outcome: InjectOutcome[dict[str, Any]] | None = None
 
     # 1. Workflow/cursor block via the shared seam (cadence-marker committing).
     if signal.should_compose and signal.phase and orchestrator is not None:
         # Cadence lives in `.agentalloy/{announced,composed}` (durable), not in the
         # request body. The signal layer decided this turn warrants injection but
-        # deliberately did NOT commit the markers — `apply_signal` does that, only
-        # after compose tells it what was actually emitted, so a degraded compose
-        # (embed down) or an empty block never records the phase/work-item as
-        # delivered.
+        # deliberately did NOT commit the markers — `apply_signal` defers that to
+        # `commit_outcome`, which the caller runs only after a 2xx forward, so a
+        # degraded compose (embed down), an empty block, OR a turn the model never
+        # processed (overloaded/errored upstream) never records the phase/work-item
+        # as delivered.
         #
         # `inject_into_anthropic_messages` returns a NEW dict on a real injection and
         # the SAME object on every no-op (no user message, already-present marker,
@@ -155,15 +179,14 @@ async def _maybe_inject(
         # composed text but couldn't inject it does NOT burn the marker.
         phase = signal.phase
         before = current
-        injected = await apply_signal(
-            project_root=project_dir,
+        outcome = await apply_signal(
             signal=signal,
             orchestrator=orchestrator,
             inject=lambda text: inject_into_anthropic_messages(before, text, phase=phase),
             delivered=lambda out: out is not before,
         )
-        if injected is not None:
-            current = injected
+        if outcome.injected is not None:
+            current = outcome.injected
 
     # 2. Per-turn banner — strip-and-replace, appended LAST so it is the freshest text.
     #    Carrier-gated upstream: evaluate_signal only sets `banner` on a carrier turn,
@@ -176,7 +199,8 @@ async def _maybe_inject(
         if bannered is not current:
             current = bannered
 
-    return current if current is not payload else None
+    injected_payload = current if current is not payload else None
+    return injected_payload, outcome
 
 
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:
@@ -233,20 +257,31 @@ async def passthrough_anthropic_messages(
     except Exception:
         payload = None  # not JSON — forward verbatim
 
+    # `on_status` commits the deferred cadence markers, but only on a 2xx forward —
+    # so an orientation block injected into a request that upstream then 529s/errors
+    # is NOT recorded as delivered, and re-fires on the harness retry. Default no-op
+    # covers the verbatim-forward path (nothing composed).
+    on_status: Callable[[int], None] = _noop_status
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
-            injected = await _maybe_inject(payload, token, embed_client, orchestrator, session_id)
+            injected, outcome = await _maybe_inject(
+                payload, token, embed_client, orchestrator, session_id
+            )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
+            if outcome is not None:
+                on_status = _commit_on_2xx(decode_proj_token(token), outcome)
         except Exception:
             logger.warning("passthrough compose/inject failed; forwarding original", exc_info=True)
             body_to_send = raw_body
 
     # --- Forward. ---
     if stream_flag:
-        return await _forward_streaming(client, query_string, inbound_headers, body_to_send)
-    return await _forward_once(client, query_string, inbound_headers, body_to_send)
+        return await _forward_streaming(
+            client, query_string, inbound_headers, body_to_send, on_status
+        )
+    return await _forward_once(client, query_string, inbound_headers, body_to_send, on_status)
 
 
 async def _forward_once(
@@ -254,6 +289,7 @@ async def _forward_once(
     query_string: str,
     inbound_headers: Any,
     body: bytes,
+    on_status: Callable[[int], None] = lambda _status: None,
 ) -> Response:
     try:
         upstream = await client.forward(
@@ -264,6 +300,7 @@ async def _forward_once(
         )
     except httpx.HTTPError as e:
         logger.warning("passthrough upstream error: %s", e)
+        # No commit: a connection-level failure means the model never saw the block.
         return Response(
             content=json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"upstream error: {e}"}}
@@ -271,6 +308,7 @@ async def _forward_once(
             status_code=502,
             media_type="application/json",
         )
+    on_status(upstream.status_code)
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
@@ -284,6 +322,7 @@ async def _forward_streaming(
     query_string: str,
     inbound_headers: Any,
     body: bytes,
+    on_status: Callable[[int], None] = lambda _status: None,
 ) -> Response | StreamingResponse:
     # Enter the stream manually so we can read the upstream status + headers
     # before constructing the StreamingResponse, then relay raw bytes.
@@ -297,6 +336,7 @@ async def _forward_streaming(
         upstream = await cm.__aenter__()
     except httpx.HTTPError as e:
         logger.warning("passthrough upstream stream error: %s", e)
+        # No commit: a connection-level failure means the model never saw the block.
         return Response(
             content=json.dumps(
                 {"type": "error", "error": {"type": "api_error", "message": f"upstream error: {e}"}}
@@ -304,6 +344,10 @@ async def _forward_streaming(
             status_code=502,
             media_type="application/json",
         )
+
+    # Status is known at stream open, before any body bytes relay — commit here
+    # (2xx-gated inside on_status) so a 529 stream open never burns the cadence.
+    on_status(upstream.status_code)
 
     async def relay() -> AsyncIterator[bytes]:
         try:

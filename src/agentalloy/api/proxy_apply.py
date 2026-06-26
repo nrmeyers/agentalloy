@@ -8,11 +8,15 @@ already shared; this module unifies the *inject + commit* wiring so both
 surfaces share one cadence-marker implementation.
 
 :func:`apply_signal` composes the 3-tier block once, hands the text to a
-surface-specific ``inject`` callable, and commits the announce/cursor markers
-gated on confirmed delivery — composing text the request then drops (no user
-message, malformed content) must NOT burn the marker. The compose helper
-(:func:`_compose_block`) and its result (:class:`_ComposedBlock`) live here too,
-imported back by the passthrough router.
+surface-specific ``inject`` callable, and returns an :class:`InjectOutcome`
+carrying the injected payload plus the per-tier emit flags — but it no longer
+commits the cadence markers itself. Committing is deferred to
+:func:`commit_outcome`, which the surface calls *after the upstream forward* and
+only on a 2xx response: composing text the request then drops (no user message,
+malformed content) must NOT burn the marker, and neither must a turn the model
+never processed because upstream was overloaded (529) or errored. The compose
+helper (:func:`_compose_block`) and its result (:class:`_ComposedBlock`) live
+here too, imported back by the passthrough router.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentalloy.api.compose_models import ComposeRequest, EmptyResult, Phase
 from agentalloy.api.proxy_signal import SignalResult, commit_markers
@@ -147,31 +151,74 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     )
 
 
+@dataclass
+class InjectOutcome[T]:
+    """Result of :func:`apply_signal`: the injected payload + deferred commit facts.
+
+    The surface threads this across the upstream forward and hands it to
+    :func:`commit_outcome` once the response status is known, so a marker is
+    written only when the model actually received the block (a 2xx response). The
+    emit flags already fold in *delivery* (the block reached the request body); the
+    2xx gate is applied later, by :func:`commit_outcome`.
+
+    - ``injected``: whatever ``inject`` returned — the new request/payload, or None
+      on a no-op (nothing composed, or the block could not be injected).
+    - ``announce_emitted`` / ``cursor_emitted``: candidate Tier 1 / Tier 2 commits,
+      pending a 2xx forward.
+    """
+
+    injected: T | None
+    signal: SignalResult
+    announce_emitted: bool
+    cursor_emitted: bool
+
+
 async def apply_signal[T](
     *,
-    project_root: Path,
     signal: SignalResult,
     orchestrator: ComposeOrchestrator,
     inject: Callable[[str], T | None],
     delivered: Callable[[T], bool],
-) -> T | None:
-    """Shared inject+commit seam for both proxy surfaces.
+) -> InjectOutcome[T]:
+    """Shared inject seam for both proxy surfaces (commit is deferred).
 
     Composes the 3-tier block, injects it via the surface-specific ``inject``
-    (which returns the new request/payload, or None on a no-op), and commits the
-    announce/cursor markers gated on confirmed delivery — identical cadence
-    semantics to the passthrough's prior inline logic. Returns whatever ``inject``
-    returned (None when there was nothing to compose or nothing was delivered-worthy).
+    (which returns the new request/payload, or None on a no-op), and returns an
+    :class:`InjectOutcome` with the per-tier emit flags folded against delivery.
+    It does NOT write the cadence markers — the surface calls :func:`commit_outcome`
+    after the upstream forward, gated on a 2xx response, so a turn the model never
+    processed (overloaded/errored upstream) leaves the cadence intact and re-fires
+    on the harness retry.
     """
     composed = await _compose_block(signal, orchestrator)
     if not composed.text:
-        return None
+        return InjectOutcome(
+            injected=None, signal=signal, announce_emitted=False, cursor_emitted=False
+        )
     injected = inject(composed.text)
     was_delivered = injected is not None and delivered(injected)
-    commit_markers(
-        project_root,
-        signal,
+    return InjectOutcome(
+        injected=injected,
+        signal=signal,
         announce_emitted=composed.tier1_text and was_delivered,
         cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
     )
-    return injected
+
+
+def commit_outcome(project_root: Path, outcome: InjectOutcome[Any], *, upstream_ok: bool) -> None:
+    """Commit the deferred cadence markers — only after a confirmed 2xx forward.
+
+    ``upstream_ok`` is the surface's verdict that upstream returned 2xx (the model
+    processed the injected block). A non-2xx (529 overloaded, 5xx, connection error)
+    leaves ``.agentalloy/{announced,composed}`` untouched, so ``evaluate_signal``
+    re-announces on the harness's retry instead of silently dropping orientation.
+    No-op when nothing was injected (both emit flags False).
+    """
+    if not upstream_ok:
+        return
+    commit_markers(
+        project_root,
+        outcome.signal,
+        announce_emitted=outcome.announce_emitted,
+        cursor_emitted=outcome.cursor_emitted,
+    )

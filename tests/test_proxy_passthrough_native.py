@@ -43,7 +43,9 @@ def _anthropic_body(*, stream: bool = False) -> dict[str, Any]:
     }
 
 
-def _make_upstream(captured: dict[str, Any], *, sse: bytes | None = None) -> httpx.AsyncClient:
+def _make_upstream(
+    captured: dict[str, Any], *, sse: bytes | None = None, status: int = 200
+) -> httpx.AsyncClient:
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = request.content
         captured["headers"] = dict(request.headers)
@@ -54,13 +56,13 @@ def _make_upstream(captured: dict[str, Any], *, sse: bytes | None = None) -> htt
                 yield sse
 
             return httpx.Response(
-                200,
+                status,
                 content=_aiter(),
                 headers={"content-type": "text/event-stream"},
                 request=request,
             )
         return httpx.Response(
-            200,
+            status,
             json={"type": "message", "id": "msg_1", "role": "assistant", "content": []},
             request=request,
         )
@@ -73,10 +75,12 @@ def _make_app(
     *,
     orchestrator: ComposeOrchestrator | None = None,
     sse: bytes | None = None,
+    status: int = 200,
 ) -> Any:
     app = create_app(use_default_lifespan=False)
     app.state.anthropic_passthrough_client = AnthropicPassthroughClient(
-        upstream_base_url="http://mock-upstream", client=_make_upstream(captured, sse=sse)
+        upstream_base_url="http://mock-upstream",
+        client=_make_upstream(captured, sse=sse, status=status),
     )
     app.state.embed_client = MagicMock()
     app.state.vector_store = MagicMock()
@@ -329,6 +333,70 @@ def test_announce_marker_not_committed_when_compose_degrades(tmp_path: Path) -> 
     assert resp.status_code == 200
     # Original body forwarded unchanged AND the marker is NOT burned → re-announces.
     assert json.loads(captured["body"]) == _anthropic_body()
+    assert _announced_file(tmp_path) is None
+
+
+def _entry_signal() -> SignalResult:
+    return SignalResult(
+        should_compose=True,
+        announce=True,
+        phase="build",
+        task="the real task",
+        workflow_prose="operate like so",
+        pending_announce=("build", ["sess-1"]),
+    )
+
+
+def test_announce_marker_not_committed_on_upstream_529(tmp_path: Path) -> None:
+    """The orientation-drop regression: injected, but upstream overloaded (529).
+
+    The block reaches the forwarded request, but the model never processed it, so
+    the cadence marker MUST stay unwritten — the harness retries and we re-announce.
+    """
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(captured, orchestrator=_orchestrator("ORIENTATION-PROSE"), status=529)
+    with patch(_SIGNAL, return_value=_entry_signal()), TestClient(app) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 529
+    # The block WAS injected into the forwarded request...
+    assert b"operate like so" in captured["body"]
+    # ...but the non-2xx forward must NOT burn the marker.
+    assert _announced_file(tmp_path) is None
+
+
+def test_announce_marker_committed_then_not_reburned_across_retry(tmp_path: Path) -> None:
+    """529 leaves the marker unset; the retry (200) injects again and commits once."""
+    (tmp_path / ".agentalloy").mkdir()
+    # First attempt: 529 → no commit.
+    cap1: dict[str, Any] = {}
+    app1 = _make_app(cap1, orchestrator=_orchestrator("ORIENTATION-PROSE"), status=529)
+    with patch(_SIGNAL, return_value=_entry_signal()), TestClient(app1) as client:
+        client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert _announced_file(tmp_path) is None
+    # Retry: 200 → block re-injected (announce still True) and marker committed.
+    cap2: dict[str, Any] = {}
+    app2 = _make_app(cap2, orchestrator=_orchestrator("ORIENTATION-PROSE"), status=200)
+    with patch(_SIGNAL, return_value=_entry_signal()), TestClient(app2) as client:
+        resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+    assert resp.status_code == 200
+    assert b"operate like so" in cap2["body"]
+    assert _announced_file(tmp_path) == "build\tsess-1"
+
+
+def test_announce_marker_not_committed_on_streaming_529(tmp_path: Path) -> None:
+    """Same guard on the streaming surface: status is known at stream open."""
+    (tmp_path / ".agentalloy").mkdir()
+    captured: dict[str, Any] = {}
+    app = _make_app(
+        captured, orchestrator=_orchestrator("ORIENTATION-PROSE"), sse=b"data: {}\n\n", status=529
+    )
+    with patch(_SIGNAL, return_value=_entry_signal()), TestClient(app) as client:
+        resp = client.post(
+            f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body(stream=True)
+        )
+    assert resp.status_code == 529
+    assert b"operate like so" in captured["body"]
     assert _announced_file(tmp_path) is None
 
 

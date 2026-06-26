@@ -301,6 +301,51 @@ def test_artifact_completeness_gate_returns_unknown(tmp_path: Path):
     assert evals[0].result == UNKNOWN
 
 
+# ---------------------------------------------------------------------------
+# design → build hand-off requires a build contract (the missing-contract gap)
+# ---------------------------------------------------------------------------
+
+
+def _seed_design_artifacts(tmp_path: Path) -> None:
+    """The three load-bearing design files, each with its required section."""
+    d = tmp_path / "docs" / "design" / "01-task"
+    d.mkdir(parents=True)
+    (d / "approach.md").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
+    (d / "tasks.md").write_text("# x\n\n## Tasks\n\n- t1\n", encoding="utf-8")
+    (d / "test-plan.md").write_text("# x\n\n## Test Cases\n\n- AC-1\n", encoding="utf-8")
+
+
+def test_design_gate_blocks_without_build_contract(tmp_path: Path):
+    """The real shipped design gate: three files present but no build contract → NOT_MET.
+
+    Regression for the gap where `phase set build` passed with zero contracts because
+    §6 lived only in the prose, never in the mechanical gate.
+    """
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    _seed_design_artifacts(tmp_path)
+    gate = exit_gates_for_phase("design")
+    assert gate is not None
+    ctx = _ctx(tmp_path, phase="design")
+    result, _ = evaluate_node(gate, ctx, None, [0])
+    assert result == NOT_MET
+
+
+def test_design_gate_passes_with_build_contract(tmp_path: Path):
+    """Add one contract under .agentalloy/contracts/build/ and the same gate is MET."""
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    _seed_design_artifacts(tmp_path)
+    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts.mkdir(parents=True)
+    (contracts / "01-task.md").write_text("## Task\n\nimplement\n", encoding="utf-8")
+    gate = exit_gates_for_phase("design")
+    assert gate is not None
+    ctx = _ctx(tmp_path, phase="design")
+    result, _ = evaluate_node(gate, ctx, None, [0])
+    assert result == MET
+
+
 def test_artifact_completeness_advisory_populated(tmp_path: Path):
     """Advisory text is built when artifact exists."""
     (tmp_path / "spec.md").write_text("# Spec\n\nsome content\n")
