@@ -1,11 +1,9 @@
 """Proxy request telemetry.
 
-Constructs a ``CompositionTrace`` for every proxy request (composed or
-passthrough) and writes it to the vector store via ``record_composition_trace``.
-
-Pattern mirrors ``signal.py``'s ``_write_telemetry`` — the signal CLI constructs
-CompositionTrace directly and calls ``append_trace()``; the proxy path does the
-same but receives a live VectorStore from the app context.
+Constructs one consolidated ``CompositionTrace`` for every proxy request
+(composed or passthrough) — folding in both compose tiers' skill/fragment
+provenance and token counts — and writes it to the vector store via
+``record_composition_trace`` on the live VectorStore from the app context.
 
 Public API
 ----------
@@ -34,6 +32,18 @@ def write_proxy_trace(
     qwen_calls: int = 0,
     total_latency_ms: int | None = None,
     source_skill_ids: Sequence[str] | None = None,
+    system_skill_ids: Sequence[str] | None = None,
+    workflow_skill_ids: Sequence[str] | None = None,
+    selected_fragment_ids: Sequence[str] | None = None,
+    tokens_returned: int = 0,
+    tokens_flat_equivalent: int = 0,
+    reranked: bool = False,
+    lm_assist_outcome: str = "disabled",
+    lm_assist_model: str | None = None,
+    lm_assist_kept_ids: Sequence[str] | None = None,
+    lm_assist_dropped_ids: Sequence[str] | None = None,
+    lm_assist_scores: str | None = None,
+    dense_leg_degraded: bool = False,
     error_code: str | None = None,
     phase_gate_embed_failed: bool = False,
     repo: str | None = None,
@@ -78,6 +88,18 @@ def write_proxy_trace(
             qwen_calls=qwen_calls,
             total_latency_ms=total_latency_ms,
             source_skill_ids=list(source_skill_ids) if source_skill_ids else [],
+            system_skill_ids=list(system_skill_ids) if system_skill_ids else [],
+            workflow_skill_ids=list(workflow_skill_ids) if workflow_skill_ids else [],
+            selected_fragment_ids=list(selected_fragment_ids) if selected_fragment_ids else [],
+            tokens_returned=tokens_returned,
+            tokens_flat_equivalent=tokens_flat_equivalent,
+            reranked=reranked,
+            lm_assist_outcome=lm_assist_outcome,
+            lm_assist_model=lm_assist_model,
+            lm_assist_kept_ids=list(lm_assist_kept_ids) if lm_assist_kept_ids else [],
+            lm_assist_dropped_ids=list(lm_assist_dropped_ids) if lm_assist_dropped_ids else [],
+            lm_assist_scores=lm_assist_scores,
+            dense_leg_degraded=dense_leg_degraded,
             error_code=error_code,
             phase_gate_embed_failed=phase_gate_embed_failed,
             repo=repo,

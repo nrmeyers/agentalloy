@@ -61,7 +61,7 @@ def _load_watch_config(config_path: Path) -> WatchConfig | None:
 def _load_workflow_skill_prose(phase: str, profile_name: str) -> str:
     """Load raw_prose for the workflow skill matching the given phase."""
     try:
-        from agentalloy.install.subcommands.signal import (
+        from agentalloy.signals.skill_loader import (
             _load_workflow_skill_for_phase,  # pyright: ignore[reportPrivateUsage]
         )
 

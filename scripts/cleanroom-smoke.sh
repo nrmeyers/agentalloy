@@ -161,9 +161,9 @@ else
   echo "ok   [full unwire: soft note removed]"
 fi
 
-echo "== telemetry coverage verb (human by default, --json opt-in) =="
-assert_human "telemetry coverage"        -- agentalloy telemetry coverage
-assert_json  "telemetry coverage --json" -- agentalloy telemetry coverage --json
+echo "== telemetry savings verb (human by default, --json opt-in) =="
+assert_human "telemetry savings"        -- agentalloy telemetry savings
+assert_json  "telemetry savings --json" -- agentalloy telemetry savings --json
 
 echo
 if [ "$fail" -ne 0 ]; then

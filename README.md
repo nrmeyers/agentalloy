@@ -479,7 +479,7 @@ Both runtime paths are **deterministic by default** — the only optional LM sta
 
 Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns — no async backlog, no dropped traces. Trace-write failures never propagate.
 
-Query via `GET /telemetry/traces` and `GET /telemetry/coverage`; the CLI exposes `agentalloy telemetry savings` (token-savings summary), `agentalloy telemetry coverage` (composition coverage: every prompt + every skill pull), and `agentalloy telemetry clear`. See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
+Query via `GET /telemetry/traces`; the CLI exposes `agentalloy telemetry savings` (token-savings summary — one `status='proxy_composed'` row per proxy request) and `agentalloy telemetry clear` (truncates `composition_traces`). See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
 
 ---
 

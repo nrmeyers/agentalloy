@@ -24,7 +24,7 @@ from agentalloy.telemetry.writer import DuckDBTelemetryWriter, TelemetryRecord
 def _mk_trace(
     trace_id: str,
     phase: str = "build",
-    status: str = "compose",
+    status: str = "proxy_composed",
     tokens_returned: int = 0,
     tokens_flat_equivalent: int = 0,
 ) -> CompositionTrace:
@@ -222,12 +222,20 @@ def test_aggregate_savings_math(store: VectorStore) -> None:
 
 
 def test_aggregate_savings_excludes_non_compose_status(store: VectorStore) -> None:
-    """Rows with status != 'compose' (e.g. compose_empty) must not inflate totals."""
+    """Only status='proxy_composed' rows count. Passthroughs and legacy per-leg
+    'compose'/'compose_empty' rows must not inflate totals."""
     store.record_composition_trace(
-        _mk_trace("t1", status="compose", tokens_returned=100, tokens_flat_equivalent=400)
+        _mk_trace("t1", status="proxy_composed", tokens_returned=100, tokens_flat_equivalent=400)
     )
     store.record_composition_trace(
-        _mk_trace("t2", status="compose_empty", tokens_returned=0, tokens_flat_equivalent=0)
+        _mk_trace("t2", status="proxy_passthrough", tokens_returned=0, tokens_flat_equivalent=0)
+    )
+    # Legacy per-leg rows from the orchestrator/eval path are no longer counted.
+    store.record_composition_trace(
+        _mk_trace("t3", status="compose", tokens_returned=999, tokens_flat_equivalent=999)
+    )
+    store.record_composition_trace(
+        _mk_trace("t4", status="compose_empty", tokens_returned=0, tokens_flat_equivalent=0)
     )
     result = store.aggregate_savings()
     assert result["total_composes"] == 1

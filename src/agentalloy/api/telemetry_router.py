@@ -98,49 +98,6 @@ class SavingsResponse(BaseModel):
     per_phase: list[PhaseSavings]
 
 
-class EventCount(BaseModel):
-    event_type: str
-    status: str
-    count: int
-
-
-class PhasePrompts(BaseModel):
-    phase: str
-    prompts: int
-    composed: int
-
-
-class CoverageResponse(BaseModel):
-    """Hook-layer coverage — every prompt + every skill pull the hooks record.
-
-    Complements ``SavingsResponse`` (compose-only). ``prompts_total`` counts
-    every UserPromptSubmit (composed, no-compose, and cache hits); the savings
-    ``total_composes`` is unchanged (still ``status='compose'``).
-    """
-
-    prompts_total: int
-    prompts_composed: int
-    prompts_no_compose: int
-    system_skill_pulls: int
-    intake_injections: int
-    contract_composes: int = 0
-    by_event: list[EventCount]
-    per_phase_prompts: list[PhasePrompts]
-
-    @classmethod
-    def empty(cls) -> CoverageResponse:
-        return cls(
-            prompts_total=0,
-            prompts_composed=0,
-            prompts_no_compose=0,
-            system_skill_pulls=0,
-            intake_injections=0,
-            contract_composes=0,
-            by_event=[],
-            per_phase_prompts=[],
-        )
-
-
 class TelemetryQuerier:
     def __init__(self, store: VectorStore) -> None:
         self._store = store
@@ -149,10 +106,6 @@ class TelemetryQuerier:
         # DuckDB connection is not thread-safe; run the read off the loop.
         data = await asyncio.to_thread(self._store.aggregate_savings, repo)
         return SavingsResponse.model_validate(data)
-
-    async def coverage(self, repo: str | None = None) -> CoverageResponse:
-        data = await asyncio.to_thread(self._store.aggregate_hook_coverage, repo)
-        return CoverageResponse.model_validate(data)
 
     async def query(
         self,
@@ -240,24 +193,3 @@ async def get_savings(
             per_phase=[],
         )
     return await querier.savings(repo)
-
-
-@router.get(
-    "/telemetry/coverage",
-    response_model=CoverageResponse,
-    summary="Hook-layer coverage: every prompt + every skill pull",
-)
-async def get_coverage(
-    request: Request,
-    repo: str | None = Query(
-        default=None,
-        description="Scope to a project root (matches it or any subdirectory); omit for all repos.",
-    ),
-) -> CoverageResponse:
-    """Return hook-layer activity counts (prompts, no-compose, system-skill pulls,
-    intake injections) grouped by event/status and per phase, from the open store.
-    ``repo`` scopes to a single project root (the CLI's default), omitted for ``--all``."""
-    querier: TelemetryQuerier | None = getattr(request.app.state, "telemetry_querier", None)
-    if querier is None:
-        return CoverageResponse.empty()
-    return await querier.coverage(repo)

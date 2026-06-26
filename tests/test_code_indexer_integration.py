@@ -136,36 +136,3 @@ def test_state_json_records_unreachable(tmp_path: Path):
 
     st = install_state.load_state(tmp_path)
     assert st["code_indexer"]["reachable"] is False
-
-
-# ---------------------------------------------------------------------------
-# Hook skips code-indexer when unreachable
-# ---------------------------------------------------------------------------
-
-
-def test_hook_skips_code_indexer_when_unreachable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """code-indexer-from-contract returns 0 and emits no output when code-indexer is down."""
-    from agentalloy.install.subcommands import signal as sig
-
-    contract_path = tmp_path / ".agentalloy" / "contracts" / "build" / "task.md"
-    _write_contract(contract_path)
-
-    import io
-    import sys
-
-    captured = io.StringIO()
-    with (
-        patch("urllib.request.urlopen", side_effect=OSError("refused")),
-        patch.object(sig, "_write_telemetry"),
-    ):
-        import argparse
-
-        args = argparse.Namespace(path=str(contract_path))
-        sys.stdout = captured
-        try:
-            rc = sig._code_indexer_from_contract(args)  # pyright: ignore[reportPrivateUsage]
-        finally:
-            sys.stdout = sys.__stdout__
-
-    assert rc == 0
-    assert captured.getvalue() == ""  # no output when unreachable

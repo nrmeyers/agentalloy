@@ -150,7 +150,7 @@ def test_phase_change_triggers_regenerate(tmp_path: Path):
     phase_file = agentalloy_dir / "phase"
     phase_file.write_text("phase: build\n")
 
-    with patch("agentalloy.install.subcommands.signal._load_workflow_skill_for_phase") as mock_load:
+    with patch("agentalloy.signals.skill_loader._load_workflow_skill_for_phase") as mock_load:
         mock_load.return_value = {"skill_id": "sdd-build", "raw_prose": "BUILD PROSE"}
 
         # Simulate the file event

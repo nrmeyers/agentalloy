@@ -342,31 +342,3 @@ def test_build_predicate_context_empty_file_events(tmp_path: Path) -> None:
 
     ctx = _build_predicate_context(tmp_path, phase="build")
     assert ctx.file_events_since == []
-
-
-# ---------------------------------------------------------------------------
-# _write_telemetry (soft-fail — no DB)
-# ---------------------------------------------------------------------------
-
-
-def test_write_telemetry_soft_fails_when_db_missing(tmp_path: Path) -> None:
-    """_write_telemetry must not raise even when the DB is absent."""
-    from agentalloy.signals.skill_loader import _write_telemetry
-
-    with patch(
-        "agentalloy.profiles.domain_datastore_path",
-        return_value=tmp_path / "nonexistent.duck",
-    ):
-        # Should not raise
-        _write_telemetry({"phase": "build", "task": "test", "event_type": "phase_eval"})
-
-
-def test_write_telemetry_soft_fails_on_error() -> None:
-    """_write_telemetry catches all exceptions — never propagates."""
-    from agentalloy.signals.skill_loader import _write_telemetry
-
-    with patch(
-        "agentalloy.profiles.domain_datastore_path",
-        side_effect=RuntimeError("broken"),
-    ):
-        _write_telemetry({"phase": "build"})

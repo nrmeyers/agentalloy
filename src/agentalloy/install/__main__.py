@@ -64,9 +64,6 @@ from agentalloy.install.subcommands import (
     write_env,
 )
 from agentalloy.install.subcommands import (
-    signal as signal_cmd,
-)
-from agentalloy.install.subcommands import (
     watch as watch_cmd,
 )
 
@@ -87,7 +84,6 @@ _SUBCOMMANDS = [
     reset,
     contract,
     compose,
-    signal_cmd,
     watch_cmd,
     wire,
     unwire,

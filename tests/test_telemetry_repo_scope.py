@@ -1,7 +1,7 @@
 """Tests for per-repo telemetry scoping.
 
 Covers the ``repo`` column round-trip, the prefix-matching repo filter on
-``aggregate_savings`` / ``aggregate_hook_coverage`` (default = current repo,
+``aggregate_savings`` (default = current repo,
 ``--all`` = aggregate), the schema migration that backfills the column on a
 pre-existing DB, and the CLI scope-resolution helpers.
 """
@@ -31,8 +31,8 @@ def _mk_trace(
     *,
     repo: str | None = None,
     phase: str = "build",
-    status: str = "compose",
-    event_type: str = "compose",
+    status: str = "proxy_composed",
+    event_type: str = "proxy_request",
     tokens_returned: int = 0,
     tokens_flat_equivalent: int = 0,
 ) -> CompositionTrace:
@@ -141,51 +141,6 @@ def test_savings_prefix_does_not_leak_sibling_repo(store: VectorStore) -> None:
 
 
 # ---------------------------------------------------------------------------
-# aggregate_hook_coverage scoping
-# ---------------------------------------------------------------------------
-
-
-def test_coverage_scoped_to_repo(store: VectorStore) -> None:
-    store.record_composition_trace(
-        _mk_trace("pa", repo="/repo/a", status="composed", event_type="prompt_submit")
-    )
-    store.record_composition_trace(
-        _mk_trace("pa2", repo="/repo/a", status="no_compose", event_type="prompt_submit")
-    )
-    store.record_composition_trace(
-        _mk_trace("pb", repo="/repo/b", status="composed", event_type="prompt_submit")
-    )
-
-    only_a = store.aggregate_hook_coverage("/repo/a")
-    assert only_a["prompts_total"] == 2
-    assert only_a["prompts_composed"] == 1
-    assert only_a["prompts_no_compose"] == 1
-
-    all_repos = store.aggregate_hook_coverage()
-    assert all_repos["prompts_total"] == 3
-
-
-def test_coverage_prefix_matches_subdirectory(store: VectorStore) -> None:
-    store.record_composition_trace(
-        _mk_trace("sub", repo="/repo/a/pkg", status="composed", event_type="prompt_submit")
-    )
-    assert store.aggregate_hook_coverage("/repo/a")["prompts_total"] == 1
-
-
-def test_coverage_by_event_respects_repo(store: VectorStore) -> None:
-    store.record_composition_trace(
-        _mk_trace("sa", repo="/repo/a", event_type="system_skill_applied")
-    )
-    store.record_composition_trace(
-        _mk_trace("sb", repo="/repo/b", event_type="system_skill_applied")
-    )
-    scoped = store.aggregate_hook_coverage("/repo/a")
-    assert scoped["system_skill_pulls"] == 1
-    by_event = {(e["event_type"], e["status"]): e["count"] for e in scoped["by_event"]}  # type: ignore[index]
-    assert by_event[("system_skill_applied", "compose")] == 1
-
-
-# ---------------------------------------------------------------------------
 # Schema migration: pre-existing DB without the repo column
 # ---------------------------------------------------------------------------
 
@@ -234,7 +189,7 @@ def test_migration_adds_repo_column(tmp_path: Path) -> None:
     conn.execute(
         """
         INSERT INTO composition_traces (trace_id, request_ts, phase, task_prompt, status)
-        VALUES ('legacy', 0, 'build', 'legacy', 'compose')
+        VALUES ('legacy', 0, 'build', 'legacy', 'proxy_composed')
         """
     )
     conn.close()

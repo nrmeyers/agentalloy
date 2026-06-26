@@ -221,14 +221,19 @@ def _read_cmdline(pid: int) -> str:
 
 
 def _ps_cmdline(pid: int) -> str:
-    """Command line via ``ps -o command=`` for platforms without ``/proc``.
+    """Command line via ``ps -ww -o command=`` for platforms without ``/proc``.
 
     ``command`` carries the full argv on macOS/BSD (and Linux), which is what
     the ``reclaim_stale_port`` signature match needs. '' on any failure.
+
+    ``-ww`` disables ps's default ~80-column truncation of the command field —
+    without it a long argv (e.g. a deep venv/worktree path) gets cut off, which
+    would hide the very ``uvicorn agentalloy.app`` / ``llama-server`` substrings
+    the reclaim match depends on.
     """
     try:
         out = subprocess.check_output(
-            ["ps", "-o", "command=", "-p", str(pid)],
+            ["ps", "-ww", "-o", "command=", "-p", str(pid)],
             text=True,
             stderr=subprocess.DEVNULL,
         )

@@ -34,7 +34,7 @@ def _compose_trace(trace_id: str, phase: str, returned: int, flat: int) -> Compo
         request_ts=int(time.time()),
         phase=phase,
         task_prompt="t",
-        status="compose",
+        status="proxy_composed",
         tokens_returned=returned,
         tokens_flat_equivalent=flat,
     )

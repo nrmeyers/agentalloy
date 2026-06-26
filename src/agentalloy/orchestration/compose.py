@@ -19,6 +19,7 @@ from agentalloy.api.compose_models import (
     DEFAULT_MAX_TOKENS_BY_PHASE,
     ComposedResult,
     ComposeRequest,
+    ComposeTelemetry,
     EmptyResult,
     ErrorAvailable,
     ErrorCode,
@@ -103,6 +104,7 @@ class ComposeOrchestrator:
         repo: str | None = None,
         session_key: str | None = None,
         session_source: str | None = None,
+        record_trace: bool = True,
     ) -> ComposedResult | EmptyResult:
         # repo / session_* are per-request attribution stamped onto the telemetry
         # trace (proxy paths pass them from the signal layer; direct /compose omits
@@ -144,6 +146,15 @@ class ComposeOrchestrator:
         _lm_cfg = _lm_config()
         lm_assist_model = _lm_cfg.model if _lm_cfg.enabled else None
 
+        # Stage B selection detail (kept/dropped/scores) — present only on a HIT
+        # over a successful RetrievalResult; empty otherwise.
+        if isinstance(retrieval, RetrievalResult):
+            stage_b_kept = retrieval.lm_assist_kept_ids
+            stage_b_dropped = retrieval.lm_assist_dropped_ids
+            stage_b_scores = retrieval.lm_assist_scores
+        else:
+            stage_b_kept, stage_b_dropped, stage_b_scores = [], [], {}
+
         if isinstance(retrieval, EmbeddingErrorResult):
             retrieval_error_code = retrieval.error.code.value
             logger.warning(
@@ -157,28 +168,40 @@ class ComposeOrchestrator:
         # (plus the workflow prose the router prepends), domain intentionally absent.
         if want_domain and not retrieval.candidates:
             elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
-            self._telemetry.write(
-                TelemetryRecord(
-                    composition_id=str(uuid.uuid4()),
-                    timestamp=datetime.now(UTC),
-                    phase=req.phase,
-                    task_prompt=req.task,
-                    result_type="compose_empty",
-                    domain_fragment_ids=[],
-                    system_fragment_ids=system_fragment_ids,
-                    source_skill_ids=[],
-                    repo=repo,
-                    session_key=session_key,
-                    session_source=session_source,
-                    latency_retrieval_ms=retrieval.retrieval_ms,
-                    latency_total_ms=elapsed_ms,
-                    error_payload=retrieval_error_code,
-                    lm_assist_outcome=lm_assist_outcome,
-                    lm_assist_model=lm_assist_model,
-                    requesting_agent=req.requesting_agent,
-                    dense_leg_degraded=dense_leg_degraded,
-                )
+            empty_telemetry = ComposeTelemetry(
+                lm_assist_outcome=lm_assist_outcome,
+                lm_assist_model=lm_assist_model,
+                dense_leg_degraded=dense_leg_degraded,
+                lm_assist_kept_ids=list(stage_b_kept),
+                lm_assist_dropped_ids=list(stage_b_dropped),
+                lm_assist_scores=dict(stage_b_scores),
             )
+            if record_trace:
+                self._telemetry.write(
+                    TelemetryRecord(
+                        composition_id=str(uuid.uuid4()),
+                        timestamp=datetime.now(UTC),
+                        phase=req.phase,
+                        task_prompt=req.task,
+                        result_type="compose_empty",
+                        domain_fragment_ids=[],
+                        system_fragment_ids=system_fragment_ids,
+                        source_skill_ids=[],
+                        repo=repo,
+                        session_key=session_key,
+                        session_source=session_source,
+                        latency_retrieval_ms=retrieval.retrieval_ms,
+                        latency_total_ms=elapsed_ms,
+                        error_payload=retrieval_error_code,
+                        lm_assist_outcome=lm_assist_outcome,
+                        lm_assist_model=lm_assist_model,
+                        requesting_agent=req.requesting_agent,
+                        dense_leg_degraded=dense_leg_degraded,
+                        lm_assist_kept_ids=list(stage_b_kept),
+                        lm_assist_dropped_ids=list(stage_b_dropped),
+                        lm_assist_scores=dict(stage_b_scores),
+                    )
+                )
             return EmptyResult(
                 task=req.task,
                 phase=req.phase,
@@ -186,6 +209,7 @@ class ComposeOrchestrator:
                 system_skills_applied=system_applied,
                 recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
                 dense_leg_degraded=dense_leg_degraded,
+                telemetry=empty_telemetry,
             )
 
         output = _format_fragments(system.candidates, retrieval.candidates)
@@ -217,34 +241,50 @@ class ComposeOrchestrator:
                     if detail is not None:
                         tokens_flat_equivalent += len(detail.raw_prose) // 4
 
-        self._telemetry.write(
-            TelemetryRecord(
-                composition_id=str(uuid.uuid4()),
-                timestamp=datetime.now(UTC),
-                phase=req.phase,
-                task_prompt=req.task,
-                result_type="compose",
-                assembly_tier=ASSEMBLY_TIER,
-                domain_fragment_ids=domain_fragment_ids,
-                system_fragment_ids=system_fragment_ids,
-                source_skill_ids=source_skills,
-                latency_retrieval_ms=retrieval.retrieval_ms,
-                latency_assembly_ms=0,
-                latency_total_ms=elapsed_ms,
-                error_payload=retrieval_error_code,
-                workflow_skill_ids=workflow_skill_ids,
-                reranked=reranked,
-                tokens_returned=tokens_returned,
-                tokens_flat_equivalent=tokens_flat_equivalent,
-                lm_assist_outcome=lm_assist_outcome,
-                lm_assist_model=lm_assist_model,
-                requesting_agent=req.requesting_agent,
-                dense_leg_degraded=dense_leg_degraded,
-                repo=repo,
-                session_key=session_key,
-                session_source=session_source,
-            )
+        telemetry = ComposeTelemetry(
+            tokens_returned=tokens_returned,
+            tokens_flat_equivalent=tokens_flat_equivalent,
+            workflow_skill_ids=workflow_skill_ids,
+            reranked=reranked,
+            dense_leg_degraded=dense_leg_degraded,
+            lm_assist_outcome=lm_assist_outcome,
+            lm_assist_model=lm_assist_model,
+            lm_assist_kept_ids=list(stage_b_kept),
+            lm_assist_dropped_ids=list(stage_b_dropped),
+            lm_assist_scores=dict(stage_b_scores),
         )
+        if record_trace:
+            self._telemetry.write(
+                TelemetryRecord(
+                    composition_id=str(uuid.uuid4()),
+                    timestamp=datetime.now(UTC),
+                    phase=req.phase,
+                    task_prompt=req.task,
+                    result_type="compose",
+                    assembly_tier=ASSEMBLY_TIER,
+                    domain_fragment_ids=domain_fragment_ids,
+                    system_fragment_ids=system_fragment_ids,
+                    source_skill_ids=source_skills,
+                    latency_retrieval_ms=retrieval.retrieval_ms,
+                    latency_assembly_ms=0,
+                    latency_total_ms=elapsed_ms,
+                    error_payload=retrieval_error_code,
+                    workflow_skill_ids=workflow_skill_ids,
+                    reranked=reranked,
+                    tokens_returned=tokens_returned,
+                    tokens_flat_equivalent=tokens_flat_equivalent,
+                    lm_assist_outcome=lm_assist_outcome,
+                    lm_assist_model=lm_assist_model,
+                    requesting_agent=req.requesting_agent,
+                    dense_leg_degraded=dense_leg_degraded,
+                    repo=repo,
+                    session_key=session_key,
+                    session_source=session_source,
+                    lm_assist_kept_ids=list(stage_b_kept),
+                    lm_assist_dropped_ids=list(stage_b_dropped),
+                    lm_assist_scores=dict(stage_b_scores),
+                )
+            )
         return ComposedResult(
             task=req.task,
             phase=req.phase,
@@ -263,6 +303,7 @@ class ComposeOrchestrator:
             ),
             recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
             dense_leg_degraded=dense_leg_degraded,
+            telemetry=telemetry,
         )
 
     async def retrieve(self, req: ComposeRequest) -> RetrievalResult | EmbeddingErrorResult:

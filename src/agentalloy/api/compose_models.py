@@ -169,6 +169,26 @@ class LatencyBreakdown(BaseModel):
     total_ms: int
 
 
+class ComposeTelemetry(BaseModel):
+    """Persisted-trace fields the orchestrator computes but the result body
+    otherwise omits. Surfaced on the result so a caller that suppresses the
+    orchestrator's internal trace write (the proxy, via ``record_trace=False``)
+    can fold them into one consolidated row instead of losing them."""
+
+    tokens_returned: int = 0
+    tokens_flat_equivalent: int = 0
+    workflow_skill_ids: list[str] = Field(default_factory=list)
+    reranked: bool = False
+    dense_leg_degraded: bool = False
+    lm_assist_outcome: str = "disabled"
+    lm_assist_model: str | None = None
+    # Stage B selection detail (populated only on a HIT): kept (injected) vs
+    # scored-but-dropped fragment ids, and per-fragment scores over the pool.
+    lm_assist_kept_ids: list[str] = Field(default_factory=list)
+    lm_assist_dropped_ids: list[str] = Field(default_factory=list)
+    lm_assist_scores: dict[str, float] = Field(default_factory=dict)
+
+
 class ComposedResult(BaseModel):
     """Successful composition — HTTP 200."""
 
@@ -199,6 +219,13 @@ class ComposedResult(BaseModel):
             "retrieval quality for this response."
         ),
     )
+    telemetry: ComposeTelemetry = Field(
+        default_factory=ComposeTelemetry,
+        description=(
+            "Persisted-trace fields (tokens, Stage B detail, workflow skills) for "
+            "callers that suppress the orchestrator's internal trace write."
+        ),
+    )
 
 
 class EmptyResult(BaseModel):
@@ -216,6 +243,7 @@ class EmptyResult(BaseModel):
     reason: Literal["no_domain_fragments_matched"] = "no_domain_fragments_matched"
     recommended_max_tokens: int | None = None
     dense_leg_degraded: bool = False
+    telemetry: ComposeTelemetry = Field(default_factory=ComposeTelemetry)
 
 
 class ErrorAvailable(BaseModel):

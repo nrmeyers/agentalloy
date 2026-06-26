@@ -165,6 +165,12 @@ class RetrievalResult:
     # Stage B (LM fragment re-rank) outcome for this composition. "disabled"
     # whenever LM_ASSIST=off or the stage never ran; otherwise hit/timeout/error.
     lm_assist_outcome: str = "disabled"
+    # Stage B selection detail, populated only on a HIT (empty otherwise):
+    # the fragment ids kept (above threshold) vs scored-but-dropped, and the
+    # per-fragment scores over the full scored pool (fragment_id -> score).
+    lm_assist_kept_ids: list[str] = field(default_factory=lambda: list[str]())
+    lm_assist_dropped_ids: list[str] = field(default_factory=lambda: list[str]())
+    lm_assist_scores: dict[str, float] = field(default_factory=lambda: dict[str, float]())
     # True when the dense leg was skipped because the bounded query came back
     # empty (a noise-only first turn). compose maps this to a degraded trace.
     dense_leg_degraded: bool = False
@@ -560,6 +566,7 @@ def retrieve_domain_candidates(
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
     reranked = False
     lm_outcome = LMAssistOutcome.DISABLED
+    lm_detail: _LMArbitrationDetail | None = None
     if raw_scores or diversity_off:
         selected = ranked[:k]
         skills_ranked: list[str] = []
@@ -587,7 +594,7 @@ def retrieve_domain_candidates(
         # order). On disabled/timeout/error it returns (None, outcome) and the
         # deterministic path below runs byte-for-byte as if Stage B did not
         # exist. The deterministic path never sees the reranker.
-        lm_selected, lm_outcome = _maybe_lm_arbitrate(ranked, query, k)
+        lm_selected, lm_outcome, lm_detail = _maybe_lm_arbitrate(ranked, query, k)
         if lm_selected is not None:
             selected = lm_selected
             skills_ranked = list(dict.fromkeys(f.skill_id for f in ranked))
@@ -609,6 +616,9 @@ def retrieve_domain_candidates(
         skills_ranked=skills_ranked,
         reranked=reranked,
         lm_assist_outcome=lm_outcome.value,
+        lm_assist_kept_ids=list(lm_detail.kept_ids) if lm_detail else [],
+        lm_assist_dropped_ids=list(lm_detail.dropped_ids) if lm_detail else [],
+        lm_assist_scores=dict(lm_detail.scores) if lm_detail else {},
         dense_leg_degraded=dense_leg_degraded,
     )
 
@@ -726,9 +736,20 @@ def _maybe_rerank(ranked: list[ActiveFragment], query: str) -> tuple[list[Active
     return rebuilt, True
 
 
+@dataclass(frozen=True)
+class _LMArbitrationDetail:
+    """Stage B selection bookkeeping for telemetry — the kept (injected) vs the
+    scored-but-dropped fragment ids, and the per-fragment scores over the full
+    scored pool (fragment_id -> yes-probability)."""
+
+    kept_ids: list[str]
+    dropped_ids: list[str]
+    scores: dict[str, float]
+
+
 def _maybe_lm_arbitrate(
     ranked: list[ActiveFragment], query: str, k: int
-) -> tuple[list[ActiveFragment] | None, LMAssistOutcome]:
+) -> tuple[list[ActiveFragment] | None, LMAssistOutcome, _LMArbitrationDetail | None]:
     """Stage B — LM fragment re-rank over the top fused fragments.
 
     Scores up to ``max_candidates()`` top fused fragments against ``query``,
@@ -752,13 +773,13 @@ def _maybe_lm_arbitrate(
     if not query:
         # Nothing instruction-bearing survived query bounding; defer to the
         # deterministic path.
-        return None, LMAssistOutcome.DISABLED
+        return None, LMAssistOutcome.DISABLED, None
     scorer = build_scorer_from_env()
     if scorer is None:
-        return None, LMAssistOutcome.DISABLED
+        return None, LMAssistOutcome.DISABLED, None
     if not ranked:
         # Nothing to arbitrate; let the (also-empty) deterministic path run.
-        return None, LMAssistOutcome.DISABLED
+        return None, LMAssistOutcome.DISABLED, None
 
     head = ranked[: max_candidates()]
     # Document = skill identity + fragment body, same framing as Stage A: bare
@@ -769,18 +790,27 @@ def _maybe_lm_arbitrate(
         result = scorer.score(query, documents)
     except Exception:  # pyright: ignore[reportBroadExceptionCaught]
         logger.warning("lm-assist Stage B raised at call site; using deterministic selection")
-        return None, LMAssistOutcome.ERROR
+        return None, LMAssistOutcome.ERROR, None
 
     if result.outcome is not LMAssistOutcome.HIT or len(result.scores) != len(head):
         # Disabled/timeout/error, or a length mismatch — fail open.
         outcome = (
             result.outcome if result.outcome is not LMAssistOutcome.HIT else LMAssistOutcome.ERROR
         )
-        return None, outcome
+        return None, outcome, None
 
     threshold = load_config().keep_threshold
     kept = [frag for frag, score in zip(head, result.scores, strict=True) if score >= threshold]
-    return kept[:k], LMAssistOutcome.HIT
+    selection = kept[:k]
+    # Telemetry detail over the full scored pool: scores keyed by fragment id,
+    # kept = the injected selection (post-cap), dropped = everything else scored
+    # (below threshold OR trimmed by the ``k`` cap).
+    scores = {frag.fragment_id: score for frag, score in zip(head, result.scores, strict=True)}
+    kept_ids = [frag.fragment_id for frag in selection]
+    kept_set = set(kept_ids)
+    dropped_ids = [frag.fragment_id for frag in head if frag.fragment_id not in kept_set]
+    detail = _LMArbitrationDetail(kept_ids=kept_ids, dropped_ids=dropped_ids, scores=scores)
+    return selection, LMAssistOutcome.HIT, detail
 
 
 def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]:

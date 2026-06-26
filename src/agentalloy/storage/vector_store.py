@@ -114,7 +114,9 @@ class CompositionTrace:
     contract_tags: list[str] = field(default_factory=lambda: [])
     bm25_source: str = "rule-extracted"  # "rule-extracted" | "contract" | "union"
     # Signal-layer fields
-    event_type: str = "compose"  # "compose" | "phase_eval" | "phase_transition" | "system_skill_applied" | "contract_retrieval"
+    event_type: str = (
+        "compose"  # "compose" (orchestrator /compose path) | "proxy_request" (proxy surface)
+    )
     pre_filter_matched: str | None = None
     gates_met: list[str] = field(default_factory=lambda: list[str]())
     gates_unmet: list[str] = field(default_factory=lambda: list[str]())
@@ -138,6 +140,14 @@ class CompositionTrace:
     # failure: the gate fell open to UNKNOWN and the transition may have silently
     # not fired. Distinguishes an infra-degraded gate from a legitimately-unmet one.
     phase_gate_embed_failed: bool = False
+    # Stage B (LM fragment re-rank) selection detail, populated only on a HIT.
+    # ``lm_assist_kept_ids`` are the fragment ids Stage B kept (the returned set);
+    # ``lm_assist_dropped_ids`` are the scored-but-below-threshold fragments it
+    # discarded. ``lm_assist_scores`` is a JSON object mapping fragment_id -> score
+    # over the full scored pool (kept + dropped). Empty/None when Stage B did not HIT.
+    lm_assist_kept_ids: list[str] = field(default_factory=lambda: list[str]())
+    lm_assist_dropped_ids: list[str] = field(default_factory=lambda: list[str]())
+    lm_assist_scores: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -216,20 +226,15 @@ CREATE TABLE IF NOT EXISTS composition_traces (
     phase_gate_embed_failed BOOLEAN NOT NULL DEFAULT FALSE,
     repo VARCHAR,
     session_key VARCHAR,
-    session_source VARCHAR
+    session_source VARCHAR,
+    lm_assist_kept_ids VARCHAR[],
+    lm_assist_dropped_ids VARCHAR[],
+    lm_assist_scores VARCHAR
 );
 
 CREATE INDEX IF NOT EXISTS idx_traces_ts ON composition_traces(request_ts);
 CREATE INDEX IF NOT EXISTS idx_traces_phase ON composition_traces(phase);
 CREATE INDEX IF NOT EXISTS idx_traces_status ON composition_traces(status);
-
-CREATE TABLE IF NOT EXISTS prompt_loads (
-    ts BIGINT NOT NULL,
-    prompt_name VARCHAR NOT NULL,
-    prompt_version VARCHAR NOT NULL,
-    trace_id VARCHAR
-);
-CREATE INDEX IF NOT EXISTS idx_prompt_loads_ts ON prompt_loads(ts);
 
 -- Stage 0: auditable key/value record of how the corpus index was built.
 -- The re-embed pass writes ``card_index`` here so the indexed representation
@@ -670,8 +675,9 @@ class VectorStore:
                 contract_path, contract_tags, bm25_source, reranked,
                 tokens_returned, tokens_flat_equivalent,
                 lm_assist_outcome, lm_assist_model, dense_leg_degraded,
-                phase_gate_embed_failed, repo, session_key, session_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                phase_gate_embed_failed, repo, session_key, session_source,
+                lm_assist_kept_ids, lm_assist_dropped_ids, lm_assist_scores
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 trace.trace_id,
@@ -711,6 +717,9 @@ class VectorStore:
                 trace.repo,
                 trace.session_key,
                 trace.session_source,
+                trace.lm_assist_kept_ids,
+                trace.lm_assist_dropped_ids,
+                trace.lm_assist_scores,
             ],
         )
 
@@ -741,7 +750,8 @@ class VectorStore:
                    contract_path, contract_tags, bm25_source, reranked,
                    tokens_returned, tokens_flat_equivalent,
                    lm_assist_outcome, lm_assist_model, dense_leg_degraded,
-                   phase_gate_embed_failed, repo, session_key, session_source
+                   phase_gate_embed_failed, repo, session_key, session_source,
+                   lm_assist_kept_ids, lm_assist_dropped_ids, lm_assist_scores
             FROM composition_traces
             {where}
             ORDER BY request_ts DESC
@@ -787,6 +797,9 @@ class VectorStore:
                 repo=r[34],
                 session_key=r[35],
                 session_source=r[36],
+                lm_assist_kept_ids=list(r[37] or []),
+                lm_assist_dropped_ids=list(r[38] or []),
+                lm_assist_scores=r[39],
             )
             for r in rows
         ]
@@ -806,7 +819,14 @@ class VectorStore:
         return int(row[0]) if row else 0
 
     def aggregate_savings(self, repo: str | None = None) -> dict[str, object]:
-        """Aggregate token-savings telemetry across compose traces.
+        """Aggregate token-savings telemetry across proxy compose traces.
+
+        Counts the consolidated proxy compose row (``status='proxy_composed'``) —
+        one per composed request, written by the proxy surface with both tiers'
+        tokens folded in. Legacy per-leg ``status='compose'`` rows (and any direct
+        ``/compose`` HTTP / eval rows) are intentionally *not* counted: the proxy
+        suppresses the orchestrator's per-leg write, so a single request no longer
+        inflates the count. ``telemetry clear`` resets the table.
 
         When ``repo`` is given, only traces attributed to that project root (or a
         subdirectory of it) are counted; otherwise all repos are aggregated.
@@ -825,7 +845,7 @@ class VectorStore:
                 COALESCE(SUM(tokens_returned), 0) AS sum_returned,
                 COALESCE(SUM(tokens_flat_equivalent), 0) AS sum_flat
             FROM composition_traces
-            WHERE status = 'compose'{repo_and}
+            WHERE status = 'proxy_composed'{repo_and}
             """,
             repo_params,
         ).fetchone()
@@ -843,7 +863,7 @@ class VectorStore:
                 COALESCE(SUM(tokens_returned), 0) AS returned,
                 COALESCE(SUM(tokens_flat_equivalent), 0) AS flat
             FROM composition_traces
-            WHERE status = 'compose'{repo_and}
+            WHERE status = 'proxy_composed'{repo_and}
             GROUP BY phase
             ORDER BY composes DESC
             """,
@@ -875,95 +895,15 @@ class VectorStore:
             "per_phase": per_phase,
         }
 
-    def aggregate_hook_coverage(self, repo: str | None = None) -> dict[str, object]:
-        """Aggregate hook-layer activity: every prompt and every skill pull.
-
-        When ``repo`` is given, only traces attributed to that project root (or a
-        subdirectory of it) are counted; otherwise all repos are aggregated.
-
-        Complements ``aggregate_savings`` (which counts only ``status='compose'``)
-        by surfacing what the hook router now records — prompts (composed and
-        no-compose, incl. cache hits), system-skill pulls, and intake injections —
-        grouped by (event_type, status), with a per-phase prompt breakdown.
-        """
-        repo_clause, repo_params = _repo_clause(repo)
-        repo_and = f" AND {repo_clause}" if repo_clause else ""
-        repo_where = f" WHERE {repo_clause}" if repo_clause else ""
-
-        rows = self._conn.execute(
-            f"""
-            SELECT event_type, status, COUNT(*) AS n
-            FROM composition_traces{repo_where}
-            GROUP BY event_type, status
-            ORDER BY n DESC
-            """,
-            repo_params,
-        ).fetchall()
-        by_event: list[dict[str, object]] = [
-            {"event_type": str(r[0]), "status": str(r[1]), "count": int(r[2])} for r in rows
-        ]
-
-        def _count(predicate: str, params: list[object]) -> int:
-            row = self._conn.execute(
-                f"SELECT COUNT(*) FROM composition_traces WHERE {predicate}{repo_and}",
-                [*params, *repo_params],
-            ).fetchone()
-            return int(row[0]) if row else 0
-
-        prompts_total = _count("event_type = ?", ["prompt_submit"])
-        prompts_composed = _count("event_type = ? AND status = ?", ["prompt_submit", "composed"])
-        prompts_no_compose = _count(
-            "event_type = ? AND status = ?", ["prompt_submit", "no_compose"]
-        )
-        system_skill_pulls = _count("event_type = ?", ["system_skill_applied"])
-        intake_injections = _count("event_type = ?", ["session_intake"])
-        # PostToolUse domain composes are recorded by the orchestrator as
-        # status='compose' (counted in savings); the correlation_id tag is what
-        # makes them attributable to the contract hook here.
-        contract_composes = _count(
-            "event_type IN ('compose', 'compose_empty') AND correlation_id = ?",
-            ["post_tool_use"],
-        )
-
-        prompt_phase_rows = self._conn.execute(
-            f"""
-            SELECT phase, COUNT(*) AS prompts,
-                   COALESCE(SUM(CASE WHEN status = 'composed' THEN 1 ELSE 0 END), 0) AS composed
-            FROM composition_traces
-            WHERE event_type = 'prompt_submit'{repo_and}
-            GROUP BY phase
-            ORDER BY prompts DESC
-            """,
-            repo_params,
-        ).fetchall()
-        per_phase: list[dict[str, object]] = [
-            {"phase": str(r[0]), "prompts": int(r[1]), "composed": int(r[2])}
-            for r in prompt_phase_rows
-        ]
-
-        return {
-            "prompts_total": prompts_total,
-            "prompts_composed": prompts_composed,
-            "prompts_no_compose": prompts_no_compose,
-            "system_skill_pulls": system_skill_pulls,
-            "intake_injections": intake_injections,
-            "contract_composes": contract_composes,
-            "by_event": by_event,
-            "per_phase_prompts": per_phase,
-        }
-
     def clear_telemetry(self) -> dict[str, int]:
-        """Delete all rows from composition_traces and prompt_loads.
+        """Delete all rows from composition_traces.
 
         Does NOT touch fragment_embeddings (the corpus).
         Returns counts of deleted rows.
         """
         traces = self.count_traces()
         self._conn.execute("DELETE FROM composition_traces")
-        loads_row = self._conn.execute("SELECT COUNT(*) FROM prompt_loads").fetchone()
-        loads = int(loads_row[0]) if loads_row else 0
-        self._conn.execute("DELETE FROM prompt_loads")
-        return {"traces_deleted": traces, "prompt_loads_deleted": loads}
+        return {"traces_deleted": traces}
 
 
 # ---------------------------------------------------------------------------
@@ -999,6 +939,9 @@ _COMPOSITION_TRACES_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("repo", "VARCHAR", ""),
     ("session_key", "VARCHAR", ""),
     ("session_source", "VARCHAR", ""),
+    ("lm_assist_kept_ids", "VARCHAR[]", ""),
+    ("lm_assist_dropped_ids", "VARCHAR[]", ""),
+    ("lm_assist_scores", "VARCHAR", ""),
 )
 
 
@@ -1105,19 +1048,3 @@ def open_or_create(path: str | Path) -> VectorStore:
         vs.close()  # release DuckDB file lock before raising — callers may catch and reopen
         raise
     return vs
-
-
-def append_trace(db_path: Path, trace: CompositionTrace) -> None:
-    """Convenience: open the store at db_path, insert trace, close. Soft-fail.
-
-    D3: re-raises ``EmbeddingDimMismatch`` before the broad soft-fail catch —
-    a corpus dimension mismatch is a hard configuration error that must surface,
-    not be silently swallowed in the telemetry path.
-    """
-    try:
-        with open_or_create(db_path) as store:
-            store.record_composition_trace(trace)
-    except EmbeddingDimMismatch:
-        raise  # D3: hard corpus error — propagate, do not soft-fail
-    except Exception:
-        pass

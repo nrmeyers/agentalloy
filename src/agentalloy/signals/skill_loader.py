@@ -1,13 +1,12 @@
 """Pure domain helpers for phase management and workflow skill loading.
 
-Extracted from ``install/subcommands/signal.py`` so that the proxy path
-(see plan Pass 1) can reuse the same logic without pulling in CLI
-dependencies (argparse, Rich, etc.).
+The proxy path (``proxy_signal``) and the watcher reuse this logic without
+pulling in CLI dependencies (argparse, Rich, etc.).
 
 Public API
 ----------
 _read_phase, _write_phase_atomic, _load_workflow_skill_for_phase,
-_load_workflow_skill_from_packs, _build_predicate_context, _write_telemetry
+_load_workflow_skill_from_packs, _build_predicate_context
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import time
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -41,7 +39,6 @@ __all__ = [
     "_write_cursor_atomic",
     "_write_lifecycle_mode",
     "_write_phase_atomic",
-    "_write_telemetry",
     "exit_gates_for_phase",
 ]
 
@@ -479,37 +476,3 @@ def _build_predicate_context(
         file_events_since=file_events or [],
         contracts_root=project_root / ".agentalloy" / "contracts",
     )
-
-
-# ---------------------------------------------------------------------------
-# Telemetry
-# ---------------------------------------------------------------------------
-
-
-def _write_telemetry(record: dict[str, Any]) -> None:
-    """Write a telemetry record to the vector store (soft-fail)."""
-    try:
-        from agentalloy.profiles import domain_datastore_path
-        from agentalloy.storage.vector_store import CompositionTrace, append_trace
-
-        db_path = domain_datastore_path()
-        if not db_path.exists():
-            return
-        trace = CompositionTrace(
-            trace_id=str(uuid.uuid4()),
-            request_ts=int(time.time() * 1000),
-            phase=record.get("phase", ""),
-            task_prompt=record.get("task", "")[:500],
-            status="signal",
-            event_type=record.get("event_type", "phase_eval"),
-            pre_filter_matched=record.get("pre_filter_matched"),
-            gates_met=record.get("gates_met", []),
-            gates_unmet=record.get("gates_unmet", []),
-            qwen_calls=record.get("qwen_calls", 0),
-            # Every signal subcommand is invoked at the project root, so cwd is
-            # the repo unless a caller overrides it explicitly.
-            repo=record.get("repo") or str(Path.cwd()),
-        )
-        append_trace(db_path, trace)
-    except Exception:
-        pass

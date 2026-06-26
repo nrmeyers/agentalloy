@@ -67,6 +67,10 @@ class SignalResult:
     # operating instructions (the workflow skill's raw_prose). See `_read_announced`.
     announce: bool = False
     workflow_prose: str | None = None
+    # The skill id behind `workflow_prose` (the phase's workflow skill), so the
+    # Tier 1 header's source skill is identifiable in telemetry. None when no
+    # workflow skill was loaded for the phase.
+    workflow_skill_id: str | None = None
 
     # Tier 2 (per-work-item domain). `current_contract` is the absolute path to the
     # work-item contract whose domain skills should be composed (body → prompt,
@@ -523,6 +527,7 @@ async def evaluate_signal(
         should_compose=True,
         announce=announce,
         workflow_prose=skill.get("raw_prose") if announce else None,
+        workflow_skill_id=(skill.get("skill_id") or None) if announce else None,
         current_contract=str(contract_path) if announce_cursor and contract_path else None,
         announce_cursor=announce_cursor,
         phase=phase,

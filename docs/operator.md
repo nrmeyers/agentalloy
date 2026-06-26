@@ -186,7 +186,6 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 - `GET /retrieve/{skill_id}` — lookup single skill's fragments
 - `GET /skills/{skill_id}` — inspect skill metadata
 - `GET /telemetry/traces` — query composition traces
-- `GET /telemetry/coverage` — composition coverage (prompts, no-compose, skill pulls)
 - `GET /health` — liveness probe
 - `GET /diagnostics/runtime` — backend/model/DB state
 
@@ -222,7 +221,7 @@ Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace t
 
 Signal-layer traces additionally capture: `event_type`, `pre_filter_matched`, `gates_met`, `gates_unmet`, `qwen_calls`.
 
-The proxy records its activity so every prompt and every skill pull is attributable: each intercepted request (composed, no-compose), intake injections, and contract composes. Summarize it with `agentalloy telemetry coverage` or `GET /telemetry/coverage` — counts of prompts, no-compose, system-skill pulls, intake injections, and contract composes, with a per-phase prompt breakdown. The token-savings view (`agentalloy telemetry savings`) is unaffected: it still counts only `status='compose'`.
+The proxy records each intercepted request as a single consolidated trace row (`status='proxy_composed'`). Summarize token savings with `agentalloy telemetry savings`, which counts one `proxy_composed` row per proxy request. Query the raw rows with `GET /telemetry/traces`, and reset the table with `agentalloy telemetry clear` (truncates `composition_traces`).
 
 ## Configuration
 

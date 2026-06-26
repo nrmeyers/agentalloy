@@ -12,6 +12,7 @@ Sprint 1 additions:
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -71,6 +72,13 @@ class TelemetryRecord:
     lm_assist_outcome: str = "disabled"
     lm_assist_model: str | None = None
     dense_leg_degraded: bool = False
+    # Stage B (LM fragment re-rank) selection detail, populated only on a HIT:
+    # kept (injected) vs scored-but-dropped fragment ids, and the per-fragment
+    # scores over the full scored pool. ``lm_assist_scores`` is the dict form; the
+    # DuckDB column stores its JSON encoding.
+    lm_assist_kept_ids: list[str] | None = None
+    lm_assist_dropped_ids: list[str] | None = None
+    lm_assist_scores: dict[str, float] | None = None
     # Per-request attribution carried from the signal layer (proxy paths set these;
     # direct /compose leaves them None). repo = resolved project root; session_key /
     # session_source = the session this compose belongs to and how it was derived.
@@ -164,6 +172,11 @@ class DuckDBTelemetryWriter:
             lm_assist_outcome=record.lm_assist_outcome,
             lm_assist_model=record.lm_assist_model,
             dense_leg_degraded=record.dense_leg_degraded,
+            lm_assist_kept_ids=list(record.lm_assist_kept_ids or []),
+            lm_assist_dropped_ids=list(record.lm_assist_dropped_ids or []),
+            lm_assist_scores=(
+                json.dumps(record.lm_assist_scores) if record.lm_assist_scores else None
+            ),
             repo=record.repo,
             session_key=record.session_key,
             session_source=record.session_source,

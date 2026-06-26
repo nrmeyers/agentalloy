@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentalloy.api.compose_models import ComposeRequest, EmptyResult, Phase
+from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyResult, Phase
 from agentalloy.api.proxy_signal import SignalResult, commit_markers
 
 if TYPE_CHECKING:
@@ -36,6 +36,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+
+
+@dataclass
+class ProxyComposeTelemetry:
+    """Skill/fragment provenance for one proxy request, merged across both compose
+    tiers, so the surface can write a single consolidated trace row instead of
+    losing it to the orchestrator's (now-suppressed) per-leg writes.
+
+    - ``workflow_skill_ids`` / ``header_fragment_ids``: the Tier 1 orientation
+      "header" — the phase's workflow skill plus its system-prose fragments.
+    - ``returned_skill_ids``: the Tier 2 domain skills actually injected.
+    - ``selected_fragment_ids``: every fragment injected (Tier 1 system + Tier 2 domain).
+    - ``tokens_returned`` / ``tokens_flat_equivalent``: summed across both tiers.
+    - ``lm_assist_*``: Stage B detail from the Tier 2 domain leg (Stage B never runs
+      on the system leg).
+    """
+
+    workflow_skill_ids: list[str]
+    header_fragment_ids: list[str]
+    returned_skill_ids: list[str]
+    selected_fragment_ids: list[str]
+    tokens_returned: int
+    tokens_flat_equivalent: int
+    reranked: bool
+    dense_leg_degraded: bool
+    lm_assist_outcome: str
+    lm_assist_model: str | None
+    lm_assist_kept_ids: list[str]
+    lm_assist_dropped_ids: list[str]
+    lm_assist_scores: dict[str, float]
 
 
 @dataclass
@@ -62,6 +92,7 @@ class _ComposedBlock:
     tier1_text: bool
     cursor_terminal: bool
     cursor_text: bool
+    telemetry: ProxyComposeTelemetry
 
 
 async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> _ComposedBlock:
@@ -93,7 +124,10 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
         )
 
     # Tier 1: workflow prose (operating instructions) + system-only compose.
+    # ``record_trace=False`` suppresses the orchestrator's own per-leg write — this
+    # surface folds both legs into one consolidated trace row below.
     tier1 = ""
+    tier1_result: ComposedResult | EmptyResult | None = None
     if signal.announce:
         parts: list[str] = []
         if signal.workflow_prose:
@@ -104,14 +138,15 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
                 phase=compose_phase,
                 legs="system",
             )
-            result = await orchestrator.compose(
+            tier1_result = await orchestrator.compose(
                 system_req,
                 repo=signal.repo,
                 session_key=signal.session_key,
                 session_source=signal.session_source,
+                record_trace=False,
             )
-            if not isinstance(result, EmptyResult) and result.output:
-                parts.append(result.output)
+            if not isinstance(tier1_result, EmptyResult) and tier1_result.output:
+                parts.append(tier1_result.output)
         except Exception:
             logger.warning("Tier 1 system compose failed -- workflow prose only", exc_info=True)
         tier1 = "\n\n".join(parts)
@@ -122,6 +157,7 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     # the cursor unmarked so it re-fires next turn).
     tier2 = ""
     tier2_terminal = False
+    tier2_result: ComposedResult | EmptyResult | None = None
     if signal.announce_cursor and signal.current_contract:
         try:
             from agentalloy.api.compose_models import compose_request_from_contract
@@ -129,13 +165,14 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
 
             contract = parse_contract(Path(signal.current_contract))
             domain_req = compose_request_from_contract(contract, legs="domain")
-            result = await orchestrator.compose(
+            tier2_result = await orchestrator.compose(
                 domain_req,
                 repo=signal.repo,
                 session_key=signal.session_key,
                 session_source=signal.session_source,
+                record_trace=False,
             )
-            tier2 = "" if isinstance(result, EmptyResult) else result.output
+            tier2 = "" if isinstance(tier2_result, EmptyResult) else tier2_result.output
             tier2_terminal = True
         except Exception:
             logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
@@ -148,6 +185,44 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
         tier1_text=bool(tier1),
         cursor_terminal=tier2_terminal,
         cursor_text=bool(tier2),
+        telemetry=_merge_compose_telemetry(signal, tier1_result, tier2_result),
+    )
+
+
+def _merge_compose_telemetry(
+    signal: SignalResult,
+    tier1: ComposedResult | EmptyResult | None,
+    tier2: ComposedResult | EmptyResult | None,
+) -> ProxyComposeTelemetry:
+    """Fold the Tier 1 (system/header) and Tier 2 (domain) compose results into one
+    provenance record. Stage B fields come from Tier 2 only — it never runs on the
+    system leg. Missing legs (passthrough) contribute nothing."""
+    t1 = tier1.telemetry if tier1 is not None else None
+    t2 = tier2.telemetry if tier2 is not None else None
+    workflow_ids = list(t1.workflow_skill_ids) if t1 else []
+    if signal.workflow_skill_id and signal.workflow_skill_id not in workflow_ids:
+        workflow_ids.append(signal.workflow_skill_id)
+    header_fragment_ids = list(tier1.system_fragments) if tier1 is not None else []
+    returned_skill_ids = list(tier2.source_skills) if tier2 is not None else []
+    selected_fragment_ids = header_fragment_ids + (
+        list(tier2.domain_fragments) if tier2 is not None else []
+    )
+    return ProxyComposeTelemetry(
+        workflow_skill_ids=workflow_ids,
+        header_fragment_ids=header_fragment_ids,
+        returned_skill_ids=returned_skill_ids,
+        selected_fragment_ids=selected_fragment_ids,
+        tokens_returned=(t1.tokens_returned if t1 else 0) + (t2.tokens_returned if t2 else 0),
+        tokens_flat_equivalent=(
+            (t1.tokens_flat_equivalent if t1 else 0) + (t2.tokens_flat_equivalent if t2 else 0)
+        ),
+        reranked=bool(t2.reranked) if t2 else False,
+        dense_leg_degraded=bool(t2 and t2.dense_leg_degraded) or bool(t1 and t1.dense_leg_degraded),
+        lm_assist_outcome=t2.lm_assist_outcome if t2 else "disabled",
+        lm_assist_model=t2.lm_assist_model if t2 else None,
+        lm_assist_kept_ids=list(t2.lm_assist_kept_ids) if t2 else [],
+        lm_assist_dropped_ids=list(t2.lm_assist_dropped_ids) if t2 else [],
+        lm_assist_scores=dict(t2.lm_assist_scores) if t2 else {},
     )
 
 
@@ -171,6 +246,8 @@ class InjectOutcome[T]:
     signal: SignalResult
     announce_emitted: bool
     cursor_emitted: bool
+    # Merged skill/fragment provenance for the consolidated proxy trace row.
+    telemetry: ProxyComposeTelemetry
 
 
 async def apply_signal[T](
@@ -193,7 +270,11 @@ async def apply_signal[T](
     composed = await _compose_block(signal, orchestrator)
     if not composed.text:
         return InjectOutcome(
-            injected=None, signal=signal, announce_emitted=False, cursor_emitted=False
+            injected=None,
+            signal=signal,
+            announce_emitted=False,
+            cursor_emitted=False,
+            telemetry=composed.telemetry,
         )
     injected = inject(composed.text)
     was_delivered = injected is not None and delivered(injected)
@@ -202,6 +283,7 @@ async def apply_signal[T](
         signal=signal,
         announce_emitted=composed.tier1_text and was_delivered,
         cursor_emitted=composed.cursor_terminal and (was_delivered or not composed.cursor_text),
+        telemetry=composed.telemetry,
     )
 
 

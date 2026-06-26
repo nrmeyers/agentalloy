@@ -4,18 +4,15 @@ Exposes two sub-verbs:
 
     agentalloy telemetry clear [--confirm]
     agentalloy telemetry savings [--json] [--all]
-    agentalloy telemetry coverage [--json] [--all]
 
-``clear`` deletes ``composition_traces`` and ``prompt_loads`` from the
-user-scoped DuckDB without touching ``fragment_embeddings`` (the corpus).
+``clear`` deletes ``composition_traces`` from the user-scoped DuckDB without
+touching ``fragment_embeddings`` (the corpus).
 
-``savings`` aggregates token-savings telemetry from stored compose traces
-and prints overall totals plus a per-phase breakdown.
+``savings`` aggregates token-savings telemetry from the consolidated proxy
+compose traces and prints overall totals plus a per-phase breakdown.
 
-``coverage`` reports hook-layer activity (every prompt + every skill pull).
-
-``savings`` and ``coverage`` default to the repo you're in (resolved via the
-git toplevel); pass ``--all`` to aggregate across every repo.
+``savings`` defaults to the repo you're in (resolved via the git toplevel);
+pass ``--all`` to aggregate across every repo.
 """
 
 from __future__ import annotations
@@ -59,14 +56,6 @@ def add_parser(
     add_json_flag(savings_p)
     _add_scope_flag(savings_p)
     savings_p.set_defaults(func=_run_savings)
-
-    coverage_p = sub.add_parser(
-        "coverage",
-        help="Show hook-layer coverage (current repo by default; --all for every repo).",
-    )
-    add_json_flag(coverage_p)
-    _add_scope_flag(coverage_p)
-    coverage_p.set_defaults(func=_run_coverage)
 
     p.set_defaults(func=_dispatch)
 
@@ -119,7 +108,7 @@ def _resolve_scope(args: argparse.Namespace) -> str | None:
 
 
 def _scope_label(repo: str | None) -> str:
-    """Human-readable scope banner shown above savings/coverage output."""
+    """Human-readable scope banner shown above savings output."""
     return "all repos" if repo is None else f"this repo · {repo}"
 
 
@@ -182,7 +171,6 @@ def _render_clear(result: dict[str, Any]) -> None:
     """Render telemetry clear result in human-readable format."""
     print_rich("\n  [bold]Telemetry Clear[/bold]\n")
     print_rich(f"  Traces deleted: {result['traces_deleted']}")
-    print_rich(f"  Prompt loads deleted: {result['prompt_loads_deleted']}")
     print_rich()
 
 
@@ -314,110 +302,5 @@ def _render_savings(result: dict[str, Any], repo: str | None = None) -> None:
             print_rich(
                 "  * flat-equivalent is 0 for traces recorded before this feature "
                 "was deployed or with a non-RuntimeCache source."
-            )
-    print_rich()
-
-
-def _fetch_coverage_via_api(port: int, repo: str | None = None) -> dict[str, Any] | None:
-    """GET /telemetry/coverage from the running service; None on any failure.
-
-    Returns the same dict shape as ``VectorStore.aggregate_hook_coverage()``.
-    ``repo`` scopes to one project root.
-    """
-    import json
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
-    url = f"http://127.0.0.1:{port}/telemetry/coverage"
-    if repo is not None:
-        url += "?" + urllib.parse.urlencode({"repo": repo})
-    try:
-        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310 (localhost only)
-            if resp.status != 200:
-                return None
-            data = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _run_coverage(args: argparse.Namespace) -> int:
-    """Print hook-layer coverage (prompts, no-compose, skill pulls, intake).
-
-    Same service-lock handling as ``savings``: route through the API when the
-    service is up; direct read only when it is down.
-    """
-    from agentalloy.install import server_proc
-
-    repo = _resolve_scope(args)
-    render = functools.partial(_render_coverage, repo=repo)
-
-    port = _service_port()
-    if server_proc.port_reachable(port):
-        result = _fetch_coverage_via_api(port, repo)
-        if result is not None:
-            result["repo"] = repo
-            write_result(result, args, human_fn=render)
-            return 0
-        print(
-            "ERROR: the agentalloy service is running but its /telemetry/coverage API "
-            "did not respond (older version?).",
-            file=sys.stderr,
-        )
-        print(
-            "FIX:   restart it to pick up this endpoint: `agentalloy server-restart` "
-            "(or `systemctl --user restart agentalloy`).",
-            file=sys.stderr,
-        )
-        return 1
-
-    from agentalloy.config import get_settings
-    from agentalloy.storage.vector_store import open_or_create
-
-    settings = get_settings()
-    vs = open_or_create(settings.duckdb_path)
-    try:
-        result = vs.aggregate_hook_coverage(repo)
-    finally:
-        vs.close()
-
-    result["repo"] = repo
-    write_result(result, args, human_fn=render)
-    return 0
-
-
-def _render_coverage(result: dict[str, Any], repo: str | None = None) -> None:
-    """Render hook-layer coverage in human-readable format."""
-    prompts = int(result.get("prompts_total", 0))
-    print_rich("\n  [bold]Hook Coverage[/bold]  [dim](every prompt + every skill pull)[/dim]")
-    print_rich(f"  [dim]{_scope_label(repo)}[/dim]\n")
-    if prompts == 0 and not result.get("by_event"):
-        if repo is not None:
-            print_rich("  No hook activity recorded for this repo yet.")
-            print_rich("  [dim]Run with --all to see every repo.[/dim]")
-        else:
-            print_rich("  No hook activity recorded yet.")
-        print_rich()
-        return
-
-    print_rich(f"  Prompts (total):         {prompts:,}")
-    print_rich(f"    composed:              {int(result.get('prompts_composed', 0)):,}")
-    print_rich(f"    no-compose:            {int(result.get('prompts_no_compose', 0)):,}")
-    print_rich(f"  System-skill pulls:      {int(result.get('system_skill_pulls', 0)):,}")
-    print_rich(f"  Intake injections:       {int(result.get('intake_injections', 0)):,}")
-    print_rich(f"  Contract composes:       {int(result.get('contract_composes', 0)):,}")
-
-    per_phase: list[dict[str, Any]] = list(result.get("per_phase_prompts") or [])
-    if per_phase:
-        print_rich()
-        print_rich("  [bold]Prompts per phase[/bold]")
-        print_rich()
-        header = f"  {'Phase':<14}  {'Prompts':>9}  {'Composed':>9}"
-        print_rich(header)
-        print_rich("  " + "-" * (len(header) - 2))
-        for row in per_phase:
-            print_rich(
-                f"  {str(row['phase']):<14}  {int(row['prompts']):>9,}  {int(row['composed']):>9,}"
             )
     print_rich()

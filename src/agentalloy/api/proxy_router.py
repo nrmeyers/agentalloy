@@ -9,6 +9,7 @@ Composition failures soft-fail: request passes through unchanged.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -20,7 +21,12 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from agentalloy.api.proxy_apply import InjectOutcome, apply_signal, commit_outcome
+from agentalloy.api.proxy_apply import (
+    InjectOutcome,
+    ProxyComposeTelemetry,
+    apply_signal,
+    commit_outcome,
+)
 from agentalloy.api.proxy_context import (
     decode_proj_token,
     read_phase,
@@ -349,22 +355,28 @@ async def _write_flow_telemetry(
     qwen_calls: int,
     latency_ms: int | None,
     error_code: str | None = None,
-    source_skill_ids: list[str] | None = None,
+    telemetry: ProxyComposeTelemetry | None = None,
     phase_gate_embed_failed: bool = False,
     repo: str | None = None,
     session_key: str | None = None,
     session_source: str | None = None,
 ) -> None:
-    """Write a telemetry trace for the full proxy request flow.
+    """Write one consolidated telemetry trace for the full proxy request flow.
 
-    ``repo`` and ``session_*`` are the values the handler already resolved (the
-    handler may have used a /proj/<token> override, so they're passed in rather
-    than recomputed here).
+    ``telemetry`` carries the merged skill/fragment provenance from both compose
+    tiers (the orchestrator's per-leg writes are suppressed via
+    ``record_trace=False``); ``None`` on passthrough/error paths leaves the skill
+    fields empty. ``repo`` and ``session_*`` are the values the handler already
+    resolved (the handler may have used a /proj/<token> override, so they're passed
+    in rather than recomputed here).
     """
     if vector_store is None:
         return
     status = "proxy_composed" if composed else "proxy_passthrough"
     task_prompt = _extract_task_prompt(request)
+    scores_json = (
+        json.dumps(telemetry.lm_assist_scores) if telemetry and telemetry.lm_assist_scores else None
+    )
     write_proxy_trace(
         vector_store,
         phase=phase or "unspecified",
@@ -375,7 +387,19 @@ async def _write_flow_telemetry(
         gates_unmet=gates_unmet or [],
         qwen_calls=qwen_calls,
         total_latency_ms=latency_ms,
-        source_skill_ids=source_skill_ids,
+        source_skill_ids=telemetry.returned_skill_ids if telemetry else None,
+        system_skill_ids=telemetry.header_fragment_ids if telemetry else None,
+        workflow_skill_ids=telemetry.workflow_skill_ids if telemetry else None,
+        selected_fragment_ids=telemetry.selected_fragment_ids if telemetry else None,
+        tokens_returned=telemetry.tokens_returned if telemetry else 0,
+        tokens_flat_equivalent=telemetry.tokens_flat_equivalent if telemetry else 0,
+        reranked=telemetry.reranked if telemetry else False,
+        lm_assist_outcome=telemetry.lm_assist_outcome if telemetry else "disabled",
+        lm_assist_model=telemetry.lm_assist_model if telemetry else None,
+        lm_assist_kept_ids=telemetry.lm_assist_kept_ids if telemetry else None,
+        lm_assist_dropped_ids=telemetry.lm_assist_dropped_ids if telemetry else None,
+        lm_assist_scores=scores_json,
+        dense_leg_degraded=telemetry.dense_leg_degraded if telemetry else False,
         error_code=error_code,
         session_key=session_key,
         session_source=session_source,
@@ -465,7 +489,7 @@ async def proxy_chat_completions(
     # the banner is a recency anchor and must not register as a composition in telemetry.
     current = request
     modified_request = request
-    source_skill_ids: list[str] | None = None
+    compose_telemetry: ProxyComposeTelemetry | None = None
     # Deferred cadence commit: apply_signal no longer writes `.agentalloy/{announced,
     # composed}` — we commit only after a confirmed 2xx upstream response (see
     # `_commit` below), so a turn the model never processed (5xx/connection error)
@@ -497,6 +521,7 @@ async def proxy_chat_completions(
                 # result IS the delivery proof — no identity test needed here.
                 delivered=lambda _out: True,
             )
+            compose_telemetry = inject_outcome.telemetry
             if inject_outcome.injected is not None:
                 current = inject_outcome.injected
                 composed = True
@@ -564,7 +589,7 @@ async def proxy_chat_completions(
             signal_result.gates_unmet if signal_result else None,
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=None,  # streaming latency tracked separately
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -590,7 +615,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             error_code=error_code,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -612,7 +637,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             error_code=error_code,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -634,7 +659,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             error_code=error_code,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -656,7 +681,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             error_code=error_code,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -679,7 +704,7 @@ async def proxy_chat_completions(
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
             error_code=error_code,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -702,7 +727,7 @@ async def proxy_chat_completions(
             signal_result.gates_unmet if signal_result else None,
             signal_result.qwen_calls if signal_result else 0,
             latency_ms=latency_ms,
-            source_skill_ids=source_skill_ids,
+            telemetry=compose_telemetry,
             phase_gate_embed_failed=gate_embed_failed,
             repo=repo,
             session_key=session_key,
@@ -728,7 +753,7 @@ async def proxy_chat_completions(
         signal_result.gates_unmet if signal_result else None,
         signal_result.qwen_calls if signal_result else 0,
         latency_ms=latency_ms,
-        source_skill_ids=source_skill_ids,
+        telemetry=compose_telemetry,
         phase_gate_embed_failed=gate_embed_failed,
         repo=repo,
         session_key=session_key,

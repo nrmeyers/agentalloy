@@ -259,9 +259,10 @@ class _FakeScorer:
 def test_arbitrate_disabled_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     # No scorer built (LM_ASSIST off) → fall through to deterministic.
     monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: None)
-    selected, outcome = _maybe_lm_arbitrate([_frag("f1", "s1")], "task", k=4)
+    selected, outcome, detail = _maybe_lm_arbitrate([_frag("f1", "s1")], "task", k=4)
     assert selected is None
     assert outcome is LMAssistOutcome.DISABLED
+    assert detail is None
 
 
 def test_arbitrate_threshold_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -272,11 +273,16 @@ def test_arbitrate_threshold_filters(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: _FakeScorer(LMAssistOutcome.HIT, [0.9, 0.01, 0.6]),
     )
     monkeypatch.setattr(domain_module, "load_config", lambda: _cfg(0.05))
-    selected, outcome = _maybe_lm_arbitrate(ranked, "task", k=4)
+    selected, outcome, detail = _maybe_lm_arbitrate(ranked, "task", k=4)
     assert outcome is LMAssistOutcome.HIT
     assert selected is not None
     # f2 (0.01) drops; order preserved by fusion rank (f1 then f3).
     assert [f.fragment_id for f in selected] == ["f1", "f3"]
+    # Telemetry detail: kept = injected, dropped = below-threshold, scores over all.
+    assert detail is not None
+    assert detail.kept_ids == ["f1", "f3"]
+    assert detail.dropped_ids == ["f2"]
+    assert detail.scores == {"f1": 0.9, "f2": 0.01, "f3": 0.6}
 
 
 def test_arbitrate_empty_keep(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,9 +294,13 @@ def test_arbitrate_empty_keep(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: _FakeScorer(LMAssistOutcome.HIT, [0.0, 0.001]),
     )
     monkeypatch.setattr(domain_module, "load_config", lambda: _cfg(0.05))
-    selected, outcome = _maybe_lm_arbitrate(ranked, "task", k=4)
+    selected, outcome, detail = _maybe_lm_arbitrate(ranked, "task", k=4)
     assert outcome is LMAssistOutcome.HIT
     assert selected == []
+    # Nothing kept; both scored fragments land in dropped.
+    assert detail is not None
+    assert detail.kept_ids == []
+    assert detail.dropped_ids == ["f1", "f2"]
 
 
 def test_arbitrate_caps_at_k(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,9 +311,14 @@ def test_arbitrate_caps_at_k(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda: _FakeScorer(LMAssistOutcome.HIT, [0.9] * 6),
     )
     monkeypatch.setattr(domain_module, "load_config", lambda: _cfg(0.05))
-    selected, _ = _maybe_lm_arbitrate(ranked, "task", k=2)
+    selected, _, detail = _maybe_lm_arbitrate(ranked, "task", k=2)
     assert selected is not None
     assert len(selected) == 2
+    # All six clear the threshold but the k=2 cap trims four into dropped.
+    assert detail is not None
+    assert len(detail.kept_ids) == 2
+    assert len(detail.dropped_ids) == 4
+    assert len(detail.scores) == 6
 
 
 def test_arbitrate_timeout_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,9 +328,10 @@ def test_arbitrate_timeout_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
         "build_scorer_from_env",
         lambda: _FakeScorer(LMAssistOutcome.TIMEOUT, []),
     )
-    selected, outcome = _maybe_lm_arbitrate(ranked, "task", k=4)
+    selected, outcome, detail = _maybe_lm_arbitrate(ranked, "task", k=4)
     assert selected is None
     assert outcome is LMAssistOutcome.TIMEOUT
+    assert detail is None
 
 
 def test_arbitrate_length_mismatch_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -325,9 +341,10 @@ def test_arbitrate_length_mismatch_fails_open(monkeypatch: pytest.MonkeyPatch) -
         "build_scorer_from_env",
         lambda: _FakeScorer(LMAssistOutcome.HIT, [0.9]),  # one score for two docs
     )
-    selected, outcome = _maybe_lm_arbitrate(ranked, "task", k=4)
+    selected, outcome, detail = _maybe_lm_arbitrate(ranked, "task", k=4)
     assert selected is None
     assert outcome is LMAssistOutcome.ERROR
+    assert detail is None
 
 
 def _cfg(threshold: float) -> lm_assist.LMAssistConfig:
