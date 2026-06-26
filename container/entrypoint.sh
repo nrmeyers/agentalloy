@@ -73,12 +73,17 @@ NEED_SEED=false
 if [ -f "$SEED_DIR/corpus-stamp.json" ]; then
     if [ ! -f "$APP_DIR/data/skills.duck" ]; then
         NEED_SEED=true
-    elif [ -f "$VOL_STAMP" ]; then
-        if [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" packs_hash)" != "$(stamp_value "$VOL_STAMP" packs_hash)" ] \
-           || [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" embedding_dim)" != "$(stamp_value "$VOL_STAMP" embedding_dim)" ]; then
-            NEED_SEED=true
-            echo ">> Image corpus differs from volume (upgrade) - re-seeding"
-        fi
+    elif [ ! -f "$VOL_STAMP" ]; then
+        # Corpus present but unstamped (e.g. a pre-stamp volume, or one
+        # whose stamp was lost): we can't verify it matches the image, so
+        # re-seed from the authoritative corpus rather than trust a
+        # partial always-on reconcile that leaves other packs stale.
+        NEED_SEED=true
+        echo ">> Volume corpus has no stamp - re-seeding from image to verify"
+    elif [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" packs_hash)" != "$(stamp_value "$VOL_STAMP" packs_hash)" ] \
+         || [ "$(stamp_value "$SEED_DIR/corpus-stamp.json" embedding_dim)" != "$(stamp_value "$VOL_STAMP" embedding_dim)" ]; then
+        NEED_SEED=true
+        echo ">> Image corpus differs from volume (upgrade) - re-seeding"
     fi
 fi
 
@@ -169,8 +174,12 @@ fi
 # --- SIGTERM/SIGINT trap (covers llama-servers + uvicorn) ----------
 trap 'kill ${EMBED_PID:-} ${RERANK_PID:-} ${UVICORN_PID:-} 2>/dev/null; exit 0' SIGTERM SIGINT
 
-# Pack ingest runs only when the corpus was not seeded from the image.
-if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]; then
+# Pack ingest runs only when there is no corpus to start from: not seeded
+# this boot (CORPUS_SEEDED) AND no existing volume corpus (skills.duck). A
+# reused/populated volume is left to the seed logic above, so we never run a
+# partial always-on reconcile over an already-full corpus.
+if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ] \
+   && [ ! -f "$APP_DIR/data/skills.duck" ]; then
     if [ -n "${AGENTALLOY_PACKS:-}" ]; then
         IFS="," read -ra PACK_LIST <<< "$AGENTALLOY_PACKS"
         TOTAL=${#PACK_LIST[@]}

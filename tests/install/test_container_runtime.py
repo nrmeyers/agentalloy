@@ -367,6 +367,40 @@ class TestEntrypoint:
         assert "rust" in content
         assert "python" in content
 
+    # --- bootstrap: don't run a partial ingest on a populated volume --------
+    # (regression for the "installing always-on packs" on a reused volume bug)
+
+    def test_ingest_gated_on_no_existing_corpus(self):
+        """Pack ingest runs only when there is genuinely no corpus to start from:
+        not seeded this boot AND no existing volume corpus (skills.duck)."""
+        script = container_runtime._build_entrypoint_script("")
+        assert '[ "$BOOTSTRAP_NEEDED" = "true" ]' in script
+        assert '[ "$CORPUS_SEEDED" = "false" ]' in script
+        # The skills.duck guard is the fix — without it a reused/populated volume
+        # falls into the misleading always-on reconcile.
+        assert '&& [ ! -f "$APP_DIR/data/skills.duck" ]; then' in script
+
+    def test_unstamped_volume_triggers_reseed(self):
+        """A volume with a corpus but no stamp can't be verified against the image,
+        so it re-seeds from the authoritative corpus (closes the NEED_SEED gap)."""
+        script = container_runtime._build_entrypoint_script("")
+        assert 'elif [ ! -f "$VOL_STAMP" ]; then' in script
+        assert ">> Volume corpus has no stamp - re-seeding from image to verify" in script
+
+    def test_stamp_mismatch_still_reseeds(self):
+        """Flattening the NEED_SEED chain must keep the upgrade (stamp-differs) path."""
+        script = container_runtime._build_entrypoint_script("")
+        assert "packs_hash" in script and "embedding_dim" in script
+        assert ">> Image corpus differs from volume (upgrade) - re-seeding" in script
+
+    def test_always_on_ingest_branch_preserved(self):
+        """An empty volume with no seed (local build) must still populate via the
+        always-on / AGENTALLOY_PACKS ingest path — it is only gated, not removed."""
+        script = container_runtime._build_entrypoint_script("")
+        assert "installing always-on packs" in script
+        assert "install-packs --no-restart" in script
+        assert 'if [ -n "${AGENTALLOY_PACKS:-}" ]; then' in script
+
 
 # ---------------------------------------------------------------------------
 # _run_container bind-failure hint

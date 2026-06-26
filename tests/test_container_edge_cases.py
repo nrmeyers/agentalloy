@@ -1422,6 +1422,9 @@ class TestEntrypointPrebuiltCorpusSeed:
 
         script = _build_entrypoint_script("core")
         assert '[ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ]' in script
+        # The gate also requires no existing volume corpus, so a reused/populated
+        # volume never runs a partial always-on reconcile.
+        assert '&& [ ! -f "$APP_DIR/data/skills.duck" ]; then' in script
         # seed branch is decided before the ingest gate consumes it
         assert script.index("CORPUS_SEEDED=false") < script.index('[ "$CORPUS_SEEDED" = "false" ]')
 
