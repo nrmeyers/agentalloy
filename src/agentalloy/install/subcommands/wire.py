@@ -129,18 +129,51 @@ def _describe(f: dict[str, Any]) -> str:
     return f"{path}  [dim]({action})[/dim]" if action else str(path)
 
 
+def _resolve_git_exclude(root: Path) -> Path | None:
+    """Resolve *root*'s local git exclude file, or ``None`` if not a work tree.
+
+    Uses ``git -C <root> rev-parse --git-path info/exclude`` so it resolves
+    correctly in both a normal checkout (``.git/info/exclude``) and a git
+    worktree (where ``.git`` is a *file* and the exclude lives under the main
+    repo's ``.git/worktrees/<name>/`` or common dir). When git can't resolve it
+    (not installed, or rev-parse fails), falls back to the literal
+    ``<root>/.git/info/exclude`` if ``.git`` is a real directory, else ``None``.
+    Returns ``None`` when *root* isn't a git work tree.
+    """
+    import subprocess  # noqa: PLC0415 — match the per-module inline-git convention
+
+    def _legacy() -> Path | None:
+        git_dir = root / ".git"
+        return git_dir / "info" / "exclude" if git_dir.is_dir() else None
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--git-path", "info/exclude"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return _legacy()
+    rel = out.stdout.strip()
+    if out.returncode != 0 or not rel:
+        return _legacy()
+    # rev-parse returns a path relative to root (or absolute); resolve against root.
+    return (root / rel) if not Path(rel).is_absolute() else Path(rel)
+
+
 def _git_exclude_agentalloy(root: Path) -> None:
-    """Append ``.agentalloy/`` to ``<root>/.git/info/exclude`` (idempotent).
+    """Append ``.agentalloy/`` to *root*'s local git exclude file (idempotent).
 
     Uses the local, never-committed exclude file rather than touching a shared
     ``.gitignore``, so the per-repo phase/contract state can't be accidentally
-    committed. No-op when there's no git repo. Best-effort: wiring never fails
-    over this.
+    committed. Works in both a normal checkout and a git worktree (see
+    :func:`_resolve_git_exclude`). No-op when there's no git repo. Best-effort:
+    wiring never fails over this.
     """
-    git_dir = root / ".git"
-    if not git_dir.is_dir():
+    exclude = _resolve_git_exclude(root)
+    if exclude is None:
         return
-    exclude = git_dir / "info" / "exclude"
     try:
         existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         if any(line.strip() == ".agentalloy/" for line in existing.splitlines()):

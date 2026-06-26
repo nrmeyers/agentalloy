@@ -339,6 +339,19 @@ agentalloy wire --harness <name>
 
 **Claude Code is auth-transparent.** Wiring writes a per-repo `.agentalloy/claude-code-env.sh` that exports **only** `ANTHROPIC_BASE_URL=http://localhost:47950/proj/<token>` — never an API key. The `/proj/<token>` segment is `base64url(realpath)` of the repo, so the proxy resolves this repo's phase and lifecycle straight from the URL (no shared state). Because no key is set, Claude Code attaches your **own** credential and the proxy forwards it verbatim — account/OAuth auth (Pro/Max/Team, who have no API key) keeps working unchanged. The env file is sourced via direnv if a `.envrc` is present, otherwise `wire` prints a one-line `source` hint.
 
+### Parallel sessions with git worktrees
+
+Run several agent sessions against the same repo at once — each on its own branch, each at its own phase — with one command:
+
+```bash
+agentalloy worktree <harness> <branch> -b   # create the worktree + wire it in one shot
+cd ../<branch>                              # then start your session there
+```
+
+Isolation is automatic and needs no new server. The proxy keys per-repo state on `base64url(realpath)` of the working directory, so a worktree's distinct path gets its own `/proj/<token>` — and therefore its own `.agentalloy/` phase and upstream, git-excluded so they never get committed. All worktrees share the one running service and the one user-scoped corpus; concurrent inference is read-only against that corpus, so sessions never contend.
+
+The one caveat: corpus *mutations* (`agentalloy install-packs`, `agentalloy reembed`) take the single-writer lock and affect every worktree, so stop the service before running them. Day-to-day composition does not.
+
 ### Wired into a sidecar harness
 
 A few harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI) route through their own backends and can't be intercepted. For those, AgentAlloy writes a static rules file and a file-watching sidecar regenerates that file within ~1s of a phase or contract change. You start the sidecar once per session:

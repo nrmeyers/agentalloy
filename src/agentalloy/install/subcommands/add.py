@@ -95,34 +95,44 @@ def capture_upstream(
     return upstream
 
 
-def _run(args: argparse.Namespace) -> int:
-    harness: str = args.harness
+def resolve_port(port_override: int | None) -> int:
+    """Resolve the service port: explicit override, else user state, else 47950."""
+    if port_override is not None:
+        return install_state.validate_port(port_override)
+    st = install_state.load_state()
+    return install_state.validate_port(st.get("port", 47950))
+
+
+def adopt_and_wire(
+    harness: str,
+    root: Path,
+    *,
+    port: int,
+    upstream_url: str | None = None,
+    upstream_model: str | None = None,
+    key_env: str | None = None,
+) -> tuple[Upstream | None, dict[str, Any], str | None]:
+    """Adopt *harness*'s upstream and wire interception at *root* (repo scope).
+
+    The reusable core shared by ``add`` (root = cwd) and ``worktree`` (root = a
+    freshly created worktree): capture upstream → wire the harness through the
+    proxy → seed the entry phase → git-exclude ``.agentalloy/``. Returns
+    ``(upstream, wire_result, phase_seeded)`` for the caller to render. Callers
+    are responsible for validating *harness* against ``REGISTRY`` first.
+    """
     spec = REGISTRY.get(harness)
-    if spec is None:
-        print(f"ERROR: Unknown harness: {harness}.", file=sys.stderr)
-        print(f"FIX:   Choices: {', '.join(sorted(REGISTRY))}.", file=sys.stderr)
-        return 1
-
-    cwd = Path.cwd().resolve()
-
-    if args.port is not None:
-        port = install_state.validate_port(args.port)
-    else:
-        st = install_state.load_state()
-        port = install_state.validate_port(st.get("port", 47950))
-
     upstream = capture_upstream(
         harness,
-        cwd,
-        upstream_url=args.upstream_url,
-        upstream_model=args.upstream_model,
-        key_env=args.key_env,
+        root,
+        upstream_url=upstream_url,
+        upstream_model=upstream_model,
+        key_env=key_env,
     )
     # A harness that advertises an extractor but yielded nothing is a soft miss:
     # wire interception anyway (the proxy falls back to the global UPSTREAM), but
     # tell the user so they can pass --upstream-url. Harnesses with no extractor
     # (claude-code) intentionally adopt nothing — stay quiet.
-    if upstream is None and spec.upstream_extractor is not None:
+    if upstream is None and spec is not None and spec.upstream_extractor is not None:
         print(
             f"WARN:  No upstream found in {harness}'s config. Wiring interception only; "
             "the proxy will fall back to the global UPSTREAM. Pass --upstream-url to adopt one.",
@@ -138,9 +148,30 @@ def _run(args: argparse.Namespace) -> int:
         _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
     )
 
-    result = _wire_harness_core(harness, port=port, root=cwd, scope="repo")
-    phase_seeded = _seed_entry_phase(cwd)
-    _git_exclude_agentalloy(cwd)  # ensure .agentalloy/ (upstream + phase) stays uncommitted
+    result = _wire_harness_core(harness, port=port, root=root, scope="repo")
+    phase_seeded = _seed_entry_phase(root)
+    _git_exclude_agentalloy(root)  # ensure .agentalloy/ (upstream + phase) stays uncommitted
+    return upstream, result, phase_seeded
+
+
+def _run(args: argparse.Namespace) -> int:
+    harness: str = args.harness
+    if REGISTRY.get(harness) is None:
+        print(f"ERROR: Unknown harness: {harness}.", file=sys.stderr)
+        print(f"FIX:   Choices: {', '.join(sorted(REGISTRY))}.", file=sys.stderr)
+        return 1
+
+    cwd = Path.cwd().resolve()
+    port = resolve_port(args.port)
+
+    upstream, result, phase_seeded = adopt_and_wire(
+        harness,
+        cwd,
+        port=port,
+        upstream_url=args.upstream_url,
+        upstream_model=args.upstream_model,
+        key_env=args.key_env,
+    )
 
     _render(harness, upstream, result, phase_seeded)
     return 0

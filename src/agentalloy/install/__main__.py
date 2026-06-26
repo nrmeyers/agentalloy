@@ -59,6 +59,7 @@ from agentalloy.install.subcommands import (
     verify_pack,
     wire,
     wire_harness,
+    worktree,
     wrap,
     write_env,
 )
@@ -80,6 +81,7 @@ _SUBCOMMANDS = [
     preflight,
     simple_setup,
     add,
+    worktree,
     profile,
     customize,
     reset,
