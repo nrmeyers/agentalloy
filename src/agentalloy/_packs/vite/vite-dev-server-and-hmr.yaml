@@ -1,0 +1,147 @@
+skill_id: vite-dev-server-and-hmr
+canonical_name: Vite — Dev Server & Hot Module Replacement
+description: 'Run and configure the Vite dev server: native-ESM serving, instant HMR for React via Fast Refresh, the import.meta.hot API, and server host/port/proxy options.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vite
+- dev-server
+- hmr
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Running the dev server
+
+  ```bash
+  npm run dev            # http://localhost:5173
+  npm run dev -- --host  # expose on the LAN
+  npm run dev -- --port 3000
+  ```
+
+  Configure persistently in `vite.config.ts`:
+
+  ```ts
+  export default defineConfig({
+    server: {
+      port: 5173,
+      open: true,
+      proxy: {
+        '/api': { target: 'http://localhost:8787', changeOrigin: true },
+      },
+    },
+  });
+  ```
+
+  `server.proxy` forwards matching requests to a backend so the browser sees a single origin — the standard way to avoid CORS during local development. The server transforms and serves files over native ESM; there is no bundle to wait for.
+
+  ## HMR with Fast Refresh
+
+  `@vitejs/plugin-react` wires React Fast Refresh automatically: editing a component swaps it in place while preserving local state. No configuration is needed for component HMR.
+
+  For non-component modules, accept updates explicitly with the `import.meta.hot` API:
+
+  ```ts
+  if (import.meta.hot) {
+    import.meta.hot.accept('./store.ts', (mod) => {
+      applyStore(mod!.createStore());   // re-wire with the updated module
+    });
+  }
+  ```
+
+  `import.meta.hot` is `undefined` in production builds, so the guard tree-shakes the HMR code out. Accepting an update stops the change from bubbling up and forcing a full page reload.
+
+  ## When HMR falls back to a full reload
+
+  Fast Refresh only preserves state when a module exports React components and nothing else. Common reasons an edit triggers a full page reload instead of a hot swap:
+
+  - A file mixes a component export with a non-component export (a constant or hook). Split them into separate files.
+  - The component is an anonymous default export (`export default () => ...`); give it a name so Fast Refresh can track it.
+  - A module has no `import.meta.hot.accept` handler and nothing downstream accepts it — the update bubbles to the root.
+  - Changing code outside the served module graph (such as `vite.config.ts`) restarts the server by design.
+
+  ## Why no-bundle dev is fast
+
+  Webpack-era servers rebuild a bundle on every change before the browser can load it, and that cost grows with app size. Vite instead serves each source file as a separate ES module and lets the browser request only what a route needs. An edit invalidates exactly one module in the HMR graph, so update latency is flat — independent of total project size. Dependencies are pre-bundled once by esbuild (10-100x faster than JS-based bundlers) and cached under `node_modules/.vite`.
+
+  ## Verification
+
+  - Editing a component updates the browser without a full reload and keeps component state.
+  - The terminal shows `hmr update /src/...` lines, not `page reload`, on a component edit.
+  - `/api/*` requests in the browser hit the proxied backend (check the Network tab origin).
+  - A production build (`vite build`) contains no `import.meta.hot` code (guarded blocks are dropped).
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Running the dev server
+
+    ```bash
+    npm run dev            # http://localhost:5173
+    npm run dev -- --host  # expose on the LAN
+    npm run dev -- --port 3000
+    ```
+
+    Configure persistently in `vite.config.ts`:
+
+    ```ts
+    export default defineConfig({
+      server: {
+        port: 5173,
+        open: true,
+        proxy: {
+          '/api': { target: 'http://localhost:8787', changeOrigin: true },
+        },
+      },
+    });
+    ```
+
+    `server.proxy` forwards matching requests to a backend so the browser sees a single origin — the standard way to avoid CORS during local development. The server transforms and serves files over native ESM; there is no bundle to wait for.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## HMR with Fast Refresh
+
+    `@vitejs/plugin-react` wires React Fast Refresh automatically: editing a component swaps it in place while preserving local state. No configuration is needed for component HMR.
+
+    For non-component modules, accept updates explicitly with the `import.meta.hot` API:
+
+    ```ts
+    if (import.meta.hot) {
+      import.meta.hot.accept('./store.ts', (mod) => {
+        applyStore(mod!.createStore());   // re-wire with the updated module
+      });
+    }
+    ```
+
+    `import.meta.hot` is `undefined` in production builds, so the guard tree-shakes the HMR code out. Accepting an update stops the change from bubbling up and forcing a full page reload.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## When HMR falls back to a full reload
+
+    Fast Refresh only preserves state when a module exports React components and nothing else. Common reasons an edit triggers a full page reload instead of a hot swap:
+
+    - A file mixes a component export with a non-component export (a constant or hook). Split them into separate files.
+    - The component is an anonymous default export (`export default () => ...`); give it a name so Fast Refresh can track it.
+    - A module has no `import.meta.hot.accept` handler and nothing downstream accepts it — the update bubbles to the root.
+    - Changing code outside the served module graph (such as `vite.config.ts`) restarts the server by design.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why no-bundle dev is fast
+
+    Webpack-era servers rebuild a bundle on every change before the browser can load it, and that cost grows with app size. Vite instead serves each source file as a separate ES module and lets the browser request only what a route needs. An edit invalidates exactly one module in the HMR graph, so update latency is flat — independent of total project size. Dependencies are pre-bundled once by esbuild (10-100x faster than JS-based bundlers) and cached under `node_modules/.vite`.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - Editing a component updates the browser without a full reload and keeps component state.
+    - The terminal shows `hmr update /src/...` lines, not `page reload`, on a component edit.
+    - `/api/*` requests in the browser hit the proxied backend (check the Network tab origin).
+    - A production build (`vite build`) contains no `import.meta.hot` code (guarded blocks are dropped).

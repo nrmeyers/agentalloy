@@ -331,7 +331,7 @@ fragments:
       **Don't push past a failing test or broken build to work on the next feature.** Errors compound. A bug in Step 3 that goes unfixed makes Steps 4-10 wrong.
   - fragment_type: execution
     sequence: 4
-    content: |
+    content: |2
       ## The Triage Checklist
 
       Work through these steps in order. Do not skip steps.
@@ -348,7 +348,9 @@ fragments:
           ├── Try reproducing in a minimal environment
           └── If truly non-reproducible, document conditions and monitor
       ```
-
+  - fragment_type: execution
+    sequence: 5
+    content: |2
       **When a bug is non-reproducible:**
 
       ```
@@ -383,7 +385,7 @@ fragments:
       npm test -- --testPathPattern="specific-file" --runInBand
       ```
   - fragment_type: execution
-    sequence: 5
+    sequence: 6
     content: |
       ### Step 2: Localize
 
@@ -409,7 +411,7 @@ fragments:
       git bisect run npm test -- --grep "failing test"
       ```
   - fragment_type: execution
-    sequence: 6
+    sequence: 7
     content: |
       ### Step 3: Reduce
 
@@ -421,7 +423,7 @@ fragments:
 
       A minimal reproduction makes the root cause obvious and prevents fixing symptoms instead of causes.
   - fragment_type: execution
-    sequence: 7
+    sequence: 8
     content: |
       ### Step 4: Fix the Root Cause
 
@@ -440,7 +442,7 @@ fragments:
 
       Ask: "Why does this happen?" until you reach the actual cause, not just where it manifests.
   - fragment_type: execution
-    sequence: 8
+    sequence: 9
     content: |
       ### Step 5: Guard Against Recurrence
 
@@ -458,7 +460,7 @@ fragments:
 
       This test will prevent the same bug from recurring. It should fail without the fix and pass with it.
   - fragment_type: execution
-    sequence: 9
+    sequence: 10
     content: |
       ### Step 6: Verify End-to-End
 
@@ -478,7 +480,7 @@ fragments:
       npm run dev  # Verify in browser
       ```
   - fragment_type: example
-    sequence: 10
+    sequence: 11
     content: |
       ## Safe Fallback Patterns
 
@@ -509,7 +511,7 @@ fragments:
       }
       ```
   - fragment_type: rationale
-    sequence: 11
+    sequence: 12
     content: |
       ## Instrumentation Guidelines
 
@@ -530,7 +532,7 @@ fragments:
       - API error logging with request context
       - Performance metrics at key user flows
   - fragment_type: rationale
-    sequence: 12
+    sequence: 13
     content: |
       ## Common Rationalizations
 

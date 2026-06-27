@@ -116,6 +116,41 @@ def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]
     store.close()
 
 
+def test_insert_benchmark_category_domain_skill(
+    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+) -> None:
+    """A domain skill with `category: benchmark` ingests cleanly.
+
+    `benchmark` is the reserved benchmark-pack category (plan #14 Option B); the
+    five benchmark packs are re-categorized rather than deleted. `_validate`
+    enum-checks domain categories against ingest._VALID_DOMAIN_CATEGORIES, so a
+    missing `benchmark` member there would abort the corpus re-embed with
+    EXIT_VALIDATION. This guards that path.
+    """
+    db_path, store = seeded_db
+    benchmark_yaml = (
+        _DOMAIN_YAML.replace("skill_id: test-domain-skill", "skill_id: test-benchmark-skill")
+        .replace("canonical_name: Test Domain Skill", "canonical_name: Test Benchmark Skill")
+        .replace("category: engineering", "category: benchmark")
+    )
+    yaml_file = tmp_path / "benchmark.yaml"
+    yaml_file.write_text(benchmark_yaml)
+
+    with patch("agentalloy.ingest.get_settings", return_value=_make_settings(db_path)):
+        code = main([str(yaml_file), "--yes"])
+
+    assert code == EXIT_OK
+
+    store.open()
+    name = store.scalar(
+        "MATCH (s:Skill {skill_id: 'test-benchmark-skill'}) RETURN s.canonical_name"
+    )
+    assert name == "Test Benchmark Skill"
+    category = store.scalar("MATCH (s:Skill {skill_id: 'test-benchmark-skill'}) RETURN s.category")
+    assert category == "benchmark"
+    store.close()
+
+
 def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "system.yaml"

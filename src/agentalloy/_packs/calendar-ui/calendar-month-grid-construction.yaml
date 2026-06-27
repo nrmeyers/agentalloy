@@ -1,0 +1,139 @@
+skill_id: calendar-month-grid-construction
+canonical_name: Calendar — Month Grid Construction with Native Date
+description: 'Build a month''s 42-cell day grid from scratch with the native Date object: the leading weekday offset, days in month, leap years, and the trailing days that fill a fixed six-week grid — no date library.'
+category: engineering
+skill_class: domain
+domain_tags:
+- calendar-ui
+- calendar
+- date-math
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- domain
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  # Calendar — Month Grid Construction with Native Date
+
+  ## Build a 42-cell month grid
+
+  A month grid is a fixed 6 rows x 7 columns = 42 cells, padded with the tail of the previous month and the head of the next so every week is full:
+
+  ```ts
+  type Day = { date: Date; inMonth: boolean };
+
+  function buildMonthGrid(year: number, month: number): Day[] {
+    const first = new Date(year, month, 1);
+    const offset = first.getDay();            // 0=Sun ... 6=Sat
+    const start = new Date(year, month, 1 - offset);
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      return { date: d, inMonth: d.getMonth() === month };
+    });
+  }
+  ```
+
+  `month` is 0-indexed (January = 0). Starting at `1 - offset` walks back to the Sunday on or before the first, then 42 day-steps fill the grid.
+
+  ## Days in month and leap years, the Date way
+
+  You rarely need an explicit leap-year check — day 0 of the next month is the last day of this month:
+
+  ```ts
+  function daysInMonth(year: number, month: number): number {
+    return new Date(year, month + 1, 0).getDate();  // 28 / 29 / 30 / 31
+  }
+
+  daysInMonth(2024, 1); // 29 — Feb 2024 (leap)
+  daysInMonth(2025, 1); // 28 — Feb 2025
+  ```
+
+  `new Date(year, month + 1, 0)` rolls back one day from the first of the following month, and the Date constructor normalizes overflow. This single trick replaces the `year % 4 / % 100 / % 400` leap rule and is always correct because it defers to the engine's calendar.
+
+  ## Why a fixed 42-cell grid
+
+  A month spans 28-31 days and can touch 4, 5, or 6 distinct weeks depending on its start weekday. If the grid resized per month, the calendar's height would jump as the user pages through months, shifting surrounding layout. Locking the grid at 6 rows (42 cells) keeps the component a constant size, so navigation feels stable and CSS grid can use a fixed row count. The leading and trailing cells from adjacent months render muted (`inMonth: false`) so focus stays on the current month while weeks remain visually complete.
+
+  ## Native Date pitfalls to avoid
+
+  - **Indexing.** `getMonth()` is 0-11 and `getDay()` is 0-6 (Sun-Sat), but `getDate()` is 1-indexed. Mixing these up is the classic off-by-one.
+  - **Local vs UTC.** `new Date(y, m, d)` builds a local-time date; `getDay()`/`getDate()` read local fields. Stay consistently local for a display calendar, or consistently UTC (`Date.UTC`, `getUTCDay()`) — never mix.
+  - **DST days.** Adding `24 * 60 * 60 * 1000` milliseconds can skip or repeat a day across a DST boundary. Step dates with the constructor (`new Date(y, m, d + i)`), which is DST-safe, not by adding millisecond offsets.
+  - **Mutation.** `setDate`/`setMonth` mutate in place; clone with `new Date(d)` before adjusting.
+
+  ## Verification
+
+  - `buildMonthGrid` always returns exactly 42 entries.
+  - Cell 0 is a Sunday (`getDay() === 0`) and cells flow Sun->Sat across each row.
+  - `inMonth` is true only for the target month's days; leading and trailing cells are false.
+  - February returns 29 days in leap years (2024) and 28 otherwise (2025, 2100).
+  - Paging across a DST boundary preserves all 42 distinct calendar days (none skipped or duplicated).
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    # Calendar — Month Grid Construction with Native Date
+
+    ## Build a 42-cell month grid
+
+    A month grid is a fixed 6 rows x 7 columns = 42 cells, padded with the tail of the previous month and the head of the next so every week is full:
+
+    ```ts
+    type Day = { date: Date; inMonth: boolean };
+
+    function buildMonthGrid(year: number, month: number): Day[] {
+      const first = new Date(year, month, 1);
+      const offset = first.getDay();            // 0=Sun ... 6=Sat
+      const start = new Date(year, month, 1 - offset);
+      return Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+        return { date: d, inMonth: d.getMonth() === month };
+      });
+    }
+    ```
+
+    `month` is 0-indexed (January = 0). Starting at `1 - offset` walks back to the Sunday on or before the first, then 42 day-steps fill the grid.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Days in month and leap years, the Date way
+
+    You rarely need an explicit leap-year check — day 0 of the next month is the last day of this month:
+
+    ```ts
+    function daysInMonth(year: number, month: number): number {
+      return new Date(year, month + 1, 0).getDate();  // 28 / 29 / 30 / 31
+    }
+
+    daysInMonth(2024, 1); // 29 — Feb 2024 (leap)
+    daysInMonth(2025, 1); // 28 — Feb 2025
+    ```
+
+    `new Date(year, month + 1, 0)` rolls back one day from the first of the following month, and the Date constructor normalizes overflow. This single trick replaces the `year % 4 / % 100 / % 400` leap rule and is always correct because it defers to the engine's calendar.
+- fragment_type: rationale
+  sequence: 3
+  content: |-
+    ## Why a fixed 42-cell grid
+
+    A month spans 28-31 days and can touch 4, 5, or 6 distinct weeks depending on its start weekday. If the grid resized per month, the calendar's height would jump as the user pages through months, shifting surrounding layout. Locking the grid at 6 rows (42 cells) keeps the component a constant size, so navigation feels stable and CSS grid can use a fixed row count. The leading and trailing cells from adjacent months render muted (`inMonth: false`) so focus stays on the current month while weeks remain visually complete.
+- fragment_type: guardrail
+  sequence: 4
+  content: |-
+    ## Native Date pitfalls to avoid
+
+    - **Indexing.** `getMonth()` is 0-11 and `getDay()` is 0-6 (Sun-Sat), but `getDate()` is 1-indexed. Mixing these up is the classic off-by-one.
+    - **Local vs UTC.** `new Date(y, m, d)` builds a local-time date; `getDay()`/`getDate()` read local fields. Stay consistently local for a display calendar, or consistently UTC (`Date.UTC`, `getUTCDay()`) — never mix.
+    - **DST days.** Adding `24 * 60 * 60 * 1000` milliseconds can skip or repeat a day across a DST boundary. Step dates with the constructor (`new Date(y, m, d + i)`), which is DST-safe, not by adding millisecond offsets.
+    - **Mutation.** `setDate`/`setMonth` mutate in place; clone with `new Date(d)` before adjusting.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - `buildMonthGrid` always returns exactly 42 entries.
+    - Cell 0 is a Sunday (`getDay() === 0`) and cells flow Sun->Sat across each row.
+    - `inMonth` is true only for the target month's days; leading and trailing cells are false.
+    - February returns 29 days in leap years (2024) and 28 otherwise (2025, 2100).
+    - Paging across a DST boundary preserves all 42 distinct calendar days (none skipped or duplicated).

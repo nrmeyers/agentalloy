@@ -1,5 +1,5 @@
 name: temporal
-version: 1.0.5
+version: 1.1.0
 tier: store
 description: |
   Temporal Python SDK patterns — workflow definitions with @workflow.defn, activity definitions with @activity.defn, worker process setup, message passing (signals/queries/updates), and time primitives (schedules, timers, timeouts). Precision-favored store tier (durable execution platform); sourced from the temporalio/documentation GitHub repo per R1 tier-1 procedure (registry llms_full_url https://docs.temporal.io/llms-full.txt).
@@ -16,16 +16,16 @@ depends_on:
 skills:
 - skill_id: temporal-activity-basics
   file: temporal-activity-basics.yaml
-  fragment_count: 11
+  fragment_count: 13
 - skill_id: temporal-message-passing
   file: temporal-message-passing.yaml
   fragment_count: 10
 - skill_id: temporal-schedules-and-timers
   file: temporal-schedules-and-timers.yaml
-  fragment_count: 6
+  fragment_count: 7
 - skill_id: temporal-workers
   file: temporal-workers.yaml
   fragment_count: 4
 - skill_id: temporal-workflow-basics
   file: temporal-workflow-basics.yaml
-  fragment_count: 8
+  fragment_count: 9

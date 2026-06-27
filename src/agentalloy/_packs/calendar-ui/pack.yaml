@@ -1,0 +1,27 @@
+name: calendar-ui
+version: 1.0.0
+tier: domain
+description: |
+  Build calendar UIs from scratch with the native Date object and CSS grid — month-grid construction (42-cell grid, leading offset, leap years), a 7x6 CSS-grid layout with weekday labels, previous/next month navigation, and today-highlight plus day-selection state. No date-library dependency. Precision-favored domain tier; hand-authored from MDN Date and CSS Grid references per R1 tier-3 procedure.
+author: navistone
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
+license: MIT
+homepage: https://github.com/nrmeyers/agentalloy
+always_install: false
+depends_on:
+- core
+- engineering
+skills:
+- skill_id: calendar-month-grid-construction
+  file: calendar-month-grid-construction.yaml
+  fragment_count: 5
+- skill_id: calendar-grid-css-layout
+  file: calendar-grid-css-layout.yaml
+  fragment_count: 5
+- skill_id: calendar-month-navigation
+  file: calendar-month-navigation.yaml
+  fragment_count: 5
+- skill_id: calendar-today-and-selection
+  file: calendar-today-and-selection.yaml
+  fragment_count: 5

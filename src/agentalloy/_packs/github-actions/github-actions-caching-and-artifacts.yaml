@@ -188,7 +188,7 @@ fragments:
       You cannot change the contents of an existing cache. Instead, you can create a new cache with a new key.
   - fragment_type: rationale
     sequence: 3
-    content: |
+    content: |2
       ### Input parameters for the `cache` action
 
       * `key`: **Required** The key created when saving a cache and the key used to search for a cache. It can be any combination of variables, context values, static strings, and functions. Keys have a maximum length of 512 characters, and keys longer than the maximum length will cause the action to fail.
@@ -206,6 +206,9 @@ fragments:
 
         * You can specify either directories or single files, and glob patterns are supported.
         * You can specify absolute paths, or paths relative to the workspace directory.
+  - fragment_type: rationale
+    sequence: 4
+    content: |2
       * `restore-keys`: **Optional** A string containing alternative restore keys, with each restore key placed on a new line. If no cache hit occurs for `key`, these restore keys are used sequentially in the order provided to find and restore a cache. For example:
 
           ```yaml
@@ -220,7 +223,7 @@ fragments:
       > [!NOTE]
       > We recommend that you don't store any sensitive information, such as access tokens or login credentials, in files in the cache path. Anyone with read access can create a pull request on a repository and access the contents of a cache. Additionally, forks of a repository can create pull requests on the base branch and access caches on the base branch.
   - fragment_type: example
-    sequence: 4
+    sequence: 5
     content: |
       ### Example using the `cache` action
 
@@ -264,7 +267,7 @@ fragments:
               run: npm test
       ```
   - fragment_type: rationale
-    sequence: 5
+    sequence: 6
     content: |
       ### Using contexts to create cache keys
 
@@ -288,7 +291,7 @@ fragments:
       npm-d5ea0750
       ```
   - fragment_type: example
-    sequence: 6
+    sequence: 7
     content: |
       ### Using the output of the `cache` action
 

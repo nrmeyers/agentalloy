@@ -34,6 +34,9 @@ contract_template: |
   phase: build
   task_slug: {{task_slug}}
   route: full
+  # domain_tags: 1-2 tags, ONE dominant tech surface — never every surface.
+  # Build retrieval is ~4 skills per contract; a 7-tag basket starves most
+  # surfaces (important fragments truncate, scores muddy). Keep it narrow.
   domain_tags: []
   scope:
     touches: []
@@ -47,10 +50,11 @@ contract_template: |
 
   ## Task
 
-  <one self-contained build task — what to implement and the boundary of "this".
-  This body IS the retrieval prompt: the proxy composes the skills that match it
-  and front-loads them before you code, so describe the work concretely (the
-  component, the behavior, the tech surface), not just a pointer to tasks.md.>
+  <one self-contained build task on ONE dominant tech surface — what to implement
+  and the boundary of "this". This body IS the retrieval prompt: the proxy composes
+  ~4 skills that match it, so a task spanning many surfaces starves most of them.
+  Describe one surface concretely (the component, the behavior, the tech), not the
+  whole feature and not just a pointer to tasks.md.>
 
   ## Test cases
 

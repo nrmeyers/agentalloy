@@ -93,6 +93,56 @@ def _build_approval_advisory(ctx: PredicateContext) -> str:
     )
 
 
+def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
+    """Advisory for ``build_contracts_cover_tasks`` NOT_MET (the §6 density floor)."""
+    from agentalloy.signals.predicates import _count_task_items  # noqa: PLC0415
+
+    tasks_glob: str = args.get("tasks", "docs/design/**/tasks.md")
+    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    try:
+        tasks = 0
+        for f in _glob_files(ctx.project_root, tasks_glob):
+            tasks += _count_task_items(_read_file(f) or "")
+        tasks = max(1, tasks)
+        contracts = len([p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()])
+    except Exception:
+        return None
+    return (
+        f"Design emitted {contracts} build contract(s) for {tasks} task(s) in tasks.md. "
+        f"Emit ONE build contract per task before advancing to build — "
+        f"`agentalloy contract init --phase build --slug <NN-task-slug>`, each centered on a "
+        f"single tech surface."
+    )
+
+
+def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
+    """Advisory for ``build_contract_tag_focus`` NOT_MET — name the over-tagged contracts."""
+    from agentalloy.signals.predicates import _contract_domain_tags  # noqa: PLC0415
+
+    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    max_tags: int = args.get("max_tags", 2)
+    try:
+        offenders: list[str] = []
+        for p in _glob_files(ctx.project_root, contracts_glob):
+            if not p.is_file():
+                continue
+            tags = _contract_domain_tags(_read_file(p) or "")
+            if tags is not None and len(tags) > max_tags:
+                offenders.append(f"{p.name} ({len(tags)} tags)")
+    except Exception:
+        return None
+    if not offenders:
+        return None
+    listed = ", ".join(sorted(offenders))
+    return (
+        f"Over-tagged build contract(s): {listed}. Each build contract MUST carry <={max_tags} "
+        f"domain_tags centered on ONE dominant tech surface — at the build retrieval cap, more "
+        f"surfaces truncate the fragments that matter. Split into per-surface tasks (e.g. a 7-tag "
+        f"calendar contract -> date-layer [calendar], scaffold [vite, react], components "
+        f"[react, css-grid], tests [vitest])."
+    )
+
+
 def _is_composite(spec: dict[str, Any]) -> bool:
     return any(k in spec for k in ("all_of", "any_of", "not"))
 
@@ -198,6 +248,10 @@ def evaluate_node(
 
     if predicate_name == "approval_recorded" and result == PredicateResult.NOT_MET:
         advisory = _build_approval_advisory(ctx)
+    elif predicate_name == "build_contracts_cover_tasks" and result == PredicateResult.NOT_MET:
+        advisory = _build_contract_coverage_advisory(args, ctx)
+    elif predicate_name == "build_contract_tag_focus" and result == PredicateResult.NOT_MET:
+        advisory = _build_tag_focus_advisory(args, ctx)
 
     eval_record = GateEvaluation(
         gate_name=predicate_name,

@@ -1,0 +1,141 @@
+skill_id: vite-env-vars-and-modes
+canonical_name: Vite — Environment Variables & Modes
+description: Expose configuration through import.meta.env with the VITE_ prefix, load per-mode .env files, type env vars for TypeScript, and avoid leaking server secrets into client bundles.
+category: engineering
+skill_class: domain
+domain_tags:
+- vite
+- env
+- import-meta-env
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## import.meta.env and the VITE_ prefix
+
+  Vite exposes env vars on `import.meta.env`, but only keys prefixed `VITE_` reach client code:
+
+  ```ts
+  const base = import.meta.env.VITE_API_URL;     // exposed
+  const secret = import.meta.env.DB_PASSWORD;    // undefined in the client
+  ```
+
+  Built-in keys are always present: `import.meta.env.MODE` (e.g. `'development'`), `DEV` (boolean), `PROD` (boolean), and `BASE_URL`. The prefix is a safety boundary: it forces you to opt each variable into the client bundle by name, so a stray secret in `.env` cannot be statically inlined by accident.
+
+  ## Per-mode .env files and typing
+
+  Vite loads `.env` files by mode (`vite build --mode staging` loads `.env.staging`):
+
+  ```bash
+  .env                # loaded in every mode
+  .env.local          # every mode, git-ignored
+  .env.production     # only `vite build` (production mode)
+  .env.staging        # only --mode staging
+  ```
+
+  ```bash
+  # .env.production
+  VITE_API_URL=https://api.example.com
+  ```
+
+  Type the variables so the editor and `tsc` know them:
+
+  ```ts
+  // src/vite-env.d.ts
+  interface ImportMetaEnv {
+    readonly VITE_API_URL: string;
+  }
+  interface ImportMeta { readonly env: ImportMetaEnv; }
+  ```
+
+  ## Never ship server secrets to the client
+
+  `import.meta.env.VITE_*` values are statically replaced at build time and embedded verbatim in the JavaScript shipped to browsers. Anyone can read them in DevTools. Rules:
+
+  - Never give a server secret (DB password, private API key, signing secret) a `VITE_` prefix. If it must stay secret, it does not belong in a Vite client build at all — keep it on a backend.
+  - `.env.local` and `.env.*.local` are git-ignored by the scaffold; keep real values there and commit a `.env.example` with blank placeholders.
+  - A publishable key (publishable Stripe key, public API base) is fine to expose — that is exactly what `VITE_` is for.
+
+  ## Why a prefix instead of exposing everything
+
+  A client bundle is fully public, so exposing the whole `process.env` (as some setups do) risks inlining a secret the moment someone adds it to `.env`. Vite inverts the default: nothing is exposed unless you prefix it `VITE_`, making client exposure an explicit, greppable decision. Because the values are inlined at build time rather than read at runtime, dead-code elimination can also strip branches guarded by `import.meta.env.PROD`, shrinking the bundle.
+
+  ## Verification
+
+  - Only `VITE_`-prefixed vars are defined on `import.meta.env` in the browser; others are `undefined`.
+  - `import.meta.env.VITE_API_URL` is typed (no `any`) via `ImportMetaEnv` in `vite-env.d.ts`.
+  - `vite build --mode staging` picks up `.env.staging`.
+  - Grepping `dist/` for any server secret returns nothing.
+  - `.env.local` is git-ignored; a committed `.env.example` documents required keys.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## import.meta.env and the VITE_ prefix
+
+    Vite exposes env vars on `import.meta.env`, but only keys prefixed `VITE_` reach client code:
+
+    ```ts
+    const base = import.meta.env.VITE_API_URL;     // exposed
+    const secret = import.meta.env.DB_PASSWORD;    // undefined in the client
+    ```
+
+    Built-in keys are always present: `import.meta.env.MODE` (e.g. `'development'`), `DEV` (boolean), `PROD` (boolean), and `BASE_URL`. The prefix is a safety boundary: it forces you to opt each variable into the client bundle by name, so a stray secret in `.env` cannot be statically inlined by accident.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Per-mode .env files and typing
+
+    Vite loads `.env` files by mode (`vite build --mode staging` loads `.env.staging`):
+
+    ```bash
+    .env                # loaded in every mode
+    .env.local          # every mode, git-ignored
+    .env.production     # only `vite build` (production mode)
+    .env.staging        # only --mode staging
+    ```
+
+    ```bash
+    # .env.production
+    VITE_API_URL=https://api.example.com
+    ```
+
+    Type the variables so the editor and `tsc` know them:
+
+    ```ts
+    // src/vite-env.d.ts
+    interface ImportMetaEnv {
+      readonly VITE_API_URL: string;
+    }
+    interface ImportMeta { readonly env: ImportMetaEnv; }
+    ```
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Never ship server secrets to the client
+
+    `import.meta.env.VITE_*` values are statically replaced at build time and embedded verbatim in the JavaScript shipped to browsers. Anyone can read them in DevTools. Rules:
+
+    - Never give a server secret (DB password, private API key, signing secret) a `VITE_` prefix. If it must stay secret, it does not belong in a Vite client build at all — keep it on a backend.
+    - `.env.local` and `.env.*.local` are git-ignored by the scaffold; keep real values there and commit a `.env.example` with blank placeholders.
+    - A publishable key (publishable Stripe key, public API base) is fine to expose — that is exactly what `VITE_` is for.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why a prefix instead of exposing everything
+
+    A client bundle is fully public, so exposing the whole `process.env` (as some setups do) risks inlining a secret the moment someone adds it to `.env`. Vite inverts the default: nothing is exposed unless you prefix it `VITE_`, making client exposure an explicit, greppable decision. Because the values are inlined at build time rather than read at runtime, dead-code elimination can also strip branches guarded by `import.meta.env.PROD`, shrinking the bundle.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - Only `VITE_`-prefixed vars are defined on `import.meta.env` in the browser; others are `undefined`.
+    - `import.meta.env.VITE_API_URL` is typed (no `any`) via `ImportMetaEnv` in `vite-env.d.ts`.
+    - `vite build --mode staging` picks up `.env.staging`.
+    - Grepping `dist/` for any server secret returns nothing.
+    - `.env.local` is git-ignored; a committed `.env.example` documents required keys.

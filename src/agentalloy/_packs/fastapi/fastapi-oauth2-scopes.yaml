@@ -1,7 +1,7 @@
 skill_id: fastapi-oauth2-scopes
 canonical_name: FastAPI OAuth2 Scopes
 description: "Protect API endpoints with fine-grained permissions using OAuth2 scopes in FastAPI: declare required scopes on routes to automatically enforce access control and return 401 or 403 errors when users lack the necessary privileges."
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
   - oauth2

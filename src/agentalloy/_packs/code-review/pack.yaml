@@ -1,5 +1,5 @@
 name: code-review
-version: 1.0.5
+version: 1.0.6
 tier: workflow
 description: |
   Code review craft — defect-spotting patterns (race conditions, off-by-one, error swallowing, async pitfalls, security smells). code-review-craft-and-feedback was auto-rejected for hard duplication with sdd-verify-and-review (review process content overlaps); code-simplification routed to needs-human after 4 bounces. The shipped skill focuses specifically on defect-spotting which is additive to the SDD verify pack.
@@ -15,7 +15,7 @@ depends_on:
 skills:
 - skill_id: code-review-debugging-and-defects
   file: code-review-debugging-and-defects.yaml
-  fragment_count: 12
+  fragment_count: 13
 - skill_id: code-simplification
   file: code-simplification.yaml
   fragment_count: 8

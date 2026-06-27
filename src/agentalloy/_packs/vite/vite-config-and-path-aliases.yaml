@@ -1,0 +1,151 @@
+skill_id: vite-config-and-path-aliases
+canonical_name: Vite — Config, Plugins & Path Aliases
+description: 'Shape vite.config.ts: register plugins like @vitejs/plugin-react, define resolve.alias shortcuts kept in sync with tsconfig paths, and order plugins with enforce.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vite
+- vite-config
+- path-alias
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## The vite.config.ts shape
+
+  ```ts
+  import { defineConfig } from 'vite';
+  import react from '@vitejs/plugin-react';
+
+  export default defineConfig({
+    plugins: [react()],
+  });
+  ```
+
+  `defineConfig` gives full type-checking and IntelliSense on the config object. `@vitejs/plugin-react` enables the JSX transform and Fast Refresh; it is the single required plugin for a React app. For conditional config, pass a function: `defineConfig(({ command, mode }) => ({ ... }))`, where `command` is `'serve'` (dev) or `'build'`.
+
+  ## Path aliases, kept in sync with TypeScript
+
+  Define the runtime alias in Vite and the matching compile-time path in `tsconfig.json` — both are required, since Vite resolves at bundle time and `tsc` resolves types:
+
+  ```ts
+  // vite.config.ts
+  import { fileURLToPath, URL } from 'node:url';
+
+  export default defineConfig({
+    plugins: [react()],
+    resolve: {
+      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    },
+  });
+  ```
+
+  ```jsonc
+  // tsconfig.json
+  {
+    "compilerOptions": {
+      "baseUrl": ".",
+      "paths": { "@/*": ["src/*"] }
+    }
+  }
+  ```
+
+  Now `import Button from '@/components/Button'` resolves in both the editor and the build. Skipping the tsconfig half compiles but shows red squiggles; skipping the Vite half type-checks but fails at runtime.
+
+  ## Plugin order and enforce
+
+  Plugins run in array order, but each plugin can opt into a phase with `enforce`:
+
+  - `enforce: 'pre'` — runs before Vite core plugins (for source transforms that must see raw code).
+  - default (no enforce) — runs with Vite core.
+  - `enforce: 'post'` — runs after, on already-transformed output.
+
+  When a transform plugin (for example SVG-as-component) must process files before `@vitejs/plugin-react`, give it `enforce: 'pre'` or place it earlier. A `pre` plugin placed after React in the array still runs first — `enforce` wins over array position. Misordered plugins are the usual cause of "JSX not transformed" or "alias not applied" errors.
+
+  ## Config file vs CLI flags
+
+  CLI flags (`--port`, `--host`, `--mode`) are convenient for one-off runs but are invisible to teammates and CI. Anything the whole project depends on — plugins, aliases, proxy, build target — belongs in `vite.config.ts` so it is versioned and applied uniformly. Vite merges config in a fixed precedence: inline CLI flags override `vite.config.ts`, which overrides defaults. Keep durable decisions in the file and reserve CLI flags for ephemeral overrides while debugging.
+
+  ## Verification
+
+  - `import '@/...'` resolves in both `vite build` and `tsc --noEmit` (no "cannot find module").
+  - The editor offers autocomplete on aliased imports (tsconfig `paths` is correct).
+  - `vite build` succeeds with `@vitejs/plugin-react` present (JSX compiles).
+  - Any pre-processing plugin that must run first carries `enforce: 'pre'` or precedes React in the array.
+fragments:
+- fragment_type: setup
+  sequence: 1
+  content: |-
+    ## The vite.config.ts shape
+
+    ```ts
+    import { defineConfig } from 'vite';
+    import react from '@vitejs/plugin-react';
+
+    export default defineConfig({
+      plugins: [react()],
+    });
+    ```
+
+    `defineConfig` gives full type-checking and IntelliSense on the config object. `@vitejs/plugin-react` enables the JSX transform and Fast Refresh; it is the single required plugin for a React app. For conditional config, pass a function: `defineConfig(({ command, mode }) => ({ ... }))`, where `command` is `'serve'` (dev) or `'build'`.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    ## Path aliases, kept in sync with TypeScript
+
+    Define the runtime alias in Vite and the matching compile-time path in `tsconfig.json` — both are required, since Vite resolves at bundle time and `tsc` resolves types:
+
+    ```ts
+    // vite.config.ts
+    import { fileURLToPath, URL } from 'node:url';
+
+    export default defineConfig({
+      plugins: [react()],
+      resolve: {
+        alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+      },
+    });
+    ```
+
+    ```jsonc
+    // tsconfig.json
+    {
+      "compilerOptions": {
+        "baseUrl": ".",
+        "paths": { "@/*": ["src/*"] }
+      }
+    }
+    ```
+
+    Now `import Button from '@/components/Button'` resolves in both the editor and the build. Skipping the tsconfig half compiles but shows red squiggles; skipping the Vite half type-checks but fails at runtime.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Plugin order and enforce
+
+    Plugins run in array order, but each plugin can opt into a phase with `enforce`:
+
+    - `enforce: 'pre'` — runs before Vite core plugins (for source transforms that must see raw code).
+    - default (no enforce) — runs with Vite core.
+    - `enforce: 'post'` — runs after, on already-transformed output.
+
+    When a transform plugin (for example SVG-as-component) must process files before `@vitejs/plugin-react`, give it `enforce: 'pre'` or place it earlier. A `pre` plugin placed after React in the array still runs first — `enforce` wins over array position. Misordered plugins are the usual cause of "JSX not transformed" or "alias not applied" errors.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Config file vs CLI flags
+
+    CLI flags (`--port`, `--host`, `--mode`) are convenient for one-off runs but are invisible to teammates and CI. Anything the whole project depends on — plugins, aliases, proxy, build target — belongs in `vite.config.ts` so it is versioned and applied uniformly. Vite merges config in a fixed precedence: inline CLI flags override `vite.config.ts`, which overrides defaults. Keep durable decisions in the file and reserve CLI flags for ephemeral overrides while debugging.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - `import '@/...'` resolves in both `vite build` and `tsc --noEmit` (no "cannot find module").
+    - The editor offers autocomplete on aliased imports (tsconfig `paths` is correct).
+    - `vite build` succeeds with `@vitejs/plugin-react` present (JSX compiles).
+    - Any pre-processing plugin that must run first carries `enforce: 'pre'` or precedes React in the array.

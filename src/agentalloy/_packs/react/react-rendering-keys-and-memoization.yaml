@@ -139,18 +139,19 @@ raw_prose: |
 fragments:
   - sequence: 1
     fragment_type: rationale
-    content: |
+    content: |2
       # React Rendering, Keys, and Memoization
 
       React's rendering model is two-phase: render means React calls your component functions to produce a JSX tree, then reconciles that tree against the previous one; commit means React applies the resulting DOM mutations. Pure render is the contract — no side effects, no DOM reads, no fetches inline — because React may render speculatively and discard the result. Side effects belong in event handlers and `useEffect`. Keys, `React.memo`, `useMemo`, and `useCallback` all exist to give the reconciler enough information to do the *right* thing during the diff: which children correspond to which previous children (keys), and which subtrees can be skipped entirely (memoization). The React Compiler (React 19+) automates most hand-rolled memoization but does not replace correct keys, and code authored to be correct without the compiler stays correct with it.
-
+  - sequence: 2
+    fragment_type: rationale
+    content: |2
       ## Render and commit
 
       Rendering is React calling your component function to get JSX. Committing is React mutating the DOM to match. The split matters because render runs may be thrown away — React may render and not commit, render twice in development (Strict Mode), or render with stale props before another render arrives. Treat render as a pure function from props and state to JSX; never mutate refs, write to module-level variables, or fire requests during render. The render-commit boundary is also where the reconciler decides whether to mount, update, or unmount each element in the tree.
 
       Renders are triggered by initial mount, by a state setter, or by a parent re-rendering. A parent re-rendering re-renders all of its children by default — unless `React.memo` (or the React Compiler) decides the child's props are referentially equal to last render and skips it.
-
-  - sequence: 2
+  - sequence: 3
     fragment_type: rationale
     content: |
       ## Reconciliation: same type at same position preserves state
@@ -163,7 +164,7 @@ fragments:
 
       Walked: a `<Form>` rendered inside a parent that toggles `showAdvanced` between two slightly different layouts will lose its draft state if the toggle changes the JSX shape such that `<Form>` ends up at a different position (sibling index changes), or if a wrapper above it changes type. Position is structural — `if (cond) <Form/> else <div><Form/></div>` puts `<Form>` at different positions and remounts it across the toggle.
 
-  - sequence: 3
+  - sequence: 4
     fragment_type: example
     content: |
       ## Keys for lists: stable, unique, derived from data identity
@@ -198,7 +199,7 @@ fragments:
 
       Index keys are acceptable only when the list is static, never reordered, never inserted-in-the-middle, and items have no per-item state. When in doubt, mint a stable id at the point you build the data, not at the point you render it.
 
-  - sequence: 4
+  - sequence: 5
     fragment_type: example
     content: |
       ## `key` as a state-reset signal
@@ -214,7 +215,7 @@ fragments:
 
       This is the documented escape hatch from "state is tied to position." Reach for it instead of plumbing a `useEffect` that resets every state slot whenever `recordId` changes — the key approach is one line, declarative, and cannot drift out of sync with the state shape. Do not abuse it: changing `key` on every render forces a remount on every render, defeating the reconciler entirely.
 
-  - sequence: 5
+  - sequence: 6
     fragment_type: example
     content: |
       ## `React.memo`: skip re-render when props are referentially equal
@@ -236,7 +237,7 @@ fragments:
 
       The catch: shallow-equality on props means **referential** equality for objects, arrays, and functions. If the parent passes `onToggle={() => ...}` inline, that's a fresh function reference every render, `Object.is` returns false, and `memo` is a no-op. Same for `style={{color: 'red'}}` and `data={[...]}` inline. Either lift these to stable values, wrap them in `useMemo`/`useCallback`, or accept that `memo` won't help here.
 
-  - sequence: 6
+  - sequence: 7
     fragment_type: rationale
     content: |
       ## React Compiler (React 19+): automatic memoization at compile time
@@ -249,7 +250,7 @@ fragments:
       - **Manual `useMemo`/`useCallback` is still useful** during the transition: explicit memoization stays, the compiler simply makes additional cases fast that weren't before.
       - **Keys are not memoization.** The compiler does not invent `key` props for you; bad keys remain a correctness bug regardless of compiler status.
 
-  - sequence: 7
+  - sequence: 8
     fragment_type: rationale
     content: |
       ## "Why did this re-render?" — the diagnostic loop
@@ -261,7 +262,7 @@ fragments:
       3. Did a context this component consumes change? `useContext` re-renders the consumer when the provider's value changes by `Object.is` — passing `value={{user, setUser}}` inline to a Provider re-renders every consumer on every parent render.
       4. Is `React.memo` in place but a no-op because of (2) or (3)? Stabilize the offending prop or accept the re-render.
 
-  - sequence: 8
+  - sequence: 9
     fragment_type: guardrail
     content: |
       ## Anti-patterns
@@ -274,7 +275,7 @@ fragments:
       - **Inline arrow function passed to a `React.memo`'d child.** `<MemoChild onClick={() => ...} />` — fresh reference each render, `memo` no-ops. Use `useCallback` or hoist the handler.
       - **Side effects during render.** Fetching, subscribing, mutating refs, writing to module state — all forbidden in render. They run unpredictably (Strict Mode double-render, speculative renders) and break the reconciler's purity assumption.
 
-  - sequence: 9
+  - sequence: 10
     fragment_type: verification
     content: |
       ## Verification
@@ -287,7 +288,7 @@ fragments:
       - [ ] For any deliberate `key={recordId}`-style state-reset, a comment on the line names the intent ("remount to clear draft state on record change"). Drive-by readers will otherwise read it as a normal list key.
       - [ ] If the React Compiler is enabled, `npx react-compiler-healthcheck` (or the project's equivalent) reports zero opt-outs in the changed files; opt-outs imply the compiler found something it could not safely memoize and the code may need adjustment.
 
-  - sequence: 10
+  - sequence: 11
     fragment_type: execution
     content: |
       ## Execution checklist

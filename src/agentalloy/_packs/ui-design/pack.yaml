@@ -1,5 +1,5 @@
 name: ui-design
-version: 1.0.6
+version: 1.0.7
 tier: domain
 description: |
   UI design + frontend craft — Tailwind v4 utility-first styling, theme + design tokens via @theme, responsive design + dark mode, state variants (hover/focus/group/peer/aria), and accessibility fundamentals (ARIA, WCAG, semantic HTML). Precision-favored domain tier; sourced from tailwindlabs/tailwindcss.com docs and MDN accessibility guides per R1 tier-3 procedure.
@@ -21,10 +21,10 @@ skills:
   fragment_count: 14
 - skill_id: ui-design-states-and-variants
   file: ui-design-states-and-variants.yaml
-  fragment_count: 9
+  fragment_count: 10
 - skill_id: ui-design-tailwind-theme-and-tokens
   file: ui-design-tailwind-theme-and-tokens.yaml
-  fragment_count: 9
+  fragment_count: 12
 - skill_id: ui-design-tailwind-utility-classes
   file: ui-design-tailwind-utility-classes.yaml
   fragment_count: 9

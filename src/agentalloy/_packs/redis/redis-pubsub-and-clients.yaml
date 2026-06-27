@@ -114,16 +114,34 @@ fragments:
     for nine main languages:
 - fragment_type: setup
   sequence: 9
-  content: "| Language | Client name | Docs | Supported |\n| :-- | :-- | :-- | :-- |\n| [Python](https://www.python.org/) | [`redis-py`](https://github.com/redis/redis-py) |[`redis-py` guide](https://redis.io/docs/latest/develop/clients/redis-py) | Yes |\n| [Python](https://www.python.org/) | [`RedisVL`](https://github.com/redis/redis-vl-python) |[RedisVL guide](https://redis.io/docs/latest/develop/ai/redisvl) | Yes \n| [C#/.NET](https://learn.microsoft.com/en-us/dotnet/csharp/) | [`StackExchange.Redis`](https://github.com/StackExchange/StackExchange.Redis) |[`StackExchange.Redis` guide](https://redis.io/docs/latest/develop/clients/dotnet) | Yes |\n| [C#/.NET](https://learn.microsoft.com/en-us/dotnet/csharp/) | [`NRedisStack`](https://github.com/redis/NRedisStack) |[`NRedisStack` guide](https://redis.io/docs/latest/develop/clients/dotnet/nredisstack) | Yes |\n| [JavaScript](https://nodejs.org/en) | [`node-redis`](https://github.com/redis/node-redis) | [`node-redis` guide](https://redis.io/docs/latest/develop/clients/nodejs) | Yes |\n| [JavaScript](https://nodejs.org/en) | [`ioredis`](https://github.com/redis/ioredis) | [`ioredis` guide](https://redis.io/docs/latest/develop/clients/ioredis) | Yes |\n| [Java](https://www.java.com/en/) | [`Jedis`](https://github.com/redis/jedis) | [`Jedis` guide](https://redis.io/docs/latest/develop/clients/jedis) |  Yes |\n| [Java](https://www.java.com/en/) | [`Lettuce`](https://github.com/redis/lettuce) | [`Lettuce` guide](https://redis.io/docs/latest/develop/clients/lettuce) | Yes |\n| [Go](https://go.dev/) | [`go-redis`](https://github.com/redis/go-redis) | [`go-redis` guide](https://redis.io/docs/latest/develop/clients/go) | Yes |\n| [PHP](https://www.php.net/)| [`Predis`](https://github.com/predis/predis) | [`Predis` guide](https://redis.io/docs/latest/develop/clients/php) | Best effort [*](#best-effort) |\n| [C](https://en.wikipedia.org/wiki/C_(programming_language)) | [`hiredis`](https://github.com/redis/hiredis) | [`hiredis` guide](https://redis.io/docs/latest/develop/clients/hiredis) | Yes |\n| [Rust](https://www.rust-lang.org/) | [`redis-rs`](https://github.com/redis-rs/redis-rs) | [`redis-rs` guide](https://redis.io/docs/latest/develop/clients/rust) | Best effort [*](#best-effort) |\n| [Ruby](https://www.ruby-lang.org/en/) | [`redis-rb`](https://github.com/redis/redis-rb) | [`redis-rb` guide](https://redis.io/docs/latest/develop/clients/ruby) | Yes |"
-- fragment_type: guardrail
+  content: |2-
+    | Language | Client name | Docs | Supported |
+    | :-- | :-- | :-- | :-- |
+    | [Python](https://www.python.org/) | [`redis-py`](https://github.com/redis/redis-py) |[`redis-py` guide](https://redis.io/docs/latest/develop/clients/redis-py) | Yes |
+    | [Python](https://www.python.org/) | [`RedisVL`](https://github.com/redis/redis-vl-python) |[RedisVL guide](https://redis.io/docs/latest/develop/ai/redisvl) | Yes 
+    | [C#/.NET](https://learn.microsoft.com/en-us/dotnet/csharp/) | [`StackExchange.Redis`](https://github.com/StackExchange/StackExchange.Redis) |[`StackExchange.Redis` guide](https://redis.io/docs/latest/develop/clients/dotnet) | Yes |
+    | [C#/.NET](https://learn.microsoft.com/en-us/dotnet/csharp/) | [`NRedisStack`](https://github.com/redis/NRedisStack) |[`NRedisStack` guide](https://redis.io/docs/latest/develop/clients/dotnet/nredisstack) | Yes |
+    | [JavaScript](https://nodejs.org/en) | [`node-redis`](https://github.com/redis/node-redis) | [`node-redis` guide](https://redis.io/docs/latest/develop/clients/nodejs) | Yes |
+    | [JavaScript](https://nodejs.org/en) | [`ioredis`](https://github.com/redis/ioredis) | [`ioredis` guide](https://redis.io/docs/latest/develop/clients/ioredis) | Yes |
+    | [Java](https://www.java.com/en/) | [`Jedis`](https://github.com/redis/jedis) | [`Jedis` guide](https://redis.io/docs/latest/develop/clients/jedis) |  Yes |
+- fragment_type: setup
   sequence: 10
+  content: |2-
+    | [Java](https://www.java.com/en/) | [`Lettuce`](https://github.com/redis/lettuce) | [`Lettuce` guide](https://redis.io/docs/latest/develop/clients/lettuce) | Yes |
+    | [Go](https://go.dev/) | [`go-redis`](https://github.com/redis/go-redis) | [`go-redis` guide](https://redis.io/docs/latest/develop/clients/go) | Yes |
+    | [PHP](https://www.php.net/)| [`Predis`](https://github.com/predis/predis) | [`Predis` guide](https://redis.io/docs/latest/develop/clients/php) | Best effort [*](#best-effort) |
+    | [C](https://en.wikipedia.org/wiki/C_(programming_language)) | [`hiredis`](https://github.com/redis/hiredis) | [`hiredis` guide](https://redis.io/docs/latest/develop/clients/hiredis) | Yes |
+    | [Rust](https://www.rust-lang.org/) | [`redis-rs`](https://github.com/redis-rs/redis-rs) | [`redis-rs` guide](https://redis.io/docs/latest/develop/clients/rust) | Best effort [*](#best-effort) |
+    | [Ruby](https://www.ruby-lang.org/en/) | [`redis-rb`](https://github.com/redis/redis-rb) | [`redis-rb` guide](https://redis.io/docs/latest/develop/clients/ruby) | Yes |
+- fragment_type: guardrail
+  sequence: 11
   content: |
     *<a name="best-effort"></a>
     Redis does not provide official support for third-party client libraries.
     However, we contribute new features, offer guidance, and collaborate with the community
     on a best-effort basis to help ensure these libraries remain reliable and up-to-date.
 - fragment_type: example
-  sequence: 11
+  sequence: 12
   content: |
     We also provide several higher-level
     [object mapping (OM)](https://redis.io/docs/latest/develop/clients/om-clients)
@@ -144,7 +162,7 @@ fragments:
     | [PHP](https://www.php.net/) | PhpRedis extension | https://github.com/phpredis/phpredis | https://github.com/phpredis/phpredis/blob/develop/README.md |
     | [Python](https://www.python.org/) | coredis | https://github.com/alisaifee/coredis | https://coredis.readthedocs.io |
 - fragment_type: setup
-  sequence: 12
+  sequence: 13
   content: |-
     ## Requirements
 

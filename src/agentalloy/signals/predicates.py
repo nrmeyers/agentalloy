@@ -462,6 +462,107 @@ def eval_file_type_active(args: dict[str, Any], ctx: PredicateContext) -> Predic
     return PredicateResult.NOT_MET
 
 
+# --- build-contract density + tag-focus (#12 / #12b) ---------------------
+
+
+def _count_task_items(content: str) -> int:
+    """Count top-level task entries under any ``## Tasks`` heading.
+
+    A task entry is a top-level (<=3 leading spaces) markdown list item — a bullet
+    (``-``/``*``/``+``) or an ordered item (``1.``/``1)``). Counting is scoped to the
+    ``## Tasks`` section (any heading level) and stops at the next heading. Returns 0
+    when there is no ``## Tasks`` section or it carries no list items.
+    """
+    item_re = re.compile(r"^ {0,3}(?:[-*+]|\d+[.)])\s+\S")
+    heading_re = re.compile(r"^#{1,6}\s")
+    count = 0
+    in_tasks = False
+    for line in content.splitlines():
+        if heading_re.match(line):
+            in_tasks = _section_present("Tasks", [line.lstrip("#").strip()])
+            continue
+        if in_tasks and item_re.match(line):
+            count += 1
+    return count
+
+
+def eval_build_contracts_cover_tasks(
+    args: dict[str, Any], ctx: PredicateContext
+) -> PredicateResult:
+    """MET when #build-contracts >= #tasks enumerated in tasks.md (floor 1).
+
+    Deterministic and embed-free. Counts top-level list items under ``## Tasks``
+    across the ``tasks`` glob, clamps the task count to a floor of 1 (so it never
+    relaxes the existing >=1-contract gate and never blocks on an unparseable
+    tasks.md), and compares that to the number of build-contract files. Returns
+    UNKNOWN when no tasks.md exists or one is unreadable (a preceding
+    artifact_exists/contains node handles the missing-file case in all_of).
+    """
+    tasks_glob = args.get("tasks", "docs/design/**/tasks.md")
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    task_files = _glob_files(ctx.project_root, tasks_glob)
+    if not task_files:
+        return PredicateResult.UNKNOWN
+    task_count = 0
+    for f in task_files:
+        content = _read_file(f)
+        if content is None:
+            return PredicateResult.UNKNOWN
+        task_count += _count_task_items(content)
+    task_count = max(1, task_count)
+    contract_count = len([p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()])
+    return PredicateResult.MET if contract_count >= task_count else PredicateResult.NOT_MET
+
+
+def _contract_domain_tags(content: str) -> list[Any] | None:
+    """Parse the ``domain_tags`` list from a contract's YAML frontmatter.
+
+    Returns the tag list (``[]`` when the field is absent or non-list), or ``None``
+    when there is no parseable frontmatter — so a malformed/headerless file is
+    skipped rather than flagged.
+    """
+    import yaml as _yaml
+
+    if not content.startswith("---"):
+        return None
+    end = content.find("---", 3)
+    if end == -1:
+        return None
+    try:
+        fm: dict[str, Any] = _yaml.safe_load(content[3:end]) or {}
+    except Exception:
+        return None
+    tags = fm.get("domain_tags")
+    return tags if isinstance(tags, list) else []
+
+
+def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """MET when every build contract carries <=2 domain_tags (one dominant surface).
+
+    Tag-focus hard gate (#12b): with the fixed per-contract retrieval budget,
+    fragments spread across many surfaces truncate and scores muddy, so each build
+    contract must center ONE dominant tech surface. NOT_MET if ANY contract has
+    more than ``max_tags`` (default 2) domain_tags. Embed-free and deterministic;
+    UNKNOWN only when no contracts exist (a preceding artifact_exists node handles
+    that in all_of).
+    """
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    max_tags = args.get("max_tags", 2)
+    files = [p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()]
+    if not files:
+        return PredicateResult.UNKNOWN
+    for f in files:
+        content = _read_file(f)
+        if content is None:
+            continue
+        tags = _contract_domain_tags(content)
+        if tags is None:
+            continue
+        if len(tags) > max_tags:
+            return PredicateResult.NOT_MET
+    return PredicateResult.MET
+
+
 PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResult]] = {
     "artifact_exists": eval_artifact_exists,
     "artifact_absent": eval_artifact_absent,
@@ -477,6 +578,8 @@ PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResu
     "contract_exists": eval_contract_exists,
     "contract_has_tags": eval_contract_has_tags,
     "file_type_active": eval_file_type_active,
+    "build_contracts_cover_tasks": eval_build_contracts_cover_tasks,
+    "build_contract_tag_focus": eval_build_contract_tag_focus,
 }
 
 

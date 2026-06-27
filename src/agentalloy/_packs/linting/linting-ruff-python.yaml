@@ -438,7 +438,9 @@ fragments:
 
         # Assume Python 3.10
         target-version = "py310"
-
+- fragment_type: execution
+  sequence: 4
+  content: |2-
         [tool.ruff.lint]
         # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
         # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
@@ -452,7 +454,9 @@ fragments:
 
         # Allow unused variables when underscore-prefixed.
         dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
-
+- fragment_type: execution
+  sequence: 5
+  content: |2-
         [tool.ruff.format]
         # Like Black, use double quotes for strings.
         quote-style = "double"
@@ -481,7 +485,7 @@ fragments:
         docstring-code-line-length = "dynamic"
         ```
 - fragment_type: execution
-  sequence: 4
+  sequence: 6
   content: |2-
         ```toml
         # Exclude a variety of commonly ignored directories.
@@ -520,7 +524,9 @@ fragments:
 
         # Assume Python 3.10
         target-version = "py310"
-
+- fragment_type: execution
+  sequence: 7
+  content: |2-
         [lint]
         # Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
         # Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
@@ -534,7 +540,9 @@ fragments:
 
         # Allow unused variables when underscore-prefixed.
         dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
-
+- fragment_type: execution
+  sequence: 8
+  content: |2-
         [format]
         # Like Black, use double quotes for strings.
         quote-style = "double"
@@ -563,7 +571,7 @@ fragments:
         docstring-code-line-length = "dynamic"
         ```
 - fragment_type: example
-  sequence: 5
+  sequence: 9
   content: |
     As an example, the following would configure Ruff to:
 
@@ -613,7 +621,7 @@ fragments:
         quote-style = "single"
         ```
 - fragment_type: example
-  sequence: 6
+  sequence: 10
   content: |
     Linter plugin configurations are expressed as subsections, e.g.:
 
@@ -639,7 +647,7 @@ fragments:
         docstring-quotes = "double"
         ```
 - fragment_type: guardrail
-  sequence: 7
+  sequence: 11
   content: |
     Ruff respects `pyproject.toml` settings, and will ignore any conflicting settings in other configuration files.
 
@@ -667,7 +675,7 @@ fragments:
 
     For the full list of supported options, run `ruff format --help`.
 - fragment_type: rationale
-  sequence: 8
+  sequence: 12
   content: |-
     ## Philosophy
 
@@ -688,7 +696,7 @@ fragments:
     which aims for "consistency, generality, readability and reducing git diffs". To give you a sense
     for the enforced code style, here's an example:
 - fragment_type: rationale
-  sequence: 9
+  sequence: 13
   content: |-
     ```python
     # Input
@@ -734,7 +742,7 @@ fragments:
     unlike Black, it _does_ support configuring the desired quote style, indent style, line endings,
     and more. (See: [_Configuration_](#configuration).)
 - fragment_type: rationale
-  sequence: 10
+  sequence: 14
   content: |-
     While the formatter is designed to be a drop-in replacement for Black, it is not intended to be
     used interchangeably with Black on an ongoing basis, as the formatter _does_ differ from

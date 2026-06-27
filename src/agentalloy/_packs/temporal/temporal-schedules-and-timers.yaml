@@ -1,7 +1,7 @@
 skill_id: temporal-schedules-and-timers
 canonical_name: Temporal Schedules, Timers, and Timeouts
 description: 'Run background jobs on a calendar or interval, pause workflows durably, and set execution limits: use Temporal schedules for recurring tasks, timers for delays, and timeouts to prevent long-running processes from hanging.'
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
 - temporal
@@ -210,6 +210,9 @@ fragments:
       in the context of the rest of the application code.
     </div>
 
+- fragment_type: example
+  sequence: 4
+  content: |
     ```python
     # ...
     async def main():
@@ -232,7 +235,7 @@ fragments:
         )
     ```
 - fragment_type: example
-  sequence: 4
+  sequence: 5
   content: |
     # workflows / timers
 
@@ -258,7 +261,7 @@ fragments:
         await asyncio.sleep(10)
     ```
 - fragment_type: example
-  sequence: 5
+  sequence: 6
   content: |-
     ## Workflow timeouts {#workflow-timeouts}
 
@@ -274,7 +277,7 @@ fragments:
     - **[Workflow Run Timeout](/encyclopedia/detecting-workflow-failures#workflow-run-timeout):** restricts the maximum amount of time that a single Workflow Run can last.
     - **[Workflow Task Timeout](/encyclopedia/detecting-workflow-failures#workflow-task-timeout):** restricts the maximum amount of time that a Worker can execute a Workflow Task.
 - fragment_type: example
-  sequence: 6
+  sequence: 7
   content: |-
     Set the timeout to either the [`start_workflow()`](https://python.temporal.io/temporalio.client.Client.html#start_workflow) or [`execute_workflow()`](https://python.temporal.io/temporalio.client.Client.html#execute_workflow) asynchronous methods.
 

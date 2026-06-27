@@ -126,13 +126,16 @@ raw_prose: |
   proxy front-loads the matching skills. Don't copy acceptance into it — the spec
   doc is acceptance's one home, no drift.
 
-  Then advance yourself — don't wait to be told. The moment the spec is written
-  and unambiguous, run `agentalloy phase set design` and carry straight on into
-  design. If anything's still unresolved — an assumption the user hasn't
-  confirmed, an acceptance criterion you can't make checkable — **stop and
-  surface it** instead of advancing; resolve it first. The phase guard refuses
-  the jump until `docs/spec/<slug>.md` exists with its required sections, so a
-  premature `phase set` just tells you what's still missing.
+  Then PRESENT the spec in full and STOP — do not advance yourself. The forward
+  jump to design is a human checkpoint: only once the user explicitly approves do
+  you run `agentalloy approve spec` (it records the approval and carries you into
+  design) — or, after approval, advance with `agentalloy phase set design`. If
+  anything's still unresolved — an assumption the user hasn't confirmed, an
+  acceptance criterion you can't make checkable — **stop and surface it** instead
+  of advancing; resolve it first. The phase guard refuses the jump until
+  `docs/spec/<slug>.md` exists with its required sections AND a human approval is
+  recorded, so a premature `phase set` or `approve` just tells you what's still
+  missing.
 
   ## Not this
 

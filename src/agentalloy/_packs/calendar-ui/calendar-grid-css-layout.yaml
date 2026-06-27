@@ -1,0 +1,179 @@
+skill_id: calendar-grid-css-layout
+canonical_name: Calendar — 7x6 CSS Grid Layout & Weekday Labels
+description: 'Lay out a month calendar with CSS grid: a seven-column track, a fixed six-row body, a weekday header row, and accessible day cells using semantic markup and grid roles instead of a table.'
+category: engineering
+skill_class: domain
+domain_tags:
+- calendar-ui
+- calendar
+- css-grid
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- domain
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Seven-column CSS grid
+
+  Model the calendar body as a grid of seven equal columns; the rows fill naturally as the cells flow in:
+
+  ```css
+  .calendar {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+  }
+  .calendar__weekday {            /* header row */
+    font-weight: 600;
+    text-align: center;
+  }
+  .calendar__cell {
+    aspect-ratio: 1;              /* square day cells */
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 4px;
+  }
+  .calendar__cell--outside { color: var(--muted); }    /* prev/next month */
+  .calendar__cell--today { outline: 2px solid var(--accent); }
+  ```
+
+  `repeat(7, 1fr)` gives seven equal columns; the seven weekday headers plus 42 day cells auto-place into rows. `aspect-ratio: 1` keeps cells square without JS.
+
+  ## Rendering the grid in React
+
+  ```tsx
+  const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function MonthGrid({ days }: { days: Day[] }) {
+    return (
+      <div className="calendar" role="grid" aria-label="Month">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="calendar__weekday" role="columnheader">{w}</div>
+        ))}
+        {days.map(({ date, inMonth }) => (
+          <div
+            key={date.toISOString()}
+            role="gridcell"
+            aria-current={isToday(date) ? 'date' : undefined}
+            className={`calendar__cell ${inMonth ? '' : 'calendar__cell--outside'}`}
+          >
+            <time dateTime={date.toISOString().slice(0, 10)}>{date.getDate()}</time>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  ```
+
+  A stable `key` (the ISO date) lets React reconcile cells efficiently as the month changes.
+
+  ## Grid div vs <table>
+
+  A `<table>` carries strong tabular semantics and rigid markup; a CSS grid of `<div>`s is more flexible for interactive calendars (drag-select, popovers, variable cell content) and easier to style responsively. The trade-off is that you must restore the semantics a table gives for free:
+
+  - Add `role="grid"`, `role="columnheader"`, and `role="gridcell"` so screen readers announce structure.
+  - Mark today with `aria-current="date"`, not color alone (color is invisible to assistive tech and fails contrast-only users).
+  - Wrap the day number in `<time dateTime="YYYY-MM-DD">` so the date is machine-readable.
+  - Keep keyboard focus order following reading order, which it does when DOM order is Sun->Sat by row.
+
+  ## Why CSS grid over float layouts
+
+  CSS grid expresses a calendar's two-dimensional structure directly: seven columns, rows of weeks. `repeat(7, 1fr)` guarantees equal columns that share width exactly, with `gap` for gutters — no margin math, no clearfix, no percentage-rounding drift that float and inline-block layouts suffer. Because placement is automatic, you render a flat list of 49 elements (7 headers + 42 cells) and the grid arranges them; there is no per-week wrapper. This keeps the DOM flat, the markup minimal, and the layout robust as cell content grows.
+
+  ## Verification
+
+  - The grid shows 7 columns and 6 week rows at a fixed height across all months.
+  - Weekday headers align above their columns; cells read Sun->Sat per row.
+  - Outside-month cells are visually muted; today is marked with `aria-current="date"` (not color only).
+  - Each cell's date is exposed via `<time dateTime>`; a screen reader announces grid, columnheader, and gridcell roles.
+  - Resizing the viewport keeps cells square (`aspect-ratio`) without horizontal scroll.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Seven-column CSS grid
+
+    Model the calendar body as a grid of seven equal columns; the rows fill naturally as the cells flow in:
+
+    ```css
+    .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+    }
+    .calendar__weekday {            /* header row */
+      font-weight: 600;
+      text-align: center;
+    }
+    .calendar__cell {
+      aspect-ratio: 1;              /* square day cells */
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      padding: 4px;
+    }
+    .calendar__cell--outside { color: var(--muted); }    /* prev/next month */
+    .calendar__cell--today { outline: 2px solid var(--accent); }
+    ```
+
+    `repeat(7, 1fr)` gives seven equal columns; the seven weekday headers plus 42 day cells auto-place into rows. `aspect-ratio: 1` keeps cells square without JS.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Rendering the grid in React
+
+    ```tsx
+    const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    function MonthGrid({ days }: { days: Day[] }) {
+      return (
+        <div className="calendar" role="grid" aria-label="Month">
+          {WEEKDAYS.map((w) => (
+            <div key={w} className="calendar__weekday" role="columnheader">{w}</div>
+          ))}
+          {days.map(({ date, inMonth }) => (
+            <div
+              key={date.toISOString()}
+              role="gridcell"
+              aria-current={isToday(date) ? 'date' : undefined}
+              className={`calendar__cell ${inMonth ? '' : 'calendar__cell--outside'}`}
+            >
+              <time dateTime={date.toISOString().slice(0, 10)}>{date.getDate()}</time>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    ```
+
+    A stable `key` (the ISO date) lets React reconcile cells efficiently as the month changes.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Grid div vs <table>
+
+    A `<table>` carries strong tabular semantics and rigid markup; a CSS grid of `<div>`s is more flexible for interactive calendars (drag-select, popovers, variable cell content) and easier to style responsively. The trade-off is that you must restore the semantics a table gives for free:
+
+    - Add `role="grid"`, `role="columnheader"`, and `role="gridcell"` so screen readers announce structure.
+    - Mark today with `aria-current="date"`, not color alone (color is invisible to assistive tech and fails contrast-only users).
+    - Wrap the day number in `<time dateTime="YYYY-MM-DD">` so the date is machine-readable.
+    - Keep keyboard focus order following reading order, which it does when DOM order is Sun->Sat by row.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why CSS grid over float layouts
+
+    CSS grid expresses a calendar's two-dimensional structure directly: seven columns, rows of weeks. `repeat(7, 1fr)` guarantees equal columns that share width exactly, with `gap` for gutters — no margin math, no clearfix, no percentage-rounding drift that float and inline-block layouts suffer. Because placement is automatic, you render a flat list of 49 elements (7 headers + 42 cells) and the grid arranges them; there is no per-week wrapper. This keeps the DOM flat, the markup minimal, and the layout robust as cell content grows.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - The grid shows 7 columns and 6 week rows at a fixed height across all months.
+    - Weekday headers align above their columns; cells read Sun->Sat per row.
+    - Outside-month cells are visually muted; today is marked with `aria-current="date"` (not color only).
+    - Each cell's date is exposed via `<time dateTime>`; a screen reader announces grid, columnheader, and gridcell roles.
+    - Resizing the viewport keeps cells square (`aspect-ratio`) without horizontal scroll.

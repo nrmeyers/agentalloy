@@ -1,7 +1,7 @@
 skill_id: snowflake-tasks-and-automation
 canonical_name: Snowflake Tasks and Scheduled Automation
 description: "Automate data pipelines and scheduled SQL jobs in Snowflake: create tasks that run on a cron schedule or after other tasks finish, build dependency chains with DAGs, and manage compute resources for reliable background processing."
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
   - snowflake
@@ -350,6 +350,9 @@ fragments:
       | Category | Serverless tasks | User-managed tasks | Notes |
       | --- | --- | --- | --- |
       | Number, duration, and predictability of concurrent task workloads | Recommended for under-utilized warehouses with too few tasks running concurrently, or completing quickly.  Tasks with relatively stable runs are good candidates for serverless tasks. | Recommended for fully utilized warehouses with multiple concurrent tasks.  Also recommended for unpredictable loads on compute resources. [Multi-cluster warehouses](warehouses-multicluster.md) with [auto-suspend and auto-resume](warehouses-overview.md) enabled could help moderate your credit consumption. | For serverless tasks, Snowflake bills your account based on the actual compute resource usage.  For user-managed tasks, billing for warehouses is based on warehouse size, with a 60-second minimum each time the warehouse is resumed. |
+  - fragment_type: example
+    sequence: 6
+    content: |
       | Schedule interval | Recommended when adherence to the schedule interval is highly important.  If a run of a standalone task or scheduled task graph exceeds the interval, Snowflake increases the size of the compute resources. | Recommended when adherence to the schedule interval is less important. | *Schedule interval* refers to the interval of time between scheduled runs of a standalone task or the root task in a task graph.  Increasing the compute resources can reduce the runtime of some, but not all, SQL code. It doesn’t ensure a task run is completed within the batch window. |
 
       The maximum size for a serverless task run is equivalent to an XXLARGE warehouse.

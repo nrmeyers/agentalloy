@@ -1,0 +1,171 @@
+skill_id: calendar-month-navigation
+canonical_name: Calendar — Previous/Next Month Navigation
+description: 'Move between months with native Date and controlled React state: a {year, month} cursor, prev/next handlers that roll over year boundaries, jump-to-today, and rebuilding the grid on change.'
+category: engineering
+skill_class: domain
+domain_tags:
+- calendar-ui
+- calendar
+- navigation
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- domain
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## A month cursor with prev/next
+
+  Hold the visible month as a `{year, month}` cursor and let the Date constructor handle rollover:
+
+  ```tsx
+  function useMonthCursor(initial = new Date()) {
+    const [cursor, setCursor] = useState({
+      year: initial.getFullYear(),
+      month: initial.getMonth(),
+    });
+    const shift = (delta: number) =>
+      setCursor((c) => {
+        const d = new Date(c.year, c.month + delta, 1);
+        return { year: d.getFullYear(), month: d.getMonth() };
+      });
+    return {
+      cursor,
+      prev: () => shift(-1),
+      next: () => shift(1),
+      today: () => setCursor({ year: new Date().getFullYear(), month: new Date().getMonth() }),
+    };
+  }
+  ```
+
+  Passing `month + delta` to `new Date` normalizes `-1` to December of the prior year and `12` to January of the next — no manual wraparound.
+
+  ## Wiring controls and rebuilding the grid
+
+  ```tsx
+  function Calendar() {
+    const { cursor, prev, next, today } = useMonthCursor();
+    const days = useMemo(
+      () => buildMonthGrid(cursor.year, cursor.month),
+      [cursor.year, cursor.month],
+    );
+    const label = new Date(cursor.year, cursor.month).toLocaleString(undefined, {
+      month: 'long', year: 'numeric',
+    });
+    return (
+      <div>
+        <header>
+          <button onClick={prev} aria-label="Previous month">&lsaquo;</button>
+          <h2>{label}</h2>
+          <button onClick={next} aria-label="Next month">&rsaquo;</button>
+          <button onClick={today}>Today</button>
+        </header>
+        <MonthGrid days={days} />
+      </div>
+    );
+  }
+  ```
+
+  `toLocaleString` formats the heading in the user's locale for free.
+
+  ## Derive the grid, don't store it
+
+  The 42-cell grid is a pure function of `{year, month}`, so it is derived state — compute it with `useMemo` keyed on the cursor rather than holding a second `useState` for the days array. Storing the grid separately invites the two values to drift: a cursor update that forgets to rebuild the grid leaves a stale view. Keeping a single source of truth (the cursor) and deriving everything else (grid, heading label) from it removes a whole class of synchronization bugs and re-renders only when the month actually changes.
+
+  ## Year-boundary and indexing gotchas
+
+  - **Let the constructor wrap.** Don't hand-roll `if (month < 0) { month = 11; year-- }`. `new Date(year, month + delta, 1)` already rolls the year correctly — re-read `getFullYear()`/`getMonth()` off the result.
+  - **Always reconstruct from day 1.** Shifting from a 31-day month into a 30-day month while keeping the day-of-month can skip a month (Jan 31 + 1 month -> Mar 3). Navigation should pin day `1`; only the selected date tracks the actual day.
+  - **Recompute today on click**, not once at mount, so a long-lived tab that crosses midnight still jumps to the correct day.
+
+  ## Verification
+
+  - Next from December rolls to January of the following year; Prev from January rolls back to December.
+  - The heading label and grid always reflect the same `{year, month}` (no drift).
+  - "Today" returns to the current month regardless of how far the user navigated.
+  - The grid is rebuilt only when year or month changes (memoized on the cursor).
+  - Rapidly paging never lands on a skipped month (day pinned to 1).
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## A month cursor with prev/next
+
+    Hold the visible month as a `{year, month}` cursor and let the Date constructor handle rollover:
+
+    ```tsx
+    function useMonthCursor(initial = new Date()) {
+      const [cursor, setCursor] = useState({
+        year: initial.getFullYear(),
+        month: initial.getMonth(),
+      });
+      const shift = (delta: number) =>
+        setCursor((c) => {
+          const d = new Date(c.year, c.month + delta, 1);
+          return { year: d.getFullYear(), month: d.getMonth() };
+        });
+      return {
+        cursor,
+        prev: () => shift(-1),
+        next: () => shift(1),
+        today: () => setCursor({ year: new Date().getFullYear(), month: new Date().getMonth() }),
+      };
+    }
+    ```
+
+    Passing `month + delta` to `new Date` normalizes `-1` to December of the prior year and `12` to January of the next — no manual wraparound.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Wiring controls and rebuilding the grid
+
+    ```tsx
+    function Calendar() {
+      const { cursor, prev, next, today } = useMonthCursor();
+      const days = useMemo(
+        () => buildMonthGrid(cursor.year, cursor.month),
+        [cursor.year, cursor.month],
+      );
+      const label = new Date(cursor.year, cursor.month).toLocaleString(undefined, {
+        month: 'long', year: 'numeric',
+      });
+      return (
+        <div>
+          <header>
+            <button onClick={prev} aria-label="Previous month">&lsaquo;</button>
+            <h2>{label}</h2>
+            <button onClick={next} aria-label="Next month">&rsaquo;</button>
+            <button onClick={today}>Today</button>
+          </header>
+          <MonthGrid days={days} />
+        </div>
+      );
+    }
+    ```
+
+    `toLocaleString` formats the heading in the user's locale for free.
+- fragment_type: rationale
+  sequence: 3
+  content: |-
+    ## Derive the grid, don't store it
+
+    The 42-cell grid is a pure function of `{year, month}`, so it is derived state — compute it with `useMemo` keyed on the cursor rather than holding a second `useState` for the days array. Storing the grid separately invites the two values to drift: a cursor update that forgets to rebuild the grid leaves a stale view. Keeping a single source of truth (the cursor) and deriving everything else (grid, heading label) from it removes a whole class of synchronization bugs and re-renders only when the month actually changes.
+- fragment_type: guardrail
+  sequence: 4
+  content: |-
+    ## Year-boundary and indexing gotchas
+
+    - **Let the constructor wrap.** Don't hand-roll `if (month < 0) { month = 11; year-- }`. `new Date(year, month + delta, 1)` already rolls the year correctly — re-read `getFullYear()`/`getMonth()` off the result.
+    - **Always reconstruct from day 1.** Shifting from a 31-day month into a 30-day month while keeping the day-of-month can skip a month (Jan 31 + 1 month -> Mar 3). Navigation should pin day `1`; only the selected date tracks the actual day.
+    - **Recompute today on click**, not once at mount, so a long-lived tab that crosses midnight still jumps to the correct day.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - Next from December rolls to January of the following year; Prev from January rolls back to December.
+    - The heading label and grid always reflect the same `{year, month}` (no drift).
+    - "Today" returns to the current month regardless of how far the user navigated.
+    - The grid is rebuilt only when year or month changes (memoized on the cursor).
+    - Rapidly paging never lands on a skipped month (day pinned to 1).

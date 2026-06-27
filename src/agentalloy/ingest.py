@@ -54,7 +54,11 @@ _VALID_SYSTEM_CATEGORIES = frozenset(
     {"governance", "operational", "tooling", "safety", "quality", "observability"}
 )
 _VALID_DOMAIN_CATEGORIES = frozenset(
-    {"engineering", "ops", "review", "design", "tooling", "quality"}
+    # "benchmark" is the reserved benchmark-pack category (plan #14 Option B):
+    # the five eval/benchmark packs are re-categorized rather than deleted so
+    # gold_hit stays 18/18, and retrieval.domain._PRODUCT_CATEGORIES excludes it
+    # (the E6 pool-gate keeps benchmark packs out of production retrieval).
+    {"engineering", "ops", "review", "design", "tooling", "quality", "benchmark"}
 )
 _VALID_FRAGMENT_TYPES = frozenset(
     {"setup", "execution", "verification", "example", "guardrail", "rationale"}

@@ -1,7 +1,7 @@
 skill_id: temporal-activity-basics
 canonical_name: Temporal Activity Basics
 description: "Run background jobs, data pipelines, and long-running tasks with Temporal: define activities as Python functions decorated with @activity.defn to handle side effects, automatic retries, and progress heartbeats orchestrated by workflows."
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
   - temporal
@@ -323,6 +323,9 @@ fragments:
       Therefore, be mindful of the amount of data you transfer through Activity invocation parameters or Return Values.
       Otherwise, no additional limitations exist on Activity implementations.
 
+  - fragment_type: execution
+    sequence: 8
+    content: |
       To spawn an Activity Execution, use the
       [`execute_activity()`](https://python.temporal.io/temporalio.workflow.html#execute_activity) operation from within your
       Workflow Definition.
@@ -336,7 +339,7 @@ fragments:
       A single argument to the Activity is positional. Multiple arguments are not supported in the type-safe form of
       `start_activity()` or `execute_activity()` and must be supplied by the `args` keyword argument.
   - fragment_type: example
-    sequence: 8
+    sequence: 9
     content: |
       ```python
       from temporalio import workflow
@@ -356,7 +359,7 @@ fragments:
               )
       ```
   - fragment_type: execution
-    sequence: 9
+    sequence: 10
     content: |
       Activity Execution semantics rely on several parameters. The only required value that needs to be set is either a
       [Schedule-To-Close Timeout](/encyclopedia/detecting-activity-failures#schedule-to-close-timeout) or a
@@ -371,7 +374,7 @@ fragments:
       - schedule_to_start_timeout
       - start_to_close_timeout
   - fragment_type: example
-    sequence: 10
+    sequence: 11
     content: |
       ```python
       # ...
@@ -385,7 +388,7 @@ fragments:
               )
       ```
   - fragment_type: execution
-    sequence: 11
+    sequence: 12
     content: |
       The call to spawn an [Activity Execution](/activity-execution) generates the
       [ScheduleActivityTask](/references/commands#scheduleactivitytask). This results in the set of three
@@ -403,6 +406,9 @@ fragments:
       Therefore, be mindful of the amount of data you transfer through Activity invocation parameters or Return Values.
       Otherwise, no additional limitations exist on Activity implementations.
 
+  - fragment_type: execution
+    sequence: 13
+    content: |
       To spawn an Activity Execution, use the
       [`execute_activity()`](https://python.temporal.io/temporalio.workflow.html#execute_activity) operation from within your
       Workflow Definition.

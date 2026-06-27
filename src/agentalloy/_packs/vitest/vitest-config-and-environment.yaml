@@ -1,0 +1,122 @@
+skill_id: vitest-config-and-environment
+canonical_name: Vitest — Config & Test Environment
+description: 'Configure Vitest for a React + TS project: reuse the Vite pipeline, pick the jsdom environment, enable globals, and register setupFiles for jest-dom matchers.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vitest
+- test-config
+- jsdom
+always_apply: false
+phase_scope:
+- build
+- qa
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  # Vitest — Config & Test Environment
+
+  ## Install
+
+  ```bash
+  npm install -D vitest jsdom @testing-library/react @testing-library/user-event @testing-library/jest-dom
+  ```
+
+  Vitest is the test runner; `jsdom` provides a browser-like DOM so React can render headlessly; the Testing Library packages drive and query components. Install all as devDependencies — they never ship to production.
+
+  ## Configure with the Vite pipeline
+
+  Add a `test` block to `vite.config.ts` (or a dedicated `vitest.config.ts`) — Vitest reuses your Vite resolve, alias, and plugin setup automatically:
+
+  ```ts
+  /// <reference types="vitest/config" />
+  import { defineConfig } from 'vite';
+  import react from '@vitejs/plugin-react';
+
+  export default defineConfig({
+    plugins: [react()],
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: './src/test/setup.ts',
+    },
+  });
+  ```
+
+  ```ts
+  // src/test/setup.ts
+  import '@testing-library/jest-dom/vitest';
+  ```
+
+  `environment: 'jsdom'` gives `document`/`window`; `globals: true` exposes `describe`/`it`/`expect` without imports; `setupFiles` runs once before the suite to register `toBeInTheDocument` and friends.
+
+  ## Why Vitest reuses the Vite pipeline
+
+  Because Vitest transforms test files through the same Vite config as your app, there is no separate Babel or ts-jest toolchain to configure or keep in sync. Path aliases (`@/`), the JSX transform, TypeScript, and plugins all behave identically in tests and in the app, so "works in the app, fails only in tests" transform mismatches disappear. Vitest also shares Vite's esbuild speed and on-demand transforms, so the watch loop is near-instant. With `globals: true` its API is Jest-compatible, making migration from Jest mostly mechanical.
+
+  ## Verification
+
+  - `npx vitest run` discovers `*.test.ts(x)` / `*.spec.ts(x)` files and executes them.
+  - A test can `render(<App/>)` without "document is not defined" (jsdom active).
+  - `expect(el).toBeInTheDocument()` works (jest-dom setupFile loaded).
+  - `describe`/`it`/`expect` are usable without imports (`globals: true`), typed via `vitest/config` or `types: ["vitest/globals"]` in tsconfig.
+  - Aliased imports (`@/...`) resolve in tests exactly as in the app.
+fragments:
+- fragment_type: setup
+  sequence: 1
+  content: |-
+    # Vitest — Config & Test Environment
+
+    ## Install
+
+    ```bash
+    npm install -D vitest jsdom @testing-library/react @testing-library/user-event @testing-library/jest-dom
+    ```
+
+    Vitest is the test runner; `jsdom` provides a browser-like DOM so React can render headlessly; the Testing Library packages drive and query components. Install all as devDependencies — they never ship to production.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    ## Configure with the Vite pipeline
+
+    Add a `test` block to `vite.config.ts` (or a dedicated `vitest.config.ts`) — Vitest reuses your Vite resolve, alias, and plugin setup automatically:
+
+    ```ts
+    /// <reference types="vitest/config" />
+    import { defineConfig } from 'vite';
+    import react from '@vitejs/plugin-react';
+
+    export default defineConfig({
+      plugins: [react()],
+      test: {
+        environment: 'jsdom',
+        globals: true,
+        setupFiles: './src/test/setup.ts',
+      },
+    });
+    ```
+
+    ```ts
+    // src/test/setup.ts
+    import '@testing-library/jest-dom/vitest';
+    ```
+
+    `environment: 'jsdom'` gives `document`/`window`; `globals: true` exposes `describe`/`it`/`expect` without imports; `setupFiles` runs once before the suite to register `toBeInTheDocument` and friends.
+- fragment_type: rationale
+  sequence: 3
+  content: |-
+    ## Why Vitest reuses the Vite pipeline
+
+    Because Vitest transforms test files through the same Vite config as your app, there is no separate Babel or ts-jest toolchain to configure or keep in sync. Path aliases (`@/`), the JSX transform, TypeScript, and plugins all behave identically in tests and in the app, so "works in the app, fails only in tests" transform mismatches disappear. Vitest also shares Vite's esbuild speed and on-demand transforms, so the watch loop is near-instant. With `globals: true` its API is Jest-compatible, making migration from Jest mostly mechanical.
+- fragment_type: verification
+  sequence: 4
+  content: |-
+    ## Verification
+
+    - `npx vitest run` discovers `*.test.ts(x)` / `*.spec.ts(x)` files and executes them.
+    - A test can `render(<App/>)` without "document is not defined" (jsdom active).
+    - `expect(el).toBeInTheDocument()` works (jest-dom setupFile loaded).
+    - `describe`/`it`/`expect` are usable without imports (`globals: true`), typed via `vitest/config` or `types: ["vitest/globals"]` in tsconfig.
+    - Aliased imports (`@/...`) resolve in tests exactly as in the app.

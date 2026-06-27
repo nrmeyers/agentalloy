@@ -405,7 +405,7 @@ fragments:
       **When NOT to use:** Don't document obvious code. Don't add comments that restate what the code already says. Don't write docs for throwaway prototypes.
   - fragment_type: rationale
     sequence: 3
-    content: |
+    content: |2
       ## Architecture Decision Records (ADRs)
 
       ADRs capture the reasoning behind significant technical decisions. They're the highest-value documentation you can write.
@@ -424,6 +424,9 @@ fragments:
       Store ADRs in `docs/decisions/` with sequential numbering:
 
       ```markdown
+  - fragment_type: rationale
+    sequence: 4
+    content: |2
       # ADR-001: Use PostgreSQL for primary database
 
       ## Status
@@ -466,7 +469,7 @@ fragments:
       - Hosting on managed service (Supabase, Neon, or RDS)
       ```
   - fragment_type: execution
-    sequence: 4
+    sequence: 5
     content: |
       ### ADR Lifecycle
 
@@ -477,7 +480,7 @@ fragments:
       - **Don't delete old ADRs.** They capture historical context.
       - When a decision changes, write a new ADR that references and supersedes the old one.
   - fragment_type: execution
-    sequence: 5
+    sequence: 6
     content: |
       ## Inline Documentation
 
@@ -499,7 +502,7 @@ fragments:
       }
       ```
   - fragment_type: execution
-    sequence: 6
+    sequence: 7
     content: |
       ### When NOT to Comment
 
@@ -516,7 +519,7 @@ fragments:
       // const oldImplementation = () => { ... }  ← Delete it, git has history
       ```
   - fragment_type: example
-    sequence: 7
+    sequence: 8
     content: |
       ### Document Known Gotchas
 
@@ -533,7 +536,7 @@ fragments:
       }
       ```
   - fragment_type: example
-    sequence: 8
+    sequence: 9
     content: |
       ## API Documentation
 
@@ -559,7 +562,7 @@ fragments:
       }
       ```
   - fragment_type: example
-    sequence: 9
+    sequence: 10
     content: |
       ### OpenAPI / Swagger for REST APIs
 
@@ -585,7 +588,7 @@ fragments:
                 description: Validation error
       ```
   - fragment_type: example
-    sequence: 10
+    sequence: 11
     content: |
       ## README Structure
 
@@ -618,7 +621,7 @@ fragments:
       How to contribute, coding standards, PR process.
       ```
   - fragment_type: example
-    sequence: 11
+    sequence: 12
     content: |
       ## Changelog Maintenance
 
@@ -639,7 +642,7 @@ fragments:
       - Task list now loads 50 items per page (was 20) for better UX (#126)
       ```
   - fragment_type: rationale
-    sequence: 12
+    sequence: 13
     content: |
       ## Documentation for Agents
 
@@ -660,7 +663,7 @@ fragments:
       | "ADRs are overhead" | A 10-minute ADR prevents a 2-hour debate about the same decision six months later. |
       | "Comments get outdated" | Comments on *why* are stable. Comments on *what* get outdated — that's why you only write the former. |
   - fragment_type: guardrail
-    sequence: 13
+    sequence: 14
     content: |
       ## Red Flags
 
@@ -672,7 +675,7 @@ fragments:
       - No ADRs in a project with significant architectural choices
       - Documentation that restates the code instead of explaining intent
   - fragment_type: verification
-    sequence: 14
+    sequence: 15
     content: |
       ## Verification
 
@@ -685,7 +688,7 @@ fragments:
       - [ ] No commented-out code remains
       - [ ] Rules files (CLAUDE.md etc.) are current and accurate
   - fragment_type: rationale
-    sequence: 15
+    sequence: 16
     content: |
       ## ADR core rule (one sentence)
 
@@ -702,7 +705,7 @@ fragments:
 
       Skip ADRs for routine decisions documented elsewhere: dependency upgrades (commit history), small refactors (the diff), feature implementations (PR description).
   - fragment_type: execution
-    sequence: 16
+    sequence: 17
     content: |
       ## The Nygard standard ADR shape
 
@@ -720,7 +723,7 @@ fragments:
 
       Tools like `adr-tools` (`adr new`, `adr supersede`) automate the numbering and cross-linking.
   - fragment_type: execution
-    sequence: 17
+    sequence: 18
     content: |
       ## Immutable after acceptance — supersede, don't edit
 
@@ -736,7 +739,7 @@ fragments:
 
       An ADR is one to two pages. If it is longer, it is probably an RFC or a design document. The ADR captures the decision crisply; the design doc explores the design space. ADRs do not need long preambles, implementation details, or marketing language.
   - fragment_type: guardrail
-    sequence: 18
+    sequence: 19
     content: |
       ## ADR-specific anti-patterns
 
@@ -753,7 +756,7 @@ fragments:
 
       Some teams add an `adr-link` lint that flags PRs touching files marked as covered by an ADR — forcing the author to update or supersede the ADR rather than silently changing the underlying decision.
   - fragment_type: verification
-    sequence: 19
+    sequence: 20
     content: |
       ## ADR verification checklist (Nygard discipline)
 

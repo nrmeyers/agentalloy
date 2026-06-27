@@ -332,19 +332,70 @@ def test_design_gate_blocks_without_build_contract(tmp_path: Path):
     assert result == NOT_MET
 
 
+def _approve_design(tmp_path: Path) -> None:
+    """Record a design approval marker newer than the design docs (#10 gate)."""
+    marker = tmp_path / ".agentalloy" / "approved" / "design"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('approver: t\napproved_at: "2026-01-01T00:00:00Z"\nartifact_sha256: x\n')
+    docs = list((tmp_path / "docs" / "design").rglob("*.md"))
+    base = max((p.stat().st_mtime for p in docs), default=0.0)
+    os.utime(marker, (base + 10, base + 10))
+
+
 def test_design_gate_passes_with_build_contract(tmp_path: Path):
-    """Add one contract under .agentalloy/contracts/build/ and the same gate is MET."""
+    """One per-task build contract (≤2 tags) + a recorded approval → the gate is MET."""
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
-    _seed_design_artifacts(tmp_path)
+    _seed_design_artifacts(tmp_path)  # one task: `- t1`
     contracts = tmp_path / ".agentalloy" / "contracts" / "build"
     contracts.mkdir(parents=True)
-    (contracts / "01-task.md").write_text("## Task\n\nimplement\n", encoding="utf-8")
+    (contracts / "01-task.md").write_text(
+        "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
+        encoding="utf-8",
+    )
+    _approve_design(tmp_path)
     gate = exit_gates_for_phase("design")
     assert gate is not None
     ctx = _ctx(tmp_path, phase="design")
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == MET
+
+
+def test_design_gate_blocks_without_approval(tmp_path: Path):
+    """Three docs + a per-task contract but no approval marker → NOT_MET (#10 checkpoint)."""
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    _seed_design_artifacts(tmp_path)
+    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts.mkdir(parents=True)
+    (contracts / "01-task.md").write_text(
+        "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
+        encoding="utf-8",
+    )
+    gate = exit_gates_for_phase("design")
+    assert gate is not None
+    ctx = _ctx(tmp_path, phase="design")
+    result, _ = evaluate_node(gate, ctx, None, [0])
+    assert result == NOT_MET
+
+
+def test_design_gate_blocks_on_over_tagged_contract(tmp_path: Path):
+    """A 3-tag build contract trips the tag-focus gate even with approval recorded."""
+    from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+    _seed_design_artifacts(tmp_path)
+    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts.mkdir(parents=True)
+    (contracts / "01-task.md").write_text(
+        "---\nphase: build\ndomain_tags: [react, typescript, vite]\n---\n\n## Task\n\nx\n",
+        encoding="utf-8",
+    )
+    _approve_design(tmp_path)
+    gate = exit_gates_for_phase("design")
+    assert gate is not None
+    ctx = _ctx(tmp_path, phase="design")
+    result, _ = evaluate_node(gate, ctx, None, [0])
+    assert result == NOT_MET
 
 
 def test_artifact_completeness_advisory_populated(tmp_path: Path):
@@ -426,3 +477,56 @@ def test_decide_transition_awaiting_approval_advisory(tmp_path: Path):
     # The leaf eval attaches a present-and-STOP nudge naming `approve spec`.
     assert any("approve spec" in a for a in decision.advisories)
     assert any("STOP" in a for a in decision.advisories)
+
+
+# ---------------------------------------------------------------------------
+# build-contract density + tag-focus advisories (#12 / #12b)
+# ---------------------------------------------------------------------------
+
+
+def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None:
+    bc = tmp_path / ".agentalloy" / "contracts" / "build"
+    bc.mkdir(parents=True, exist_ok=True)
+    tag_str = "[" + ", ".join(tags) + "]"
+    (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
+
+
+def test_coverage_advisory_reports_counts(tmp_path: Path):
+    d = tmp_path / "docs" / "design" / "feat"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("# feat\n\n## Tasks\n\n- a\n- b\n- c\n")
+    _write_build_contract(tmp_path, name="01-a.md", tags=["react"])
+    spec = {
+        "build_contracts_cover_tasks": {
+            "tasks": "docs/design/**/tasks.md",
+            "contracts": ".agentalloy/contracts/build/*.md",
+        }
+    }
+    qwen_calls: list[int] = [0]
+    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    assert result == NOT_MET
+    assert evals[0].advisory is not None
+    assert "1 build contract" in evals[0].advisory
+    assert "3 task" in evals[0].advisory
+
+
+def test_tag_focus_advisory_names_offender(tmp_path: Path):
+    _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
+    _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
+    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
+    qwen_calls: list[int] = [0]
+    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    assert result == NOT_MET
+    assert evals[0].advisory is not None
+    assert "02-bad.md" in evals[0].advisory
+    assert "3 tags" in evals[0].advisory
+
+
+def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
+    _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
+    _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
+    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
+    qwen_calls: list[int] = [0]
+    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    assert result == MET
+    assert evals[0].advisory is None

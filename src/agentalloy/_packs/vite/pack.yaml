@@ -1,0 +1,31 @@
+name: vite
+version: 1.0.0
+tier: framework
+description: |
+  Vite 5/6 build tooling for React + TypeScript SPAs — scaffolding the react-ts template, the native-ESM dev server with Fast Refresh HMR, vite.config.ts plugins and path aliases, the Rollup production build with code-splitting, and import.meta.env environment handling. Precision-favored tooling; sourced from vite.dev docs per R1 tier-3 procedure.
+author: navistone
+embed_model: nomic-embed-text-v1.5
+embedding_dim: 768
+license: MIT
+homepage: https://github.com/nrmeyers/agentalloy
+always_install: false
+depends_on:
+- core
+- engineering
+- typescript
+skills:
+- skill_id: vite-react-ts-scaffolding
+  file: vite-react-ts-scaffolding.yaml
+  fragment_count: 5
+- skill_id: vite-dev-server-and-hmr
+  file: vite-dev-server-and-hmr.yaml
+  fragment_count: 5
+- skill_id: vite-config-and-path-aliases
+  file: vite-config-and-path-aliases.yaml
+  fragment_count: 5
+- skill_id: vite-build-and-preview
+  file: vite-build-and-preview.yaml
+  fragment_count: 5
+- skill_id: vite-env-vars-and-modes
+  file: vite-env-vars-and-modes.yaml
+  fragment_count: 5

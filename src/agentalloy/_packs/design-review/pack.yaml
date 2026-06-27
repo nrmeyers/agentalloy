@@ -1,5 +1,5 @@
 name: design-review
-version: 1.0.5
+version: 1.0.6
 tier: workflow
 description: |
   Design review workflow patterns — RFC + ADR document conventions, interface-contract review (Hyrum's Law, contract-first, deprecation planning), and non-functional-requirements review (security threat-model, performance targets, observability hooks, operational constraints). Precision-favored workflow tier; sourced from agent-skills/ canonical methodology per R1 internal procedure.
@@ -21,4 +21,4 @@ skills:
   fragment_count: 19
 - skill_id: design-review-rfc-and-adrs
   file: design-review-rfc-and-adrs.yaml
-  fragment_count: 19
+  fragment_count: 20

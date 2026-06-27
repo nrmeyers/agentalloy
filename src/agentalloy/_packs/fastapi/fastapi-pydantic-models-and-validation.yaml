@@ -1,7 +1,7 @@
 skill_id: fastapi-pydantic-models-and-validation
 canonical_name: FastAPI Request/Response Models with Pydantic v2 (Field, response_model, exclude_unset, Validators)
 description: 'Define API request and response shapes with Pydantic v2 in FastAPI: validate incoming JSON, enforce field constraints, filter output fields, and generate OpenAPI docs using model_config and @field_validator decorators.'
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
 - request-body-model

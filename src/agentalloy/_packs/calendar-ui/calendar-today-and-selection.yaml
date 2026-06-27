@@ -1,0 +1,145 @@
+skill_id: calendar-today-and-selection
+canonical_name: Calendar — Today Highlight & Day Selection
+description: 'Highlight the current day and track a selected date in a from-scratch calendar: a same-day comparison helper, selected-day state lifted to the parent, and roving-tabindex keyboard navigation.'
+category: engineering
+skill_class: domain
+domain_tags:
+- calendar-ui
+- calendar
+- accessibility
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- domain
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Same-day comparison and selection state
+
+  Highlighting today and tracking a selection both reduce to a same-day test — compare the three local fields, never the Date objects directly:
+
+  ```ts
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const isToday = (d: Date) => isSameDay(d, new Date());
+  ```
+
+  ```tsx
+  const [selected, setSelected] = useState<Date | null>(null);
+  ```
+
+  Lift `selected` to the calendar root so the grid, header, and any detail panel read one source of truth. `isToday` calls `new Date()` at render time, so the highlight is always current.
+
+  ## Marking today and the selected cell
+
+  ```tsx
+  <button
+    type="button"
+    role="gridcell"
+    aria-current={isToday(date) ? 'date' : undefined}
+    aria-selected={selected ? isSameDay(date, selected) : undefined}
+    tabIndex={isFocusable ? 0 : -1}
+    className={[
+      'calendar__cell',
+      isToday(date) && 'is-today',
+      selected && isSameDay(date, selected) && 'is-selected',
+    ].filter(Boolean).join(' ')}
+    onClick={() => setSelected(date)}
+  >
+    <time dateTime={date.toISOString().slice(0, 10)}>{date.getDate()}</time>
+  </button>
+  ```
+
+  Cells are real `<button>`s, so they are focusable and keyboard-activatable for free. `aria-selected` exposes the choice to assistive tech; `is-today`/`is-selected` style it.
+
+  ## Comparison and keyboard pitfalls
+
+  - **Never compare dates with `===` or `==`.** Two `Date` objects are reference-unequal even for the same instant; `+a === +b` compares timestamps but still fails when the times-of-day differ. Compare year/month/day fields for a calendar-day match.
+  - **Watch time-of-day.** A date from `new Date()` carries the current time; one from `new Date(y, m, d)` is midnight. The field-wise `isSameDay` ignores time, which is what a day grid wants.
+  - **Roving tabindex.** Give only one cell `tabIndex={0}` and the rest `-1`, then move focus with Arrow keys; otherwise a 42-cell grid needs 42 Tab presses to traverse.
+
+  ## Why lift selection and compare by field
+
+  Selection is shared across the header (showing the picked date), the grid (highlighting it), and often a sibling panel — so it belongs in the common parent, not inside a cell. Comparing by calendar fields rather than timestamp models user intent: the user picks a day, not an instant, so two dates on the same day must be equal regardless of time or how they were constructed. These two choices — one lifted state and a field-wise equality — keep "what is selected" unambiguous and make today-highlighting a pure render-time derivation rather than stored, drift-prone state.
+
+  ## Verification
+
+  - Today's cell always carries `aria-current="date"` and the `is-today` style, even across midnight.
+  - Clicking a day sets exactly one selected cell (`aria-selected="true"`); selecting another clears the previous.
+  - Dates are compared by year/month/day, never by `===` on Date objects.
+  - Day cells are focusable `<button>`s; Arrow keys move focus via roving tabindex (one cell `tabIndex=0`).
+  - Selecting an outside-month day is handled (ignored or navigates to that month), not a crash.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Same-day comparison and selection state
+
+    Highlighting today and tracking a selection both reduce to a same-day test — compare the three local fields, never the Date objects directly:
+
+    ```ts
+    const isSameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate();
+
+    const isToday = (d: Date) => isSameDay(d, new Date());
+    ```
+
+    ```tsx
+    const [selected, setSelected] = useState<Date | null>(null);
+    ```
+
+    Lift `selected` to the calendar root so the grid, header, and any detail panel read one source of truth. `isToday` calls `new Date()` at render time, so the highlight is always current.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Marking today and the selected cell
+
+    ```tsx
+    <button
+      type="button"
+      role="gridcell"
+      aria-current={isToday(date) ? 'date' : undefined}
+      aria-selected={selected ? isSameDay(date, selected) : undefined}
+      tabIndex={isFocusable ? 0 : -1}
+      className={[
+        'calendar__cell',
+        isToday(date) && 'is-today',
+        selected && isSameDay(date, selected) && 'is-selected',
+      ].filter(Boolean).join(' ')}
+      onClick={() => setSelected(date)}
+    >
+      <time dateTime={date.toISOString().slice(0, 10)}>{date.getDate()}</time>
+    </button>
+    ```
+
+    Cells are real `<button>`s, so they are focusable and keyboard-activatable for free. `aria-selected` exposes the choice to assistive tech; `is-today`/`is-selected` style it.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Comparison and keyboard pitfalls
+
+    - **Never compare dates with `===` or `==`.** Two `Date` objects are reference-unequal even for the same instant; `+a === +b` compares timestamps but still fails when the times-of-day differ. Compare year/month/day fields for a calendar-day match.
+    - **Watch time-of-day.** A date from `new Date()` carries the current time; one from `new Date(y, m, d)` is midnight. The field-wise `isSameDay` ignores time, which is what a day grid wants.
+    - **Roving tabindex.** Give only one cell `tabIndex={0}` and the rest `-1`, then move focus with Arrow keys; otherwise a 42-cell grid needs 42 Tab presses to traverse.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why lift selection and compare by field
+
+    Selection is shared across the header (showing the picked date), the grid (highlighting it), and often a sibling panel — so it belongs in the common parent, not inside a cell. Comparing by calendar fields rather than timestamp models user intent: the user picks a day, not an instant, so two dates on the same day must be equal regardless of time or how they were constructed. These two choices — one lifted state and a field-wise equality — keep "what is selected" unambiguous and make today-highlighting a pure render-time derivation rather than stored, drift-prone state.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - Today's cell always carries `aria-current="date"` and the `is-today` style, even across midnight.
+    - Clicking a day sets exactly one selected cell (`aria-selected="true"`); selecting another clears the previous.
+    - Dates are compared by year/month/day, never by `===` on Date objects.
+    - Day cells are focusable `<button>`s; Arrow keys move focus via roving tabindex (one cell `tabIndex=0`).
+    - Selecting an outside-month day is handled (ignored or navigates to that month), not a crash.

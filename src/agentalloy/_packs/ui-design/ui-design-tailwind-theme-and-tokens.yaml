@@ -469,7 +469,7 @@ fragments:
     {
 - fragment_type: example
   sequence: 8
-  content: |-
+  content: |2-
     <table>
       <thead>
         <tr>
@@ -518,6 +518,9 @@ fragments:
             Letter spacing utilities like <code>tracking-wide</code>
           </td>
         </tr>
+- fragment_type: example
+  sequence: 9
+  content: |2-
         <tr>
           <td className="whitespace-nowrap">
             <code>--leading-*</code>
@@ -550,6 +553,9 @@ fragments:
             Spacing and sizing utilities like <code>px-4</code>, <code>max-h-16</code>, and many more
           </td>
         </tr>
+- fragment_type: example
+  sequence: 10
+  content: |2-
         <tr>
           <td className="whitespace-nowrap">
             <code>--radius-*</code>
@@ -590,6 +596,9 @@ fragments:
             Blur filter utilities like <code>blur-md</code>
           </td>
         </tr>
+- fragment_type: example
+  sequence: 11
+  content: |2-
         <tr>
           <td className="whitespace-nowrap">
             <code>--perspective-*</code>
@@ -626,7 +635,7 @@ fragments:
     </table>
     }
 - fragment_type: example
-  sequence: 9
+  sequence: 12
   content: |-
     For a list of all of the default theme variables, see the [default theme variable reference](#default-theme-variable-reference).
 

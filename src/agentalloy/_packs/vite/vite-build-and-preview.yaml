@@ -1,0 +1,139 @@
+skill_id: vite-build-and-preview
+canonical_name: Vite — Production Build, Preview & Code-Splitting
+description: 'Produce and inspect the production bundle: vite build with Rollup, preview the output locally, and split code with dynamic import() and manualChunks for cacheable vendor chunks.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vite
+- build
+- code-splitting
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Build and preview
+
+  ```bash
+  npm run build     # tsc -b && vite build  ->  dist/
+  npm run preview   # serve dist/ on http://localhost:4173
+  ```
+
+  `vite build` runs a Rollup production build: tree-shaking, minification (esbuild), CSS extraction, and content-hashed filenames (`assets/index-a1b2c3.js`) for long-term caching. `vite preview` serves the built `dist/` exactly as a static host would — use it to catch base-path and asset-URL problems the dev server hides. `preview` is for local verification only; it is not a production server.
+
+  ## Code-splitting
+
+  A dynamic `import()` becomes its own chunk, loaded on demand — the idiomatic way to lazy-load a route:
+
+  ```tsx
+  import { lazy, Suspense } from 'react';
+  const Calendar = lazy(() => import('./Calendar.tsx'));
+
+  <Suspense fallback={<Spinner />}>
+    <Calendar />
+  </Suspense>;
+  ```
+
+  Group stable dependencies into a cacheable vendor chunk so app edits don't bust them:
+
+  ```ts
+  // vite.config.ts
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: { react: ['react', 'react-dom'] },
+      },
+    },
+  },
+  ```
+
+  Now `react`/`react-dom` ship as one hashed file that changes only on a React upgrade.
+
+  ## manualChunks pitfalls
+
+  - **Over-splitting.** Many tiny chunks add HTTP requests and can be slower than one mid-size chunk over HTTP/1.1. Split by stability (vendor vs app), not per-package.
+  - **Circular references.** Forcing a module into a manual chunk while its dependents land elsewhere can produce a chunk-load-order bug. Prefer grouping whole dependency subtrees.
+  - **Stale catch-alls.** A single `vendor` chunk holding everything in `node_modules` busts on any dependency change. Name the truly-stable libraries explicitly instead.
+  - Let Vite's default splitting handle the rest; reach for `manualChunks` only when bundle analysis shows a real caching win.
+
+  ## Why esbuild for dev, Rollup for prod
+
+  Vite deliberately uses two engines. In development, esbuild pre-bundles dependencies and transpiles TS/JSX — it is written in Go and is dramatically faster, and dev output quality does not matter because nothing ships. For production, Vite uses Rollup, whose mature tree-shaking, chunking, and plugin ecosystem produce smaller, better-optimized bundles than esbuild's bundler. You get fast iteration during development and high-quality, cacheable output for users, without configuring two toolchains yourself.
+
+  ## Verification
+
+  - `npm run build` produces `dist/` with content-hashed `assets/*.js` and `*.css`.
+  - `npm run preview` serves the build and the app works (routes, assets, base path).
+  - Lazy routes load as separate chunks (visible as on-demand requests in the Network tab).
+  - A vendor chunk's hash is unchanged after an app-only edit (caching works).
+  - The build fails on type errors because `tsc -b` runs before `vite build`.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Build and preview
+
+    ```bash
+    npm run build     # tsc -b && vite build  ->  dist/
+    npm run preview   # serve dist/ on http://localhost:4173
+    ```
+
+    `vite build` runs a Rollup production build: tree-shaking, minification (esbuild), CSS extraction, and content-hashed filenames (`assets/index-a1b2c3.js`) for long-term caching. `vite preview` serves the built `dist/` exactly as a static host would — use it to catch base-path and asset-URL problems the dev server hides. `preview` is for local verification only; it is not a production server.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Code-splitting
+
+    A dynamic `import()` becomes its own chunk, loaded on demand — the idiomatic way to lazy-load a route:
+
+    ```tsx
+    import { lazy, Suspense } from 'react';
+    const Calendar = lazy(() => import('./Calendar.tsx'));
+
+    <Suspense fallback={<Spinner />}>
+      <Calendar />
+    </Suspense>;
+    ```
+
+    Group stable dependencies into a cacheable vendor chunk so app edits don't bust them:
+
+    ```ts
+    // vite.config.ts
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: { react: ['react', 'react-dom'] },
+        },
+      },
+    },
+    ```
+
+    Now `react`/`react-dom` ship as one hashed file that changes only on a React upgrade.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## manualChunks pitfalls
+
+    - **Over-splitting.** Many tiny chunks add HTTP requests and can be slower than one mid-size chunk over HTTP/1.1. Split by stability (vendor vs app), not per-package.
+    - **Circular references.** Forcing a module into a manual chunk while its dependents land elsewhere can produce a chunk-load-order bug. Prefer grouping whole dependency subtrees.
+    - **Stale catch-alls.** A single `vendor` chunk holding everything in `node_modules` busts on any dependency change. Name the truly-stable libraries explicitly instead.
+    - Let Vite's default splitting handle the rest; reach for `manualChunks` only when bundle analysis shows a real caching win.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why esbuild for dev, Rollup for prod
+
+    Vite deliberately uses two engines. In development, esbuild pre-bundles dependencies and transpiles TS/JSX — it is written in Go and is dramatically faster, and dev output quality does not matter because nothing ships. For production, Vite uses Rollup, whose mature tree-shaking, chunking, and plugin ecosystem produce smaller, better-optimized bundles than esbuild's bundler. You get fast iteration during development and high-quality, cacheable output for users, without configuring two toolchains yourself.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - `npm run build` produces `dist/` with content-hashed `assets/*.js` and `*.css`.
+    - `npm run preview` serves the build and the app works (routes, assets, base path).
+    - Lazy routes load as separate chunks (visible as on-demand requests in the Network tab).
+    - A vendor chunk's hash is unchanged after an app-only edit (caching works).
+    - The build fails on type errors because `tsc -b` runs before `vite build`.

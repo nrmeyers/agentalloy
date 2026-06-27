@@ -271,7 +271,7 @@ fragments:
     > The global exception filter partially supports the `http-errors` library. Basically, any thrown exception containing the `statusCode` and `message` properties will be properly populated and sent back as a response (instead of the default `InternalServerErrorException` for unrecognized exceptions).
 - fragment_type: example
   sequence: 3
-  content: |
+  content: |2
     ```typescript
     @@filename(cats.controller)
     @Get()
@@ -290,7 +290,9 @@ fragments:
       "message": "Forbidden"
     }
     ```
-
+- fragment_type: example
+  sequence: 4
+  content: |2
     The `HttpException` constructor takes two required arguments which determine the
     response:
 
@@ -311,7 +313,7 @@ fragments:
 
     There is a **third** constructor argument (optional) - `options` - that can be used to provide an error [cause](https://nodejs.org/en/blog/release/v16.9.0/#error-cause). This `cause` object is not serialized into the response object, but it can be useful for logging purposes, providing valuable information about the inner error that caused the `HttpException` to be thrown.
 - fragment_type: example
-  sequence: 4
+  sequence: 5
   content: |
     Here's an example overriding the entire response body and providing an error cause:
 
@@ -341,7 +343,7 @@ fragments:
     }
     ```
 - fragment_type: verification
-  sequence: 5
+  sequence: 6
   content: |
     By default, the exception filter does not log built-in exceptions like `HttpException` (and any exceptions that inherit from it). When these exceptions are thrown, they won't appear in the console, as they are treated as part of the normal application flow. The same behavior applies to other built-in exceptions such as `WsException` and `RpcException`.
 
@@ -349,7 +351,7 @@ fragments:
 
     If you want to log these exceptions, you can create a custom exception filter. We'll explain how to do this in the next section.
 - fragment_type: example
-  sequence: 6
+  sequence: 7
   content: |
     ```typescript
     @@filename(forbidden.exception)
@@ -370,7 +372,7 @@ fragments:
     }
     ```
 - fragment_type: example
-  sequence: 7
+  sequence: 8
   content: |
     Nest provides a set of standard exceptions that inherit from the base `HttpException`. These are exposed from the `@nestjs/common` package, and represent many of the most common HTTP exceptions:
 
@@ -414,10 +416,10 @@ fragments:
     }
     ```
 - fragment_type: example
-  sequence: 8
+  sequence: 9
   content: Let's create an exception filter that is responsible for catching exceptions which are an instance of the `HttpException` class, and implementing custom response logic for them. To do this, we'll need to access the underlying platform `Request` and `Response` objects. We'll access the `Request` object so we can pull out the original `url` and include that in the logging information. We'll use the `Response` object to take direct control of the response that is sent, using the `response.json()` method.
 - fragment_type: example
-  sequence: 9
+  sequence: 10
   content: |-
     ```typescript
     @@filename(http-exception.filter)
@@ -463,7 +465,7 @@ fragments:
     }
     ```
 - fragment_type: example
-  sequence: 10
+  sequence: 11
   content: |-
     > All exception filters should implement the generic `ExceptionFilter<T>` interface. This requires you to provide the `catch(exception: T, host: ArgumentsHost)` method with its indicated signature. `T` indicates the type of the exception.
 

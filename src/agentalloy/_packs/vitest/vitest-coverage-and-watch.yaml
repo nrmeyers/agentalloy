@@ -1,0 +1,121 @@
+skill_id: vitest-coverage-and-watch
+canonical_name: Vitest — Coverage & Watch Mode
+description: 'Run Vitest in watch mode for the dev loop and measure coverage with the v8 provider: configure reporters and thresholds that fail CI when coverage drops below a floor.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vitest
+- coverage
+always_apply: false
+phase_scope:
+- build
+- qa
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  # Vitest — Coverage & Watch Mode
+
+  ## Run modes and coverage
+
+  ```bash
+  vitest              # watch mode (default): re-runs on file change
+  vitest run          # single pass — use in CI
+  vitest --ui         # browser UI for the run
+  vitest run --coverage
+  ```
+
+  Coverage uses the V8 provider by default (install `@vitest/coverage-v8`):
+
+  ```bash
+  npm install -D @vitest/coverage-v8
+  ```
+
+  `vitest` with no subcommand watches and re-runs only the tests affected by a change, using Vite's module graph — the fast inner loop. `vitest run` does one deterministic pass and exits with a non-zero code on failure, which is what CI needs.
+
+  ## Coverage reporters and thresholds
+
+  ```ts
+  // vite.config.ts -> test block
+  test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      include: ['src/**'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+      thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
+    },
+  },
+  ```
+
+  `reporter` controls output: `text` prints a table, `html` writes a browsable report, `lcov` feeds CI dashboards. `thresholds` makes `vitest run --coverage` exit non-zero when coverage falls below the floor, so a drop fails the build instead of sliding silently.
+
+  ## Why a watch loop plus a coverage floor
+
+  Watch mode and coverage serve two different moments. During development, `vitest` watches and re-runs only affected tests, giving sub-second feedback that keeps you in flow — fast enough to practice test-driven development. In CI, `vitest run --coverage` with thresholds turns coverage from a vanity number into a gate: it pins a minimum so new code arrives with tests and the suite can't quietly rot. Use the watch loop to write code and the threshold gate to defend it; coverage percentage is a floor to hold, not a target to chase to 100%.
+
+  ## Verification
+
+  - `vitest` (watch) re-runs only affected tests on save; `vitest run` does a single pass and exits cleanly.
+  - `vitest run --coverage` emits the configured reporters (text table, `coverage/` HTML, lcov).
+  - Coverage below a configured threshold makes the command exit non-zero (CI fails).
+  - Test files and setup are excluded from the coverage `include` set.
+  - CI runs `vitest run` (not watch) so the process terminates.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    # Vitest — Coverage & Watch Mode
+
+    ## Run modes and coverage
+
+    ```bash
+    vitest              # watch mode (default): re-runs on file change
+    vitest run          # single pass — use in CI
+    vitest --ui         # browser UI for the run
+    vitest run --coverage
+    ```
+
+    Coverage uses the V8 provider by default (install `@vitest/coverage-v8`):
+
+    ```bash
+    npm install -D @vitest/coverage-v8
+    ```
+
+    `vitest` with no subcommand watches and re-runs only the tests affected by a change, using Vite's module graph — the fast inner loop. `vitest run` does one deterministic pass and exits with a non-zero code on failure, which is what CI needs.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Coverage reporters and thresholds
+
+    ```ts
+    // vite.config.ts -> test block
+    test: {
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'html', 'lcov'],
+        include: ['src/**'],
+        exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
+        thresholds: { lines: 80, functions: 80, branches: 75, statements: 80 },
+      },
+    },
+    ```
+
+    `reporter` controls output: `text` prints a table, `html` writes a browsable report, `lcov` feeds CI dashboards. `thresholds` makes `vitest run --coverage` exit non-zero when coverage falls below the floor, so a drop fails the build instead of sliding silently.
+- fragment_type: rationale
+  sequence: 3
+  content: |-
+    ## Why a watch loop plus a coverage floor
+
+    Watch mode and coverage serve two different moments. During development, `vitest` watches and re-runs only affected tests, giving sub-second feedback that keeps you in flow — fast enough to practice test-driven development. In CI, `vitest run --coverage` with thresholds turns coverage from a vanity number into a gate: it pins a minimum so new code arrives with tests and the suite can't quietly rot. Use the watch loop to write code and the threshold gate to defend it; coverage percentage is a floor to hold, not a target to chase to 100%.
+- fragment_type: verification
+  sequence: 4
+  content: |-
+    ## Verification
+
+    - `vitest` (watch) re-runs only affected tests on save; `vitest run` does a single pass and exits cleanly.
+    - `vitest run --coverage` emits the configured reporters (text table, `coverage/` HTML, lcov).
+    - Coverage below a configured threshold makes the command exit non-zero (CI fails).
+    - Test files and setup are excluded from the coverage `include` set.
+    - CI runs `vitest run` (not watch) so the process terminates.

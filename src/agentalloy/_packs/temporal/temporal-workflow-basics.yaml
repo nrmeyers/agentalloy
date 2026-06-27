@@ -1,7 +1,7 @@
 skill_id: temporal-workflow-basics
 canonical_name: Temporal Workflow Basics
 description: 'Build resilient background jobs and long-running processes that survive server restarts: define workflows with the Temporal Python SDK to ensure deterministic execution and automatic state recovery for complex business logic.'
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
 - temporal
@@ -312,6 +312,9 @@ fragments:
     Worker creation time by customizing the runner's restrictions with
     [`with_passthrough_modules`](https://python.temporal.io/temporalio.worker.workflow_sandbox.SandboxRestrictions.html#with_passthrough_modules).
 
+- fragment_type: execution
+  sequence: 5
+  content: |
     ```python
     from temporalio import workflow
 
@@ -330,7 +333,7 @@ fragments:
             )
     ```
 - fragment_type: execution
-  sequence: 5
+  sequence: 6
   content: |
     ### Customize your Workflow Type {#workflow-type}
 
@@ -362,7 +365,7 @@ fragments:
             )
     ```
 - fragment_type: execution
-  sequence: 6
+  sequence: 7
   content: |-
     ### Develop Workflow logic {#workflow-logic-requirements}
 
@@ -392,7 +395,7 @@ fragments:
     Use [`workflow.logger`](https://python.temporal.io/temporalio.workflow.html#logger) instead of `print()` or the standard `logging` module.
     The SDK logger automatically suppresses log messages during replay to avoid duplicates:
 - fragment_type: execution
-  sequence: 7
+  sequence: 8
   content: |-
     ```python
     @workflow.defn
@@ -421,7 +424,7 @@ fragments:
 
     #### Current time
 - fragment_type: execution
-  sequence: 8
+  sequence: 9
   content: |-
     Use [`workflow.now()`](https://python.temporal.io/temporalio.workflow.html#now) instead of `datetime.now()` or `time.time()`. The SDK returns the time of the last Workflow Task, which is consistent across replays:
 

@@ -1,7 +1,7 @@
 skill_id: temporal-workers
 canonical_name: Temporal Workers
 description: "Run background jobs, data pipelines, and long-running workflows with Temporal: set up a Python worker process that polls a task queue and executes your workflow and activity code."
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
   - temporal

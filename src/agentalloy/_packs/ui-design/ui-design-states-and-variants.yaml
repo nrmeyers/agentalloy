@@ -341,7 +341,7 @@ fragments:
     Style an element when it is the first-child or last-child using the `first` and `last` variants:
 - fragment_type: execution
   sequence: 7
-  content: |-
+  content: |2-
     {
         <div className="px-4">
           <div className="mx-auto max-w-md border-x border-x-gray-200 dark:border-x-gray-800 dark:bg-gray-950/10">
@@ -368,6 +368,9 @@ fragments:
                   <p className="truncate text-sm text-gray-500 dark:text-gray-400">floyd.miles@example.com</p>
                 </div>
               </li>
+- fragment_type: execution
+  sequence: 8
+  content: |2-
               <li className="flex py-4 first:pt-0 last:pb-0">
                 <img
                   className="h-10 w-10 rounded-full"
@@ -395,7 +398,7 @@ fragments:
         </div>
       }
 - fragment_type: execution
-  sequence: 8
+  sequence: 9
   content: |-
     ```svelte
     <!-- [!code classes:first:pt-0,last:pb-0] -->
@@ -417,7 +420,7 @@ fragments:
 
     <Figure>
 - fragment_type: execution
-  sequence: 9
+  sequence: 10
   content: |-
     <Example padding={false} className="py-8">
       {

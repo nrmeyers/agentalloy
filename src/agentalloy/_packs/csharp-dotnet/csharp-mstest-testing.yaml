@@ -353,7 +353,7 @@ fragments:
     The data source must be `public static` and return `IEnumerable<object[]>`. Use `[DataRow]` for short literal tables; use `[DynamicData]` when cases are generated, loaded from a file, or large enough that inline literals harm readability.
 - sequence: 6
   fragment_type: example
-  content: |
+  content: |2
     ## Async tests and `TestContext` cancellation
 
     Async tests return `Task`. The runner awaits them:
@@ -375,7 +375,9 @@ fragments:
     ```
 
     `TestContext.CancellationTokenSource.Token` is cancelled when the test times out (`[Timeout(5000)]` or assembly-wide setting), so passing it into awaited operations lets the runner unblock a hung test instead of killing the process. The edge case to walk: a method written `[TestMethod] public Task X()` with NO `async` keyword and NO `await` compiles fine, and if it returns `Task.CompletedTask` it appears to pass instantly — but assertions inside an unawaited inner task are silently swallowed. The fix is to write `public async Task X()` and `await` the operation; the runner only reports failure for assertions that ran on the awaited path.
-
+- sequence: 7
+  fragment_type: example
+  content: |2
     Exception assertions for async code use `Assert.ThrowsExceptionAsync<T>`:
 
     ```csharp
@@ -394,7 +396,7 @@ fragments:
     ```
 
     Both APIs return the caught exception so you can assert on its message or properties.
-- sequence: 7
+- sequence: 8
   fragment_type: execution
   content: |
     ## Filtering, categories, and skipping
@@ -423,12 +425,12 @@ fragments:
 
     `[Ignore("reason")]` skips the test entirely; the reason string surfaces in the runner output so contributors know why. CI typically runs `dotnet test --filter "TestCategory!=Slow"` on PR and `dotnet test` (everything) on a scheduled job.
 - fragment_type: guardrail
-  sequence: 8
+  sequence: 9
   content: '- **`[TestMethod] public Task X()` without `async`/`await`.** The method compiles and the runner awaits the returned `Task`, but if the body never `await`s, inner exceptions on detached tasks are swallowed. Always write `public async Task X()` and `await` every awaitable operation under test. - **`Assert.IsTrue(actual == expected)` instead of `Assert.AreEqual(expected, actual)`.** `IsTrue` failures print `Assert.IsTrue failed` with no values; `AreEqual` prints both. The diff message is the entire point of the assertion library. - **`Thread.Sleep(ms)` for timing-based tests.** Sleeps make tests slow and flaky on loaded CI. Use `TaskCompletionSource<T>` to await a signal, or pass `TestContext.CancellationTokenSource.Token` into a `Task.Delay` and assert cancellation. - **Mutable static state in `[ClassInitialize]` not cleared between tests.** Tests run in undefined order within a class; one test mutating `_connection` state leaks into the next. Use `[TestInitialize]` to reset per-test state, or model the fixture as immutable. - **`[ClassInitialize]` written without `public static` or without `TestContext` parameter.** The runner silently skips the method; the class-level setup never runs. Both modifiers and the parameter are required.'
 - fragment_type: guardrail
-  sequence: 9
+  sequence: 10
   content: '- **`Assert.ThrowsException<T>` on `async` code.** It will not catch the exception because the async lambda returns a `Task` that throws on await, not synchronously. Use `Assert.ThrowsExceptionAsync<T>` with `await`. - **`[TestCategory]` strings inconsistent across the suite.** `"slow"` and `"Slow"` are different categories to the filter. Define category names as `const string` in a shared static class. - **`[Ignore]` without a reason string.** A skipped test with no reason survives indefinitely. Always write `[Ignore("reason and ticket")]`.'
-- sequence: 10
+- sequence: 11
   fragment_type: verification
   content: |
     ## Verification

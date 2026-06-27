@@ -689,7 +689,7 @@ fragments:
     > ℹ️ Note: If you change the payload, you may only change it to a `string`, a `Buffer`, a `stream`, a `ReadableStream`, a `Response`, or `null`.
 - fragment_type: execution
   sequence: 11
-  content: |-
+  content: |2-
     ### onResponse[​](#onresponse "Direct link to onResponse")
 
     ```
@@ -704,7 +704,9 @@ fragments:
     This schema shows the internal lifecycle of Fastify.
 
     The right branch of each section shows the next phase of the lifecycle. The left branch shows the corresponding error code generated if the parent throws an error. All errors are automatically handled by Fastify.
-
+- fragment_type: execution
+  sequence: 12
+  content: |2-
     ```
     Incoming Request
 
@@ -764,7 +766,9 @@ fragments:
 
                                                                                       └─▶ onResponse Hook
     ```
-
+- fragment_type: execution
+  sequence: 13
+  content: |2-
     When `handlerTimeout` is configured, a timer starts after routing. If the response is not sent within the allowed time, `request.signal` is aborted and a 503 error is sent. The timer is cleared when the response finishes or when `reply.hijack()` is called. See [`handlerTimeout`](/docs/v5.8.x/Reference/Server/.md#factory-handler-timeout).
 
     Before or during the `User Handler`, `reply.hijack()` can be called to:

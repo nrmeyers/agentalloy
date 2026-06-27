@@ -21,6 +21,8 @@ from agentalloy.signals.predicates import (
     eval_artifact_exists,
     eval_artifact_newer_than,
     eval_artifact_size_min,
+    eval_build_contract_tag_focus,
+    eval_build_contracts_cover_tasks,
     eval_contract_exists,
     eval_contract_has_tags,
     eval_file_type_active,
@@ -533,3 +535,76 @@ def test_approval_recorded_via_registry(tmp_path: Path) -> None:
     _spec_doc(tmp_path)
     ctx = _ctx(tmp_path, current_phase="spec")
     assert evaluate_predicate("approval_recorded", {"since": "docs/spec/*.md"}, ctx) == NOT_MET
+
+
+# ---------------------------------------------------------------------------
+# build_contracts_cover_tasks / build_contract_tag_focus (#12 / #12b)
+# ---------------------------------------------------------------------------
+
+
+def _write_tasks(tmp_path: Path, *, slug: str, items: int) -> None:
+    d = tmp_path / "docs" / "design" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(f"- task {i}" for i in range(items))
+    (d / "tasks.md").write_text(f"# {slug}\n\n## Tasks\n\n{body}\n")
+
+
+def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None:
+    bc = tmp_path / ".agentalloy" / "contracts" / "build"
+    bc.mkdir(parents=True, exist_ok=True)
+    tag_str = "[" + ", ".join(tags) + "]"
+    (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
+
+
+def test_cover_tasks_met(tmp_path: Path) -> None:
+    # 3 tasks, 3 build contracts → covered → MET.
+    _write_tasks(tmp_path, slug="feat", items=3)
+    for i in range(3):
+        _write_build_contract(tmp_path, name=f"0{i}-t.md", tags=["react"])
+    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == MET
+
+
+def test_cover_tasks_not_met_monolith(tmp_path: Path) -> None:
+    # 8 tasks, 1 whole-feature contract → the bug case → NOT_MET.
+    _write_tasks(tmp_path, slug="feat", items=8)
+    _write_build_contract(tmp_path, name="01-all.md", tags=["react"])
+    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == NOT_MET
+
+
+def test_cover_tasks_no_tasks_file_unknown(tmp_path: Path) -> None:
+    # No tasks.md anywhere → UNKNOWN (the preceding artifact_exists node owns this).
+    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == UNKNOWN
+
+
+def test_cover_tasks_unparseable_clamps_to_one(tmp_path: Path) -> None:
+    # `## Tasks` heading but no list items (0) → floor-clamped to 1; 1 contract → MET.
+    d = tmp_path / "docs" / "design" / "feat"
+    d.mkdir(parents=True)
+    (d / "tasks.md").write_text("# feat\n\n## Tasks\n\nprose only, no list items.\n")
+    _write_build_contract(tmp_path, name="01-t.md", tags=["react"])
+    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == MET
+
+
+def test_tag_focus_met_all_within_two(tmp_path: Path) -> None:
+    _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
+    _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
+    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == MET
+
+
+def test_tag_focus_not_met_names_offender(tmp_path: Path) -> None:
+    # A 3-tag contract violates the ≤2 rule → NOT_MET; the advisory (gates.py) names it.
+    _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
+    _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
+    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == NOT_MET
+
+
+def test_tag_focus_no_contracts_unknown(tmp_path: Path) -> None:
+    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == UNKNOWN
+
+
+def test_new_predicates_registered(tmp_path: Path) -> None:
+    _write_tasks(tmp_path, slug="feat", items=1)
+    _write_build_contract(tmp_path, name="01-t.md", tags=["react"])
+    ctx = _ctx(tmp_path)
+    assert evaluate_predicate("build_contracts_cover_tasks", {}, ctx) == MET
+    assert evaluate_predicate("build_contract_tag_focus", {}, ctx) == MET

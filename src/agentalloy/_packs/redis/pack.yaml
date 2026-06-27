@@ -1,5 +1,5 @@
 name: redis
-version: 1.0.6
+version: 1.0.7
 tier: store
 description: |
   Redis patterns — strings + key management (TTL, eviction policies, INCR/DECR atomic ops) and Pub/Sub messaging + client library wiring (connection pooling, async clients). Initial 2-skill release; hashes-and-sets, lists-and-sorted-sets, and streams skills currently in skill-source/needs-human/ pending hand-author or richer-source re-attempt (the 14B over-fragmented dense Redis command-reference pages). Sourced from redis.io/llms.txt per R1 tier-2 procedure (curated URL list, fetch indexed pages).
@@ -15,7 +15,7 @@ depends_on:
 skills:
 - skill_id: redis-pubsub-and-clients
   file: redis-pubsub-and-clients.yaml
-  fragment_count: 12
+  fragment_count: 13
 - skill_id: redis-strings-and-key-management
   file: redis-strings-and-key-management.yaml
   fragment_count: 5

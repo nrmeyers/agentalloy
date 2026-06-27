@@ -44,6 +44,24 @@ exit_gates:
     # zero contracts and build has no worklist (the gap that motivated this gate).
     - artifact_exists:
         path: .agentalloy/contracts/build/*.md
+    # §6 density floor (#12): ONE build contract PER TASK, not one whole-feature
+    # contract. Counts top-level items under `## Tasks` in tasks.md and requires at
+    # least that many build contracts. Floor-clamps to 1, so it never relaxes the
+    # artifact_exists check above and never blocks on an unparseable tasks.md.
+    - build_contracts_cover_tasks:
+        tasks: docs/design/**/tasks.md
+        contracts: .agentalloy/contracts/build/*.md
+    # Tag-focus hard gate (#12b): each build contract must center ONE dominant tech
+    # surface — ≤2 domain_tags. At the build retrieval cap a 7-surface basket
+    # starves most surfaces. NOT_MET names the offender + its tag count; --force
+    # bypasses it (no separate pre-check — the normal forward-gate carve-out).
+    - build_contract_tag_focus:
+        contracts: .agentalloy/contracts/build/*.md
+    # Human-in-the-loop checkpoint (#10): design→build requires a recorded approval.
+    # `since` = the design docs (NOT the build contracts) so editing a contract
+    # during build doesn't re-stale the approval. --force never bypasses this.
+    - approval_recorded:
+        since: docs/design/**/*.md
 signal_keywords:
   - done with design
   - ready to build
@@ -117,6 +135,11 @@ raw_prose: |
   Each task names the spec acceptance it satisfies; don't invent new acceptance
   here — that's spec's job.
 
+  A slice may span schema + API + UI, but each *task* inside it should resolve to
+  ONE dominant tech surface — don't basket many surfaces into a single task. §6
+  turns each task into a build contract whose `domain_tags` must stay narrow, so
+  decompose now with that in mind.
+
   Keep tasks small: one focused session each. If you're writing "and" in a task
   title, it's two tasks.
 
@@ -146,32 +169,54 @@ raw_prose: |
 
   ## 6. Emit one build contract per task
 
-  This is the hand-off that makes build effortless. For each task in `tasks.md`,
-  write a build contract — design is the cheap place to do this, with the whole
-  plan in front of you:
+  **MUST: emit ONE build contract per task — never one whole-feature contract.**
+  Build retrieval is budgeted to a small ~4-skill cap per contract (the `build`
+  default in `DEFAULT_K_BY_PHASE`). A single contract that carries every task's
+  tags spreads that budget across all of them, so most surfaces get **zero**
+  skills — a 7-tag contract at k≈4 front-loads two surfaces and starves five. One
+  contract per task, centered on one surface, keeps the budget on target. Design
+  is the cheap place to do it, with the whole plan in front of you:
 
       agentalloy contract init --phase build --slug <NN-task-slug>   # NN = 01, 02, … sets order
 
-  In each, fill `domain_tags` with that task's *technology surface* — the
-  concrete tech the task touches (`pytest`, `fastapi`, `duckdb`, `async`), **not**
-  process words (`build`, `coding`) — and write the `## Task` body as a
-  self-contained description of what to implement. That body becomes build's
-  retrieval prompt: the proxy composes the skills matching it and front-loads
-  them with the task, so build never has to decide what it needs. Set
+  In each, fill `domain_tags` with that task's *technology surface* — **one
+  dominant surface plus at most one adjacent**, so **MUST: ≤2 `domain_tags` per
+  contract** (`[react]`, `[fastapi, async]`, `[typescript, pure-functions]`),
+  **not** a union of every surface in the feature and **not** process words
+  (`build`, `coding`). Narrow tags are the whole point: with the fixed
+  per-contract k≈4 and the token budget, same-surface candidates let the reranker
+  separate cleanly and the right fragments reach the agent; pile on 5–7 surfaces
+  and the important fragments truncate and the scores muddy. Then write the
+  `## Task` body as a self-contained description of what to implement. That body
+  becomes build's retrieval prompt: the proxy composes the skills matching it and
+  front-loads them with the task, so build never has to decide what it needs. Set
   `scope.touches/avoids` and name the `## Test cases` (the test-plan.md cases by
   AC-N). The contracts sort by their `NN-` prefix — that's build's worklist order.
 
-  Then advance yourself — but first **verify the hand-off is complete**: every task
-  in `tasks.md` has a matching contract in `.agentalloy/contracts/build/`. The
-  moment the three design files exist *and* that's true, run
-  `agentalloy phase set build` and work the contracts top to bottom with
-  `agentalloy task next`. Don't wait to be told. If the design still has an open
+  Anti-pattern (a real calendar build that starved): one contract tagged
+  `[frontend, react, typescript, vite, calendar, css-grid, vitest]` — 7 surfaces,
+  so at k≈4 the reranker never sees same-surface candidates and most fragments
+  truncate. Pattern: split it into per-surface tasks, each ≤2 tags — the date
+  layer `[calendar]`, the scaffold `[vite, react]`, the components
+  `[react, css-grid]`, the tests `[vitest]`. Four focused contracts, four clean
+  retrievals.
+
+  Then **verify the hand-off is complete**, PRESENT it, and STOP — do not
+  advance yourself. Each task is a top-level list item under `## Tasks`; the design→build
+  gate counts those items and refuses the jump until at least that many build
+  contracts exist under `.agentalloy/contracts/build/`, each carrying ≤2
+  `domain_tags`. The forward jump is a human checkpoint: present the design and the
+  per-task contracts in full, and only once the user explicitly approves do you
+  record it with `agentalloy approve design` (it advances you into build) — or,
+  after approval, advance with `agentalloy phase set build` and work the contracts
+  top to bottom with `agentalloy task next`. If the design still has an open
   question — an approach you haven't committed to, a slice you can't yet test —
-  **stop and surface it** instead of advancing. The phase guard refuses the jump
-  until `approach.md`, `tasks.md`, and `test-plan.md` all exist with their required
-  sections **and at least one build contract exists under
-  `.agentalloy/contracts/build/`**, so a premature `phase set` just names what's
-  missing — including a forgotten contract.
+  **stop and surface it** instead of presenting it as done. The phase guard refuses
+  the jump until `approach.md`, `tasks.md`, and `test-plan.md` all exist with their
+  required sections, one build contract per task exists under
+  `.agentalloy/contracts/build/` with ≤2 tags each, AND a human approval is
+  recorded — so a premature `phase set` just names what's missing, including a
+  forgotten contract or an over-tagged one.
 
   ## Not this
 
@@ -182,3 +227,7 @@ raw_prose: |
   risk matrices the work doesn't need — the approach, the ordered slices, and
   the test cases that prove them are the whole deliverable. And designing test
   cases means writing *behaviors*, not test files — the red tests are build's.
+  And don't collapse the worklist into one all-tech contract — a single
+  `[react, typescript, fastapi, duckdb, …]` body for the whole feature is the
+  anti-pattern this phase exists to prevent: at k≈4 it front-loads two surfaces
+  and starves the rest. One single-surface contract per task, ≤2 tags, always.

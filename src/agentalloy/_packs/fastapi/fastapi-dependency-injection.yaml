@@ -1,7 +1,7 @@
 skill_id: fastapi-dependency-injection
 canonical_name: "FastAPI Dependency Injection (Depends, Sub-deps, yield Cleanup, Class Deps, Caching)"
 description: "Build APIs with FastAPI: share logic like auth, DB sessions, and query parsing across endpoints using dependency injection, manage resources with yield cleanup, cache results per request, and compose complex sub-dependencies."
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
   - depends-callable
@@ -227,12 +227,15 @@ fragments:
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
 
+  - sequence: 2
+    fragment_type: rationale
+    content: |
       ## Why dependency injection over plain helper calls
 
       Three things the DI system buys that a plain helper function does not: (1) parameter declarations on the dependency are merged into the path operation's OpenAPI schema, so a `q: str | None = None` query param declared in the dependency shows up in `/docs` for every endpoint that uses it; (2) per-request caching deduplicates work across a deep dependency graph; (3) `app.dependency_overrides` swaps the dependency at test time without monkey-patching imports. If you just call the helper inside the handler, you lose all three. Cite: fastapi.tiangolo.com/tutorial/dependencies, /tutorial/dependencies/sub-dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
 
       Keywords for retrieval: FastAPI, Depends, dependency injection, Annotated, session, sub-dependency, override, cache.
-  - sequence: 2
+  - sequence: 3
     fragment_type: example
     content: |
       ## Declaring a dependency with Annotated (preferred)
@@ -258,7 +261,7 @@ fragments:
       ```
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies, /tutorial/dependencies/classes-as-dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure). Annotated form preferred since FastAPI 0.95+ (verified 2026-05-06).
-  - sequence: 3
+  - sequence: 4
     fragment_type: example
     content: |
       ## Sub-dependencies and per-request caching
@@ -296,7 +299,7 @@ fragments:
       ```
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies/sub-dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
-  - sequence: 4
+  - sequence: 5
     fragment_type: example
     content: |
       ## yield-based dependencies for setup/teardown
@@ -325,7 +328,7 @@ fragments:
       Edge case: if the path handler raises `HTTPException`, the code after `yield` STILL runs — the exception propagates up through the exit stack, cleanup completes, and FastAPI sends the error response. But if you raise an exception AFTER `yield` in the dependency itself (in the `finally` block or after a successful yield), the response has already been sent to the client; the caller sees a 500 instead of your intended status. Do cleanup, not business-logic validation, after `yield`.
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies/dependencies-with-yield (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
-  - sequence: 5
+  - sequence: 6
     fragment_type: example
     content: |
       ## Classes as dependencies
@@ -354,7 +357,7 @@ fragments:
       Note `Depends()` with no argument — FastAPI infers the callable from the parameter's type annotation (`CommonQueryParams`). Equivalent to `Depends(CommonQueryParams)` but without the duplication.
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies/classes-as-dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
-  - sequence: 6
+  - sequence: 7
     fragment_type: execution
     content: |
       ## Path-, router-, and app-level dependencies
@@ -384,7 +387,7 @@ fragments:
       ```
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies/global-dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
-  - sequence: 7
+  - sequence: 8
     fragment_type: example
     content: |
       ## Test overrides
@@ -410,7 +413,7 @@ fragments:
       The override is keyed by the original dependency object — `app.dependency_overrides[get_db]`, not by name or path. The replacement follows the same callable rules as a normal dependency: it can be a function, a class, or a generator with `yield`, and it can declare its own sub-dependencies. Use this hook to inject a SQLite test database in place of Postgres, a deterministic clock in place of `datetime.now`, or a stub auth dependency that always returns a fixed user. Always clear overrides in teardown — pytest fixtures with `yield` plus `app.dependency_overrides.clear()` is the standard pattern.
 
       Cite: fastapi.tiangolo.com/tutorial/dependencies (verified 2026-05-06 against fixtures/upstream/registry.yaml entry fastapi via tier-3 fallback_root procedure).
-  - sequence: 8
+  - sequence: 9
     fragment_type: guardrail
     content: |
       ## Anti-patterns
@@ -421,7 +424,7 @@ fragments:
       - Raising business-logic errors after `yield` in a yield-dependency. The response has already been sent; the caller sees a 500, not the status you wanted. Validate before yield or in the handler.
       - Skipping `app.dependency_overrides` in tests — tests hit the real database, network, or auth provider, slow and flaky.
       - Module-level mutable state captured by a closure dependency — shared across requests, races under concurrency. Use `app.state` with explicit lifecycle, or per-request construction.
-  - sequence: 9
+  - sequence: 10
     fragment_type: verification
     content: |
       ## Verification

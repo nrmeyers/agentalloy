@@ -1,5 +1,5 @@
 name: linting
-version: 1.0.5
+version: 1.0.6
 tier: tooling
 description: |
   Linting and formatting toolchains across JS/TS and Python — ESLint v9 flat config (rules, plugins, scoping), Prettier configuration and options, typescript-eslint type-aware linting, and Ruff (Python linter + formatter). Precision-favored tooling tier; sourced from the canonical docs of each tool per R1 tier-3 procedure (eslint/eslint, prettier/prettier, typescript-eslint/typescript-eslint, astral-sh/ruff GitHub repos).
@@ -24,7 +24,7 @@ skills:
   fragment_count: 17
 - skill_id: linting-ruff-python
   file: linting-ruff-python.yaml
-  fragment_count: 10
+  fragment_count: 14
 - skill_id: linting-typescript-eslint
   file: linting-typescript-eslint.yaml
   fragment_count: 9

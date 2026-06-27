@@ -1,5 +1,5 @@
 name: github-actions
-version: 1.0.5
+version: 1.0.6
 tier: platform
 description: |
   GitHub Actions CI/CD patterns — workflow YAML syntax, trigger events (push/pull_request/schedule/etc.), expression language + contexts (${{ }}), reusable workflows + composite actions, and dependency caching + artifact passing. Precision-favored platform tier; sourced from github/docs GitHub repo per R1 tier-2 procedure (registry github entry, content/actions/* markdown).
@@ -15,7 +15,7 @@ depends_on:
 skills:
 - skill_id: github-actions-caching-and-artifacts
   file: github-actions-caching-and-artifacts.yaml
-  fragment_count: 6
+  fragment_count: 7
 - skill_id: github-actions-events-and-triggers
   file: github-actions-events-and-triggers.yaml
   fragment_count: 9

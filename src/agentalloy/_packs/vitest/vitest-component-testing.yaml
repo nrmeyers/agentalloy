@@ -1,0 +1,134 @@
+skill_id: vitest-component-testing
+canonical_name: Vitest — Component Testing with Testing Library
+description: 'Test React components under Vitest: render into jsdom, drive interactions with user-event, query by accessible role, and assert on visible output with async findBy queries.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vitest
+- testing
+- testing-library
+always_apply: false
+phase_scope:
+- build
+- qa
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Render and query a component
+
+  ```tsx
+  import { render, screen } from '@testing-library/react';
+  import { expect, test } from 'vitest';
+  import Calendar from './Calendar';
+
+  test('renders the current month heading', () => {
+    render(<Calendar />);
+    expect(
+      screen.getByRole('heading', { level: 2 }),
+    ).toHaveTextContent(/\w+ \d{4}/);          // e.g. "June 2026"
+  });
+  ```
+
+  `render` mounts the component into jsdom; `screen` exposes queries scoped to the document. Prefer `getByRole` — it asserts the element is reachable the way a user (and assistive tech) reaches it.
+
+  ## Drive interactions with user-event
+
+  ```tsx
+  import userEvent from '@testing-library/user-event';
+
+  test('paging to the next month updates the heading', async () => {
+    const user = userEvent.setup();
+    render(<Calendar />);
+    const before = screen.getByRole('heading', { level: 2 }).textContent;
+
+    await user.click(screen.getByRole('button', { name: /next month/i }));
+
+    expect(screen.getByRole('heading', { level: 2 }).textContent).not.toBe(before);
+  });
+  ```
+
+  `userEvent.setup()` returns a session that simulates a real user — focus, key events, pointer — which is closer to production behavior than firing raw events. Always `await` the interaction.
+
+  ## Query by role, not test id
+
+  - **Prefer `getByRole`, `getByLabelText`, `getByText`.** They tie the test to what the user perceives, so it survives refactors and doubles as an accessibility check. If `getByRole` can't find a control, the markup is probably missing a label or semantic element — fix the component, not the test.
+  - **`getByTestId` is a last resort**, for elements with no accessible name.
+  - **Use the right query verb:** `getBy*` throws when absent (asserts presence), `queryBy*` returns null (asserts absence), `findBy*` is async and retries (for content that appears after an await). Using `getBy*` for async content causes flaky "not found" failures.
+
+  ## Why user-centric queries
+
+  Tests that read internal state or reach for class names break on every refactor and prove nothing about whether the UI works. Querying by role, label, and text exercises the component through the same surface a user and a screen reader use, so a passing test is evidence the feature is actually usable, and a failing `getByRole` flags a real accessibility gap. This is why Testing Library deliberately omits APIs for inspecting component internals — the constraint pushes you toward resilient, behavior-level tests.
+
+  ## Verification
+
+  - Component tests render via `@testing-library/react` and assert on visible output, not internal state.
+  - Interactions use an awaited `userEvent.setup()` session, not bare `fireEvent`.
+  - Most queries are `getByRole`/`getByLabelText`/`getByText`; `getByTestId` is rare.
+  - Async UI is awaited with `findBy*`/`waitFor`; absence is asserted with `queryBy*`.
+  - Test names describe user behavior ("paging to the next month updates the heading").
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Render and query a component
+
+    ```tsx
+    import { render, screen } from '@testing-library/react';
+    import { expect, test } from 'vitest';
+    import Calendar from './Calendar';
+
+    test('renders the current month heading', () => {
+      render(<Calendar />);
+      expect(
+        screen.getByRole('heading', { level: 2 }),
+      ).toHaveTextContent(/\w+ \d{4}/);          // e.g. "June 2026"
+    });
+    ```
+
+    `render` mounts the component into jsdom; `screen` exposes queries scoped to the document. Prefer `getByRole` — it asserts the element is reachable the way a user (and assistive tech) reaches it.
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Drive interactions with user-event
+
+    ```tsx
+    import userEvent from '@testing-library/user-event';
+
+    test('paging to the next month updates the heading', async () => {
+      const user = userEvent.setup();
+      render(<Calendar />);
+      const before = screen.getByRole('heading', { level: 2 }).textContent;
+
+      await user.click(screen.getByRole('button', { name: /next month/i }));
+
+      expect(screen.getByRole('heading', { level: 2 }).textContent).not.toBe(before);
+    });
+    ```
+
+    `userEvent.setup()` returns a session that simulates a real user — focus, key events, pointer — which is closer to production behavior than firing raw events. Always `await` the interaction.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Query by role, not test id
+
+    - **Prefer `getByRole`, `getByLabelText`, `getByText`.** They tie the test to what the user perceives, so it survives refactors and doubles as an accessibility check. If `getByRole` can't find a control, the markup is probably missing a label or semantic element — fix the component, not the test.
+    - **`getByTestId` is a last resort**, for elements with no accessible name.
+    - **Use the right query verb:** `getBy*` throws when absent (asserts presence), `queryBy*` returns null (asserts absence), `findBy*` is async and retries (for content that appears after an await). Using `getBy*` for async content causes flaky "not found" failures.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why user-centric queries
+
+    Tests that read internal state or reach for class names break on every refactor and prove nothing about whether the UI works. Querying by role, label, and text exercises the component through the same surface a user and a screen reader use, so a passing test is evidence the feature is actually usable, and a failing `getByRole` flags a real accessibility gap. This is why Testing Library deliberately omits APIs for inspecting component internals — the constraint pushes you toward resilient, behavior-level tests.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - Component tests render via `@testing-library/react` and assert on visible output, not internal state.
+    - Interactions use an awaited `userEvent.setup()` session, not bare `fireEvent`.
+    - Most queries are `getByRole`/`getByLabelText`/`getByText`; `getByTestId` is rare.
+    - Async UI is awaited with `findBy*`/`waitFor`; absence is asserted with `queryBy*`.
+    - Test names describe user behavior ("paging to the next month updates the heading").

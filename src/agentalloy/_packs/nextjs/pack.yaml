@@ -1,5 +1,5 @@
 name: nextjs
-version: 1.0.6
+version: 1.0.7
 tier: framework
 description: |
   Next.js 16 App Router patterns — file-system routing with layouts and parallel/intercepting routes, Server Actions for mutations with revalidate, Cache Components data fetching with use cache directive, metadata/OG images via generateMetadata and file conventions, Proxy (formerly Middleware) on the edge runtime. Precision-favored framework tier; sourced from nextjs.org per R1 tier-2 procedure (registry llms_url https://nextjs.org/llms.txt; Next.js 16.2.4).
@@ -17,7 +17,7 @@ depends_on:
 skills:
 - skill_id: nextjs-app-router-routing
   file: nextjs-app-router-routing.yaml
-  fragment_count: 13
+  fragment_count: 14
 - skill_id: nextjs-server-actions-and-mutations
   file: nextjs-server-actions-and-mutations.yaml
   fragment_count: 17

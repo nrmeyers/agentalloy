@@ -1,7 +1,7 @@
 skill_id: snowflake-time-travel-and-streams
 canonical_name: Snowflake Time Travel and Streams
 description: 'Recover deleted or changed data and build audit trails in Snowflake: query historical table states within the retention window and use streams to capture row-level inserts, updates, and deletes for incremental processing.'
-category: engineering
+category: benchmark
 skill_class: domain
 domain_tags:
 - time-travel

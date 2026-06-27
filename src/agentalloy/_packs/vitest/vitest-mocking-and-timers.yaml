@@ -1,0 +1,159 @@
+skill_id: vitest-mocking-and-timers
+canonical_name: Vitest — Mocking, Spies & Fake Timers
+description: 'Isolate code under test with Vitest''s vi utilities: mock modules with vi.mock, stub functions with vi.fn/vi.spyOn, control time with fake timers, and restore mocks between tests.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vitest
+- mocking
+always_apply: false
+phase_scope:
+- build
+- qa
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  ## Mocks, spies, and module mocks
+
+  ```ts
+  import { vi, expect, test } from 'vitest';
+
+  // Replace a whole module
+  vi.mock('./api', () => ({ fetchEvents: vi.fn().mockResolvedValue([]) }));
+
+  test('spy on a method', () => {
+    const obj = { save: (x: number) => x * 2 };
+    const spy = vi.spyOn(obj, 'save');
+    obj.save(21);
+    expect(spy).toHaveBeenCalledWith(21);
+  });
+  ```
+
+  - `vi.fn()` — a standalone mock function with call tracking and `.mockReturnValue`/`.mockResolvedValue`.
+  - `vi.spyOn(obj, 'method')` — wraps a real method so you can assert on calls (and optionally `.mockImplementation` it).
+  - `vi.mock(path, factory)` — replaces a module; it is hoisted above imports, so the factory must not reference outer variables (use `vi.hoisted` if needed).
+
+  ## Fake timers
+
+  Control time deterministically instead of waiting for real delays:
+
+  ```ts
+  import { vi, expect, test, afterEach } from 'vitest';
+
+  afterEach(() => vi.useRealTimers());
+
+  test('debounced callback fires after 300ms', () => {
+    vi.useFakeTimers();
+    const cb = vi.fn();
+    const debounced = debounce(cb, 300);
+
+    debounced();
+    vi.advanceTimersByTime(299);
+    expect(cb).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(cb).toHaveBeenCalledOnce();
+  });
+  ```
+
+  `vi.useFakeTimers()` swaps `setTimeout`/`setInterval`/`Date`; `advanceTimersByTime` ticks the virtual clock so timer-based code runs synchronously. Always restore with `vi.useRealTimers()`.
+
+  ## Mock hygiene between tests
+
+  Leaked mocks make tests order-dependent and flaky. Reset state between tests:
+
+  - `vi.restoreAllMocks()` in `afterEach` (or `restoreMocks: true` in config) returns `spyOn` targets to their originals.
+  - `vi.clearAllMocks()` resets call history but keeps implementations; `vi.resetAllMocks()` also wipes implementations.
+  - Always pair `vi.useFakeTimers()` with `vi.useRealTimers()`, or later tests inherit a frozen clock.
+  - A test that mocks everything its subject touches proves only that the mocks were set up — mock the boundary (network, time), then run the real logic.
+
+  ## Why mock the boundary, not the logic
+
+  Mocking exists to make tests deterministic and fast by cutting off non-deterministic boundaries — the network, the clock, the filesystem — not to replace the code you are trying to verify. Over-mocking inverts the test: it asserts that your mock returns what you told it to, while the real branching, parsing, and state transitions go unexercised. Stub the edge (a `fetch` that resolves fixture data, a frozen clock) and let the unit's actual logic run, so the test fails when the logic regresses, which is the only failure worth catching.
+
+  ## Verification
+
+  - External boundaries (network, time) are mocked; the unit's own logic runs unmocked.
+  - `vi.spyOn` targets are restored (`restoreAllMocks` / `restoreMocks: true`) so tests don't leak.
+  - Fake-timer tests call `vi.useRealTimers()` afterward.
+  - `vi.mock` factories don't reference un-hoisted outer variables (use `vi.hoisted` if needed).
+  - Assertions check call args and counts (`toHaveBeenCalledWith`, `toHaveBeenCalledOnce`), not just that a mock exists.
+fragments:
+- fragment_type: execution
+  sequence: 1
+  content: |-
+    ## Mocks, spies, and module mocks
+
+    ```ts
+    import { vi, expect, test } from 'vitest';
+
+    // Replace a whole module
+    vi.mock('./api', () => ({ fetchEvents: vi.fn().mockResolvedValue([]) }));
+
+    test('spy on a method', () => {
+      const obj = { save: (x: number) => x * 2 };
+      const spy = vi.spyOn(obj, 'save');
+      obj.save(21);
+      expect(spy).toHaveBeenCalledWith(21);
+    });
+    ```
+
+    - `vi.fn()` — a standalone mock function with call tracking and `.mockReturnValue`/`.mockResolvedValue`.
+    - `vi.spyOn(obj, 'method')` — wraps a real method so you can assert on calls (and optionally `.mockImplementation` it).
+    - `vi.mock(path, factory)` — replaces a module; it is hoisted above imports, so the factory must not reference outer variables (use `vi.hoisted` if needed).
+- fragment_type: example
+  sequence: 2
+  content: |-
+    ## Fake timers
+
+    Control time deterministically instead of waiting for real delays:
+
+    ```ts
+    import { vi, expect, test, afterEach } from 'vitest';
+
+    afterEach(() => vi.useRealTimers());
+
+    test('debounced callback fires after 300ms', () => {
+      vi.useFakeTimers();
+      const cb = vi.fn();
+      const debounced = debounce(cb, 300);
+
+      debounced();
+      vi.advanceTimersByTime(299);
+      expect(cb).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(cb).toHaveBeenCalledOnce();
+    });
+    ```
+
+    `vi.useFakeTimers()` swaps `setTimeout`/`setInterval`/`Date`; `advanceTimersByTime` ticks the virtual clock so timer-based code runs synchronously. Always restore with `vi.useRealTimers()`.
+- fragment_type: guardrail
+  sequence: 3
+  content: |-
+    ## Mock hygiene between tests
+
+    Leaked mocks make tests order-dependent and flaky. Reset state between tests:
+
+    - `vi.restoreAllMocks()` in `afterEach` (or `restoreMocks: true` in config) returns `spyOn` targets to their originals.
+    - `vi.clearAllMocks()` resets call history but keeps implementations; `vi.resetAllMocks()` also wipes implementations.
+    - Always pair `vi.useFakeTimers()` with `vi.useRealTimers()`, or later tests inherit a frozen clock.
+    - A test that mocks everything its subject touches proves only that the mocks were set up — mock the boundary (network, time), then run the real logic.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why mock the boundary, not the logic
+
+    Mocking exists to make tests deterministic and fast by cutting off non-deterministic boundaries — the network, the clock, the filesystem — not to replace the code you are trying to verify. Over-mocking inverts the test: it asserts that your mock returns what you told it to, while the real branching, parsing, and state transitions go unexercised. Stub the edge (a `fetch` that resolves fixture data, a frozen clock) and let the unit's actual logic run, so the test fails when the logic regresses, which is the only failure worth catching.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    - External boundaries (network, time) are mocked; the unit's own logic runs unmocked.
+    - `vi.spyOn` targets are restored (`restoreAllMocks` / `restoreMocks: true`) so tests don't leak.
+    - Fake-timer tests call `vi.useRealTimers()` afterward.
+    - `vi.mock` factories don't reference un-hoisted outer variables (use `vi.hoisted` if needed).
+    - Assertions check call args and counts (`toHaveBeenCalledWith`, `toHaveBeenCalledOnce`), not just that a mock exists.

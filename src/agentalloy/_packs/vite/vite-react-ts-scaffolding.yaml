@@ -1,0 +1,180 @@
+skill_id: vite-react-ts-scaffolding
+canonical_name: Vite — Scaffold a React + TypeScript SPA
+description: 'Initialize a single-page app with Vite''s react-ts template: project creation, the index.html entry point, the main.tsx mount, and the standard src/ layout.'
+category: engineering
+skill_class: domain
+domain_tags:
+- vite
+- react
+- typescript
+- scaffolding
+always_apply: false
+phase_scope:
+- build
+category_scope:
+- framework
+author: navistone
+change_summary: hand-authored Opus expansion
+raw_prose: |-
+  # Vite — Scaffold a React + TypeScript SPA
+
+  ## Create the project
+
+  ```bash
+  npm create vite@latest my-app -- --template react-ts
+  cd my-app
+  npm install
+  npm run dev
+  ```
+
+  `npm create vite@latest` runs the latest `create-vite` scaffolder. The `--template react-ts` flag selects the React + TypeScript preset: JSX via `@vitejs/plugin-react`, a ready `tsconfig.json`, and `react`/`react-dom` pinned. Use `pnpm create vite` or `yarn create vite` for other package managers — the `-- --template` separator is required so the flag reaches the scaffolder, not the package manager.
+
+  ## Entry points: index.html and main.tsx
+
+  Vite treats `index.html` as the app entry — it lives at the project root, not in `public/`, and is itself a module-graph entry:
+
+  ```html
+  <!-- index.html -->
+  <!doctype html>
+  <html lang="en">
+    <body>
+      <div id="root"></div>
+      <script type="module" src="/src/main.tsx"></script>
+    </body>
+  </html>
+  ```
+
+  ```tsx
+  // src/main.tsx
+  import { StrictMode } from 'react';
+  import { createRoot } from 'react-dom/client';
+  import App from './App.tsx';
+  import './index.css';
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+  ```
+
+  The `<script type="module">` tag boots the app; Vite rewrites that graph for dev and for the production build.
+
+  ## Standard project layout
+
+  ```text
+  my-app/
+    index.html          # app entry (root, not public/)
+    package.json
+    tsconfig.json       # app TS config (references tsconfig.node.json)
+    vite.config.ts      # Vite + plugin config
+    public/             # copied verbatim, served at /
+    src/
+      main.tsx          # mounts <App/>
+      App.tsx
+      index.css
+      vite-env.d.ts     # /// <reference types="vite/client" />
+  ```
+
+  `src/vite-env.d.ts` pulls in Vite's client types so `import.meta.env` and asset imports (`?url`, `?raw`) are typed. Keep `public/` for files referenced by absolute URL that must skip the build pipeline, such as `favicon.ico` and `robots.txt`.
+
+  ## Why Vite for an SPA
+
+  Vite serves source over native ES modules in development, so the dev server starts in milliseconds regardless of app size — there is no upfront bundle step. Dependencies are pre-bundled once with esbuild; your own files are transformed on demand as the browser requests them. For production, Vite switches to a Rollup build that tree-shakes, splits chunks, and content-hashes assets. This dev/prod split — esbuild for speed, Rollup for output quality — is the core reason Vite replaced webpack-era tooling for greenfield React + TypeScript SPAs.
+
+  ## Verification
+
+  A correctly scaffolded Vite React + TS SPA has:
+
+  - `npm run dev` starts a server (default `http://localhost:5173`) and hot-reloads on edit.
+  - `index.html` sits at the project root and references `/src/main.tsx` via `<script type="module">`.
+  - `npm run build` emits a `dist/` folder; `npm run preview` serves it.
+  - `src/vite-env.d.ts` contains `/// <reference types="vite/client" />`.
+  - `tsc --noEmit` (or `npm run build`, which runs `tsc -b` first) reports no type errors.
+fragments:
+- fragment_type: setup
+  sequence: 1
+  content: |-
+    # Vite — Scaffold a React + TypeScript SPA
+
+    ## Create the project
+
+    ```bash
+    npm create vite@latest my-app -- --template react-ts
+    cd my-app
+    npm install
+    npm run dev
+    ```
+
+    `npm create vite@latest` runs the latest `create-vite` scaffolder. The `--template react-ts` flag selects the React + TypeScript preset: JSX via `@vitejs/plugin-react`, a ready `tsconfig.json`, and `react`/`react-dom` pinned. Use `pnpm create vite` or `yarn create vite` for other package managers — the `-- --template` separator is required so the flag reaches the scaffolder, not the package manager.
+- fragment_type: execution
+  sequence: 2
+  content: |-
+    ## Entry points: index.html and main.tsx
+
+    Vite treats `index.html` as the app entry — it lives at the project root, not in `public/`, and is itself a module-graph entry:
+
+    ```html
+    <!-- index.html -->
+    <!doctype html>
+    <html lang="en">
+      <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+      </body>
+    </html>
+    ```
+
+    ```tsx
+    // src/main.tsx
+    import { StrictMode } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import App from './App.tsx';
+    import './index.css';
+
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    ```
+
+    The `<script type="module">` tag boots the app; Vite rewrites that graph for dev and for the production build.
+- fragment_type: example
+  sequence: 3
+  content: |-
+    ## Standard project layout
+
+    ```text
+    my-app/
+      index.html          # app entry (root, not public/)
+      package.json
+      tsconfig.json       # app TS config (references tsconfig.node.json)
+      vite.config.ts      # Vite + plugin config
+      public/             # copied verbatim, served at /
+      src/
+        main.tsx          # mounts <App/>
+        App.tsx
+        index.css
+        vite-env.d.ts     # /// <reference types="vite/client" />
+    ```
+
+    `src/vite-env.d.ts` pulls in Vite's client types so `import.meta.env` and asset imports (`?url`, `?raw`) are typed. Keep `public/` for files referenced by absolute URL that must skip the build pipeline, such as `favicon.ico` and `robots.txt`.
+- fragment_type: rationale
+  sequence: 4
+  content: |-
+    ## Why Vite for an SPA
+
+    Vite serves source over native ES modules in development, so the dev server starts in milliseconds regardless of app size — there is no upfront bundle step. Dependencies are pre-bundled once with esbuild; your own files are transformed on demand as the browser requests them. For production, Vite switches to a Rollup build that tree-shakes, splits chunks, and content-hashes assets. This dev/prod split — esbuild for speed, Rollup for output quality — is the core reason Vite replaced webpack-era tooling for greenfield React + TypeScript SPAs.
+- fragment_type: verification
+  sequence: 5
+  content: |-
+    ## Verification
+
+    A correctly scaffolded Vite React + TS SPA has:
+
+    - `npm run dev` starts a server (default `http://localhost:5173`) and hot-reloads on edit.
+    - `index.html` sits at the project root and references `/src/main.tsx` via `<script type="module">`.
+    - `npm run build` emits a `dist/` folder; `npm run preview` serves it.
+    - `src/vite-env.d.ts` contains `/// <reference types="vite/client" />`.
+    - `tsc --noEmit` (or `npm run build`, which runs `tsc -b` first) reports no type errors.

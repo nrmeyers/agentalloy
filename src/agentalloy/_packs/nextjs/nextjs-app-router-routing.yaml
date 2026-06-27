@@ -305,11 +305,13 @@ fragments:
     Search params have an analogous shape: `searchParams: Promise<{ [key: string]: string | string[] | undefined }>` is awaited in Server Components and reading it opts the page into dynamic rendering.
 - sequence: 5
   fragment_type: rationale
-  content: |
+  content: |2
     ## Route groups — share a layout without adding to the URL
 
     A folder whose name is wrapped in parentheses, e.g. `app/(marketing)/`, is a **route group**. The group does not contribute to the URL: `app/(marketing)/about/page.tsx` resolves at `/about`, not `/(marketing)/about`. Use route groups to apply a shared `layout.tsx` to a subset of pages without changing their public paths, or to organize files without leaking taxonomy into URLs. A typical pattern is `app/(marketing)/layout.tsx` for the public site and `app/(app)/layout.tsx` for the authenticated dashboard, both children of the root layout.
-
+- sequence: 6
+  fragment_type: rationale
+  content: |2
     ## Parallel routes — named slots rendered as props
 
     Parallel Routes let a parent layout render multiple independent page subtrees side by side. A folder prefixed with `@`, e.g. `app/@analytics/`, is a **slot** — it is passed to the parent layout as a same-named prop alongside `children`.
@@ -336,7 +338,7 @@ fragments:
     ```
 
     Slots do not change the URL. `app/@analytics/views/page.tsx` resolves at `/views`, not `/@analytics/views`. Each slot navigates independently; the framework keeps unrelated slots in place when one slot changes. When a navigation does not match a given slot, the framework looks for `default.tsx` inside that slot to render — without `default.tsx`, the previously matched slot is reused on soft navigations but a hard reload may 404. As the upstream docs put it: if one slot is dynamic, all slots at that level must be dynamic. `children` is itself an implicit slot.
-- sequence: 6
+- sequence: 7
   fragment_type: rationale
   content: |
     ## Intercepting routes — overlay another route in place
@@ -349,7 +351,7 @@ fragments:
     - `(...)` matches segments from the **root** `app/` directory
 
     Combined with parallel routes, you build a `@modal` slot that intercepts a sibling route. Soft-navigating to `/photo/123` from the feed renders the intercepted modal in the slot; refreshing or sharing the URL bypasses the interception and renders the full `/photo/123` page. The dot conventions resolve against route segments, not the file system — `@slot` folders are skipped by the resolver.
-- sequence: 7
+- sequence: 8
   fragment_type: execution
   content: |
     ## Route Handlers — `route.ts` for HTTP endpoints
@@ -377,7 +379,7 @@ fragments:
     ```
 
     Return either a plain `Response` or `NextResponse` (which adds cookie/redirect helpers). Route Handlers replace the Pages Router's `pages/api/*` files. A folder cannot contain BOTH `route.ts` and `page.tsx`: the conflict is rejected at build time. If `OPTIONS` is not defined, Next.js synthesizes one with an appropriate `Allow` header from the verbs you did define.
-- sequence: 8
+- sequence: 9
   fragment_type: example
   content: |
     ## `<Link>` — prefetch and client-side navigation
@@ -403,25 +405,25 @@ fragments:
 
     `<Link>` is the primary navigation primitive. For programmatic navigation, use the `useRouter` hook from `next/navigation`. The plain `<a>` tag still works but triggers a full document reload and loses the App Router's state preservation. To force a reload, set `prefetch={false}` and use a regular anchor.
 - fragment_type: guardrail
-  sequence: 9
+  sequence: 10
   content: |-
     ## Anti-patterns
 
     - **Auth checks placed only in `layout.tsx`.** Layouts do NOT re-render on navigations within their subtree — once a user has rendered a layout, navigating between sibling pages does not re-execute the layout's body. A redirect call there fires only on the initial entry. Per-request authorization belongs in `proxy.ts` (Next.js 16's renamed middleware) or at the top of each `page.tsx`/`route.ts` body, not in a layout. - **Both `route.ts` and `page.tsx` in the same folder.** Build error. A segment is either a UI page or an HTTP endpoint, not both. Move the handler under `app/api/...` or rename the segment. - **Synchronous destructure of `params` in Next.js 15+.** Code copied from pre-15 docs that writes `function Page({ params }) { const { slug } = params; }` now reads a `Promise` and either TypeScript-errors or surfaces the dev-time warning "params should be awaited." Always `await params` in Server Components or `use(params)` in Client Components. - **Putting `'use client'` at the top of `app/layout.tsx`.** Forces the entire route tree under that layout into the client bundle and disables server data fetching for every page below it. Push the directive down to the leaves that actually need state, effects, or browser APIs.
 - fragment_type: guardrail
-  sequence: 10
+  sequence: 11
   content: '- **Forgetting `default.tsx` for a parallel-route slot.** When the user hard-navigates to a URL that does not match a slot, the framework needs a fallback to render. Without `default.tsx` you get either an unexpected 404 or a stale slot rendering, depending on the navigation type. - **Building auth-aware redirects with `useEffect` in a Server Component file.** A Server Component that imports `useEffect` is a TypeScript and runtime error — Server Components have no effects. If you need an effect, mark the file `''use client''` (and accept the bundle cost) or move the redirect to the server side using `redirect()` from `next/navigation`. - **Treating Pages Router conventions as App Router conventions.** `getServerSideProps`, `getStaticProps`, `_app.tsx`, `_document.tsx`, and `pages/api/*` are Pages Router APIs. The App Router has no equivalent: data fetching is done by `await`ing in Server Components, the root layout replaces `_document`, and `route.ts` replaces `pages/api`. Mixing the two within the same project is supported but conventions do NOT cross over. - **Deeply nested layouts that copy boilerplate.** When five segments each repeat the same nav header, factor the JSX into a shared module (e.g. `app/_components/SiteNav.tsx`) imported by each layout. The leading underscore folder is excluded from routing.'
 - fragment_type: verification
-  sequence: 11
+  sequence: 12
   content: '- [ ] App Router is in use, not Pages Router. `test -d app && echo app-router` should print, and `test -d pages` should be empty (or both directories present if intentionally migrating). - [ ] Root layout exists and emits `<html>` and `<body>`. `grep -nE ''<html'' app/layout.tsx` and `grep -nE ''<body'' app/layout.tsx` each return exactly one match. - [ ] No folder contains both `route.ts` and `page.tsx`. `find app -type d -exec sh -c ''test -f "$1/route.ts" && test -f "$1/page.tsx" && echo "CONFLICT: $1"'' _ {} \;` returns no lines. - [ ] All dynamic segments treat `params` as a Promise. `grep -rnE ''params:\s*\{[^}]*\}'' app` should return zero matches whose value is not wrapped in `Promise<...>`. Run `pnpm tsc --noEmit` — TypeScript flags every synchronous destructure. - [ ] No Server Component file imports `useEffect` or `useState` without `''use client''`. `grep -rLn "''use client''" app | xargs grep -lE ''useEffect|useState'' 2>/dev/null` should return no files. - [ ] Every parallel-route slot has either a matching page for every reachable URL or a `default.tsx`. `find app -type d -name ''@*'' -exec sh -c ''test -f "$1/default.tsx" || test -f "$1/default.js" || echo "MISSING default: $1"'' _ {} \;` returns no lines. - [ ] Every `error.tsx` is a Client Component.'
 - fragment_type: verification
-  sequence: 12
+  sequence: 13
   content: |-
     `for f in $(find app -name error.tsx); do head -1 "$f" | grep -q "'use client'" || echo "MISSING use client: $f"; done` returns no lines. - [ ] Auth redirects are not buried in layouts. `grep -rn -E '(redirect|notFound)\(' app/**/layout.tsx` and review each hit — layouts do not re-render between sibling navigations. - [ ] `<Link>` is imported from `next/link`, not authored as raw `<a>` for in-app navigation. `grep -rnE '<a [^>]*href="/' app` should be reviewed; raw anchors trigger full reloads. - [ ] Next.js version is 15.0.0 or later (so the `params` Promise contract holds). `node -e "console.log(require('./package.json').dependencies.next)"` returns a 15+ range.
 
     ## Verified
 - fragment_type: verification
-  sequence: 13
+  sequence: 14
   content: |-
     - App Router stable since Next.js 13.4 (May 2023); current release 16.2.4 per `nextjs.org/docs-index` (verified 2026-05-06).
     - `params` and `searchParams` are Promises starting in Next.js 15 (October 2024) per `nextjs.org/docs/app/api-reference/file-conventions/dynamic-routes` and `.../page` and `.../route` (verified 2026-05-06).
