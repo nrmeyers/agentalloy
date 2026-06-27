@@ -1,0 +1,146 @@
+"""Compile the rerank model's KV-cache graph on a cold restart by sending one
+tiny /v1/completions request right after the systemd unit's main process starts.
+
+Without this, the first real Stage B compose after a reranker restart can blow
+through the per-request timeout (~1.35s) on the cold prompt-eval (~1.2s × N
+parallel docs) → `outcome=error` → graceful deterministic fallback. Once warm,
+subsequent compose calls hit at ~940ms. The warmup absorbs that cold first
+request before any real traffic arrives.
+
+systemd invokes this from `ExecStartPost=` on agentalloy-rerank.service. Exits
+0 unconditionally so a transient warmup failure never blocks the unit from
+becoming active — the breaker (rerank.py:_FailureLatch) handles persistent
+failures at request time.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
+
+from agentalloy.install.subcommands.start_rerank_server import _RERANK_PARALLEL
+
+logger = logging.getLogger(__name__)
+
+STEP_NAME = "rerank-warmup"
+
+_DEFAULT_PORT = 47952
+_DEFAULT_HEALTH_TIMEOUT_S = 90.0
+_HEALTH_POLL_INTERVAL_S = 0.5
+_WARMUP_REQUEST_TIMEOUT_S = 30.0
+# Warm one request per llama.cpp slot — graph compilation happens per-slot on
+# its first inference, so a single warmup leaves N-1 cold slots that the next
+# Stage B fan-out (LM_ASSIST_MAX_CANDIDATES==--parallel) then hits cold.
+_DEFAULT_PARALLEL_WARMUPS = _RERANK_PARALLEL
+
+
+def add_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+) -> None:
+    p: argparse.ArgumentParser = subparsers.add_parser(
+        STEP_NAME,
+        help=(
+            "Warm the reranker (port 47952) by sending one tiny /v1/completions "
+            "request after llama-server is ready. Eliminates the first-request "
+            "Stage B fallback on a cold restart. Wired into the rerank systemd "
+            "unit via ExecStartPost."
+        ),
+    )
+    p.add_argument("--port", type=int, default=_DEFAULT_PORT)
+    p.add_argument(
+        "--health-timeout",
+        type=float,
+        default=_DEFAULT_HEALTH_TIMEOUT_S,
+        help=f"Seconds to poll /health before giving up (default {_DEFAULT_HEALTH_TIMEOUT_S}).",
+    )
+    p.add_argument(
+        "--parallel",
+        type=int,
+        default=_DEFAULT_PARALLEL_WARMUPS,
+        help=(
+            "Concurrent warmup requests (default = --parallel slot count). One "
+            "request warms one slot's graph; warming all slots prevents the next "
+            "real fan-out from hitting cold slots."
+        ),
+    )
+    p.set_defaults(func=_run)
+
+
+def _run(args: argparse.Namespace) -> int:
+    port: int = args.port
+    health_timeout: float = args.health_timeout
+    parallel: int = max(1, args.parallel)
+
+    base = f"http://127.0.0.1:{port}"
+    if not _wait_for_health(base, health_timeout):
+        logger.warning(
+            "rerank-warmup: /health never became ready within %.1fs — skipping warmup",
+            health_timeout,
+        )
+        return 0  # never block the unit
+
+    start = time.monotonic()
+    succeeded = _warmup_all_slots(base, parallel)
+    elapsed_ms = (time.monotonic() - start) * 1000
+    logger.info(
+        "rerank-warmup: warmed %d/%d slot(s) in %.0fms",
+        succeeded,
+        parallel,
+        elapsed_ms,
+    )
+    return 0
+
+
+def _warmup_all_slots(base: str, parallel: int) -> int:
+    """Fire ``parallel`` concurrent /v1/completions so every llama.cpp slot
+    compiles its graph (graph compilation is per-slot on first inference).
+    Returns the count of successful warmups; failures are best-effort."""
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
+        results = list(pool.map(lambda _: _warmup_request(base), range(parallel)))
+    return sum(1 for r in results if r is not None)
+
+
+def _wait_for_health(base: str, timeout_s: float) -> bool:
+    """Poll /health until it returns 200 or the timeout expires."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"{base}/health", timeout=2.0) as resp:
+                if 200 <= resp.status < 300:
+                    return True
+        except (urllib.error.URLError, ConnectionError, OSError, TimeoutError):
+            pass
+        time.sleep(_HEALTH_POLL_INTERVAL_S)
+    return False
+
+
+def _warmup_request(base: str) -> float | None:
+    """Fire one tiny /v1/completions to compile the model graph. Returns elapsed
+    seconds on success, None on failure. Failures are non-fatal — the breaker
+    handles persistent reranker problems at compose time."""
+    payload: dict[str, Any] = {
+        "prompt": "warmup",
+        "max_tokens": 1,
+        "temperature": 0.0,
+        "cache_prompt": False,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/v1/completions",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    start = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=_WARMUP_REQUEST_TIMEOUT_S) as resp:
+            resp.read()  # drain so the connection closes cleanly
+            return time.monotonic() - start
+    except (urllib.error.URLError, ConnectionError, OSError, TimeoutError) as exc:
+        logger.warning("rerank-warmup: warmup request failed (%s) — skipping", exc)
+        return None

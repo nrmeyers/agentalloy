@@ -50,6 +50,10 @@ from typing import Any
 from agentalloy.install import runtime_artifacts
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+from agentalloy.install.subcommands.start_rerank_server import (
+    _RERANK_CTX,
+    _RERANK_PARALLEL,
+)
 
 logger = __import__("logging").getLogger(__name__)
 
@@ -212,7 +216,15 @@ def _render_llama_embed_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> 
 
 def _render_llama_rerank_unit(llama_bin: str, model_path: Path, ngl: int = 0) -> str:
     # Completions mode — NO --embeddings — so /v1/completions logprobs are served.
+    # --parallel/-c match start_rerank_server's CLI launcher so an `enable-service`
+    # install matches what `agentalloy start-rerank-server` would launch; without
+    # them llama.cpp auto-picks n_parallel=4 and Stage B oversubscribes the slots
+    # (compose fans out up to LM_ASSIST_MAX_CANDIDATES=8 docs per request).
+    # ExecStartPost warms the KV-cache graph by sending one /v1/completions before
+    # any real Stage B traffic — eliminates the first-request fallback after a
+    # cold restart (rerank cold prompt-eval ~1.2s > per-req timeout 1.35s).
     ngl_flag = f" -ngl {ngl}" if ngl > 0 else ""
+    agentalloy_bin = shutil.which("agentalloy") or "agentalloy"
     return (
         "[Unit]\n"
         "Description=AgentAlloy reranker server (llama-server)\n"
@@ -220,7 +232,11 @@ def _render_llama_rerank_unit(llama_bin: str, model_path: Path, ngl: int = 0) ->
         "\n"
         "[Service]\n"
         "Type=simple\n"
-        f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT}{ngl_flag} -m {model_path}\n"
+        f"ExecStart={llama_bin} --port {_LLAMA_RERANK_PORT}{ngl_flag} -m {model_path}"
+        f" --parallel {_RERANK_PARALLEL} -c {_RERANK_CTX}\n"
+        # `-` prefix: a warmup error must NEVER mark the unit failed (the breaker
+        # at request time is the real safety net; warmup is best-effort).
+        f"ExecStartPost=-{agentalloy_bin} rerank-warmup\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "\n"

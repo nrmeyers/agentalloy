@@ -124,6 +124,27 @@ class TestRenderLlamaUnits:
         assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in content
         assert "WantedBy=default.target" in content
 
+    def test_rerank_unit_pins_parallel_and_ctx(self) -> None:
+        # The production unit must carry --parallel/-c so it doesn't depend on
+        # llama.cpp's auto n_parallel=4 (which oversubscribes the 8-wide compose
+        # Stage B fan-out). Values must match the start_rerank_server launcher.
+        from agentalloy.install.subcommands.start_rerank_server import (
+            _RERANK_CTX,
+            _RERANK_PARALLEL,
+        )
+
+        content = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"), 999)
+        assert f"--parallel {_RERANK_PARALLEL}" in content
+        assert f"-c {_RERANK_CTX}" in content
+
+    def test_rerank_unit_wires_warmup_post_hook(self) -> None:
+        # ExecStartPost calls `agentalloy rerank-warmup` so the model graph is
+        # compiled before the first real Stage B request — eliminates the
+        # first-request fallback after a cold restart.
+        content = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"), 999)
+        assert "ExecStartPost=" in content
+        assert "rerank-warmup" in content
+
     def test_units_add_ngl_for_gpu_target(self) -> None:
         """GPU targets (ngl > 0) append -ngl so persistent units offload like setup did."""
         embed = _render_llama_embed_unit("/usr/bin/llama-server", Path("/m/e.gguf"), 999)
