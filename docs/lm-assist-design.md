@@ -133,10 +133,14 @@ Selection is a **filter, then diversity routing** (not a fusion-order cap):
   `skill_granular_select` as the deterministic path. The HIT path is no
   longer "diversity off". (Earlier it bypassed selection and assembled the
   kept fragments in fusion order, capped at k.) `keep_threshold` ships
-  **inert and gated-off** at 0.05 — ~every scored fragment survives, so the
-  win is the restored selection routing, not the filter. The real prod value
-  is a deferred decision gate pending a P(yes) measurement; the
-  `LM_ASSIST_KEEP_THRESHOLD` knob ships but no preset sets it.
+  **truly inert and gated-off** at 0.0 — the keep test is `score >= threshold`
+  and reranker yes-probabilities are in [0,1], so every scored fragment
+  survives (including ones the reranker scores exactly 0.0 for a task with no
+  relevant corpus coverage). The win is the restored selection routing, not
+  the filter. The real prod value is a deferred decision gate pending a P(yes)
+  measurement; the `LM_ASSIST_KEEP_THRESHOLD` knob ships but no preset sets it.
+  (0.05 would NOT be inert — a task whose candidates all score 0.0 would be
+  emptied. Live-test correction landed in v4.0.0.)
 - Disabled / timeout / error / empty-survivor → deterministic depth+round-robin
   selection runs byte-for-byte as if Stage B never ran (fail-open floor).
 
@@ -178,7 +182,7 @@ then became the default once measured.)
   (default `qwen3-reranker-0.6b`), `LM_ASSIST_RERANK_URL`,
   `LM_ASSIST_TIMEOUT_MS`, `LM_ASSIST_MAX_CANDIDATES` (default 8, ==
   `--parallel`), `LM_ASSIST_DOC_CAP_CHARS` (default 2400),
-  `LM_ASSIST_KEEP_THRESHOLD` (inert/gated-off default 0.05 — measure-then-set,
+  `LM_ASSIST_KEEP_THRESHOLD` (inert/gated-off default **0.0** — measure-then-set,
   no preset sets it). Signals backend: `SIGNAL_INTENT_BACKEND=cosine|reranker`,
   `SIGNAL_INTENT_RERANK_THRESHOLD`. Telemetry records the stage outcome
   (`hit|timeout|error|disabled`) per composition, and `/health` surfaces a

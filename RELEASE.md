@@ -120,3 +120,35 @@ git push origin v<X.Y.Z>
 - [ ] Local gate green: ruff check + ruff format --check + pyright + pytest.
 - [ ] PR opened against `main`, CI green, squash-merged with authorization.
 - [ ] Annotated `v<X.Y.Z>` tag pushed on the merge commit; container build confirmed.
+
+## 7. Gotchas seen in past releases
+
+These have bitten releases before; surface them up-front when planning a tag.
+
+- **Working on a worktree branch that was already merged.** When you stack new
+  work on a branch whose previous head already got squash-merged into `main`,
+  GitHub sees the still-unsquashed commit as "ahead of main" and the merge ref
+  conflicts. CI then never runs on a `pull_request` event. Fix: merge `origin/main`
+  into the branch (resolving the trivial `pyproject.toml` / `uv.lock` conflict by
+  taking the new-release side) and push — CI registers on the next event. Or
+  branch fresh off `main` for the new work instead of extending the merged branch.
+- **`gh pr merge --delete-branch` fails from a non-primary worktree.** `gh` tries
+  to check out `main` locally to delete the merged branch, which fails when the
+  primary worktree already has `main` checked out (`fatal: 'main' is already used
+  by worktree at …`). The remote merge still happened — verify with
+  `gh pr view <N> --json state,mergeCommit`. Delete the branch on the remote
+  manually: `git push origin --delete <branch>`.
+- **Container build is the long pole.** `Container Build & Publish`'s `build-corpus`
+  job re-ingests + re-embeds every pack into the image; with new packs or
+  resliced fragments this can run 25–35 min (vs ~5 min for a code-only release).
+  The workflow tolerates up to 150 min — don't panic at 15-min marks. The
+  `main`-push build and the tag-push build run concurrently and don't share the
+  embed cache, so total wall time roughly doubles for big releases. Users get the
+  new code via `:latest` from the `main`-push as soon as that finishes; the
+  `:vX.Y.Z` pinned image follows when the tag build completes.
+- **`enable-service` silently skips the rerank/embed units when `llama-server`
+  isn't on PATH.** `shutil.which("llama-server")` returns `None` if the
+  `pull-models`-generated `~/.local/bin/llama-server` shim was deleted (e.g. by
+  `uv tool install --reinstall`). The fallout: rerank/embed services aren't
+  registered, no warmup, Stage B disabled. Verify the shim exists before running
+  `enable-service`, and recreate it via `agentalloy pull-models` if missing.

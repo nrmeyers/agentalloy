@@ -254,6 +254,8 @@ A sticky, one-line YAML file under your project. Tracks where the agent is in th
 
 The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `off` stays wired but composes nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
 
+On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`. See [docs/operator.md](docs/operator.md) for the full gate inventory.
+
 ### 2. Task contracts
 
 ```
@@ -403,10 +405,12 @@ agentalloy worktree <harness> <branch> -b # Create a git worktree + wire it (par
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy compose --contract <path>      # One-shot composition
+agentalloy approve <phase>                # Record the human-in-the-loop approval marker (spec | design)
 agentalloy customize <list|edit|diff|reset>  # Manage per-profile / per-project skill overrides
 agentalloy doctor                         # Diagnose install issues
 agentalloy upgrade                        # Upgrade to the latest release (--check to preview, --dismiss to mute the nudge)
 agentalloy cleanup                        # Reap orphaned runtimes; --deep fully sanitizes the host
+agentalloy rerank-warmup                  # Warm the reranker (wired into the systemd unit's ExecStartPost)
 agentalloy --version                      # Print the installed version
 ```
 
@@ -448,16 +452,16 @@ Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § 
 
 ## Packs shipping in-tree
 
-The corpus is **packs** — opt-in groups of related skills. `main` ships **35+ packs / 300+ declared skills** organized across 9 tiers:
+The corpus is **packs** — opt-in groups of related skills. `main` ships **38+ packs / 320+ declared skills** organized across 9 tiers:
 
 <table>
 <tr><th>Tier</th><th>Packs</th></tr>
 <tr><td><b>foundation</b></td><td><code>core</code> · <code>documentation</code> · <code>engineering</code> · <code>performance</code> · <code>refactoring</code></td></tr>
 <tr><td><b>language</b></td><td><code>csharp-dotnet</code> · <code>go</code> · <code>java</code> · <code>nodejs</code> · <code>python</code> · <code>rust</code> · <code>typescript</code></td></tr>
 <tr><td><b>framework</b></td><td><code>fastapi</code> · <code>fastify</code> · <code>nestjs</code> · <code>nextjs</code> · <code>react</code> · <code>vue</code></td></tr>
-<tr><td><b>tooling</b></td><td><code>linting</code> · <code>pytest</code> · <code>testing</code></td></tr>
+<tr><td><b>tooling</b></td><td><code>linting</code> · <code>pytest</code> · <code>testing</code> · <code>vite</code> · <code>vitest</code></td></tr>
 <tr><td><b>workflow</b></td><td><code>code-review</code> · <code>design-review</code> · <code>intake</code> · <code>sdd</code></td></tr>
-<tr><td><b>domain</b></td><td><code>analytics</code> · <code>data-engineering</code> · <code>ui-design</code></td></tr>
+<tr><td><b>domain</b></td><td><code>analytics</code> · <code>calendar-ui</code> · <code>data-engineering</code> · <code>ui-design</code></td></tr>
 <tr><td><b>platform</b></td><td><code>github-actions</code></td></tr>
 <tr><td><b>protocol</b></td><td><code>rest</code> · <code>webhooks</code></td></tr>
 <tr><td><b>store</b></td><td><code>redis</code> · <code>redshift</code> · <code>snowflake</code> · <code>temporal</code></td></tr>

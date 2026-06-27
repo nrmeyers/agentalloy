@@ -26,7 +26,7 @@ The proxy exposes inbound HTTP surfaces in `src/agentalloy/api/`. After this pro
 | Surface | Endpoint | Router | Signal layer | Injection point | Markers |
 |---|---|---|---|---|---|
 | **Passthrough** | `POST /proj/{token}/v1/messages` | `proxy_passthrough_router.py` | yes | trailing **user** message | yes (announce/cursor) |
-| **OpenAI** | `POST /v1/chat/completions` | `proxy_router.py` | yes | **system** message | **none** (parity gap) |
+| **OpenAI** | `POST /v1/chat/completions` | `proxy_router.py` | yes | **system** message | yes (announce/cursor — parity achieved Phase 2; both surfaces share the `apply_signal` seam) |
 
 Claude Code wires to the passthrough (`ANTHROPIC_BASE_URL=…/proj/<token>`). Every OpenAI-format
 harness (aider, codex, cline, continue, cursor via sidecar, …) wires to `/v1/chat/completions`.

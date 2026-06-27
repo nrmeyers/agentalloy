@@ -224,7 +224,7 @@ conditional.
 | skill_id | canonical_name | domain_tags | fragment outline |
 |---|---|---|---|
 | `vitest-config-and-environment` | Vitest Config & Environment | vitest, vite, jsdom, test-config | setup·`vitest.config`/shared `vite.config`; execution·`environment: jsdom`, `globals`, `setupFiles`; rationale·why it reuses the Vite pipeline; verification·config sanity |
-| `vitest-mocking-and-timers` | Vitest Mocking & Timers | vitest, mocking, vi-fn, fake-timers | execution·`vi.mock`/`vi.fn`/`vi.spyOn`; example·module + fake timers; guardrail·`vi.restoreAllMocks` hygiene; verification·no-leak check |
+| ~~`vitest-mocking-and-timers`~~ | ~~Vitest Mocking & Timers~~ | — | **DROPPED** at ship-time: the dedup gate flagged it as a HARD duplicate of the existing `testing-mocks-and-spies` (0.95 similarity across 3 fragment pairs). Vitest-specific mocking guidance can be authored later as a tighter API-focused skill if needed. |
 | `vitest-component-testing` | Vitest Component Testing | vitest, testing-library, component-test | execution·`@testing-library` + jsdom render; example·user-event interaction; guardrail·query-by-role over test-id; verification·a11y-query check |
 | `vitest-coverage-and-watch` | Vitest Coverage & Watch | vitest, coverage, v8, watch | execution·`--coverage` (v8/istanbul); example·thresholds in config; rationale·watch/`--ui` loop; verification·coverage-floor gate |
 

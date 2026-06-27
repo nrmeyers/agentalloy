@@ -204,7 +204,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 **Optional flag-gated steps** (all off by default, all fail open to the deterministic path above when the local model or graph is unavailable):
 
 - **Graph expansion** (`RETRIEVAL_GRAPH_EXPAND=on`, default off): splices `requires`-edge neighbors of the top ranked skills into the candidate set before selection.
-- **Stage B LM fragment re-rank** (`LM_ASSIST=arbitrate` on the GPU presets, `off` on cpu/container): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top ~12 fragments (pairwise yes/no logprobs over `/v1/completions`); on a HIT it replaces deterministic selection with the fragments scoring above `LM_ASSIST_KEEP_THRESHOLD`. On disabled/timeout/error, deterministic selection runs unchanged.
+- **Stage B LM fragment re-rank** (`LM_ASSIST=arbitrate` on the GPU presets, `off` on cpu/container): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top 8 fragments (pairwise yes/no logprobs over `/v1/completions`, bounded by `LM_ASSIST_MAX_CANDIDATES` which matches the reranker's `--parallel` slot count); on a HIT, survivors above `LM_ASSIST_KEEP_THRESHOLD` (default `0.0` — gated-off pending a P(yes) measurement) are routed through the SAME `skill_granular_select` diversity selection as the deterministic path (no longer "diversity off"). On disabled/timeout/error, deterministic selection runs unchanged.
 
 ### Embedding Model
 

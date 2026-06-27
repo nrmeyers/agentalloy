@@ -91,7 +91,16 @@ exactly tying the deterministic baseline (0.827) — and trailed slightly
 (0.809–0.817) once the candidate pool was widened; its canary task `domain_1`
 did not recover (0.76, dropping to 0.48 in the top-12 variant). **Graph
 expansion** (`RETRIEVAL_GRAPH_EXPAND=on`) also tied (0.827). Both stay off by
-default on that evidence. The signals-layer intent backend, which *did* win its
+default on that evidence.
+
+> **v4.0.0 update.** This campaign predates the Stage B viability work that
+> landed in v4.0.0 (doc-cap, slot sizing, shared pool bound, HIT-path rewrite to
+> route survivors through `skill_granular_select`, breaker exponential backoff,
+> `/health` reranker probe). On the GPU presets Stage B is now ON by default
+> (`LM_ASSIST=arbitrate`); the v3 "off by default" guidance still holds for CPU
+> and container deploys where the reranker can't meet the budget. A re-run of
+> this campaign against v4.0.0 to measure the post-fix lift on the LFM/domain
+> leg is the natural next benchmark. The signals-layer intent backend, which *did* win its
 benchmark, is the one model-backed stage shipped on (see
 [Intent Classification](#intent-classification-signals-layer)).
 

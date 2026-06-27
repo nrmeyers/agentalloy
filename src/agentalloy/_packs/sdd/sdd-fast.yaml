@@ -26,6 +26,14 @@ exit_gates:
           - Acceptance Criteria
           - Approach
           - Test Cases
+    # Human-in-the-loop checkpoint (#10, D8): sdd-fast→qa approval is INERT
+    # by default (`SDD_FAST_REQUIRE_APPROVAL=off`). When the flag is on, the
+    # `approval_recorded` predicate gates the transition; `agentalloy approve
+    # sdd-fast` writes the marker. CLI enforcement
+    # (`phase.py::_approval_gate_blocks`) honors the flag too; this exit_gate
+    # node surfaces the composed advisory in-proxy under the same flag.
+    - approval_recorded:
+        since: docs/fast/*.md
     - artifact_exists:
         path: "src/**"
     - artifact_exists:

@@ -26,6 +26,16 @@ exit_gates:
         sections:
           - Acceptance Criteria
           - Out of Scope
+    # Human-in-the-loop checkpoint (#10): spec→design requires a recorded
+    # approval. `since` = the spec docs so editing a spec doc after approval
+    # invalidates the marker (file mtime > marker mtime → unapproved again).
+    # `agentalloy approve spec` writes the marker. The CLI gate
+    # (`phase.py::_approval_gate_blocks`) is the HARD enforcement and runs
+    # even under `--force`; this exit_gate node is the composed advisory that
+    # surfaces the awaiting-approval message in-proxy BEFORE the user tries
+    # to advance. Matches the design node at sdd-design-and-planning.yaml.
+    - approval_recorded:
+        since: docs/spec/**/*.md
 signal_keywords:
   - done with spec
   - ready to design
