@@ -1,5 +1,5 @@
 name: vitest
-version: 1.0.0
+version: 1.0.1
 tier: tooling
 description: |
   Vitest 1/2 unit testing for React + TypeScript — config that reuses the Vite pipeline with the jsdom environment, component testing with Testing Library and user-event, mocking and spies and fake timers via the vi utilities, and v8 coverage with watch mode. Precision-favored tooling; sourced from vitest.dev docs per R1 tier-3 procedure.
@@ -19,9 +19,6 @@ skills:
   fragment_count: 4
 - skill_id: vitest-component-testing
   file: vitest-component-testing.yaml
-  fragment_count: 5
-- skill_id: vitest-mocking-and-timers
-  file: vitest-mocking-and-timers.yaml
   fragment_count: 5
 - skill_id: vitest-coverage-and-watch
   file: vitest-coverage-and-watch.yaml
