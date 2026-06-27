@@ -487,6 +487,21 @@ def test_preset_lm_assist_max_candidates_matches_parallel(preset: str) -> None:
 
 
 @pytest.mark.parametrize("preset", _HW_PRESETS)
+def test_preset_phase_gate_on(preset: str) -> None:
+    # GPU presets pin AGENTALLOY_PHASE_GATE=on so prod retrieval excludes
+    # `category: benchmark` packs (E6 pool gate in retrieval/domain.py). Flipped
+    # on as the final step of the corpus batch after #14's recat was verified;
+    # eval/gold_hit runs gate-off so the 18/18 baseline is unaffected.
+    defaults = write_env._load_preset(preset)
+    if _LM_ASSIST_BY_PRESET[preset] != "arbitrate":
+        return
+    assert defaults.get("AGENTALLOY_PHASE_GATE") == "on", (
+        f"{preset}: GPU preset must set AGENTALLOY_PHASE_GATE=on so benchmark "
+        "packs are excluded from the prod retrieval pool"
+    )
+
+
+@pytest.mark.parametrize("preset", _HW_PRESETS)
 def test_preset_lm_assist_doc_cap_chars(preset: str) -> None:
     # GPU presets pin the runtime doc cap to the locked 2400-char value.
     defaults = write_env._load_preset(preset)

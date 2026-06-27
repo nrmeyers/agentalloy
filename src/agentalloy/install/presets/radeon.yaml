@@ -19,6 +19,10 @@ defaults:
   # inside the Stage B budget. (keep_threshold is deliberately NOT set: it stays the
   # inert code default, gated-off, pending a P(yes) measurement.)
   LM_ASSIST_DOC_CAP_CHARS: "2400"
+  # E6 product/category pool gate (retrieval/domain.py): "on" excludes
+  # `category: benchmark` packs from the retrieval pool. Flipped on for prod after
+  # the #14 recat + re-embed (eval/gold_hit still runs gate-off → 18/18 preserved).
+  AGENTALLOY_PHASE_GATE: "on"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"
   BOUNCE_BUDGET: "3"
