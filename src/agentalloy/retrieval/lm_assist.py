@@ -60,12 +60,17 @@ _DEFAULT_URL = "http://127.0.0.1:47952"
 # Override with LM_ASSIST_TIMEOUT_MS.
 _DEFAULT_TIMEOUT_MS = 600
 # Keep threshold is the relevance floor below which Stage B drops a fragment. The
-# default ships INERT (near-zero) and gated-off: at 0.05 ~every scored fragment
-# survives the filter, so the win is the restored skill_granular_select routing on
-# the HIT path (see domain.py), not the filter. The real prod value is a deferred
-# decision gate pending a P(yes) distribution measurement — do NOT bake a measured
-# value into any preset until then; only the env knob LM_ASSIST_KEEP_THRESHOLD ships.
-_DEFAULT_KEEP_THRESHOLD = 0.05
+# default ships TRULY INERT (0.0) and gated-off: the keep test is ``score >= threshold``
+# (domain.py), and the reranker yes-probabilities are in [0, 1], so 0.0 keeps EVERY
+# scored fragment — including ones the reranker scores exactly 0.0 for a task with no
+# relevant corpus coverage. (0.05 is NOT inert: a task whose candidates all score 0.0
+# would be emptied, which contradicts the "gated-off until measured" posture — live
+# test, calendar build → 8×0.0 → empty.) So the win at the default is purely the
+# restored skill_granular_select routing/reordering on the HIT path, never a drop.
+# The real prod value is a deferred decision gate pending a P(yes) distribution
+# measurement — do NOT bake a measured value into any preset until then; only the env
+# knob LM_ASSIST_KEEP_THRESHOLD ships.
+_DEFAULT_KEEP_THRESHOLD = 0.0
 _DEFAULT_MODEL = "Qwen3-Reranker-0.6B-Q8_0.gguf"
 # Cap on fragments scored per composition (env LM_ASSIST_MAX_CANDIDATES). Default
 # 8 == the reranker's ``--parallel`` slot count, so a compose Stage B fans out

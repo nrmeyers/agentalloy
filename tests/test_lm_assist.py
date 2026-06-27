@@ -63,7 +63,9 @@ def test_config_defaults_off() -> None:
     assert cfg.enabled is False
     assert cfg.url == "http://127.0.0.1:47952"
     assert cfg.timeout_ms == 600
-    assert cfg.keep_threshold == pytest.approx(0.05)
+    # Gated-off default is TRULY inert: 0.0 keeps every score>=0 (D6 measure-then-set;
+    # 0.05 would empty a task whose candidates all score 0.0 — found in live test).
+    assert cfg.keep_threshold == pytest.approx(0.0)
     assert cfg.model == "Qwen3-Reranker-0.6B-Q8_0.gguf"
 
 

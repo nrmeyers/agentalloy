@@ -870,8 +870,11 @@ def _maybe_lm_arbitrate(
     as the deterministic path. An empty survivor set is a *valid* high-confidence
     result meaning "inject nothing" and is returned as ``[]`` (not None).
 
-    At the inert default keep_threshold (0.05, gated-off) ~every scored fragment
-    survives, so the value is the restored selection routing, not the filter.
+    At the inert default keep_threshold (0.0, gated-off) EVERY scored fragment
+    survives (the keep test is ``score >= threshold`` and reranker probabilities are
+    in [0, 1]), so the value is the restored selection routing, not the filter. 0.0
+    (not 0.05) is the truly-inert default: a task whose candidates all score 0.0 must
+    not be emptied before the P(yes) measurement gate sets a real prod threshold.
 
     ``k`` is accepted for call-site symmetry but unused (the cap lives downstream).
 
