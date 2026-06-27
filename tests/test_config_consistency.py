@@ -60,10 +60,13 @@ _DEAD_RERANK_PORT = 60001  # old default; pointed at an unrelated local service
 # of truth). Named by hardware target only — see write_env.VALID_PRESETS.
 _HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
 
-# Expected Stage B posture per preset: GPU presets enable the compose re-ranker
-# (budget headroom to score real fragments), cpu leaves it off.
+# Expected Stage B posture per preset: ALL presets enable the compose re-ranker
+# as of v4.0.2 — CPU was measured viable when the rerank server runs with
+# --parallel 1 -c 2048 (start_rerank_server.rerank_launch_args). Stage B fails
+# open to the deterministic path on any preset, so users on slower hardware
+# than the measurement still get a safe degradation, not a break.
 _LM_ASSIST_BY_PRESET = {
-    "cpu": "off",
+    "cpu": "arbitrate",
     "nvidia": "arbitrate",
     "radeon": "arbitrate",
     "apple-silicon": "arbitrate",
@@ -139,9 +142,12 @@ def test_preset_lm_assist_posture(preset: str) -> None:
         f"(missing → silently falls back to the code default 'off')"
     )
     if expected == "arbitrate":
-        # GPU presets raise the 600ms code default for headroom.
-        assert defaults.get("LM_ASSIST_TIMEOUT_MS") == "1500", (
-            f"{preset}: arbitrate preset should set LM_ASSIST_TIMEOUT_MS=1500"
+        # v4.0.2: 2000ms budget across all arbitrate presets — gives cold-start
+        # (~1.2s GPU prompt-eval) + warmup-fallback recovery + CPU-headroom
+        # margin. Was 1500ms in v4.0.0/4.0.1 — bumped after measuring the
+        # budget was 70% unused on warm GPU and CPU needed more cushion.
+        assert defaults.get("LM_ASSIST_TIMEOUT_MS") == "2000", (
+            f"{preset}: arbitrate preset should set LM_ASSIST_TIMEOUT_MS=2000"
         )
 
 
@@ -469,20 +475,18 @@ def test_deepen_gate_fills_k_when_all_far() -> None:
 
 
 @pytest.mark.parametrize("preset", _HW_PRESETS)
-def test_preset_lm_assist_max_candidates_matches_parallel(preset: str) -> None:
-    # GPU (arbitrate) presets must pin LM_ASSIST_MAX_CANDIDATES to the reranker
-    # --parallel slot count, so the per-composition fan-out lands as exactly one
-    # wave. cpu leaves Stage B off and need not set it.
-    from agentalloy.install.subcommands import start_rerank_server
-
+def test_preset_lm_assist_max_candidates_is_8(preset: str) -> None:
+    # All arbitrate presets pin LM_ASSIST_MAX_CANDIDATES=8 (client-side fan-out).
+    # The reranker --parallel value is now hardware-conditional via
+    # start_rerank_server.rerank_launch_args (2 on GPU, 1 on CPU) — they do NOT
+    # need to match: on CPU the 8 client requests serialize at the server (1
+    # slot) and that's intentional (avoids OpenMP thread contention). On GPU
+    # the 8 client requests use 2 slots × 4-deep queueing.
     defaults = write_env._load_preset(preset)
     if _LM_ASSIST_BY_PRESET[preset] != "arbitrate":
         return
     assert defaults.get("LM_ASSIST_MAX_CANDIDATES") == "8", (
         f"{preset}: arbitrate preset must set LM_ASSIST_MAX_CANDIDATES=8"
-    )
-    assert defaults["LM_ASSIST_MAX_CANDIDATES"] == str(start_rerank_server._RERANK_PARALLEL), (
-        f"{preset}: LM_ASSIST_MAX_CANDIDATES drifted from --parallel slot count"
     )
 
 
@@ -523,14 +527,27 @@ def test_preset_keep_threshold_absent(preset: str) -> None:
     )
 
 
-def test_rerank_parallel_accommodates_client_fan_out() -> None:
-    # The reranker's launched slot count must be >= the client's candidate fan-out,
-    # or half the wave serializes and Stage B blows the budget.
-    from agentalloy.install.subcommands import start_rerank_server
+def test_rerank_launch_args_per_target() -> None:
+    # Hardware-conditional rerank slot config (start_rerank_server.rerank_launch_args).
+    # GPU and CPU have opposite optima: GPU benefits from multi-slot prefill
+    # concurrency, CPU suffers from OpenMP thread contention with multiple slots.
+    # Concrete values are pinned here so a drift breaks the build with a clear
+    # error rather than silently flipping back to the old --parallel 8 config.
+    from agentalloy.install.subcommands.start_rerank_server import rerank_launch_args
 
-    assert lm_assist.max_candidates() <= start_rerank_server._RERANK_PARALLEL
-    assert start_rerank_server._RERANK_PARALLEL == 8
-    assert start_rerank_server._RERANK_CTX == 8192
+    # GPU: 2 slots × 2048 tok each (Pareto sweet spot — ~94% of --parallel 8
+    # throughput at 50% KV memory; measured Jun 2026).
+    assert rerank_launch_args("nvidia") == (2, 4096)
+    assert rerank_launch_args("radeon") == (2, 4096)
+    assert rerank_launch_args("apple-silicon") == (2, 4096)
+    # CPU: 1 slot, all threads to ONE inference; 8 client requests serialize at
+    # the server (intentional — avoids OpenMP contention).
+    assert rerank_launch_args("cpu") == (1, 2048)
+    # None coerces to "cpu" (matches start_rerank_server's launcher default:
+    # `getattr(args, "hardware_target", "cpu") or "cpu"`).
+    assert rerank_launch_args(None) == (1, 2048)
+    # Truly unknown targets fall back to the GPU shape (safer for most installs).
+    assert rerank_launch_args("future-target") == (2, 4096)
 
 
 def test_scorer_pool_width_equals_max_candidates() -> None:

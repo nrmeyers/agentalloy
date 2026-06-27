@@ -37,16 +37,41 @@ RERANK_HOST = "127.0.0.1"
 # Seconds to wait for llama-server /health before giving up.
 LLAMA_START_TIMEOUT = 120
 
-# Concurrent decode slots for the reranker. Stage B fans out up to
-# lm_assist.max_candidates() (default 8) scoring requests per composition; without
-# explicit slots llama.cpp auto-picks n_parallel=4, so half the fan-out serializes
-# and the batch blows the budget. _RERANK_PARALLEL must stay >= max_candidates()
-# (guarded in tests/test_config_consistency.py). _RERANK_CTX is the total KV context
-# split across the slots (8192 / 8 = 1024 tok/slot — ample for a capped doc + the
-# Qwen reranker template), which also frees VRAM versus the 40960 auto default on
-# the shared GPU co-tenant embed server.
-_RERANK_PARALLEL = 8
-_RERANK_CTX = 8192
+# Hardware-conditional rerank slot config (per-target tuple of (--parallel, -c)).
+# CPU and GPU have opposite optima:
+#
+# - GPU: more slots → more concurrent prefill. ``--parallel 2 -c 4096`` (2 slots ×
+#   2048 tok each) captures ~94% of the ``--parallel 8`` throughput at HALF the
+#   total KV memory and gives 2× per-slot context (2048 vs 1024 tok), eliminating
+#   the long-task headroom worry. Measured Jun 2026 on Vulkan/RTX 3060.
+#
+# - CPU: more slots → OpenMP thread contention → WORSE throughput. ``--parallel 1
+#   -c 2048`` gives the single inference all CPU threads; 8 sequential requests at
+#   full thread count beat 8 parallel at 1–2 threads each by 1.5–3×. Measured Jun
+#   2026 on Xeon W-2225 (4-thread inference): batch-of-8 ~1170ms at --parallel 1
+#   vs ~2216ms at --parallel 8 — almost 2× speedup from FEWER slots.
+#
+# ``-c`` is the TOTAL KV cache that gets divided by ``--parallel``, so per-slot
+# context = ``-c`` ÷ ``--parallel``.
+_RERANK_LAUNCH_BY_TARGET: dict[str, tuple[int, int]] = {
+    "cpu": (1, 2048),  # 1 slot, all threads — avoids contention
+    "nvidia": (2, 4096),  # 2 slots × 2048 tok each — Pareto sweet spot on GPU
+    "radeon": (2, 4096),
+    "apple-silicon": (2, 4096),
+}
+# Safe fallback for unknown targets: GPU shape (closer to what most installs use).
+_DEFAULT_RERANK_LAUNCH = (2, 4096)
+
+
+def rerank_launch_args(target: str | None) -> tuple[int, int]:
+    """Return (--parallel, -c) for the rerank llama-server launch on ``target``.
+
+    Imported by ``enable_service._render_llama_rerank_unit`` so the production
+    systemd unit's ExecStart matches whatever ``agentalloy start-rerank-server``
+    would launch interactively — a single source of truth for the slot config.
+    """
+    return _RERANK_LAUNCH_BY_TARGET.get(target or "cpu", _DEFAULT_RERANK_LAUNCH)
+
 
 # Per-hardware GPU-offload layer counts. CPU offloads nothing; GPU targets
 # offload all layers. The value is passed to ``-ngl`` at server start.
@@ -171,6 +196,8 @@ def _start_llama_server(model: str, ngl: int, timeout: float, args: argparse.Nam
 
     # COMPLETIONS mode — NO --embeddings. The reranker scores candidates via
     # /v1/completions logprobs, so the server must run as a completions server.
+    hardware_target = getattr(args, "hardware_target", "cpu") or "cpu"
+    parallel, ctx = rerank_launch_args(hardware_target)
     cmd = [
         "llama-server",
         "--port",
@@ -179,13 +206,13 @@ def _start_llama_server(model: str, ngl: int, timeout: float, args: argparse.Nam
         str(ngl),
         "-m",
         str(model_path),
-        # Concurrent decode slots + total KV context so Stage B's per-composition
-        # fan-out (up to max_candidates()) runs as one wave instead of serializing
-        # against llama.cpp's auto n_parallel=4. See _RERANK_PARALLEL / _RERANK_CTX.
+        # Concurrent decode slots + total KV context, hardware-conditional. See
+        # rerank_launch_args() — GPU and CPU have opposite optima and the helper
+        # is the single source of truth (also imported by enable_service.py).
         "--parallel",
-        str(_RERANK_PARALLEL),
+        str(parallel),
         "-c",
-        str(_RERANK_CTX),
+        str(ctx),
     ]
     log_path = install_state.user_data_dir() / "logs" / "rerank-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)

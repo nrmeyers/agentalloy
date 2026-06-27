@@ -96,11 +96,14 @@ default on that evidence.
 > **v4.0.0 update.** This campaign predates the Stage B viability work that
 > landed in v4.0.0 (doc-cap, slot sizing, shared pool bound, HIT-path rewrite to
 > route survivors through `skill_granular_select`, breaker exponential backoff,
-> `/health` reranker probe). On the GPU presets Stage B is now ON by default
-> (`LM_ASSIST=arbitrate`); the v3 "off by default" guidance still holds for CPU
-> and container deploys where the reranker can't meet the budget. A re-run of
-> this campaign against v4.0.0 to measure the post-fix lift on the LFM/domain
-> leg is the natural next benchmark. The signals-layer intent backend, which *did* win its
+> `/health` reranker probe). **As of v4.0.2 Stage B is ON by default on EVERY
+> preset** — including CPU. The earlier "off on cpu" guidance was over-
+> conservative; a faithful measurement (Xeon W-2225, exact `build_prompt`,
+> `/health`-confirmed warm) showed CPU Stage B fits the 2000ms budget when the
+> rerank server runs with `--parallel 1 -c 2048` (warm K=8 ~1170ms). The
+> launcher (`start_rerank_server.rerank_launch_args`) selects per-target slot
+> config automatically. A re-run of this campaign against the current Stage B
+> on the LFM/domain leg is the natural next benchmark. The signals-layer intent backend, which *did* win its
 benchmark, is the one model-backed stage shipped on (see
 [Intent Classification](#intent-classification-signals-layer)).
 

@@ -124,18 +124,43 @@ class TestRenderLlamaUnits:
         assert "Qwen3-Reranker-0.6B-Q8_0.gguf" in content
         assert "WantedBy=default.target" in content
 
-    def test_rerank_unit_pins_parallel_and_ctx(self) -> None:
+    def test_rerank_unit_pins_parallel_and_ctx_per_target(self) -> None:
         # The production unit must carry --parallel/-c so it doesn't depend on
-        # llama.cpp's auto n_parallel=4 (which oversubscribes the 8-wide compose
-        # Stage B fan-out). Values must match the start_rerank_server launcher.
-        from agentalloy.install.subcommands.start_rerank_server import (
-            _RERANK_CTX,
-            _RERANK_PARALLEL,
-        )
+        # llama.cpp's auto n_parallel=4. Values come from the hardware-conditional
+        # helper start_rerank_server.rerank_launch_args (GPU and CPU have
+        # OPPOSITE optima — see that function's docstring).
+        from agentalloy.install.subcommands.start_rerank_server import rerank_launch_args
 
-        content = _render_llama_rerank_unit("/usr/bin/llama-server", Path("/m/r.gguf"), 999)
-        assert f"--parallel {_RERANK_PARALLEL}" in content
-        assert f"-c {_RERANK_CTX}" in content
+        # GPU target → 2 slots × 2048 tok each (Pareto sweet spot).
+        gpu_parallel, gpu_ctx = rerank_launch_args("nvidia")
+        gpu_content = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/m/r.gguf"), 999, hardware_target="nvidia"
+        )
+        assert f"--parallel {gpu_parallel}" in gpu_content
+        assert f"-c {gpu_ctx}" in gpu_content
+        assert "--parallel 2" in gpu_content and "-c 4096" in gpu_content
+
+        # CPU target → 1 slot, all threads (avoids OpenMP contention).
+        cpu_parallel, cpu_ctx = rerank_launch_args("cpu")
+        cpu_content = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/m/r.gguf"), 0, hardware_target="cpu"
+        )
+        assert f"--parallel {cpu_parallel}" in cpu_content
+        assert f"-c {cpu_ctx}" in cpu_content
+        assert "--parallel 1" in cpu_content and "-c 2048" in cpu_content
+
+    def test_rerank_unit_warmup_fan_out_matches_parallel(self) -> None:
+        # The systemd ExecStartPost passes --parallel to the warmup so the
+        # fan-out matches the actual slot count (no point warming 8 slots when
+        # the server has 1).
+        gpu = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/m/r.gguf"), 999, hardware_target="nvidia"
+        )
+        cpu = _render_llama_rerank_unit(
+            "/usr/bin/llama-server", Path("/m/r.gguf"), 0, hardware_target="cpu"
+        )
+        assert "rerank-warmup --parallel 2" in gpu
+        assert "rerank-warmup --parallel 1" in cpu
 
     def test_rerank_unit_wires_warmup_post_hook(self) -> None:
         # ExecStartPost calls `agentalloy rerank-warmup` so the model graph is

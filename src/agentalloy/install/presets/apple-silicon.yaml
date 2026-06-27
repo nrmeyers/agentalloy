@@ -10,7 +10,10 @@ defaults:
   # off for cpu (can't score real fragments inside the budget). 1500ms gives
   # GPU headroom over the 600ms code default.
   LM_ASSIST: "arbitrate"
-  LM_ASSIST_TIMEOUT_MS: "1500"
+  # 2s budget: ample headroom for cold-start (~1.2s) and warmup-fallback recovery;
+  # warm K=8 lands at ~485ms on GPU (--parallel 2 -c 4096 launcher config — see
+  # start_rerank_server.rerank_launch_args).
+  LM_ASSIST_TIMEOUT_MS: "2000"
   # Candidate fan-out == reranker --parallel slot count (start_rerank_server.py);
   # bounds both scorer pools so Stage B + intent can't oversubscribe the slots.
   LM_ASSIST_MAX_CANDIDATES: "8"

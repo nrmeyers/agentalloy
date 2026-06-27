@@ -6,9 +6,23 @@ defaults:
   SIGNAL_INTENT_BACKEND: "reranker"
   SIGNAL_INTENT_RERANK_URL: "http://127.0.0.1:47952"
   SIGNAL_INTENT_RERANK_MODEL: "Qwen3-Reranker-0.6B-Q8_0.gguf"
-  # Stage B compose fragment re-ranker (lm_assist.py) — explicitly off on cpu:
-  # no GPU to score the real fragments inside the budget. GPU presets set arbitrate.
-  LM_ASSIST: "off"
+  # Stage B compose fragment re-ranker (lm_assist.py). Enabled on cpu in v4.0.2
+  # after a Jun 2026 measurement (Xeon W-2225, 4-thread inference, faithful
+  # build_prompt, /health-confirmed warm) showed CPU Stage B fits the budget
+  # WHEN the rerank server runs with --parallel 1 -c 2048: warm single ~145ms,
+  # batch-of-8 ~1170ms vs 2000ms budget. The launcher (start_rerank_server.py
+  # rerank_launch_args) selects the CPU-optimal slot config automatically. Slower
+  # CPUs may not hit the budget — Stage B fails open to the deterministic path
+  # (no breakage, just a missed quality lift). Set LM_ASSIST=off to disable.
+  LM_ASSIST: "arbitrate"
+  # 2s budget gives cold-start + slower-CPU headroom; warm steady-state is well
+  # under (single ~145ms, K=8 ~1170ms on Xeon-class CPU).
+  LM_ASSIST_TIMEOUT_MS: "2000"
+  # Same as GPU: 8-wide client fan-out. With --parallel 1 server, the 8 requests
+  # serialize at the server; per-request stays at full thread bandwidth.
+  LM_ASSIST_MAX_CANDIDATES: "8"
+  # Same per-fragment char cap as GPU (~600 tok prefill bound).
+  LM_ASSIST_DOC_CAP_CHARS: "2400"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"
   BOUNCE_BUDGET: "3"
