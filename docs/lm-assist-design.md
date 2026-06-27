@@ -116,19 +116,39 @@ The idea was to append `domains` terms to the BM25 query as a soft boost
 (`FragmentScorer`, `src/agentalloy/retrieval/lm_assist.py`), not the
 JSON keep-list extractor the sketch proposed.
 
-Mechanism: for the top ~12 fused fragments, the `qwen3-reranker-0.6b`
-cross-encoder is shown the task plus one fragment at a time via
-`/v1/completions` using the official Qwen3-Reranker chat template, asked
-whether the Document meets the Query's requirements. It emits one token
-with logprobs; `softmax(yes, no)` becomes the relevance score. Fragments
-scoring above `LM_ASSIST_KEEP_THRESHOLD` are kept (capped at k, in fusion
-order) and *replace* deterministic selection; everything else is dropped.
-(llama.cpp's `/v1/rerank` endpoint skips the instruction template for this
-GGUF and is not used.)
+Mechanism: for the top `LM_ASSIST_MAX_CANDIDATES` (default 8) fused
+fragments, the `qwen3-reranker-0.6b` cross-encoder is shown the task plus
+one fragment at a time via `/v1/completions` using the official
+Qwen3-Reranker chat template, asked whether the Document meets the Query's
+requirements. Each fragment body is truncated to `LM_ASSIST_DOC_CAP_CHARS`
+(default 2400, ~600 tok) first — a prefill bound that keeps fat-corpus
+outliers inside the budget. It emits one token with logprobs;
+`softmax(yes, no)` becomes the relevance score. (llama.cpp's `/v1/rerank`
+endpoint skips the instruction template for this GGUF and is not used.)
 
-- HIT → assemble exactly the kept fragments, in fusion order.
-- Disabled / timeout / error / empty-keep → deterministic depth+round-robin
+Selection is a **filter, then diversity routing** (not a fusion-order cap):
+
+- HIT → fragments scoring at/above `LM_ASSIST_KEEP_THRESHOLD` are the
+  *survivors*; they are routed through the same depth+round-robin
+  `skill_granular_select` as the deterministic path. The HIT path is no
+  longer "diversity off". (Earlier it bypassed selection and assembled the
+  kept fragments in fusion order, capped at k.) `keep_threshold` ships
+  **inert and gated-off** at 0.05 — ~every scored fragment survives, so the
+  win is the restored selection routing, not the filter. The real prod value
+  is a deferred decision gate pending a P(yes) measurement; the
+  `LM_ASSIST_KEEP_THRESHOLD` knob ships but no preset sets it.
+- Disabled / timeout / error / empty-survivor → deterministic depth+round-robin
   selection runs byte-for-byte as if Stage B never ran (fail-open floor).
+
+Concurrency & ops: the per-composition fan-out (`LM_ASSIST_MAX_CANDIDATES`)
+equals the reranker `--parallel` slot count (`-c 8192`), so a composition
+fans out as one wave. That single knob also sizes the scorer thread pool and
+bounds **both** `FragmentScorer` singletons (compose Stage B + signal
+intent), so the two consumers can't oversubscribe the slots. `/health` reports
+a `reranker` dependency (degraded — never unavailable — when the recent Stage B
+outcome window is timeout/error-dominant), and the shared rerank failure latch
+escalates its cooldown on repeated re-failures so a permanently-dead backend
+quiesces instead of being probed every 60 s forever.
 
 This subsumes the score-conditional-depth heuristic: deterministic
 selection is the fail-open behavior.
@@ -150,14 +170,19 @@ then became the default once measured.)
 - **Model: `qwen3-reranker-0.6b`** — pair-scored via `/v1/completions`
   yes/no logprobs. (The earlier LFM2.5-350M vs `qwen3.5:0.8b` bake-off is
   obsolete; the reranker won.) Default served at `http://127.0.0.1:47952`.
-- Budget: hard 600 ms timeout, then fail-open. Stage B scores up to 12
-  fragments concurrently (~150–250 ms).
+- Budget: hard 600 ms timeout (per-request reaped at 0.9x the batch budget),
+  then fail-open. Stage B scores up to `LM_ASSIST_MAX_CANDIDATES` (default 8)
+  fragments concurrently (~150–250 ms). The reranker llama-server runs with
+  `--parallel 8 -c 8192` so the fan-out lands as one wave.
 - Config: `LM_ASSIST=off|arbitrate` (default `off`), `LM_ASSIST_MODEL`
   (default `qwen3-reranker-0.6b`), `LM_ASSIST_RERANK_URL`,
-  `LM_ASSIST_TIMEOUT_MS`, `LM_ASSIST_KEEP_THRESHOLD`. Signals backend:
-  `SIGNAL_INTENT_BACKEND=cosine|reranker`,
+  `LM_ASSIST_TIMEOUT_MS`, `LM_ASSIST_MAX_CANDIDATES` (default 8, ==
+  `--parallel`), `LM_ASSIST_DOC_CAP_CHARS` (default 2400),
+  `LM_ASSIST_KEEP_THRESHOLD` (inert/gated-off default 0.05 — measure-then-set,
+  no preset sets it). Signals backend: `SIGNAL_INTENT_BACKEND=cosine|reranker`,
   `SIGNAL_INTENT_RERANK_THRESHOLD`. Telemetry records the stage outcome
-  (`hit|timeout|error|disabled`) per composition.
+  (`hit|timeout|error|disabled`) per composition, and `/health` surfaces a
+  `reranker` dependency (degraded when the recent window is timeout-dominant).
 
 ## How we know it works
 

@@ -25,6 +25,7 @@ from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
+from agentalloy.storage.vector_store import VectorStore, open_or_create
 
 _SIGNAL = "agentalloy.api.proxy_passthrough_router.evaluate_signal"
 
@@ -88,6 +89,20 @@ def _make_app(
         from agentalloy.api.compose_router import get_orchestrator
 
         app.dependency_overrides[get_orchestrator] = lambda: orchestrator
+    return app
+
+
+def _make_app_with_store(
+    captured: dict[str, Any],
+    store: VectorStore,
+    *,
+    orchestrator: ComposeOrchestrator | None = None,
+    sse: bytes | None = None,
+    status: int = 200,
+) -> Any:
+    """Like ``_make_app`` but with a real VectorStore wired in for telemetry asserts."""
+    app = _make_app(captured, orchestrator=orchestrator, sse=sse, status=status)
+    app.state.vector_store = store
     return app
 
 
@@ -485,3 +500,108 @@ def test_announce_marker_not_committed_when_no_user_message_to_inject(tmp_path: 
     # Body forwarded unchanged (nothing injected) AND the marker is NOT burned.
     assert json.loads(captured["body"]) == body
     assert _announced_file(tmp_path) is None
+
+
+# --------------------------------------------------------------------------- #
+# Telemetry: the native passthrough surface persists exactly one consolidated
+# CompositionTrace per 2xx forward (mirrors the OpenAI surface's _write_flow_telemetry).
+# --------------------------------------------------------------------------- #
+
+
+def _composed_signal(tmp_path: Path) -> SignalResult:
+    return SignalResult(
+        should_compose=True,
+        phase="build",
+        announce=True,
+        workflow_prose="OPERATE LIKE THIS",
+        workflow_skill_id="wf-build",
+        repo=str(tmp_path),
+        session_key="sess-1",
+        session_source="header",
+        task="t",
+    )
+
+
+def test_tc_passthrough_writes_single_passthrough_row(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    signal = SignalResult(
+        should_compose=False,
+        phase="build",
+        repo=str(tmp_path),
+        session_key="sess-1",
+        session_source="header",
+        task="the real task",
+    )
+    with open_or_create(tmp_path / "tele.duck") as store:
+        app = _make_app_with_store(captured, store)
+        with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 200
+        rows = store.query_traces(limit=10)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status == "proxy_passthrough"
+        assert row.event_type == "proxy_request"
+        assert row.session_key == "sess-1"
+        assert row.session_source == "header"
+        assert row.repo == str(tmp_path)
+        assert row.source_skill_ids == []
+        assert row.lm_assist_outcome == "disabled"
+
+
+def test_tc_composed_writes_composed_row_with_skills(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with open_or_create(tmp_path / "tele.duck") as store:
+        app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
+        with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 200
+        rows = store.query_traces(limit=10)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status == "proxy_composed"
+        # The workflow header skill is carried through the merged telemetry.
+        assert row.workflow_skill_ids == ["wf-build"]
+
+
+def test_tc_streaming_writes_exactly_one_row(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with open_or_create(tmp_path / "tele.duck") as store:
+        app = _make_app_with_store(
+            captured, store, orchestrator=_orchestrator("WF"), sse=b"data: {}\n\n"
+        )
+        with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
+            resp = client.post(
+                f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body(stream=True)
+            )
+            assert resp.status_code == 200
+            _ = resp.content  # drain the relay generator
+        # Written once at stream open (in _forward_streaming's on_status), not per chunk.
+        assert len(store.query_traces(limit=10)) == 1
+
+
+def test_tc_non2xx_writes_no_row(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with open_or_create(tmp_path / "tele.duck") as store:
+        app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"), status=529)
+        with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        assert resp.status_code == 529
+        # 2xx gate suppresses the write (the model never processed the turn).
+        assert store.query_traces(limit=10) == []
+
+
+def test_tc_compose_exception_still_forwards_no_row(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+    with open_or_create(tmp_path / "tele.duck") as store:
+        app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
+        with (
+            patch(_SIGNAL, side_effect=RuntimeError("signal boom")),
+            TestClient(app) as client,
+        ):
+            resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
+        # The compose-path exception leaves on_status = _noop_status: original
+        # forwarded, request succeeds, and no telemetry row is written.
+        assert resp.status_code == 200
+        assert json.loads(captured["body"]) == _anthropic_body()
+        assert store.query_traces(limit=10) == []

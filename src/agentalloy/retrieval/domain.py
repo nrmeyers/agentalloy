@@ -116,6 +116,80 @@ def _graph_expand_enabled() -> bool:
     return _os.environ.get("RETRIEVAL_GRAPH_EXPAND", "off").lower() == "on"
 
 
+# E4 — fused-score deepen-gate (ships inert). At 0.0 the gate is a strict no-op
+# (legacy breadth-first selection); 0.85 is the recommended value after the
+# post-#15 K sweep, at which a spare small-k slot deepens the top skill unless a
+# sibling's lead fragment scores within the band of the top skill's lead.
+_DEEPEN_BAND_DEFAULT = 0.0
+
+
+def _deepen_band() -> float:
+    """Deepen-band fraction from ``AGENTALLOY_DEEPEN_BAND`` (clamped to [0, 1]).
+
+    Malformed/empty falls back to ``_DEEPEN_BAND_DEFAULT`` (0.0 == legacy).
+    """
+    try:
+        return max(
+            0.0,
+            min(1.0, float(_os.environ.get("AGENTALLOY_DEEPEN_BAND", _DEEPEN_BAND_DEFAULT))),
+        )
+    except ValueError:
+        return _DEEPEN_BAND_DEFAULT
+
+
+# E5 — contract_tags as a soft domain filter (ships on; empty-fallback safe).
+def _contract_tag_filter_enabled() -> bool:
+    return _os.environ.get("AGENTALLOY_CONTRACT_TAG_FILTER", "on").strip().lower() != "off"
+
+
+def _soft_tag_filter(
+    ranked: list[ActiveFragment], contract_tags: list[str] | None
+) -> list[ActiveFragment]:
+    """Intersect the fused pool with fragments carrying >=1 contract tag.
+
+    Falls back to the full pool when the intersection is empty (process-vocab
+    contracts whose tags match no domain skill must not empty retrieval — the
+    safety valve for ``legs="domain"`` contracts carrying only process tags). The
+    pipeline already hydrates ``frag.domain_tags``. Additive to (not a replacement
+    for) the BM25 steer in ``_resolve_bm25_query``.
+    """
+    if not contract_tags:
+        return ranked
+    want = {t.lower() for t in contract_tags}
+    keep = [f for f in ranked if want & {t.lower() for t in f.domain_tags}]
+    return keep if keep else ranked
+
+
+# E6 — phase/category pool gate (ships dormant; #14 activates). The benchmark
+# packs share category="engineering" with React, so the old per-phase map can't
+# separate them; the engine needs a product-category allowlist that excludes a
+# reserved "benchmark" category (#14 assigns it at the pack level). Off by
+# default (phase-agnostic, today's behavior) until #14's re-categorization +
+# re-embed lands — then AGENTALLOY_PHASE_GATE=on activates it.
+_PRODUCT_CATEGORIES: tuple[str, ...] = (
+    "engineering",
+    "design",
+    "tooling",
+    "quality",
+    "ops",
+    "operational",
+    "review",
+)
+
+
+def _pool_categories() -> list[str] | None:
+    """Category allowlist for the candidate pool, or ``None`` for phase-agnostic.
+
+    Returns the product-category allowlist only when ``AGENTALLOY_PHASE_GATE=on``;
+    the reserved "benchmark" category (#14) is excluded by omission so
+    benchmark-only packs never enter production retrieval. Unset → ``None`` →
+    byte-for-byte identical to today (a true no-op until #14 + the flip).
+    """
+    if _os.environ.get("AGENTALLOY_PHASE_GATE", "off").strip().lower() == "on":
+        return list(_PRODUCT_CATEGORIES)
+    return None
+
+
 @runtime_checkable
 class RequiresEdgeSource(Protocol):
     """Anything that can resolve a skill's REQUIRES_COMPOSITIONAL out-edges.
@@ -300,7 +374,7 @@ def _bm25_fallback_result(
     bm25_query, bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(
         bm25_query,
-        categories=None,
+        categories=_pool_categories(),
         phases=None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
@@ -308,7 +382,7 @@ def _bm25_fallback_result(
 
     metadata = frag_src.get_active_fragments(
         skill_class="domain",
-        categories=None,
+        categories=_pool_categories(),
         phases=None,
         domain_tags=domain_tags,
     )
@@ -323,12 +397,20 @@ def _bm25_fallback_result(
         ranked.append(frag)
         scores_by_id[hit.fragment_id] = hit.score
 
+    # E5: contract_tags soft filter — narrow the pool to fragments carrying >=1
+    # contract tag, empty-fallback safe. No-op when contract_tags is None or the
+    # AGENTALLOY_CONTRACT_TAG_FILTER kill-switch is off.
+    if _contract_tag_filter_enabled():
+        ranked = _soft_tag_filter(ranked, contract_tags)
+
     eligible_count = len(ranked)
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
     if raw_scores or diversity_off:
         selected = ranked[:k]
     else:
-        selected, _ = skill_granular_select(ranked, k)
+        selected, _ = skill_granular_select(
+            ranked, k, scores_by_id=scores_by_id, deepen_band=_deepen_band()
+        )
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
     return EmbeddingErrorResult(
         error=error,
@@ -471,7 +553,7 @@ def retrieve_domain_candidates(
             )
         dense_hits = vector_store.search_similar(
             query_vec,
-            categories=None,
+            categories=_pool_categories(),
             phases=None,
             deprecated_skill_ids=deprecated_ids,
             k=pool_size,
@@ -490,7 +572,7 @@ def retrieve_domain_candidates(
     bm25_query, _bm25_source = _resolve_bm25_query(task, contract_tags)
     bm25_hits = vector_store.search_bm25(
         bm25_query,
-        categories=None,
+        categories=_pool_categories(),
         phases=None,
         deprecated_skill_ids=deprecated_ids,
         k=pool_size,
@@ -517,7 +599,7 @@ def retrieve_domain_candidates(
     # for the eligible categories; intersect with the fused ids.
     metadata = frag_src.get_active_fragments(
         skill_class="domain",
-        categories=None,
+        categories=_pool_categories(),
         phases=None,
         domain_tags=domain_tags,
     )
@@ -559,6 +641,13 @@ def retrieve_domain_candidates(
             phase,
         )
 
+    # E5: contract_tags as a soft domain filter — narrow the hydrated pool to
+    # fragments carrying >=1 contract tag (empty-fallback safe) so Stage A/B and
+    # selection all operate on the narrowed pool. No-op when contract_tags is None
+    # (direct /compose) or AGENTALLOY_CONTRACT_TAG_FILTER=off.
+    if _contract_tag_filter_enabled():
+        ranked = _soft_tag_filter(ranked, contract_tags)
+
     eligible_count = len(ranked)
 
     # raw_scores=True: return pre-diversity order (for /retrieve observability).
@@ -588,18 +677,37 @@ def retrieve_domain_candidates(
             ranked_skill_order = list(dict.fromkeys(f.skill_id for f in ranked))
             ranked = _graph_expand(ranked, ranked_skill_order, by_id, source)
 
-        # Stage B: LM fragment re-rank. When enabled and it returns a HIT, it
-        # *replaces* deterministic selection — it has already chosen exactly
-        # which fragments to keep (above threshold, capped at k, in fusion
-        # order). On disabled/timeout/error it returns (None, outcome) and the
-        # deterministic path below runs byte-for-byte as if Stage B did not
-        # exist. The deterministic path never sees the reranker.
+        # Stage B: LM fragment re-rank. When enabled and it returns a HIT, it has
+        # FILTERED the scored head down to the survivors above keep_threshold (in
+        # fusion order, NOT capped at k). Those survivors are routed through
+        # skill_granular_select below, so the HIT path keeps the same depth+diversity
+        # guarantees as the deterministic path — it is no longer "diversity off". On
+        # disabled/timeout/error it returns (None, outcome) and the deterministic
+        # path below runs byte-for-byte as if Stage B did not exist. The
+        # deterministic path never sees the reranker.
         lm_selected, lm_outcome, lm_detail = _maybe_lm_arbitrate(ranked, query, k)
+        logger.info(
+            "stage-b verdict: outcome=%s kept=%d dropped=%d k=%d candidates=%d",
+            lm_outcome.value,
+            len(lm_detail.kept_ids) if lm_detail else 0,
+            len(lm_detail.dropped_ids) if lm_detail else 0,
+            k,
+            len(ranked),
+        )
         if lm_selected is not None:
-            selected = lm_selected
-            skills_ranked = list(dict.fromkeys(f.skill_id for f in ranked))
+            # §D: route Stage B survivors through the SAME diversity selection as
+            # the deterministic path. scores_by_id = the reranker yes-probabilities
+            # over the survivors (feeds the deepen-gate; inert at deepen_band=0.0).
+            selected, skills_ranked = skill_granular_select(
+                lm_selected,
+                k,
+                scores_by_id=(lm_detail.scores if lm_detail else None),
+                deepen_band=_deepen_band(),
+            )
         else:
-            selected, skills_ranked = skill_granular_select(ranked, k)
+            selected, skills_ranked = skill_granular_select(
+                ranked, k, scores_by_id=scores_by_id, deepen_band=_deepen_band()
+            )
 
         # Additive tail: re-append graph neighbors dropped by the k-cap so they
         # surface as trailing candidates without displacing the selection.
@@ -738,9 +846,11 @@ def _maybe_rerank(ranked: list[ActiveFragment], query: str) -> tuple[list[Active
 
 @dataclass(frozen=True)
 class _LMArbitrationDetail:
-    """Stage B selection bookkeeping for telemetry — the kept (injected) vs the
-    scored-but-dropped fragment ids, and the per-fragment scores over the full
-    scored pool (fragment_id -> yes-probability)."""
+    """Stage B selection bookkeeping for telemetry — ``kept_ids`` = the survivors
+    that cleared the keep_threshold filter (NOT necessarily the final injected set,
+    which is the downstream skill_granular_select result over the survivors),
+    ``dropped_ids`` = scored-but-below-threshold, and ``scores`` = the per-fragment
+    yes-probabilities over the full scored pool (fragment_id -> score)."""
 
     kept_ids: list[str]
     dropped_ids: list[str]
@@ -750,19 +860,25 @@ class _LMArbitrationDetail:
 def _maybe_lm_arbitrate(
     ranked: list[ActiveFragment], query: str, k: int
 ) -> tuple[list[ActiveFragment] | None, LMAssistOutcome, _LMArbitrationDetail | None]:
-    """Stage B — LM fragment re-rank over the top fused fragments.
+    """Stage B — LM fragment re-rank (relevance FILTER) over the top fused fragments.
 
-    Scores up to ``max_candidates()`` top fused fragments against ``query``,
-    keeps those whose yes-probability clears the configured threshold (in
-    fusion-score order, capped at ``k``), and returns them as the final
-    selection. An empty keep is a *valid* high-confidence result meaning
-    "inject nothing" — the 12B-redshift case — and is returned as ``[]`` (not
-    None), so compose returns no domain fragments.
+    Scores up to ``max_candidates()`` top fused fragments against ``query`` and
+    returns the *survivors* — those whose yes-probability clears the configured
+    keep_threshold, in fusion order, **uncapped**. The ``k`` cap is NOT applied
+    here: the caller routes the survivors through ``skill_granular_select`` (with
+    the reranker scores), so the HIT path gets the same depth+diversity selection
+    as the deterministic path. An empty survivor set is a *valid* high-confidence
+    result meaning "inject nothing" and is returned as ``[]`` (not None).
 
-    Returns ``(selection, outcome)``:
+    At the inert default keep_threshold (0.05, gated-off) ~every scored fragment
+    survives, so the value is the restored selection routing, not the filter.
 
-    * ``(list, HIT)`` — Stage B ran and chose the selection (possibly empty).
-    * ``(None, DISABLED|TIMEOUT|ERROR)`` — Stage B did not produce a result;
+    ``k`` is accepted for call-site symmetry but unused (the cap lives downstream).
+
+    Returns ``(survivors, outcome, detail)``:
+
+    * ``(list, HIT, detail)`` — Stage B ran and filtered (survivors possibly empty).
+    * ``(None, DISABLED|TIMEOUT|ERROR, None)`` — Stage B did not produce a result;
       the caller must fall through to deterministic selection. This is the
       contractual fail-open floor: ANY failure routes here and the
       deterministic path runs as if Stage B never existed.
@@ -800,17 +916,20 @@ def _maybe_lm_arbitrate(
         return None, outcome, None
 
     threshold = load_config().keep_threshold
-    kept = [frag for frag, score in zip(head, result.scores, strict=True) if score >= threshold]
-    selection = kept[:k]
+    # FILTER (don't cap): keep every scored-head fragment at/above the threshold,
+    # in fusion order. The ``k`` cap is applied downstream by skill_granular_select.
+    survivors = [
+        frag for frag, score in zip(head, result.scores, strict=True) if score >= threshold
+    ]
     # Telemetry detail over the full scored pool: scores keyed by fragment id,
-    # kept = the injected selection (post-cap), dropped = everything else scored
-    # (below threshold OR trimmed by the ``k`` cap).
+    # kept = the survivors (cleared the filter — NOT the final injected set, which
+    # is the post-skill_granular_select result), dropped = scored-but-below-threshold.
     scores = {frag.fragment_id: score for frag, score in zip(head, result.scores, strict=True)}
-    kept_ids = [frag.fragment_id for frag in selection]
+    kept_ids = [frag.fragment_id for frag in survivors]
     kept_set = set(kept_ids)
     dropped_ids = [frag.fragment_id for frag in head if frag.fragment_id not in kept_set]
     detail = _LMArbitrationDetail(kept_ids=kept_ids, dropped_ids=dropped_ids, scores=scores)
-    return selection, LMAssistOutcome.HIT, detail
+    return survivors, LMAssistOutcome.HIT, detail
 
 
 def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]:
@@ -849,7 +968,11 @@ def diversity_select(pool: list[ActiveFragment], k: int) -> list[ActiveFragment]
 
 
 def skill_granular_select(
-    ranked: list[ActiveFragment], k: int
+    ranked: list[ActiveFragment],
+    k: int,
+    *,
+    scores_by_id: dict[str, float] | None = None,
+    deepen_band: float = 0.0,
 ) -> tuple[list[ActiveFragment], list[str]]:
     """Depth-guaranteed round-robin selection across skills.
 
@@ -865,14 +988,29 @@ def skill_granular_select(
     prompt (measured: 2026-06 campaign, composed-vs-oracle gap concentrated in
     exactly those criteria).
 
-    Stage 2 — round-robin over all skills (including the top skill, if it has
-    fragments left) fills the remaining slots, preventing sibling-skill
+    Stage 2 — round-robin over the NEAR sibling skills (including the top skill,
+    if it has fragments left) fills the remaining slots, preventing sibling-skill
     cannibalization exactly as before.
+
+    Stage 4 (deepen-gate) — ``scores_by_id`` + ``deepen_band`` partition the
+    non-top siblings into NEAR (lead fragment scores within ``deepen_band`` of the
+    top skill's lead) and FAR (below the band). Stages 2/3 spend the budget on
+    NEAR siblings then the top skill's leftovers; only if the budget is still
+    unfilled does Stage 4 admit FAR siblings as a last resort, so k is always
+    filled. ``deepen_band=0.0`` (the shipped default) collapses the threshold to
+    0.0 → FAR is empty, NEAR is all siblings → byte-for-byte identical to the
+    legacy breadth-first behavior.
 
     Within each skill's queue, prefer a ``fragment_type`` from
     ``_DIVERSITY_PRIORITY`` not yet represented in the globally selected set
     (same logic as ``diversity_select``); otherwise take the skill's next
     highest-ranked fragment.
+
+    Args:
+        scores_by_id: per-fragment fused-rank scores (1 - i/n) for the lead-score
+            lookup; ``None`` (or omitted) disables the gate.
+        deepen_band: fraction of the top skill's lead score a sibling must clear
+            to count as NEAR; 0.0 == legacy (gate inert).
 
     Returns:
         (selected, skills_ranked) where ``skills_ranked`` is the ordered list
@@ -915,15 +1053,30 @@ def skill_granular_select(
         selected.append(frag)
         selected_types.add(frag.fragment_type)
 
-    # Stage 2: round-robin the remaining slots over the OTHER skills — the
-    # top skill already holds its depth slots, so the rest of the budget
-    # buys breadth. The top skill re-enters only in stage 3, when every
-    # other queue is exhausted. When no depth slot was taken (k <= 1) the
-    # top skill keeps its place at the head of the rotation.
-    rotation = skills_ranked[1:] if depth and len(skills_ranked) > 1 else skills_ranked
+    # Deepen-gate partition (E4). Partition the non-top "sibling" skills into
+    # NEAR (lead fragment scores within ``deepen_band`` of the top skill's lead)
+    # and FAR (below the band), using the ORIGINAL immutable ``skill_queues`` for
+    # the lead-score lookup. At deepen_band=0.0 the threshold collapses to 0.0 →
+    # NEAR == all siblings, FAR == [] → byte-for-byte identical to legacy.
+    top_lead = (scores_by_id or {}).get(skill_queues[skills_ranked[0]][0].fragment_id, 0.0)
+    threshold = deepen_band * top_lead if (scores_by_id and deepen_band > 0.0) else 0.0
+
+    def _lead(sid: str) -> float:
+        return (scores_by_id or {}).get(skill_queues[sid][0].fragment_id, 0.0)
+
+    siblings = skills_ranked[1:] if depth and len(skills_ranked) > 1 else skills_ranked
+    near = [s for s in siblings if threshold == 0.0 or _lead(s) >= threshold]
+    far = [s for s in siblings if threshold > 0.0 and _lead(s) < threshold]
+
+    # Stage 2: round-robin the remaining slots over the NEAR sibling skills — the
+    # top skill already holds its depth slots, so the rest of the budget buys
+    # breadth among siblings close enough to the top skill to be worth surfacing.
+    # The top skill re-enters only in stage 3, when every near queue is exhausted.
+    # When no depth slot was taken (k <= 1) the top skill keeps its place at the
+    # head of the rotation (it is included in ``siblings``/``near``).
     while len(selected) < k:
         made_progress = False
-        for sid in rotation:
+        for sid in near:
             if len(selected) >= k:
                 break
             queue = queues[sid]
@@ -934,18 +1087,38 @@ def skill_granular_select(
             selected.append(frag)
             selected_types.add(frag.fragment_type)
             made_progress = True
-        # Other queues exhausted before k fragments were gathered.
+        # Near queues exhausted before k fragments were gathered.
         if not made_progress:
             break
 
-    # Stage 3: every other skill is drained — spend any remaining budget on
-    # the top skill's leftover fragments.
+    # Stage 3: every near skill is drained — spend any remaining budget on the
+    # top skill's leftover fragments (deepen the best match).
     top_queue = queues[skills_ranked[0]]
     while len(selected) < k and top_queue:
         chosen_index = _pick_diverse_index(top_queue, selected_types)
         frag = top_queue.pop(chosen_index)
         selected.append(frag)
         selected_types.add(frag.fragment_type)
+
+    # Stage 4 (deepen-gate fallback): only when the gate fired (FAR non-empty) and
+    # the budget is still unfilled after deepening the top skill, round-robin the
+    # FAR (below-band) siblings so k is always filled. Inert when far == [] (the
+    # deepen_band=0.0 default), preserving legacy behavior exactly.
+    while len(selected) < k:
+        made_progress = False
+        for sid in far:
+            if len(selected) >= k:
+                break
+            queue = queues[sid]
+            if not queue:
+                continue
+            chosen_index = _pick_diverse_index(queue, selected_types)
+            frag = queue.pop(chosen_index)
+            selected.append(frag)
+            selected_types.add(frag.fragment_type)
+            made_progress = True
+        if not made_progress:
+            break
 
     return selected, skills_ranked
 

@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import logging
-
 import uvicorn
 
-from agentalloy.config import get_settings
+from agentalloy.config import configure_logging, get_settings
 
 
 def main() -> None:
     settings = get_settings()
-    # Apply log_level to the root logger so logging is configured before uvicorn starts.
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    # Apply log_level to the agentalloy.* loggers before uvicorn starts.
+    configure_logging(settings.log_level)
     uvicorn.run(
         "agentalloy.app:app",
         host="0.0.0.0",

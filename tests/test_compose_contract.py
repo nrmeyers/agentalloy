@@ -90,9 +90,10 @@ def test_request_minimal_valid() -> None:
 
 
 def test_request_resolves_phase_defaults() -> None:
-    """Verify the phase-driven k defaults from POC §15.7."""
-    assert ComposeRequest(task="t", phase="build").resolved_k() == 2
-    assert ComposeRequest(task="t", phase="ship").resolved_k() == 2
+    """Verify the phase-driven k defaults (build/ship raised 2→4 in #13/§E; the
+    improved corpus made the original k=2 cap too thin — see PLAN-OF-ATTACK §9 D3)."""
+    assert ComposeRequest(task="t", phase="build").resolved_k() == 4
+    assert ComposeRequest(task="t", phase="ship").resolved_k() == 4
     assert ComposeRequest(task="t", phase="qa").resolved_k() == 4
     assert ComposeRequest(task="t", phase="design").resolved_k() == 4
     assert ComposeRequest(task="t", phase="intake").resolved_k() == 4

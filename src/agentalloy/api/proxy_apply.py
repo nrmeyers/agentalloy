@@ -22,6 +22,7 @@ here too, imported back by the passthrough router.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+
+
+def _tier2_k() -> int | None:
+    """Explicit per-work-item k for the Tier-2 domain leg.
+
+    ``AGENTALLOY_TIER2_K`` overrides (clamped to ``[1, 50]``); ``None`` defers to
+    the phase default (post-E1, build=4). Lets the Tier-2 per-work-item leg be
+    tuned independently of direct ``/compose`` calls. A malformed or empty value
+    falls back to ``None`` (phase default).
+    """
+    raw = os.environ.get("AGENTALLOY_TIER2_K")
+    if raw:
+        try:
+            return max(1, min(50, int(raw)))
+        except ValueError:
+            return None
+    return None
 
 
 @dataclass
@@ -164,7 +182,7 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
             from agentalloy.contracts import parse_contract
 
             contract = parse_contract(Path(signal.current_contract))
-            domain_req = compose_request_from_contract(contract, legs="domain")
+            domain_req = compose_request_from_contract(contract, legs="domain", k=_tier2_k())
             tier2_result = await orchestrator.compose(
                 domain_req,
                 repo=signal.repo,

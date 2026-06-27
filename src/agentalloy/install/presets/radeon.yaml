@@ -12,6 +12,13 @@ defaults:
   # contends with the embedder + intent reranker; drop to off if the budget bites.
   LM_ASSIST: "arbitrate"
   LM_ASSIST_TIMEOUT_MS: "1500"
+  # Candidate fan-out == reranker --parallel slot count (start_rerank_server.py);
+  # bounds both scorer pools so Stage B + intent can't oversubscribe the slots.
+  LM_ASSIST_MAX_CANDIDATES: "8"
+  # Per-fragment char cap (~600 tok) — prefill bound that keeps fat-corpus outliers
+  # inside the Stage B budget. (keep_threshold is deliberately NOT set: it stays the
+  # inert code default, gated-off, pending a P(yes) measurement.)
+  LM_ASSIST_DOC_CAP_CHARS: "2400"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"
   BOUNCE_BUDGET: "3"

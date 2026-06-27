@@ -610,7 +610,7 @@ def _build_entrypoint_script(packs: str) -> str:
             "",
             "# Start uvicorn AFTER bootstrap completes to avoid Ladybug lock conflicts.",
             'echo ">> Starting uvicorn..."',
-            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &",
+            'uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "${LOG_LEVEL:-info}" &',
             "UVICORN_PID=$!",
             "",
             "# Block on uvicorn — its exit is the container's exit.",
@@ -706,7 +706,7 @@ def _run_container(
         "AGENTALLOY_PACKS": packs,
         "LADYBUG_DB_PATH": "/app/data/ladybug",
         "DUCKDB_PATH": "/app/data/skills.duck",
-        "LOG_LEVEL": "info",
+        "LOG_LEVEL": os.environ.get("LOG_LEVEL", "info").lower(),
     }
     env_cmd: list[str] = []
     for k, v in env.items():

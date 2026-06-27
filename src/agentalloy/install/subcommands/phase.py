@@ -24,6 +24,15 @@ VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
 
 SCHEMA_VERSION = 1
 
+# Per-phase exit-artifact glob used to detect a *stale* approval (artifact edited
+# after the marker was written). Shared in spirit with approve.py's map. Phases
+# absent here are existence-only / not approval-gated.
+_APPROVAL_SINCE = {
+    "spec": "docs/spec/*.md",
+    "design": "docs/design/**/*.md",
+    "sdd-fast": "docs/fast/*.md",
+}
+
 
 def _phase_path(root: Path) -> Path:
     return root / ".agentalloy" / "phase"
@@ -121,14 +130,61 @@ def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, l
     return True, decision.advisories
 
 
+def _approval_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, list[str]]:
+    """Whether a forward ``phase set`` must be refused for lack of human approval.
+
+    Approval is the human checkpoint that ``--force`` must NOT bypass (``--force``
+    only waives artifact-completeness). Only forward, approval-gated routes are
+    checked; everything else returns ``(False, [])``. Evaluates the deterministic
+    ``approval_recorded`` predicate directly (embed-free): only a hard ``NOT_MET``
+    (no marker, or the exit artifact changed after approval) blocks.
+
+    When the exit artifact doesn't exist yet there is nothing to approve, so we
+    defer to the completeness gate (``_forward_gate_blocks``) to drive the
+    "produce the exit artifact" message — mirroring the packaged ``exit_gates``,
+    where ``approval_recorded`` sits *after* ``artifact_exists`` in the ``all_of``
+    and is only reached once the artifact is on disk.
+    """
+    from agentalloy.signals.gates import (  # noqa: PLC0415
+        _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
+    )
+    from agentalloy.signals.predicates import (  # noqa: PLC0415
+        PredicateContext,
+        PredicateResult,
+        approval_required,
+        eval_approval_recorded,
+    )
+
+    if target != _PHASE_GRAPH.get(current):
+        return False, []  # backward / bail / non-linear → unguarded
+    if not approval_required(current):
+        return False, []
+    since = _APPROVAL_SINCE.get(current, "")
+    if since and not any(p.is_file() for p in root.glob(since)):
+        return False, []  # nothing produced yet → completeness gate handles it
+    ctx = PredicateContext(project_root=root, current_phase=current)
+    result = eval_approval_recorded({"since": since}, ctx)
+    if result != PredicateResult.NOT_MET:
+        return False, []  # MET or UNKNOWN → allow
+    return True, [
+        f"'{current}' requires human approval before advancing to '{target}'. "
+        f"Run `agentalloy approve {current}` once the user has approved."
+    ]
+
+
 def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> dict[str, Any]:
     """Set or update the current phase.
 
     A *forward* transition (the next phase in the linear SDD graph) is gated on
     the current phase's deterministic exit gates: if the exit artifact isn't on
     disk, the write is refused and the returned dict carries ``blocked=True`` plus
-    advisories naming what's missing. ``force=True`` bypasses the gate. Backward,
-    bail, and reset transitions are never gated.
+    advisories naming what's missing. ``force=True`` bypasses that completeness
+    gate. Backward, bail, and reset transitions are never gated.
+
+    The human-approval gate is separate and *unforgeable-by-force*: leaving an
+    approval-gated phase (spec/design, plus sdd-fast when enabled) without a
+    recorded approval marker is refused with ``reason="approval"`` even under
+    ``force``. Backward, bail, and reset transitions are never gated.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
@@ -143,6 +199,19 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
     existing = _read_phase(root)
     current = existing.get("phase") if existing else None
+
+    # Human-approval gate runs unconditionally — --force waives only
+    # artifact-completeness, never the human checkpoint.
+    if current and current != phase:
+        appr_blocked, appr_adv = _approval_gate_blocks(current, phase, root)
+        if appr_blocked:
+            return {
+                "phase": current,
+                "blocked": True,
+                "target": phase,
+                "advisories": appr_adv,
+                "reason": "approval",
+            }
 
     if not force and current and current != phase:
         blocked, advisories = _forward_gate_blocks(current, phase, root)
@@ -257,6 +326,16 @@ def _run_set(args: argparse.Namespace) -> int:
         args.phase, root=_resolve_root(args), force=getattr(args, "force", False)
     )
     if result.get("blocked"):
+        if result.get("reason") == "approval":
+            # The human checkpoint --force cannot bypass: don't suggest --force.
+            print(
+                f"Refusing to advance {result['phase']} → {result['target']}: "
+                f"awaiting human approval.",
+                file=sys.stderr,
+            )
+            for advisory in result.get("advisories", []):
+                print(f"  {advisory}", file=sys.stderr)
+            return 1
         print(
             f"Refusing to advance {result['phase']} → {result['target']}: "
             f"the current phase's exit gate isn't met.",

@@ -20,6 +20,7 @@ import sys
 
 from agentalloy.install.subcommands import (
     add,
+    approve,
     cleanup,
     compose,
     contract,
@@ -96,6 +97,7 @@ _SUBCOMMANDS = [
     status,
     statusline,
     task,
+    approve,
     cleanup,
     # Underlying step subcommands (still available for power-users + the
     # runbook LLM that drives them individually).

@@ -83,6 +83,9 @@ class HealthChecker:
         # NXS-777: reflect startup cache load result
         cache_err = self._runtime_load_error
 
+        # Stage B reranker health (read-only rolling-window read — adds no latency).
+        rerank_err = self._probe_reranker()
+
         deps: dict[str, DependencyStatus] = {
             "runtime_store": DependencyStatus(
                 status="ok" if store_ok is None else "unavailable",
@@ -110,11 +113,20 @@ class HealthChecker:
                 else None,
                 detail=cache_err,
             ),
+            "reranker": DependencyStatus(
+                status="ok" if rerank_err is None else "unavailable",
+                impact="Stage B fragment re-rank is timing out; falling back to deterministic selection"
+                if rerank_err
+                else None,
+                detail=rerank_err,
+            ),
         }
 
+        # A failing reranker degrades (Stage B fails open to deterministic
+        # selection) — it never makes the service unavailable.
         if store_ok is not None or cache_err is not None:
             overall: OverallStatus = "unavailable"
-        elif embed_ok is not None or tel_ok is not None:
+        elif embed_ok is not None or tel_ok is not None or rerank_err is not None:
             overall = "degraded"
         else:
             overall = "healthy"
@@ -160,6 +172,20 @@ class HealthChecker:
             return str(exc)
         except Exception as exc:
             return str(exc)
+
+    def _probe_reranker(self) -> str | None:
+        """Detail string when Stage B's recent outcomes are timeout/error-dominant,
+        else None. Read-only: it queries the scorer's process-local rolling outcome
+        window (updated by the scorer itself), so it never makes a live reranker
+        call and adds no latency to /health. Returns None when Stage B is disabled
+        (no attempts ever run) or the window has no failing majority. Any unexpected
+        error is swallowed — the probe must never break /health."""
+        try:
+            from agentalloy.retrieval.lm_assist import reranker_status
+
+            return reranker_status()
+        except Exception:  # pragma: no cover — defensive; probe must not raise
+            return None
 
 
 @router.get(

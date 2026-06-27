@@ -7,6 +7,7 @@ them to document the contract via OpenAPI.
 
 from __future__ import annotations
 
+import os as _os
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -18,16 +19,19 @@ if TYPE_CHECKING:
 # fast-lane route (one compressed pass) intake can branch to.
 Phase = Literal["intake", "spec", "design", "build", "qa", "ship", "sdd-fast"]
 
-# Phase-driven defaults (set 2026-04-25 from POC §15.7 findings).
-# Short-form action phases get k=2 — Phase 1+2 data shows ~70% token reduction
-# at parity quality. Long-form structured phases get k=4 — under-context
-# at k=2 caused output rambling on T8 postmortem (truncated at max_tokens).
-# Every value of the ``Phase`` Literal must appear here — ``resolved_k`` indexes
-# this dict directly.
+# Phase-driven defaults (set 2026-04-25 from POC §15.7 findings; build/ship
+# revisited upward in #13). Short-form action phases historically got k=2, but
+# build/ship were raised to k=4 — k=2 was a pre-corpus-improvement default and
+# the on-domain skill holds 4-6 fragments yet won only a single slot. The final
+# value is confirmed by the post-#15 K sweep via the ``AGENTALLOY_K_<PHASE>`` env
+# knob (see ``_phase_k``). Long-form structured phases get k=4 — under-context at
+# k=2 caused output rambling on the T8 postmortem (truncated at max_tokens).
+# Every value of the ``Phase`` Literal must appear here — ``_phase_k`` /
+# ``resolved_k`` index this dict directly.
 DEFAULT_K_BY_PHASE: dict[str, int] = {
-    "build": 2,
-    "ship": 2,
-    "sdd-fast": 2,  # compressed action pass — short-form like build
+    "build": 4,  # was 2 — pre-corpus default; on-domain skill holds 4-6 frags. Revisited #13.
+    "ship": 4,  # was 2 — lockstep with build; max_tokens raised to 4096 to match (E2).
+    "sdd-fast": 2,  # compressed action pass stays tight — short-form like build
     "qa": 4,  # safer default; long-form qa (postmortem) needs anchor context
     "spec": 4,
     "design": 4,
@@ -39,14 +43,48 @@ DEFAULT_K_BY_PHASE: dict[str, int] = {
 # on flat). These hints are sized to the typical fragment payload at the
 # matching k. Keyed by every ``Phase`` value (compose indexes it directly).
 DEFAULT_MAX_TOKENS_BY_PHASE: dict[str, int] = {
-    "build": 2048,
-    "ship": 2048,
-    "sdd-fast": 2048,
+    "build": 4096,  # lockstep with DEFAULT_K_BY_PHASE build=4 (E2 — Risk #5 truncation guard)
+    "ship": 4096,  # lockstep with DEFAULT_K_BY_PHASE ship=4
+    "sdd-fast": 2048,  # stays tight — k=2 compressed pass
     "qa": 4096,
     "spec": 4096,
     "design": 4096,
     "intake": 4096,
 }
+
+
+def _phase_k(phase: str) -> int:
+    """Phase-default k with an optional ``AGENTALLOY_K_<PHASE>`` env override (the K-sweep knob).
+
+    The override is clamped to ``[1, 50]``; a malformed or empty value falls back
+    to the table. ``-`` maps to ``_`` so ``sdd-fast`` reads ``AGENTALLOY_K_SDD_FAST``.
+    """
+    raw = _os.environ.get(f"AGENTALLOY_K_{phase.upper().replace('-', '_')}")
+    base = DEFAULT_K_BY_PHASE[phase]
+    if raw:
+        try:
+            return max(1, min(50, int(raw)))
+        except ValueError:
+            return base
+    return base
+
+
+def _phase_max_tokens(phase: str) -> int:
+    """Phase-default max_tokens hint with an optional ``AGENTALLOY_MAX_TOKENS_<PHASE>`` override.
+
+    Kept in lockstep with ``_phase_k`` (Risk #5): raising k without raising the
+    output budget re-introduces the T8 truncation/ramble. Floor 256; a malformed
+    value falls back to the table.
+    """
+    raw = _os.environ.get(f"AGENTALLOY_MAX_TOKENS_{phase.upper().replace('-', '_')}")
+    base = DEFAULT_MAX_TOKENS_BY_PHASE[phase]
+    if raw:
+        try:
+            return max(256, int(raw))
+        except ValueError:
+            return base
+    return base
+
 
 ErrorStage = Literal["retrieval", "assembly"]
 ErrorCode = Literal[
@@ -109,7 +147,7 @@ class ComposeRequest(BaseModel):
 
     def resolved_k(self) -> int:
         """Server-side resolution: caller's k if provided, else phase default."""
-        return self.k if self.k is not None else DEFAULT_K_BY_PHASE[self.phase]
+        return self.k if self.k is not None else _phase_k(self.phase)
 
     @property
     def resolved_contract_tags(self) -> list[str] | None:
@@ -140,6 +178,7 @@ def compose_request_from_contract(
     *,
     legs: Literal["both", "system", "domain"] = "both",
     requesting_agent: str = "post_tool_use",
+    k: int | None = None,
 ) -> ComposeRequest:
     """Map a parsed :class:`~agentalloy.contracts.Contract` to a ComposeRequest.
 
@@ -160,6 +199,7 @@ def compose_request_from_contract(
         contract_path=str(contract.path),
         requesting_agent=requesting_agent,
         legs=legs,
+        k=k,
     )
 
 

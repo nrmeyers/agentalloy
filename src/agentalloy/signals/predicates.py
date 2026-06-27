@@ -252,6 +252,67 @@ def eval_artifact_newer_than(args: dict[str, Any], ctx: PredicateContext) -> Pre
         return PredicateResult.UNKNOWN
 
 
+# --- approval gate -------------------------------------------------------
+
+# Forward routes that always require a recorded human approval marker.
+_ALWAYS_APPROVAL_PHASES = ("spec", "design")
+
+
+def approval_required(phase: str | None) -> bool:
+    """True when leaving *phase* requires a recorded human approval.
+
+    spec/design: always. sdd-fast: behind SDD_FAST_REQUIRE_APPROVAL (default OFF).
+    Everything else (intake, build, qa, ship): never.
+    """
+    if phase in _ALWAYS_APPROVAL_PHASES:
+        return True
+    if phase == "sdd-fast":
+        try:
+            from agentalloy.config import get_settings  # lazy, like gates.py
+
+            return bool(get_settings().sdd_fast_require_approval)
+        except Exception:
+            return False
+    return False
+
+
+def approval_marker_path(project_root: Path, phase: str) -> Path:
+    """Path of the human-approval marker for *phase* (``.agentalloy/approved/<phase>``)."""
+    return project_root / ".agentalloy" / "approved" / phase
+
+
+def eval_approval_recorded(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """MET when leaving the current phase is permitted by the human-approval gate.
+
+    The marker path is *derived from phase* (not a ``path`` arg) so the prefilter's
+    gate-path walker never collects it and never emits a misleading "produce its
+    exit artifact" advisory. ``since`` (the exit-artifact glob) makes the marker go
+    stale when the artifact is edited after approval.
+    """
+    phase = args.get("phase") or ctx.current_phase
+    if phase is None:
+        return PredicateResult.UNKNOWN
+    if not approval_required(phase):
+        return PredicateResult.MET  # route is not approval-gated → satisfied
+    marker = approval_marker_path(ctx.project_root, str(phase))
+    if not marker.is_file():
+        return PredicateResult.NOT_MET  # awaiting approval
+    since_pattern = args.get("since", "")
+    if not since_pattern:
+        return PredicateResult.MET  # existence-only marker
+    artifacts = _glob_files(ctx.project_root, since_pattern)
+    if not artifacts:
+        return PredicateResult.NOT_MET  # nothing produced → nothing approvable
+    try:
+        marker_mtime = marker.stat().st_mtime
+        artifact_mtime = max(f.stat().st_mtime for f in artifacts if f.is_file())
+        # >= (not strict >) tolerates same-second granularity; staleness is only
+        # when the exit artifact is edited *after* approval.
+        return PredicateResult.MET if marker_mtime >= artifact_mtime else PredicateResult.NOT_MET
+    except OSError:
+        return PredicateResult.UNKNOWN
+
+
 def eval_phase_in(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
     if ctx.current_phase is None:
         return PredicateResult.UNKNOWN
@@ -407,6 +468,7 @@ PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResu
     "artifact_contains": eval_artifact_contains,
     "artifact_size_min": eval_artifact_size_min,
     "artifact_newer_than": eval_artifact_newer_than,
+    "approval_recorded": eval_approval_recorded,
     "phase_in": eval_phase_in,
     "phase_not_in": eval_phase_not_in,
     "tool_use_about_to_fire": eval_tool_use_about_to_fire,

@@ -44,8 +44,10 @@ class TestEntrypointScript:
             "uvicorn must start after pack ingest (avoids Ladybug lock conflict)"
         )
         # Uvicorn launched in background, not exec'd.
+        # #8: the entrypoint now honors LOG_LEVEL (default info) instead of a
+        # hardcoded `--log-level info`.
         assert (
-            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &"
+            'uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "${LOG_LEVEL:-info}" &'
             in script
         )
         assert "UVICORN_PID=$!" in script

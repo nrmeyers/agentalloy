@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["AuthoringConfig", "Settings", "get_settings"]
+__all__ = ["AuthoringConfig", "Settings", "configure_logging", "get_settings"]
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,11 @@ class Settings(BaseSettings):
     dedup_hard_threshold: float = 0.92
     dedup_soft_threshold: float = 0.80
     bounce_budget: int = 3
+
+    # Human-approval gate on the sdd-fast lane (spec/design are always gated).
+    # Bare-name env mapping ⇒ SDD_FAST_REQUIRE_APPROVAL. Default OFF: the fast
+    # lane stays ungated unless an operator opts in.
+    sdd_fast_require_approval: bool = False
 
     # Upstream LLM — the generative model the proxy forwards chat completions to.
     # Env vars: UPSTREAM_URL, UPSTREAM_MODEL, UPSTREAM_API_KEY (bare names, no prefix).
@@ -149,6 +154,28 @@ class Settings(BaseSettings):
                 f"{', '.join(missing)}. Source ~/.config/agentalloy/.env or set them manually."
             )
         return ac
+
+
+def configure_logging(level: str | None = None) -> None:
+    """Install a root handler and pin the ``agentalloy`` namespace to LOG_LEVEL.
+
+    Called at the top of ``create_app`` (and ``__main__``) so every entrypoint —
+    ``python -m agentalloy``, ``uvicorn agentalloy.app:app`` (systemd/launchd),
+    and the container's ``uv run uvicorn`` — applies ``LOG_LEVEL`` to the
+    ``agentalloy.*`` loggers. uvicorn's ``--log-level`` only touches the
+    ``uvicorn.*`` loggers; this fills the missing piece.
+
+    Idempotent: ``basicConfig`` installs at most one root handler (at NOTSET, so
+    it passes every record it receives); the explicit ``setLevel`` re-applies on
+    each call so a later ``create_app`` with a changed ``LOG_LEVEL`` still takes
+    effect, and wins even when uvicorn or pytest installed a handler first
+    (uvicorn's dictConfig has no ``root`` key and ``disable_existing_loggers=
+    False``, so it never touches the ``agentalloy`` logger).
+    """
+    name = (level or get_settings().log_level).upper()
+    lvl = getattr(logging, name, logging.INFO)
+    logging.basicConfig(level=lvl, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("agentalloy").setLevel(lvl)
 
 
 def get_settings() -> Settings:

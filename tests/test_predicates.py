@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,9 @@ import pytest
 from agentalloy.signals.predicates import (
     PredicateContext,
     PredicateResult,
+    approval_marker_path,
+    approval_required,
+    eval_approval_recorded,
     eval_artifact_absent,
     eval_artifact_contains,
     eval_artifact_exists,
@@ -443,3 +447,89 @@ def test_section_completeness_unreadable_file_returns_all_missing(tmp_path: Path
     with patch("agentalloy.signals.predicates._read_file", return_value=None):
         present, total, missing = section_completeness("spec.md", ["Acceptance Criteria"], tmp_path)
     assert (present, total, missing) == (0, 1, ["Acceptance Criteria"])
+
+
+# ---------------------------------------------------------------------------
+# approval_recorded (#10 — human-in-the-loop approval gate)
+# ---------------------------------------------------------------------------
+
+
+def _spec_doc(tmp_path: Path) -> Path:
+    d = tmp_path / "docs" / "spec"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "x.md"
+    f.write_text("# spec\n")
+    return f
+
+
+def _marker(tmp_path: Path, phase: str = "spec") -> Path:
+    m = approval_marker_path(tmp_path, phase)
+    m.parent.mkdir(parents=True, exist_ok=True)
+    m.write_text('approver: u\napproved_at: "2026-01-01T00:00:00Z"\nartifact_sha256: x\n')
+    return m
+
+
+def test_approval_required_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert approval_required("spec") is True
+    assert approval_required("design") is True
+    assert approval_required("build") is False
+    assert approval_required(None) is False
+    monkeypatch.delenv("SDD_FAST_REQUIRE_APPROVAL", raising=False)
+    assert approval_required("sdd-fast") is False
+    monkeypatch.setenv("SDD_FAST_REQUIRE_APPROVAL", "1")
+    assert approval_required("sdd-fast") is True
+
+
+def test_approval_recorded_no_marker_not_met(tmp_path: Path) -> None:
+    _spec_doc(tmp_path)
+    ctx = _ctx(tmp_path, current_phase="spec")
+    assert eval_approval_recorded({"since": "docs/spec/*.md"}, ctx) == NOT_MET
+
+
+def test_approval_recorded_marker_postdates_met(tmp_path: Path) -> None:
+    doc = _spec_doc(tmp_path)
+    marker = _marker(tmp_path)
+    future = doc.stat().st_mtime + 10
+    os.utime(marker, (future, future))
+    ctx = _ctx(tmp_path, current_phase="spec")
+    assert eval_approval_recorded({"since": "docs/spec/*.md"}, ctx) == MET
+
+
+def test_approval_recorded_stale_not_met(tmp_path: Path) -> None:
+    doc = _spec_doc(tmp_path)
+    marker = _marker(tmp_path)
+    # Artifact edited *after* approval → stale → NOT_MET.
+    future = marker.stat().st_mtime + 10
+    os.utime(doc, (future, future))
+    ctx = _ctx(tmp_path, current_phase="spec")
+    assert eval_approval_recorded({"since": "docs/spec/*.md"}, ctx) == NOT_MET
+
+
+def test_approval_recorded_no_phase_unknown(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, current_phase=None)
+    assert eval_approval_recorded({"since": "docs/spec/*.md"}, ctx) == UNKNOWN
+
+
+def test_approval_recorded_route_not_required_met(tmp_path: Path) -> None:
+    # build is never approval-gated → MET even with no marker.
+    ctx = _ctx(tmp_path, current_phase="build")
+    assert eval_approval_recorded({"since": "docs/spec/*.md"}, ctx) == MET
+
+
+def test_approval_recorded_sdd_fast_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "docs" / "fast").mkdir(parents=True)
+    (tmp_path / "docs" / "fast" / "x.md").write_text("# fast\n")
+    ctx = _ctx(tmp_path, current_phase="sdd-fast")
+    # OFF (default) → fast lane ungated → MET without a marker.
+    monkeypatch.delenv("SDD_FAST_REQUIRE_APPROVAL", raising=False)
+    assert eval_approval_recorded({"since": "docs/fast/*.md"}, ctx) == MET
+    # ON → gated, no marker → NOT_MET.
+    monkeypatch.setenv("SDD_FAST_REQUIRE_APPROVAL", "1")
+    assert eval_approval_recorded({"since": "docs/fast/*.md"}, ctx) == NOT_MET
+
+
+def test_approval_recorded_via_registry(tmp_path: Path) -> None:
+    # Registered in PREDICATES → reachable through evaluate_predicate.
+    _spec_doc(tmp_path)
+    ctx = _ctx(tmp_path, current_phase="spec")
+    assert evaluate_predicate("approval_recorded", {"since": "docs/spec/*.md"}, ctx) == NOT_MET

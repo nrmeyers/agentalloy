@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from agentalloy.signals.gates import (
@@ -382,3 +383,46 @@ def test_non_completeness_gate_has_no_advisory(tmp_path: Path):
     gate_spec = {"artifact_exists": {"path": "f.md"}}
     _, evals = evaluate_node(gate_spec, ctx, None, [0])
     assert evals[0].advisory is None
+
+
+# ---------------------------------------------------------------------------
+# approval gate (approval_recorded leaf) — #10
+# ---------------------------------------------------------------------------
+
+
+def _approval_gate() -> dict[str, object]:
+    return {"all_of": [{"approval_recorded": {"since": "docs/spec/*.md"}}]}
+
+
+def _spec_artifact(tmp_path: Path) -> Path:
+    (tmp_path / "docs" / "spec").mkdir(parents=True)
+    f = tmp_path / "docs" / "spec" / "x.md"
+    f.write_text("# spec\n")
+    return f
+
+
+def test_decide_transition_blocked_until_approval(tmp_path: Path):
+    doc = _spec_artifact(tmp_path)
+    ctx = _ctx(tmp_path, "spec")
+    # Exit artifact present but no approval marker → NOT_MET → no transition.
+    decision = decide_transition("spec", _approval_gate(), ctx)
+    assert decision.should_transition is False
+
+    # Record approval (marker newer than the artifact) → MET → transitions.
+    marker = tmp_path / ".agentalloy" / "approved" / "spec"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("approver: u\n")
+    future = doc.stat().st_mtime + 10
+    os.utime(marker, (future, future))
+    decision2 = decide_transition("spec", _approval_gate(), ctx)
+    assert decision2.should_transition is True
+
+
+def test_decide_transition_awaiting_approval_advisory(tmp_path: Path):
+    _spec_artifact(tmp_path)
+    ctx = _ctx(tmp_path, "spec")
+    decision = decide_transition("spec", _approval_gate(), ctx)
+    assert decision.should_transition is False
+    # The leaf eval attaches a present-and-STOP nudge naming `approve spec`.
+    assert any("approve spec" in a for a in decision.advisories)
+    assert any("STOP" in a for a in decision.advisories)

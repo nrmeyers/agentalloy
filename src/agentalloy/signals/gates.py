@@ -78,6 +78,21 @@ def _build_completeness_advisory(args: dict[str, Any], ctx: PredicateContext) ->
         return None
 
 
+def _build_approval_advisory(ctx: PredicateContext) -> str:
+    """Present-and-STOP nudge for a complete-but-unapproved phase.
+
+    ``approval_recorded`` carries no ``path`` glob, so the missing-path advisory in
+    :func:`decide_transition` stays silent for it. Attach this on the leaf eval so a
+    phase that is done but awaiting human sign-off doesn't block without explanation.
+    """
+    phase = ctx.current_phase or "this phase"
+    return (
+        f"'{phase}' is complete and awaiting human approval. PRESENT the work in full and STOP; "
+        f"run `agentalloy approve {phase}` only after the user explicitly approves (re-run it if the "
+        f"exit artifact changed after the last approval)."
+    )
+
+
 def _is_composite(spec: dict[str, Any]) -> bool:
     return any(k in spec for k in ("all_of", "any_of", "not"))
 
@@ -180,6 +195,10 @@ def evaluate_node(
         result = _evaluate_single(predicate_name, args, ctx, lm_client, qwen_calls)
     except ValueError:
         result = PredicateResult.UNKNOWN
+
+    if predicate_name == "approval_recorded" and result == PredicateResult.NOT_MET:
+        advisory = _build_approval_advisory(ctx)
+
     eval_record = GateEvaluation(
         gate_name=predicate_name,
         result=result,

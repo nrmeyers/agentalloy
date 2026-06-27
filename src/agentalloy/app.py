@@ -28,7 +28,7 @@ from agentalloy.api.skill_router import get_skill_store
 from agentalloy.api.skill_router import router as skill_router
 from agentalloy.api.telemetry_router import TelemetryQuerier
 from agentalloy.api.telemetry_router import router as telemetry_router
-from agentalloy.config import get_settings
+from agentalloy.config import configure_logging, get_settings
 from agentalloy.embed_provider import EmbedClient, get_embed_client
 from agentalloy.install import release_check
 from agentalloy.orchestration.compose import (
@@ -233,6 +233,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     LadybugDB and the embedding client). Tests pass ``False`` and wire their own
     dependency overrides via ``app.dependency_overrides``.
     """
+    configure_logging()
     app = FastAPI(
         title="agentalloy",
         version="1.0.0",

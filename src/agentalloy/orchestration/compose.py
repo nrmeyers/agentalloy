@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from agentalloy.api.compose_models import (
-    DEFAULT_MAX_TOKENS_BY_PHASE,
     ComposedResult,
     ComposeRequest,
     ComposeTelemetry,
@@ -24,6 +23,7 @@ from agentalloy.api.compose_models import (
     ErrorAvailable,
     ErrorCode,
     LatencyBreakdown,
+    _phase_max_tokens,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.lm_client import (
@@ -207,7 +207,7 @@ class ComposeOrchestrator:
                 phase=req.phase,
                 system_fragments=system_fragment_ids,
                 system_skills_applied=system_applied,
-                recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
+                recommended_max_tokens=_phase_max_tokens(req.phase),
                 dense_leg_degraded=dense_leg_degraded,
                 telemetry=empty_telemetry,
             )
@@ -301,7 +301,7 @@ class ComposeOrchestrator:
                 # not retrieval-only — which excluded system retrieval + assembly.
                 total_ms=elapsed_ms,
             ),
-            recommended_max_tokens=DEFAULT_MAX_TOKENS_BY_PHASE[req.phase],
+            recommended_max_tokens=_phase_max_tokens(req.phase),
             dense_leg_degraded=dense_leg_degraded,
             telemetry=telemetry,
         )

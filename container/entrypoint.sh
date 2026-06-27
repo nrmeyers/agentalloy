@@ -219,7 +219,7 @@ fi
 
 # Start uvicorn AFTER bootstrap completes to avoid Ladybug lock conflicts.
 echo ">> Starting uvicorn..."
-uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level info &
+uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "${LOG_LEVEL:-info}" &
 UVICORN_PID=$!
 
 # Block on uvicorn — its exit is the container's exit.

@@ -33,6 +33,11 @@ _MAX_TOKENS = 512
 # failures, then allow one retry. Process-local, never persisted.
 _FAILURE_THRESHOLD = 3
 _COOLDOWN_SECONDS = 60.0
+# Long-open escalation cap. A permanently-dead backend that re-fails its retry
+# every cooldown would otherwise be probed forever on a fixed 60s cadence (one
+# guaranteed timeout per minute, every minute). Each successive re-open doubles
+# the cooldown up to this cap, so a dead reranker quiesces instead of thrashing.
+_MAX_COOLDOWN_SECONDS = 600.0
 
 # 600ms budget before the rerank stage trips its circuit-breaker and falls
 # through to the deterministic order. Raised from 150ms: a cold/loaded CPU
@@ -55,6 +60,13 @@ class _FailureLatch:
     Mirrors the embedding circuit-breaker philosophy but minimal — reranking is
     never on the critical path, so a half-open probe state is unnecessary; the
     cooldown simply elapses and the next call is allowed through.
+
+    Long-open escalation: a backend that keeps re-failing its post-cooldown retry
+    is permanently dead, so each successive re-open doubles the cooldown (capped at
+    ``_MAX_COOLDOWN_SECONDS``) instead of probing it on a fixed cadence forever. The
+    first open keeps the base cooldown, so single-blip recovery is unchanged. A
+    ``record_success`` resets the escalation. Shared by Stage A, Stage B, and the
+    intent scorer — a dead reranker long-opens everywhere, which is intended.
     """
 
     def __init__(self, threshold: int = _FAILURE_THRESHOLD, cooldown: float = _COOLDOWN_SECONDS):
@@ -63,13 +75,18 @@ class _FailureLatch:
         self._lock = threading.Lock()
         self._failures = 0
         self._opened_at: float | None = None
+        # Number of open episodes since the last success (drives the backoff).
+        self._open_cycles = 0
+        # Cooldown that applies to the CURRENT open episode (escalates per cycle).
+        self._current_cooldown = cooldown
 
     def allow(self) -> bool:
         with self._lock:
             if self._opened_at is None:
                 return True
-            if time.monotonic() - self._opened_at >= self._cooldown:
-                # Cooldown elapsed — allow one retry and reset the counter.
+            if time.monotonic() - self._opened_at >= self._current_cooldown:
+                # Cooldown elapsed — allow one retry and reset the counter. The
+                # open-cycle count is preserved so a re-failure escalates further.
                 self._opened_at = None
                 self._failures = 0
                 return True
@@ -79,16 +96,25 @@ class _FailureLatch:
         with self._lock:
             self._failures = 0
             self._opened_at = None
+            self._open_cycles = 0
+            self._current_cooldown = self._cooldown
 
     def record_failure(self) -> None:
         with self._lock:
             self._failures += 1
             if self._failures >= self._threshold and self._opened_at is None:
+                # Escalate: first open uses the base cooldown (cycle 0), each
+                # subsequent re-open doubles it up to the cap.
+                self._current_cooldown = min(
+                    self._cooldown * (2**self._open_cycles), _MAX_COOLDOWN_SECONDS
+                )
+                self._open_cycles += 1
                 self._opened_at = time.monotonic()
                 logger.warning(
-                    "rerank disabled for %.0fs after %d consecutive failures",
-                    self._cooldown,
+                    "rerank disabled for %.0fs after %d consecutive failures (open cycle %d)",
+                    self._current_cooldown,
                     self._failures,
+                    self._open_cycles,
                 )
 
 

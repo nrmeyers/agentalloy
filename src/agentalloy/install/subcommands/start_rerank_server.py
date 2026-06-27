@@ -37,6 +37,17 @@ RERANK_HOST = "127.0.0.1"
 # Seconds to wait for llama-server /health before giving up.
 LLAMA_START_TIMEOUT = 120
 
+# Concurrent decode slots for the reranker. Stage B fans out up to
+# lm_assist.max_candidates() (default 8) scoring requests per composition; without
+# explicit slots llama.cpp auto-picks n_parallel=4, so half the fan-out serializes
+# and the batch blows the budget. _RERANK_PARALLEL must stay >= max_candidates()
+# (guarded in tests/test_config_consistency.py). _RERANK_CTX is the total KV context
+# split across the slots (8192 / 8 = 1024 tok/slot — ample for a capped doc + the
+# Qwen reranker template), which also frees VRAM versus the 40960 auto default on
+# the shared GPU co-tenant embed server.
+_RERANK_PARALLEL = 8
+_RERANK_CTX = 8192
+
 # Per-hardware GPU-offload layer counts. CPU offloads nothing; GPU targets
 # offload all layers. The value is passed to ``-ngl`` at server start.
 _NGL_BY_TARGET: dict[str, int] = {
@@ -168,6 +179,13 @@ def _start_llama_server(model: str, ngl: int, timeout: float, args: argparse.Nam
         str(ngl),
         "-m",
         str(model_path),
+        # Concurrent decode slots + total KV context so Stage B's per-composition
+        # fan-out (up to max_candidates()) runs as one wave instead of serializing
+        # against llama.cpp's auto n_parallel=4. See _RERANK_PARALLEL / _RERANK_CTX.
+        "--parallel",
+        str(_RERANK_PARALLEL),
+        "-c",
+        str(_RERANK_CTX),
     ]
     log_path = install_state.user_data_dir() / "logs" / "rerank-server.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)

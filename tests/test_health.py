@@ -107,3 +107,53 @@ def test_telemetry_unavailable_does_not_imply_runtime_failure(app: FastAPI) -> N
     assert body["dependencies"]["telemetry_store"]["status"] == "unavailable"
     assert body["dependencies"]["runtime_store"]["status"] == "ok"
     assert body["dependencies"]["embedding_runtime"]["status"] == "ok"
+
+
+# #9 (§D): /health probes the Stage B reranker via the scorer's rolling outcome
+# window. A timeout-dominant window → reranker "unavailable" and overall degraded
+# (Stage B fails open — never "unavailable"). All other deps are mocked healthy.
+def _real_checker_with_healthy_deps() -> HealthChecker:
+    return HealthChecker(MagicMock(), MagicMock(), MagicMock(), "stub-embed")
+
+
+def test_health_reranker_degraded_when_timeout_dominant(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import agentalloy.retrieval.lm_assist as lm_assist
+    from agentalloy.retrieval.lm_assist import LMAssistOutcome
+
+    monkeypatch.setenv("LM_ASSIST", "arbitrate")
+    lm_assist.reset_outcome_window()
+    for _ in range(10):
+        lm_assist._record_outcome(LMAssistOutcome.TIMEOUT)  # pyright: ignore[reportPrivateUsage]
+    try:
+        resp = asyncio.run(_real_checker_with_healthy_deps().check())
+    finally:
+        lm_assist.reset_outcome_window()
+
+    assert resp.dependencies is not None
+    reranker = resp.dependencies["reranker"]
+    assert reranker.status == "unavailable"
+    assert reranker.impact is not None and "Stage B" in reranker.impact
+    assert resp.status == "degraded"  # degraded, never unavailable (fails open)
+
+
+def test_health_reranker_ok_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    import agentalloy.retrieval.lm_assist as lm_assist
+    from agentalloy.retrieval.lm_assist import LMAssistOutcome
+
+    # Even with timeouts in the window, a disabled Stage B never reports unhealthy.
+    monkeypatch.setenv("LM_ASSIST", "off")
+    lm_assist.reset_outcome_window()
+    for _ in range(10):
+        lm_assist._record_outcome(LMAssistOutcome.TIMEOUT)  # pyright: ignore[reportPrivateUsage]
+    try:
+        resp = asyncio.run(_real_checker_with_healthy_deps().check())
+    finally:
+        lm_assist.reset_outcome_window()
+
+    assert resp.dependencies is not None
+    assert resp.dependencies["reranker"].status == "ok"
+    assert resp.status == "healthy"

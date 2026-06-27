@@ -836,6 +836,50 @@ def test_lm_assist_hit_filters_to_kept_fragments(
     assert len(result.candidates) == 2
 
 
+def test_lm_assist_hit_routes_survivors_through_skill_granular_select(
+    populated: LadybugStore,
+    populated_vectors: VectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """§D: on a HIT the survivors are routed through skill_granular_select (the HIT
+    path is no longer "diversity off"). The old behavior bypassed selection and
+    assembled the kept fragments in fusion order."""
+    from agentalloy.retrieval.lm_assist import (
+        LMAssistConfig,
+        LMAssistMode,
+        LMAssistOutcome,
+        ScoreResult,
+    )
+
+    class _KeepFirstTwo:
+        def score(self, task: str, documents: list[str]) -> ScoreResult:  # noqa: ARG002
+            scores = [0.9, 0.9] + [0.0] * (len(documents) - 2)
+            return ScoreResult(LMAssistOutcome.HIT, scores[: len(documents)])
+
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: _KeepFirstTwo())
+    monkeypatch.setattr(
+        domain_module,
+        "load_config",
+        lambda: LMAssistConfig(LMAssistMode.ARBITRATE, "http://x", 300, 0.05, "m"),
+    )
+
+    # Spy on skill_granular_select to prove the HIT path routes through it.
+    seen: list[int] = []
+    real_select = domain_module.skill_granular_select
+
+    def _spy(ranked: list[ActiveFragment], k: int, **kwargs: object):  # type: ignore[no-untyped-def]
+        seen.append(len(ranked))
+        return real_select(ranked, k, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(domain_module, "skill_granular_select", _spy)
+
+    result = _retrieve_design(populated, populated_vectors)
+    assert result.lm_assist_outcome == "hit"
+    # skill_granular_select was invoked exactly once, over the 2 survivors (the HIT
+    # branch no longer bypasses diversity selection).
+    assert seen == [2]
+
+
 # -------- query bounding: an oversized first turn must not reach the embedder --------
 
 

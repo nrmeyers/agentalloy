@@ -347,6 +347,18 @@ class TestEntrypointLlamaServers:
         assert "http://127.0.0.1:47951/health" in script
         assert "http://127.0.0.1:47952/health" in script
 
+    def test_entrypoint_uvicorn_log_level_from_env(self):
+        """uvicorn's --log-level reads the container LOG_LEVEL env (default info).
+
+        Regression guard for TODO #8: the launch line hardcoded ``--log-level
+        info``, so a ``LOG_LEVEL=DEBUG`` request could never reach uvicorn.
+        """
+        from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
+
+        script = _build_entrypoint_script("")
+        assert '--log-level "${LOG_LEVEL:-info}"' in script
+        assert "--log-level info &" not in script
+
 
 # ---------------------------------------------------------------------------
 # EC-8: Entrypoint -- GGUF download gated on missing files (skip when present)

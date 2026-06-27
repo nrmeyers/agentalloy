@@ -38,13 +38,19 @@ from agentalloy.api.proxy_apply import (
 from agentalloy.api.proxy_context import decode_proj_token
 from agentalloy.api.proxy_injection import inject_into_anthropic_messages
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
-from agentalloy.api.proxy_router import get_embed_client, get_orchestrator_for_proxy
+from agentalloy.api.proxy_router import (
+    get_embed_client,
+    get_orchestrator_for_proxy,
+    get_vector_store,
+)
 from agentalloy.api.proxy_session import extract_session_header
-from agentalloy.api.proxy_signal import evaluate_signal
+from agentalloy.api.proxy_signal import SignalResult, evaluate_signal
+from agentalloy.api.proxy_telemetry import write_proxy_trace
 
 if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
     from agentalloy.orchestration.compose import ComposeOrchestrator
+    from agentalloy.storage.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -119,15 +125,80 @@ def _noop_status(_status: int) -> None:
     return None
 
 
-def _commit_on_2xx(
-    project_dir: Path, outcome: InjectOutcome[dict[str, Any]]
+def _make_on_status(
+    project_dir: Path,
+    outcome: InjectOutcome[dict[str, Any]] | None,
+    vector_store: VectorStore | None,
+    signal: SignalResult,
 ) -> Callable[[int], None]:
-    """Build an ``on_status`` that commits ``outcome``'s markers iff status is 2xx."""
+    """``on_status`` for the forward: on a 2xx response commit the deferred cadence
+    markers (iff a workflow block composed) AND write one consolidated proxy trace.
+
+    Best-effort telemetry — the arg-construction is guarded and ``write_proxy_trace``
+    is internally soft-failing, so neither can break the forward. A non-2xx forward
+    commits nothing and records nothing (the model never processed the turn).
+    """
 
     def on_status(status: int) -> None:
-        commit_outcome(project_dir, outcome, upstream_ok=200 <= status < 300)
+        ok = 200 <= status < 300
+        if outcome is not None:
+            commit_outcome(project_dir, outcome, upstream_ok=ok)
+        if ok and vector_store is not None:
+            try:
+                _write_passthrough_trace(vector_store, signal, outcome)
+            except Exception:  # noqa: BLE001 — telemetry never breaks the forward
+                logger.warning("passthrough telemetry write failed", exc_info=True)
 
     return on_status
+
+
+def _write_passthrough_trace(
+    vector_store: VectorStore,
+    signal: SignalResult,
+    outcome: InjectOutcome[dict[str, Any]] | None,
+) -> None:
+    """Write one consolidated CompositionTrace for a passthrough forward.
+
+    ``status`` is ``'proxy_composed'`` when the workflow block was injected, else
+    ``'proxy_passthrough'`` — a banner-only turn produces no ``outcome`` and does NOT
+    count as composed (mirrors ``proxy_router._write_flow_telemetry``, where the
+    banner does not flip ``composed``). Every field is sourced from the already
+    resolved ``signal`` and ``outcome.telemetry`` (the merged provenance from both
+    compose tiers); no value is recomputed here. ``task_prompt`` reuses
+    ``signal.task`` (the first-user-message text ``evaluate_signal`` already
+    extracted) and ``write_proxy_trace`` truncates it to 500 chars.
+    """
+    composed = outcome is not None and outcome.injected is not None
+    tel = outcome.telemetry if outcome is not None else None
+    scores_json = json.dumps(tel.lm_assist_scores) if tel and tel.lm_assist_scores else None
+    write_proxy_trace(
+        vector_store,
+        phase=signal.phase or "unspecified",
+        task_prompt=signal.task or "",
+        status="proxy_composed" if composed else "proxy_passthrough",
+        pre_filter_matched=signal.pre_filter_matched,
+        gates_met=signal.gates_met,
+        gates_unmet=signal.gates_unmet,
+        qwen_calls=signal.qwen_calls,
+        total_latency_ms=None,  # not timed on this surface (parity-deferred)
+        source_skill_ids=tel.returned_skill_ids if tel else None,
+        system_skill_ids=tel.header_fragment_ids if tel else None,
+        workflow_skill_ids=tel.workflow_skill_ids if tel else None,
+        selected_fragment_ids=tel.selected_fragment_ids if tel else None,
+        tokens_returned=tel.tokens_returned if tel else 0,
+        tokens_flat_equivalent=tel.tokens_flat_equivalent if tel else 0,
+        reranked=tel.reranked if tel else False,
+        lm_assist_outcome=tel.lm_assist_outcome if tel else "disabled",
+        lm_assist_model=tel.lm_assist_model if tel else None,
+        lm_assist_kept_ids=tel.lm_assist_kept_ids if tel else None,
+        lm_assist_dropped_ids=tel.lm_assist_dropped_ids if tel else None,
+        lm_assist_scores=scores_json,
+        dense_leg_degraded=tel.dense_leg_degraded if tel else False,
+        phase_gate_embed_failed=signal.phase_gate_embed_failed,
+        repo=signal.repo,
+        session_key=signal.session_key,
+        session_source=signal.session_source,
+    )
 
 
 async def _maybe_inject(
@@ -136,16 +207,17 @@ async def _maybe_inject(
     embed_client: EmbedClient | None,
     orchestrator: ComposeOrchestrator | None,
     session_id: str | None = None,
-) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None]:
+) -> tuple[dict[str, Any] | None, InjectOutcome[dict[str, Any]] | None, SignalResult]:
     """Run signal → compose → inject for this repo.
 
-    Returns ``(payload_or_None, outcome_or_None)``: the new payload (None when
-    nothing was injected — skip / no-op), and the :class:`InjectOutcome` whose
+    Returns ``(payload_or_None, outcome_or_None, signal)``: the new payload (None
+    when nothing was injected — skip / no-op), the :class:`InjectOutcome` whose
     cadence markers the caller commits *after a 2xx forward* (None when no workflow
-    block was composed). Raising is fine — the caller treats any exception as
-    "forward the original unchanged". ``session_id`` is the harness session-id
-    header (Claude Code's ``x-claude-code-session-id``),
-    used to key per-session orientation.
+    block was composed), and the resolved :class:`SignalResult` (used to build the
+    consolidated telemetry row on the 2xx seam). Raising is fine — the caller treats
+    any exception as "forward the original unchanged". ``session_id`` is the harness
+    session-id header (Claude Code's ``x-claude-code-session-id``), used to key
+    per-session orientation.
     """
     project_dir = decode_proj_token(token)  # ValueError on a bad token → caller soft-fails
     signal = await evaluate_signal(
@@ -200,7 +272,7 @@ async def _maybe_inject(
             current = bannered
 
     injected_payload = current if current is not payload else None
-    return injected_payload, outcome
+    return injected_payload, outcome, signal
 
 
 def _response_headers(headers: httpx.Headers, *, decoded_body: bool) -> dict[str, str]:
@@ -225,6 +297,7 @@ async def passthrough_anthropic_messages(
     client: AnthropicPassthroughClient | None = Depends(get_passthrough_client),
     embed_client: EmbedClient | None = Depends(get_embed_client),
     orchestrator: ComposeOrchestrator | None = Depends(get_orchestrator_for_proxy),
+    vector_store: VectorStore | None = Depends(get_vector_store),
 ) -> Response | StreamingResponse:
     raw_body = await request.body()
     query_string = request.url.query
@@ -265,13 +338,17 @@ async def passthrough_anthropic_messages(
     if payload is not None:
         try:
             session_id = extract_session_header(inbound_headers)
-            injected, outcome = await _maybe_inject(
+            injected, outcome, signal = await _maybe_inject(
                 payload, token, embed_client, orchestrator, session_id
             )
             if injected is not None:
                 body_to_send = json.dumps(injected).encode("utf-8")
-            if outcome is not None:
-                on_status = _commit_on_2xx(decode_proj_token(token), outcome)
+            # Set unconditionally on a successful compose: the on_status seam now
+            # also writes one consolidated telemetry row, so the passthrough
+            # (nothing-composed) case is recorded too — not just the committed-marker
+            # case. A compose-path exception leaves on_status = _noop_status (no row;
+            # error-path parity deferred).
+            on_status = _make_on_status(decode_proj_token(token), outcome, vector_store, signal)
         except Exception:
             logger.warning("passthrough compose/inject failed; forwarding original", exc_info=True)
             body_to_send = raw_body

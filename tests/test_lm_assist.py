@@ -40,6 +40,8 @@ _LM_ENV = (
     "LM_ASSIST_TIMEOUT_MS",
     "LM_ASSIST_KEEP_THRESHOLD",
     "LM_ASSIST_MODEL",
+    "LM_ASSIST_MAX_CANDIDATES",
+    "LM_ASSIST_DOC_CAP_CHARS",
 )
 
 
@@ -303,7 +305,10 @@ def test_arbitrate_empty_keep(monkeypatch: pytest.MonkeyPatch) -> None:
     assert detail.dropped_ids == ["f1", "f2"]
 
 
-def test_arbitrate_caps_at_k(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_arbitrate_returns_all_survivors_uncapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    # §D: _maybe_lm_arbitrate is now a FILTER, not a fusion-order cap. It returns
+    # every above-threshold survivor (uncapped); the k cap is applied downstream by
+    # skill_granular_select at the call site, NOT here.
     ranked = [_frag(f"f{i}", f"s{i}") for i in range(6)]
     monkeypatch.setattr(
         domain_module,
@@ -313,11 +318,11 @@ def test_arbitrate_caps_at_k(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(domain_module, "load_config", lambda: _cfg(0.05))
     selected, _, detail = _maybe_lm_arbitrate(ranked, "task", k=2)
     assert selected is not None
-    assert len(selected) == 2
-    # All six clear the threshold but the k=2 cap trims four into dropped.
+    # All six clear the threshold and all six are returned despite k=2 (no trim here).
+    assert len(selected) == 6
     assert detail is not None
-    assert len(detail.kept_ids) == 2
-    assert len(detail.dropped_ids) == 4
+    assert len(detail.kept_ids) == 6
+    assert detail.dropped_ids == []
     assert len(detail.scores) == 6
 
 
@@ -355,3 +360,80 @@ def _cfg(threshold: float) -> lm_assist.LMAssistConfig:
         keep_threshold=threshold,
         model="m",
     )
+
+
+# -------- §C: doc-cap, pool bound, per-request timeout --------
+
+
+def test_score_one_truncates_document_to_doc_cap() -> None:
+    # A document longer than doc_cap_chars must be truncated BEFORE build_prompt, so
+    # only the first doc_cap_chars characters reach the posted /v1/completions prompt.
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured["prompt"] = body["prompt"]
+        return httpx.Response(200, json=_completion([("yes", 0.0), ("no", -10.0)]))
+
+    cfg = lm_assist.LMAssistConfig(
+        mode=LMAssistMode.ARBITRATE,
+        url="http://test",
+        timeout_ms=300,
+        keep_threshold=0.05,
+        model="m",
+        doc_cap_chars=2400,
+    )
+    scorer = FragmentScorer(cfg)
+    scorer._client = httpx.Client(  # pyright: ignore[reportPrivateUsage]
+        transport=httpx.MockTransport(handler), base_url="http://test"
+    )
+    document = "X" * 3000  # 600 chars over the cap
+    try:
+        result = scorer.score("task", [document])
+    finally:
+        scorer.close()
+    assert result.outcome is LMAssistOutcome.HIT
+    # Exactly doc_cap_chars 'X's survived into the prompt; the 600-char tail is gone.
+    assert captured["prompt"].count("X") == 2400
+    assert "X" * 2400 in captured["prompt"]
+    assert "X" * 2401 not in captured["prompt"]
+
+
+def test_pool_width_equals_max_candidates() -> None:
+    # The scorer thread pool is keyed to the same knob as the candidate cap, so the
+    # pool width can never drift from --parallel. Default == 8.
+    scorer = FragmentScorer(_cfg(0.05))
+    try:
+        assert scorer._pool._max_workers == lm_assist.max_candidates()  # pyright: ignore[reportPrivateUsage]
+        assert scorer._pool._max_workers == 8  # pyright: ignore[reportPrivateUsage]
+    finally:
+        scorer.close()
+
+
+def test_max_candidates_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LM_ASSIST_MAX_CANDIDATES", "6")
+    assert lm_assist.max_candidates() == 6
+    scorer = FragmentScorer(_cfg(0.05))
+    try:
+        # Pool width follows the override too (one knob, both sites).
+        assert scorer._pool._max_workers == 6  # pyright: ignore[reportPrivateUsage]
+    finally:
+        scorer.close()
+
+
+def test_per_req_timeout_under_batch_budget() -> None:
+    # Per-request httpx timeout is strictly under the batch budget (0.9x) so one
+    # hung request can't consume the whole budget before the deadline loop reaps it.
+    cfg = lm_assist.LMAssistConfig(
+        mode=LMAssistMode.ARBITRATE,
+        url="http://test",
+        timeout_ms=1000,
+        keep_threshold=0.05,
+        model="m",
+    )
+    scorer = FragmentScorer(cfg)
+    try:
+        assert scorer._client.timeout.read == pytest.approx(0.9)  # pyright: ignore[reportPrivateUsage]
+        assert scorer._client.timeout.read < 1000 / 1000.0  # pyright: ignore[reportPrivateUsage]
+    finally:
+        scorer.close()

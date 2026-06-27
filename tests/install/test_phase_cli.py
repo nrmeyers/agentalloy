@@ -6,6 +6,7 @@ Maps to plan: agentalloy phase CLI — set/get/clear phase lock file.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import pytest
@@ -137,6 +138,15 @@ def _write_spec_doc(repo_root: Path) -> None:
     (spec / "x.md").write_text("# x\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
 
 
+def _approve(repo_root: Path, phase: str, since_glob: str) -> None:
+    """Write a fresh approval marker for `phase`, newer than its exit artifact."""
+    marker = repo_root / ".agentalloy" / "approved" / phase
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text('approver: t\napproved_at: "2026-01-01T00:00:00Z"\nartifact_sha256: x\n')
+    base = max((p.stat().st_mtime for p in repo_root.glob(since_glob) if p.is_file()), default=0.0)
+    os.utime(marker, (base + 10, base + 10))
+
+
 class TestGuardedAdvance:
     """B2 — a *forward* `phase set` is gated on the current phase's exit gate.
 
@@ -155,9 +165,10 @@ class TestGuardedAdvance:
         assert run_phase_get(root=repo_root)["phase"] == "spec"
 
     def test_forward_guard_passes_when_artifact_present(self, repo_root: Path) -> None:
-        # TC16: conformant spec doc present → spec→design succeeds.
+        # TC16: conformant spec doc present + approval recorded → spec→design succeeds.
         run_phase_set("spec", root=repo_root)
         _write_spec_doc(repo_root)
+        _approve(repo_root, "spec", "docs/spec/*.md")  # #10: spec→design now needs approval
         result = run_phase_set("design", root=repo_root)
         assert result["blocked"] is False
         assert result["phase"] == "design"
@@ -206,6 +217,7 @@ class TestGuardedAdvance:
         # deterministic part MET, semantic part UNKNOWN → allowed (UNKNOWN doesn't block)
         run_phase_set("spec", root=repo_root)
         _write_spec_doc(repo_root)
+        _approve(repo_root, "spec", "docs/spec/*.md")  # #10: clear the approval gate
         assert run_phase_set("design", root=repo_root)["blocked"] is False
 
         # deterministic part NOT_MET → blocked, regardless of the UNKNOWN semantic part
@@ -226,3 +238,54 @@ class TestGuardedAdvance:
 
         for phase in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast"):
             assert exit_gates_for_phase(phase) is not None
+
+
+class TestApprovalGate:
+    """#10 — the human-approval gate that ``--force`` must NOT bypass.
+
+    spec→design / design→build on the full lane require a recorded approval
+    marker. ``--force`` waives artifact-completeness but never the human
+    checkpoint.
+    """
+
+    def test_force_does_not_bypass_approval(self, repo_root: Path) -> None:
+        # Exit artifact present and complete, but no approval marker: even
+        # --force is refused, with reason='approval'.
+        run_phase_set("spec", root=repo_root)
+        _write_spec_doc(repo_root)
+        result = run_phase_set("design", root=repo_root, force=True)
+        assert result["blocked"] is True
+        assert result["reason"] == "approval"
+        assert result["phase"] == "spec"  # unchanged
+        assert result["target"] == "design"
+        assert any("approve spec" in a for a in result["advisories"])
+        assert run_phase_get(root=repo_root)["phase"] == "spec"
+
+    def test_force_bypasses_completeness_not_approval(self, repo_root: Path) -> None:
+        # Approval recorded but the spec doc is missing its required sections:
+        # --force waives the completeness gate and advances.
+        run_phase_set("spec", root=repo_root)
+        spec = repo_root / "docs" / "spec"
+        spec.mkdir(parents=True, exist_ok=True)
+        (spec / "x.md").write_text("# spec only, no required sections\n")
+        _approve(repo_root, "spec", "docs/spec/*.md")
+        result = run_phase_set("design", root=repo_root, force=True)
+        assert result["blocked"] is False
+        assert result["phase"] == "design"
+
+    def test_present_but_unapproved_blocks_without_force(self, repo_root: Path) -> None:
+        # Complete spec, no approval, no force → blocked on approval (not completeness).
+        run_phase_set("spec", root=repo_root)
+        _write_spec_doc(repo_root)
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is True
+        assert result["reason"] == "approval"
+
+    def test_missing_artifact_defers_to_completeness_gate(self, repo_root: Path) -> None:
+        # No exit artifact at all → approval gate steps aside; the completeness
+        # gate drives the "produce docs/spec" message (no reason='approval').
+        run_phase_set("spec", root=repo_root)
+        result = run_phase_set("design", root=repo_root)
+        assert result["blocked"] is True
+        assert result.get("reason") != "approval"
+        assert any("docs/spec" in a for a in result["advisories"])

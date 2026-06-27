@@ -7,7 +7,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from agentalloy.api.compose_models import DEFAULT_K_BY_PHASE, Phase
+from agentalloy.api.compose_models import (
+    Phase,
+    _phase_k,  # pyright: ignore[reportPrivateUsage]
+)
 
 
 class ActiveVersionMeta(BaseModel):
@@ -36,7 +39,7 @@ class RetrieveQueryRequest(BaseModel):
 
     def resolved_k(self) -> int:
         """Server-side resolution: caller's k if provided, else phase default."""
-        return self.k if self.k is not None else DEFAULT_K_BY_PHASE[self.phase]
+        return self.k if self.k is not None else _phase_k(self.phase)
 
 
 class RetrieveQueryHit(BaseModel):
