@@ -487,17 +487,17 @@ def test_preset_lm_assist_max_candidates_matches_parallel(preset: str) -> None:
 
 
 @pytest.mark.parametrize("preset", _HW_PRESETS)
-def test_preset_phase_gate_on(preset: str) -> None:
-    # GPU presets pin AGENTALLOY_PHASE_GATE=on so prod retrieval excludes
-    # `category: benchmark` packs (E6 pool gate in retrieval/domain.py). Flipped
-    # on as the final step of the corpus batch after #14's recat was verified;
-    # eval/gold_hit runs gate-off so the 18/18 baseline is unaffected.
+def test_preset_phase_gate_absent_by_default(preset: str) -> None:
+    # The E6 pool gate (retrieval/domain.py) is a mechanism for hiding genuinely
+    # benchmark-only packs from prod retrieval — it MUST NOT be used to hide
+    # real product domain skills (fastapi/snowflake/temporal/data-engineering/vue
+    # ARE real domain skills used by developers today). No preset sets
+    # AGENTALLOY_PHASE_GATE; the gate stays dormant at its code default ("off")
+    # until a future PR introduces actually-benchmark-only packs.
     defaults = write_env._load_preset(preset)
-    if _LM_ASSIST_BY_PRESET[preset] != "arbitrate":
-        return
-    assert defaults.get("AGENTALLOY_PHASE_GATE") == "on", (
-        f"{preset}: GPU preset must set AGENTALLOY_PHASE_GATE=on so benchmark "
-        "packs are excluded from the prod retrieval pool"
+    assert "AGENTALLOY_PHASE_GATE" not in defaults, (
+        f"{preset}: do not pin AGENTALLOY_PHASE_GATE in presets — the gate is "
+        "the mechanism, but using it to hide real product packs is not the fix"
     )
 
 
