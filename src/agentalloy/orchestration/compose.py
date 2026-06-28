@@ -234,7 +234,12 @@ class ComposeOrchestrator:
         # Bind to a typed local so pyright can narrow through isinstance.
         _src = getattr(self, "_source", None)
         if isinstance(_src, RuntimeCache):
-            for skill_id in source_skills:
+            # Count raw_prose for EVERY skill that contributed an injected fragment —
+            # domain AND system. Summing domain skills only made a system-only (Tier 1)
+            # compose report a 0 baseline → 0% savings despite real injected system
+            # prose (e.g. the ship phase, or any phase with no work-item contract).
+            flat_skill_ids = list(dict.fromkeys([*source_skills, *system.applied_skill_ids]))
+            for skill_id in flat_skill_ids:
                 skill = _src.get_active_skill_by_id(skill_id)
                 if skill is not None:
                     detail = _src.get_version_detail(skill.active_version_id)

@@ -438,3 +438,84 @@ async def test_compose_records_token_savings_with_runtime_cache() -> None:
     assert rec.tokens_flat_equivalent == 100
     # composed output is fragments only, should be less than full prose
     assert rec.tokens_returned < rec.tokens_flat_equivalent
+
+
+async def test_system_only_compose_counts_system_skills_in_flat_baseline() -> None:
+    """P4: a system-only (Tier-1) compose — e.g. ship, or any phase with no work-item
+    contract — must include its system skills' raw_prose in tokens_flat_equivalent.
+    Previously the flat baseline summed only domain skills, so a system-only compose
+    reported flat=0 → savings_pct=0 despite injecting real system prose."""
+    from agentalloy.api.compose_models import ComposeRequest
+    from agentalloy.orchestration.compose import ComposeOrchestrator
+    from agentalloy.reads.models import ActiveFragment, ActiveSkill
+    from agentalloy.retrieval.system import SystemRetrievalResult
+    from agentalloy.runtime_state import RuntimeCache, VersionDetail
+    from agentalloy.storage.vector_store import VectorStore
+
+    RAW_PROSE = "s" * 400  # 400 chars → 100 tokens via len // 4
+    sys_skill = ActiveSkill(
+        skill_id="sk-sys",
+        canonical_name="system skill",
+        category="engineering",
+        skill_class="system",
+        domain_tags=[],
+        always_apply=True,
+        phase_scope=None,
+        category_scope=None,
+        active_version_id="sk-sys-v1",
+        tier=None,
+    )
+    vd = VersionDetail(
+        version_id="sk-sys-v1",
+        version_number=1,
+        authored_at=None,
+        author="test",
+        change_summary="",
+        raw_prose=RAW_PROSE,
+    )
+    sys_fragment = ActiveFragment(
+        fragment_id="f-sys-1",
+        fragment_type="system",
+        sequence=1,
+        content="z" * 80,
+        skill_id="sk-sys",
+        version_id="sk-sys-v1",
+        skill_class="system",
+        category="engineering",
+        domain_tags=[],
+    )
+    cache = RuntimeCache(
+        skills={"sk-sys": sys_skill},
+        fragments=[sys_fragment],
+        version_details={"sk-sys-v1": vd},
+    )
+
+    captured: list[TelemetryRecord] = []
+
+    class _CapturingWriter:
+        def write(self, rec: TelemetryRecord) -> None:
+            captured.append(rec)
+
+    orch = ComposeOrchestrator(
+        source=cache,
+        lm=MagicMock(),
+        vector_store=MagicMock(spec=VectorStore),
+        telemetry=_CapturingWriter(),
+        embedding_model="fake-embed",
+    )
+
+    async def _fake_retrieve_system(req: ComposeRequest) -> SystemRetrievalResult:
+        return SystemRetrievalResult(
+            candidates=[sys_fragment], applied_skill_ids=["sk-sys"], retrieval_ms=0
+        )
+
+    orch.retrieve_system = _fake_retrieve_system  # type: ignore[method-assign]
+
+    # legs="system" → Tier 1 only; the domain leg is skipped entirely.
+    req = ComposeRequest(task="entering ship", phase="ship", legs="system")
+    await orch.compose(req)
+
+    assert len(captured) == 1
+    rec = captured[0]
+    assert rec.tokens_returned > 0  # real injected system prose
+    assert rec.tokens_flat_equivalent == 100  # system skill counted (was 0 before P4)

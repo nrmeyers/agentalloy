@@ -180,7 +180,10 @@ def _write_passthrough_trace(
         gates_met=signal.gates_met,
         gates_unmet=signal.gates_unmet,
         qwen_calls=signal.qwen_calls,
-        total_latency_ms=None,  # not timed on this surface (parity-deferred)
+        # Compose-span latency from the orchestrator's per-leg breakdown (no handler
+        # wall-clock is threaded to this surface; this is the measured compose work).
+        total_latency_ms=tel.total_latency_ms if tel else None,
+        retrieval_latency_ms=tel.retrieval_latency_ms if tel else None,
         source_skill_ids=tel.returned_skill_ids if tel else None,
         system_skill_ids=tel.header_fragment_ids if tel else None,
         workflow_skill_ids=tel.workflow_skill_ids if tel else None,

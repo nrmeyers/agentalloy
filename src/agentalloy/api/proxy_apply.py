@@ -84,6 +84,11 @@ class ProxyComposeTelemetry:
     lm_assist_kept_ids: list[str]
     lm_assist_dropped_ids: list[str]
     lm_assist_scores: dict[str, float]
+    # Compose latency (ms), summed across both tiers, from the orchestrator's per-leg
+    # LatencyBreakdown. ``None`` when neither leg composed (passthrough). assembly is
+    # omitted — it's structurally 0 since generative assembly was removed.
+    retrieval_latency_ms: int | None = None
+    total_latency_ms: int | None = None
 
 
 @dataclass
@@ -225,6 +230,17 @@ def _merge_compose_telemetry(
     selected_fragment_ids = header_fragment_ids + (
         list(tier2.domain_fragments) if tier2 is not None else []
     )
+    # Latency lives on the result (ComposedResult.latency_ms), not on .telemetry, and
+    # only ComposedResult carries it — an EmptyResult / missing leg contributes nothing.
+    lat1 = tier1.latency_ms if isinstance(tier1, ComposedResult) else None
+    lat2 = tier2.latency_ms if isinstance(tier2, ComposedResult) else None
+    if lat1 is None and lat2 is None:
+        retrieval_latency_ms = total_latency_ms = None  # untimed (distinct from 0ms)
+    else:
+        retrieval_latency_ms = (lat1.retrieval_ms if lat1 else 0) + (
+            lat2.retrieval_ms if lat2 else 0
+        )
+        total_latency_ms = (lat1.total_ms if lat1 else 0) + (lat2.total_ms if lat2 else 0)
     return ProxyComposeTelemetry(
         workflow_skill_ids=workflow_ids,
         header_fragment_ids=header_fragment_ids,
@@ -241,6 +257,8 @@ def _merge_compose_telemetry(
         lm_assist_kept_ids=list(t2.lm_assist_kept_ids) if t2 else [],
         lm_assist_dropped_ids=list(t2.lm_assist_dropped_ids) if t2 else [],
         lm_assist_scores=dict(t2.lm_assist_scores) if t2 else {},
+        retrieval_latency_ms=retrieval_latency_ms,
+        total_latency_ms=total_latency_ms,
     )
 
 

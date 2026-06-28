@@ -186,7 +186,18 @@ raw_prose: |
   (`build`, `coding`). Narrow tags are the whole point: with the fixed
   per-contract k≈4 and the token budget, same-surface candidates let the reranker
   separate cleanly and the right fragments reach the agent; pile on 5–7 surfaces
-  and the important fragments truncate and the scores muddy. Then write the
+  and the important fragments truncate and the scores muddy.
+
+  **MUST: tag the most *specific* surface the task implements, not the generic
+  framework it happens to use.** A task that builds a feature behavior with its own
+  domain (calendar navigation, date math, a charting axis) MUST carry that feature
+  tag (`[calendar]`), **not** the framework it's written in (`[react]`). A framework
+  tag retrieves framework boilerplate and starves the feature's domain skill — a
+  navigation task mistagged `[react]` is exactly why month-navigation guidance never
+  reached build even though the skill existed. When unsure, name the surface the
+  *acceptance criteria* are about, not the language.
+
+  Then write the
   `## Task` body as a self-contained description of what to implement. That body
   becomes build's retrieval prompt: the proxy composes the skills matching it and
   front-loads them with the task, so build never has to decide what it needs. Set

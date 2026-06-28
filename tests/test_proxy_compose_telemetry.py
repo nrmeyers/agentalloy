@@ -138,6 +138,34 @@ def test_merge_empty_tier2_contributes_no_returned_skills() -> None:
     assert merged.lm_assist_dropped_ids == ["f-x"]
 
 
+def test_merge_sums_leg_latency() -> None:
+    """P1: compose latency is threaded from each leg's LatencyBreakdown and summed."""
+    signal = SignalResult(should_compose=True, phase="build", workflow_skill_id="wf-build")
+    tier1 = _tier1(workflow_skill_ids=[], system_fragments=["sys-1"], tokens=10)  # ret=1,total=1
+    tier2 = _tier2_with_stage_b()  # ret=2,total=2
+    merged = _merge_compose_telemetry(signal, tier1, tier2)
+    assert merged.retrieval_latency_ms == 3
+    assert merged.total_latency_ms == 3
+
+
+def test_merge_latency_none_on_passthrough() -> None:
+    """Neither leg composed → latency stays None (untimed), distinct from 0ms."""
+    signal = SignalResult(should_compose=False, phase="build")
+    merged = _merge_compose_telemetry(signal, None, None)
+    assert merged.retrieval_latency_ms is None
+    assert merged.total_latency_ms is None
+
+
+def test_merge_latency_ignores_empty_tier2() -> None:
+    """An EmptyResult leg carries no latency_ms; only the timed (Tier 1) leg counts."""
+    signal = SignalResult(should_compose=True, phase="build")
+    tier1 = _tier1(workflow_skill_ids=[], system_fragments=["sys-1"], tokens=5)  # ret=1,total=1
+    tier2 = EmptyResult(task="t", phase="build", system_fragments=[], system_skills_applied=False)
+    merged = _merge_compose_telemetry(signal, tier1, tier2)
+    assert merged.retrieval_latency_ms == 1
+    assert merged.total_latency_ms == 1
+
+
 @pytest.fixture
 def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
     with open_or_create(tmp_path / "t.duck") as s:
@@ -178,6 +206,8 @@ def test_write_proxy_trace_persists_stage_b_and_skills(store: VectorStore) -> No
         lm_assist_kept_ids=tel.lm_assist_kept_ids,
         lm_assist_dropped_ids=tel.lm_assist_dropped_ids,
         lm_assist_scores=json.dumps(tel.lm_assist_scores),
+        total_latency_ms=7,
+        retrieval_latency_ms=3,
         repo="/repo/a",
     )
 
@@ -185,6 +215,8 @@ def test_write_proxy_trace_persists_stage_b_and_skills(store: VectorStore) -> No
     assert len(rows) == 1
     row = rows[0]
     assert row.status == "proxy_composed"
+    assert row.total_latency_ms == 7
+    assert row.retrieval_latency_ms == 3
     assert row.event_type == "proxy_request"
     assert row.source_skill_ids == ["skill-a", "skill-b"]
     assert row.system_skill_ids == ["sys-1"]

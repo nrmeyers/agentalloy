@@ -387,6 +387,7 @@ async def _write_flow_telemetry(
         gates_unmet=gates_unmet or [],
         qwen_calls=qwen_calls,
         total_latency_ms=latency_ms,
+        retrieval_latency_ms=telemetry.retrieval_latency_ms if telemetry else None,
         source_skill_ids=telemetry.returned_skill_ids if telemetry else None,
         system_skill_ids=telemetry.header_fragment_ids if telemetry else None,
         workflow_skill_ids=telemetry.workflow_skill_ids if telemetry else None,
