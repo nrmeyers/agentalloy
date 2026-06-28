@@ -13,11 +13,13 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 try:
     from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
     from rich.table import Table
 
     # Auto-detect terminal: force only when stdout is a real TTY so piped
@@ -27,6 +29,10 @@ try:
     HAS_RICH: bool = True
 except ImportError:
     Console = None  # type: ignore[misc,assignment]
+    Progress = None  # type: ignore[misc,assignment]
+    SpinnerColumn = None  # type: ignore[misc,assignment]
+    TextColumn = None  # type: ignore[misc,assignment]
+    TimeElapsedColumn = None  # type: ignore[misc,assignment]
     Table = None  # type: ignore[misc,assignment]
     _console = None  # type: ignore[assignment]
     HAS_RICH = False  # type: ignore[possibly-unused-assignment]
@@ -72,6 +78,45 @@ def print_rich_stderr(*args: Any, **kwargs: Any) -> None:
         err_console.print(*args, **kwargs)
     else:
         print(*args, file=sys.stderr, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Live activity spinner (long, output-silent steps)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def progress_activity(message: str, *, enabled: bool = True) -> Iterator[None]:
+    """Show a live spinner + elapsed timer while a long, output-silent step runs.
+
+    Wrap a blocking call whose own output is captured (a package swap, a pack
+    ingest, a corpus migration) so the terminal keeps animating instead of
+    looking hung. Rich's ``Progress`` refreshes on its own background thread,
+    so the spinner spins and the elapsed clock keeps ticking even while the
+    main thread is blocked inside ``subprocess.run`` — visible proof the step
+    is still working rather than wedged.
+
+    No-op when ``enabled`` is False, Rich is unavailable, or stdout isn't a
+    real terminal (so ``--json``/``--quiet`` and piped runs stay byte-clean).
+    In that no-op path it prints a single ``-> message…`` line so non-TTY logs
+    still record what is running.
+    """
+    if not (enabled and HAS_RICH and _console is not None and _console.is_terminal):
+        if enabled:
+            print_rich(f"  [dim]-> {message}…[/dim]")
+        yield
+        return
+
+    progress = Progress(  # type: ignore[union-attr]
+        SpinnerColumn(),  # type: ignore[union-attr]
+        TextColumn("[dim]{task.description}[/dim]"),  # type: ignore[union-attr]
+        TimeElapsedColumn(),  # type: ignore[union-attr]
+        console=_console,
+        transient=True,
+    )
+    with progress:
+        progress.add_task(message, total=None)
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +461,7 @@ __all__ = [
     "write_result",
     "print_rich",
     "print_rich_stderr",
+    "progress_activity",
     "render_checklist",
     "render_key_value",
     "render_action_result",

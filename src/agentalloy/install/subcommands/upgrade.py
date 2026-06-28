@@ -39,6 +39,7 @@ from agentalloy.install.output import (
     add_json_flag,
     print_rich,
     print_rich_stderr,
+    progress_activity,
     should_output_human,
     write_result,
 )
@@ -226,9 +227,15 @@ def _installed_packs(state: dict[str, Any]) -> str:
 
 
 def _upgrade_native(
-    ref: str, state: dict[str, Any], *, assume_yes: bool
+    ref: str, state: dict[str, Any], *, assume_yes: bool, show_progress: bool = False
 ) -> tuple[list[str], list[str]]:
-    """Run the native upgrade. Returns (actions, warnings)."""
+    """Run the native upgrade. Returns (actions, warnings).
+
+    ``show_progress`` drives a live spinner around the long, output-silent
+    steps (package swap, pack ingest, corpus migration); each runs with its
+    own output captured, so without it the terminal sits blank for minutes and
+    looks wedged. Defaults off for programmatic/`--json` callers.
+    """
     actions: list[str] = []
     warnings: list[str] = []
 
@@ -246,7 +253,8 @@ def _upgrade_native(
     swap = _swap_command(method, ref)
     print_rich(f"  [dim]-> {' '.join(swap)}[/dim]")
     try:
-        subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
+        with progress_activity(f"installing {ref} via {method}", enabled=show_progress):
+            subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
         detail = f": {' / '.join(line.strip() for line in tail)}" if tail else ""
@@ -263,15 +271,20 @@ def _upgrade_native(
     _start_inference_servers()
 
     packs = _installed_packs(state)
-    ingest = _run_cli(["install-packs", "--packs", packs, "--no-restart"], capture=True)
+    with progress_activity("ingesting skill packs", enabled=show_progress):
+        ingest = _run_cli(["install-packs", "--packs", packs, "--no-restart"], capture=True)
     if _is_dim_mismatch(ingest):
         warnings.append("embedding dimension changed — a full re-embed is required")
         if _confirm(
             "  Re-embed the whole corpus now? This can take 30–40 min on CPU",
             assume_yes=assume_yes,
         ):
+            # Stream reembed (capture=False): it prints its own live `embedded
+            # N/M` counter to stderr, which beats a blind spinner. The trailing
+            # re-ingest is the silent one, so wrap only that.
             _run_cli(["reembed", "--force", "--no-restart"], check=False)
-            _run_cli(["install-packs", "--packs", packs, "--no-restart"], check=False)
+            with progress_activity("re-ingesting skill packs", enabled=show_progress):
+                _run_cli(["install-packs", "--packs", packs, "--no-restart"], check=False)
             actions.append("re-embedded corpus (--force)")
         else:
             warnings.append("re-embed skipped — the service may refuse to start until you run it")
@@ -283,7 +296,8 @@ def _upgrade_native(
     # paths, phase-advance commands); an override whose prose no longer carries
     # them is disabled so the shipped version serves, surfaced as a warning. Runs
     # as a child so it sees the NEW _packs (this process is still pre-swap code).
-    rev = _run_cli(["customize", "revalidate", "--json"], check=False, capture=True)
+    with progress_activity("re-validating customizations", enabled=show_progress):
+        rev = _run_cli(["customize", "revalidate", "--json"], check=False, capture=True)
     actions.append("re-validated overrides")
     try:
         rev_payload: dict[str, Any] = json.loads(rev.stdout or "{}")
@@ -309,7 +323,8 @@ def _upgrade_native(
 
     # corpus schema migrations + model-drift report. Capture the JSON output so it
     # does not spill to the terminal; surface only its warnings, cleanly.
-    upd = _run_cli(["update", "--json"], check=False, capture=True)
+    with progress_activity("running corpus migrations", enabled=show_progress):
+        upd = _run_cli(["update", "--json"], check=False, capture=True)
     actions.append("ran corpus migrations")
     try:
         upd_payload: dict[str, Any] = json.loads(upd.stdout or "{}")
@@ -349,7 +364,13 @@ def _target_image(current_tag: str | None, version: str | None) -> str:
 def _upgrade_container(
     ref: str, state: dict[str, Any], *, assume_yes: bool
 ) -> tuple[list[str], list[str]]:
-    """Run the container upgrade. Returns (actions, warnings)."""
+    """Run the container upgrade. Returns (actions, warnings).
+
+    No activity spinner here: the long container steps already stream their
+    own progress — ``podman pull`` renders per-layer download bars and the CLI
+    swap runs uncaptured — so the terminal never goes silent the way the
+    native path's captured steps do.
+    """
     from agentalloy.install.subcommands import container_runtime as cr
 
     actions: list[str] = []
@@ -663,7 +684,9 @@ def upgrade(
     if deployment == "container":
         actions, warnings = _upgrade_container(target_ref, state, assume_yes=assume_yes)
     else:
-        actions, warnings = _upgrade_native(target_ref, state, assume_yes=assume_yes)
+        actions, warnings = _upgrade_native(
+            target_ref, state, assume_yes=assume_yes, show_progress=interactive
+        )
 
     summary["actions"].extend(actions)
     summary["warnings"].extend(warnings)

@@ -85,9 +85,13 @@ uv tool install git+https://github.com/nrmeyers/agentalloy.git
 
 # 3. run the setup wizard
 agentalloy setup
+
+# 4. wire your repo to the harness (per-repo — repeat in each project)
+cd /path/to/your/repo
+agentalloy wire --harness claude-code
 ```
 
-The wizard detects your hardware, downloads the GGUF models, starts the embed + reranker servers, lets you pick skill packs, wires your IDE harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**; both choices run the same wizard:
+The wizard detects your hardware, downloads the GGUF models, starts the embed + reranker servers, lets you pick skill packs, wires your IDE harness, and validates the result — **3–5 minutes** on a warm machine. Wiring is **per-repo**: the wizard wires the repo you run it in, so run step 4 in every other project you want composed. Its first question is **how to deploy**; both choices run the same wizard:
 
 - **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly, **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (a `podman` CLI on PATH with no started `podman machine`, or a stopped Docker Desktop, does not count). If no usable runtime is found, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
 - **Native** — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.

@@ -527,6 +527,26 @@ def test_preflight_skipped_with_assume_yes():
     confirm.assert_not_called()
 
 
+def test_progress_enabled_only_for_human_output():
+    # The live spinner around the silent native steps must follow the human-output
+    # flag: on when interactive (a real terminal session), off under --json/--quiet
+    # so machine output stays clean. `interactive` is the carrier.
+    def _run_native(interactive: bool) -> Any:
+        with (
+            patch.object(up, "_current_version", return_value="3.7.0"),
+            patch.object(up, "_latest_release_tag", return_value="v3.8.0"),
+            patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+            patch.object(up, "_preflight_confirm", return_value=True),
+            patch.object(up, "_upgrade_native", return_value=([], [])) as native,
+            patch.object(up, "_installed_version_via_cli", return_value="3.8.0"),
+        ):
+            up.upgrade(interactive=interactive, assume_yes=True)
+        return native
+
+    assert _run_native(True).call_args.kwargs["show_progress"] is True
+    assert _run_native(False).call_args.kwargs["show_progress"] is False
+
+
 def test_customized_skill_count_counts_non_default():
     rows = [{"layer": "default"}, {"layer": "profile"}, {"layer": "project"}, {"layer": "default"}]
     with patch.object(up, "_run_cli", return_value=_proc(0, stdout=json.dumps(rows))):

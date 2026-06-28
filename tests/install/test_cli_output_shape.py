@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from agentalloy.install.output import render_lifecycle_result
+from agentalloy.install.output import progress_activity, render_lifecycle_result
 from agentalloy.install.subcommands import reset as reset_cmd
 from agentalloy.install.subcommands import unwire as unwire_cmd
 from agentalloy.install.subcommands import update as update_cmd
@@ -161,3 +161,35 @@ def test_render_error_shown(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "boom" in out
     assert "no changes" not in out
+
+
+# --- progress_activity (live spinner for silent long steps) ----------------
+
+
+def test_progress_activity_disabled_is_pure_noop(capsys: pytest.CaptureFixture[str]) -> None:
+    # enabled=False must yield with zero output — keeps --json/--quiet byte-clean.
+    ran = False
+    with progress_activity("doing a thing", enabled=False):
+        ran = True
+    assert ran
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_progress_activity_non_tty_prints_single_line(capsys: pytest.CaptureFixture[str]) -> None:
+    # Under pytest stdout isn't a TTY, so even enabled=True falls to the no-op
+    # path — but it logs one `-> message…` line so non-interactive runs still
+    # record what is running instead of a blank wait.
+    with progress_activity("installing v9.9.9", enabled=True):
+        pass
+    out = capsys.readouterr().out
+    assert out.count("installing v9.9.9") == 1
+    assert "->" in out
+
+
+def test_progress_activity_reraises(capsys: pytest.CaptureFixture[str]) -> None:
+    # The wrapper must not swallow the wrapped step's failure.
+    with pytest.raises(RuntimeError, match="swap failed"):
+        with progress_activity("installing", enabled=True):
+            raise RuntimeError("swap failed")
