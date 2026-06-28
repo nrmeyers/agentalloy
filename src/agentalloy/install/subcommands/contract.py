@@ -214,13 +214,28 @@ def _init(args: argparse.Namespace) -> int:
 def _concretize_glob(path_glob: str, slug: str) -> str | None:
     """Resolve a gate path glob to a concrete repo-relative file path for *slug*.
 
-    Substitutes a literal ``<slug>`` placeholder and a ``**`` directory segment with the
-    slug (``docs/design/**/approach.md`` -> ``docs/design/<slug>/approach.md``). Returns
-    None when wildcards remain after substitution (an ambiguous/multi-match glob such as
-    ``.agentalloy/contracts/build/*.md`` must not be scaffolded to a single file).
+    Substitutes, in order:
+    - a literal ``<slug>`` placeholder with the slug;
+    - a ``**`` directory segment with the slug
+      (``docs/design/**/approach.md`` -> ``docs/design/<slug>/approach.md``);
+    - a *terminal basename* wildcard — the final segment's leading ``*`` — with the slug
+      (``docs/qa/*.md`` -> ``docs/qa/<slug>.md``), but only when it is the sole remaining
+      wildcard and confined to that last segment. This names the per-feature artifact after
+      the slug, which is what the qa/spec gates intend.
+
+    Returns None when any wildcard still remains — an ambiguous/multi-match glob such as a
+    non-terminal ``*`` must not be scaffolded to a single file.
     """
     concrete = path_glob.replace("<slug>", slug)
-    concrete = "/".join(slug if seg == "**" else seg for seg in concrete.split("/"))
+    segments = [slug if seg == "**" else seg for seg in concrete.split("/")]
+    # Terminal basename wildcard: only when nothing before the last segment wildcards and
+    # the last segment has a single leading ``*`` (e.g. ``*.md``). A non-terminal or
+    # multi-wildcard glob falls through to the ``*`` guard below and stays unscaffolded.
+    if segments and "*" not in "/".join(segments[:-1]):
+        last = segments[-1]
+        if last.startswith("*") and "*" not in last[1:]:
+            segments[-1] = slug + last[1:]
+    concrete = "/".join(segments)
     if "*" in concrete:
         return None
     return concrete

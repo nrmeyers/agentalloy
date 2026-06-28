@@ -29,6 +29,7 @@ from agentalloy.signals.predicates import (
     eval_git_state,
     eval_phase_in,
     eval_phase_not_in,
+    eval_tests_present,
     eval_tool_use_about_to_fire,
     evaluate_predicate,
     section_completeness,
@@ -107,6 +108,53 @@ def test_artifact_absent_when_present(tmp_path: Path):
     (tmp_path / "x.md").write_text("hi")
     ctx = _ctx(tmp_path)
     assert eval_artifact_absent({"path": "x.md"}, ctx) == NOT_MET
+
+
+# ---------------------------------------------------------------------------
+# tests_present (stack-aware test gate)
+# ---------------------------------------------------------------------------
+
+
+def test_tests_present_pytest_layout(tmp_path: Path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+    assert eval_tests_present({}, _ctx(tmp_path)) == MET
+
+
+def test_tests_present_pytest_suffix_anywhere(tmp_path: Path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "thing_test.py").write_text("def test(): pass\n")
+    assert eval_tests_present({}, _ctx(tmp_path)) == MET
+
+
+def test_tests_present_vitest_when_package_json(tmp_path: Path):
+    (tmp_path / "package.json").write_text('{"name": "x"}')
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "date.test.ts").write_text("test('x', () => {})\n")
+    assert eval_tests_present({}, _ctx(tmp_path)) == MET
+
+
+def test_tests_present_js_ignored_without_package_json(tmp_path: Path):
+    # A *.test.ts with no package.json isn't a recognized JS/TS project.
+    (tmp_path / "a.test.ts").write_text("x")
+    assert eval_tests_present({}, _ctx(tmp_path)) == NOT_MET
+
+
+def test_tests_present_excludes_vendored_dirs(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}")
+    nm = tmp_path / "node_modules" / "dep"
+    nm.mkdir(parents=True)
+    (nm / "bundled.test.js").write_text("x")
+    assert eval_tests_present({}, _ctx(tmp_path)) == NOT_MET
+
+
+def test_tests_present_empty_repo(tmp_path: Path):
+    assert eval_tests_present({}, _ctx(tmp_path)) == NOT_MET
+
+
+def test_tests_present_extra_globs(tmp_path: Path):
+    (tmp_path / "pkg_test.go").write_text("package x\n")
+    assert eval_tests_present({"extra_globs": ["**/*_test.go"]}, _ctx(tmp_path)) == MET
 
 
 # ---------------------------------------------------------------------------

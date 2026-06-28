@@ -91,3 +91,58 @@ def test_resolve_current_contract_none_when_absent(tmp_path: Path) -> None:
     (tmp_path / ".agentalloy").mkdir()
     cid, path = _resolve_current_contract(tmp_path, "build")
     assert cid is None and path is None
+
+
+# ---------------------------------------------------------------------------
+# B2: a phase transition drops the work-item cursor so the new phase resolves
+# its own contract instead of inheriting the prior phase's terminal task slug.
+# ---------------------------------------------------------------------------
+
+
+def _seed_qa_contract(root: Path, slug: str) -> None:
+    qa = root / ".agentalloy" / "contracts" / "qa"
+    qa.mkdir(parents=True, exist_ok=True)
+    (qa / f"{slug}.md").write_text(
+        f"---\nphase: qa\ntask_slug: {slug}\ndomain_tags: [pytest]\n---\n# {slug}\nbody\n"
+    )
+
+
+def test_phase_transition_clears_cursor_proxy_path(tmp_path: Path) -> None:
+    # The proxy advances the phase via _write_phase_atomic; that must drop the cursor.
+    from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
+        _write_phase_atomic,
+    )
+
+    _seed(tmp_path, "build", ["01-cache", "02-date-tests"])
+    run_task_start("02-date-tests", tmp_path)
+    assert _read_cursor(tmp_path) == "build/02-date-tests.md"
+    _seed_qa_contract(tmp_path, "the-feature")
+
+    _write_phase_atomic(tmp_path, "qa")
+
+    assert _read_cursor(tmp_path) is None  # cursor dropped on transition
+    cid, path = _resolve_current_contract(tmp_path, "qa")
+    assert cid == "qa/the-feature.md"  # resolves the feature contract, not the build slug
+    assert path is not None and path.name == "the-feature.md"
+
+
+def test_phase_idempotent_rewrite_keeps_cursor(tmp_path: Path) -> None:
+    # An in-phase rewrite (prev == phase) must not disturb a deliberately-set cursor.
+    from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
+        _write_phase_atomic,
+    )
+
+    _seed(tmp_path, "build", ["01-cache", "02-api"])
+    run_task_start("02-api", tmp_path)
+    _write_phase_atomic(tmp_path, "build")
+    assert _read_cursor(tmp_path) == "build/02-api.md"
+
+
+def test_phase_set_cli_clears_cursor(tmp_path: Path) -> None:
+    # The CLI `phase set` path (run_phase_set) clears the cursor on a transition too.
+    from agentalloy.install.subcommands.phase import run_phase_set
+
+    _seed(tmp_path, "build", ["01-cache", "02-api"])
+    run_task_start("02-api", tmp_path)
+    run_phase_set("qa", tmp_path, force=True)
+    assert _read_cursor(tmp_path) is None

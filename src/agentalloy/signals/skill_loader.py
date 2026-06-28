@@ -85,6 +85,7 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
     """
     phase_file = project_root / ".agentalloy" / "phase"
     phase_file.parent.mkdir(parents=True, exist_ok=True)
+    prev = _read_phase(project_root)
     # Unique tmp per writer: the watcher and the async proxy both call this with
     # no shared lock, so a fixed tmp name lets two writers race on the same file
     # and defeat the os.replace atomicity. A per-writer tmp keeps it atomic.
@@ -96,6 +97,15 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+    # On a real phase transition, drop the work-item cursor. Otherwise the new phase
+    # inherits the prior phase's terminal task slug (e.g. qa wakes pointing at the last
+    # build task `bcal-05-...` instead of the feature contract). Cleared cursor →
+    # `_resolve_current_contract` falls back to the sole contract under
+    # `contracts/<newphase>/` (single-item phases: spec/design/qa/ship) or stays silent
+    # until `task next` (build fan-out). An in-phase idempotent rewrite (prev == phase)
+    # leaves a deliberately-set cursor untouched. See B2 in docs/feedback-bcal-run-fixes.md.
+    if prev != phase:
+        _clear_state(project_root, "cursor")
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +155,13 @@ def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+def _clear_state(project_root: Path, name: str) -> None:
+    """Remove ``.agentalloy/<name>`` if present (cadence-state reset). Never raises."""
+    state_file = project_root / ".agentalloy" / name
+    with contextlib.suppress(OSError):
+        state_file.unlink()
 
 
 # Cap on how many distinct session keys we remember as "already oriented" for a

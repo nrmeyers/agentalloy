@@ -102,6 +102,50 @@ def eval_artifact_absent(args: dict[str, Any], ctx: PredicateContext) -> Predica
     return PredicateResult.UNKNOWN
 
 
+_TEST_EXCLUDE_DIRS = frozenset({"node_modules", "dist", ".venv", ".git", "__pycache__"})
+_JS_TEST_EXTS = ("ts", "tsx", "js", "jsx", "mts", "cts")
+
+
+def _path_in_excluded_dir(rel: Path) -> bool:
+    """Whether any path segment is a vendored/output dir we never count tests from."""
+    return any(part in _TEST_EXCLUDE_DIRS for part in rel.parts)
+
+
+def eval_tests_present(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
+    """Stack-aware test-presence gate: MET if any recognized test file exists.
+
+    Replaces a hardcoded ``tests/**/*.py`` glob so a JS/TS repo with Vitest/Jest tests
+    satisfies ``build -> qa`` without ``--force``. Detection:
+
+    - always: ``tests/**/*.py``, ``**/test_*.py``, ``**/*_test.py`` (pytest)
+    - when a root ``package.json`` exists: ``**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts}``
+    - ``args.extra_globs`` (list of repo-relative globs): a pack can add a stack (Go,
+      Rust, ...) without a code change.
+
+    Vendored/output dirs (``node_modules``, ``dist``, ``.venv``, ...) are excluded so their
+    bundled tests never satisfy the gate. Returns MET/NOT_MET; never raises.
+    """
+    root = ctx.project_root
+    patterns: list[str] = ["tests/**/*.py", "**/test_*.py", "**/*_test.py"]
+    if (root / "package.json").is_file():
+        for ext in _JS_TEST_EXTS:
+            patterns.append(f"**/*.test.{ext}")
+            patterns.append(f"**/*.spec.{ext}")
+    extra = args.get("extra_globs")
+    if isinstance(extra, list):
+        patterns.extend(str(g) for g in cast(list[Any], extra))
+
+    for pattern in patterns:
+        for f in _glob_files(root, pattern):
+            try:
+                rel = f.relative_to(root)
+            except ValueError:
+                rel = f
+            if not _path_in_excluded_dir(rel):
+                return PredicateResult.MET
+    return PredicateResult.NOT_MET
+
+
 def _section_present(section: str, headings: list[str]) -> bool:
     """Whether a required ``section`` is present among markdown ``headings``,
     tolerating a trailing qualifier on the heading.
@@ -566,6 +610,7 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
 PREDICATES: dict[str, Callable[[dict[str, Any], PredicateContext], PredicateResult]] = {
     "artifact_exists": eval_artifact_exists,
     "artifact_absent": eval_artifact_absent,
+    "tests_present": eval_tests_present,
     "artifact_contains": eval_artifact_contains,
     "artifact_size_min": eval_artifact_size_min,
     "artifact_newer_than": eval_artifact_newer_than,

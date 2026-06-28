@@ -36,8 +36,9 @@ exit_gates:
         since: docs/fast/*.md
     - artifact_exists:
         path: "src/**"
-    - artifact_exists:
-        path: "tests/**/*.py"
+    # Stack-aware: pytest, or JS/TS (Vitest/Jest) when package.json is present.
+    # Packs may extend via `extra_globs`. Replaces the old hardcoded tests/**/*.py.
+    - tests_present: {}
 signal_keywords:
   - tests pass
   - ready to ship
