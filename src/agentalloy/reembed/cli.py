@@ -1,10 +1,14 @@
-"""Re-embed pass: populate DuckDB ``fragment_embeddings`` from LadybugDB
-``Fragment`` nodes.
+"""Re-embed pass: build the Lance ``fragments`` dataset from the skill store's
+active fragments.
 
-The migration model separates ingest (graph writes to LadybugDB) from embedding
-(vector writes to DuckDB). This CLI is the embedding half — it runs after
-ingest and can be re-run safely: fragments whose ids already have DuckDB rows
-are skipped.
+The migration model separates ingest (graph writes to ``agentalloy.duck``) from
+embedding (vector writes to the Lance ``fragments`` dataset). This CLI is the
+embedding half — it runs after ingest and can be re-run safely: fragments whose
+ids already have Lance rows are skipped.
+
+Reembed is a live, zero-downtime operation: Lance is MVCC (atomic versioned
+writes) and telemetry lives in a separate file, so the running service is never
+touched — no service stop/restart is required (decisions D3/D4).
 
 Usage::
 
@@ -22,26 +26,16 @@ picks up where this one stopped).
 from __future__ import annotations
 
 import argparse
-import contextlib
 import logging
-import os
-import platform
-import shutil
-import subprocess
 import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from agentalloy.config import Settings, get_settings
+from agentalloy.config import get_settings
 from agentalloy.dedup_gate import DedupGateResult, run_dedup_gate
 from agentalloy.embed_provider import EmbedClient, get_embed_client
-from agentalloy.install.container_service import (
-    is_in_container,
-    restart_service_in_container,
-    stop_service_in_container,
-)
 from agentalloy.lm_client import (
     LMBadResponse,
     LMClientError,
@@ -58,16 +52,13 @@ from agentalloy.storage.card_index import (
     build_card_text,
     card_fragment_id,
 )
-from agentalloy.storage.ladybug import (
-    LOCK_HELD_REMEDIATION,
-    LadybugStore,
-    is_lock_held_error,
-)
-from agentalloy.storage.vector_store import (
-    FragmentEmbedding,
-    VectorStore,
-    open_or_create,
-)
+from agentalloy.storage.open import open_fragments, open_skills
+from agentalloy.storage.protocols import FragmentEmbedding
+from agentalloy.storage.skill_store import is_lock_held_error
+
+if TYPE_CHECKING:
+    from agentalloy.storage.fragment_store import LanceFragmentStore
+    from agentalloy.storage.skill_store import DuckDBSkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -80,165 +71,12 @@ EXIT_DEDUP = 4
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
 
-# ---------------------------------------------------------------------------
-# Service management — stop the background server before reembed so it doesn't
-# hold database locks (LadybugDB/Kuzu + DuckDB).
-# ---------------------------------------------------------------------------
-
-
-def _detect_service_manager() -> str | None:
-    """Return 'systemd', 'launchd', or None."""
-    if platform.system().lower() == "linux" and shutil.which("systemctl") is not None:
-        return "systemd"
-    if platform.system().lower() == "darwin" and shutil.which("launchctl") is not None:
-        return "launchd"
-    return None
-
-
-def _systemd_unit_path() -> Path:
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return config_home / "systemd" / "user" / "agentalloy.service"
-
-
-def _launchd_plist_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / "ai.agentalloy.plist"
-
-
-def _is_service_running() -> bool:
-    """Check if the agentalloy service is active."""
-    sm = _detect_service_manager()
-    if sm == "systemd":
-        try:
-            result = subprocess.run(
-                [
-                    "systemctl",
-                    "--user",
-                    "is-active",
-                    "agentalloy.service",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env={
-                    **os.environ,
-                    "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.getuid()}/bus",
-                },
-            )
-            return result.stdout.strip() == "active"
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    elif sm == "launchd":
-        plist = _launchd_plist_path()
-        if plist.exists():
-            try:
-                result = subprocess.run(
-                    ["launchctl", "list", "ai.agentalloy"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                # launchctl list returns 0 when the job exists (loaded or running).
-                # Output is tab-separated: PID \t exitcode \t label
-                # PID column is '-' when the job is loaded but not currently running.
-                if result.returncode != 0 or "ai.agentalloy" not in result.stdout:
-                    return False
-                for line in result.stdout.strip().splitlines():
-                    parts = line.split()
-                    if parts and parts[-1] == "ai.agentalloy" and parts[0] != "-":
-                        return True
-                return False
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-    return False
-
-
-def _stop_service() -> bool:
-    """Stop the agentalloy service. Returns True if something was stopped."""
-    sm = _detect_service_manager()
-    if sm == "systemd":
-        try:
-            logger.info("stopping systemd service: agentalloy.service")
-            env = {
-                **os.environ,
-                "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.getuid()}/bus",
-            }
-            subprocess.run(
-                ["systemctl", "--user", "stop", "agentalloy.service"],
-                check=True,
-                timeout=15,
-                env=env,
-            )
-            return True
-        except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
-            logger.debug("could not stop systemd service: %s", exc)
-    elif sm == "launchd":
-        plist = _launchd_plist_path()
-        if plist.exists():
-            try:
-                logger.info("stopping launchd service: ai.agentalloy")
-                subprocess.run(
-                    ["launchctl", "bootout", "ai.agentalloy"],
-                    check=True,
-                    timeout=15,
-                )
-                # Fallback for older macOS
-                if not _is_service_running():
-                    return True
-            except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
-                pass
-            try:
-                subprocess.run(
-                    ["launchctl", "unload", str(plist)],
-                    check=True,
-                    timeout=15,
-                )
-                return True
-            except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
-                logger.debug("could not stop launchd service: %s", exc)
-    return False
-
-
-def _restart_service() -> None:
-    """Restart the agentalloy service."""
-    sm = _detect_service_manager()
-    if sm == "systemd":
-        try:
-            env = {
-                **os.environ,
-                "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{os.getuid()}/bus",
-            }
-            subprocess.run(
-                ["systemctl", "--user", "start", "agentalloy.service"],
-                check=True,
-                timeout=15,
-                env=env,
-            )
-            logger.info("restarted systemd service: agentalloy.service")
-        except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
-            logger.warning("failed to restart systemd service: %s", exc)
-    elif sm == "launchd":
-        plist = _launchd_plist_path()
-        if plist.exists():
-            try:
-                # Use non-persistent load (no -w) so we don't override user
-                # enablement/disabled state. Prefer modern kickstart when available.
-                subprocess.run(
-                    ["launchctl", "kickstart", "gui/", "ai.agentalloy"],
-                    check=True,
-                    timeout=15,
-                )
-                logger.info("restarted launchd service: ai.agentalloy")
-            except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
-                # Fallback: launchctl load without -w (older macOS)
-                try:
-                    subprocess.run(
-                        ["launchctl", "load", str(plist)],
-                        check=True,
-                        timeout=15,
-                    )
-                    logger.info("restarted launchd service: ai.agentalloy")
-                except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
-                    logger.warning("failed to restart launchd service: %s", exc)
+# Shown when the skill store's single writer lock is held by a concurrent writer
+# (another ingest/reembed). In v6 this is benign and transient — wait and retry.
+LOCK_HELD_REMEDIATION = (
+    "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
+    "writing agentalloy.duck). Wait for it to finish and re-run the command."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +86,10 @@ def _restart_service() -> None:
 
 @dataclass(frozen=True)
 class FragmentNeedingEmbedding:
-    """A Fragment node pulled from LadybugDB with its parent Skill metadata.
+    """An active fragment pulled from the skill store with its parent skill metadata.
 
     The denormalized columns (``skill_id``, ``category``, ``fragment_type``)
-    carry through to the DuckDB row so compose-time filtered search doesn't
+    carry through to the Lance row so compose-time filtered search doesn't
     need a cross-engine join.
 
     ``canonical_name`` / ``domain_tags`` / ``description`` carry the parent
@@ -295,42 +133,46 @@ class ReembedStats:
 # ---------------------------------------------------------------------------
 
 
-_DISCOVERY_CYPHER_ALL = """
-MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion)-[:DECOMPOSES_TO]->(f:Fragment)
-WHERE v.status = 'active' AND s.deprecated = false
-RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
+# Active fragments + parent-skill metadata, folded out of the old Cypher graph:
+# CURRENT_VERSION -> skills.current_version_id; DECOMPOSES_TO -> fragments.version_id.
+_DISCOVERY_SQL_ALL = """
+SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
        s.canonical_name, s.domain_tags, s.description
+FROM skills s
+JOIN skill_versions v ON v.version_id = s.current_version_id
+JOIN fragments f ON f.version_id = v.version_id
+WHERE v.status = 'active' AND s.deprecated = false
 ORDER BY s.skill_id, f.sequence
 """
 
-_DISCOVERY_CYPHER_SKILL = """
-MATCH (s:Skill {skill_id: $skill_id})-[:CURRENT_VERSION]->(v:SkillVersion)
-    -[:DECOMPOSES_TO]->(f:Fragment)
-WHERE v.status = 'active' AND s.deprecated = false
-RETURN f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
+_DISCOVERY_SQL_SKILL = """
+SELECT f.fragment_id, f.content, f.fragment_type, s.skill_id, s.category,
        s.canonical_name, s.domain_tags, s.description
+FROM skills s
+JOIN skill_versions v ON v.version_id = s.current_version_id
+JOIN fragments f ON f.version_id = v.version_id
+WHERE v.status = 'active' AND s.deprecated = false AND s.skill_id = $skill_id
 ORDER BY f.sequence
 """
 
 
 def discover_unembedded_fragments(
-    store: LadybugStore,
-    vector_store: VectorStore,
+    store: DuckDBSkillStore,
+    vector_store: LanceFragmentStore,
     *,
     skill_id: str | None = None,
     force: bool = False,
 ) -> list[FragmentNeedingEmbedding]:
-    """Pull Fragment nodes from LadybugDB; filter out those already in DuckDB.
+    """Pull active fragments from the skill store; filter out those already in Lance.
 
-    ``force=True`` returns every fragment regardless of DuckDB state — useful
-    for "wipe and re-embed" scenarios (caller is expected to have called
-    ``vector_store.delete_skill`` first, otherwise the primary-key constraint
-    on fragment_embeddings will raise).
+    ``force=True`` returns every fragment regardless of Lance state — useful for
+    "wipe and re-embed" scenarios (Lance ``insert_embeddings`` upserts on
+    ``fragment_id``, so a duplicate id replaces rather than conflicts).
     """
     if skill_id is not None:
-        rows = store.execute(_DISCOVERY_CYPHER_SKILL, {"skill_id": skill_id})
+        rows = store.execute(_DISCOVERY_SQL_SKILL, {"skill_id": skill_id})
     else:
-        rows = store.execute(_DISCOVERY_CYPHER_ALL)
+        rows = store.execute(_DISCOVERY_SQL_ALL)
 
     all_fragments = [
         FragmentNeedingEmbedding(
@@ -410,13 +252,13 @@ def reembed_fragments(
     fragments: list[FragmentNeedingEmbedding],
     *,
     embed_fn: Callable[[str], list[float]],
-    vector_store: VectorStore,
+    vector_store: LanceFragmentStore,
     embedding_model: str,
     progress_tty: bool = False,
     on_embedded: Callable[[FragmentNeedingEmbedding, list[float]], None] | None = None,
     card_index: CardIndexMode = CardIndexMode.OFF,
 ) -> ReembedStats:
-    """Embed each fragment and insert to DuckDB. Returns run stats.
+    """Embed each fragment and upsert it into the Lance dataset. Returns run stats.
 
     ``embed_fn`` takes a content string and returns a raw (non-normalized)
     vector. The vector_store normalizes on insert. Injected rather than
@@ -432,20 +274,19 @@ def reembed_fragments(
     *indexed* text (the embedded vector and the BM25 ``prose`` column) is
     prefixed with a one-line skill-card header. The returned ``content`` is
     untouched. ``cards``/``both`` additionally inserts synthetic card documents
-    — done by the caller after this batch (see ``_insert_cards``). ``off`` is a
+    — done by the caller after this batch (see ``insert_cards``). ``off`` is a
     byte-for-byte no-op vs the pre-Stage-0 index.
 
-    Transactional: the entire batch is wrapped in a DuckDB transaction.
-    If any fragment fails to embed or insert, the whole batch is rolled back
-    so the caller can retry without leaving partial state.
+    Lance is MVCC with no exclusive writer lock, so each ``insert_embeddings``
+    is its own atomic upsert (keyed on ``fragment_id``). A failure mid-run
+    leaves the already-inserted rows committed; idempotency means a re-run picks
+    up the rest, and ``fragment_id`` upserts make replays safe.
     """
     stats = ReembedStats(discovered=len(fragments))
     now = int(time.time())
     if not fragments:
         return stats
 
-    # Wrap the entire batch in a transaction for atomicity
-    vector_store.begin_transaction()
     try:
         for frag in fragments:
             indexed = _indexed_text(frag, card_index)
@@ -455,18 +296,12 @@ def reembed_fragments(
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, str(exc)))
                 logger.error("failed %s: %s", frag.fragment_id, exc)
-                # Roll back the entire batch on any embed failure
-                with contextlib.suppress(Exception):
-                    vector_store.rollback_transaction()
-                raise  # Re-raise to trigger top-level rollback
+                raise
             except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, f"unexpected: {exc}"))
                 logger.error("unexpected error on %s: %s", frag.fragment_id, exc)
-                # Roll back the entire batch on any embed failure
-                with contextlib.suppress(Exception):
-                    vector_store.rollback_transaction()
-                raise  # Re-raise to trigger top-level rollback
+                raise
 
             try:
                 vector_store.insert_embeddings(
@@ -487,10 +322,7 @@ def reembed_fragments(
                 stats.failed += 1
                 stats.failures.append((frag.fragment_id, f"insert: {exc}"))
                 logger.error("insert failed for %s: %s", frag.fragment_id, exc)
-                # Roll back the entire batch on any insert failure
-                with contextlib.suppress(Exception):
-                    vector_store.rollback_transaction()
-                raise  # Re-raise to trigger top-level rollback
+                raise
 
             stats.embedded += 1
             if on_embedded is not None:
@@ -505,15 +337,9 @@ def reembed_fragments(
             elif stats.embedded % 10 == 0:
                 logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
 
-        # All fragments processed — commit the batch
-        vector_store.commit_transaction()
-
     except Exception as exc:
-        # Top-level error — rollback the entire batch
-        with contextlib.suppress(Exception):
-            vector_store.rollback_transaction()
         logger.error(
-            "reembed batch failed after %d embedded, %d failed — rolled back: %s",
+            "reembed batch failed after %d embedded, %d failed: %s",
             stats.embedded,
             stats.failed,
             exc,
@@ -544,51 +370,44 @@ def insert_cards(
     fragments: list[FragmentNeedingEmbedding],
     *,
     embed_fn: Callable[[str], list[float]],
-    vector_store: VectorStore,
+    vector_store: LanceFragmentStore,
     embedding_model: str,
 ) -> int:
     """Embed and insert one synthetic card document per distinct skill.
 
     Cards carry ``fragment_type='card'`` and a ``card::<skill_id>`` id so they
-    are trivially identifiable in both DuckDB and the fused candidate list.
-    They participate in dense + BM25 retrieval (boosting their skill's rank)
-    but are excluded from ``/compose`` assembly — no LadybugDB Fragment node
+    are trivially identifiable in both the Lance dataset and the fused candidate
+    list. They participate in dense + BM25 retrieval (boosting their skill's
+    rank) but are excluded from ``/compose`` assembly — no skill-store fragment
     hydrates them, and ``retrieval.domain`` drops card ids before selection.
 
     Caller is responsible for clearing pre-existing cards (``delete_cards``)
     when re-running, mirroring the ``--force`` fragment path. Returns the count
-    of cards inserted. Wrapped in its own transaction for atomicity.
+    of cards inserted (each an atomic Lance upsert keyed on ``fragment_id``).
     """
     cards = _distinct_skill_cards(fragments)
     if not cards:
         return 0
     now = int(time.time())
     inserted = 0
-    vector_store.begin_transaction()
-    try:
-        for rep in cards:
-            text = build_card_text(rep.canonical_name, rep.domain_tags, rep.description)
-            vec = _embed_with_retry(embed_fn, text)
-            vector_store.insert_embeddings(
-                [
-                    FragmentEmbedding(
-                        fragment_id=card_fragment_id(rep.skill_id),
-                        embedding=vec,
-                        skill_id=rep.skill_id,
-                        category=rep.category,
-                        fragment_type=CARD_FRAGMENT_TYPE,
-                        embedded_at=now,
-                        embedding_model=embedding_model,
-                        prose=text,
-                    )
-                ]
-            )
-            inserted += 1
-        vector_store.commit_transaction()
-    except Exception:
-        with contextlib.suppress(Exception):
-            vector_store.rollback_transaction()
-        raise
+    for rep in cards:
+        text = build_card_text(rep.canonical_name, rep.domain_tags, rep.description)
+        vec = _embed_with_retry(embed_fn, text)
+        vector_store.insert_embeddings(
+            [
+                FragmentEmbedding(
+                    fragment_id=card_fragment_id(rep.skill_id),
+                    embedding=vec,
+                    skill_id=rep.skill_id,
+                    category=rep.category,
+                    fragment_type=CARD_FRAGMENT_TYPE,
+                    embedded_at=now,
+                    embedding_model=embedding_model,
+                    prose=text,
+                )
+            ]
+        )
+        inserted += 1
     return inserted
 
 
@@ -643,19 +462,13 @@ def _report_dedup(gate_result: DedupGateResult, *, allow_duplicates: bool) -> in
 # ---------------------------------------------------------------------------
 
 
-def _duckdb_path(settings: Settings) -> Path:
-    """Locate the DuckDB file. Derived from LadybugDB path's parent dir."""
-    ladybug_path = Path(settings.ladybug_db_path)
-    return ladybug_path.parent / "skills.duck"
-
-
 def build_parser() -> argparse.ArgumentParser:
     """The reembed CLI parser. Exposed so tests can assert real defaults."""
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.reembed",
         description=(
-            "Compute embeddings for LadybugDB fragments and write them to "
-            "the DuckDB vector store. Idempotent on re-run."
+            "Compute embeddings for the skill store's active fragments and write "
+            "them to the Lance fragment store. Idempotent on re-run."
         ),
     )
     parser.add_argument(
@@ -701,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Report what would be embedded without calling LM Studio or writing DuckDB",
+        help="Report what would be embedded without calling LM Studio or writing the Lance store",
     )
     parser.add_argument(
         "--rebuild-fts",
@@ -715,7 +528,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-restart",
         action="store_true",
-        help="Do not restart the agentalloy service after reembed completes",
+        help=(
+            "Accepted for backward compatibility and ignored: reembed is a live, "
+            "zero-downtime operation and never stops the agentalloy service."
+        ),
     )
     parser.add_argument(
         "--allow-duplicates",
@@ -735,266 +551,207 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     card_mode = CardIndexMode(args.card_index)
 
-    # Stop service in container mode before DB operations
-    container_was_stopped = False
-    if is_in_container():
-        if args.no_restart:
-            logger.info("skipping container service stop (no_restart requested)")
-        else:
-            print(
-                "Stopping agentalloy service (container mode) to release database locks...",
-                file=sys.stderr,
-            )
-            container_was_stopped = stop_service_in_container(no_restart=False)
-            if not container_was_stopped:
-                logger.warning(
-                    "no running agentalloy service found in container; "
-                    "proceeding without stop/restart"
-                )
-
     settings = get_settings()
     model_id = args.model or settings.runtime_embedding_model
-    duck_path = _duckdb_path(settings)
-    Path(settings.ladybug_db_path).parent.mkdir(parents=True, exist_ok=True)
+    settings.ensure_data_dirs()
 
-    # Pre-flight: stop the background service if running — it holds database locks
-    # (LadybugDB/Kuzu + DuckDB) that conflict with our exclusive access.
-    # Even in dry-run mode we must stop the service, otherwise opening the DBs
-    # will fail with the same lock errors we're trying to avoid.
-    service_was_running = False
-    service_was_stopped = False
-    if _is_service_running():
-        service_was_running = True
-        service_was_stopped = _stop_service()
-        if service_was_stopped:
-            logger.info("stopped agentalloy service to release database locks")
-        else:
-            logger.warning(
-                "agentalloy service appears active but could not be stopped via "
-                "service manager — reembed may fail with lock errors"
-            )
-    else:
-        logger.debug("agentalloy service is not running")
-
-    def _maybe_restart() -> None:
-        """Restart the service if we stopped it and --no-restart is not set."""
-        if service_was_stopped and not args.no_restart:
-            _restart_service()
-        elif not args.no_restart and service_was_running:
-            logger.warning(
-                "service was running but could not be stopped; "
-                "it may still need a restart. Run 'agentalloy serve --restart' manually."
-            )
-
+    # No service stop/restart: Lance is MVCC (atomic versioned writes) and
+    # telemetry lives in a separate file, so a live reembed is safe by
+    # construction (decisions D3/D4). The skill store's transient writer lock
+    # can still be contended by a concurrent ingest/reembed — that surfaces as a
+    # lock-held error below and is benign (retry).
+    store: DuckDBSkillStore | None = None
+    vs: LanceFragmentStore | None = None
     try:
-        with LadybugStore(settings.ladybug_db_path) as store, open_or_create(duck_path) as vs:
-            # Apply schema migrations before discovery — the discovery cypher
-            # references columns (e.g. Stage 0's ``s.description``) that an
-            # older corpus won't have until the ALTERs run. Idempotent.
-            store.migrate()
-            # --force: clear scope first so the primary-key constraint doesn't trip.
-            # Wrap in a transaction so rollback is possible if embedding fails.
-            if args.force:
-                vs.begin_transaction()
-                try:
-                    if args.skill_id:
-                        n = vs.delete_skill(args.skill_id)
-                        logger.info(
-                            "--force: deleted %d existing embeddings for %s", n, args.skill_id
-                        )
-                    else:
-                        # Full wipe: required when changing embedding models (dimension change
-                        # makes existing vectors incompatible with the new index).
-                        n = vs.count_embeddings()
-                        vs._conn.execute("DELETE FROM fragment_embeddings")  # pyright: ignore[reportPrivateUsage]
-                        logger.info(
-                            "--force: deleted all %d existing embeddings for full reindex", n
-                        )
-                    vs.commit_transaction()
-                except Exception as exc:
-                    with contextlib.suppress(Exception):
-                        vs.rollback_transaction()
-                    logger.error("--force delete failed, rolled back: %s", exc)
-                    raise
+        store = open_skills(settings, read_only=False)
+        vs = open_fragments(settings)
+        # Writer-mode open already migrated; re-assert idempotently.
+        store.migrate()
 
-            fragments = discover_unembedded_fragments(
-                store, vs, skill_id=args.skill_id, force=args.force
-            )
-            if args.limit is not None:
-                fragments = fragments[: args.limit]
+        # --force: drop existing Lance rows for the scope before re-embedding.
+        # A full wipe is required when changing embedding models (a dimension
+        # change makes existing vectors incompatible with the new index).
+        if args.force:
+            if args.skill_id:
+                n = vs.delete_skill(args.skill_id)
+                logger.info("--force: deleted %d existing embeddings for %s", n, args.skill_id)
+            else:
+                n = vs.count_embeddings()
+                vs.delete_all()
+                logger.info("--force: deleted all %d existing embeddings for full reindex", n)
 
-            logger.info(
-                "discovered %d fragment(s) to embed (model=%s, target=%s)",
-                len(fragments),
-                model_id,
-                duck_path,
-            )
+        fragments = discover_unembedded_fragments(
+            store, vs, skill_id=args.skill_id, force=args.force
+        )
+        if args.limit is not None:
+            fragments = fragments[: args.limit]
 
-            if args.dry_run:
-                for f in fragments[:20]:
-                    logger.info(
-                        "  would embed: %s (%s, %s)", f.fragment_id, f.skill_id, f.fragment_type
+        logger.info(
+            "discovered %d fragment(s) to embed (model=%s, target=%s)",
+            len(fragments),
+            model_id,
+            settings.fragments_lance_path,
+        )
+
+        if args.dry_run:
+            for f in fragments[:20]:
+                logger.info(
+                    "  would embed: %s (%s, %s)", f.fragment_id, f.skill_id, f.fragment_type
+                )
+            if len(fragments) > 20:
+                logger.info("  ... and %d more", len(fragments) - 20)
+            return EXIT_OK
+
+        if not fragments and not args.rebuild_fts:
+            logger.info("nothing to do — all fragments already embedded")
+            return EXIT_OK
+
+        stats: ReembedStats
+        # fragment_id → (skill_id, raw_vector) for the dedup gate.
+        embedded_vecs: dict[str, tuple[str, list[float]]] = {}
+        if fragments:
+            embed_client: EmbedClient = get_embed_client(settings)
+            try:
+
+                def _embed(text: str) -> list[float]:
+                    payload = f"search_document: {text}"
+                    # nomic-embed-text-v1.5 serves at n_ctx_train=2048; inputs
+                    # over that overflow the (u)batch. Truncate long fragments
+                    # to 2040 tokens via llama-server's tokenizer; short ones
+                    # (<1500 chars, <=~1500 tok worst case) skip the round-trip.
+                    if len(payload) > 1500:
+
+                        def _ntok(s: str) -> int:
+                            resp = embed_client._post_json(  # type: ignore[attr-defined]
+                                "/tokenize", {"content": s}
+                            )
+                            return len(resp.get("tokens", []))
+
+                        try:
+                            for _ in range(6):
+                                n = _ntok(payload)
+                                if n <= 2040:
+                                    break
+                                payload = payload[: int(len(payload) * 2040 / max(n, 1) * 0.95)]
+                        except Exception:
+                            payload = payload[:4000]
+                    vectors = embed_client.embed(model=model_id, texts=[payload])
+                    return vectors[0]
+
+                def _record(frag: FragmentNeedingEmbedding, vec: list[float]) -> None:
+                    embedded_vecs[frag.fragment_id] = (frag.skill_id, vec)
+
+                stats = reembed_fragments(
+                    fragments,
+                    embed_fn=_embed,
+                    vector_store=vs,
+                    embedding_model=model_id,
+                    progress_tty=sys.stderr.isatty(),
+                    on_embedded=_record,
+                    card_index=card_mode,
+                )
+                stats.log_summary()
+
+                # Stage 0 'cards'/'both': rebuild the synthetic card layer.
+                # Reps are derived at the pass's scope (all skills, or the
+                # single ``--skill-id``). Drop stale cards at the SAME scope
+                # first so re-runs stay idempotent — a skill-scoped pass must
+                # only replace its own card, never wipe every other skill's.
+                if card_mode.with_cards:
+                    all_frags = discover_unembedded_fragments(
+                        store, vs, skill_id=args.skill_id, force=True
                     )
-                if len(fragments) > 20:
-                    logger.info("  ... and %d more", len(fragments) - 20)
-                return EXIT_OK
-
-            if not fragments and not args.rebuild_fts:
-                logger.info("nothing to do — all fragments already embedded")
-                return EXIT_OK
-
-            stats: ReembedStats
-            # fragment_id → (skill_id, raw_vector) for the dedup gate.
-            embedded_vecs: dict[str, tuple[str, list[float]]] = {}
-            if fragments:
-                embed_client: EmbedClient = get_embed_client(settings)
-                try:
-
-                    def _embed(text: str) -> list[float]:
-                        payload = f"search_document: {text}"
-                        # nomic-embed-text-v1.5 serves at n_ctx_train=2048; inputs
-                        # over that overflow the (u)batch. Truncate long fragments
-                        # to 2040 tokens via llama-server's tokenizer; short ones
-                        # (<1500 chars, <=~1500 tok worst case) skip the round-trip.
-                        if len(payload) > 1500:
-
-                            def _ntok(s: str) -> int:
-                                resp = embed_client._post_json(  # type: ignore[attr-defined]
-                                    "/tokenize", {"content": s}
-                                )
-                                return len(resp.get("tokens", []))
-
-                            try:
-                                for _ in range(6):
-                                    n = _ntok(payload)
-                                    if n <= 2040:
-                                        break
-                                    payload = payload[: int(len(payload) * 2040 / max(n, 1) * 0.95)]
-                            except Exception:
-                                payload = payload[:4000]
-                        vectors = embed_client.embed(model=model_id, texts=[payload])
-                        return vectors[0]
-
-                    def _record(frag: FragmentNeedingEmbedding, vec: list[float]) -> None:
-                        embedded_vecs[frag.fragment_id] = (frag.skill_id, vec)
-
-                    stats = reembed_fragments(
-                        fragments,
+                    removed = vs.delete_cards(skill_id=args.skill_id)
+                    n_cards = insert_cards(
+                        all_frags,
                         embed_fn=_embed,
                         vector_store=vs,
                         embedding_model=model_id,
-                        progress_tty=sys.stderr.isatty(),
-                        on_embedded=_record,
-                        card_index=card_mode,
                     )
-                    stats.log_summary()
-
-                    # Stage 0 'cards'/'both': rebuild the synthetic card layer.
-                    # Reps are derived at the pass's scope (all skills, or the
-                    # single ``--skill-id``). Drop stale cards at the SAME scope
-                    # first so re-runs stay idempotent — a skill-scoped pass must
-                    # only replace its own card, never wipe every other skill's.
-                    if card_mode.with_cards:
-                        all_frags = discover_unembedded_fragments(
-                            store, vs, skill_id=args.skill_id, force=True
-                        )
-                        removed = vs.delete_cards(skill_id=args.skill_id)
-                        n_cards = insert_cards(
-                            all_frags,
-                            embed_fn=_embed,
-                            vector_store=vs,
-                            embedding_model=model_id,
-                        )
-                        logger.info(
-                            "card index: replaced %d card(s) with %d (mode=%s)",
-                            removed,
-                            n_cards,
-                            card_mode.value,
-                        )
-                finally:
-                    embed_client.close()
-            else:
-                # --rebuild-fts with no fragments to embed
-                logger.info("no fragments to embed; running --rebuild-fts only")
-                stats = ReembedStats()
-
-            # When cards are NOT requested, ensure none linger from a prior
-            # 'cards'/'both' build — keeps 'off'/'prefix' free of card rows so
-            # 'off' matches the pre-Stage-0 index. Scoped to match the pass: a
-            # full-scope pass drops every stale card; a skill-scoped pass drops
-            # only that skill's card, leaving other skills' cards untouched.
-            if not card_mode.with_cards:
-                dropped = vs.delete_cards(skill_id=args.skill_id)
-                if dropped:
                     logger.info(
-                        "card index: removed %d stale card(s) (mode=%s)", dropped, card_mode.value
+                        "card index: replaced %d card(s) with %d (mode=%s)",
+                        removed,
+                        n_cards,
+                        card_mode.value,
                     )
+            finally:
+                embed_client.close()
+        else:
+            # --rebuild-fts with no fragments to embed
+            logger.info("no fragments to embed; running --rebuild-fts only")
+            stats = ReembedStats()
 
-            # Record the indexed-representation mode for auditability. Soft-fail:
-            # a metadata write must never fail the embed pass.
-            try:
-                vs.set_meta(META_KEY_CARD_INDEX, card_mode.value)
-            except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
-                logger.warning("could not record card_index meta: %s", exc)
-
-            # Stamp the corpus schema version so `update`/`seed-corpus` read an
-            # explicit marker instead of assuming "implicit v1". Soft-fail: a
-            # metadata write must never fail the embed pass.
-            try:
-                vs.set_meta(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
-            except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
-                logger.warning("could not record schema_version meta: %s", exc)
-
-            # Keep authored phase eligibility in sync with the graph on every
-            # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall
-            # back to the phase->category map at query time.
-            try:
-                from agentalloy.migrate import phase_scope_by_skill
-
-                scope_by_skill = phase_scope_by_skill(store)
-                if scope_by_skill:
-                    updated = vs.backfill_phase_scope(scope_by_skill)
-                    logger.info("phase_scope synced on %d fragment row(s)", updated)
-            except Exception as exc:  # noqa: BLE001 — sync is best-effort; migrate also does it
-                logger.warning("phase_scope sync skipped: %s", exc)
-
-            # Dedup gate — only fires when new fragments were actually embedded.
-            dedup_exit: int = EXIT_OK
-            if embedded_vecs:
-                new_skill_ids = {sid for sid, _ in embedded_vecs.values()}
-                gate_result: DedupGateResult = run_dedup_gate(
-                    new_skill_ids=new_skill_ids,
-                    new_fragment_vecs=embedded_vecs,
-                    vector_store=vs,
-                    hard_similarity=settings.dedup_hard_threshold,
-                    soft_similarity=settings.dedup_soft_threshold,
+        # When cards are NOT requested, ensure none linger from a prior
+        # 'cards'/'both' build — keeps 'off'/'prefix' free of card rows so
+        # 'off' matches the pre-Stage-0 index. Scoped to match the pass: a
+        # full-scope pass drops every stale card; a skill-scoped pass drops
+        # only that skill's card, leaving other skills' cards untouched.
+        if not card_mode.with_cards:
+            dropped = vs.delete_cards(skill_id=args.skill_id)
+            if dropped:
+                logger.info(
+                    "card index: removed %d stale card(s) (mode=%s)", dropped, card_mode.value
                 )
-                dedup_exit = _report_dedup(gate_result, allow_duplicates=args.allow_duplicates)
 
-            if stats.embedded > 0 or args.rebuild_fts:
-                if stats.embedded > 0:
-                    logger.info(
-                        "rebuilding BM25 FTS index after embedding %d fragment(s)", stats.embedded
-                    )
-                else:
-                    logger.info("rebuilding BM25 FTS index (--rebuild-fts requested)")
-                try:
-                    vs.rebuild_fts_index()
-                    logger.info("BM25 FTS index rebuilt")
-                except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
-                    logger.warning(
-                        "FTS index rebuild failed (BM25 leg degraded): %s. "
-                        "If the background service was holding the DB, stop it and re-run "
-                        "with `agentalloy reembed --rebuild-fts`.",
-                        exc,
-                    )
-            # reembed_fragments raises on any failure (see its handlers), so
-            # stats.failed is always 0 here — no EXIT_LLM branch is reachable.
-            return dedup_exit
+        # Record the indexed-representation mode for auditability (on the skill
+        # store's corpus_meta). Soft-fail: metadata must never fail the embed pass.
+        try:
+            store.set_meta(META_KEY_CARD_INDEX, card_mode.value)
+        except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+            logger.warning("could not record card_index meta: %s", exc)
+
+        # Stamp the corpus schema version so `update`/`seed-corpus` read an
+        # explicit marker instead of assuming "implicit v1". Soft-fail.
+        try:
+            store.set_meta(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
+        except Exception as exc:  # noqa: BLE001 — audit metadata is best-effort
+            logger.warning("could not record schema_version meta: %s", exc)
+
+        # Keep authored phase eligibility in sync with the Lance rows on every
+        # pass (cheap UPDATEs, vectors untouched). NULL scope rows fall back to
+        # the phase->category map at query time.
+        try:
+            from agentalloy.migrate import phase_scope_by_skill
+
+            scope_by_skill = phase_scope_by_skill(store)
+            if scope_by_skill:
+                updated = vs.backfill_phase_scope(scope_by_skill)
+                logger.info("phase_scope synced on %d fragment row(s)", updated)
+        except Exception as exc:  # noqa: BLE001 — sync is best-effort; migrate also does it
+            logger.warning("phase_scope sync skipped: %s", exc)
+
+        # Dedup gate — only fires when new fragments were actually embedded.
+        dedup_exit: int = EXIT_OK
+        if embedded_vecs:
+            new_skill_ids = {sid for sid, _ in embedded_vecs.values()}
+            gate_result: DedupGateResult = run_dedup_gate(
+                new_skill_ids=new_skill_ids,
+                new_fragment_vecs=embedded_vecs,
+                vector_store=vs,
+                hard_similarity=settings.dedup_hard_threshold,
+                soft_similarity=settings.dedup_soft_threshold,
+            )
+            dedup_exit = _report_dedup(gate_result, allow_duplicates=args.allow_duplicates)
+
+        if stats.embedded > 0 or args.rebuild_fts:
+            if stats.embedded > 0:
+                logger.info(
+                    "rebuilding BM25 FTS index after embedding %d fragment(s)", stats.embedded
+                )
+            else:
+                logger.info("rebuilding BM25 FTS index (--rebuild-fts requested)")
+            try:
+                vs.rebuild_fts_index()
+                logger.info("BM25 FTS index rebuilt")
+            except Exception as exc:  # noqa: BLE001 — FTS rebuild is best-effort
+                logger.warning("FTS index rebuild failed (BM25 leg degraded): %s.", exc)
+        # reembed_fragments raises on any failure (see its handlers), so
+        # stats.failed is always 0 here — no EXIT_LLM branch is reachable.
+        return dedup_exit
     except Exception as exc:
-        # LadybugDB enforces a single writer; a running service (including a
-        # manually-launched uvicorn the preflight can't see) holds the lock
-        # and the DB open above fails. Tell the user what to stop (issue #84).
+        # The skill store enforces a single writer; a concurrent ingest/reembed
+        # may briefly hold the lock and the open above fails. In v6 this is
+        # transient — tell the user to retry rather than crash.
         if not is_lock_held_error(str(exc)):
             raise
         logger.error("database lock is held: %s", exc)
@@ -1002,20 +759,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
         return EXIT_DB
     finally:
-        _maybe_restart()
-        if is_in_container():
-            if args.no_restart:
-                logger.info("skipping container service restart (no_restart requested)")
-            elif container_was_stopped:
-                print("Operation complete, restarting agentalloy service...", file=sys.stderr)
-                if not restart_service_in_container(no_restart=False):
-                    logger.warning(
-                        "failed to restart agentalloy service after operation. "
-                        "Restart the container manually "
-                        "(`docker restart agentalloy` or `podman restart agentalloy`)."
-                    )
-            else:
-                logger.debug("skipping container restart — no service was stopped")
+        if store is not None:
+            store.close()
+        if vs is not None:
+            vs.close()
 
 
 if __name__ == "__main__":

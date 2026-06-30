@@ -7,10 +7,10 @@ Two deployment modes (read from ``install-state.json``):
 
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
  2. embed_server    — embed llama-server reachable on RUNTIME_EMBED_BASE_URL
- 3. corpus_files    — ladybug/ + skills.duck present at corpus_dir()
- 4. ladybug_schema  — Skill table exists; lock-held → report PID + stop-service remediation
- 5. corpus_count    — skill count >= 25 (LadybugDB); embedded-vector count > 0 (DuckDB)
- 6. embedding_dim   — stored DuckDB dim matches EMBEDDING_DIM constant
+ 3. corpus_files    — agentalloy.duck + fragments.lance present at corpus_dir()
+ 4. ladybug_schema  — skills table exists; lock-held → report + retry remediation
+ 5. corpus_count    — skill count >= 25 (agentalloy.duck); embedded-vector count > 0 (fragments.lance)
+ 6. embedding_dim   — stored fragments dim matches EMBEDDING_DIM constant
  7. service         — port /health responding (down is ok; up-degraded is warned)
  8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
  9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
@@ -46,6 +46,16 @@ from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 SCHEMA_VERSION = 2
 _MIN_SKILL_COUNT = 25
+
+# Remediation shown when the corpus DB (agentalloy.duck) write-lock is held by
+# another process. In v6 a held lock is usually transient — an in-flight
+# reembed/ingest holds the single writer for a short window — so the fix is to
+# wait or stop the service, never to kill processes (repair aborts on this).
+_LOCK_HELD_REMEDIATION = (
+    "The corpus database write-lock is held by another process "
+    "(e.g. an in-flight reembed/ingest, or the running agentalloy service). "
+    "Wait for it to finish, or stop the agentalloy service, then re-run doctor."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,11 +133,11 @@ def _check_embed_server(base_url: str, model: str) -> dict[str, Any]:
 
 
 def _check_corpus_files(cdir: Path) -> dict[str, Any]:
-    """Check 3: ladybug/ and skills.duck present."""
+    """Check 3: agentalloy.duck and fragments.lance present."""
     t0 = time.monotonic()
-    ladybug = cdir / "ladybug"
-    duckdb = cdir / "skills.duck"
-    missing = [str(p) for p in (ladybug, duckdb) if not p.exists()]
+    skills_db = cdir / "agentalloy.duck"
+    fragments = cdir / "fragments.lance"
+    missing = [str(p) for p in (skills_db, fragments) if not p.exists()]
     if missing:
         return {
             "name": "corpus_files",
@@ -140,36 +150,37 @@ def _check_corpus_files(cdir: Path) -> dict[str, Any]:
         "name": "corpus_files",
         "passed": True,
         "duration_ms": int((time.monotonic() - t0) * 1000),
-        "detail": f"ladybug/ and skills.duck present at {cdir}",
+        "detail": f"agentalloy.duck and fragments.lance present at {cdir}",
     }
 
 
-def _check_ladybug_schema(ladybug_path: str) -> dict[str, Any]:
-    """Check 4: Skill table exists; distinguish lock-held from schema-missing."""
+def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
+    """Check 4: skills table exists; distinguish lock-held from schema-missing."""
     t0 = time.monotonic()
-    from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, LadybugStore, is_lock_held_error
+    from agentalloy.storage.skill_store import is_lock_held_error, open_skill_store
 
-    # Guard: LadybugStore.open() creates an empty DB file as a side effect. Don't
-    # leave a stub behind when the corpus is genuinely absent — report and bail.
-    if not Path(ladybug_path).exists():
+    # Guard: opening read-write would create an empty DB file as a side effect.
+    # Don't leave a stub behind when the corpus is genuinely absent — report and
+    # bail. (Read-only opens used below never create the file.)
+    if not Path(skills_path).exists():
         return {
             "name": "ladybug_schema",
             "passed": False,
             "lock_held": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": f"Corpus DB absent: {ladybug_path}",
+            "error": f"Corpus DB absent: {skills_path}",
             "remediation": "Run `agentalloy install-packs` to populate the corpus.",
         }
 
     try:
-        with LadybugStore(ladybug_path) as store:
-            rows = store.execute("MATCH (s:Skill) RETURN count(s) LIMIT 1")
+        with open_skill_store(skills_path, read_only=True) as store:
+            rows = store.execute("SELECT count(*) FROM skills")
             _ = rows  # just confirming the table exists
         return {
             "name": "ladybug_schema",
             "passed": True,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "detail": "Skill table present",
+            "detail": "skills table present",
         }
     except Exception as exc:  # noqa: BLE001
         err = str(exc)
@@ -180,7 +191,7 @@ def _check_ladybug_schema(ladybug_path: str) -> dict[str, Any]:
                 "lock_held": True,
                 "duration_ms": int((time.monotonic() - t0) * 1000),
                 "error": f"DB lock held: {err}",
-                "remediation": LOCK_HELD_REMEDIATION,
+                "remediation": _LOCK_HELD_REMEDIATION,
             }
         return {
             "name": "ladybug_schema",
@@ -195,15 +206,15 @@ def _check_ladybug_schema(ladybug_path: str) -> dict[str, Any]:
         }
 
 
-def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
-    """Check 5: skill count >= 25 in LadybugDB; embedded-vector count > 0 in DuckDB."""
+def _check_corpus_count(skills_path: str, fragments_path: str) -> dict[str, Any]:
+    """Check 5: skill count >= 25 in agentalloy.duck; embedded-vector count > 0 in fragments.lance."""
     t0 = time.monotonic()
-    from agentalloy.storage.ladybug import LadybugStore, is_lock_held_error
-    from agentalloy.storage.vector_store import open_or_create
+    from agentalloy.storage.fragment_store import LanceFragmentStore
+    from agentalloy.storage.skill_store import is_lock_held_error, open_skill_store
 
-    # Guard: both LadybugStore.open() and open_or_create() create empty DB files
-    # as a side effect. Don't leave stubs behind when the corpus is absent.
-    missing = [p for p in (ladybug_path, duckdb_path) if not Path(p).exists()]
+    # Guard: don't leave stubs behind when the corpus is absent (a read-write
+    # open would create empty DB files as a side effect).
+    missing = [p for p in (skills_path, fragments_path) if not Path(p).exists()]
     if missing:
         return {
             "name": "corpus_count",
@@ -219,8 +230,8 @@ def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
     vec_err: str | None = None
 
     try:
-        with LadybugStore(ladybug_path) as store:
-            rows = store.execute("MATCH (s:Skill) RETURN count(s)")
+        with open_skill_store(skills_path, read_only=True) as store:
+            rows = store.execute("SELECT count(*) FROM skills")
             skill_count = int(rows[0][0]) if rows and rows[0] else 0
     except Exception as exc:  # noqa: BLE001
         skill_err = str(exc)
@@ -235,22 +246,25 @@ def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
             }
 
     try:
-        vs = open_or_create(Path(duckdb_path))
-        vec_count = vs.count_embeddings()
+        vs = LanceFragmentStore(fragments_path)
+        try:
+            vec_count = vs.count_embeddings()
+        finally:
+            vs.close()
     except Exception as exc:  # noqa: BLE001
         vec_err = str(exc)
 
     errors: list[str] = []
     remediations: list[str] = []
     if skill_err:
-        errors.append(f"LadybugDB: {skill_err}")
+        errors.append(f"skills: {skill_err}")
     elif skill_count < _MIN_SKILL_COUNT:
         errors.append(f"skill count {skill_count} < {_MIN_SKILL_COUNT}")
         remediations.append("Run `agentalloy install-packs` to install skills.")
     if vec_err:
-        errors.append(f"DuckDB: {vec_err}")
+        errors.append(f"fragments: {vec_err}")
     elif vec_count == 0:
-        errors.append("no embedded vectors in DuckDB")
+        errors.append("no embedded vectors in fragments.lance")
         remediations.append("Run `agentalloy reembed` to populate embeddings.")
 
     if errors:
@@ -269,54 +283,27 @@ def _check_corpus_count(ladybug_path: str, duckdb_path: str) -> dict[str, Any]:
     }
 
 
-def _read_stored_dim(duckdb_path: str) -> int | None:
-    """Read the stored embedding dim directly, bypassing open_or_create's guard."""
-    try:
-        import duckdb
-
-        con = duckdb.connect(duckdb_path, read_only=True)
-        try:
-            row = con.execute("SELECT len(embedding) FROM fragment_embeddings LIMIT 1").fetchone()
-            return int(row[0]) if row and row[0] is not None else None
-        finally:
-            con.close()
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _check_embedding_dim(duckdb_path: str) -> dict[str, Any]:
-    """Check 6: stored DuckDB embedding dim matches EMBEDDING_DIM constant."""
+def _check_embedding_dim(fragments_path: str) -> dict[str, Any]:
+    """Check 6: stored fragments embedding dim matches EMBEDDING_DIM constant."""
     t0 = time.monotonic()
-    from agentalloy.storage.vector_store import (
-        EMBEDDING_DIM,
-        EmbeddingDimMismatch,
-        open_or_create,
-    )
+    from agentalloy.storage.fragment_store import LanceFragmentStore
+    from agentalloy.storage.protocols import EMBEDDING_DIM
 
+    # Read the stored dim directly off the Lance dataset (no dim guard) so a
+    # mismatch surfaces as the tailored remediation below rather than an
+    # open-time error.
     try:
-        vs = open_or_create(Path(duckdb_path))
-        stored_dim = vs.embedding_dim()
-    except EmbeddingDimMismatch:
-        # open_or_create's startup guard raises for exactly the mismatch case, so
-        # surface the tailored remediation (read the real stored dim directly,
-        # bypassing the guard) instead of the generic "cannot read" error.
-        stored = _read_stored_dim(duckdb_path)
-        return {
-            "name": "embedding_dim",
-            "passed": False,
-            "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": f"Stored dim {stored} != expected {EMBEDDING_DIM}",
-            "remediation": (
-                "Embedding model changed. Run `agentalloy reembed --force` "
-                "to rebuild the vector store at the current dimension."
-            ),
-        }
+        vs = LanceFragmentStore(fragments_path)
+        try:
+            stored_dim = vs.embedding_dim()
+        finally:
+            vs.close()
     except Exception as exc:  # noqa: BLE001
         return {
             "name": "embedding_dim",
             "passed": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
-            "error": f"Cannot read DuckDB dim: {exc}",
+            "error": f"Cannot read fragments dim: {exc}",
             "remediation": "Run `agentalloy reembed --force` after checking EMBEDDING_DIM.",
         }
 
@@ -563,7 +550,7 @@ def run_doctor() -> dict[str, Any]:
 
     For ``deployment == container`` installs the runtime resources live inside
     the container/volume, not on the host, and the *running* service holds the
-    Ladybug/DuckDB file locks — so the host DB/config/embed checks can't apply
+    corpus DB file locks — so the host DB/config/embed checks can't apply
     and a nested in-container doctor can't open the locked stores either.
     Instead the container path verifies liveness via ``/health`` (whose
     dependency report already exercises the corpus store + embed runtime) plus
@@ -575,8 +562,8 @@ def run_doctor() -> dict[str, Any]:
     return _run_doctor_host()
 
 
-# Data dir inside the container — set by the entrypoint via LADYBUG_DB_PATH /
-# DUCKDB_PATH (container_runtime._run_container).
+# Data dir inside the container — set by the entrypoint via DUCKDB_PATH /
+# FRAGMENTS_LANCE_PATH (container_runtime._run_container).
 _CONTAINER_DATA_DIR = "/app/data"
 
 
@@ -686,9 +673,9 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
     """Verify a container deployment via /health + volume inspection.
 
     The running service owns the DB file locks, so the corpus is verified
-    indirectly: ``/health``'s ``runtime_store`` dependency proves Ladybug is
-    readable, ``embedding_runtime`` proves the embed server answers, and the
-    corpus files are confirmed present in the volume by an ``exec test``.
+    indirectly: ``/health``'s ``runtime_store`` dependency proves the skill
+    store is readable, ``embedding_runtime`` proves the embed server answers,
+    and the corpus files are confirmed present in the volume by an ``exec test``.
     """
     from agentalloy.install.subcommands.container_runtime import _container_state
 
@@ -771,16 +758,16 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
     )
 
     # corpus_files — confirm the seeded DBs are present and non-empty in the volume.
-    ladybug = f"{_CONTAINER_DATA_DIR}/ladybug"
-    duckdb = f"{_CONTAINER_DATA_DIR}/skills.duck"
+    skills_db = f"{_CONTAINER_DATA_DIR}/agentalloy.duck"
+    fragments = f"{_CONTAINER_DATA_DIR}/fragments.lance"
     missing = [
-        p for p in (ladybug, duckdb) if not _container_file_exists(runtime, container_name, p)
+        p for p in (skills_db, fragments) if not _container_file_exists(runtime, container_name, p)
     ]
     checks.append(
         {
             "name": "corpus_files",
             "passed": not missing,
-            "detail": f"ladybug + skills.duck present in volume at {_CONTAINER_DATA_DIR}"
+            "detail": f"agentalloy.duck + fragments.lance present in volume at {_CONTAINER_DATA_DIR}"
             if not missing
             else None,
             "error": None if not missing else f"Missing/empty corpus files: {', '.join(missing)}",
@@ -901,15 +888,15 @@ def _run_doctor_host() -> dict[str, Any]:
     # Resolve DB paths via Settings (honours XDG overrides in tests)
     try:
         settings = get_settings()
-        ladybug_path = settings.ladybug_db_path
-        duckdb_path = settings.duckdb_path
+        skills_path = settings.duckdb_path
+        fragments_path = settings.fragments_lance_path
     except Exception:  # noqa: BLE001
-        ladybug_path = str(cdir / "ladybug")
-        duckdb_path = str(cdir / "skills.duck")
+        skills_path = str(cdir / "agentalloy.duck")
+        fragments_path = str(cdir / "fragments.lance")
 
-    checks.append(_check_ladybug_schema(ladybug_path))
-    checks.append(_check_corpus_count(ladybug_path, duckdb_path))
-    checks.append(_check_embedding_dim(duckdb_path))
+    checks.append(_check_ladybug_schema(skills_path))
+    checks.append(_check_corpus_count(skills_path, fragments_path))
+    checks.append(_check_embedding_dim(fragments_path))
 
     st = install_state.load_state()
     port = install_state.validate_port(st.get("port", 47950))
@@ -994,11 +981,11 @@ def _repair(result: dict[str, Any]) -> int:
     if schema_failed and not corpus_failed:
         print_rich("[yellow]→ Running schema migration…[/yellow]")
         from agentalloy.config import get_settings
-        from agentalloy.storage.ladybug import LadybugStore
+        from agentalloy.storage.skill_store import open_skill_store
 
         try:
             settings = get_settings()
-            with LadybugStore(settings.ladybug_db_path) as store:
+            with open_skill_store(settings.duckdb_path, read_only=False) as store:
                 store.migrate()
             print_rich("[green]  Schema migration OK[/green]")
         except Exception as exc:  # noqa: BLE001

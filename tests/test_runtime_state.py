@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.health_router import HealthChecker, HealthResponse
 from agentalloy.runtime_state import load_runtime_cache
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -25,10 +25,8 @@ from agentalloy.storage.ladybug import LadybugStore
 
 
 @pytest.fixture
-def store(corpus_dir: Path) -> LadybugStore:
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
-    return s
+def store(corpus_dir: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +34,7 @@ def store(corpus_dir: Path) -> LadybugStore:
 # ---------------------------------------------------------------------------
 
 
-def test_load_runtime_cache_populates_skills(store: LadybugStore) -> None:
+def test_load_runtime_cache_populates_skills(store: DuckDBSkillStore) -> None:
     """AC-1: after loading, all active skills are available in the cache."""
     cache = load_runtime_cache(store)
 
@@ -45,7 +43,7 @@ def test_load_runtime_cache_populates_skills(store: LadybugStore) -> None:
     assert len(cache.get_active_skills()) == 8
 
 
-def test_load_runtime_cache_populates_fragments(store: LadybugStore) -> None:
+def test_load_runtime_cache_populates_fragments(store: DuckDBSkillStore) -> None:
     """AC-1: all active fragments are in the cache."""
     cache = load_runtime_cache(store)
 
@@ -54,7 +52,7 @@ def test_load_runtime_cache_populates_fragments(store: LadybugStore) -> None:
     assert len(fragments) == cache.fragment_count
 
 
-def test_cache_get_active_skill_by_id_returns_correct_skill(store: LadybugStore) -> None:
+def test_cache_get_active_skill_by_id_returns_correct_skill(store: DuckDBSkillStore) -> None:
     """AC-1: by-id lookup works from cache."""
     cache = load_runtime_cache(store)
 
@@ -68,13 +66,13 @@ def test_cache_get_active_skill_by_id_returns_correct_skill(store: LadybugStore)
     assert result.canonical_name == first.canonical_name
 
 
-def test_cache_get_active_skill_by_id_missing_returns_none(store: LadybugStore) -> None:
+def test_cache_get_active_skill_by_id_missing_returns_none(store: DuckDBSkillStore) -> None:
     """AC-1: unknown skill_id returns None without error."""
     cache = load_runtime_cache(store)
     assert cache.get_active_skill_by_id("does-not-exist") is None
 
 
-def test_cache_skill_class_filter(store: LadybugStore) -> None:
+def test_cache_skill_class_filter(store: DuckDBSkillStore) -> None:
     """AC-1: skill_class filter works in-memory."""
     cache = load_runtime_cache(store)
 
@@ -87,7 +85,7 @@ def test_cache_skill_class_filter(store: LadybugStore) -> None:
     assert all(s.skill_class == "system" for s in system)
 
 
-def test_cache_fragment_filter_by_category(store: LadybugStore) -> None:
+def test_cache_fragment_filter_by_category(store: DuckDBSkillStore) -> None:
     """AC-1: category filter narrows fragment list."""
     cache = load_runtime_cache(store)
 
@@ -99,7 +97,7 @@ def test_cache_fragment_filter_by_category(store: LadybugStore) -> None:
     assert all(f.category == "design" for f in design_frags)
 
 
-def test_cache_version_detail_populated(store: LadybugStore) -> None:
+def test_cache_version_detail_populated(store: DuckDBSkillStore) -> None:
     """AC-1: version detail (raw_prose, author, etc.) is cached and retrievable."""
     cache = load_runtime_cache(store)
 
@@ -112,7 +110,7 @@ def test_cache_version_detail_populated(store: LadybugStore) -> None:
     assert isinstance(detail.author, str)
 
 
-def test_cache_fragments_for_skill(store: LadybugStore) -> None:
+def test_cache_fragments_for_skill(store: DuckDBSkillStore) -> None:
     """AC-1: per-skill fragment retrieval from cache is ordered by sequence."""
     cache = load_runtime_cache(store)
 
@@ -131,8 +129,7 @@ def test_cache_fragments_for_skill(store: LadybugStore) -> None:
 
 def test_reload_reflects_new_active_data(corpus_dir: Path) -> None:
     """AC-2: a new cache load (simulating restart) picks up re-seeded data."""
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
+    s = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
     cache_v1 = load_runtime_cache(s)
     skill_ids_v1 = {sk.skill_id for sk in cache_v1.get_active_skills()}
@@ -149,7 +146,7 @@ def test_reload_reflects_new_active_data(corpus_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cache_reads_do_not_hit_store_after_load(store: LadybugStore) -> None:
+def test_cache_reads_do_not_hit_store_after_load(store: DuckDBSkillStore) -> None:
     """AC-3: once loaded, cache reads are pure in-memory — store is not consulted."""
     cache = load_runtime_cache(store)
 
@@ -229,18 +226,18 @@ def test_health_reports_healthy_when_cache_loaded(app: FastAPI) -> None:
 def test_health_checker_runtime_load_error_propagates() -> None:
     """AC-4: HealthChecker built with runtime_load_error reports it in dependencies."""
 
-    mock_store = MagicMock(spec=LadybugStore)
+    mock_store = MagicMock(spec=DuckDBSkillStore)
     mock_store.scalar.return_value = 1
     mock_lm = MagicMock()
     mock_lm.list_models.return_value = ["embed-model", "assembly-model"]
 
-    mock_vector_store = MagicMock()
-    mock_vector_store.count_traces.return_value = 0
+    mock_telemetry_store = MagicMock()
+    mock_telemetry_store.count_traces.return_value = 0
 
     checker = HealthChecker(
         store=mock_store,
         lm=mock_lm,
-        vector_store=mock_vector_store,
+        telemetry_store=mock_telemetry_store,
         embedding_model="embed-model",
         runtime_load_error="connection refused",
     )
@@ -263,9 +260,7 @@ def test_health_checker_runtime_load_error_propagates() -> None:
 
 def test_load_runtime_cache_raises_on_store_error(tmp_path: Path) -> None:
     """AC-4: load_runtime_cache propagates errors so lifespan can catch them."""
-    s = LadybugStore(str(tmp_path / "ladybug"))
-    s.open()
-    s.migrate()
+    s = open_skill_store(str(tmp_path / "agentalloy.duck"))
     # Do NOT load fixtures — store has no active skills, but that's fine (returns empty).
     # Simulate a store error by patching execute to raise.
     with (

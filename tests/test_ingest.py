@@ -18,7 +18,7 @@ from agentalloy.ingest import (
     _validate_gate_spec,  # type: ignore[reportPrivateUsage]
     main,
 )
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 _DOMAIN_YAML = textwrap.dedent("""\
     skill_id: test-domain-skill
@@ -74,22 +74,20 @@ _SYSTEM_YAML = textwrap.dedent("""\
 
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
-        ladybug_db_path = db_path
+        duckdb_path = db_path
 
     return FakeSettings()
 
 
 @pytest.fixture
-def seeded_db(tmp_path: Path) -> tuple[str, LadybugStore]:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+def seeded_db(tmp_path: Path) -> tuple[str, DuckDBSkillStore]:
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
     return db_path, store
 
 
-def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -> None:
+def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
@@ -100,24 +98,27 @@ def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]
     assert code == EXIT_OK
 
     store.open()
-    name = store.scalar("MATCH (s:Skill {skill_id: 'test-domain-skill'}) RETURN s.canonical_name")
+    name = store.scalar(
+        "SELECT canonical_name FROM skills WHERE skill_id = 'test-domain-skill'"
+    )
     assert name == "Test Domain Skill"
     fragment_count = store.scalar(
         """
-        MATCH (:Skill {skill_id: 'test-domain-skill'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
-        RETURN count(f)
+        SELECT count(*) FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'test-domain-skill'
         """
     )
     assert fragment_count == 2
     current = store.scalar(
-        "MATCH (:Skill {skill_id: 'test-domain-skill'})-[:CURRENT_VERSION]->(v) RETURN v.version_id"
+        "SELECT current_version_id FROM skills WHERE skill_id = 'test-domain-skill'"
     )
     assert current == "test-domain-skill-v1"
     store.close()
 
 
 def test_insert_benchmark_category_domain_skill(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """A domain skill with `category: benchmark` ingests cleanly.
 
@@ -143,15 +144,15 @@ def test_insert_benchmark_category_domain_skill(
 
     store.open()
     name = store.scalar(
-        "MATCH (s:Skill {skill_id: 'test-benchmark-skill'}) RETURN s.canonical_name"
+        "SELECT canonical_name FROM skills WHERE skill_id = 'test-benchmark-skill'"
     )
     assert name == "Test Benchmark Skill"
-    category = store.scalar("MATCH (s:Skill {skill_id: 'test-benchmark-skill'}) RETURN s.category")
+    category = store.scalar("SELECT category FROM skills WHERE skill_id = 'test-benchmark-skill'")
     assert category == "benchmark"
     store.close()
 
 
-def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -> None:
+def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "system.yaml"
     yaml_file.write_text(_SYSTEM_YAML)
@@ -164,8 +165,9 @@ def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]
     store.open()
     fragment_count = store.scalar(
         """
-        MATCH (:Skill {skill_id: 'sys-test-governance'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
-        RETURN count(f)
+        SELECT count(*) FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'sys-test-governance'
         """
     )
     assert fragment_count == 1
@@ -173,7 +175,7 @@ def test_insert_system_skill(tmp_path: Path, seeded_db: tuple[str, LadybugStore]
 
 
 def test_insert_workflow_skill_creates_no_fragments(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """Workflow skills are raw_prose-only — ingest must persist zero fragments."""
     db_path, store = seeded_db
@@ -188,8 +190,9 @@ def test_insert_workflow_skill_creates_no_fragments(
     store.open()
     fragment_count = store.scalar(
         """
-        MATCH (:Skill {skill_id: 'sdd-spec-authoring'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
-        RETURN count(f)
+        SELECT count(*) FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'sdd-spec-authoring'
         """
     )
     assert fragment_count == 0
@@ -197,7 +200,7 @@ def test_insert_workflow_skill_creates_no_fragments(
 
 
 def test_duplicate_skill_id_without_force_fails(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     yaml_file = tmp_path / "domain.yaml"
@@ -215,7 +218,7 @@ def test_duplicate_skill_id_without_force_fails(
 
 
 def test_canonical_name_collision_without_force_fails(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     first = tmp_path / "first.yaml"
@@ -232,7 +235,7 @@ def test_canonical_name_collision_without_force_fails(
     assert code == EXIT_DUPLICATE
 
 
-def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -> None:
+def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]) -> None:
     db_path, store = seeded_db
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
@@ -244,7 +247,7 @@ def test_force_overwrites(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -
     assert code == EXIT_OK
 
     store.open()
-    count = store.scalar("MATCH (s:Skill {skill_id: 'test-domain-skill'}) RETURN count(s)")
+    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'test-domain-skill'")
     assert count == 1
     store.close()
 
@@ -468,7 +471,9 @@ def _write_domain(path: Path, skill_id: str, canonical_name: str) -> None:
     )
 
 
-def test_batch_loads_all_valid_files(tmp_path: Path, seeded_db: tuple[str, LadybugStore]) -> None:
+def test_batch_loads_all_valid_files(
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
+) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
     batch_dir.mkdir()
@@ -482,7 +487,7 @@ def test_batch_loads_all_valid_files(tmp_path: Path, seeded_db: tuple[str, Ladyb
     assert code == EXIT_OK
 
     store.open()
-    count = store.scalar("MATCH (s:Skill) RETURN count(s)")
+    count = store.scalar("SELECT count(*) FROM skills")
     assert count == 2
     store.close()
 
@@ -495,7 +500,7 @@ def test_batch_empty_directory_returns_usage_error(tmp_path: Path) -> None:
 
 
 def test_batch_skips_invalid_and_loads_valid(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
@@ -525,13 +530,13 @@ def test_batch_skips_invalid_and_loads_valid(
     assert code == EXIT_OK
 
     store.open()
-    count = store.scalar("MATCH (s:Skill) RETURN count(s)")
+    count = store.scalar("SELECT count(*) FROM skills")
     assert count == 1
     store.close()
 
 
 def test_batch_blocks_duplicates_without_force(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     db_path, _ = seeded_db
     batch_dir = tmp_path / "batch"
@@ -547,7 +552,7 @@ def test_batch_blocks_duplicates_without_force(
 
 
 def test_batch_force_overwrites_duplicates(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     db_path, store = seeded_db
     batch_dir = tmp_path / "batch"
@@ -562,7 +567,7 @@ def test_batch_force_overwrites_duplicates(
     assert code == EXIT_OK
 
     store.open()
-    count = store.scalar("MATCH (s:Skill {skill_id: 'batch-force-a'}) RETURN count(s)")
+    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'batch-force-a'")
     assert count == 1
     store.close()
 
@@ -697,7 +702,7 @@ def test_workflow_skill_with_position_marker_no_w1(tmp_path: Path) -> None:
 
 
 def test_no_restart_skips_container_stop_restart_in_container(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """When --no-restart is passed and we're in a container,
     stop_service_in_container and restart_service_in_container must NOT be called."""
@@ -725,7 +730,7 @@ def test_no_restart_skips_container_stop_restart_in_container(
 
 
 def test_without_no_restart_calls_container_stop_restart_in_container(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """Without --no-restart, when in a container, stop_service_in_container
     and restart_service_in_container MUST be called."""
@@ -755,7 +760,7 @@ def test_without_no_restart_calls_container_stop_restart_in_container(
 
 
 def test_no_restart_skips_in_container_batch_mode(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """--no-restart in batch mode must also skip container stop/restart."""
     db_path, _ = seeded_db
@@ -783,7 +788,7 @@ def test_no_restart_skips_in_container_batch_mode(
 
 
 def test_not_in_container_noops_container_functions(
-    tmp_path: Path, seeded_db: tuple[str, LadybugStore]
+    tmp_path: Path, seeded_db: tuple[str, DuckDBSkillStore]
 ) -> None:
     """When not in a container, container stop/restart functions must NOT be called."""
     db_path, _ = seeded_db

@@ -1,13 +1,14 @@
 """Domain fragment retrieval pipeline.
 
 Given a task + phase + optional filters, embed the task via the inference
-runtime, query DuckDB ``fragment_embeddings`` for top-k by cosine, fuse with
+runtime, query the Lance ``fragments`` dataset for top-k by cosine, fuse with
 a BM25 lexical leg via Reciprocal Rank Fusion (RRF), hydrate
-ActiveFragment metadata from LadybugDB, then apply skill-granular selection
-to prevent sibling skills from crowding out unrelated relevant skills.
+ActiveFragment metadata from the DuckDB skill store, then apply skill-granular
+selection to prevent sibling skills from crowding out unrelated relevant skills.
 
-Per v5.3, vector storage is DuckDB; cosine ranking happens in DuckDB via
-``array_cosine_distance`` over L2-normalized vectors.
+In v6, vector storage is the Lance ``fragments`` dataset; cosine ranking
+(ANN for retrieval, exact for dedup) happens inside LanceDB over L2-normalized
+vectors.
 
 Improvements (v5.4+):
 - Rule-based keyword extraction boosts BM25 lexical recall.
@@ -48,7 +49,7 @@ from agentalloy.retrieval.lm_assist import (
 from agentalloy.retrieval.query_bounds import build_retrieval_query
 from agentalloy.retrieval.rerank import build_reranker_from_env, rerank_max_pairs
 from agentalloy.storage.card_index import is_card_id, skill_id_from_card_id
-from agentalloy.storage.vector_store import SimilarityHit, VectorStore
+from agentalloy.storage.protocols import FragmentStore, SimilarityHit
 
 _RRF_K_DEFAULT = 60
 logger = logging.getLogger(__name__)
@@ -195,7 +196,7 @@ class RequiresEdgeSource(Protocol):
     """Anything that can resolve a skill's REQUIRES_COMPOSITIONAL out-edges.
 
     Satisfied by ``RuntimeCache`` (edges loaded at startup). A bare
-    ``LadybugStore`` does not implement this, so graph expansion is a no-op on
+    ``SkillStore`` does not implement this, so graph expansion is a no-op on
     the store-backed path — the production pipeline always holds a RuntimeCache.
     """
 
@@ -251,7 +252,7 @@ class RetrievalResult:
 
 
 class StoreFragmentSource:
-    """Thin adapter so a raw ``LadybugStore`` satisfies ``FragmentSource``."""
+    """Thin adapter so a raw ``SkillStore`` satisfies ``FragmentSource``."""
 
     def __init__(self, store: object) -> None:
         self._store = store
@@ -351,7 +352,7 @@ def _apply_card_boost(fused_ids: list[str], skill_of: dict[str, str]) -> list[st
 
 def _bm25_fallback_result(
     frag_src: FragmentSource,
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     *,
     task: str,
     phase: Phase,
@@ -426,7 +427,7 @@ def _bm25_fallback_result(
 def retrieve_domain_candidates(
     source: object,
     lm: EmbedClient,
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     *,
     task: str,
     phase: Phase,
@@ -439,9 +440,9 @@ def retrieve_domain_candidates(
     """Execute the retrieval pipeline and return a bounded candidate set.
 
     ``source`` may be a ``RuntimeCache`` (startup-loaded snapshot) or a raw
-    ``LadybugStore`` (wrapped automatically via ``StoreFragmentSource``).
-    ``vector_store`` is a DuckDB ``VectorStore`` whose ``fragment_embeddings``
-    table is populated via the reembed CLI.
+    ``SkillStore`` (wrapped automatically via ``StoreFragmentSource``).
+    ``vector_store`` is a ``FragmentStore`` (the Lance ``fragments`` dataset)
+    populated via the reembed CLI.
 
     Stages:
 

@@ -262,8 +262,8 @@ def _run(args: argparse.Namespace) -> int:
         corpus_present = service_reachable
         corpus_location = "container volume (agentalloy-data)"
     else:
-        corpus_present = (corpus_path / "skills.duck").exists() and (
-            corpus_path / "ladybug"
+        corpus_present = (corpus_path / "agentalloy.duck").exists() and (
+            corpus_path / "fragments.lance"
         ).exists()
         corpus_location = str(corpus_path)
 

@@ -1,26 +1,29 @@
 """Migration CLI: ``python -m agentalloy.migrate``.
 
-Creates the LadybugDB graph store and the DuckDB vector + telemetry store
-at the paths configured via environment. Safe to run multiple times
-(idempotent).
+Ensures the DuckDB skill store (``agentalloy.duck``) schema exists and keeps the
+Lance ``fragments`` dataset's ``phase_scope`` column in sync with the authored
+``skills.phase_scope``. Safe to run multiple times (idempotent).
 """
 
 from __future__ import annotations
 
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 from agentalloy.config import get_settings
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import open_or_create
+from agentalloy.storage.open import open_fragments, open_skills
+
+if TYPE_CHECKING:
+    from agentalloy.storage.protocols import SkillStore
 
 logger = logging.getLogger(__name__)
 
 
-def phase_scope_by_skill(store: LadybugStore) -> dict[str, list[str] | None]:
-    """Read authored Skill.phase_scope for every active skill from the graph."""
+def phase_scope_by_skill(store: SkillStore) -> dict[str, list[str] | None]:
+    """Read authored ``phase_scope`` for every active skill from the skill store."""
     rows = store.execute(
-        "MATCH (s:Skill) WHERE s.deprecated = false RETURN s.skill_id, s.phase_scope", {}
+        "SELECT skill_id, phase_scope FROM skills WHERE deprecated = false"
     )
     return {str(sid): (list(scope) if scope else None) for sid, scope in rows}
 
@@ -30,21 +33,26 @@ def main() -> int:
     settings = get_settings()
     settings.ensure_data_dirs()
 
-    logger.info("migrate ladybug path=%s", settings.ladybug_db_path)
+    logger.info("migrate skills path=%s", settings.duckdb_path)
+    store = open_skills(settings, read_only=False)
     scope_by_skill: dict[str, list[str] | None] = {}
-    with LadybugStore(settings.ladybug_db_path) as store:
+    try:
         store.migrate()
         try:
             scope_by_skill = phase_scope_by_skill(store)
-        except Exception:  # noqa: BLE001 — empty/fresh graph has nothing to backfill
+        except Exception:  # noqa: BLE001 — empty/fresh store has nothing to backfill
             scope_by_skill = {}
+    finally:
+        store.close()
 
-    logger.info("migrate duckdb path=%s", settings.duckdb_path)
-    with open_or_create(settings.duckdb_path) as vs:
-        # open_or_create runs the schema DDL + additive column migrations.
+    logger.info("migrate fragments path=%s", settings.fragments_lance_path)
+    fragments = open_fragments(settings)
+    try:
         if scope_by_skill:
-            updated = vs.backfill_phase_scope(scope_by_skill)
+            updated = fragments.backfill_phase_scope(scope_by_skill)
             logger.info("backfilled phase_scope on %d fragment row(s)", updated)
+    finally:
+        fragments.close()
 
     logger.info("migrate ok")
     return 0

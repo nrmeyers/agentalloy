@@ -215,31 +215,33 @@ def add_parser(
     p.set_defaults(func=_run)
 
 
-def _ensure_ladybug_schema() -> None:
-    """Create the LadybugDB graph schema if it's missing. Best-effort.
+def _ensure_skill_schema() -> None:
+    """Create the skill-store schema if it's missing. Best-effort.
 
     A ``setup --force`` re-run can leave corpus files on disk without the
-    graph schema (issue #84); every subsequent ingest then fails with
-    "Table Skill does not exist" and the pack rolls back. ``migrate()`` is
+    skill-graph tables (issue #84); every subsequent ingest then fails with
+    "Table skills does not exist" and the pack rolls back. ``migrate()`` is
     idempotent, so running it up front is safe. Failures (e.g. the DB
-    lock is held by a running service) are non-fatal — the per-skill
+    lock is held by a concurrent writer) are non-fatal — the per-skill
     ingest errors will surface them.
     """
     from agentalloy.config import get_settings
-    from agentalloy.storage.ladybug import (
-        LOCK_HELD_REMEDIATION,
-        LadybugStore,
-        is_lock_held_error,
-    )
+    from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
+    from agentalloy.storage.open import open_skills
+    from agentalloy.storage.skill_store import is_lock_held_error
 
+    store = None
     try:
         settings = get_settings()
-        with LadybugStore(settings.ladybug_db_path) as store:
-            store.migrate()
+        store = open_skills(settings, read_only=False)
+        store.migrate()
     except Exception as exc:  # noqa: BLE001 — best-effort guard, ingest surfaces real failures
         print(f"WARN: could not verify/create corpus graph schema: {exc}", file=sys.stderr)
         if is_lock_held_error(str(exc)):
             print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
+    finally:
+        if store is not None:
+            store.close()
 
 
 def _summarize_install_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -413,10 +415,11 @@ def _run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    # Lock-held detection: if any per-skill ingest failure looks like
-    # LadybugDB's single-writer lock error, tell the user to stop the
-    # service instead of leaving them to decode "Failures: N" (issue #84).
-    from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, is_lock_held_error
+    # Lock-held detection: if any per-skill ingest failure looks like the
+    # skill store's single-writer lock error, surface the retry hint instead
+    # of leaving the user to decode "Failures: N" (issue #84).
+    from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
+    from agentalloy.storage.skill_store import is_lock_held_error
 
     if any(
         is_lock_held_error(str(ir.get("stderr_tail") or ""))
@@ -847,9 +850,9 @@ def _run_container_guard(
             )
 
     # Schema guard (issue #84): a wiped-then-recreated corpus can have DB
-    # files on disk without the graph schema; ingest would fail on every
-    # skill with "Table Skill does not exist". Migrations are idempotent.
-    _ensure_ladybug_schema()
+    # files on disk without the skill-graph tables; ingest would fail on every
+    # skill with "Table skills does not exist". Migrations are idempotent.
+    _ensure_skill_schema()
 
     # list[tuple[pack_name, result]] so _run() can build failed list by name, not path
     named_results: list[tuple[str, dict[str, Any]]] = []
@@ -891,7 +894,8 @@ def _bulk_reembed(no_restart: bool = False) -> int:
         return reembed_main(argv)
     except Exception as exc:  # noqa: BLE001 — surface but don't crash setup
         print(f"install-packs: reembed raised: {exc}", file=sys.stderr)
-        from agentalloy.storage.ladybug import LOCK_HELD_REMEDIATION, is_lock_held_error
+        from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
+        from agentalloy.storage.skill_store import is_lock_held_error
 
         if is_lock_held_error(str(exc)):
             print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)

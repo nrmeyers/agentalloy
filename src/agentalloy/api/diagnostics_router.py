@@ -19,8 +19,7 @@ from agentalloy.api.health_router import HealthChecker
 from agentalloy.reads.active import get_active_skills
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.runtime_state import RuntimeCache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import EMBEDDING_DIM
+from agentalloy.storage.protocols import EMBEDDING_DIM, SkillStore
 
 router = APIRouter()
 
@@ -96,7 +95,7 @@ class CorpusDiagnosticsResponse(BaseModel):
 class DiagnosticsChecker:
     def __init__(
         self,
-        store: LadybugStore,
+        store: SkillStore,
         cache: RuntimeCache | None,
         health_checker: HealthChecker,
     ) -> None:
@@ -106,8 +105,8 @@ class DiagnosticsChecker:
 
     async def check(self) -> RuntimeDiagnosticsResponse:
         # _read_store_state and health_checker.check() both touch the same
-        # (non-thread-safe) LadybugStore connection, so run them sequentially
-        # rather than concurrently to avoid interleaved execute() on one conn.
+        # SkillStore connection, so run them sequentially rather than
+        # concurrently to avoid interleaved execute() on one connection.
         store_skills = await asyncio.to_thread(self._read_store_state)
         health = await self._health_checker.check()
 
@@ -261,10 +260,10 @@ async def corpus_diagnostics(request: Request) -> CorpusDiagnosticsResponse:
     state = request.app.state
 
     skill_count = 0
-    store: LadybugStore | None = getattr(state, "store", None)
+    store: SkillStore | None = getattr(state, "store", None)
     if store is not None:
         try:
-            rows = store.execute("MATCH (s:Skill) RETURN count(s)")
+            rows = store.execute("SELECT count(*) FROM skills")
             if rows and rows[0]:
                 skill_count = int(rows[0][0])
         except Exception:

@@ -21,36 +21,34 @@ from agentalloy.retrieval.embedding_errors import (
     EmbeddingErrorResult,
 )
 from agentalloy.retrieval.query_bounds import build_retrieval_query
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import (
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import (
     BM25Hit,
+    FragmentStore,
     SimilarityHit,
-    VectorStore,
-    open_or_create,
 )
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from tests.support import StubLMClient
 
 
 @pytest.fixture
-def populated(corpus_dir: Path) -> LadybugStore:
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
-    return s
+def populated(corpus_dir: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
 
 @pytest.fixture
-def populated_vectors(corpus_dir: Path) -> VectorStore:
-    """Pre-embedded DuckDB vector store from the shared corpus template. Vectors
+def populated_vectors(corpus_dir: Path) -> FragmentStore:
+    """Pre-embedded Lance fragment store from the shared corpus template. Vectors
     are StubLMClient values for every active fragment — coherent with the
     retrieval path's stub embedder for cosine ranking."""
-    return open_or_create(corpus_dir / "skills.duck")
+    return LanceFragmentStore(corpus_dir / "fragments.lance")
 
 
 # -------- AC-1: eligibility filter --------
 
 
 def test_only_domain_fragments_returned(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -67,7 +65,7 @@ def test_only_domain_fragments_returned(
 
 
 def test_retrieval_is_phase_agnostic(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # Phase no longer hard-gates the candidate pool by category. The hard
     # category gate was A/B-confirmed performance-neutral (gold-hit 18/18 and
@@ -93,7 +91,7 @@ def test_retrieval_is_phase_agnostic(
 
 
 def test_domain_tags_narrow_further(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -112,10 +110,10 @@ def test_domain_tags_narrow_further(
 
 # -------- AC-2: ranking --------
 #
-# Ranking by cosine similarity now happens in DuckDB via
-# ``array_cosine_distance`` — see ``test_vector_store.py`` for the
+# Ranking by cosine similarity now happens in the Lance fragment store
+# (cosine ANN / brute-force scan) — see ``test_fragment_store.py`` for the
 # corresponding tests. The previous in-Python ranking test against
-# ``ActiveFragment.embedding`` is obsolete with the v5.3 storage split.
+# ``ActiveFragment.embedding`` is obsolete with the v6 storage split.
 
 
 # -------- AC-3: structural diversity --------
@@ -330,7 +328,7 @@ def test_skill_granular_empty_input() -> None:
 
 
 def test_skill_granular_skills_ranked_populated_on_retrieval(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # RetrievalResult.skills_ranked must be populated on a real retrieval.
     result = retrieve_domain_candidates(
@@ -354,7 +352,7 @@ def test_skill_granular_skills_ranked_populated_on_retrieval(
 
 
 def test_empty_eligible_returns_empty_result(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # No fragments match a nonsense domain_tag
     result = retrieve_domain_candidates(
@@ -372,7 +370,7 @@ def test_empty_eligible_returns_empty_result(
     assert result.retrieval_ms >= 0
 
 
-def test_retrieval_records_latency(populated: LadybugStore, populated_vectors: VectorStore) -> None:
+def test_retrieval_records_latency(populated: DuckDBSkillStore, populated_vectors: FragmentStore) -> None:
     result = retrieve_domain_candidates(
         populated,
         StubLMClient(),
@@ -387,8 +385,8 @@ def test_retrieval_records_latency(populated: LadybugStore, populated_vectors: V
 
 
 def test_circuit_open_falls_back_to_bm25(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(domain_module.embedding_breaker, "allow_request", lambda: False)
@@ -412,8 +410,8 @@ def test_circuit_open_falls_back_to_bm25(
 
 
 def test_embedding_error_also_falls_back_to_bm25(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _raise_embed(*args: object, **kwargs: object) -> list[list[float]]:
@@ -439,8 +437,8 @@ def test_embedding_error_also_falls_back_to_bm25(
 
 
 def test_model_not_loaded_does_not_degrade(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _raise_embed(*args: object, **kwargs: object) -> list[list[float]]:
@@ -467,7 +465,7 @@ def test_model_not_loaded_does_not_degrade(
 
 
 def test_k_larger_than_eligible_returns_all(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     result = retrieve_domain_candidates(
         populated,
@@ -523,8 +521,8 @@ def test_rrf_fuse_both_empty_returns_empty() -> None:
 
 
 def test_degradable_embedding_error_with_empty_bm25(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Regression test: embedding fails with degradable code AND BM25 returns no hits.
@@ -669,8 +667,8 @@ def test_maybe_rerank_scorer_failure_degrades(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_retrieve_sets_reranked_flag(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A scorer that reverses ranking — any non-trivial pool gets reordered.
@@ -698,8 +696,8 @@ def test_retrieve_sets_reranked_flag(
 
 
 def test_raw_scores_bypass_skips_reranker(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeReranker([1.0] * 64)
@@ -721,8 +719,8 @@ def test_raw_scores_bypass_skips_reranker(
 
 
 def test_diversity_off_bypass_skips_reranker(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _FakeReranker([1.0] * 64)
@@ -747,7 +745,7 @@ def test_diversity_off_bypass_skips_reranker(
 
 
 def _retrieve_design(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> domain_module.RetrievalResult:
     result = retrieve_domain_candidates(
         populated,
@@ -764,8 +762,8 @@ def _retrieve_design(
 
 
 def test_lm_assist_off_is_byte_identical_baseline(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """LM_ASSIST off → scorer factory returns None → deterministic selection.
@@ -780,8 +778,8 @@ def test_lm_assist_off_is_byte_identical_baseline(
 
 
 def test_lm_assist_unreachable_matches_off(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A scorer whose every call fails (unreachable server) must yield the SAME
@@ -807,8 +805,8 @@ def test_lm_assist_unreachable_matches_off(
 
 
 def test_lm_assist_hit_filters_to_kept_fragments(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A HIT replaces deterministic selection with exactly the kept fragments."""
@@ -837,8 +835,8 @@ def test_lm_assist_hit_filters_to_kept_fragments(
 
 
 def test_lm_assist_hit_routes_survivors_through_skill_granular_select(
-    populated: LadybugStore,
-    populated_vectors: VectorStore,
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """§D: on a HIT the survivors are routed through skill_granular_select (the HIT
@@ -897,7 +895,7 @@ class _RecordingLMClient(StubLMClient):
 
 
 def test_retrieval_query_is_bounded_before_embedding(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # First user turn = a real instruction buried under a giant injected
     # <system-reminder> dump (the 6050-token-500 shape). The dense leg must embed
@@ -927,7 +925,7 @@ def test_retrieval_query_is_bounded_before_embedding(
 
 
 def test_noise_only_task_skips_dense_leg(
-    populated: LadybugStore, populated_vectors: VectorStore
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
 ) -> None:
     # Once injected context is stripped the first turn carries no instruction, so
     # the bounded query is empty. Skip the dense embed entirely (embedding "" is a

@@ -1,12 +1,18 @@
-"""Fixture loader — reads YAML skill files and seeds LadybugDB.
+"""Fixture loader — reads YAML skill files and seeds the skill store.
 
 Not a product capability. Only used by tests and by local developers to get a
 representative runtime store without going through the real ingest flow.
 
-Per v5.3, embeddings live in DuckDB ``fragment_embeddings``; this loader
-only writes the LadybugDB graph (Skill / SkillVersion / Fragment + edges).
-After loading fixtures, run ``python -m agentalloy.reembed`` to populate
-DuckDB.
+In v6 the skill graph (skills / skill_versions / fragments + folded edges) lives
+in DuckDB ``agentalloy.duck`` (the ``SkillStore``); embeddings live in the Lance
+``fragments`` dataset. This loader only writes the skill graph. After loading
+fixtures, run ``python -m agentalloy.reembed`` to build the Lance fragments
+dataset from the active fragments.
+
+The fixtures intentionally carry multiple versions per skill (a superseded v1
+plus an active v2) and explicit version/fragment ids, so they are written
+directly here rather than through ``install.importer`` (which folds every skill
+into a single synthetic ``-v1`` active version).
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from typing import Any, cast
 
 import yaml
 
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.protocols import SkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +40,16 @@ class LoadSummary:
 
 
 def load_fixtures(
-    store: LadybugStore,
+    store: SkillStore,
     *,
     fixtures_root: Path = FIXTURES_ROOT,
 ) -> LoadSummary:
-    """Wipe Skill/SkillVersion/Fragment nodes and re-seed from YAML fixtures.
+    """Wipe the skill graph tables and re-seed from YAML fixtures.
 
-    To populate the DuckDB ``fragment_embeddings`` table after loading, run
+    To populate the Lance ``fragments`` dataset after loading, run
     ``python -m agentalloy.reembed``.
     """
+    store.migrate()  # idempotent; ensures the schema exists before writing
     _wipe(store)
     skills = _read_fixture_files(fixtures_root)
     logger.info("fixtures_load begin files=%d", len(skills))
@@ -77,10 +84,13 @@ def load_fixtures(
     return summary
 
 
-def _wipe(store: LadybugStore) -> None:
-    # Kuzu 0.11 doesn't support DETACH DELETE for every edge type in one statement;
-    # deleting nodes deletes incident edges automatically in current versions.
-    store.execute("MATCH (n) DETACH DELETE n")
+def _wipe(store: SkillStore) -> None:
+    # Clear the skill graph tables (corpus_meta is left intact). No FK cascade is
+    # declared, so order is cosmetic; we delete children before parents anyway.
+    store.execute("DELETE FROM fragments")
+    store.execute("DELETE FROM skill_dependencies")
+    store.execute("DELETE FROM skill_versions")
+    store.execute("DELETE FROM skills")
 
 
 def _read_fixture_files(root: Path) -> list[dict[str, Any]]:
@@ -96,36 +106,26 @@ def _read_fixture_files(root: Path) -> list[dict[str, Any]]:
     return out
 
 
-def _insert_skill(store: LadybugStore, skill: dict[str, Any]) -> None:
+def _insert_skill(store: SkillStore, skill: dict[str, Any]) -> None:
     store.execute(
-        """
-        CREATE (:Skill {
-            skill_id: $skill_id,
-            canonical_name: $canonical_name,
-            category: $category,
-            skill_class: $skill_class,
-            domain_tags: $domain_tags,
-            deprecated: $deprecated,
-            always_apply: $always_apply,
-            phase_scope: $phase_scope,
-            category_scope: $category_scope
-        })
-        """,
-        {
-            "skill_id": skill["skill_id"],
-            "canonical_name": skill["canonical_name"],
-            "category": skill["category"],
-            "skill_class": skill["skill_class"],
-            "domain_tags": skill.get("domain_tags") or [],
-            "deprecated": bool(skill.get("deprecated", False)),
-            "always_apply": bool(skill.get("always_apply", False)),
-            "phase_scope": skill.get("phase_scope") or [],
-            "category_scope": skill.get("category_scope") or [],
-        },
+        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, "
+        "domain_tags, deprecated, always_apply, phase_scope, category_scope) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            skill["skill_id"],
+            skill["canonical_name"],
+            skill["category"],
+            skill["skill_class"],
+            skill.get("domain_tags") or [],
+            bool(skill.get("deprecated", False)),
+            bool(skill.get("always_apply", False)),
+            skill.get("phase_scope") or [],
+            skill.get("category_scope") or [],
+        ],
     )
 
 
-def _insert_version(store: LadybugStore, skill_id: str, version: dict[str, Any]) -> None:
+def _insert_version(store: SkillStore, skill_id: str, version: dict[str, Any]) -> None:
     authored_at = version.get("authored_at")
     if isinstance(authored_at, str):
         authored_dt = datetime.fromisoformat(authored_at.replace("Z", "+00:00"))
@@ -135,71 +135,43 @@ def _insert_version(store: LadybugStore, skill_id: str, version: dict[str, Any])
         raise ValueError(f"invalid authored_at on version {version.get('version_id')}")
 
     store.execute(
-        """
-        CREATE (:SkillVersion {
-            version_id: $version_id,
-            version_number: $version_number,
-            authored_at: $authored_at,
-            author: $author,
-            change_summary: $change_summary,
-            status: $status,
-            raw_prose: $raw_prose
-        })
-        """,
-        {
-            "version_id": version["version_id"],
-            "version_number": int(version["version_number"]),
-            "authored_at": authored_dt,
-            "author": version.get("author", "fixture-seed"),
-            "change_summary": version.get("change_summary", ""),
-            "status": version["status"],
-            "raw_prose": version.get("raw_prose", ""),
-        },
-    )
-    store.execute(
-        """
-        MATCH (s:Skill {skill_id: $skill_id}), (v:SkillVersion {version_id: $version_id})
-        CREATE (s)-[:HAS_VERSION]->(v)
-        """,
-        {"skill_id": skill_id, "version_id": version["version_id"]},
+        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+        "author, change_summary, status, raw_prose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            version["version_id"],
+            skill_id,
+            int(version["version_number"]),
+            authored_dt,
+            version.get("author", "fixture-seed"),
+            version.get("change_summary", ""),
+            version["status"],
+            version.get("raw_prose", ""),
+        ],
     )
 
 
-def _link_current_version(store: LadybugStore, skill_id: str, version_id: str) -> None:
+def _link_current_version(store: SkillStore, skill_id: str, version_id: str) -> None:
+    # The old CURRENT_VERSION edge is folded into skills.current_version_id.
     store.execute(
-        """
-        MATCH (s:Skill {skill_id: $skill_id}), (v:SkillVersion {version_id: $version_id})
-        CREATE (s)-[:CURRENT_VERSION]->(v)
-        """,
-        {"skill_id": skill_id, "version_id": version_id},
+        "UPDATE skills SET current_version_id = ? WHERE skill_id = ?",
+        [version_id, skill_id],
     )
 
 
 def _insert_fragment(
-    store: LadybugStore,
+    store: SkillStore,
     version_id: str,
     fragment: dict[str, Any],
 ) -> None:
+    # The old DECOMPOSES_TO edge is folded into fragments.version_id.
     store.execute(
-        """
-        CREATE (:Fragment {
-            fragment_id: $fragment_id,
-            fragment_type: $fragment_type,
-            sequence: $sequence,
-            content: $content
-        })
-        """,
-        {
-            "fragment_id": fragment["fragment_id"],
-            "fragment_type": fragment["fragment_type"],
-            "sequence": int(fragment["sequence"]),
-            "content": fragment["content"],
-        },
-    )
-    store.execute(
-        """
-        MATCH (v:SkillVersion {version_id: $version_id}), (f:Fragment {fragment_id: $fragment_id})
-        CREATE (v)-[:DECOMPOSES_TO]->(f)
-        """,
-        {"version_id": version_id, "fragment_id": fragment["fragment_id"]},
+        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            fragment["fragment_id"],
+            version_id,
+            fragment["fragment_type"],
+            int(fragment["sequence"]),
+            fragment["content"],
+        ],
     )

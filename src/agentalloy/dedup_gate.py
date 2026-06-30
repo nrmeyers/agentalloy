@@ -1,9 +1,9 @@
 """Reembed-boundary dedup gate — cross-pack near-duplicate detection.
 
-Runs after new fragments have been written to DuckDB.  For each newly-embedded
-skill, compares its fragments against every *other* skill already present in
-the vector store and classifies matches as HARD (≥ hard_threshold) or SOFT
-(≥ soft_threshold).
+Runs after new fragments have been written to the Lance dataset.  For each
+newly-embedded skill, compares its fragments against every *other* skill
+already present in the fragment store and classifies matches as HARD
+(≥ hard_threshold) or SOFT (≥ soft_threshold). Uses exact cosine (D2).
 
 Same-pack deduplication is intentionally exempt: packs may contain sibling
 skills that legitimately overlap.  "Same pack" is determined by the caller
@@ -21,7 +21,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from agentalloy.storage.vector_store import SimilarityHit, VectorStore
+from agentalloy.storage.protocols import FragmentStore, SimilarityHit
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def classify_hit(
 ) -> str:
     """Return ``"hard"``, ``"soft"``, or ``"ignore"`` for a single similarity hit.
 
-    Convention: vectors in DuckDB are L2-normalized, so
+    Convention: vectors in the Lance dataset are L2-normalized, so
     ``similarity = 1.0 - cosine_distance``.
     """
     similarity = 1.0 - hit.distance
@@ -86,7 +86,7 @@ def dedup_fragment(
     *,
     label: str,
     query_vec: Sequence[float],
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     hard_similarity: float,
     soft_similarity: float,
     k: int = 20,
@@ -95,7 +95,7 @@ def dedup_fragment(
     exclude_fragment_id: str | None = None,
     exclude_skill_ids: set[str] | None = None,
 ) -> tuple[SimilarityHit | None, list[SimilarityHit]]:
-    """Search DuckDB for top-k matches to *query_vec* and classify them.
+    """Search the fragment store for top-k matches to *query_vec* and classify them.
 
     Returns ``(hard_match, soft_matches)`` where ``hard_match`` is the closest
     hit at or above ``hard_similarity`` (or ``None``), and ``soft_matches`` are
@@ -143,7 +143,7 @@ def run_dedup_gate(
     *,
     new_skill_ids: set[str],
     new_fragment_vecs: dict[str, tuple[str, list[float]]],
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     hard_similarity: float,
     soft_similarity: float,
     k: int = 20,
@@ -160,9 +160,10 @@ def run_dedup_gate(
         Mapping of ``fragment_id → (skill_id, embedding_vector)`` for every
         fragment that was newly embedded.  Vectors should be the raw
         (pre-normalisation) vectors returned by the embed call; the gate
-        queries DuckDB which normalises internally, so consistency is maintained.
+        queries the fragment store which normalises internally, so consistency
+        is maintained.
     vector_store:
-        Open VectorStore (DuckDB) — must already contain the newly-inserted rows
+        Open FragmentStore (Lance) — must already contain the newly-inserted rows
         so that ``search_similar`` can find existing fragments by other skills.
     hard_similarity / soft_similarity:
         Thresholds (in [0, 1]) from ``Settings``.
@@ -180,8 +181,8 @@ def run_dedup_gate(
 
     total = len(new_fragment_vecs)
     logger.info("dedup gate: scanning %d new fragment(s) for cross-pack near-duplicates", total)
-    # Each fragment is a DuckDB vector search, so a full re-embed (thousands of
-    # fragments) is otherwise silent for minutes. Emit ~10 progress ticks.
+    # Each fragment is a Lance exact-cosine search, so a full re-embed (thousands
+    # of fragments) is otherwise silent for minutes. Emit ~10 progress ticks.
     step = max(1, total // 10)
 
     for i, (fragment_id, (incoming_skill_id, vec)) in enumerate(new_fragment_vecs.items(), start=1):

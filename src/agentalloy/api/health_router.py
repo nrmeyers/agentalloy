@@ -20,8 +20,7 @@ from pydantic import BaseModel
 
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.lm_client import LMClientError
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import SkillStore, TelemetryStore
 
 router = APIRouter()
 
@@ -60,16 +59,16 @@ class HealthResponse(BaseModel):
 class HealthChecker:
     def __init__(
         self,
-        store: LadybugStore,
+        store: SkillStore,
         lm: EmbedClient,
-        vector_store: VectorStore,
+        telemetry_store: TelemetryStore,
         embedding_model: str,
         *,
         runtime_load_error: str | None = None,
     ) -> None:
         self._store = store
         self._lm = lm
-        self._vector_store = vector_store
+        self._telemetry_store = telemetry_store
         self._embedding_model = embedding_model
         self._runtime_load_error = runtime_load_error
 
@@ -145,16 +144,16 @@ class HealthChecker:
 
     def _probe_runtime_store(self) -> str | None:
         try:
-            self._store.scalar("RETURN 1")
+            self._store.scalar("SELECT 1")
             return None
         except Exception as exc:
             return str(exc)
 
     def _probe_telemetry_store(self) -> str | None:
         try:
-            # DuckDB ``composition_traces`` lives in the same VectorStore.
+            # composition_traces lives in the service-owned telemetry.duck.
             # A successful count() proves the table is open and queryable.
-            self._vector_store.count_traces()
+            self._telemetry_store.count_traces()
             return None
         except Exception as exc:
             return str(exc)

@@ -26,7 +26,7 @@ from urllib.request import Request, urlopen
 from agentalloy.install import port_guard
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, write_result
-from agentalloy.storage.vector_store import EMBEDDING_DIM
+from agentalloy.storage.protocols import EMBEDDING_DIM
 
 SCHEMA_VERSION = 1
 # Sanity floor — flags truly empty corpora; not a quality bar.
@@ -63,7 +63,7 @@ def _probe_diagnostics(port: int) -> dict[str, Any] | None:
 
     Returns the parsed JSON body when the service is up and responding,
     None on any failure. Used by the DB checks to avoid racing the
-    service for the Kuzu file lock.
+    service for the corpus DB lock.
     """
     url = f"http://localhost:{port}/diagnostics/runtime"
     try:
@@ -223,14 +223,14 @@ def _check_embedding_expected_dim(embed_url: str, model: str) -> dict[str, Any]:
 
 
 def _check_duckdb_present(
-    duck_path: str,
+    fragments_path: str,
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
-    """Check 3: DuckDB file exists with fragment rows.
+    """Check 3: fragments store exists with fragment rows.
 
     When the service is running (``diag`` is non-None), defer to its
-    telemetry-store readiness probe instead of opening the file directly —
+    telemetry-store readiness probe instead of opening the store directly —
     a concurrent open races the service for the file lock.
 
     In container mode, direct file access is not available on the host;
@@ -264,34 +264,36 @@ def _check_duckdb_present(
             "duration_ms": duration,
             "error": (
                 "Service not reachable on the runtime port; "
-                "cannot verify DuckDB without the diagnostics endpoint"
+                "cannot verify the fragments store without the diagnostics endpoint"
             ),
             "remediation": (
                 "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
-    p = Path(duck_path)
+    p = Path(fragments_path)
     if not p.exists():
         return {
             "name": "duckdb_present",
             "passed": False,
             "duration_ms": 0,
-            "error": f"{duck_path} not found",
+            "error": f"{fragments_path} not found",
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        import duckdb
+        from agentalloy.storage.fragment_store import LanceFragmentStore
 
-        con = duckdb.connect(str(p), read_only=True)
-        count = con.execute("SELECT count(*) FROM fragment_embeddings").fetchone()[0]  # type: ignore[index]
-        con.close()
+        vs = LanceFragmentStore(str(p))
+        try:
+            count = vs.count_embeddings()
+        finally:
+            vs.close()
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "duckdb_present",
             "passed": True,
             "duration_ms": duration,
-            "detail": f"{duck_path} has {count} fragments",
+            "detail": f"{fragments_path} has {count} fragments",
         }
     except Exception as exc:
         duration = int((time.monotonic() - t0) * 1000)
@@ -305,15 +307,15 @@ def _check_duckdb_present(
 
 
 def _check_ladybug_present(
-    ladybug_path: str,
+    skills_path: str,
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
-    """Check 4: Kuzu directory exists with Skill nodes.
+    """Check 4: skill store (agentalloy.duck) exists with skill rows.
 
     When the service is running (``diag`` is non-None), defer to its
-    runtime-store readiness probe — Kuzu holds an exclusive lock that
-    blocks a second open from this process.
+    runtime-store readiness probe — the skill store holds a single-writer
+    lock that blocks a second writer open from this process.
 
     In container mode, direct file access is not available on the host;
     the diagnostics endpoint is the only reliable source.
@@ -350,36 +352,36 @@ def _check_ladybug_present(
             "duration_ms": duration,
             "error": (
                 "Service not reachable on the runtime port; "
-                "cannot verify Kuzu DB without the diagnostics endpoint"
+                "cannot verify the skill store without the diagnostics endpoint"
             ),
             "remediation": (
                 "Check the container logs (e.g. `podman logs agentalloy`) "
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
-    p = Path(ladybug_path)
+    p = Path(skills_path)
     if not p.exists():
         return {
             "name": "ladybug_present",
             "passed": False,
             "duration_ms": 0,
-            "error": f"{ladybug_path} not found",
+            "error": f"{skills_path} not found",
             "remediation": "Run `python -m agentalloy.install seed-corpus`",
         }
     try:
-        from agentalloy.storage.ladybug import LadybugStore
+        from agentalloy.storage.skill_store import open_skill_store
 
-        # Use the context manager so the Kuzu connection (and its exclusive lock)
-        # is always closed — raw ladybug.Database/Connection here leaked the lock.
-        with LadybugStore(str(p)) as store:
-            rows = store.execute("MATCH (s:Skill) RETURN count(s) AS c")
+        # Use the context manager so the read-only connection is always
+        # closed and never contends with a writer's single-writer lock.
+        with open_skill_store(str(p), read_only=True) as store:
+            rows = store.execute("SELECT count(*) FROM skills")
         count = int(rows[0][0]) if rows and rows[0] else 0
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "ladybug_present",
             "passed": True,
             "duration_ms": duration,
-            "detail": f"{ladybug_path} has {count} skills",
+            "detail": f"{skills_path} has {count} skills",
         }
     except Exception as exc:
         duration = int((time.monotonic() - t0) * 1000)
@@ -393,14 +395,14 @@ def _check_ladybug_present(
 
 
 def _check_skill_count(
-    ladybug_path: str,
+    skills_path: str,
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
     """Check 5: Skill count >= MIN_SKILL_COUNT.
 
     When the service is running, count active skills via
-    /diagnostics/runtime; otherwise fall back to a direct Kuzu read.
+    /diagnostics/runtime; otherwise fall back to a direct skill-store read.
 
     In container mode, direct file access is not available on the host;
     the diagnostics endpoint is the only reliable source.
@@ -440,12 +442,12 @@ def _check_skill_count(
             ),
         }
     try:
-        from agentalloy.storage.ladybug import LadybugStore
+        from agentalloy.storage.skill_store import open_skill_store
 
-        # Context manager closes the Kuzu connection + exclusive lock (raw
-        # ladybug.Database/Connection here leaked the lock on every fallback).
-        with LadybugStore(str(ladybug_path)) as store:
-            rows = store.execute("MATCH (s:Skill) RETURN count(s) AS c")
+        # Context manager closes the read-only connection so the fallback
+        # never contends with a writer's single-writer lock.
+        with open_skill_store(str(skills_path), read_only=True) as store:
+            rows = store.execute("SELECT count(*) FROM skills")
         count = int(rows[0][0]) if rows and rows[0] else 0
         duration = int((time.monotonic() - t0) * 1000)
         if count >= MIN_SKILL_COUNT:
@@ -749,20 +751,20 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     embed_url = env.get("RUNTIME_EMBED_BASE_URL", "http://localhost:47951")
     embed_model = env.get("RUNTIME_EMBEDDING_MODEL", "nomic-embed-text-v1.5.Q8_0.gguf")
     user_corpus = install_state.corpus_dir()
-    duck_path = env.get("DUCKDB_PATH", str(user_corpus / "skills.duck"))
-    ladybug_path = env.get("LADYBUG_DB_PATH", str(user_corpus / "ladybug"))
+    fragments_path = env.get("FRAGMENTS_LANCE_PATH", str(user_corpus / "fragments.lance"))
+    skills_path = env.get("DUCKDB_PATH", str(user_corpus / "agentalloy.duck"))
     port = install_state.validate_port(st.get("port", 47950))
 
     # Resolve relative paths against the user corpus dir (not the cwd) —
     # the service no longer assumes a project-relative working directory.
-    if not Path(duck_path).is_absolute():
-        duck_path = str(user_corpus / duck_path)
-    if not Path(ladybug_path).is_absolute():
-        ladybug_path = str(user_corpus / ladybug_path)
+    if not Path(fragments_path).is_absolute():
+        fragments_path = str(user_corpus / fragments_path)
+    if not Path(skills_path).is_absolute():
+        skills_path = str(user_corpus / skills_path)
 
     # Probe the running service once. When it's up, the three DB checks
     # below skip the direct file open (which races the service for the
-    # Kuzu file lock) and use the diagnostics response instead.
+    # corpus DB lock) and use the diagnostics response instead.
     diag = _probe_diagnostics(port)
 
     # Container deployments: the host can't reach the embedder directly
@@ -784,9 +786,9 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
 
     checks = [
         *embed_checks,
-        _check_duckdb_present(duck_path, diag=diag, is_container=is_container),
-        _check_ladybug_present(ladybug_path, diag=diag, is_container=is_container),
-        _check_skill_count(ladybug_path, diag=diag, is_container=is_container),
+        _check_duckdb_present(fragments_path, diag=diag, is_container=is_container),
+        _check_ladybug_present(skills_path, diag=diag, is_container=is_container),
+        _check_skill_count(skills_path, diag=diag, is_container=is_container),
         _check_harness_config_present(st),
         _check_harness_config_url(st),
         _check_port_available(port),

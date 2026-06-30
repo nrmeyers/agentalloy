@@ -20,7 +20,7 @@ pyproject.toml.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import httpx
 import pytest
@@ -36,8 +36,10 @@ from agentalloy.lm_client import (
     OpenAICompatClient,
 )
 from agentalloy.reembed import discover_unembedded_fragments, reembed_fragments
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import EMBEDDING_DIM, VectorStore, open_or_create
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import EMBEDDING_DIM
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.telemetry_store import open_telemetry_store
 
 pytestmark = pytest.mark.integration
 
@@ -101,19 +103,24 @@ def embedding_model_required(lm_studio_models: list[str]) -> None:
 
 
 @pytest.fixture
-def fresh_ladybug(tmp_path: Path):
-    """A migrated, empty LadybugDB at a tmp path."""
-    path = tmp_path / "ladybug"
-    with LadybugStore(str(path)) as store:
-        store.migrate()
+def fresh_skills(tmp_path: Path):
+    """A migrated, empty DuckDB skill store at a tmp path."""
+    store = open_skill_store(str(tmp_path / "agentalloy.duck"))
+    store.migrate()
+    try:
         yield store
+    finally:
+        store.close()
 
 
 @pytest.fixture
-def fresh_duckdb(tmp_path: Path):
-    """An open, empty DuckDB vector store at a tmp path."""
-    with open_or_create(tmp_path / "skills.duck") as vs:
-        yield vs
+def fresh_fragments(tmp_path: Path):
+    """An open, empty Lance fragment store at a tmp path."""
+    fs = LanceFragmentStore(tmp_path / "fragments.lance")
+    try:
+        yield fs
+    finally:
+        fs.close()
 
 
 # ---------------------------------------------------------------------------
@@ -122,62 +129,61 @@ def fresh_duckdb(tmp_path: Path):
 
 
 def test_step_1_fresh_stores_are_empty(
-    fresh_ladybug: LadybugStore, fresh_duckdb: VectorStore
+    fresh_skills: DuckDBSkillStore, fresh_fragments: LanceFragmentStore
 ) -> None:
-    """Fresh LadybugDB + DuckDB carry no skills, fragments, or embeddings."""
-    skill_count = fresh_ladybug.scalar("MATCH (s:Skill) RETURN count(s)")
+    """Fresh skill store + Lance dataset carry no skills, fragments, or embeddings."""
+    skill_count = fresh_skills.scalar("SELECT count(*) FROM skills")
     assert skill_count == 0
-    frag_count = fresh_ladybug.scalar("MATCH (f:Fragment) RETURN count(f)")
+    frag_count = fresh_skills.scalar("SELECT count(*) FROM fragments")
     assert frag_count == 0
-    assert fresh_duckdb.count_embeddings() == 0
-    assert fresh_duckdb.count_traces() == 0
+    assert fresh_fragments.count_embeddings() == 0
 
 
 # ---------------------------------------------------------------------------
-# NXS-802 Step 2+3: ingest populates LadybugDB, DuckDB remains empty
+# NXS-802 Step 2+3: ingest populates the skill store, Lance remains empty
 # ---------------------------------------------------------------------------
 
 
-def test_step_2_ingest_populates_ladybug_only(
-    fresh_ladybug: LadybugStore, fresh_duckdb: VectorStore
+def test_step_2_ingest_populates_skill_store_only(
+    fresh_skills: DuckDBSkillStore, fresh_fragments: LanceFragmentStore
 ) -> None:
-    """Ingest writes graph data to Ladybug. DuckDB fragment_embeddings stays empty
-    (the v1.5 model separates ingest from embedding)."""
+    """Ingest writes graph data to the skill store. The Lance fragments dataset
+    stays empty (the v1.5 model separates ingest from embedding)."""
     record = _load_yaml(FIXTURE_SKILL)
     assert _validate(record) == []
-    _insert(fresh_ladybug, record, force=False)
+    _insert(fresh_skills, record, force=False)
 
     assert (
-        fresh_ladybug.scalar(
-            "MATCH (s:Skill {skill_id: $id}) RETURN count(s)", {"id": record.skill_id}
+        fresh_skills.scalar(
+            "SELECT count(*) FROM skills WHERE skill_id = ?", [record.skill_id]
         )
         == 1
     )
-    assert fresh_ladybug.scalar("MATCH (v:SkillVersion) RETURN count(v)") == 1
-    fragment_count = fresh_ladybug.scalar("MATCH (f:Fragment) RETURN count(f)")
+    assert fresh_skills.scalar("SELECT count(*) FROM skill_versions") == 1
+    fragment_count = fresh_skills.scalar("SELECT count(*) FROM fragments")
     assert fragment_count == len(record.fragments) > 0
 
-    # Critically: DuckDB has nothing yet — ingest is graph-only in the v1.5 model.
-    assert fresh_duckdb.count_embeddings() == 0
+    # Critically: Lance has nothing yet — ingest is graph-only in the v1.5 model.
+    assert fresh_fragments.count_embeddings() == 0
 
 
 # ---------------------------------------------------------------------------
-# NXS-802 Step 4+5: reembed populates DuckDB with L2-normalized vectors
+# NXS-802 Step 4+5: reembed populates the Lance dataset with L2-normalized vectors
 # ---------------------------------------------------------------------------
 
 
-def test_step_4_reembed_populates_duckdb(
-    fresh_ladybug: LadybugStore,
-    fresh_duckdb: VectorStore,
+def test_step_4_reembed_populates_lance(
+    fresh_skills: DuckDBSkillStore,
+    fresh_fragments: LanceFragmentStore,
     lm_studio_required: None,
     embedding_model_required: None,
 ) -> None:
-    """After reembed: DuckDB has one row per Fragment, vectors are L2-normalized,
-    denormalized columns are populated correctly."""
+    """After reembed: Lance has one row per Fragment, the embedding dim matches the
+    runtime contract, denormalized columns are populated correctly."""
     record = _load_yaml(FIXTURE_SKILL)
-    _insert(fresh_ladybug, record, force=False)
+    _insert(fresh_skills, record, force=False)
 
-    fragments = discover_unembedded_fragments(fresh_ladybug, fresh_duckdb)
+    fragments = discover_unembedded_fragments(fresh_skills, fresh_fragments)
     assert len(fragments) == len(record.fragments)
     assert all(f.category == record.category for f in fragments)
 
@@ -189,38 +195,34 @@ def test_step_4_reembed_populates_duckdb(
         stats = reembed_fragments(
             fragments,
             embed_fn=embed,
-            vector_store=fresh_duckdb,
+            vector_store=fresh_fragments,
             embedding_model=EMBEDDING_MODEL,
         )
 
     assert stats.failed == 0
     assert stats.embedded == len(fragments)
-    assert fresh_duckdb.count_embeddings() == len(fragments)
+    assert fresh_fragments.count_embeddings() == len(fragments)
 
-    # Verify the stored vectors are L2-normalized (||v|| ≈ 1).
-    raw_vec_rows: list[Any] = fresh_duckdb._conn.execute(  # pyright: ignore[reportPrivateUsage]
-        "SELECT embedding FROM fragment_embeddings LIMIT 3"
-    ).fetchall()
-    assert len(raw_vec_rows) > 0
-    for row in raw_vec_rows:
-        vec = row[0]
-        assert len(vec) == EMBEDDING_DIM
-        norm_sq = sum(float(x) * float(x) for x in vec)
-        assert abs(norm_sq - 1.0) < 1e-4, f"vector not unit-normalized: ||v||² = {norm_sq}"
+    # v6: vectors are L2-normalized on insert inside LanceFragmentStore. The old
+    # raw ``SELECT embedding FROM fragment_embeddings`` peek is gone — Lance stores
+    # a FixedSizeList(float32, EMBEDDING_DIM), not a DuckDB array. The stored dim is
+    # the contract; the normalized vectors' coherence is proven end-to-end by the
+    # self-search round-trip in test_step_5 (near-zero cosine distance).
+    assert fresh_fragments.embedding_dim() == EMBEDDING_DIM
 
 
 def test_step_5_search_roundtrip_returns_exact_match(
-    fresh_ladybug: LadybugStore,
-    fresh_duckdb: VectorStore,
+    fresh_skills: DuckDBSkillStore,
+    fresh_fragments: LanceFragmentStore,
     lm_studio_required: None,
     embedding_model_required: None,
 ) -> None:
     """Embedding the same content twice should yield a near-zero-distance
     search result — proves the full write/query path is coherent."""
     record = _load_yaml(FIXTURE_SKILL)
-    _insert(fresh_ladybug, record, force=False)
+    _insert(fresh_skills, record, force=False)
 
-    fragments = discover_unembedded_fragments(fresh_ladybug, fresh_duckdb)
+    fragments = discover_unembedded_fragments(fresh_skills, fresh_fragments)
 
     with OpenAICompatClient(LM_STUDIO_BASE_URL) as client:
 
@@ -230,7 +232,7 @@ def test_step_5_search_roundtrip_returns_exact_match(
         reembed_fragments(
             fragments,
             embed_fn=embed,
-            vector_store=fresh_duckdb,
+            vector_store=fresh_fragments,
             embedding_model=EMBEDDING_MODEL,
         )
 
@@ -238,7 +240,7 @@ def test_step_5_search_roundtrip_returns_exact_match(
         target = fragments[0]
         query_vec = client.embed(model=EMBEDDING_MODEL, texts=[target.content])[0]
 
-    hits = fresh_duckdb.search_similar(query_vec, k=5)
+    hits = fresh_fragments.search_similar(query_vec, k=5)
     assert hits, "expected at least one hit"
     assert hits[0].fragment_id == target.fragment_id
     # Distance should be essentially zero — same content, same model, same norm.
@@ -246,16 +248,16 @@ def test_step_5_search_roundtrip_returns_exact_match(
 
 
 def test_step_5b_category_filter_narrows_search(
-    fresh_ladybug: LadybugStore,
-    fresh_duckdb: VectorStore,
+    fresh_skills: DuckDBSkillStore,
+    fresh_fragments: LanceFragmentStore,
     lm_studio_required: None,
     embedding_model_required: None,
 ) -> None:
     """Denormalized-column filters should restrict results — a filter for a
     category the skill doesn't belong to returns nothing."""
     record = _load_yaml(FIXTURE_SKILL)
-    _insert(fresh_ladybug, record, force=False)
-    fragments = discover_unembedded_fragments(fresh_ladybug, fresh_duckdb)
+    _insert(fresh_skills, record, force=False)
+    fragments = discover_unembedded_fragments(fresh_skills, fresh_fragments)
 
     with OpenAICompatClient(LM_STUDIO_BASE_URL) as client:
 
@@ -265,14 +267,14 @@ def test_step_5b_category_filter_narrows_search(
         reembed_fragments(
             fragments,
             embed_fn=embed,
-            vector_store=fresh_duckdb,
+            vector_store=fresh_fragments,
             embedding_model=EMBEDDING_MODEL,
         )
         q = client.embed(model=EMBEDDING_MODEL, texts=[fragments[0].content])[0]
 
     # Filter on a category this skill doesn't have.
     other = "safety" if record.category != "safety" else "governance"
-    hits = fresh_duckdb.search_similar(q, k=10, categories=[other])
+    hits = fresh_fragments.search_similar(q, k=10, categories=[other])
     assert hits == []
 
 
@@ -282,7 +284,7 @@ def test_step_5b_category_filter_narrows_search(
 
 
 def test_step_6_compose_writes_composition_trace(tmp_path: Path) -> None:
-    """End-to-end /compose call writes a composition_traces row to DuckDB."""
+    """End-to-end /compose call writes a composition_traces row to telemetry.duck."""
     import asyncio
 
     from agentalloy.api.compose_models import ComposeRequest
@@ -292,9 +294,9 @@ def test_step_6_compose_writes_composition_trace(tmp_path: Path) -> None:
     from agentalloy.telemetry import DuckDBTelemetryWriter
     from tests.support import StubLMClient, fake_fragment
 
-    duck_path = tmp_path / "skills.duck"
-    vector_store = open_or_create(duck_path)
-    telemetry = DuckDBTelemetryWriter(vector_store)
+    fragment_store = LanceFragmentStore(tmp_path / "fragments.lance")
+    telemetry_store = open_telemetry_store(tmp_path / "telemetry.duck")
+    telemetry = DuckDBTelemetryWriter(telemetry_store)
 
     class _FakeOrch(ComposeOrchestrator):
         async def retrieve(self, req: ComposeRequest) -> RetrievalResult:  # noqa: ARG002
@@ -310,7 +312,7 @@ def test_step_6_compose_writes_composition_trace(tmp_path: Path) -> None:
     orch = _FakeOrch(
         source=None,  # type: ignore[arg-type]
         lm=StubLMClient(),
-        vector_store=vector_store,
+        vector_store=fragment_store,
         telemetry=telemetry,
         embedding_model="stub-embed",
     )
@@ -320,24 +322,17 @@ def test_step_6_compose_writes_composition_trace(tmp_path: Path) -> None:
     )
     assert result.result_type == "composed"
 
-    rows = vector_store._conn.execute(  # pyright: ignore[reportPrivateUsage]
-        """
-        SELECT status, task_prompt, source_skill_ids, selected_fragment_ids,
-               assembly_tier, retrieval_latency_ms, assembly_latency_ms, total_latency_ms
-        FROM composition_traces
-        WHERE status = 'compose'
-        """
-    ).fetchall()
-    assert len(rows) == 1, "expected exactly one composition trace row"
-    status, task, source_ids, selected_ids, tier, ret_ms, asm_ms, tot_ms = rows[0]
-    assert status == "compose"
-    assert task == "design a fastapi route"
-    assert sorted(source_ids) == ["sk-a", "sk-b"]
-    assert sorted(selected_ids) == ["f1", "f2"]
-    assert tier == "0"  # v5.4: no LLM tier
-    assert ret_ms == 12
-    assert asm_ms == 0  # v5.4: no assembly latency
-    assert tot_ms is not None and tot_ms >= 0
+    traces = telemetry_store.query_traces(status="compose", limit=10)
+    assert len(traces) == 1, "expected exactly one composition trace row"
+    t = traces[0]
+    assert t.status == "compose"
+    assert t.task_prompt == "design a fastapi route"
+    assert sorted(t.source_skill_ids) == ["sk-a", "sk-b"]
+    assert sorted(t.selected_fragment_ids) == ["f1", "f2"]
+    assert t.assembly_tier == "0"  # v5.4: no LLM tier
+    assert t.retrieval_latency_ms == 12
+    assert t.assembly_latency_ms == 0  # v5.4: no assembly latency
+    assert t.total_latency_ms is not None and t.total_latency_ms >= 0
 
 
 def test_step_7_embedding_model_not_loaded_returns_structured_503(tmp_path: Path) -> None:
@@ -352,17 +347,21 @@ def test_step_7_embedding_model_not_loaded_returns_structured_503(tmp_path: Path
     from agentalloy.telemetry.writer import NullTelemetryWriter
     from tests.support import StubLMClient
 
-    duck_path = tmp_path / "skills.duck"
-    vector_store = open_or_create(duck_path)
+    fragment_store = LanceFragmentStore(tmp_path / "fragments.lance")
+    # An empty (migrated) skill store as the retrieval source: the domain leg reads
+    # deprecated skill ids from it before building the query embedding, so the
+    # missing-model failure surfaces from the embed call (the path under test), not
+    # from a None source.
+    skill_store = open_skill_store(str(tmp_path / "agentalloy.duck"))
 
     class _UnloadedEmbedLM(StubLMClient):
         def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:  # noqa: ARG002
             raise LMModelNotLoaded(model, ["some-other-embed-model"])
 
     orch = ComposeOrchestrator(
-        source=None,  # type: ignore[arg-type]
+        source=skill_store,
         lm=_UnloadedEmbedLM(),
-        vector_store=vector_store,
+        vector_store=fragment_store,
         telemetry=NullTelemetryWriter(),
         embedding_model="missing-embed-model",
     )

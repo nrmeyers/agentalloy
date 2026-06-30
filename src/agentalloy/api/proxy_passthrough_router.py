@@ -50,7 +50,7 @@ from agentalloy.api.proxy_telemetry import write_proxy_trace
 if TYPE_CHECKING:
     from agentalloy.embed_provider import EmbedClient
     from agentalloy.orchestration.compose import ComposeOrchestrator
-    from agentalloy.storage.vector_store import VectorStore
+    from agentalloy.storage.protocols import TelemetryStore
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ def _noop_status(_status: int) -> None:
 def _make_on_status(
     project_dir: Path,
     outcome: InjectOutcome[dict[str, Any]] | None,
-    vector_store: VectorStore | None,
+    vector_store: TelemetryStore | None,
     signal: SignalResult,
 ) -> Callable[[int], None]:
     """``on_status`` for the forward: on a 2xx response commit the deferred cadence
@@ -153,7 +153,7 @@ def _make_on_status(
 
 
 def _write_passthrough_trace(
-    vector_store: VectorStore,
+    vector_store: TelemetryStore,
     signal: SignalResult,
     outcome: InjectOutcome[dict[str, Any]] | None,
 ) -> None:
@@ -300,7 +300,7 @@ async def passthrough_anthropic_messages(
     client: AnthropicPassthroughClient | None = Depends(get_passthrough_client),
     embed_client: EmbedClient | None = Depends(get_embed_client),
     orchestrator: ComposeOrchestrator | None = Depends(get_orchestrator_for_proxy),
-    vector_store: VectorStore | None = Depends(get_vector_store),
+    vector_store: TelemetryStore | None = Depends(get_vector_store),
 ) -> Response | StreamingResponse:
     raw_body = await request.body()
     query_string = request.url.query

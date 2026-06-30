@@ -1,8 +1,8 @@
 """Container-aware database lock resolution helpers.
 
 Provides functions for detecting container environments, stopping/starting
-the uvicorn service, and testing Kuzu database lock release — all needed
-for the container-aware Kuzu lock resolution mechanism (TASK-1).
+the uvicorn service, and testing corpus DB write-lock release — all needed
+for the container-aware DuckDB lock resolution mechanism (TASK-1).
 """
 
 from __future__ import annotations
@@ -13,13 +13,9 @@ import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from agentalloy.install import server_proc
 from agentalloy.install import state as install_state
-
-if TYPE_CHECKING:
-    import ladybug  # annotation-only; runtime import lives inside test_kuzu_lock_released()
 
 _DEFAULT_UVICORN_CMD = "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950"
 
@@ -255,39 +251,39 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
 
 
 def test_kuzu_lock_released() -> bool:
-    """Test whether the Kuzu database lock is released.
+    """Test whether the corpus DB (agentalloy.duck) write-lock is released.
 
-    Prefers ``LADYBUG_DB_PATH`` env var (set by the container run env to
-    ``/app/data/ladybug``) over ``user_data_dir()`` — the latter
+    Prefers ``DUCKDB_PATH`` env var (set by the container run env to
+    ``/app/data/agentalloy.duck``) over ``corpus_dir()`` — the latter
     resolves to the host home directory and silently skips the check
     inside a container where the volume-mounted DB lives elsewhere.
 
-    Opens a test connection, then explicitly deletes the handle in a
+    Opens a read-only skill-store connection, then closes it in a
     ``finally`` block so the file lock is released before the caller
-    opens the real ``LadybugStore`` connection.
+    opens the real skill-store connection.
 
     Retries up to 5 seconds at 0.5-second intervals.
     Returns ``True`` if the lock is released, ``False`` if still locked.
     """
-    # T3: prefer LADYBUG_DB_PATH env (container run env sets /app/data/ladybug)
-    env_path = os.environ.get("LADYBUG_DB_PATH")
+    # T3: prefer DUCKDB_PATH env (container run env sets /app/data/agentalloy.duck)
+    env_path = os.environ.get("DUCKDB_PATH")
     if env_path is not None:
-        ladybug_path = Path(env_path)
+        skills_path = Path(env_path)
     else:
-        ladybug_path = install_state.user_data_dir() / "ladybug"
+        skills_path = install_state.corpus_dir() / "agentalloy.duck"
 
-    assert ladybug_path is not None, "ladybug_path must resolve to a non-None Path"  # P10-R5
+    assert skills_path is not None, "skills_path must resolve to a non-None Path"  # P10-R5
+
+    from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
     max_retries = 10  # P10-R2: 10 iterations × 0.5s = 5s max wait
     retry_interval = 0.5
 
     for attempt in range(max_retries):  # P10-R2: bounded = max_retries = 10
-        db: ladybug.Database | None = None  # P10-R9: TYPE_CHECKING-imported annotation
+        store: DuckDBSkillStore | None = None
         try:
-            import ladybug as _ladybug  # runtime import kept inside function per existing pattern
-
-            db = _ladybug.Database(str(ladybug_path))
-            _ladybug.Connection(db)
+            # A read-only open succeeds only when no writer holds the lock.
+            store = open_skill_store(str(skills_path), read_only=True)
             # Success — lock is released.
             return True
         except Exception:
@@ -295,7 +291,7 @@ def test_kuzu_lock_released() -> bool:
                 time.sleep(retry_interval)
         finally:
             # T4: explicitly release file handle before caller opens real connection.
-            if db is not None:
-                del db  # P10-R7: forces CPython refcount drop → lock release
+            if store is not None:
+                store.close()  # P10-R7: drops the read-only handle → lock release
 
     return False

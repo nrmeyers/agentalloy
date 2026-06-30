@@ -3,7 +3,7 @@
 Covers the four guarantees the design requires:
 
 (a) ``prefix`` mode changes the embedded/BM25-indexed text but never the stored
-    fragment ``content`` (LadybugDB) returned by reads;
+    fragment ``content`` (SkillStore / agentalloy.duck) returned by reads;
 (b) cards rank (boost their skill) but never assemble — ``_apply_card_boost``;
 (c) ``off`` mode is a byte-identical no-op vs the pre-Stage-0 index;
 (d) the ``description`` column round-trips through ingest and reads.
@@ -36,12 +36,9 @@ from agentalloy.storage.card_index import (
     is_card_id,
     skill_id_from_card_id,
 )
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import (
-    FragmentEmbedding,
-    VectorStore,
-    open_or_create,
-)
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import FragmentEmbedding
+from agentalloy.storage.skill_store import open_skill_store
 from tests.support import StubLMClient
 
 # --------------------------------------------------------------------------
@@ -82,12 +79,17 @@ def _stub_embed_fn() -> tuple[list[str], object]:
     return captured, embed_fn
 
 
-def _prose_of(vs: VectorStore, fragment_id: str) -> str:
-    row = vs._conn.execute(  # pyright: ignore[reportPrivateUsage]
-        "SELECT prose FROM fragment_embeddings WHERE fragment_id = ?", [fragment_id]
-    ).fetchone()
-    assert row is not None
-    return str(row[0])
+def _prose_of(vs: LanceFragmentStore, fragment_id: str) -> str:
+    safe = fragment_id.replace("'", "''")
+    rows = (
+        vs._table.search()  # pyright: ignore[reportPrivateUsage]
+        .where(f"fragment_id = '{safe}'")
+        .select(["prose"])
+        .limit(1)
+        .to_list()
+    )
+    assert rows
+    return str(rows[0]["prose"])
 
 
 # --------------------------------------------------------------------------
@@ -141,7 +143,7 @@ def test_indexed_text_prefix_prepends_header() -> None:
 
 
 def test_prefix_mode_indexes_header_but_stores_body_unchanged(tmp_path: Path) -> None:
-    vs = open_or_create(tmp_path / "vectors.duck")
+    vs = LanceFragmentStore(tmp_path / "vectors.lance")
     captured, embed_fn = _stub_embed_fn()
     frag = _frag("f1", "BODY TEXT")
 
@@ -162,13 +164,12 @@ def test_prefix_mode_indexes_header_but_stores_body_unchanged(tmp_path: Path) ->
     assert _prose_of(vs, "f1") != frag.content
 
 
-def test_prefix_mode_leaves_ladybug_content_untouched(tmp_path: Path) -> None:
-    """The LadybugDB Fragment.content (source of /compose prose) is never
-    rewritten by card indexing — only the DuckDB indexed representation is."""
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+def test_prefix_mode_leaves_skill_store_content_untouched(tmp_path: Path) -> None:
+    """The SkillStore Fragment.content (source of /compose prose) is never
+    rewritten by card indexing — only the Lance indexed representation is."""
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
+    store.close()
     yaml_file = tmp_path / "domain.yaml"
     yaml_file.write_text(_DOMAIN_YAML)
     with patch("agentalloy.ingest.get_settings", return_value=_FakeSettings(db_path)):
@@ -176,11 +177,14 @@ def test_prefix_mode_leaves_ladybug_content_untouched(tmp_path: Path) -> None:
 
     store.open()
     content = store.scalar(
-        "MATCH (:Skill {skill_id: 'test-domain-skill'})-[:HAS_VERSION]->(v)"
-        "-[:DECOMPOSES_TO]->(f:Fragment {sequence: 1}) RETURN f.content"
+        """
+        SELECT f.content FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'test-domain-skill' AND f.sequence = 1
+        """
     )
     store.close()
-    # The stored content has no card header — prefix mode only touched DuckDB.
+    # The stored content has no card header — prefix mode only touched the Lance index.
     assert content is not None
     assert not str(content).startswith("skill:")
 
@@ -196,7 +200,7 @@ def test_indexed_text_off_is_identity() -> None:
 
 
 def test_off_mode_prose_equals_content(tmp_path: Path) -> None:
-    vs = open_or_create(tmp_path / "vectors.duck")
+    vs = LanceFragmentStore(tmp_path / "vectors.lance")
     captured, embed_fn = _stub_embed_fn()
     frag = _frag("f1", "BODY TEXT")
 
@@ -216,7 +220,7 @@ def test_off_mode_matches_default(tmp_path: Path) -> None:
     """``card_index=OFF`` is the default — explicit OFF == omitting the arg."""
     frag = _frag("f1", "BODY TEXT")
 
-    vs_default = open_or_create(tmp_path / "a.duck")
+    vs_default = LanceFragmentStore(tmp_path / "a.lance")
     _, fn_a = _stub_embed_fn()
     reembed_fragments(
         [frag],
@@ -225,7 +229,7 @@ def test_off_mode_matches_default(tmp_path: Path) -> None:
         embedding_model="stub",  # type: ignore[arg-type]
     )
 
-    vs_off = open_or_create(tmp_path / "b.duck")
+    vs_off = LanceFragmentStore(tmp_path / "b.lance")
     _, fn_b = _stub_embed_fn()
     reembed_fragments(
         [frag],
@@ -292,7 +296,7 @@ def test_card_boost_keeps_real_order_when_card_ranks_low() -> None:
 # --------------------------------------------------------------------------
 
 
-def _insert_card(vs: VectorStore, skill_id: str) -> None:
+def _insert_card(vs: LanceFragmentStore, skill_id: str) -> None:
     stub = StubLMClient()
     vs.insert_embeddings(
         [
@@ -311,7 +315,7 @@ def _insert_card(vs: VectorStore, skill_id: str) -> None:
 
 
 def test_delete_cards_unscoped_drops_all(tmp_path: Path) -> None:
-    vs = open_or_create(tmp_path / "v.duck")
+    vs = LanceFragmentStore(tmp_path / "v.lance")
     _insert_card(vs, "sk-1")
     _insert_card(vs, "sk-2")
     assert vs.count_cards() == 2
@@ -321,7 +325,7 @@ def test_delete_cards_unscoped_drops_all(tmp_path: Path) -> None:
 
 def test_delete_cards_scoped_drops_only_that_skill(tmp_path: Path) -> None:
     """The fix: a skill-scoped rebuild must not wipe other skills' cards."""
-    vs = open_or_create(tmp_path / "v.duck")
+    vs = LanceFragmentStore(tmp_path / "v.lance")
     _insert_card(vs, "sk-1")
     _insert_card(vs, "sk-2")
 
@@ -330,11 +334,14 @@ def test_delete_cards_scoped_drops_only_that_skill(tmp_path: Path) -> None:
     assert dropped == 1
     assert vs.count_cards() == 1
     # sk-2's card survives the scoped delete.
-    row = vs._conn.execute(  # pyright: ignore[reportPrivateUsage]
-        "SELECT skill_id FROM fragment_embeddings WHERE fragment_type = ?",
-        [CARD_FRAGMENT_TYPE],
-    ).fetchone()
-    assert row is not None and row[0] == "sk-2"
+    rows = (
+        vs._table.search()  # pyright: ignore[reportPrivateUsage]
+        .where(f"fragment_type = '{CARD_FRAGMENT_TYPE}'")
+        .select(["skill_id"])
+        .limit(10)
+        .to_list()
+    )
+    assert len(rows) == 1 and rows[0]["skill_id"] == "sk-2"
 
 
 # --------------------------------------------------------------------------
@@ -365,10 +372,8 @@ def test_load_yaml_defaults_description_blank(tmp_path: Path) -> None:
 
 
 def test_description_round_trips_through_ingest(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     yaml_file = tmp_path / "domain.yaml"
@@ -385,10 +390,8 @@ def test_description_round_trips_through_ingest(tmp_path: Path) -> None:
 
 def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
     """No ``description:`` → "" on the record → NULL on insert → None on read."""
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     yaml_file = tmp_path / "domain.yaml"
@@ -410,7 +413,7 @@ def test_blank_description_round_trips_to_none(tmp_path: Path) -> None:
 
 class _FakeSettings:
     def __init__(self, db_path: str) -> None:
-        self.ladybug_db_path = db_path
+        self.duckdb_path = db_path
 
 
 _DOMAIN_YAML = textwrap.dedent("""\

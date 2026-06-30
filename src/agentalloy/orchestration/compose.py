@@ -41,8 +41,7 @@ from agentalloy.retrieval.embedding_errors import (
 )
 from agentalloy.retrieval.system import SystemRetrievalResult, retrieve_system_fragments
 from agentalloy.runtime_state import RuntimeCache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import FragmentStore, SkillStore
 from agentalloy.telemetry import TelemetryRecord, TelemetryWriter
 
 logger = logging.getLogger(__name__)
@@ -75,14 +74,14 @@ class ComposeOrchestrator:
 
     def __init__(
         self,
-        source: RuntimeCache | LadybugStore,
+        source: RuntimeCache | SkillStore,
         lm: EmbedClient,
-        vector_store: VectorStore,
+        vector_store: FragmentStore,
         telemetry: TelemetryWriter,
         *,
         embedding_model: str,
     ) -> None:
-        self._source: RuntimeCache | LadybugStore = source
+        self._source: RuntimeCache | SkillStore = source
         self._lm = lm
         self._vector_store = vector_store
         self._telemetry = telemetry
@@ -227,7 +226,7 @@ class ComposeOrchestrator:
         tokens_returned = len(output) // 4
         # Flat-injection counterfactual: sum of raw_prose for every source skill.
         # Only available when the source is a RuntimeCache (version detail is in
-        # memory).  With a bare LadybugStore we skip the counterfactual (0) to
+        # memory).  With a bare SkillStore we skip the counterfactual (0) to
         # avoid a per-request DB query.
         tokens_flat_equivalent = 0
         # ``_source`` may not be set on test doubles that bypass __init__.

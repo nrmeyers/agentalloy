@@ -16,7 +16,7 @@ from agentalloy.install import state as install_state
 from agentalloy.install.subcommands.install_packs import (
     _bulk_reembed,
     _clear_pending_pack_selection,
-    _ensure_ladybug_schema,
+    _ensure_skill_schema,
     _installed_pack_names,
     _load_pending_pack_selection,
     _reclaim_native_corpus_lock,
@@ -27,7 +27,8 @@ from agentalloy.install.subcommands.install_packs import (
 )
 
 _LOCK_ERR = (
-    "RuntimeError: IO exception: Could not set lock on file ladybug.lock: Lock is held by PID 12345"
+    "RuntimeError: IO exception: Could not set lock on file agentalloy.duck: "
+    "Lock is held by PID 12345"
 )
 
 
@@ -193,21 +194,21 @@ class TestInstalledPackAnnotation:
         assert _installed_pack_names() == {"lang/python", "tool/git"}
 
 
-class TestEnsureLadybugSchema:
+class TestEnsureSkillSchema:
     """Schema guard for issue #84: a wiped-then-recreated corpus can have DB
-    files on disk without the graph schema; install-packs must migrate
+    files on disk without the skill-graph tables; install-packs must migrate
     (idempotently) before ingesting instead of failing every skill with
-    "Table Skill does not exist"."""
+    "Table skills does not exist"."""
 
     def test_runs_migrate_on_store(self, tmp_path: Path) -> None:
         with (
             patch("agentalloy.config.get_settings") as mock_settings,
-            patch("agentalloy.storage.ladybug.LadybugStore") as mock_store_cls,
+            patch("agentalloy.storage.open.open_skills") as mock_open_skills,
         ):
-            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
-            _ensure_ladybug_schema()
-        mock_store_cls.assert_called_once_with(str(tmp_path / "ladybug"))
-        mock_store_cls.return_value.__enter__.return_value.migrate.assert_called_once()
+            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            _ensure_skill_schema()
+        mock_open_skills.assert_called_once()
+        mock_open_skills.return_value.migrate.assert_called_once()
 
     def test_failure_is_nonfatal_and_warns(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -215,12 +216,12 @@ class TestEnsureLadybugSchema:
         with (
             patch("agentalloy.config.get_settings") as mock_settings,
             patch(
-                "agentalloy.storage.ladybug.LadybugStore",
+                "agentalloy.storage.open.open_skills",
                 side_effect=RuntimeError("disk on fire"),
             ),
         ):
-            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
-            _ensure_ladybug_schema()  # must not raise
+            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            _ensure_skill_schema()  # must not raise
         err = capsys.readouterr().err
         assert "could not verify/create corpus graph schema" in err
         assert "disk on fire" in err
@@ -231,15 +232,15 @@ class TestEnsureLadybugSchema:
         with (
             patch("agentalloy.config.get_settings") as mock_settings,
             patch(
-                "agentalloy.storage.ladybug.LadybugStore",
+                "agentalloy.storage.open.open_skills",
                 side_effect=RuntimeError(_LOCK_ERR),
             ),
         ):
-            mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug")
-            _ensure_ladybug_schema()
+            mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
+            _ensure_skill_schema()
         err = capsys.readouterr().err
         assert "Another process holds the corpus DB lock" in err
-        assert "agentalloy server-stop" in err
+        assert "writing agentalloy.duck" in err
 
 
 class TestSummarizeInstallResult:
@@ -318,11 +319,11 @@ class TestBulkReembedLockHint:
 
 class TestIsLockHeldError:
     def test_matches_both_lock_phrases(self) -> None:
-        from agentalloy.storage.ladybug import is_lock_held_error
+        from agentalloy.storage.skill_store import is_lock_held_error
 
-        assert is_lock_held_error("Could not set lock on file /x/ladybug.lock")
-        assert is_lock_held_error("Lock is held by PID 4242")
-        assert not is_lock_held_error("Binder exception: Table Skill does not exist.")
+        assert is_lock_held_error("Could not set lock on file /x/agentalloy.duck")
+        assert is_lock_held_error("IO Error: Conflicting lock is held by another process")
+        assert not is_lock_held_error("Binder exception: Table skills does not exist.")
         assert not is_lock_held_error("")
 
 

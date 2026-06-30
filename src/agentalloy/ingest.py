@@ -1,12 +1,12 @@
-"""Review-gated ingest CLI — loads a review YAML into LadybugDB after human confirmation.
+"""Review-gated ingest CLI — loads a review YAML into the skill store after human confirmation.
 
 Usage::
 
     python -m agentalloy.ingest <review.yaml> [--force] [--yes]
 
 The review YAML is produced by the Skill Authoring Agent. It covers both domain
-and system skills. No live embedder is required; fragment embeddings are initialised to
-zero and can be populated by a separate re-embed pass.
+and system skills. No live embedder is required; the Lance ``fragments`` dataset
+is populated by a separate re-embed pass.
 
 Exit codes
 ----------
@@ -25,7 +25,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -36,7 +36,10 @@ from agentalloy.install.container_service import (
     stop_service_in_container,
 )
 from agentalloy.skill_tier import resolve_skill_tier
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.open import open_skills
+
+if TYPE_CHECKING:
+    from agentalloy.storage.skill_store import DuckDBSkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.ingest",
         description=(
-            "Load review YAML skill(s) into LadybugDB after human confirmation. "
+            "Load review YAML skill(s) into the skill store after human confirmation. "
             "Pass a file path to load a single skill, or a directory to batch-load "
             "all *.yaml files in that directory."
         ),
@@ -274,20 +277,19 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
             return EXIT_VALIDATION
 
     settings = get_settings()
-    store = LadybugStore(settings.ladybug_db_path)
     try:
-        store.open()
+        store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open LadybugDB at '{settings.ladybug_db_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
 
     try:
         existing_name = store.scalar(
-            "MATCH (s:Skill {skill_id: $id}) RETURN s.canonical_name",
-            {"id": record.skill_id},
+            "SELECT canonical_name FROM skills WHERE skill_id = ?",
+            [record.skill_id],
         )
         if existing_name is not None and not force:
             print(
@@ -299,8 +301,8 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
 
         if existing_name is None:
             existing_id_by_name = store.scalar(
-                "MATCH (s:Skill {canonical_name: $name}) RETURN s.skill_id",
-                {"name": record.canonical_name},
+                "SELECT skill_id FROM skills WHERE canonical_name = ?",
+                [record.canonical_name],
             )
             if existing_id_by_name is not None and not force:
                 print(
@@ -323,8 +325,8 @@ def _single(yaml_path: Path, *, force: bool, yes: bool, strict: bool = False) ->
         # --- check superseded_by reference (needs DB access) ---
         if record.superseded_by:
             ref_exists = store.scalar(
-                "MATCH (s:Skill {skill_id: $id}) RETURN s.skill_id",
-                {"id": record.superseded_by},
+                "SELECT skill_id FROM skills WHERE skill_id = ?",
+                [record.superseded_by],
             )
             if ref_exists is None:
                 print(
@@ -425,12 +427,11 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
 
     # --- Phase 3: open DB and check duplicates ---
     settings = get_settings()
-    store = LadybugStore(settings.ladybug_db_path)
     try:
-        store.open()
+        store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open LadybugDB at '{settings.ladybug_db_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
@@ -440,8 +441,8 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
 
     for f, record in parsed:
         existing_name = store.scalar(
-            "MATCH (s:Skill {skill_id: $id}) RETURN s.canonical_name",
-            {"id": record.skill_id},
+            "SELECT canonical_name FROM skills WHERE skill_id = ?",
+            [record.skill_id],
         )
         if existing_name is not None and not force:
             blocked.append(
@@ -451,8 +452,8 @@ def _batch(directory: Path, *, force: bool, yes: bool, strict: bool = False) -> 
 
         if existing_name is None:
             existing_id = store.scalar(
-                "MATCH (s:Skill {canonical_name: $name}) RETURN s.skill_id",
-                {"name": record.canonical_name},
+                "SELECT skill_id FROM skills WHERE canonical_name = ?",
+                [record.canonical_name],
             )
             if existing_id is not None and not force:
                 blocked.append(
@@ -979,8 +980,14 @@ def _print_summary(record: ReviewRecord, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[DeferredEdge]:
-    """Insert a skill (node, version, fragments) and (re)write its graph edges.
+def _insert(store: DuckDBSkillStore, record: ReviewRecord, *, force: bool) -> list[DeferredEdge]:
+    """Insert a skill (row, active version, fragments) and (re)write its edges.
+
+    Produces the same relational graph as ``install.importer.import_skill``: the
+    version is ``status='active'`` with the skill's ``current_version_id``
+    pointing at it (folding the old HAS_VERSION/CURRENT_VERSION edges); system
+    skills get one guardrail fragment from ``raw_prose``, domain skills decompose
+    into their authored ``fragments`` list, and workflow skills carry none.
 
     Returns the list of deferred edges (targets not yet in the graph) for the
     caller's batch-end retry pass. Single-file callers resolve them inline."""
@@ -988,142 +995,79 @@ def _insert(store: LadybugStore, record: ReviewRecord, *, force: bool) -> list[D
     now = datetime.now(tz=UTC)
 
     if force:
-        store.execute(
-            """
-            MATCH (s:Skill {skill_id: $id})
-            OPTIONAL MATCH (s)-[:HAS_VERSION]->(v:SkillVersion)
-            OPTIONAL MATCH (v)-[:DECOMPOSES_TO]->(f:Fragment)
-            DETACH DELETE s, v, f
-            """,
-            {"id": record.skill_id},
-        )
+        # Replaces the old Cypher DETACH DELETE — drops the skill and all its
+        # versions/fragments/deps so a re-ingest is idempotent.
+        store.delete_skill(record.skill_id)
 
     store.execute(
-        """
-        CREATE (:Skill {
-            skill_id: $skill_id,
-            canonical_name: $canonical_name,
-            category: $category,
-            skill_class: $skill_class,
-            domain_tags: $domain_tags,
-            deprecated: $deprecated,
-            superseded_by: $superseded_by,
-            always_apply: $always_apply,
-            phase_scope: $phase_scope,
-            category_scope: $category_scope,
-            tier: $tier,
-            description: $description
-        })
-        """,
-        {
-            "skill_id": record.skill_id,
-            "canonical_name": record.canonical_name,
-            "category": record.category,
-            "skill_class": record.skill_class,
-            "domain_tags": record.domain_tags,
-            "deprecated": record.deprecated,
-            "superseded_by": record.superseded_by or "",
-            "always_apply": record.always_apply,
-            "phase_scope": record.phase_scope,
-            "category_scope": record.category_scope,
-            "tier": record.tier,
+        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
+        "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
+        "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            record.skill_id,
+            record.canonical_name,
+            record.category,
+            record.skill_class,
+            record.domain_tags or [],
+            record.deprecated,
+            record.superseded_by or None,
+            record.always_apply,
+            record.phase_scope or None,
+            record.category_scope or None,
+            record.tier,
             # "" → NULL keeps the column absent-tolerant for blank-description skills.
-            "description": record.description or None,
-        },
+            record.description or None,
+            version_id,
+        ],
     )
 
     store.execute(
-        """
-        CREATE (:SkillVersion {
-            version_id: $version_id,
-            version_number: 1,
-            authored_at: $authored_at,
-            author: $author,
-            change_summary: $change_summary,
-            status: 'active',
-            raw_prose: $raw_prose
-        })
-        """,
-        {
-            "version_id": version_id,
-            "authored_at": now,
-            "author": record.author,
-            "change_summary": record.change_summary,
-            "raw_prose": record.raw_prose,
-        },
-    )
-
-    store.execute(
-        """
-        MATCH (s:Skill {skill_id: $skill_id}), (v:SkillVersion {version_id: $version_id})
-        CREATE (s)-[:HAS_VERSION]->(v)
-        CREATE (s)-[:CURRENT_VERSION]->(v)
-        """,
-        {"skill_id": record.skill_id, "version_id": version_id},
+        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+        "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
+        [
+            version_id,
+            record.skill_id,
+            1,
+            now,
+            record.author,
+            record.change_summary,
+            "active",
+            record.raw_prose,
+        ],
     )
 
     if record.skill_class == "system":
         # System skills decompose to a single guardrail fragment carrying the
         # whole prose; retrieved via the applicability-gated system path.
-        fragment_id = f"{record.skill_id}-v1-f1"
         store.execute(
-            """
-            CREATE (:Fragment {
-                fragment_id: $fragment_id,
-                fragment_type: 'guardrail',
-                sequence: 1,
-                content: $content
-            })
-            """,
-            {
-                "fragment_id": fragment_id,
-                "content": record.raw_prose,
-            },
-        )
-        store.execute(
-            """
-            MATCH (v:SkillVersion {version_id: $version_id}), (f:Fragment {fragment_id: $fragment_id})
-            CREATE (v)-[:DECOMPOSES_TO]->(f)
-            """,
-            {"version_id": version_id, "fragment_id": fragment_id},
+            "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
+            "VALUES (?,?,?,?,?)",
+            [f"{record.skill_id}-v1-f1", version_id, "guardrail", 1, record.raw_prose],
         )
     elif record.skill_class == "domain":
         # Workflow skills (skill_class == "workflow") intentionally fall through
-        # here with no Fragment nodes: their raw_prose is injected by the SDD
+        # here with no fragment rows: their raw_prose is injected by the SDD
         # phase hook, never retrieved, so they carry zero fragments.
         for frag in record.fragments:
-            fragment_id = f"{record.skill_id}-v1-f{frag.sequence}"
             store.execute(
-                """
-                CREATE (:Fragment {
-                    fragment_id: $fragment_id,
-                    fragment_type: $fragment_type,
-                    sequence: $sequence,
-                    content: $content
-                })
-                """,
-                {
-                    "fragment_id": fragment_id,
-                    "fragment_type": frag.fragment_type,
-                    "sequence": frag.sequence,
-                    "content": frag.content,
-                },
-            )
-            store.execute(
-                """
-                MATCH (v:SkillVersion {version_id: $version_id}),
-                      (f:Fragment {fragment_id: $fragment_id})
-                CREATE (v)-[:DECOMPOSES_TO]->(f)
-                """,
-                {"version_id": version_id, "fragment_id": fragment_id},
+                "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, "
+                "content) VALUES (?,?,?,?,?)",
+                [
+                    f"{record.skill_id}-v1-f{frag.sequence}",
+                    version_id,
+                    frag.fragment_type,
+                    frag.sequence,
+                    frag.content,
+                ],
             )
 
     return _write_edges(store, record)
 
 
-# The sole skill-graph edge type. (REFERENCES_CONCEPTUAL / `related` was removed
-# in Stage 3a — it was stored but never consumed at runtime.)
-_REQUIRES_REL = "REQUIRES_COMPOSITIONAL"
+# The sole skill-graph edge type, stored as ``skill_dependencies.rel_type``.
+# (REFERENCES_CONCEPTUAL / `related` was removed in Stage 3a — it was stored but
+# never consumed at runtime.)
+_REQUIRES_REL = "requires"
 
 
 @dataclass
@@ -1141,18 +1085,18 @@ class DeferredEdge:
     field_name: str
 
 
-def _write_edges(store: LadybugStore, record: ReviewRecord) -> list[DeferredEdge]:
+def _write_edges(store: DuckDBSkillStore, record: ReviewRecord) -> list[DeferredEdge]:
     """(Re)write a skill's outgoing ``requires`` edges. Returns deferred (forward-ref) edges.
 
-    Idempotent across re-ingest: the skill's existing REQUIRES_COMPOSITIONAL
-    out-edges are deleted first, so a version bump replaces rather than
-    duplicates them. Targets that do not yet exist in the graph are returned as
-    ``DeferredEdge``s for a batch-end retry pass instead of failing.
+    Idempotent across re-ingest: the skill's existing ``requires`` rows in
+    ``skill_dependencies`` are deleted first, so a version bump replaces rather
+    than duplicates them. Targets that do not yet exist in the graph are returned
+    as ``DeferredEdge``s for a batch-end retry pass instead of failing.
     """
     # Delete this skill's existing outgoing edges so re-ingest is idempotent.
     store.execute(
-        f"MATCH (s:Skill {{skill_id: $id}})-[r:{_REQUIRES_REL}]->() DELETE r",
-        {"id": record.skill_id},
+        "DELETE FROM skill_dependencies WHERE source_skill_id = ? AND rel_type = ?",
+        [record.skill_id, _REQUIRES_REL],
     )
 
     deferred: list[DeferredEdge] = []
@@ -1165,30 +1109,28 @@ def _write_edges(store: LadybugStore, record: ReviewRecord) -> list[DeferredEdge
 
 
 def _create_edge_if_target_exists(
-    store: LadybugStore, source_id: str, target_id: str, rel: str
+    store: DuckDBSkillStore, source_id: str, target_id: str, rel: str
 ) -> bool:
-    """Create one ``(source)-[rel]->(target)`` edge if the target Skill exists.
+    """Insert one ``(source)-[rel]->(target)`` dependency row if the target exists.
 
-    Returns True if the edge was created, False if the target is missing (caller
-    defers it). Assumes the source node already exists (just inserted)."""
+    Returns True if the edge was written, False if the target is missing (caller
+    defers it). Assumes the source skill already exists (just inserted)."""
     exists = store.scalar(
-        "MATCH (t:Skill {skill_id: $tid}) RETURN t.skill_id",
-        {"tid": target_id},
+        "SELECT skill_id FROM skills WHERE skill_id = ?",
+        [target_id],
     )
     if exists is None:
         return False
     store.execute(
-        f"""
-        MATCH (s:Skill {{skill_id: $sid}}), (t:Skill {{skill_id: $tid}})
-        CREATE (s)-[:{rel}]->(t)
-        """,
-        {"sid": source_id, "tid": target_id},
+        "INSERT INTO skill_dependencies (source_skill_id, target_skill_id, rel_type) "
+        "VALUES (?,?,?) ON CONFLICT DO NOTHING",
+        [source_id, target_id, rel],
     )
     return True
 
 
 def _resolve_deferred_edges(
-    store: LadybugStore, deferred: list[DeferredEdge]
+    store: DuckDBSkillStore, deferred: list[DeferredEdge]
 ) -> list[DeferredEdge]:
     """Retry deferred (forward-ref) edges after a full batch insert.
 

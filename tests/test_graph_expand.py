@@ -28,11 +28,9 @@ from agentalloy.retrieval.domain import (
     retrieve_domain_candidates,
 )
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import (
-    VectorStore,
-    open_or_create,
-)
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import FragmentStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from tests.support import StubLMClient
 
 # --------------------------------------------------------------------------
@@ -203,20 +201,18 @@ def test_only_top_three_skills_expanded() -> None:
 
 
 @pytest.fixture
-def populated(corpus_dir: Path) -> LadybugStore:
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
-    return s
+def populated(corpus_dir: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
 
 @pytest.fixture
-def vectors(corpus_dir: Path) -> VectorStore:
-    """Pre-embedded DuckDB vector store from the shared corpus template
+def vectors(corpus_dir: Path) -> FragmentStore:
+    """Pre-embedded Lance fragment store from the shared corpus template
     (StubLMClient vectors + rebuilt FTS index)."""
-    return open_or_create(corpus_dir / "skills.duck")
+    return LanceFragmentStore(corpus_dir / "fragments.lance")
 
 
-def _retrieve(cache: RuntimeCache, vectors: VectorStore) -> list[str]:
+def _retrieve(cache: RuntimeCache, vectors: FragmentStore) -> list[str]:
     result = retrieve_domain_candidates(
         cache,
         StubLMClient(),
@@ -231,7 +227,7 @@ def _retrieve(cache: RuntimeCache, vectors: VectorStore) -> list[str]:
 
 
 def test_flag_off_is_byte_identical(
-    populated: LadybugStore, vectors: VectorStore, monkeypatch: pytest.MonkeyPatch
+    populated: DuckDBSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """RETRIEVAL_GRAPH_EXPAND unset/off → identical candidate ids to a corpus
     that has graph edges but the flag disabled (same guarantee as card-index
@@ -258,7 +254,7 @@ def test_flag_off_is_byte_identical(
 
 
 def test_flag_on_appends_required_without_displacing(
-    populated: LadybugStore, vectors: VectorStore, monkeypatch: pytest.MonkeyPatch
+    populated: DuckDBSkillStore, vectors: FragmentStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache = load_runtime_cache(populated)
     # Find a real top-ranked skill, then declare it requires a skill that is

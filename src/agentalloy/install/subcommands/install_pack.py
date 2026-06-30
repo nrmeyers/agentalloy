@@ -45,16 +45,20 @@ from agentalloy.pack_validation import (
     content_hash,
     validate_pack_skills,
 )
-from agentalloy.storage.ladybug import (
-    LOCK_HELD_REMEDIATION,
-    LadybugStore,
-    is_lock_held_error,
-)
+from agentalloy.storage.open import open_fragments, open_skills
+from agentalloy.storage.skill_store import is_lock_held_error
 
 logger = __import__("logging").getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
+
+# Shown when the skill store's single writer lock is held by a concurrent writer.
+# In v6 this is benign and transient — wait and retry. Imported by install_packs.
+LOCK_HELD_REMEDIATION = (
+    "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
+    "writing agentalloy.duck). Wait for it to finish and re-run the command."
+)
 
 # Hardcoded URL pattern. The placeholder org is ``navistone``; this lands
 # in the manifest URL ``…/skill-pack-{name}/releases/latest/download/manifest.json``.
@@ -172,46 +176,47 @@ def _is_deprecated(yaml_path: Path) -> tuple[bool, str, str]:
 
 
 def _propagate_deprecation(skill_id: str, superseded_by: str) -> str:
-    """Back-propagate a deprecation to an already-ingested Skill node.
+    """Back-propagate a deprecation to an already-ingested skill row.
 
     When a skill YAML is marked ``deprecated: true`` but its ``skill_id`` was
-    ingested into LadybugDB by a prior install, the existing Skill node still
-    carries ``deprecated = false`` and keeps being served by retrieval / ambient
-    injection (active reads filter ``s.deprecated = false``). Setting the flag is
-    the only thing needed to retire it.
+    ingested into the skill store by a prior install, the existing skill row
+    still carries ``deprecated = false`` and keeps being served by retrieval /
+    ambient injection (active reads filter ``s.deprecated = false``). Setting the
+    flag is the only thing needed to retire it.
 
     Returns one of:
-      - "deprecated_updated" — node existed and was updated (deprecated=true,
+      - "deprecated_updated" — the skill existed and was updated (deprecated=true,
         superseded_by set).
-      - "deprecated" — node was not in the graph; nothing to update (skip).
+      - "deprecated" — the skill was not in the store; nothing to update (skip).
       - "deprecated" — the DB lock was held (warned to stderr, install continues).
 
     A lock failure must NOT crash the install; we warn with the FIX hint and
-    treat it as a plain skip, mirroring ``_ensure_ladybug_schema()``.
+    treat it as a plain skip, mirroring ``_ensure_skill_schema()``.
     """
     if not skill_id:
         return "deprecated"
     from agentalloy.config import get_settings
 
+    store = None
     try:
         settings = get_settings()
-        with LadybugStore(settings.ladybug_db_path) as store:
-            exists = store.scalar(
-                "MATCH (s:Skill {skill_id: $sid}) RETURN count(s)",
-                {"sid": skill_id},
-            )
-            if not exists:
-                return "deprecated"
-            store.execute(
-                "MATCH (s:Skill {skill_id: $sid}) SET s.deprecated = true, s.superseded_by = $sup",
-                {"sid": skill_id, "sup": superseded_by},
-            )
-            logger.info(
-                "deprecation propagated: skill %s marked deprecated (superseded_by=%r)",
-                skill_id,
-                superseded_by,
-            )
-            return "deprecated_updated"
+        store = open_skills(settings, read_only=False)
+        exists = store.scalar(
+            "SELECT count(*) FROM skills WHERE skill_id = ?",
+            [skill_id],
+        )
+        if not exists:
+            return "deprecated"
+        store.execute(
+            "UPDATE skills SET deprecated = true, superseded_by = ? WHERE skill_id = ?",
+            [superseded_by, skill_id],
+        )
+        logger.info(
+            "deprecation propagated: skill %s marked deprecated (superseded_by=%r)",
+            skill_id,
+            superseded_by,
+        )
+        return "deprecated_updated"
     except Exception as exc:  # noqa: BLE001 — best-effort; lock-held must not crash install
         print(
             f"WARN: could not propagate deprecation for skill '{skill_id}': {exc}",
@@ -220,6 +225,9 @@ def _propagate_deprecation(skill_id: str, superseded_by: str) -> str:
         if is_lock_held_error(str(exc)):
             print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
         return "deprecated"
+    finally:
+        if store is not None:
+            store.close()
 
 
 def _ingest_yaml(
@@ -237,10 +245,10 @@ def _ingest_yaml(
                                  treated as a benign skip, not a failure.
       - outcome "deprecated"  → skill is marked deprecated and was NOT previously
                                  ingested; skipped (nothing in the graph to retire).
-      - outcome "deprecated_updated" → skill is marked deprecated AND its node
-                                 already existed in LadybugDB; the node was updated
-                                 (deprecated=true, superseded_by set) so retrieval /
-                                 ambient injection stops serving it.
+      - outcome "deprecated_updated" → skill is marked deprecated AND its row
+                                 already existed in the skill store; the row was
+                                 updated (deprecated=true, superseded_by set) so
+                                 retrieval / ambient injection stops serving it.
       - other non-zero        → real failure (parse, validation, DB error).
 
     ``no_restart`` is passed as ``--no-restart`` to the ingest subprocess when
@@ -248,7 +256,7 @@ def _ingest_yaml(
     if a future caller adds ``env={}`` to subprocess.run(), the flag still fires.
 
     ``force`` passes ``--force`` so ingest overwrites an existing skill_id
-    (DETACH-DELETE the old node/version/fragments, then re-create) instead of
+    (deletes the old skill/version/fragments, then re-creates) instead of
     returning ``EXIT_DUPLICATE``. Used for version-bump upgrades, where the
     skill already exists but its content changed — without it the rewrite is
     silently skipped and the corpus keeps serving the stale prose.
@@ -317,27 +325,28 @@ def _ingest_yaml(
     }
 
 
-def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]], duck_path: Path) -> int:
-    """Delete DuckDB vectors for a pack's skills so the next reembed re-creates them.
+def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]]) -> int:
+    """Delete Lance vectors for a pack's skills so the next reembed re-creates them.
 
-    Needed after a force re-ingest on a version bump: the graph nodes are rewritten
+    Needed after a force re-ingest on a version bump: the skill rows are rewritten
     but their fragment_ids are positionally stable, so a non-force reembed would
     skip them as already-embedded. Dropping the rows here makes the reembed treat
     them as missing and re-embed from the refreshed prose.
 
-    Best-effort: a held DuckDB lock (service still running) or any store error is
-    logged and swallowed — the caller's reembed and `agentalloy reembed --force`
-    remain the backstop. Returns the number of embedding rows deleted.
+    Best-effort: any store error is logged and swallowed — the caller's reembed
+    and `agentalloy reembed --force` remain the backstop. Returns the number of
+    embedding rows deleted.
     """
-    from agentalloy.storage.vector_store import open_or_create
+    from agentalloy.config import get_settings
 
     deleted = 0
+    vs = None
     try:
-        with open_or_create(duck_path) as vs:
-            for entry in skills_entries:
-                sid = str(entry.get("skill_id", ""))
-                if sid:
-                    deleted += vs.delete_skill(sid)
+        vs = open_fragments(get_settings())
+        for entry in skills_entries:
+            sid = str(entry.get("skill_id", ""))
+            if sid:
+                deleted += vs.delete_skill(sid)
     except Exception as exc:  # noqa: BLE001 — invalidation is best-effort; reembed is the backstop
         logger.warning(
             "could not invalidate pack vectors (run `agentalloy reembed --force` "
@@ -345,6 +354,9 @@ def _invalidate_pack_vectors(skills_entries: list[dict[str, Any]], duck_path: Pa
             exc,
         )
         return 0
+    finally:
+        if vs is not None:
+            vs.close()
     if deleted:
         logger.info("invalidated %d stale embedding(s) for version-bumped pack", deleted)
     return deleted
@@ -493,41 +505,44 @@ def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
     pack_model = manifest.get("embed_model")
     if not isinstance(pack_dim, int):
         return None  # nothing to check against; let ingest decide
+    vs = None
     try:
         from agentalloy.config import get_settings
-        from agentalloy.storage.vector_store import open_or_create
 
         settings = get_settings()
-        with open_or_create(settings.duckdb_path) as vs:
-            current_dim = vs.embedding_dim()
-            if current_dim is None:
-                return None  # corpus is empty; pack defines the dim
-            if current_dim != pack_dim:
-                return (
-                    f"embedding dimension mismatch: pack expects {pack_dim}-dim "
-                    f"but corpus is {current_dim}-dim. Re-embed with a matching "
-                    f"model or pick a pack with embedding_dim={current_dim}."
-                )
-            # Dims match. Soft-warn only on a GENUINE model mismatch. The pack
-            # records the bare model name while the runtime records the GGUF
-            # filename, so compare on canonical identity (quant + .gguf stripped)
-            # to avoid a false positive between e.g. `nomic-embed-text-v1.5` and
-            # `nomic-embed-text-v1.5.Q8_0.gguf`.
-            current_model = settings.runtime_embedding_model
-            if (
-                pack_model
-                and current_model
-                and _canonical_model_name(pack_model) != _canonical_model_name(current_model)
-            ):
-                print(
-                    f"WARN: pack was authored with embed_model='{pack_model}' "
-                    f"but the running corpus uses '{current_model}'. The pack "
-                    f"will install (dimensions match), but vector retrieval "
-                    f"quality may be reduced for these skills.",
-                    file=sys.stderr,
-                )
+        vs = open_fragments(settings)
+        current_dim = vs.embedding_dim()
+        if current_dim is None:
+            return None  # corpus is empty; pack defines the dim
+        if current_dim != pack_dim:
+            return (
+                f"embedding dimension mismatch: pack expects {pack_dim}-dim "
+                f"but corpus is {current_dim}-dim. Re-embed with a matching "
+                f"model or pick a pack with embedding_dim={current_dim}."
+            )
+        # Dims match. Soft-warn only on a GENUINE model mismatch. The pack
+        # records the bare model name while the runtime records the GGUF
+        # filename, so compare on canonical identity (quant + .gguf stripped)
+        # to avoid a false positive between e.g. `nomic-embed-text-v1.5` and
+        # `nomic-embed-text-v1.5.Q8_0.gguf`.
+        current_model = settings.runtime_embedding_model
+        if (
+            pack_model
+            and current_model
+            and _canonical_model_name(pack_model) != _canonical_model_name(current_model)
+        ):
+            print(
+                f"WARN: pack was authored with embed_model='{pack_model}' "
+                f"but the running corpus uses '{current_model}'. The pack "
+                f"will install (dimensions match), but vector retrieval "
+                f"quality may be reduced for these skills.",
+                file=sys.stderr,
+            )
     except Exception:  # noqa: BLE001 — best-effort; let downstream surface real failures
         return None
+    finally:
+        if vs is not None:
+            vs.close()
     return None
 
 
@@ -685,9 +700,8 @@ def install_local_pack(
         if ingested_skill_ids:
             try:
                 settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
-                store = LadybugStore(settings.ladybug_db_path)
+                store = open_skills(settings, read_only=False)
                 try:
-                    store.open()
                     for sid in ingested_skill_ids:
                         if sid:
                             store.delete_skill(sid)
@@ -726,24 +740,23 @@ def install_local_pack(
     # Verify corpus files were actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
-    # Verify the same paths the ingest actually wrote to — settings honor the
-    # DUCKDB_PATH / LADYBUG_DB_PATH env overrides (e.g. the container points them
-    # at /app/data). corpus_dir() is the XDG/profile default and diverges from
-    # those overrides, so it must not be used for verification.
+    # Verify the same path the ingest actually wrote to — settings honor the
+    # DUCKDB_PATH env override (e.g. the container points it at /app/data).
+    # corpus_dir() is the XDG/profile default and diverges from that override,
+    # so it must not be used for verification. ingest writes the skill store
+    # (agentalloy.duck); the Lance fragments dataset is built later by reembed.
     from agentalloy.config import get_settings
 
     _settings = get_settings()
     duck_path = Path(_settings.duckdb_path)
-    ladybug_path = Path(_settings.ladybug_db_path)
-    if not duck_path.exists() or not ladybug_path.exists():
+    if not duck_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "corpus_verification_failed",
             "pack": name,
             "pack_dir": str(pack_dir),
             "error": (
-                f"Corpus files missing after ingest: "
-                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+                f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"
             ),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "
@@ -752,14 +765,14 @@ def install_local_pack(
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
 
-    # Version-bump upgrade: the force re-ingest above rewrote each skill's graph
-    # node, but DuckDB vectors are keyed by positionally-stable fragment_ids
+    # Version-bump upgrade: the force re-ingest above rewrote each skill's rows,
+    # but Lance vectors are keyed by positionally-stable fragment_ids
     # ({skill_id}-v1-f{seq}), so the downstream non-force bulk reembed treats them
     # as already-present and skips them, leaving stale embeddings. Drop the pack's
     # vectors here so the reembed re-creates them from the new prose. (Workflow
     # skills carry no vectors, so this is a harmless no-op for them.)
     if force_reingest:
-        _invalidate_pack_vectors(skills_entries, duck_path)
+        _invalidate_pack_vectors(skills_entries)
 
     packs.append(
         {
@@ -1003,9 +1016,8 @@ def install_pack(
         if ingested_skill_ids:
             try:
                 settings = __import__("agentalloy.config", fromlist=["get_settings"]).get_settings()
-                store = LadybugStore(settings.ladybug_db_path)
+                store = open_skills(settings, read_only=False)
                 try:
-                    store.open()
                     for sid in ingested_skill_ids:
                         if sid:
                             store.delete_skill(sid)
@@ -1050,24 +1062,23 @@ def install_pack(
     # 5. Verify corpus files were actually created (Pattern E fix).
     # Must happen BEFORE saving install state so partial installs don't
     # leave the pack recorded as installed.
-    # Verify the same paths the ingest actually wrote to — settings honor the
-    # DUCKDB_PATH / LADYBUG_DB_PATH env overrides (e.g. the container points them
-    # at /app/data). corpus_dir() is the XDG/profile default and diverges from
-    # those overrides, so it must not be used for verification.
+    # Verify the same path the ingest actually wrote to — settings honor the
+    # DUCKDB_PATH env override (e.g. the container points it at /app/data).
+    # corpus_dir() is the XDG/profile default and diverges from that override,
+    # so it must not be used for verification. ingest writes the skill store
+    # (agentalloy.duck); the Lance fragments dataset is built later by reembed.
     from agentalloy.config import get_settings
 
     _settings = get_settings()
     duck_path = Path(_settings.duckdb_path)
-    ladybug_path = Path(_settings.ladybug_db_path)
-    if not duck_path.exists() or not ladybug_path.exists():
+    if not duck_path.exists():
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "corpus_verification_failed",
             "pack": name,
             "manifest_url": url,
             "error": (
-                f"Corpus files missing after ingest: "
-                f"skills.duck={duck_path.exists()}, ladybug={ladybug_path.exists()}"
+                f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"
             ),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "

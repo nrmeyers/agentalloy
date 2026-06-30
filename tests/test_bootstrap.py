@@ -1,6 +1,6 @@
 """Unit tests for the bootstrap CLI.
 
-All tests use a tmp_path LadybugStore so no live Ollama is needed.
+All tests use a tmp_path DuckDB skill store so no live Ollama is needed.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from agentalloy.bootstrap import EXIT_OK, EXIT_USAGE, EXIT_VALIDATION, main
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 _SAMPLE_MD = textwrap.dedent("""\
     # Sample Governance Rule
@@ -49,25 +49,20 @@ def md_file(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def seeded_db(tmp_path: Path) -> LadybugStore:
-    store = LadybugStore(str(tmp_path / "ladybug"))
-    store.open()
-    store.migrate()
-    return store
+def seeded_db(tmp_path: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(tmp_path / "agentalloy.duck"))
 
 
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
-        ladybug_db_path = db_path
+        duckdb_path = db_path
 
     return FakeSettings()
 
 
 def test_insert_new_skill(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -76,49 +71,47 @@ def test_insert_new_skill(tmp_path: Path, md_file: Path) -> None:
     assert code == EXIT_OK
 
     store.open()
-    name = store.scalar("MATCH (s:Skill {skill_id: 'sys-sample'}) RETURN s.canonical_name")
+    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'sys-sample'")
     assert name == "Sample Governance Rule"
 
     version_count = store.scalar(
-        "MATCH (:Skill {skill_id: 'sys-sample'})-[:HAS_VERSION]->(v) RETURN count(v)"
+        "SELECT count(*) FROM skill_versions WHERE skill_id = 'sys-sample'"
     )
     assert version_count == 1
 
     fragment_count = store.scalar(
         """
-        MATCH (:Skill {skill_id: 'sys-sample'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
-        RETURN count(f)
+        SELECT count(*) FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'sys-sample'
         """
     )
     assert fragment_count == 1
 
     current = store.scalar(
-        "MATCH (:Skill {skill_id: 'sys-sample'})-[:CURRENT_VERSION]->(v) RETURN v.version_id"
+        "SELECT current_version_id FROM skills WHERE skill_id = 'sys-sample'"
     )
     assert current == "sys-sample-v1"
     store.close()
 
 
 def test_init_schema_flag(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "ladybug_new")
+    db_path = str(tmp_path / "agentalloy_new.duck")
     # DB doesn't exist yet — --init-schema must create schema first
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
         code = main([str(md_file), "--init-schema", "--yes"])
 
     assert code == EXIT_OK
 
-    store = LadybugStore(db_path)
-    store.open()
-    count = store.scalar("MATCH (s:Skill) RETURN count(s)")
+    store = open_skill_store(db_path, read_only=True)
+    count = store.scalar("SELECT count(*) FROM skills")
     assert count == 1
     store.close()
 
 
 def test_duplicate_without_force_fails(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -129,10 +122,8 @@ def test_duplicate_without_force_fails(tmp_path: Path, md_file: Path) -> None:
 
 
 def test_force_overwrites(tmp_path: Path, md_file: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     with patch("agentalloy.bootstrap.get_settings", return_value=_make_settings(db_path)):
@@ -142,7 +133,7 @@ def test_force_overwrites(tmp_path: Path, md_file: Path) -> None:
     assert code == EXIT_OK
 
     store.open()
-    count = store.scalar("MATCH (s:Skill {skill_id: 'sys-sample'}) RETURN count(s)")
+    count = store.scalar("SELECT count(*) FROM skills WHERE skill_id = 'sys-sample'")
     assert count == 1
     store.close()
 
@@ -160,10 +151,8 @@ def test_invalid_markdown_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_non_sys_prefix_returns_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad_id = tmp_path / "bad_id.md"
@@ -185,10 +174,8 @@ def test_non_sys_prefix_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     md = tmp_path / "phase.md"
@@ -201,7 +188,7 @@ def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
 
     store.open()
     row = store.execute(
-        "MATCH (s:Skill {skill_id: 'sys-build-rule'}) RETURN s.always_apply, s.phase_scope"
+        "SELECT always_apply, phase_scope FROM skills WHERE skill_id = 'sys-build-rule'"
     )
     assert row[0][0] is False
     assert "build" in row[0][1]
@@ -211,10 +198,8 @@ def test_phase_scoped_skill_inserted(tmp_path: Path) -> None:
 def test_sdd_fast_phase_scope_is_valid(tmp_path: Path) -> None:
     """sys skills can scope to the fast-lane phase — `sdd-fast` is in the
     canonical lifecycle vocabulary, not rejected as unknown."""
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     md = tmp_path / "fast.md"
@@ -239,16 +224,14 @@ def test_sdd_fast_phase_scope_is_valid(tmp_path: Path) -> None:
 
     assert code == EXIT_OK
     store.open()
-    row = store.execute("MATCH (s:Skill {skill_id: 'sys-fast-rule'}) RETURN s.phase_scope")
+    row = store.execute("SELECT phase_scope FROM skills WHERE skill_id = 'sys-fast-rule'")
     assert "sdd-fast" in row[0][0]
     store.close()
 
 
 def test_always_apply_with_phase_scope_is_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad = tmp_path / "conflict.md"
@@ -272,10 +255,8 @@ def test_always_apply_with_phase_scope_is_validation_error(tmp_path: Path) -> No
 
 
 def test_canonical_name_collision_without_force_fails(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     skill_a = tmp_path / "skill_a.md"
@@ -311,10 +292,8 @@ def test_canonical_name_collision_without_force_fails(tmp_path: Path) -> None:
 
 
 def test_invalid_category_returns_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     bad = tmp_path / "bad_cat.md"
@@ -337,10 +316,8 @@ def test_invalid_category_returns_validation_error(tmp_path: Path) -> None:
 
 
 def test_empty_prose_is_validation_error(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "ladybug")
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    db_path = str(tmp_path / "agentalloy.duck")
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
 
     empty = tmp_path / "empty.md"

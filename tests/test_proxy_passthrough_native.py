@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -25,7 +26,7 @@ from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.app import create_app
 from agentalloy.orchestration.compose import ComposeOrchestrator
-from agentalloy.storage.vector_store import VectorStore, open_or_create
+from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 
 _SIGNAL = "agentalloy.api.proxy_passthrough_router.evaluate_signal"
 
@@ -84,7 +85,9 @@ def _make_app(
         client=_make_upstream(captured, sse=sse, status=status),
     )
     app.state.embed_client = MagicMock()
-    app.state.vector_store = MagicMock()
+    # The proxy trace sink: get_vector_store resolves app.state.telemetry_store
+    # (a TelemetryStore on telemetry.duck) in v6.
+    app.state.telemetry_store = MagicMock()
     if orchestrator is not None:
         from agentalloy.api.compose_router import get_orchestrator
 
@@ -94,15 +97,15 @@ def _make_app(
 
 def _make_app_with_store(
     captured: dict[str, Any],
-    store: VectorStore,
+    store: DuckDBTelemetryStore,
     *,
     orchestrator: ComposeOrchestrator | None = None,
     sse: bytes | None = None,
     status: int = 200,
 ) -> Any:
-    """Like ``_make_app`` but with a real VectorStore wired in for telemetry asserts."""
+    """Like ``_make_app`` but with a real TelemetryStore wired in for telemetry asserts."""
     app = _make_app(captured, orchestrator=orchestrator, sse=sse, status=status)
-    app.state.vector_store = store
+    app.state.telemetry_store = store
     return app
 
 
@@ -532,7 +535,7 @@ def test_tc_passthrough_writes_single_passthrough_row(tmp_path: Path) -> None:
         session_source="header",
         task="the real task",
     )
-    with open_or_create(tmp_path / "tele.duck") as store:
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(captured, store)
         with patch(_SIGNAL, return_value=signal), TestClient(app) as client:
             resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
@@ -551,7 +554,7 @@ def test_tc_passthrough_writes_single_passthrough_row(tmp_path: Path) -> None:
 
 def test_tc_composed_writes_composed_row_with_skills(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    with open_or_create(tmp_path / "tele.duck") as store:
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
         with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
             resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
@@ -566,7 +569,7 @@ def test_tc_composed_writes_composed_row_with_skills(tmp_path: Path) -> None:
 
 def test_tc_streaming_writes_exactly_one_row(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    with open_or_create(tmp_path / "tele.duck") as store:
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(
             captured, store, orchestrator=_orchestrator("WF"), sse=b"data: {}\n\n"
         )
@@ -582,7 +585,7 @@ def test_tc_streaming_writes_exactly_one_row(tmp_path: Path) -> None:
 
 def test_tc_non2xx_writes_no_row(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    with open_or_create(tmp_path / "tele.duck") as store:
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"), status=529)
         with patch(_SIGNAL, return_value=_composed_signal(tmp_path)), TestClient(app) as client:
             resp = client.post(f"/proj/{_token(tmp_path)}/v1/messages", json=_anthropic_body())
@@ -593,7 +596,7 @@ def test_tc_non2xx_writes_no_row(tmp_path: Path) -> None:
 
 def test_tc_compose_exception_still_forwards_no_row(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    with open_or_create(tmp_path / "tele.duck") as store:
+    with closing(open_telemetry_store(tmp_path / "tele.duck")) as store:
         app = _make_app_with_store(captured, store, orchestrator=_orchestrator("WF"))
         with (
             patch(_SIGNAL, side_effect=RuntimeError("signal boom")),

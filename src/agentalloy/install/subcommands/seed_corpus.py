@@ -1,9 +1,11 @@
 # pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportAttributeAccessIssue=false, reportArgumentType=false
 """``seed-corpus`` subcommand â€” presence + integrity check.
 
-The corpus ships in the repo at ``data/skills.duck`` and ``data/ladybug``.
-This subcommand verifies both files exist, the schema version matches,
-and the skill count meets the minimum threshold. No network calls.
+The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`` as the
+v6 two-engine store: ``agentalloy.duck`` (skill graph + corpus_meta),
+``fragments.lance`` (vector + BM25 index), and ``telemetry.duck``. This
+subcommand verifies the skill store exists, the schema version matches, and the
+skill count meets the minimum threshold. No network calls.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from agentalloy.config import Settings, get_settings
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 from agentalloy.storage.card_index import CORPUS_SCHEMA_VERSION
@@ -30,104 +33,98 @@ MIN_SKILL_COUNT = 25
 
 
 def corpus_skill_count() -> int:
-    """Embedded-skill count in the user corpus; 0 if absent/empty/unreadable.
+    """Skill count in the user corpus; 0 if absent/empty/unreadable.
 
     Shared post-install/upgrade guard seam: callers compare against
     ``MIN_SKILL_COUNT`` to catch a silent half-install (install-packs reports
     success but the corpus never populated). Never raises.
     """
-    corpus = install_state.corpus_dir()
-    duck_path = corpus / "skills.duck"
-    ladybug_path = corpus / "ladybug"
-    if not (duck_path.exists() and ladybug_path.exists()):
+    settings = get_settings()
+    if not Path(settings.duckdb_path).exists():
         return 0
     try:
-        return int(_check_duckdb(duck_path).get("skill_count") or 0)
+        return int(_check_skill_store(settings).get("skill_count") or 0)
     except Exception:
         return 0
 
 
-def _check_duckdb(duck_path: Path) -> dict[str, Any]:
-    """Query DuckDB for skill/fragment counts, embedding metadata, and embedded
-    schema_version (if the ``corpus_meta`` table is present).
+def _check_skill_store(settings: Settings) -> dict[str, Any]:
+    """Read skill/fragment counts + recorded schema_version from ``agentalloy.duck``.
 
     Returns ``corpus_schema_version_recorded=None`` if the corpus pre-dates the
-    metadata table (callers treat this as "implicit v1" with a soft warning).
+    metadata kv (callers treat this as "implicit v1" with a soft warning).
     """
-    import duckdb
+    from agentalloy.storage.open import open_skills
 
-    con = duckdb.connect(str(duck_path), read_only=True)
+    store = open_skills(settings, read_only=True)
     try:
-        frag_count = con.execute("SELECT count(*) FROM fragment_embeddings").fetchone()[0]  # type: ignore[index]
-        skill_count = con.execute(
-            "SELECT count(DISTINCT skill_id) FROM fragment_embeddings"
-        ).fetchone()[0]  # type: ignore[index]
-        emb_model_row = con.execute(
-            "SELECT DISTINCT embedding_model FROM fragment_embeddings LIMIT 1"
-        ).fetchone()
-        embedding_model = emb_model_row[0] if emb_model_row else None  # type: ignore[index]
-        # Probe embedding dimension from first row
-        dim_row = con.execute(
-            "SELECT array_length(embedding) FROM fragment_embeddings LIMIT 1"
-        ).fetchone()
-        embedding_dim = dim_row[0] if dim_row else None  # type: ignore[index]
-
-        # Read schema_version from corpus_meta table if it exists.
-        # The marker is stamped by the embed pass; corpora built before this
-        # was added will not have the row â€” that's treated as "unrecorded".
-        recorded_version: int | None = None
         try:
-            row = con.execute(
-                "SELECT value FROM corpus_meta WHERE key = 'schema_version' LIMIT 1"
-            ).fetchone()
-            if row and row[0] is not None:
-                recorded_version = int(row[0])  # type: ignore[index]
-        except duckdb.CatalogException:
-            recorded_version = None
+            skill_count = int(
+                store.scalar("SELECT count(*) FROM skills WHERE deprecated = false") or 0
+            )
+            frag_count = int(store.scalar("SELECT count(*) FROM fragments") or 0)
+        except Exception:
+            skill_count = 0
+            frag_count = 0
+        recorded_raw = store.get_meta("schema_version")
     finally:
-        con.close()
+        store.close()
+
+    recorded_version: int | None = None
+    if recorded_raw is not None:
+        try:
+            recorded_version = int(recorded_raw)
+        except (TypeError, ValueError):
+            recorded_version = None
 
     return {
         "skill_count": skill_count,
         "fragment_count": frag_count,
-        "embedding_model": embedding_model,
-        "embedding_dim": embedding_dim,
         "corpus_schema_version_recorded": recorded_version,
     }
 
 
-def _check_ladybug(ladybug_path: Path) -> int:
-    """Query LadybugDB for skill count."""
-    import ladybug
+def _embedding_meta(settings: Settings) -> dict[str, Any]:
+    """Best-effort embedding metadata from the Lance fragment store.
 
-    db = ladybug.Database(str(ladybug_path))
-    conn = ladybug.Connection(db)
-    result = conn.execute("MATCH (s:Skill) RETURN count(s) AS c")
-    count = 0
-    if result.has_next():
-        count = result.get_next()[0]
-    return count
-
-
-def _initialize_empty_corpus(user_corpus: Path) -> None:
-    """Initialize LadybugDB schema + DuckDB stores in an empty corpus dir.
-
-    LadybugDB requires explicit ``migrate()`` to create the Skill /
-    SkillVersion / Fragment node tables and edge tables. Without this
-    step, ``ingest`` fails with "Table Skill does not exist". DuckDB
-    schemas are created automatically by ``open_or_create``.
+    ``embedding_dim`` is row-count gated (None on an empty dataset);
+    ``embedding_model`` falls back to the configured runtime model since the
+    Lance store exposes no public per-row model accessor.
     """
-    user_corpus.mkdir(parents=True, exist_ok=True)
-    duck_path = user_corpus / "skills.duck"
-    ladybug_path = user_corpus / "ladybug"
+    from agentalloy.storage.open import open_fragments
 
-    from agentalloy.storage.ladybug import LadybugStore
-    from agentalloy.storage.vector_store import open_or_create
-
-    with LadybugStore(str(ladybug_path)) as store:
-        store.migrate()
-    with open_or_create(duck_path) as _:
+    embedding_dim: int | None = None
+    embedding_model: str | None = None
+    try:
+        vs = open_fragments(settings)
+        try:
+            embedding_dim = vs.embedding_dim()
+            if embedding_dim is not None:
+                embedding_model = settings.runtime_embedding_model
+        finally:
+            vs.close()
+    except Exception:
         pass
+    return {"embedding_dim": embedding_dim, "embedding_model": embedding_model}
+
+
+def _initialize_empty_corpus(settings: Settings) -> None:
+    """Initialize the three v6 stores in an empty corpus dir.
+
+    Writer-mode opens create the file and run the (idempotent) schema migration,
+    so the subsequent ``install-packs`` step has tables to write into. The Lance
+    dataset and telemetry DB are created on first open.
+    """
+    from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
+
+    settings.ensure_data_dirs()
+    skills = open_skills(settings, read_only=False)
+    try:
+        skills.migrate()
+    finally:
+        skills.close()
+    open_fragments(settings).close()
+    open_telemetry(settings, read_only=False).close()
 
 
 def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€” back-compat
@@ -135,22 +132,21 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
 
     The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/``
     (user-scoped). The wheel no longer ships a pre-built corpus; this step
-    initializes an empty corpus (LadybugDB + DuckDB) so the subsequent
-    ``install-packs`` step can populate it from chosen packs.
+    initializes an empty corpus (skill store + Lance + telemetry) so the
+    subsequent ``install-packs`` step can populate it from chosen packs.
     """
     t0 = time.monotonic()
 
-    user_corpus, was_seeded = install_state.ensure_corpus_seeded()
+    settings = get_settings()
+    user_corpus, _was_seeded = install_state.ensure_corpus_seeded()
+    duck_path = Path(settings.duckdb_path)
 
-    duck_path = user_corpus / "skills.duck"
-    ladybug_path = user_corpus / "ladybug"
-
-    # New flow: if the bundled corpus is empty (post-pack-refactor wheels),
+    # New flow: if the skill store is absent (post-pack-refactor wheels),
     # initialize empty stores. Don't return missing_files â€” that's the old
     # behavior from when the wheel shipped a populated corpus.
-    if not duck_path.exists() or not ladybug_path.exists():
+    if not duck_path.exists():
         try:
-            _initialize_empty_corpus(user_corpus)
+            _initialize_empty_corpus(settings)
         except Exception as exc:
             duration_ms = int((time.monotonic() - t0) * 1000)
             return {
@@ -178,36 +174,35 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
 
     # The remaining paths (failed metadata read, under-minimum skill count)
     # are integrity issues on a pre-existing populated corpus, not the
-    # fresh-install case. Their remediation message points at install-pack
+    # fresh-install case. Their remediation message points at install-packs
     # (which can repopulate from a known-good source).
     remediation = (
         "Corpus integrity check failed. Run `python -m agentalloy.migrate` to "
-        "ensure the graph schema exists (idempotent), then `agentalloy "
+        "ensure the skill-store schema exists (idempotent), then `agentalloy "
         "install-packs` to repopulate from packs, or remove "
         "${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/ to start fresh."
     )
 
-    # 2. Read DuckDB metadata
+    # 2. Read skill-store metadata
     try:
-        duck_meta = _check_duckdb(duck_path)
+        meta = _check_skill_store(settings)
     except Exception as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "missing_files",
-            "error": f"Cannot read DuckDB: {exc}",
+            "error": f"Cannot read the skill store: {exc}",
             "remediation": remediation,
             "duration_ms": duration_ms,
         }
+    meta.update(_embedding_meta(settings))
 
     # 3. Schema version check
-    # The embed pass stamps schema_version into the `corpus_meta` table. Corpora
-    # built before that change lack the marker â€” those are treated as implicit
-    # v1 (which is current) with a soft, harmless note surfaced in the output.
-    recorded = duck_meta.get("corpus_schema_version_recorded")
+    # The embed pass stamps schema_version into corpus_meta. Corpora built before
+    # that change lack the marker â€” those are treated as implicit v1 (current)
+    # with a soft, harmless note surfaced in the output.
+    recorded = meta.get("corpus_schema_version_recorded")
     if recorded is None:
-        # No explicit marker â€” pre-dates the schema_version stamp. Implicit v1
-        # is the current schema, so this is harmless; flag it softly.
         corpus_schema_version = EXPECTED_CORPUS_SCHEMA_VERSION
         schema_warning: str | None = (
             f"corpus predates the schema_version marker; treating as v{EXPECTED_CORPUS_SCHEMA_VERSION} "
@@ -215,15 +210,14 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
             "(`agentalloy reembed --force`)."
         )
     elif recorded != EXPECTED_CORPUS_SCHEMA_VERSION:
-        # Real schema mismatch â€” abort with the contract's documented action.
         duration_ms = int((time.monotonic() - t0) * 1000)
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "schema_mismatch",
             "corpus_schema_version": recorded,
             "expected_corpus_schema_version": EXPECTED_CORPUS_SCHEMA_VERSION,
-            "skill_count": duck_meta["skill_count"],
-            "fragment_count": duck_meta["fragment_count"],
+            "skill_count": meta["skill_count"],
+            "fragment_count": meta["fragment_count"],
             "error": (
                 f"Corpus is at schema v{recorded}, but this code expects "
                 f"v{EXPECTED_CORPUS_SCHEMA_VERSION}."
@@ -239,7 +233,7 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
         schema_warning = None
 
     # 4. Skill count check
-    skill_count = duck_meta["skill_count"]
+    skill_count = meta["skill_count"]
     if skill_count < MIN_SKILL_COUNT:
         duration_ms = int((time.monotonic() - t0) * 1000)
         return {
@@ -247,7 +241,7 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
             "action": "missing_files",
             "corpus_schema_version": corpus_schema_version,
             "skill_count": skill_count,
-            "fragment_count": duck_meta["fragment_count"],
+            "fragment_count": meta["fragment_count"],
             "error": f"Skill count {skill_count} < minimum {MIN_SKILL_COUNT}",
             "remediation": remediation,
             "duration_ms": int((time.monotonic() - t0) * 1000),
@@ -256,13 +250,13 @@ def check_corpus(root: Path | None = None) -> dict[str, Any]:  # noqa: ARG001 â€
     duration_ms = int((time.monotonic() - t0) * 1000)
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "action": "verified_present" if not was_seeded else "seeded",
+        "action": "verified_present",
         "corpus_path": str(user_corpus),
         "corpus_schema_version": corpus_schema_version,
         "skill_count": skill_count,
-        "fragment_count": duck_meta["fragment_count"],
-        "embedding_model": duck_meta["embedding_model"],
-        "embedding_dim": duck_meta["embedding_dim"],
+        "fragment_count": meta["fragment_count"],
+        "embedding_model": meta.get("embedding_model"),
+        "embedding_dim": meta.get("embedding_dim"),
         "duration_ms": duration_ms,
     }
     if schema_warning:
@@ -317,26 +311,24 @@ def _render_seed_corpus(result: dict[str, Any]) -> None:
 
 def run(args: argparse.Namespace) -> int:
     """Execute the seed-corpus subcommand."""
+    settings = get_settings()
     st = install_state.load_state()
     if install_state.is_step_completed(st, "seed-corpus"):
         prev = install_state.get_step_output(st, "seed-corpus")
-        user_corpus = install_state.corpus_dir()
-        duck_present = (user_corpus / "skills.duck").exists()
-        ladybug_present = (user_corpus / "ladybug").exists()
-        if prev and prev.get("output_path") and duck_present and ladybug_present:
+        duck_present = Path(settings.duckdb_path).exists()
+        if prev and prev.get("output_path") and duck_present:
             p = Path(prev["output_path"])
             if p.exists():
                 import json as _json
 
                 cached: dict[str, Any] = _json.loads(p.read_text())
-                # Re-verify corpus files are still readable before trusting cache.
+                # Re-verify the corpus is still readable before trusting cache.
                 # A stale cache would otherwise report success on a deleted or
                 # corrupted corpus (Pattern E: idempotency cache returns success
-                # without verifying artifact exists).
+                # without verifying the artifact exists).
                 try:
-                    _check_duckdb(user_corpus / "skills.duck")
+                    _check_skill_store(settings)
                 except Exception as exc:
-                    # Corpus is present but unreadable â€” cache is stale.
                     print(
                         f"WARN: cached result exists but corpus is unreadable ({exc}); "
                         "re-verifyingâ€¦",

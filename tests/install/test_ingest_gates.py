@@ -431,8 +431,8 @@ class TestInstallLocalPackGatesIntegration:
 
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "skills.duck").touch()
-        (corpus_dir / "ladybug").mkdir()
+        (corpus_dir / "agentalloy.duck").touch()
+        (corpus_dir / "fragments.lance").mkdir()
 
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
@@ -444,8 +444,8 @@ class TestInstallLocalPackGatesIntegration:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
+                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
                 ),
             ),
         ):
@@ -497,8 +497,8 @@ class TestInstallLocalPackGatesIntegration:
 
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "skills.duck").touch()
-        (corpus_dir / "ladybug").mkdir()
+        (corpus_dir / "agentalloy.duck").touch()
+        (corpus_dir / "fragments.lance").mkdir()
 
         ingest_mock = MagicMock(return_value=fake_ingest)
         invalidate_mock = MagicMock(return_value=3)
@@ -514,8 +514,8 @@ class TestInstallLocalPackGatesIntegration:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
+                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
                 ),
             ),
         ):

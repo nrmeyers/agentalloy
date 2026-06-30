@@ -7,9 +7,10 @@ For each skill in a pack, runs:
   * **topic probe**: first sentences of raw_prose with all name/id tokens
     removed (realistic — catches ranking weakness).
 
-Both probes are run in-process against the local LadybugDB + DuckDB stores.
-No HTTP service needs to be running, but the reembed pass must have been
-run first (the vector store must have embeddings for the pack's skills).
+Both probes are run in-process against the local skill store + fragments
+store. No HTTP service needs to be running, but the reembed pass must have
+been run first (the fragments store must have embeddings for the pack's
+skills).
 
 Exit codes:
   0  all skills found (hit@k for every probe)
@@ -148,8 +149,7 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
     from agentalloy.config import get_settings  # noqa: PLC0415
     from agentalloy.lm_client import LMUnavailable  # noqa: PLC0415
     from agentalloy.retrieval.domain import retrieve_domain_candidates  # noqa: PLC0415
-    from agentalloy.storage.ladybug import LadybugStore  # noqa: PLC0415
-    from agentalloy.storage.vector_store import open_or_create  # noqa: PLC0415
+    from agentalloy.storage.open import open_fragments, open_skills  # noqa: PLC0415
 
     manifest_path = pack_dir / "pack.yaml"
     if not manifest_path.is_file():
@@ -163,22 +163,24 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
     report = VerifyPackReport(pack_id=pack_dir.name, k=k)
 
     # --- Check embeddings presence ---
-    with open_or_create(settings.duckdb_path) as vs:
+    vs = open_fragments(settings)
+    try:
         total = vs.count_embeddings()
-        if total == 0:
-            report.missing_embeddings = True
-            report.error = (
-                "Vector store has 0 embeddings. "
-                "Run `agentalloy reembed` first, then re-run verify-pack."
-            )
-            return report
+    finally:
+        vs.close()
+    if total == 0:
+        report.missing_embeddings = True
+        report.error = (
+            "Fragments store has 0 embeddings. "
+            "Run `agentalloy reembed` first, then re-run verify-pack."
+        )
+        return report
 
     # --- Set up stores for in-process retrieval ---
-    store = LadybugStore(settings.ladybug_db_path)
     try:
-        store.open()
+        store = open_skills(settings, read_only=True)
     except Exception as exc:
-        report.error = f"Cannot open LadybugDB: {exc}"
+        report.error = f"Cannot open skill store: {exc}"
         return report
 
     try:
@@ -187,7 +189,8 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
 
         lm = get_embed_client(settings)
 
-        with open_or_create(settings.duckdb_path) as vs:
+        vs = open_fragments(settings)
+        try:
             for skill in skills:
                 if skill["deprecated"]:
                     continue
@@ -239,6 +242,8 @@ def probe_pack(pack_dir: Path, k: int = 4) -> VerifyPackReport:
                         break
 
                 report.probes.append(pr)
+        finally:
+            vs.close()
     finally:
         store.close()
 

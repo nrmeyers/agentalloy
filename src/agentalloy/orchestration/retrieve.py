@@ -25,8 +25,7 @@ from agentalloy.reads.models import ActiveSkill
 from agentalloy.retrieval.domain import retrieve_domain_candidates
 from agentalloy.retrieval.embedding_errors import EmbeddingErrorResult
 from agentalloy.runtime_state import RuntimeCache, VersionDetail
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import FragmentStore, SkillStore
 from agentalloy.telemetry import TelemetryRecord, TelemetryWriter
 
 
@@ -35,14 +34,14 @@ class RetrieveOrchestrator:
 
     def __init__(
         self,
-        source: RuntimeCache | LadybugStore,
+        source: RuntimeCache | SkillStore,
         lm: EmbedClient,
-        vector_store: VectorStore,
+        vector_store: FragmentStore,
         telemetry: TelemetryWriter,
         *,
         embedding_model: str,
     ) -> None:
-        self._source: RuntimeCache | LadybugStore = source
+        self._source: RuntimeCache | SkillStore = source
         self._lm = lm
         self._vector_store = vector_store
         self._telemetry = telemetry

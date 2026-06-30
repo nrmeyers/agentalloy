@@ -154,14 +154,14 @@ def _run_clear(args: argparse.Namespace) -> int:
         return 1
 
     from agentalloy.config import get_settings
-    from agentalloy.storage.vector_store import open_or_create
+    from agentalloy.storage.open import open_telemetry
 
     settings = get_settings()
-    vs = open_or_create(settings.duckdb_path)
+    ts = open_telemetry(settings, read_only=False)
     try:
-        result = vs.clear_telemetry()
+        result = ts.clear_telemetry()
     finally:
-        vs.close()
+        ts.close()
 
     write_result(result, args, human_fn=_render_clear)
     return 0
@@ -184,7 +184,7 @@ def _service_port() -> int:
 def _fetch_savings_via_api(port: int, repo: str | None = None) -> dict[str, Any] | None:
     """GET /telemetry/savings from the running service; None on any failure.
 
-    Returns the same dict shape as ``VectorStore.aggregate_savings()`` so the
+    Returns the same dict shape as ``TelemetryStore.aggregate_savings()`` so the
     existing renderer works unchanged. ``repo`` scopes to one project root.
     """
     import json
@@ -238,16 +238,16 @@ def _run_savings(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Service is down — safe to open the corpus directly.
+    # Service is down — safe to open the telemetry store directly.
     from agentalloy.config import get_settings
-    from agentalloy.storage.vector_store import open_or_create
+    from agentalloy.storage.open import open_telemetry
 
     settings = get_settings()
-    vs = open_or_create(settings.duckdb_path)
+    ts = open_telemetry(settings, read_only=True)
     try:
-        result = vs.aggregate_savings(repo)
+        result = ts.aggregate_savings(repo)
     finally:
-        vs.close()
+        ts.close()
 
     result["repo"] = repo
     write_result(result, args, human_fn=render)

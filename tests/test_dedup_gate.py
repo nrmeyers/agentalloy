@@ -29,12 +29,11 @@ from agentalloy.dedup_gate import (
     dedup_fragment,
     run_dedup_gate,
 )
-from agentalloy.storage.vector_store import (
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     FragmentEmbedding,
     SimilarityHit,
-    VectorStore,
-    open_or_create,
 )
 
 # ---------------------------------------------------------------------------
@@ -81,13 +80,16 @@ def _mk_fragment(
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> VectorStore:  # type: ignore[override]
-    with open_or_create(tmp_path / "test.duck") as s:
-        yield s  # type: ignore[misc]
+def store(tmp_path: Path):
+    s = LanceFragmentStore(tmp_path / "fragments.lance")
+    try:
+        yield s
+    finally:
+        s.close()
 
 
 @pytest.fixture
-def seeded_store(store: VectorStore) -> VectorStore:
+def seeded_store(store: LanceFragmentStore) -> LanceFragmentStore:
     """Store pre-seeded with two existing-corpus skills from different packs.
 
     pack-alpha: existing-skill-a  →  fragment existing-a-f1 (dim 0)
@@ -137,7 +139,7 @@ def test_classify_hit_boundary_soft() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_fragment_hard_match(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_hard_match(seeded_store: LanceFragmentStore) -> None:
     hard, soft = dedup_fragment(
         label="q",
         query_vec=_unit_vec(0),  # identical to existing-a-f1
@@ -151,7 +153,7 @@ def test_dedup_fragment_hard_match(seeded_store: VectorStore) -> None:
     assert soft == []
 
 
-def test_dedup_fragment_soft_match(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_soft_match(seeded_store: LanceFragmentStore) -> None:
     # similarity ≈ 0.85 (distance ≈ 0.15) to existing-a-f1
     query = _mixed_vec(0, 99, 0.85)
     hard, soft = dedup_fragment(
@@ -165,7 +167,7 @@ def test_dedup_fragment_soft_match(seeded_store: VectorStore) -> None:
     assert any(h.fragment_id == "existing-a-f1" for h in soft)
 
 
-def test_dedup_fragment_no_match(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_no_match(seeded_store: LanceFragmentStore) -> None:
     hard, soft = dedup_fragment(
         label="q",
         query_vec=_unit_vec(200),  # orthogonal — similarity 0
@@ -182,7 +184,7 @@ def test_dedup_fragment_no_match(seeded_store: VectorStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_gate_hard_cross_pack(seeded_store: VectorStore) -> None:
+def test_gate_hard_cross_pack(seeded_store: LanceFragmentStore) -> None:
     """New skill-from-pack-gamma nearly identical to existing-skill-a → hard."""
     new_frag_id = "new-gamma-f1"
     new_skill_id = "new-skill-gamma"
@@ -211,7 +213,7 @@ def test_gate_hard_cross_pack(seeded_store: VectorStore) -> None:
 
 
 def test_gate_logs_start_and_done(
-    seeded_store: VectorStore, caplog: pytest.LogCaptureFixture
+    seeded_store: LanceFragmentStore, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The gate logs start + done so a full re-embed (thousands of fragments,
     one DuckDB vector search each) isn't a silent multi-minute hang."""
@@ -231,7 +233,7 @@ def test_gate_logs_start_and_done(
     assert "dedup gate: done" in caplog.text
 
 
-def test_gate_self_match_does_not_shadow_cross_pack_hard(seeded_store: VectorStore) -> None:
+def test_gate_self_match_does_not_shadow_cross_pack_hard(seeded_store: LanceFragmentStore) -> None:
     """A ~0-distance self-match must not hide a slightly-farther cross-pack hard dup.
 
     The new fragment is a hard duplicate of existing-skill-a (cosine 0.95) but not
@@ -259,7 +261,7 @@ def test_gate_self_match_does_not_shadow_cross_pack_hard(seeded_store: VectorSto
 
 
 def test_gate_hard_cross_pack_allow_duplicates(
-    seeded_store: VectorStore, capsys: pytest.CaptureFixture[str]
+    seeded_store: LanceFragmentStore, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Hard dup with --allow-duplicates → warning printed, exit code OK."""
     from agentalloy.reembed.cli import EXIT_OK, _report_dedup
@@ -281,7 +283,7 @@ def test_gate_hard_cross_pack_allow_duplicates(
     assert exit_code == EXIT_OK
 
 
-def test_gate_hard_cross_pack_no_allow_duplicates(seeded_store: VectorStore) -> None:
+def test_gate_hard_cross_pack_no_allow_duplicates(seeded_store: LanceFragmentStore) -> None:
     """Hard dup without --allow-duplicates → EXIT_DEDUP."""
     from agentalloy.reembed.cli import EXIT_DEDUP, _report_dedup
 
@@ -307,7 +309,7 @@ def test_gate_hard_cross_pack_no_allow_duplicates(seeded_store: VectorStore) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_gate_soft_cross_pack(seeded_store: VectorStore) -> None:
+def test_gate_soft_cross_pack(seeded_store: LanceFragmentStore) -> None:
     """New skill at soft threshold → soft match, no hard."""
     new_frag_id = "new-soft-f1"
     new_skill_id = "new-skill-soft"
@@ -330,7 +332,7 @@ def test_gate_soft_cross_pack(seeded_store: VectorStore) -> None:
     assert soft_match.verdict == "soft"
 
 
-def test_gate_soft_exit_ok(seeded_store: VectorStore) -> None:
+def test_gate_soft_exit_ok(seeded_store: LanceFragmentStore) -> None:
     """Soft-only result → _report_dedup returns EXIT_OK."""
     from agentalloy.reembed.cli import EXIT_OK, _report_dedup
 
@@ -354,7 +356,7 @@ def test_gate_soft_exit_ok(seeded_store: VectorStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_gate_same_pack_exempt(seeded_store: VectorStore) -> None:
+def test_gate_same_pack_exempt(seeded_store: LanceFragmentStore) -> None:
     """Near-duplicate between two skills in the SAME new batch → no firing."""
     frag_a = "new-same-pack-a-f1"
     skill_a = "new-pack-skill-a"
@@ -394,7 +396,7 @@ def test_gate_same_pack_exempt(seeded_store: VectorStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_gate_no_new_fragments(seeded_store: VectorStore) -> None:
+def test_gate_no_new_fragments(seeded_store: LanceFragmentStore) -> None:
     """Empty new_fragment_vecs → DedupGateResult with no findings."""
     result = run_dedup_gate(
         new_skill_ids=set(),
@@ -445,7 +447,8 @@ def test_on_embedded_attribution_survives_transient_retry(tmp_path: Path) -> Non
 
     recorded: dict[str, list[float]] = {}
 
-    with open_or_create(tmp_path / "retry.duck") as vs:
+    vs = LanceFragmentStore(tmp_path / "fragments.lance")
+    try:
         stats = reembed_fragments(
             frags,
             embed_fn=flaky_embed,
@@ -453,6 +456,8 @@ def test_on_embedded_attribution_survives_transient_retry(tmp_path: Path) -> Non
             embedding_model="test-model",
             on_embedded=lambda f, v: recorded.update({f.fragment_id: v}),
         )
+    finally:
+        vs.close()
 
     assert stats.embedded == 3
     assert calls["n"] == 4  # one retry happened

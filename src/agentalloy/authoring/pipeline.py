@@ -39,8 +39,8 @@ from agentalloy.authoring.qa_gate import (
 )
 from agentalloy.config import AuthoringConfig, Settings, get_settings
 from agentalloy.lm_client import OpenAICompatClient
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore, open_or_create
+from agentalloy.storage.open import open_fragments
+from agentalloy.storage.protocols import FragmentStore, SkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,8 @@ def process_one_skill(
     system_prompt: str,
     qa_prompt: str,
     paths: PipelinePaths,
-    store: LadybugStore,
-    vector_store: VectorStore,
+    store: SkillStore,
+    vector_store: FragmentStore,
     lm_client: OpenAICompatClient,
     embed_client: OpenAICompatClient,
     bounces: dict[str, int],
@@ -171,8 +171,8 @@ def run_per_skill(
     repo_root: Path,
     paths: PipelinePaths,
     *,
-    store: LadybugStore,
-    vector_store: VectorStore | None = None,
+    store: SkillStore,
+    vector_store: FragmentStore | None = None,
     lm_client: OpenAICompatClient | None = None,
     embed_client: OpenAICompatClient | None = None,
 ) -> list[SkillResult]:
@@ -186,7 +186,7 @@ def run_per_skill(
     owned_vs = vector_store is None
     _lm = lm_client or OpenAICompatClient(ac.lm_studio_base_url)
     _embed = embed_client or OpenAICompatClient(ac.embed_base_url)
-    _vs = vector_store or open_or_create(settings.duckdb_path)
+    _vs = vector_store or open_fragments(settings)
 
     system_prompt = load_authoring_prompt(repo_root)
     qa_fixture = repo_root / "fixtures" / "skill-qa-agent.md"

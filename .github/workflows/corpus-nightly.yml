@@ -115,11 +115,11 @@ jobs:
           set -euxo pipefail
           # seed-corpus VERIFIES the in-repo seed corpus is present and valid
           # (preflight only — schema init happens inside install-packs via
-          # _ensure_ladybug_schema). Non-fatal: a verification quirk on a
+          # _ensure_skill_schema). Non-fatal: a verification quirk on a
           # fresh runner must not mask the real ingest step below.
           uv run agentalloy seed-corpus || echo "seed-corpus verification non-fatal (fresh runner)"
-          # Ingest every pack into LadybugDB and re-embed into DuckDB. This is
-          # the real install pipeline; --non-interactive avoids the TTY picker.
+          # Ingest every pack into agentalloy.duck and re-embed into fragments.lance.
+          # This is the real install pipeline; --non-interactive avoids the TTY picker.
           uv run agentalloy install-packs --packs all --non-interactive --no-restart
 
       - name: Start AgentAlloy service

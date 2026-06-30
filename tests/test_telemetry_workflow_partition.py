@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from agentalloy.storage.vector_store import CompositionTrace
+from agentalloy.storage.protocols import CompositionTrace
 from agentalloy.telemetry.writer import TelemetryRecord
 
 

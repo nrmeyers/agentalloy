@@ -26,8 +26,8 @@ class TestCorpusPresence:
     def test_present_corpus_reports_versions(self, repo_root: Path) -> None:
         user_corpus = install_state.corpus_dir()
         user_corpus.mkdir(parents=True, exist_ok=True)
-        (user_corpus / "skills.duck").write_text("fake")
-        (user_corpus / "ladybug").mkdir(exist_ok=True)
+        (user_corpus / "agentalloy.duck").write_text("fake")
+        (user_corpus / "fragments.lance").mkdir(exist_ok=True)
         with (
             patch.object(upd, "_read_corpus_schema_version", return_value=1),
             patch.object(upd, "_expected_corpus_schema_version", return_value=1),
@@ -47,8 +47,8 @@ class TestSchemaDrift:
 
         user_corpus = install_state.corpus_dir()
         user_corpus.mkdir(parents=True, exist_ok=True)
-        (user_corpus / "skills.duck").write_text("fake")
-        (user_corpus / "ladybug").mkdir(exist_ok=True)
+        (user_corpus / "agentalloy.duck").write_text("fake")
+        (user_corpus / "fragments.lance").mkdir(exist_ok=True)
 
     def test_no_meta_table_warns(self, repo_root: Path) -> None:
         self._setup(repo_root)

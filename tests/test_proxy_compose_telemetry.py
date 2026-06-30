@@ -26,7 +26,7 @@ from agentalloy.api.compose_models import (
 from agentalloy.api.proxy_apply import ProxyComposeTelemetry, _merge_compose_telemetry
 from agentalloy.api.proxy_signal import SignalResult
 from agentalloy.api.proxy_telemetry import write_proxy_trace
-from agentalloy.storage.vector_store import VectorStore, open_or_create
+from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 
 
 def _tier1(
@@ -167,12 +167,15 @@ def test_merge_latency_ignores_empty_tier2() -> None:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
-    with open_or_create(tmp_path / "t.duck") as s:
+def store(tmp_path: Path) -> DuckDBTelemetryStore:  # type: ignore[misc]
+    s = open_telemetry_store(tmp_path / "telemetry.duck")
+    try:
         yield s
+    finally:
+        s.close()
 
 
-def test_write_proxy_trace_persists_stage_b_and_skills(store: VectorStore) -> None:
+def test_write_proxy_trace_persists_stage_b_and_skills(store: DuckDBTelemetryStore) -> None:
     """The consolidated row round-trips header/returned skills and Stage B detail."""
     tel = ProxyComposeTelemetry(
         workflow_skill_ids=["wf-build"],

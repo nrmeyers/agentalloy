@@ -112,10 +112,13 @@ class LanceFragmentStore:
         # the parent dir and a table name whose .lance dir is that path.
         self._db = lancedb.connect(str(p.parent))
         self._table_name = p.stem  # "fragments"
-        if self._table_name in self._db.table_names():
-            self._table = self._db.open_table(self._table_name)
-        else:
-            self._table = self._db.create_table(self._table_name, schema=FRAGMENTS_SCHEMA)
+        # Open-or-create in one call: ``exist_ok=True`` opens the existing table
+        # (e.g. a copied/seeded dataset) and creates it from the schema only when
+        # absent — avoids relying on a catalog listing that doesn't always see a
+        # table copied in out-of-band (the per-test ``corpus_dir`` copytree case).
+        self._table = self._db.create_table(
+            self._table_name, schema=FRAGMENTS_SCHEMA, exist_ok=True
+        )
         self._has_vector_index = self._vector_index_present()
 
     # -- internal ------------------------------------------------------------

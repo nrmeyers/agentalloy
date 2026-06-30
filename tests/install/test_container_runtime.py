@@ -372,13 +372,13 @@ class TestEntrypoint:
 
     def test_ingest_gated_on_no_existing_corpus(self):
         """Pack ingest runs only when there is genuinely no corpus to start from:
-        not seeded this boot AND no existing volume corpus (skills.duck)."""
+        not seeded this boot AND no existing volume corpus (agentalloy.duck)."""
         script = container_runtime._build_entrypoint_script("")
         assert '[ "$BOOTSTRAP_NEEDED" = "true" ]' in script
         assert '[ "$CORPUS_SEEDED" = "false" ]' in script
-        # The skills.duck guard is the fix — without it a reused/populated volume
-        # falls into the misleading always-on reconcile.
-        assert '&& [ ! -f "$APP_DIR/data/skills.duck" ]; then' in script
+        # The agentalloy.duck guard is the fix — without it a reused/populated
+        # volume falls into the misleading always-on reconcile.
+        assert '&& [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then' in script
 
     def test_unstamped_volume_triggers_reseed(self):
         """A volume with a corpus but no stamp can't be verified against the image,

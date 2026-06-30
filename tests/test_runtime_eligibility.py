@@ -22,8 +22,8 @@ from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion, get_active_version_by_id
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import FragmentStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from agentalloy.telemetry import NullTelemetryWriter
 from tests.support import StubLMClient
 
@@ -31,68 +31,49 @@ from tests.support import StubLMClient
 
 
 @pytest.fixture
-def empty_store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
-    s.open()
-    s.migrate()
-    return s
+def empty_store(tmp_path: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(tmp_path / "agentalloy.duck"))
 
 
 @pytest.fixture
-def populated_store(corpus_dir: Path) -> LadybugStore:
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
-    return s
+def populated_store(corpus_dir: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
 
 # -------- helpers --------
 
 
-def _make_skill(store: LadybugStore, skill_id: str, skill_class: str = "domain") -> None:
+def _make_skill(store: DuckDBSkillStore, skill_id: str, skill_class: str = "domain") -> None:
     store.execute(
-        """
-        CREATE (:Skill {
-            skill_id: $sid, canonical_name: $sid, category: 'design',
-            skill_class: $sc, domain_tags: [], deprecated: false,
-            always_apply: false, phase_scope: [], category_scope: []
-        })
-        """,
-        {"sid": skill_id, "sc": skill_class},
+        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, "
+        "domain_tags, deprecated, always_apply, phase_scope, category_scope) "
+        "VALUES (?, ?, 'design', ?, ?, false, false, ?, ?)",
+        [skill_id, skill_id, skill_class, [], [], []],
     )
 
 
-def _make_version(store: LadybugStore, skill_id: str, version_id: str, status: str) -> None:
+def _make_version(store: DuckDBSkillStore, skill_id: str, version_id: str, status: str) -> None:
+    # HAS_VERSION is folded into skill_versions.skill_id.
     store.execute(
-        """
-        CREATE (:SkillVersion {
-            version_id: $vid, version_number: 1, authored_at: $at,
-            author: 'test', change_summary: 't', status: $status, raw_prose: 'prose'
-        })
-        """,
-        {"vid": version_id, "at": datetime.now(UTC), "status": status},
-    )
-    store.execute(
-        """
-        MATCH (s:Skill {skill_id: $sid}), (v:SkillVersion {version_id: $vid})
-        CREATE (s)-[:HAS_VERSION]->(v)
-        """,
-        {"sid": skill_id, "vid": version_id},
+        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+        "author, change_summary, status, raw_prose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [version_id, skill_id, 1, datetime.now(UTC), "test", "t", status, "prose"],
     )
 
 
-def _link_current(store: LadybugStore, skill_id: str, version_id: str) -> None:
+def _link_current(store: DuckDBSkillStore, skill_id: str, version_id: str) -> None:
+    # CURRENT_VERSION is folded into skills.current_version_id.
     store.execute(
-        """
-        MATCH (s:Skill {skill_id: $sid}), (v:SkillVersion {version_id: $vid})
-        CREATE (s)-[:CURRENT_VERSION]->(v)
-        """,
-        {"sid": skill_id, "vid": version_id},
+        "UPDATE skills SET current_version_id = ? WHERE skill_id = ?",
+        [version_id, skill_id],
     )
 
 
-def _first_active_version_id(store: LadybugStore) -> str:
+def _first_active_version_id(store: DuckDBSkillStore) -> str:
     rows = store.execute(
-        "MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion) RETURN v.version_id LIMIT 1"
+        "SELECT v.version_id FROM skills s "
+        "JOIN skill_versions v ON v.version_id = s.current_version_id "
+        "WHERE v.status = 'active' LIMIT 1"
     )
     assert rows, "fixture store has no active versions"
     return str(rows[0][0])
@@ -102,7 +83,7 @@ def _first_active_version_id(store: LadybugStore) -> str:
 
 
 def test_get_active_version_by_id_returns_data_for_active(
-    populated_store: LadybugStore,
+    populated_store: DuckDBSkillStore,
 ) -> None:
     version_id = _first_active_version_id(populated_store)
     data = get_active_version_by_id(populated_store, version_id)
@@ -111,7 +92,7 @@ def test_get_active_version_by_id_returns_data_for_active(
     assert isinstance(data["raw_prose"], str)
 
 
-def test_get_active_version_by_id_raises_for_superseded(empty_store: LadybugStore) -> None:
+def test_get_active_version_by_id_raises_for_superseded(empty_store: DuckDBSkillStore) -> None:
     _make_skill(empty_store, "s1")
     _make_version(empty_store, "s1", "s1-v1", "superseded")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -120,7 +101,7 @@ def test_get_active_version_by_id_raises_for_superseded(empty_store: LadybugStor
     assert "superseded" in ei.value.reason
 
 
-def test_get_active_version_by_id_raises_for_draft(empty_store: LadybugStore) -> None:
+def test_get_active_version_by_id_raises_for_draft(empty_store: DuckDBSkillStore) -> None:
     _make_skill(empty_store, "s2")
     _make_version(empty_store, "s2", "s2-v1", "draft")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -128,7 +109,7 @@ def test_get_active_version_by_id_raises_for_draft(empty_store: LadybugStore) ->
     assert "draft" in ei.value.reason
 
 
-def test_get_active_version_by_id_raises_for_proposed(empty_store: LadybugStore) -> None:
+def test_get_active_version_by_id_raises_for_proposed(empty_store: DuckDBSkillStore) -> None:
     _make_skill(empty_store, "s3")
     _make_version(empty_store, "s3", "s3-v1", "proposed")
     with pytest.raises(InconsistentActiveVersion) as ei:
@@ -137,7 +118,7 @@ def test_get_active_version_by_id_raises_for_proposed(empty_store: LadybugStore)
 
 
 def test_get_active_version_by_id_raises_runtime_error_for_missing(
-    empty_store: LadybugStore,
+    empty_store: DuckDBSkillStore,
 ) -> None:
     with pytest.raises(RuntimeError, match="not found"):
         get_active_version_by_id(empty_store, "no-such-version")
@@ -152,11 +133,9 @@ def test_get_active_version_by_id_raises_runtime_error_for_missing(
 
 
 @pytest.fixture
-def inconsistent_store(tmp_path: Path) -> LadybugStore:
+def inconsistent_store(tmp_path: Path) -> DuckDBSkillStore:
     """Store where CURRENT_VERSION points at a non-active version (superseded)."""
-    s = LadybugStore(str(tmp_path / "ladybug"))
-    s.open()
-    s.migrate()
+    s = open_skill_store(str(tmp_path / "agentalloy.duck"))
     _make_skill(s, "broken-skill")
     _make_version(s, "broken-skill", "broken-skill-v1", "superseded")
     _link_current(s, "broken-skill", "broken-skill-v1")
@@ -164,7 +143,7 @@ def inconsistent_store(tmp_path: Path) -> LadybugStore:
 
 
 def test_inconsistent_state_returns_500_on_inspect(
-    app: FastAPI, inconsistent_store: LadybugStore
+    app: FastAPI, inconsistent_store: DuckDBSkillStore
 ) -> None:
     app.dependency_overrides[get_skill_store] = lambda: inconsistent_store
     with TestClient(app) as c:
@@ -177,7 +156,7 @@ def test_inconsistent_state_returns_500_on_inspect(
 
 
 def test_inconsistent_state_returns_500_on_retrieve_by_id(
-    app: FastAPI, inconsistent_store: LadybugStore, vector_store: VectorStore
+    app: FastAPI, inconsistent_store: DuckDBSkillStore, vector_store: FragmentStore
 ) -> None:
     orch = RetrieveOrchestrator(
         inconsistent_store,
@@ -199,7 +178,7 @@ def test_inconsistent_state_returns_500_on_retrieve_by_id(
 
 
 def test_compose_uses_only_active_fragments(
-    app: FastAPI, populated_store: LadybugStore, vector_store: VectorStore
+    app: FastAPI, populated_store: DuckDBSkillStore, vector_store: FragmentStore
 ) -> None:
     """Compose retrieval must only surface active-version fragments."""
     from agentalloy.orchestration.compose import ComposeOrchestrator

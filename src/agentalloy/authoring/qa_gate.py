@@ -30,8 +30,7 @@ from agentalloy.ingest import (
 )
 from agentalloy.lm_client import LMClientError, OpenAICompatClient
 from agentalloy.reads.active import get_active_fragments
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import FragmentStore, SkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ class GateResult:
 
 
 def run_deterministic(
-    draft_path: Path, store: LadybugStore
+    draft_path: Path, store: SkillStore
 ) -> tuple[ReviewRecord | None, list[str]]:
     """Parse YAML, validate schema + vocab, check skill_id collision.
 
@@ -99,12 +98,12 @@ def run_deterministic(
     errors.extend(_validate(record))
 
     existing = store.execute(
-        "MATCH (s:Skill {skill_id: $id}) RETURN s.skill_id",
-        {"id": record.skill_id},
+        "SELECT skill_id FROM skills WHERE skill_id = ?",
+        [record.skill_id],
     )
     if existing:
         errors.append(
-            f"skill_id '{record.skill_id}' already exists in LadybugDB "
+            f"skill_id '{record.skill_id}' already exists in the skill store "
             "(operator must decide: --force overwrite, rename, or reject)"
         )
 
@@ -119,15 +118,15 @@ def run_deterministic(
 def run_dedup(
     record: ReviewRecord,
     *,
-    store: LadybugStore,
-    vector_store: VectorStore,
+    store: SkillStore,
+    vector_store: FragmentStore,
     embedder: OpenAICompatClient,
     embedding_model: str,
     hard_threshold: float,
     soft_threshold: float,
 ) -> tuple[DedupHit | None, list[DedupHit]]:
-    """Embed each fragment, query DuckDB for near-duplicates against the
-    active corpus.
+    """Embed each fragment, query the fragment store for near-duplicates against
+    the active corpus.
 
     Returns ``(hard_dup_or_none, soft_dups)``. A hard match short-circuits
     the gate — no critic call needed. Soft matches go to the Critic for
@@ -166,7 +165,7 @@ def run_dedup(
         logger.warning("dedup query failed: %s — skipping dedup stage", exc)
         return None, []
 
-    # Map vector_store hits back to LadybugDB skill_ids + content excerpts for
+    # Map vector_store hits back to skill_ids + content excerpts for
     # the QA report.
     hit_ids: set[str] = set()
     if result.hardest is not None:
@@ -186,7 +185,7 @@ def run_dedup(
                 fragment_meta[af.fragment_id] = (af.skill_id, af.content[:240])
 
     def _to_legacy(hit_obj: object) -> DedupHit:
-        from agentalloy.storage.vector_store import SimilarityHit
+        from agentalloy.storage.protocols import SimilarityHit
 
         h = cast(SimilarityHit, hit_obj)
         meta = fragment_meta.get(h.fragment_id, (h.skill_id, ""))
@@ -400,8 +399,8 @@ def route(
 def qa_one(
     draft_path: Path,
     *,
-    store: LadybugStore,
-    vector_store: VectorStore,
+    store: SkillStore,
+    vector_store: FragmentStore,
     lm_client: OpenAICompatClient,
     embed_client: OpenAICompatClient,
     qa_prompt: str,
@@ -495,8 +494,8 @@ def run_qa(
     paths: PipelinePaths,
     *,
     repo_root: Path,
-    store: LadybugStore,
-    vector_store: VectorStore,
+    store: SkillStore,
+    vector_store: FragmentStore,
     lm_client: OpenAICompatClient | None = None,
     embed_client: OpenAICompatClient | None = None,
 ) -> list[GateResult]:

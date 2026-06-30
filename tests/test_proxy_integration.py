@@ -105,6 +105,7 @@ def _make_mock_orchestrator(
 def _make_app(
     mock_orchestrator: ComposeOrchestrator | None = None,
     mock_vector_store: Any = None,
+    mock_telemetry_store: Any = None,
     raise_upstream: Exception | None = None,
     upstream_status: int = 200,
     stream_chunks: list[str] | None = None,
@@ -140,10 +141,17 @@ def _make_app(
     mock_embed = MagicMock()
     app.state.embed_client = mock_embed
 
-    # Vector store (mock)
+    # Vector store (mock) -- FragmentStore role (search retrieval), NOT the
+    # telemetry sink. In v6 the proxy reads search from app.state.vector_store.
     if mock_vector_store is None:
         mock_vector_store = MagicMock()
     app.state.vector_store = mock_vector_store
+
+    # Telemetry store (mock) -- the proxy trace sink. In v6 get_vector_store()
+    # resolves app.state.telemetry_store and writes record_composition_trace there.
+    if mock_telemetry_store is None:
+        mock_telemetry_store = MagicMock()
+    app.state.telemetry_store = mock_telemetry_store
 
     # Orchestrator
     if mock_orchestrator is not None:
@@ -183,8 +191,8 @@ class TestFullProxyFlow:
         assert body["choices"][0]["message"]["content"] == "Test response"
 
         # Telemetry should have been written
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_passthrough"
 
     def test_signal_match_compose_and_inject(self, tmp_path: Path) -> None:
@@ -243,8 +251,8 @@ class TestFullProxyFlow:
         assert sent["messages"][0]["content"] == "You are an assistant."
 
         # Telemetry should show composed status
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_composed"
 
     def test_compose_failure_soft_fail(self, tmp_path: Path) -> None:
@@ -283,8 +291,8 @@ class TestFullProxyFlow:
         assert body["choices"][0]["message"]["content"] == "Test response"
 
         # Telemetry shows passthrough (composition failed)
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_passthrough"
 
     def test_signal_failure_soft_fail(self, tmp_path: Path) -> None:
@@ -342,8 +350,8 @@ class TestFullProxyFlow:
         assert resp.status_code == 200
 
         # Telemetry shows passthrough (EmptyResult = no composition)
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_passthrough"
 
     def test_stream_mode_with_composition(self, tmp_path: Path) -> None:
@@ -388,7 +396,7 @@ class TestFullProxyFlow:
         assert "[DONE]" in content
 
         # Telemetry should be written for streaming too
-        app.state.vector_store.record_composition_trace.assert_called_once()
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
 
     def test_no_orchestrator_passthrough(self, tmp_path: Path) -> None:
         """Signal match but no orchestrator -> passthrough."""
@@ -422,8 +430,8 @@ class TestFullProxyFlow:
         assert body["choices"][0]["message"]["content"] == "Test response"
 
         # Telemetry shows passthrough
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.status == "proxy_passthrough"
 
 
@@ -454,8 +462,8 @@ class TestUpstreamErrorHandling:
         assert body["error"]["code"] == "upstream_unavailable"
 
         # Telemetry should capture error
-        app.state.vector_store.record_composition_trace.assert_called_once()
-        trace = app.state.vector_store.record_composition_trace.call_args[0][0]
+        app.state.telemetry_store.record_composition_trace.assert_called_once()
+        trace = app.state.telemetry_store.record_composition_trace.call_args[0][0]
         assert trace.error_code is not None
 
     def test_no_upstream_configured(self) -> None:
@@ -539,7 +547,7 @@ class TestUpstreamErrorHandling:
         assert len(captured_payload["messages"]) == 2
 
     def test_telemetry_with_no_vector_store(self) -> None:
-        """When vector_store is None, telemetry is silently skipped."""
+        """When the telemetry sink is None, telemetry is silently skipped."""
         app = create_app(use_default_lifespan=False)
         response_body = {
             "id": "chatcmpl-123",
@@ -556,6 +564,8 @@ class TestUpstreamErrorHandling:
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
         app.state.upstream_client = _make_mock_upstream(response_body)
+        # The proxy trace sink is app.state.telemetry_store; None -> skip silently.
+        app.state.telemetry_store = None
         app.state.vector_store = None
 
         with TestClient(app) as client:

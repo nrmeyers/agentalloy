@@ -1,9 +1,11 @@
 """Telemetry writer protocol, no-op stub, and DuckDB-backed writer.
 
-Per v5.3, composition telemetry lives in DuckDB ``composition_traces``
-(same ``skills.duck`` file as fragment_embeddings). Writes are inline
-before the response — no queue, no background thread. Trace-write
-failures are logged but never propagate to the caller of /compose.
+In v6 composition telemetry lives in its own service-owned DuckDB file
+(``telemetry.duck``, ``composition_traces``), decoupled from the skill graph
+and the Lance fragment index so the reembed writer never contends with runtime
+telemetry writes (decision D4). Writes are inline before the response — no
+queue, no background thread. Trace-write failures are logged but never
+propagate to the caller of /compose.
 
 Sprint 1 additions:
 - error_payload now accepts structured error codes from EmbeddingErrorCode
@@ -19,11 +21,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from agentalloy.storage.vector_store import (
+from agentalloy.storage.protocols import (
     CompositionTrace as DuckCompositionTrace,
 )
-from agentalloy.storage.vector_store import (
-    VectorStore,
+from agentalloy.storage.protocols import (
+    TelemetryStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,17 +119,17 @@ class DuckDBTelemetryWriter:
     ``CompositionTrace`` (v5.3 schema) via :meth:`_to_duck_trace`.
     """
 
-    def __init__(self, vector_store: VectorStore) -> None:
-        self._vs = vector_store
+    def __init__(self, telemetry_store: TelemetryStore) -> None:
+        self._ts = telemetry_store
 
     def write(self, record: TelemetryRecord) -> None:
         try:
-            self._vs.record_composition_trace(self._to_duck_trace(record))
+            self._ts.record_composition_trace(self._to_duck_trace(record))
         except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
             logger.error("telemetry write failed: %s", exc)
 
-    def close(self) -> None:  # noqa: B027 — empty by design; the vector_store owns the connection
-        """No-op. The ``VectorStore`` owns the DuckDB connection lifecycle."""
+    def close(self) -> None:  # noqa: B027 — empty by design; the telemetry store owns the connection
+        """No-op. The ``TelemetryStore`` owns the DuckDB connection lifecycle."""
 
     @staticmethod
     def _to_duck_trace(record: TelemetryRecord) -> DuckCompositionTrace:

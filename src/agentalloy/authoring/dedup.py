@@ -1,7 +1,7 @@
 """DuckDB-backed dedup classifier for the QA gate's near-duplicate check.
 
 This is the v1.5 replacement for the ``run_dedup`` path in ``qa_gate.py`` that
-currently queries LadybugDB Fragment embeddings directly. When NXS-799 lands,
+currently queries the fragment store directly. When NXS-799 lands,
 ``qa_gate.run_dedup`` becomes a thin wrapper around :func:`dedup_candidates`.
 
 For now it lives alongside the old path so tests can exercise it in isolation
@@ -11,7 +11,7 @@ without touching code the in-flight authoring batch depends on.
 
 Callers pass **similarity** thresholds in [0, 1]. This module converts to
 **cosine distance** (``1 - similarity`` for L2-normalized vectors) to match
-DuckDB's ``array_cosine_distance`` output.
+the fragment store's cosine-distance output.
 
 - ``hard_similarity`` = 0.92 → any match with similarity ≥ 0.92 (distance ≤ 0.08)
   is a hard duplicate; auto-reject without Critic involvement.
@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from agentalloy.dedup_gate import classify_hit as classify_hit  # re-export
 from agentalloy.dedup_gate import dedup_fragment as _dedup_fragment_impl
 from agentalloy.lm_client import OpenAICompatClient
-from agentalloy.storage.vector_store import SimilarityHit, VectorStore
+from agentalloy.storage.protocols import FragmentStore, SimilarityHit
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +86,14 @@ def dedup_fragment(
     *,
     label: str,
     query_vec: Sequence[float],
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     hard_similarity: float,
     soft_similarity: float,
     k: int = 20,
     categories: list[str] | None = None,
     fragment_types: list[str] | None = None,
 ) -> DedupClassification:
-    """Search DuckDB for the top-k matches to one fragment, classify them.
+    """Search the fragment store for the top-k matches to one fragment, classify them.
 
     Thin wrapper around :func:`agentalloy.dedup_gate.dedup_fragment` that
     returns the authoring-layer :class:`DedupClassification` DTO.
@@ -118,7 +118,7 @@ def dedup_candidates(
     *,
     labeled_contents: list[tuple[str, str]],
     embedder: OpenAICompatClient,
-    vector_store: VectorStore,
+    vector_store: FragmentStore,
     embedding_model: str,
     hard_similarity: float,
     soft_similarity: float,

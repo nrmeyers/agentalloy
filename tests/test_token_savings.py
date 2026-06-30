@@ -4,16 +4,14 @@ aggregate_savings, CLI output, and compose-path counterfactual."""
 from __future__ import annotations
 
 import time
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentalloy.storage.vector_store import (
-    CompositionTrace,
-    VectorStore,
-    open_or_create,
-)
+from agentalloy.storage.protocols import CompositionTrace
+from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 from agentalloy.telemetry.writer import DuckDBTelemetryWriter, TelemetryRecord
 
 # ---------------------------------------------------------------------------
@@ -40,9 +38,12 @@ def _mk_trace(
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
-    with open_or_create(tmp_path / "test.duck") as s:
+def store(tmp_path: Path) -> DuckDBTelemetryStore:  # type: ignore[misc]
+    s = open_telemetry_store(tmp_path / "telemetry.duck")
+    try:
         yield s
+    finally:
+        s.close()
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
 # ---------------------------------------------------------------------------
 
 
-def test_tokens_columns_default_zero_on_fresh_db(store: VectorStore) -> None:
+def test_tokens_columns_default_zero_on_fresh_db(store: DuckDBTelemetryStore) -> None:
     trace = CompositionTrace(
         trace_id="t-defaults",
         request_ts=int(time.time()),
@@ -65,76 +66,12 @@ def test_tokens_columns_default_zero_on_fresh_db(store: VectorStore) -> None:
     assert results[0].tokens_flat_equivalent == 0
 
 
-# ---------------------------------------------------------------------------
-# Schema migration: columns added to pre-existing DB
-# ---------------------------------------------------------------------------
-
-
-def test_migration_adds_columns_to_preexisting_db(tmp_path: Path) -> None:
-    """A DB opened before the migration should gain the new columns on reopen."""
-    db_path = tmp_path / "migrate.duck"
-
-    # Simulate a pre-existing DB by opening and then manually dropping the new columns.
-    import duckdb
-
-    conn = duckdb.connect(str(db_path))
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS composition_traces (
-            trace_id VARCHAR PRIMARY KEY,
-            correlation_id VARCHAR,
-            request_ts BIGINT NOT NULL,
-            phase VARCHAR NOT NULL,
-            category VARCHAR,
-            task_prompt VARCHAR NOT NULL,
-            selected_fragment_ids VARCHAR[],
-            source_skill_ids VARCHAR[],
-            system_skill_ids VARCHAR[],
-            assembly_tier VARCHAR,
-            assembly_model VARCHAR,
-            retrieval_latency_ms INTEGER,
-            assembly_latency_ms INTEGER,
-            total_latency_ms INTEGER,
-            status VARCHAR NOT NULL,
-            error_code VARCHAR,
-            response_size_chars INTEGER,
-            prompt_version VARCHAR,
-            workflow_skill_ids VARCHAR[],
-            event_type VARCHAR NOT NULL DEFAULT 'compose',
-            pre_filter_matched VARCHAR,
-            gates_met VARCHAR[],
-            gates_unmet VARCHAR[],
-            qwen_calls INTEGER NOT NULL DEFAULT 0,
-            contract_path VARCHAR,
-            contract_tags VARCHAR[],
-            bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted',
-            reranked BOOLEAN NOT NULL DEFAULT FALSE
-        )
-        """
-    )
-    # Insert a legacy row (without the new columns) — they get the column default.
-    conn.execute(
-        """
-        INSERT INTO composition_traces
-            (trace_id, request_ts, phase, task_prompt, status)
-        VALUES ('legacy-row', 0, 'build', 'legacy', 'compose')
-        """
-    )
-    conn.close()
-
-    # Reopen via open_or_create — migration should add the new columns.
-    with open_or_create(db_path) as s:
-        # Write a new row with values.
-        s.record_composition_trace(
-            _mk_trace("new-row", tokens_returned=50, tokens_flat_equivalent=200)
-        )
-        results = {r.trace_id: r for r in s.query_traces(limit=10)}
-
-    assert "legacy-row" in results
-    assert results["legacy-row"].tokens_returned == 0
-    assert results["legacy-row"].tokens_flat_equivalent == 0
-    assert results["new-row"].tokens_returned == 50
-    assert results["new-row"].tokens_flat_equivalent == 200
+# Schema migration: the v5.3 additive-ALTER token-column backfill is obsolete in
+# v6. ``DuckDBTelemetryStore`` creates telemetry.duck from one canonical CREATE
+# (``tokens_returned`` / ``tokens_flat_equivalent`` and every other column folded
+# in, no per-open ALTER), so a "pre-existing DB missing the token columns" can no
+# longer occur. The former ``test_migration_adds_columns_to_preexisting_db``
+# exercised that deleted code path and was removed.
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +79,7 @@ def test_migration_adds_columns_to_preexisting_db(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_tokens_roundtrip_via_record_and_query(store: VectorStore) -> None:
+def test_tokens_roundtrip_via_record_and_query(store: DuckDBTelemetryStore) -> None:
     trace = _mk_trace("t-rt", phase="qa", tokens_returned=120, tokens_flat_equivalent=480)
     store.record_composition_trace(trace)
     results = store.query_traces(limit=5)
@@ -153,10 +90,10 @@ def test_tokens_roundtrip_via_record_and_query(store: VectorStore) -> None:
 
 
 def test_tokens_via_telemetry_record_writer(tmp_path: Path) -> None:
-    """TelemetryRecord → DuckDBTelemetryWriter → VectorStore round-trip."""
+    """TelemetryRecord → DuckDBTelemetryWriter → TelemetryStore round-trip."""
     from datetime import UTC, datetime
 
-    with open_or_create(tmp_path / "writer.duck") as vs:
+    with closing(open_telemetry_store(tmp_path / "writer.duck")) as vs:
         writer = DuckDBTelemetryWriter(vs)
         rec = TelemetryRecord(
             composition_id="tr-writer",
@@ -180,7 +117,7 @@ def test_tokens_via_telemetry_record_writer(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_aggregate_savings_empty_db(store: VectorStore) -> None:
+def test_aggregate_savings_empty_db(store: DuckDBTelemetryStore) -> None:
     result = store.aggregate_savings()
     assert result["total_composes"] == 0
     assert result["tokens_returned"] == 0
@@ -190,7 +127,7 @@ def test_aggregate_savings_empty_db(store: VectorStore) -> None:
     assert result["per_phase"] == []
 
 
-def test_aggregate_savings_zero_flat_equivalent(store: VectorStore) -> None:
+def test_aggregate_savings_zero_flat_equivalent(store: DuckDBTelemetryStore) -> None:
     """If all flat_equivalents are 0 (legacy rows), savings_pct must be 0."""
     store.record_composition_trace(_mk_trace("t1", tokens_returned=50, tokens_flat_equivalent=0))
     result = store.aggregate_savings()
@@ -198,7 +135,7 @@ def test_aggregate_savings_zero_flat_equivalent(store: VectorStore) -> None:
     assert result["savings_pct"] == 0.0
 
 
-def test_aggregate_savings_math(store: VectorStore) -> None:
+def test_aggregate_savings_math(store: DuckDBTelemetryStore) -> None:
     store.record_composition_trace(
         _mk_trace("t1", phase="build", tokens_returned=100, tokens_flat_equivalent=400)
     )
@@ -221,7 +158,7 @@ def test_aggregate_savings_math(store: VectorStore) -> None:
     assert phases["qa"]["tokens_saved"] == 120
 
 
-def test_aggregate_savings_excludes_non_compose_status(store: VectorStore) -> None:
+def test_aggregate_savings_excludes_non_compose_status(store: DuckDBTelemetryStore) -> None:
     """Only status='proxy_composed' rows count. Passthroughs and legacy per-leg
     'compose'/'compose_empty' rows must not inflate totals."""
     store.record_composition_trace(
@@ -251,11 +188,11 @@ def test_cli_savings_returns_zero_on_empty_db(tmp_path: Path) -> None:
     """_run_savings returns 0 (success) on an empty database."""
     from agentalloy.install.subcommands.telemetry import _run_savings
 
-    with open_or_create(tmp_path / "cli.duck"):
+    with closing(open_telemetry_store(tmp_path / "cli.duck")):
         pass  # create empty DB
 
     settings_mock = MagicMock()
-    settings_mock.duckdb_path = str(tmp_path / "cli.duck")
+    settings_mock.telemetry_db_path = str(tmp_path / "cli.duck")
     args = MagicMock()
     args.json = False
     args.quiet = False
@@ -276,13 +213,13 @@ def test_cli_savings_returns_zero_with_traces(tmp_path: Path) -> None:
     from agentalloy.install.subcommands.telemetry import _run_savings
 
     db_path = tmp_path / "cli2.duck"
-    with open_or_create(db_path) as vs:
+    with closing(open_telemetry_store(db_path)) as vs:
         vs.record_composition_trace(
             _mk_trace("c1", phase="build", tokens_returned=200, tokens_flat_equivalent=800)
         )
 
     settings_mock = MagicMock()
-    settings_mock.duckdb_path = str(db_path)
+    settings_mock.telemetry_db_path = str(db_path)
     args = MagicMock()
     args.json = False
     args.quiet = False
@@ -305,13 +242,13 @@ def test_cli_savings_json_shape(tmp_path: Path, capsys: pytest.CaptureFixture[st
     from agentalloy.install.subcommands.telemetry import _run_savings
 
     db_path = tmp_path / "cli3.duck"
-    with open_or_create(db_path) as vs:
+    with closing(open_telemetry_store(db_path)) as vs:
         vs.record_composition_trace(
             _mk_trace("j1", phase="spec", tokens_returned=50, tokens_flat_equivalent=250)
         )
 
     settings_mock = MagicMock()
-    settings_mock.duckdb_path = str(db_path)
+    settings_mock.telemetry_db_path = str(db_path)
     args = MagicMock()
     args.json = True
     args.quiet = False
@@ -355,7 +292,7 @@ async def test_compose_records_token_savings_with_runtime_cache() -> None:
     from agentalloy.retrieval.domain import RetrievalResult
     from agentalloy.retrieval.system import SystemRetrievalResult
     from agentalloy.runtime_state import RuntimeCache, VersionDetail
-    from agentalloy.storage.vector_store import VectorStore
+    from agentalloy.storage.protocols import FragmentStore
 
     # Build a minimal RuntimeCache with one skill + version detail.
     RAW_PROSE = "x" * 400  # 400 chars → 100 tokens via len // 4
@@ -405,7 +342,7 @@ async def test_compose_records_token_savings_with_runtime_cache() -> None:
 
     # Fake embed client and vector store.
     lm_mock = MagicMock()
-    vs_mock = MagicMock(spec=VectorStore)
+    vs_mock = MagicMock(spec=FragmentStore)
 
     orch = ComposeOrchestrator(
         source=cache,
@@ -450,7 +387,7 @@ async def test_system_only_compose_counts_system_skills_in_flat_baseline() -> No
     from agentalloy.reads.models import ActiveFragment, ActiveSkill
     from agentalloy.retrieval.system import SystemRetrievalResult
     from agentalloy.runtime_state import RuntimeCache, VersionDetail
-    from agentalloy.storage.vector_store import VectorStore
+    from agentalloy.storage.protocols import FragmentStore
 
     RAW_PROSE = "s" * 400  # 400 chars → 100 tokens via len // 4
     sys_skill = ActiveSkill(
@@ -499,7 +436,7 @@ async def test_system_only_compose_counts_system_skills_in_flat_baseline() -> No
     orch = ComposeOrchestrator(
         source=cache,
         lm=MagicMock(),
-        vector_store=MagicMock(spec=VectorStore),
+        vector_store=MagicMock(spec=FragmentStore),
         telemetry=_CapturingWriter(),
         embedding_model="fake-embed",
     )

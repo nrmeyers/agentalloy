@@ -1,4 +1,4 @@
-"""Dev/test fixture loader — wipes and re-seeds LadybugDB with a small fixed corpus."""
+"""Dev/test fixture loader — wipes and re-seeds the skill store (agentalloy.duck) with a small fixed corpus."""
 
 from __future__ import annotations
 

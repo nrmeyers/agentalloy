@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -23,7 +24,8 @@ from agentalloy.api.proxy_session import (
     session_header_names,
 )
 from agentalloy.api.proxy_signal import commit_markers, evaluate_signal
-from agentalloy.storage.vector_store import CompositionTrace, VectorStore, open_or_create
+from agentalloy.storage.protocols import CompositionTrace, TelemetryStore
+from agentalloy.storage.telemetry_store import open_telemetry_store
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -263,12 +265,15 @@ def test_signal_result_carries_repo_and_session(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
-    with open_or_create(tmp_path / "t.duck") as s:
+def store(tmp_path: Path) -> Iterator[TelemetryStore]:
+    s = open_telemetry_store(tmp_path / "telemetry.duck")
+    try:
         yield s
+    finally:
+        s.close()
 
 
-def test_session_columns_roundtrip(store: VectorStore) -> None:
+def test_session_columns_roundtrip(store: TelemetryStore) -> None:
     store.record_composition_trace(
         CompositionTrace(
             trace_id="s1",

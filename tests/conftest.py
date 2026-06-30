@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentalloy.app import create_app
-from agentalloy.storage.vector_store import VectorStore, open_or_create
+from agentalloy.storage.fragment_store import LanceFragmentStore
 
 # Port used by the agentalloy server — must be freed between tests.
 _DEFAULT_PORT = 47950
@@ -343,7 +343,7 @@ def clear_container_sentinel():
 
 @pytest.fixture
 def app() -> FastAPI:
-    # Skip the production lifespan (which opens LadybugDB + Ollama).
+    # Skip the production lifespan (which opens the DuckDB/Lance stores + embedder).
     # Per-test fixtures wire dependency_overrides explicitly.
     return create_app(use_default_lifespan=False)
 
@@ -355,13 +355,17 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def vector_store(tmp_path: Path) -> Iterator[VectorStore]:
-    """Empty DuckDB vector store at a tmp path. Tests that exercise
-    compose/retrieve construction use this for the new vector_store
-    constructor parameter. Empty store means search_similar returns no
-    hits — fine for tests that mock retrieval results anyway."""
-    with open_or_create(tmp_path / "test.duck") as vs:
-        yield vs
+def vector_store(tmp_path: Path) -> Iterator[LanceFragmentStore]:
+    """Empty Lance fragment store at a tmp path. Tests that exercise
+    compose/retrieve construction use this for the ``vector_store``
+    constructor parameter (a FragmentStore in v6). Empty store means
+    search_similar returns no hits — fine for tests that mock retrieval
+    results anyway."""
+    fs = LanceFragmentStore(tmp_path / "fragments.lance")
+    try:
+        yield fs
+    finally:
+        fs.close()
 
 
 # ---------------------------------------------------------------------------
@@ -379,38 +383,37 @@ _STUB_EMBED_MODEL = "stub-embed"
 
 @pytest.fixture(scope="session")
 def corpus_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Build the fixture corpus (LadybugDB graph + embedded DuckDB) once per
-    session. Returns a directory holding ``ladybug/`` and ``skills.duck``."""
+    """Build the fixture corpus (DuckDB skill graph + embedded Lance dataset)
+    once per session. Returns a directory holding ``agentalloy.duck`` and
+    ``fragments.lance``."""
     from agentalloy.fixtures.loader import load_fixtures
-    from agentalloy.reembed import discover_unembedded_fragments, reembed_fragments
-    from agentalloy.storage.ladybug import LadybugStore
+    from agentalloy.install.importer import reembed_corpus
+    from agentalloy.storage.skill_store import open_skill_store
     from tests.support import StubLMClient
 
     base = tmp_path_factory.mktemp("corpus_template")
-    lb = LadybugStore(str(base / "ladybug"))
-    lb.open()
-    lb.migrate()
-    load_fixtures(lb)
+    ss = open_skill_store(str(base / "agentalloy.duck"))
+    ss.migrate()
+    load_fixtures(ss)
     stub = StubLMClient()
-    with open_or_create(base / "skills.duck") as vs:
-        frags = discover_unembedded_fragments(lb, vs)
-        reembed_fragments(
-            frags,
-            embed_fn=lambda t: stub.embed(model=_STUB_EMBED_MODEL, texts=[t])[0],
-            vector_store=vs,
-            embedding_model=_STUB_EMBED_MODEL,
-        )
-        vs.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
-    lb.close()
+    fs = LanceFragmentStore(base / "fragments.lance")
+    reembed_corpus(
+        fs,
+        ss,
+        embed=lambda texts: stub.embed(model=_STUB_EMBED_MODEL, texts=texts),
+        model=_STUB_EMBED_MODEL,
+    )
+    fs.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
+    fs.close()
+    ss.close()
     return base
 
 
 @pytest.fixture
 def corpus_dir(corpus_template: Path, tmp_path: Path) -> Path:
     """An isolated per-test copy of the session corpus template. Returns a dir
-    holding ``ladybug`` + ``skills.duck`` (whether Kùzu/DuckDB store as a file
-    or a directory). Cheap (copy, not rebuild), so tests that mutate the store
-    stay independent."""
+    holding ``agentalloy.duck`` (file) + ``fragments.lance`` (dir). Cheap (copy,
+    not rebuild), so tests that mutate the store stay independent."""
     import shutil
 
     dst = tmp_path / "corpus"

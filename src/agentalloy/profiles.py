@@ -308,14 +308,15 @@ def _ensure_profile_dir(name: str) -> Path:
     (skills / "system").mkdir(parents=True, exist_ok=True)
     (skills / "workflow").mkdir(parents=True, exist_ok=True)
 
-    # Create empty DuckDB datastore
+    # Create empty DuckDB datastore. The per-profile ``skills.duck`` holds only
+    # the lightweight ``profile_skills`` table, which is created lazily on first
+    # write (see install.subcommands.customize); here we just materialize the file.
     ds = profile_datastore_path(name)
     if not ds.exists():
         ds.parent.mkdir(parents=True, exist_ok=True)
-        from agentalloy.storage.vector_store import open_or_create
+        import duckdb
 
-        with open_or_create(str(ds)):
-            pass  # Schema created automatically
+        duckdb.connect(str(ds)).close()
 
     return base
 

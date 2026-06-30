@@ -497,7 +497,7 @@ class TestContainerFallback:
         result = _check_ladybug_present("/nonexistent/ladybug", diag=None, is_container=True)
         assert result["passed"] is False
         assert "Service not reachable" in result["error"]
-        assert "Kuzu DB" in result["error"]
+        assert "cannot verify the skill store" in result["error"]
         assert "container logs" in result["remediation"]
 
     def test_skill_count_fallback_skips_file_access(self) -> None:

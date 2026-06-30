@@ -1,4 +1,4 @@
-"""Bootstrap CLI for loading atomic system skills into LadybugDB.
+"""Bootstrap CLI for loading atomic system skills into the skill store.
 
 Usage::
 
@@ -19,10 +19,14 @@ import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agentalloy.config import get_settings
 from agentalloy.skill_md.parser import ParsedSystemSkill, ParseError, parse_file
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.open import open_skills
+
+if TYPE_CHECKING:
+    from agentalloy.storage.skill_store import DuckDBSkillStore
 
 EXIT_OK = 0
 EXIT_USAGE = 1
@@ -39,7 +43,7 @@ _VALID_CATEGORIES = {"governance", "operational", "tooling", "safety", "quality"
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.bootstrap",
-        description="Load an atomic system skill from a Markdown file into LadybugDB.",
+        description="Load an atomic system skill from a Markdown file into the skill store.",
     )
     parser.add_argument("path", help="Path to the system skill Markdown file")
     parser.add_argument(
@@ -82,12 +86,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- open DB and check duplicate ---
     settings = get_settings()
-    store = LadybugStore(settings.ladybug_db_path)
     try:
-        store.open()
+        # Writer mode runs the (idempotent) schema migration on open, so the
+        # tables always exist; ``--init-schema`` re-runs it explicitly below.
+        store = open_skills(settings, read_only=False)
     except Exception as exc:
         print(
-            f"error: failed to open LadybugDB at '{settings.ladybug_db_path}': {exc}",
+            f"error: failed to open the skill store at '{settings.duckdb_path}': {exc}",
             file=sys.stderr,
         )
         return EXIT_DB
@@ -101,8 +106,8 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_DB
 
         existing_name = store.scalar(
-            "MATCH (s:Skill {skill_id: $id}) RETURN s.canonical_name",
-            {"id": skill.skill_id},
+            "SELECT canonical_name FROM skills WHERE skill_id = ?",
+            [skill.skill_id],
         )
         if existing_name is not None and not args.force:
             print(
@@ -114,8 +119,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if existing_name is None:
             existing_id_by_name = store.scalar(
-                "MATCH (s:Skill {canonical_name: $name}) RETURN s.skill_id",
-                {"name": skill.canonical_name},
+                "SELECT skill_id FROM skills WHERE canonical_name = ?",
+                [skill.canonical_name],
             )
             if existing_id_by_name is not None and not args.force:
                 print(
@@ -139,8 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         # --- check superseded_by reference (needs DB access) ---
         if skill.superseded_by:
             ref_exists = store.scalar(
-                "MATCH (s:Skill {skill_id: $id}) RETURN s.skill_id",
-                {"id": skill.superseded_by},
+                "SELECT skill_id FROM skills WHERE skill_id = ?",
+                [skill.superseded_by],
             )
             if ref_exists is None:
                 print(
@@ -225,101 +230,60 @@ def _print_summary(skill: ParsedSystemSkill, *, existing: bool) -> None:
     print(f"{'=' * 60}\n")
 
 
-def _insert(store: LadybugStore, skill: ParsedSystemSkill, *, force: bool) -> None:
+def _insert(store: DuckDBSkillStore, skill: ParsedSystemSkill, *, force: bool) -> None:
+    """Insert a system skill (skill, active version, single guardrail fragment).
+
+    Mirrors ``install.importer.import_skill``'s system-class path: the version is
+    ``status='active'``, the skill's ``current_version_id`` points at it, and the
+    whole ``raw_prose`` becomes one guardrail fragment.
+    """
     version_id = f"{skill.skill_id}-v1"
     fragment_id = f"{skill.skill_id}-v1-f1"
     now = datetime.now(tz=UTC)
 
     if force:
-        # Remove existing skill and all connected nodes
-        store.execute(
-            """
-            MATCH (s:Skill {skill_id: $id})
-            OPTIONAL MATCH (s)-[:HAS_VERSION]->(v:SkillVersion)
-            OPTIONAL MATCH (v)-[:DECOMPOSES_TO]->(f:Fragment)
-            DETACH DELETE s, v, f
-            """,
-            {"id": skill.skill_id},
-        )
+        store.delete_skill(skill.skill_id)
 
     store.execute(
-        """
-        CREATE (:Skill {
-            skill_id: $skill_id,
-            canonical_name: $canonical_name,
-            category: $category,
-            skill_class: 'system',
-            domain_tags: [],
-            deprecated: $deprecated,
-            superseded_by: $superseded_by,
-            always_apply: $always_apply,
-            phase_scope: $phase_scope,
-            category_scope: $category_scope
-        })
-        """,
-        {
-            "skill_id": skill.skill_id,
-            "canonical_name": skill.canonical_name,
-            "category": skill.category,
-            "deprecated": skill.deprecated,
-            "superseded_by": skill.superseded_by or "",
-            "always_apply": skill.always_apply,
-            "phase_scope": skill.phase_scope,
-            "category_scope": skill.category_scope,
-        },
+        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, domain_tags, "
+        "deprecated, superseded_by, always_apply, phase_scope, category_scope, tier, "
+        "description, current_version_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            skill.skill_id,
+            skill.canonical_name,
+            skill.category,
+            "system",
+            [],
+            skill.deprecated,
+            skill.superseded_by or None,
+            skill.always_apply,
+            list(skill.phase_scope) if skill.phase_scope else None,
+            list(skill.category_scope) if skill.category_scope else None,
+            None,
+            None,
+            version_id,
+        ],
     )
 
     store.execute(
-        """
-        CREATE (:SkillVersion {
-            version_id: $version_id,
-            version_number: 1,
-            authored_at: $authored_at,
-            author: $author,
-            change_summary: $change_summary,
-            status: 'active',
-            raw_prose: $raw_prose
-        })
-        """,
-        {
-            "version_id": version_id,
-            "authored_at": now,
-            "author": skill.author,
-            "change_summary": skill.change_summary,
-            "raw_prose": skill.raw_prose,
-        },
+        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+        "author, change_summary, status, raw_prose) VALUES (?,?,?,?,?,?,?,?)",
+        [
+            version_id,
+            skill.skill_id,
+            1,
+            now,
+            skill.author,
+            skill.change_summary,
+            "active",
+            skill.raw_prose,
+        ],
     )
 
     store.execute(
-        """
-        MATCH (s:Skill {skill_id: $skill_id}), (v:SkillVersion {version_id: $version_id})
-        CREATE (s)-[:HAS_VERSION]->(v)
-        CREATE (s)-[:CURRENT_VERSION]->(v)
-        """,
-        {"skill_id": skill.skill_id, "version_id": version_id},
-    )
-
-    store.execute(
-        """
-        CREATE (:Fragment {
-            fragment_id: $fragment_id,
-            fragment_type: 'guardrail',
-            sequence: 1,
-            content: $content
-        })
-        """,
-        {
-            "fragment_id": fragment_id,
-            "content": skill.raw_prose,
-        },
-    )
-
-    store.execute(
-        """
-        MATCH (v:SkillVersion {version_id: $version_id}), (f:Fragment {fragment_id: $fragment_id})
-        CREATE (v)-[:DECOMPOSES_TO]->(f)
-        """,
-        {"version_id": version_id, "fragment_id": fragment_id},
+        "INSERT INTO fragments (fragment_id, version_id, fragment_type, sequence, content) "
+        "VALUES (?,?,?,?,?)",
+        [fragment_id, version_id, "guardrail", 1, skill.raw_prose],
     )
 
 

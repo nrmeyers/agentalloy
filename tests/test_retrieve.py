@@ -18,8 +18,8 @@ from agentalloy.retrieval.embedding_errors import (
     EmbeddingErrorCode,
     EmbeddingErrorResult,
 )
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore
+from agentalloy.storage.protocols import FragmentStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 from agentalloy.telemetry import NullTelemetryWriter, TelemetryRecord, TelemetryWriter
 from tests.support import StubLMClient
 
@@ -33,10 +33,8 @@ class _SpyTelemetry:
 
 
 @pytest.fixture
-def populated_store(corpus_dir: Path) -> LadybugStore:
-    s = LadybugStore(str(corpus_dir / "ladybug"))
-    s.open()
-    return s
+def populated_store(corpus_dir: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
 
 
 @pytest.fixture
@@ -46,8 +44,8 @@ def spy_telemetry() -> _SpyTelemetry:
 
 @pytest.fixture
 def orch(
-    populated_store: LadybugStore,
-    vector_store: VectorStore,
+    populated_store: DuckDBSkillStore,
+    vector_store: FragmentStore,
     spy_telemetry: _SpyTelemetry,
 ) -> RetrieveOrchestrator:
     return RetrieveOrchestrator(
@@ -157,7 +155,7 @@ def test_retrieve_query_uses_bm25_fallback_results(
     app: FastAPI,
     client: TestClient,
     orch: RetrieveOrchestrator,
-    populated_store: LadybugStore,
+    populated_store: DuckDBSkillStore,
     spy_telemetry: _SpyTelemetry,
 ) -> None:
     _install(app, orch)

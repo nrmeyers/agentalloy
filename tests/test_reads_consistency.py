@@ -7,62 +7,43 @@ from pathlib import Path
 import pytest
 
 from agentalloy.reads import InconsistentActiveVersion, get_active_skills
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
 
 
 @pytest.fixture
-def empty_store(tmp_path: Path) -> LadybugStore:
-    s = LadybugStore(str(tmp_path / "ladybug"))
-    s.open()
-    s.migrate()
-    return s
+def empty_store(tmp_path: Path) -> DuckDBSkillStore:
+    return open_skill_store(str(tmp_path / "agentalloy.duck"))
 
 
-def _make_skill(store: LadybugStore, skill_id: str, skill_class: str = "domain") -> None:
+def _make_skill(store: DuckDBSkillStore, skill_id: str, skill_class: str = "domain") -> None:
     store.execute(
-        """
-        CREATE (:Skill {
-            skill_id: $sid, canonical_name: $sid, category: 'design',
-            skill_class: $sc, domain_tags: [], deprecated: false,
-            always_apply: false, phase_scope: [], category_scope: []
-        })
-        """,
-        {"sid": skill_id, "sc": skill_class},
+        "INSERT INTO skills (skill_id, canonical_name, category, skill_class, "
+        "domain_tags, deprecated, always_apply, phase_scope, category_scope) "
+        "VALUES (?, ?, 'design', ?, ?, false, false, ?, ?)",
+        [skill_id, skill_id, skill_class, [], [], []],
     )
 
 
-def _make_version(store: LadybugStore, skill_id: str, version_id: str, status: str) -> None:
+def _make_version(store: DuckDBSkillStore, skill_id: str, version_id: str, status: str) -> None:
     from datetime import UTC, datetime
 
+    # HAS_VERSION is folded into skill_versions.skill_id.
     store.execute(
-        """
-        CREATE (:SkillVersion {
-            version_id: $vid, version_number: 1, authored_at: $at,
-            author: 'test', change_summary: 't', status: $status, raw_prose: ''
-        })
-        """,
-        {"vid": version_id, "at": datetime.now(UTC), "status": status},
-    )
-    store.execute(
-        """
-        MATCH (s:Skill {skill_id: $sid}), (v:SkillVersion {version_id: $vid})
-        CREATE (s)-[:HAS_VERSION]->(v)
-        """,
-        {"sid": skill_id, "vid": version_id},
+        "INSERT INTO skill_versions (version_id, skill_id, version_number, authored_at, "
+        "author, change_summary, status, raw_prose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [version_id, skill_id, 1, datetime.now(UTC), "test", "t", status, ""],
     )
 
 
-def _link_current(store: LadybugStore, skill_id: str, version_id: str) -> None:
+def _link_current(store: DuckDBSkillStore, skill_id: str, version_id: str) -> None:
+    # CURRENT_VERSION is folded into skills.current_version_id.
     store.execute(
-        """
-        MATCH (s:Skill {skill_id: $sid}), (v:SkillVersion {version_id: $vid})
-        CREATE (s)-[:CURRENT_VERSION]->(v)
-        """,
-        {"sid": skill_id, "vid": version_id},
+        "UPDATE skills SET current_version_id = ? WHERE skill_id = ?",
+        [version_id, skill_id],
     )
 
 
-def test_current_version_points_at_superseded_raises(empty_store: LadybugStore) -> None:
+def test_current_version_points_at_superseded_raises(empty_store: DuckDBSkillStore) -> None:
     _make_skill(empty_store, "s1")
     _make_version(empty_store, "s1", "s1-v1", "superseded")
     _link_current(empty_store, "s1", "s1-v1")
@@ -72,7 +53,7 @@ def test_current_version_points_at_superseded_raises(empty_store: LadybugStore) 
     assert "superseded" in ei.value.reason
 
 
-def test_active_version_without_current_edge_raises(empty_store: LadybugStore) -> None:
+def test_active_version_without_current_edge_raises(empty_store: DuckDBSkillStore) -> None:
     _make_skill(empty_store, "s2")
     _make_version(empty_store, "s2", "s2-v1", "active")
     # intentionally skip _link_current
@@ -82,7 +63,7 @@ def test_active_version_without_current_edge_raises(empty_store: LadybugStore) -
     assert "no CURRENT_VERSION edge" in ei.value.reason
 
 
-def test_no_active_version_at_all_does_not_raise(empty_store: LadybugStore) -> None:
+def test_no_active_version_at_all_does_not_raise(empty_store: DuckDBSkillStore) -> None:
     # Draft-only skills are legitimately absent from active reads
     _make_skill(empty_store, "s3")
     _make_version(empty_store, "s3", "s3-v1", "draft")
@@ -90,5 +71,5 @@ def test_no_active_version_at_all_does_not_raise(empty_store: LadybugStore) -> N
     assert skills == []
 
 
-def test_empty_store_returns_empty(empty_store: LadybugStore) -> None:
+def test_empty_store_returns_empty(empty_store: DuckDBSkillStore) -> None:
     assert get_active_skills(empty_store) == []

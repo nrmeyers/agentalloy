@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from agentalloy.config import Settings as AppSettings
     from agentalloy.embed_provider import EmbedClient
     from agentalloy.orchestration.compose import ComposeOrchestrator
-    from agentalloy.storage.vector_store import VectorStore
+    from agentalloy.storage.protocols import TelemetryStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +74,14 @@ def get_embed_async_client(request: Request) -> httpx.AsyncClient | None:
     return getattr(request.app.state, "embed_async_client", None)
 
 
-def get_vector_store(request: Request) -> VectorStore | None:
-    """Return the VectorStore from app.state."""
-    return getattr(request.app.state, "vector_store", None)
+def get_vector_store(request: Request) -> TelemetryStore | None:
+    """Return the telemetry store from app.state (the proxy trace sink).
+
+    Named ``get_vector_store`` for call-site stability; in v6 the proxy telemetry
+    path writes composition traces to the service-owned telemetry.duck, so this
+    resolves ``app.state.telemetry_store`` (not the Lance fragment store).
+    """
+    return getattr(request.app.state, "telemetry_store", None)
 
 
 def get_orchestrator_for_proxy(request: Request) -> ComposeOrchestrator | None:
@@ -345,7 +350,7 @@ def _extract_task_prompt(request: ProxyRequest) -> str:
 
 
 async def _write_flow_telemetry(
-    vector_store: VectorStore | None,
+    vector_store: TelemetryStore | None,
     request: ProxyRequest,
     phase: str | None,
     composed: bool,
@@ -422,7 +427,7 @@ async def proxy_chat_completions(
     token: str | None = None,
     upstream: httpx.AsyncClient | None = Depends(get_upstream_client),
     embed_client: EmbedClient | None = Depends(get_embed_client),
-    vector_store: VectorStore | None = Depends(get_vector_store),
+    vector_store: TelemetryStore | None = Depends(get_vector_store),
     orchestrator: ComposeOrchestrator | None = Depends(get_orchestrator_for_proxy),
     settings: AppSettings = Depends(get_settings_for_proxy),  # pyright: ignore[reportUnknownArgumentType]
 ):

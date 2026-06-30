@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from agentalloy.storage.vector_store import CompositionTrace, VectorStore
+from agentalloy.storage.protocols import CompositionTrace, TelemetryStore
 
 router = APIRouter()
 
@@ -88,7 +88,7 @@ class PhaseSavings(BaseModel):
 
 
 class SavingsResponse(BaseModel):
-    """Token-savings aggregation — mirrors ``VectorStore.aggregate_savings()``."""
+    """Token-savings aggregation — mirrors ``TelemetryStore.aggregate_savings()``."""
 
     total_composes: int
     tokens_returned: int
@@ -99,11 +99,11 @@ class SavingsResponse(BaseModel):
 
 
 class TelemetryQuerier:
-    def __init__(self, store: VectorStore) -> None:
+    def __init__(self, store: TelemetryStore) -> None:
         self._store = store
 
     async def savings(self, repo: str | None = None) -> SavingsResponse:
-        # DuckDB connection is not thread-safe; run the read off the loop.
+        # telemetry.duck reads use thread-local cursors; run off the loop anyway.
         data = await asyncio.to_thread(self._store.aggregate_savings, repo)
         return SavingsResponse.model_validate(data)
 
@@ -118,8 +118,7 @@ class TelemetryQuerier:
         offset: int,
     ) -> TracesResponse:
         kwargs: dict[str, Any] = dict(phase=phase, status=status, since=since, until=until)
-        # Both reads share one DuckDB connection, which is not thread-safe
-        # (see VectorStore docstring) — run them sequentially, not via gather.
+        # Off-loop reads via the telemetry store's thread-local cursors.
         traces = await asyncio.to_thread(
             self._store.query_traces, **kwargs, limit=limit, offset=offset
         )

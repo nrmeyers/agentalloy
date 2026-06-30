@@ -1,8 +1,21 @@
-"""Tests for reembed CLI and vector_store FTS rebuild retry."""
+"""Tests for the reembed CLI and the Lance FTS rebuild path.
+
+v6 note: reembed no longer stops/restarts the agentalloy service. Lance is MVCC
+(atomic versioned writes) and telemetry lives in a separate ``telemetry.duck``,
+so a reembed is a live, zero-downtime operation (decisions D3/D4). The old
+service-manager detection (``_detect_service_manager``), running-state probe
+(``_is_service_running``), and stop/restart helpers (``_stop_service`` /
+``_restart_service``), plus the container stop/restart integration in this CLI,
+were DELETED — so all tests that asserted those behaviours are gone. ``--no-restart``
+is now accepted-but-ignored. The CLI opens its stores via
+``open_skills`` / ``open_fragments`` (not ``LadybugStore`` / ``open_or_create``).
+"""
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -16,105 +29,75 @@ from agentalloy.reembed.cli import (
 )
 
 # ---------------------------------------------------------------------------
+# Shared store mocking
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _patched_stores(*, count_embeddings: int = 100) -> Iterator[tuple[MagicMock, MagicMock]]:
+    """Patch the CLI's store openers + settings. Yields (skill_store, fragment_store).
+
+    The skill store's ``execute`` returns no rows (no fragments discovered), and
+    the fragment store reports an empty ``fragment_ids_present`` so discovery is
+    a clean no-op — every test here exercises the rebuild-fts / metadata path,
+    not real embedding.
+    """
+    with (
+        patch("agentalloy.reembed.cli.open_skills") as mock_open_skills,
+        patch("agentalloy.reembed.cli.open_fragments") as mock_open_fragments,
+        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.runtime_embedding_model = "test-model"
+        mock_store = MagicMock()
+        mock_store.execute.return_value = []  # no active fragments
+        mock_open_skills.return_value = mock_store
+
+        mock_vs = MagicMock()
+        mock_vs.count_embeddings.return_value = count_embeddings
+        mock_vs.fragment_ids_present.return_value = set()
+        mock_open_fragments.return_value = mock_vs
+
+        yield mock_store, mock_vs
+
+
+# ---------------------------------------------------------------------------
 # --rebuild-fts flag
 # ---------------------------------------------------------------------------
 
 
 def test_rebuild_fts_flag_accepted() -> None:
     """--rebuild-fts is accepted as valid CLI (dry-run mode)."""
-    with (
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = "/tmp/test/ladybug.db"
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 0
-        mock_vs.fragment_ids_present.return_value = set()
-
-        # dry-run should exit OK with --rebuild-fts
+    with _patched_stores(count_embeddings=0):
+        # dry-run short-circuits before any FTS rebuild; just exits OK.
         code = reembed_main(["--rebuild-fts", "--dry-run"])
         assert code == EXIT_OK
 
 
-def test_rebuild_fts_runs_when_zero_fragments(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """--rebuild-fts triggers rebuild_fts_index when fragments is empty."""
-    # Mock the LadybugStore and vector_store so we can control discovery
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        # Mock LadybugStore context manager
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []  # no fragments
-
-        # Mock VectorStore context manager
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
+def test_rebuild_fts_runs_when_zero_fragments(caplog: pytest.LogCaptureFixture) -> None:
+    """--rebuild-fts triggers rebuild_fts_index when there's nothing to embed."""
+    with _patched_stores() as (mock_store, mock_vs):
         with caplog.at_level(logging.INFO):
             code = reembed_main(["--rebuild-fts"])
 
         assert code == EXIT_OK
         mock_vs.rebuild_fts_index.assert_called_once()
-        assert "running --rebuild-fts only" in caplog.text or "rebuild-fts requested" in caplog.text
-        # Every pass stamps the corpus schema version into corpus_meta — even
-        # the zero-fragment / idempotent path — so existing corpora pick up the
-        # explicit marker without a full re-embed.
+        assert (
+            "running --rebuild-fts only" in caplog.text or "rebuild-fts requested" in caplog.text
+        )
+        # Every pass stamps the corpus schema version into corpus_meta (on the
+        # SkillStore now) — even the zero-fragment / idempotent path — so existing
+        # corpora pick up the explicit marker without a full re-embed.
         from agentalloy.storage.card_index import (
             CORPUS_SCHEMA_VERSION,
             META_KEY_SCHEMA_VERSION,
         )
 
-        mock_vs.set_meta.assert_any_call(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
+        mock_store.set_meta.assert_any_call(META_KEY_SCHEMA_VERSION, str(CORPUS_SCHEMA_VERSION))
 
 
-def test_no_rebuild_without_flag_when_zero_fragments(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Without --rebuild-fts, rebuild_fts_index is NOT called when fragments is empty."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []  # no fragments
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
+def test_no_rebuild_without_flag_when_zero_fragments(caplog: pytest.LogCaptureFixture) -> None:
+    """Without --rebuild-fts, rebuild_fts_index is NOT called when nothing to embed."""
+    with _patched_stores() as (_mock_store, mock_vs):
         with caplog.at_level(logging.INFO):
             code = reembed_main([])
 
@@ -123,27 +106,9 @@ def test_no_rebuild_without_flag_when_zero_fragments(
         assert "nothing to do" in caplog.text
 
 
-def test_rebuild_fts_exit_ok_on_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """When rebuild_fts_index raises, exit code is still EXIT_OK."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
+def test_rebuild_fts_exit_ok_on_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """When rebuild_fts_index raises, exit code is still EXIT_OK (BM25 leg degrades)."""
+    with _patched_stores() as (_mock_store, mock_vs):
         mock_vs.rebuild_fts_index.side_effect = Exception("stopwords has been deleted")
 
         with caplog.at_level(logging.WARNING):
@@ -153,612 +118,77 @@ def test_rebuild_fts_exit_ok_on_failure(tmp_path: Path, caplog: pytest.LogCaptur
         assert "BM25 leg degraded" in caplog.text
 
 
-# ---------------------------------------------------------------------------
-# Service management
-# ---------------------------------------------------------------------------
+def test_no_restart_flag_accepted_but_ignored(caplog: pytest.LogCaptureFixture) -> None:
+    """--no-restart is accepted for backward compatibility and changes nothing.
 
-
-def test_detect_service_manager_linux() -> None:
-    """_detect_service_manager returns 'systemd' on Linux with systemctl."""
-    from agentalloy.reembed.cli import (
-        _detect_service_manager,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-    ):
-        assert _detect_service_manager() == "systemd"
-
-
-def test_detect_service_manager_macos() -> None:
-    """_detect_service_manager returns 'launchd' on macOS with launchctl."""
-    from agentalloy.reembed.cli import (
-        _detect_service_manager,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    with (
-        patch("platform.system", return_value="Darwin"),
-        patch("shutil.which", return_value="/bin/launchctl"),
-    ):
-        assert _detect_service_manager() == "launchd"
-
-
-def test_detect_service_manager_none() -> None:
-    """_detect_service_manager returns None when no service manager found."""
-    from agentalloy.reembed.cli import (
-        _detect_service_manager,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value=None),
-    ):
-        assert _detect_service_manager() is None
-
-
-def test_is_service_running_systemd() -> None:
-    """_is_service_running returns True when systemd reports active."""
-    from agentalloy.reembed.cli import _is_service_running  # pyright: ignore[reportPrivateUsage]
-
-    mock_result = MagicMock()
-    mock_result.stdout = "active\n"
-    mock_result.returncode = 0
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-        patch("subprocess.run", return_value=mock_result),
-    ):
-        assert _is_service_running() is True
-
-
-def test_is_service_running_systemd_inactive() -> None:
-    """_is_service_running returns False when systemd reports inactive."""
-    from agentalloy.reembed.cli import _is_service_running  # pyright: ignore[reportPrivateUsage]
-
-    mock_result = MagicMock()
-    mock_result.stdout = "inactive\n"
-    mock_result.returncode = 3
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-        patch("subprocess.run", return_value=mock_result),
-    ):
-        assert _is_service_running() is False
-
-
-def test_is_service_running_no_service_manager() -> None:
-    """_is_service_running returns False when no service manager found."""
-    from agentalloy.reembed.cli import _is_service_running  # pyright: ignore[reportPrivateUsage]
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value=None),
-    ):
-        assert _is_service_running() is False
-
-
-def test_stop_service_systemd() -> None:
-    """_stop_service stops the systemd service."""
-    from agentalloy.reembed.cli import _stop_service  # pyright: ignore[reportPrivateUsage]
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-        patch("subprocess.run") as mock_run,
-    ):
-        result = _stop_service()
-        assert result is True
-        mock_run.assert_called_once()
-        assert "systemctl" in mock_run.call_args[0][0]
-        assert "--user" in mock_run.call_args[0][0]
-        assert "stop" in mock_run.call_args[0][0]
-
-
-def test_stop_service_systemd_failure() -> None:
-    """_stop_service returns False when systemd stop fails."""
-    from agentalloy.reembed.cli import _stop_service  # pyright: ignore[reportPrivateUsage]
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-        patch("subprocess.run", side_effect=OSError("no DBUS")),
-    ):
-        result = _stop_service()
-        assert result is False
-
-
-def test_restart_service_systemd() -> None:
-    """_restart_service starts the systemd service."""
-    from agentalloy.reembed.cli import _restart_service  # pyright: ignore[reportPrivateUsage]
-
-    with (
-        patch("platform.system", return_value="Linux"),
-        patch("shutil.which", return_value="/usr/bin/systemctl"),
-        patch("subprocess.run") as mock_run,
-    ):
-        _restart_service()
-        mock_run.assert_called_once()
-        assert "systemctl" in mock_run.call_args[0][0]
-        assert "--user" in mock_run.call_args[0][0]
-        assert "start" in mock_run.call_args[0][0]
-
-
-# ---------------------------------------------------------------------------
-# Pre-flight service stop/restart integration
-# ---------------------------------------------------------------------------
-
-
-def test_reembed_stops_and_restarts_service(tmp_path: Path) -> None:
-    """reembed stops service before DB access and restarts after (unless --no-restart)."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=True),
-        patch("agentalloy.reembed.cli._stop_service", return_value=True) as mock_stop,
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts"])
+    v6 reembed never stops/restarts the service, so the flag is a documented
+    no-op; the pass still runs and stamps metadata normally.
+    """
+    with _patched_stores() as (mock_store, mock_vs):
+        with caplog.at_level(logging.INFO):
+            code = reembed_main(["--rebuild-fts", "--no-restart"])
 
         assert code == EXIT_OK
-        mock_stop.assert_called_once()
-        mock_restart.assert_called_once()
-
-
-def test_reembed_no_restart_flag(tmp_path: Path) -> None:
-    """--no-restart prevents automatic service restart."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=True),
-        patch("agentalloy.reembed.cli._stop_service", return_value=True),
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts", "--no-restart"])
-
-        assert code == EXIT_OK
-        mock_restart.assert_not_called()
-
-
-def test_reembed_no_service_skip_stop(tmp_path: Path) -> None:
-    """When service is not running, skip stop and restart steps."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-        patch("agentalloy.reembed.cli._stop_service") as mock_stop,
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts"])
-
-        assert code == EXIT_OK
-        mock_stop.assert_not_called()
-        mock_restart.assert_not_called()
-
-
-def test_reembed_restart_on_error(tmp_path: Path) -> None:
-    """Service is restarted even when reembed fails (DB error)."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=True),
-        patch("agentalloy.reembed.cli._stop_service", return_value=True),
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-        # Simulate FTS rebuild failure
-        mock_vs.rebuild_fts_index.side_effect = Exception("DB error")
-
-        code = reembed_main(["--rebuild-fts"])
-
-        # Still exits OK (FTS failure is non-fatal)
-        assert code == EXIT_OK
-        # But service is still restarted
-        mock_restart.assert_called_once()
+        mock_vs.rebuild_fts_index.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# macOS launchctl PID parsing
+# FTS rebuild warning (v6: no remediation hint — the BM25 leg simply degrades)
 # ---------------------------------------------------------------------------
 
 
-def test_is_service_running_macos_with_pid() -> None:
-    """_is_service_running returns True when launchctl list shows a real PID."""
-    from agentalloy.reembed.cli import _is_service_running  # pyright: ignore[reportPrivateUsage]
-
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "12345\t0\tai.agentalloy\n"
-
-    with (
-        patch("platform.system", return_value="Darwin"),
-        patch("shutil.which", return_value="/bin/launchctl"),
-        patch("pathlib.Path.exists", return_value=True),
-        patch("subprocess.run", return_value=mock_result),
-    ):
-        assert _is_service_running() is True
-
-
-def test_is_service_running_macos_not_running() -> None:
-    """_is_service_running returns False when launchctl list shows PID='-'."""
-    from agentalloy.reembed.cli import _is_service_running  # pyright: ignore[reportPrivateUsage]
-
-    mock_result = MagicMock()
-    mock_result.returncode = 0
-    mock_result.stdout = "-\t0\tai.agentalloy\n"
-
-    with (
-        patch("platform.system", return_value="Darwin"),
-        patch("shutil.which", return_value="/bin/launchctl"),
-        patch("pathlib.Path.exists", return_value=True),
-        patch("subprocess.run", return_value=mock_result),
-    ):
-        assert _is_service_running() is False
-
-
-# ---------------------------------------------------------------------------
-# Dry-run with service running
-# ---------------------------------------------------------------------------
-
-
-def test_reembed_dry_run_stops_service(tmp_path: Path) -> None:
-    """--dry-run still stops the service to avoid DB lock conflicts."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=True),
-        patch("agentalloy.reembed.cli._stop_service", return_value=True) as mock_stop,
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--dry-run"])
-
-        assert code == EXIT_OK
-        mock_stop.assert_called_once()
-        mock_restart.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# FTS rebuild warning includes remediation hint
-# ---------------------------------------------------------------------------
-
-
-def test_fts_rebuild_warning_includes_hint(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """FTS rebuild failure warning includes actionable remediation hint."""
-    with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
+def test_fts_rebuild_warning_emitted_on_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """FTS rebuild failure logs a 'BM25 leg degraded' warning (non-fatal)."""
+    with _patched_stores() as (_mock_store, mock_vs):
         mock_vs.rebuild_fts_index.side_effect = Exception("stopwords has been deleted")
 
         with caplog.at_level(logging.WARNING):
             code = reembed_main(["--rebuild-fts"])
 
         assert code == EXIT_OK
+        # v6 dropped the old "agentalloy server-stop" / re-run remediation hint
+        # from this warning — the failure is benign (Lance manages FTS) and the
+        # message is just the degraded-leg notice.
         assert "BM25 leg degraded" in caplog.text
-        assert "re-run" in caplog.text or "rebuild-fts" in caplog.text
 
 
 # ---------------------------------------------------------------------------
-# Container-aware service management
-# ---------------------------------------------------------------------------
-
-
-def test_container_stop_restart_success(tmp_path: Path, capsys) -> None:
-    """Container stop/restart is called when inside a container."""
-    with (
-        patch("agentalloy.reembed.cli.is_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.stop_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.restart_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts"])
-
-        assert code == EXIT_OK
-        captured = capsys.readouterr()
-        assert (
-            "Stopping agentalloy service (container mode) to release database locks..."
-            in captured.err
-        )
-        assert "Operation complete, restarting agentalloy service..." in captured.err
-
-
-def test_container_restart_failure_logs_warning(tmp_path: Path) -> None:
-    """Container restart failure logs a warning but does not override the operation result."""
-    with (
-        patch("agentalloy.reembed.cli.is_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.stop_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.restart_service_in_container", return_value=False),
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts"])
-
-        # Operation should succeed even if restart fails
-        assert code == EXIT_OK
-
-
-# ---------------------------------------------------------------------------
-# --no-restart flag with container mode
-# ---------------------------------------------------------------------------
-
-
-def test_container_no_restart_skips_stop_and_restart(tmp_path: Path, capsys) -> None:
-    """--no-restart skips both container stop and restart."""
-    with (
-        patch("agentalloy.reembed.cli.is_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.stop_service_in_container") as mock_stop,
-        patch("agentalloy.reembed.cli.restart_service_in_container") as mock_restart,
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts", "--no-restart"])
-
-        assert code == EXIT_OK
-        captured = capsys.readouterr()
-        # Container stop should NOT appear in output
-        assert "Stopping agentalloy service (container mode)" not in captured.err
-        # Container restart should NOT appear in output
-        assert "Operation complete, restarting agentalloy service" not in captured.err
-        # Container service functions should not be called
-        mock_stop.assert_not_called()
-        mock_restart.assert_not_called()
-
-
-def test_container_no_restart_skips_service_manager_restart(tmp_path: Path) -> None:
-    """--no-restart skips both container and service-manager restart."""
-    with (
-        patch("agentalloy.reembed.cli.is_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.stop_service_in_container", return_value=False),
-        patch("agentalloy.reembed.cli.restart_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=True),
-        patch("agentalloy.reembed.cli._stop_service", return_value=True),
-        patch("agentalloy.reembed.cli._restart_service") as mock_restart,
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts", "--no-restart"])
-
-        assert code == EXIT_OK
-        # Service manager restart should also be skipped
-        mock_restart.assert_not_called()
-
-
-def test_container_without_no_restart_calls_stop_and_restart(tmp_path: Path, capsys) -> None:
-    """Without --no-restart, container stop and restart are called."""
-    with (
-        patch("agentalloy.reembed.cli.is_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.stop_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.restart_service_in_container", return_value=True),
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create") as mock_vs_cls,
-        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
-    ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
-        mock_settings.return_value.runtime_embedding_model = "test-model"
-
-        mock_store = MagicMock()
-        mock_store_cls.return_value.__enter__ = MagicMock(return_value=mock_store)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_store.execute.return_value = []
-
-        mock_vs = MagicMock()
-        mock_vs_cls.return_value.__enter__ = MagicMock(return_value=mock_vs)
-        mock_vs_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_vs.count_embeddings.return_value = 100
-        mock_vs.fragment_ids_present.return_value = set()
-
-        code = reembed_main(["--rebuild-fts"])
-
-        assert code == EXIT_OK
-        captured = capsys.readouterr()
-        assert "Stopping agentalloy service (container mode)" in captured.err
-        assert "Operation complete, restarting agentalloy service" in captured.err
-
-
-# ---------------------------------------------------------------------------
-# Lock-held error recognition (issue #84)
+# Lock-held error recognition (issue #84 — remediation reworded for v6)
 # ---------------------------------------------------------------------------
 
 
 def test_lock_held_error_returns_exit_db_with_remediation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A LadybugDB single-writer lock failure (e.g. a manually-launched
-    uvicorn the preflight can't see) must exit EXIT_DB with a targeted
-    remediation instead of an unhandled traceback."""
+    """A DuckDB single-writer lock failure (a concurrent ingest/reembed holding
+    agentalloy.duck) must exit EXIT_DB with a targeted remediation instead of an
+    unhandled traceback. In v6 the remediation is 'wait and re-run' (the writer
+    lock is benign + transient), not 'stop the service'."""
     from agentalloy.reembed.cli import EXIT_DB
 
     lock_err = RuntimeError(
-        "IO exception: Could not set lock on file ladybug.lock: Lock is held by PID 12345"
+        "IO Error: Could not set lock on file 'agentalloy.duck.lock': "
+        "Conflicting lock is held by PID 12345"
     )
     with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create"),
+        patch("agentalloy.reembed.cli.open_skills", side_effect=lock_err),
         patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
     ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
         mock_settings.return_value.runtime_embedding_model = "test-model"
-        mock_store_cls.return_value.__enter__ = MagicMock(side_effect=lock_err)
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-
         code = reembed_main([])
 
     assert code == EXIT_DB
     err = capsys.readouterr().err
     assert "Another process holds the corpus DB lock" in err
-    assert "agentalloy server-stop" in err
+    assert "re-run the command" in err
 
 
-def test_non_lock_db_error_still_raises(tmp_path: Path) -> None:
+def test_non_lock_db_error_still_raises() -> None:
     """Only lock-held errors are translated; other DB failures propagate."""
     with (
-        patch("agentalloy.reembed.cli.LadybugStore") as mock_store_cls,
-        patch("agentalloy.reembed.cli.open_or_create"),
+        patch("agentalloy.reembed.cli.open_skills", side_effect=RuntimeError("corrupt")),
         patch("agentalloy.reembed.cli.get_settings") as mock_settings,
-        patch("agentalloy.reembed.cli._is_service_running", return_value=False),
     ):
-        mock_settings.return_value.ladybug_db_path = str(tmp_path / "ladybug.db")
         mock_settings.return_value.runtime_embedding_model = "test-model"
-        mock_store_cls.return_value.__enter__ = MagicMock(side_effect=RuntimeError("corrupt"))
-        mock_store_cls.return_value.__exit__ = MagicMock(return_value=False)
-
         with pytest.raises(RuntimeError, match="corrupt"):
             reembed_main([])

@@ -39,8 +39,7 @@ from agentalloy.orchestration.compose import (
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import VectorStore, open_or_create
+from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
 from agentalloy.telemetry import DuckDBTelemetryWriter
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     endpoint reflects ``unavailable`` while runtime handlers 503.
 
     In tests we override ``get_orchestrator`` via ``app.dependency_overrides``
-    so no real LadybugDB or embedding connection is created.
+    so no real DuckDB/Lance or embedding connection is created.
     """
     settings = get_settings()
     settings.ensure_data_dirs()
@@ -78,11 +77,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # that don't use /app should skip this silently.
     if Path("/.dockerenv").exists() or Path("/app").is_dir():
         Path("/app/data").mkdir(parents=True, exist_ok=True)
-    store = LadybugStore(settings.ladybug_db_path)
-    store.open()
-    vector_store: VectorStore = open_or_create(settings.duckdb_path)
+    # Ensure the skill schema exists, then serve it READ-ONLY (decision D4): the
+    # writers — ingest / reembed, separate processes — take the exclusive lock,
+    # and the service answers from the in-memory RuntimeCache. The brief
+    # writer-migrate here runs before serving begins. Fragments live in Lance
+    # (MVCC, no lock); telemetry is a separate service-owned RW file.
+    _writer = open_skills(settings, read_only=False)
+    try:
+        _writer.migrate()
+    finally:
+        _writer.close()
+    store = open_skills(settings, read_only=True)
+    vector_store = open_fragments(settings)
+    telemetry_store = open_telemetry(settings, read_only=False)
     embed_client: EmbedClient = get_embed_client(settings)
-    telemetry = DuckDBTelemetryWriter(vector_store)
+    telemetry = DuckDBTelemetryWriter(telemetry_store)
 
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None
@@ -120,7 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     health_checker = HealthChecker(
         store,
         embed_client,
-        vector_store,
+        telemetry_store,
         settings.runtime_embedding_model,
         runtime_load_error=runtime_load_error,
     )
@@ -132,13 +141,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if app_dir.is_dir():
         app.state.readiness_checker = ReadinessChecker(app_dir=app_dir)
     app.state.diagnostics_checker = DiagnosticsChecker(store, runtime, health_checker)
-    app.state.telemetry_querier = TelemetryQuerier(vector_store)
+    app.state.telemetry_querier = TelemetryQuerier(telemetry_store)
     # Expose for proxy router dependencies
     app.state.embed_client = embed_client
+    # The Lance fragment store (vector + BM25). Name kept as ``vector_store`` for
+    # the diagnostics/proxy app.state contract; it is a FragmentStore in v6.
     app.state.vector_store = vector_store
-    # Expose the live LadybugStore so read-only diagnostics (e.g. corpus
-    # counts) can reuse the lock-holding connection instead of opening a new
-    # one (which would deadlock against this process's own file lock).
+    # Service-owned telemetry.duck handle — the proxy trace writers and the
+    # telemetry querier record/read composition traces here (decoupled from the
+    # skill graph + Lance index so the reembed writer never contends — D4).
+    app.state.telemetry_store = telemetry_store
+    # Expose the live read-only SkillStore so diagnostics (e.g. corpus skill
+    # counts) can reuse the open handle instead of opening another one.
     app.state.store = store
 
     # Async client for embed proxy passthrough
@@ -199,7 +213,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_skill_store, None)
         # Guard each close independently: a failure in one (e.g. an in-flight
         # passthrough request at shutdown) must not skip the rest and leak the
-        # DuckDB / LadybugDB connections.
+        # DuckDB / Lance connections.
         cached_upstreams = list(getattr(app.state, "upstream_client_cache", {}).values())
         for aclient in (embed_async_client, upstream_client, *cached_upstreams):
             if aclient is not None:
@@ -207,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     await aclient.aclose()
         with suppress(Exception):
             await anthropic_passthrough_client.aclose()
-        for closeable in (telemetry, embed_client, vector_store, store):
+        for closeable in (telemetry, embed_client, vector_store, store, telemetry_store):
             with suppress(Exception):
                 closeable.close()
 
@@ -229,9 +243,9 @@ def _stage_error_response(stage: str, err: object) -> JSONResponse:
 def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     """Build the FastAPI app.
 
-    ``use_default_lifespan=False`` skips the production lifespan (which opens
-    LadybugDB and the embedding client). Tests pass ``False`` and wire their own
-    dependency overrides via ``app.dependency_overrides``.
+    ``use_default_lifespan=False`` skips the production lifespan (which opens the
+    DuckDB/Lance stores and the embedding client). Tests pass ``False`` and wire
+    their own dependency overrides via ``app.dependency_overrides``.
     """
     configure_logging()
     app = FastAPI(

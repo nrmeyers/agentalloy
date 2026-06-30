@@ -8,7 +8,7 @@ import sys
 
 from agentalloy.config import get_settings
 from agentalloy.fixtures.loader import load_fixtures
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.open import open_skills
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,8 +21,11 @@ def main(argv: list[str] | None = None) -> int:
     settings.ensure_data_dirs()
 
     if args.command == "load":
-        with LadybugStore(settings.ladybug_db_path) as store:
+        store = open_skills(settings, read_only=False)
+        try:
             load_fixtures(store)
+        finally:
+            store.close()
     return 0
 
 

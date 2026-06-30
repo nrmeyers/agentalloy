@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.storage.vector_store import (
-    CompositionTrace,
-    VectorStore,
+from agentalloy.storage.protocols import CompositionTrace
+from agentalloy.storage.telemetry_store import (
+    DuckDBTelemetryStore,
     _repo_clause,
-    open_or_create,
+    open_telemetry_store,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,9 +50,12 @@ def _mk_trace(
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> VectorStore:  # type: ignore[misc]
-    with open_or_create(tmp_path / "test.duck") as s:
+def store(tmp_path: Path) -> DuckDBTelemetryStore:  # type: ignore[misc]
+    s = open_telemetry_store(tmp_path / "telemetry.duck")
+    try:
         yield s
+    finally:
+        s.close()
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +85,7 @@ def test_repo_clause_strips_trailing_slash() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_repo_roundtrips_via_query(store: VectorStore) -> None:
+def test_repo_roundtrips_via_query(store: DuckDBTelemetryStore) -> None:
     store.record_composition_trace(_mk_trace("t-repo", repo="/home/u/repo"))
     store.record_composition_trace(_mk_trace("t-none", repo=None))
     rows = {r.trace_id: r for r in store.query_traces(limit=10)}
@@ -95,7 +98,7 @@ def test_repo_roundtrips_via_query(store: VectorStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_savings_scoped_to_repo(store: VectorStore) -> None:
+def test_savings_scoped_to_repo(store: DuckDBTelemetryStore) -> None:
     store.record_composition_trace(
         _mk_trace("a1", repo="/repo/a", tokens_returned=100, tokens_flat_equivalent=400)
     )
@@ -113,7 +116,7 @@ def test_savings_scoped_to_repo(store: VectorStore) -> None:
     assert all_repos["tokens_returned"] == 150
 
 
-def test_savings_repo_prefix_matches_subdirectory(store: VectorStore) -> None:
+def test_savings_repo_prefix_matches_subdirectory(store: DuckDBTelemetryStore) -> None:
     """A trace recorded from a subdirectory still counts for the repo root."""
     store.record_composition_trace(
         _mk_trace("sub", repo="/repo/a/services/api", tokens_returned=10, tokens_flat_equivalent=40)
@@ -122,7 +125,7 @@ def test_savings_repo_prefix_matches_subdirectory(store: VectorStore) -> None:
     assert scoped["total_composes"] == 1
 
 
-def test_savings_excludes_unattributed_from_repo_scope(store: VectorStore) -> None:
+def test_savings_excludes_unattributed_from_repo_scope(store: DuckDBTelemetryStore) -> None:
     store.record_composition_trace(
         _mk_trace("legacy", repo=None, tokens_returned=99, tokens_flat_equivalent=200)
     )
@@ -132,7 +135,7 @@ def test_savings_excludes_unattributed_from_repo_scope(store: VectorStore) -> No
     assert store.aggregate_savings()["total_composes"] == 1
 
 
-def test_savings_prefix_does_not_leak_sibling_repo(store: VectorStore) -> None:
+def test_savings_prefix_does_not_leak_sibling_repo(store: DuckDBTelemetryStore) -> None:
     """``/repo/a`` must not match ``/repo/ab`` (a different repo)."""
     store.record_composition_trace(
         _mk_trace("ab", repo="/repo/ab", tokens_returned=10, tokens_flat_equivalent=40)
@@ -140,69 +143,12 @@ def test_savings_prefix_does_not_leak_sibling_repo(store: VectorStore) -> None:
     assert store.aggregate_savings("/repo/a")["total_composes"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Schema migration: pre-existing DB without the repo column
-# ---------------------------------------------------------------------------
-
-
-def test_migration_adds_repo_column(tmp_path: Path) -> None:
-    db_path = tmp_path / "migrate.duck"
-    import duckdb
-
-    conn = duckdb.connect(str(db_path))
-    # A historical schema (through ``reranked``) that predates the ``repo`` column;
-    # ``open_or_create`` must backfill it via the additive migration.
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS composition_traces (
-            trace_id VARCHAR PRIMARY KEY,
-            correlation_id VARCHAR,
-            request_ts BIGINT NOT NULL,
-            phase VARCHAR NOT NULL,
-            category VARCHAR,
-            task_prompt VARCHAR NOT NULL,
-            selected_fragment_ids VARCHAR[],
-            source_skill_ids VARCHAR[],
-            system_skill_ids VARCHAR[],
-            assembly_tier VARCHAR,
-            assembly_model VARCHAR,
-            retrieval_latency_ms INTEGER,
-            assembly_latency_ms INTEGER,
-            total_latency_ms INTEGER,
-            status VARCHAR NOT NULL,
-            error_code VARCHAR,
-            response_size_chars INTEGER,
-            prompt_version VARCHAR,
-            workflow_skill_ids VARCHAR[],
-            event_type VARCHAR NOT NULL DEFAULT 'compose',
-            pre_filter_matched VARCHAR,
-            gates_met VARCHAR[],
-            gates_unmet VARCHAR[],
-            qwen_calls INTEGER NOT NULL DEFAULT 0,
-            contract_path VARCHAR,
-            contract_tags VARCHAR[],
-            bm25_source VARCHAR NOT NULL DEFAULT 'rule-extracted',
-            reranked BOOLEAN NOT NULL DEFAULT FALSE
-        )
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO composition_traces (trace_id, request_ts, phase, task_prompt, status)
-        VALUES ('legacy', 0, 'build', 'legacy', 'proxy_composed')
-        """
-    )
-    conn.close()
-
-    with open_or_create(db_path) as s:
-        s.record_composition_trace(_mk_trace("new", repo="/repo/a"))
-        rows = {r.trace_id: r for r in s.query_traces(limit=10)}
-        # Legacy row backfills to NULL repo; new row carries its repo.
-        assert rows["legacy"].repo is None
-        assert rows["new"].repo == "/repo/a"
-        # Legacy row is unattributed -> only visible in the all-repos view.
-        assert s.aggregate_savings("/repo/a")["total_composes"] == 1
-        assert s.aggregate_savings()["total_composes"] == 2
+# Schema migration: the v5.3 additive-ALTER ``repo``-column backfill is obsolete
+# in v6 — telemetry.duck is created from a single canonical CREATE (every column
+# folded in, ``DuckDBTelemetryStore`` does no per-open ALTER), so a "pre-existing
+# DB missing the repo column" can no longer occur. The former
+# ``test_migration_adds_repo_column`` exercised that deleted code path and was
+# removed.
 
 
 # ---------------------------------------------------------------------------

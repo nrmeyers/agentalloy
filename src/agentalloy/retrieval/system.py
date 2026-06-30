@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from agentalloy.applicability import filter_applicable_system_skills
 from agentalloy.reads import get_active_fragments_for_skill, get_active_skills
 from agentalloy.reads.models import ActiveFragment
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.protocols import SkillStore
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class SystemRetrievalResult:
 
 
 def retrieve_system_fragments(
-    store: LadybugStore,
+    store: SkillStore,
     *,
     phase: str | None,
     category: str | None,

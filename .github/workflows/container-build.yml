@@ -104,13 +104,14 @@ jobs:
           # empty-embeddings image that 503s on /compose.
           uv run python - <<'PY'
           import os
-          import duckdb
 
-          p = f"{os.environ['XDG_DATA_HOME']}/agentalloy/corpus/skills.duck"
-          con = duckdb.connect(p, read_only=True)
-          n, dim = con.execute(
-              "SELECT count(*), max(len(embedding)) FROM fragment_embeddings"
-          ).fetchone()
+          from agentalloy.storage.fragment_store import LanceFragmentStore
+
+          p = f"{os.environ['XDG_DATA_HOME']}/agentalloy/corpus/fragments.lance"
+          fs = LanceFragmentStore(p)
+          n = fs.count_embeddings()
+          dim = fs.embedding_dim()
+          fs.close()
           print(f"embeddings={n} dim={dim}")
           assert n and n > 1000, f"too few embeddings ({n}) — reembed likely failed"
           assert dim == 768, f"embedding dim {dim} != 768"
@@ -121,8 +122,8 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p corpus-seed
-          cp -a "${XDG_DATA_HOME}/agentalloy/corpus/ladybug" corpus-seed/ladybug
-          cp "${XDG_DATA_HOME}/agentalloy/corpus/skills.duck" corpus-seed/skills.duck
+          cp "${XDG_DATA_HOME}/agentalloy/corpus/agentalloy.duck" corpus-seed/agentalloy.duck
+          cp -a "${XDG_DATA_HOME}/agentalloy/corpus/fragments.lance" corpus-seed/fragments.lance
           cat > corpus-seed/corpus-stamp.json <<EOF
           {
             "embedding_model": "nomic-embed-text-v1.5.Q8_0.gguf",

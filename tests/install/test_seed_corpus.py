@@ -65,25 +65,35 @@ class TestMissingFiles:
     def test_partial_corruption_returns_init_failed(
         self, repo_root: Path, user_corpus: Path, no_bundled_corpus: None
     ) -> None:
-        """A pre-existing-but-malformed ladybug path can't be initialized.
+        """A pre-existing-but-malformed store path can't be initialized.
         Surface the failure rather than silently overwriting."""
-        # Pre-create an empty `ladybug` directory (Kuzu expects a file).
-        (user_corpus / "ladybug").mkdir()
+        # Pre-create a directory where the telemetry DuckDB file must go.
+        # DuckDB refuses to open a directory, so empty-corpus init fails cleanly
+        # (the v6 analog of the old "ladybug dir where Kuzu wants a file" case).
+        (user_corpus / "telemetry.duck").mkdir()
         result = check_corpus(repo_root)
         assert result["action"] == "init_failed"
         assert "Could not initialize" in result.get("error", "")
 
 
 class TestVerifiedPresent:
-    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    @patch("agentalloy.install.subcommands.seed_corpus._embedding_meta")
+    @patch("agentalloy.install.subcommands.seed_corpus._check_skill_store")
     def test_verified_when_above_minimum(
-        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+        self,
+        mock_skill: MagicMock,
+        mock_embed: MagicMock,
+        repo_root: Path,
+        user_corpus: Path,
     ) -> None:
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
-        mock_duck.return_value = {
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
+        mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
+            "corpus_schema_version_recorded": 1,
+        }
+        mock_embed.return_value = {
             "embedding_model": "nomic-embed-text-v1.5",
             "embedding_dim": 768,
         }
@@ -97,19 +107,27 @@ class TestVerifiedPresent:
 
 
 class TestUnderMinimumSkillCount:
-    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    @patch("agentalloy.install.subcommands.seed_corpus._embedding_meta")
+    @patch("agentalloy.install.subcommands.seed_corpus._check_skill_store")
     def test_under_minimum_still_flagged(
-        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+        self,
+        mock_skill: MagicMock,
+        mock_embed: MagicMock,
+        repo_root: Path,
+        user_corpus: Path,
     ) -> None:
         """A populated-but-under-minimum corpus still triggers the
         ``missing_files`` action — that path detects integrity problems
         in a corpus that DOES have the files but is suspiciously small.
         Distinct from the `initialized_empty` path (no files at all)."""
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
-        mock_duck.return_value = {
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
+        mock_skill.return_value = {
             "skill_count": 10,
             "fragment_count": 50,
+            "corpus_schema_version_recorded": 1,
+        }
+        mock_embed.return_value = {
             "embedding_model": "nomic-embed-text-v1.5",
             "embedding_dim": 768,
         }
@@ -117,18 +135,26 @@ class TestUnderMinimumSkillCount:
         assert result["action"] == "missing_files"
         assert result["skill_count"] == 10
 
-    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    @patch("agentalloy.install.subcommands.seed_corpus._embedding_meta")
+    @patch("agentalloy.install.subcommands.seed_corpus._check_skill_store")
     def test_remediation_includes_migrate_step(
-        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+        self,
+        mock_skill: MagicMock,
+        mock_embed: MagicMock,
+        repo_root: Path,
+        user_corpus: Path,
     ) -> None:
         """Issue #84: a schema-less corpus reports skill_count 0; the
         remediation must mention `python -m agentalloy.migrate` because
         `agentalloy install-packs` alone cannot create the graph schema."""
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
-        mock_duck.return_value = {
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
+        mock_skill.return_value = {
             "skill_count": 0,
             "fragment_count": 0,
+            "corpus_schema_version_recorded": 1,
+        }
+        mock_embed.return_value = {
             "embedding_model": None,
             "embedding_dim": None,
         }
@@ -140,16 +166,24 @@ class TestUnderMinimumSkillCount:
 
 
 class TestNoNetworkCalls:
-    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    @patch("agentalloy.install.subcommands.seed_corpus._embedding_meta")
+    @patch("agentalloy.install.subcommands.seed_corpus._check_skill_store")
     def test_no_http_imports(
-        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+        self,
+        mock_skill: MagicMock,
+        mock_embed: MagicMock,
+        repo_root: Path,
+        user_corpus: Path,
     ) -> None:
         """seed-corpus should make zero network calls."""
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
-        mock_duck.return_value = {
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
+        mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
+            "corpus_schema_version_recorded": 1,
+        }
+        mock_embed.return_value = {
             "embedding_model": "nomic-embed-text-v1.5",
             "embedding_dim": 768,
         }
@@ -181,15 +215,23 @@ class TestRunEntrypoint:
 
 
 class TestDurationTracking:
-    @patch("agentalloy.install.subcommands.seed_corpus._check_duckdb")
+    @patch("agentalloy.install.subcommands.seed_corpus._embedding_meta")
+    @patch("agentalloy.install.subcommands.seed_corpus._check_skill_store")
     def test_duration_ms_present(
-        self, mock_duck: MagicMock, repo_root: Path, user_corpus: Path
+        self,
+        mock_skill: MagicMock,
+        mock_embed: MagicMock,
+        repo_root: Path,
+        user_corpus: Path,
     ) -> None:
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
-        mock_duck.return_value = {
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
+        mock_skill.return_value = {
             "skill_count": 93,
             "fragment_count": 1003,
+            "corpus_schema_version_recorded": 1,
+        }
+        mock_embed.return_value = {
             "embedding_model": "nomic-embed-text-v1.5",
             "embedding_dim": 768,
         }
@@ -202,23 +244,23 @@ class TestCorpusSkillCount:
     """Shared post-install/upgrade guard seam (used by setup #261 and upgrade)."""
 
     def test_zero_when_corpus_absent(self, repo_root: Path, user_corpus: Path) -> None:
-        # user_corpus dir exists but holds no skills.duck / ladybug
+        # user_corpus dir exists but holds no agentalloy.duck / fragments.lance
         assert corpus_skill_count() == 0
 
     def test_returns_skill_count_when_populated(self, user_corpus: Path) -> None:
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
         with patch(
-            "agentalloy.install.subcommands.seed_corpus._check_duckdb",
+            "agentalloy.install.subcommands.seed_corpus._check_skill_store",
             return_value={"skill_count": 142},
         ):
             assert corpus_skill_count() == 142
 
     def test_zero_when_check_raises(self, user_corpus: Path) -> None:
-        (user_corpus / "skills.duck").write_bytes(b"fake")
-        (user_corpus / "ladybug").mkdir()
+        (user_corpus / "agentalloy.duck").write_bytes(b"fake")
+        (user_corpus / "fragments.lance").mkdir()
         with patch(
-            "agentalloy.install.subcommands.seed_corpus._check_duckdb",
+            "agentalloy.install.subcommands.seed_corpus._check_skill_store",
             side_effect=RuntimeError("corrupt"),
         ):
             assert corpus_skill_count() == 0

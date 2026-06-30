@@ -1,8 +1,8 @@
-"""Unit tests for the DuckDB-backed dedup module.
+"""Unit tests for the dedup module.
 
 No live LM Studio; ``embedder`` is injected via a tiny fake ``OpenAICompatClient``
-stub that returns deterministic vectors. The ``VectorStore`` is a real DuckDB
-instance in tmp_path — fast, isolated per test.
+stub that returns deterministic vectors. The ``FragmentStore`` is a real Lance
+dataset in tmp_path — fast, isolated per test.
 """
 
 from __future__ import annotations
@@ -16,12 +16,11 @@ from agentalloy.authoring.dedup import (
     dedup_candidates,
     dedup_fragment,
 )
-from agentalloy.storage.vector_store import (
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.protocols import (
     EMBEDDING_DIM,
     FragmentEmbedding,
     SimilarityHit,
-    VectorStore,
-    open_or_create,
 )
 
 # ---------------------------------------------------------------------------
@@ -65,12 +64,15 @@ class _FakeEmbedder:
 
 @pytest.fixture
 def store(tmp_path: Path):
-    with open_or_create(tmp_path / "d.duck") as s:
+    s = LanceFragmentStore(tmp_path / "fragments.lance")
+    try:
         yield s
+    finally:
+        s.close()
 
 
 @pytest.fixture
-def seeded_store(store: VectorStore):
+def seeded_store(store: LanceFragmentStore):
     """Store pre-populated with 5 unit-vector fragments across 2 skills."""
     import time
 
@@ -130,7 +132,7 @@ def test_classify_hit_boundary_soft() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_fragment_detects_identical_match(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_detects_identical_match(seeded_store: LanceFragmentStore) -> None:
     # Querying with the exact vector of existing-0 should produce a hard hit.
     result = dedup_fragment(
         label="frag-0",
@@ -143,12 +145,10 @@ def test_dedup_fragment_detects_identical_match(seeded_store: VectorStore) -> No
     assert result.hard.fragment_id == "existing-0"
 
 
-def test_dedup_fragment_picks_hardest_match(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_picks_hardest_match(seeded_store: LanceFragmentStore) -> None:
     """Multiple hard hits: return the one with smallest distance."""
     # Add a second fragment in dim 0 with a slight perturbation.
     import time
-
-    from agentalloy.storage.vector_store import FragmentEmbedding
 
     seeded_store.insert_embeddings(
         [
@@ -175,7 +175,7 @@ def test_dedup_fragment_picks_hardest_match(seeded_store: VectorStore) -> None:
     assert result.hard.fragment_id == "existing-0"
 
 
-def test_dedup_fragment_only_soft_matches(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_only_soft_matches(seeded_store: LanceFragmentStore) -> None:
     """Query with a vector that's similarity ~0.85 to existing-0."""
     import math
 
@@ -196,7 +196,7 @@ def test_dedup_fragment_only_soft_matches(seeded_store: VectorStore) -> None:
     assert any(h.fragment_id == "existing-0" for h in result.soft)
 
 
-def test_dedup_fragment_no_matches(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_no_matches(seeded_store: LanceFragmentStore) -> None:
     """Query with a vector orthogonal to every seed (similarity 0)."""
     result = dedup_fragment(
         label="q",
@@ -209,7 +209,7 @@ def test_dedup_fragment_no_matches(seeded_store: VectorStore) -> None:
     assert result.soft == []
 
 
-def test_dedup_fragment_respects_fragment_type_filter(seeded_store: VectorStore) -> None:
+def test_dedup_fragment_respects_fragment_type_filter(seeded_store: LanceFragmentStore) -> None:
     """Narrowing by fragment_type should only return matches of that type."""
     result = dedup_fragment(
         label="q",
@@ -228,7 +228,7 @@ def test_dedup_fragment_respects_fragment_type_filter(seeded_store: VectorStore)
 # ---------------------------------------------------------------------------
 
 
-def test_dedup_candidates_empty_input_skips_embedding(seeded_store: VectorStore) -> None:
+def test_dedup_candidates_empty_input_skips_embedding(seeded_store: LanceFragmentStore) -> None:
     embedder = _FakeEmbedder({})
     result = dedup_candidates(
         labeled_contents=[],
@@ -244,7 +244,7 @@ def test_dedup_candidates_empty_input_skips_embedding(seeded_store: VectorStore)
     assert embedder.calls == []
 
 
-def test_dedup_candidates_batches_embeddings_in_one_call(seeded_store: VectorStore) -> None:
+def test_dedup_candidates_batches_embeddings_in_one_call(seeded_store: LanceFragmentStore) -> None:
     embedder = _FakeEmbedder(
         {
             "content-0": _unit_vec(0),
@@ -277,7 +277,7 @@ def test_dedup_candidates_batches_embeddings_in_one_call(seeded_store: VectorSto
 
 
 def test_dedup_candidates_hardest_is_min_distance_across_fragments(
-    seeded_store: VectorStore,
+    seeded_store: LanceFragmentStore,
 ) -> None:
     """When multiple candidates match, ``hardest`` is the overall smallest distance."""
     embedder = _FakeEmbedder(
@@ -298,7 +298,7 @@ def test_dedup_candidates_hardest_is_min_distance_across_fragments(
     assert result.hardest.fragment_id == "existing-0"  # exact match wins
 
 
-def test_dedup_candidates_deduplicates_soft_by_fragment_id(seeded_store: VectorStore) -> None:
+def test_dedup_candidates_deduplicates_soft_by_fragment_id(seeded_store: LanceFragmentStore) -> None:
     """If two candidate fragments both flag the same existing fragment as
     a soft match, the dedupe result's ``soft_all`` lists it once."""
     import math
@@ -328,7 +328,8 @@ def test_dedup_candidates_deduplicates_soft_by_fragment_id(seeded_store: VectorS
 
 def test_dedup_candidates_no_duplicates_in_corpus_empty_result(tmp_path: Path) -> None:
     """Fresh store with no seeded embeddings: every candidate gets clean pass."""
-    with open_or_create(tmp_path / "empty.duck") as empty_store:
+    empty_store = LanceFragmentStore(tmp_path / "empty.lance")
+    try:
         embedder = _FakeEmbedder({"c": _unit_vec(0)})
         result = dedup_candidates(
             labeled_contents=[("frag", "c")],
@@ -338,6 +339,8 @@ def test_dedup_candidates_no_duplicates_in_corpus_empty_result(tmp_path: Path) -
             hard_similarity=0.92,
             soft_similarity=0.80,
         )
+    finally:
+        empty_store.close()
     assert result.hardest is None
     assert result.soft_all == []
     assert result.per_fragment[0].hard is None

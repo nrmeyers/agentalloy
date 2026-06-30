@@ -2,8 +2,8 @@
 
 Constructs one consolidated ``CompositionTrace`` for every proxy request
 (composed or passthrough) — folding in both compose tiers' skill/fragment
-provenance and token counts — and writes it to the vector store via
-``record_composition_trace`` on the live VectorStore from the app context.
+provenance and token counts — and writes it via ``record_composition_trace``
+on the live TelemetryStore (telemetry.duck) from the app context.
 
 Public API
 ----------
@@ -16,11 +16,11 @@ import time
 import uuid
 from collections.abc import Sequence
 
-from agentalloy.storage.vector_store import CompositionTrace, VectorStore
+from agentalloy.storage.protocols import CompositionTrace, TelemetryStore
 
 
 def write_proxy_trace(
-    vector_store: VectorStore,
+    vector_store: TelemetryStore,
     *,
     phase: str,
     task_prompt: str,
@@ -57,7 +57,7 @@ def write_proxy_trace(
     caller of the proxy endpoint.
 
     Args:
-        vector_store: Live VectorStore from the app context.
+        vector_store: Live TelemetryStore (telemetry.duck) from the app context.
         phase: Current phase string (or "unspecified").
         task_prompt: First user message content (truncated to 500 chars).
         status: ``"proxy_composed"`` or ``"proxy_passthrough"``.

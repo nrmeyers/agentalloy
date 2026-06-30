@@ -189,9 +189,9 @@ def update(root: Path | None = None) -> dict[str, Any]:
 
     # 1. Corpus presence + schema version (user-scoped corpus dir)
     user_corpus = install_state.corpus_dir()
-    duck_path = user_corpus / "skills.duck"
-    ladybug_path = user_corpus / "ladybug"
-    if not duck_path.exists() or not ladybug_path.exists():
+    duck_path = user_corpus / "agentalloy.duck"
+    fragments_path = user_corpus / "fragments.lance"
+    if not duck_path.exists() or not fragments_path.exists():
         summary["corpus"] = {"present": False}
         summary["warnings"].append(
             f"Corpus missing at {user_corpus} — run "

@@ -241,10 +241,8 @@ class TestInstallLocalPack:
                 {"skill_id": "c", "file": "c.yaml", "fragment_count": 2},
             ],
         )
-        # Stub embedding-dim check and LadybugStore for rollback
+        # Stub embedding-dim check and the skill store for rollback
         mock_store = MagicMock()
-        mock_store.open = MagicMock()
-        mock_store.close = MagicMock()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(ip, "_ingest_yaml", side_effect=fake_results),
@@ -252,11 +250,9 @@ class TestInstallLocalPack:
             patch.object(ip.install_state, "save_state"),
             patch.object(ip.install_state, "record_step"),
             patch("agentalloy.config.get_settings") as mock_settings,
-            patch(
-                "agentalloy.install.subcommands.install_pack.LadybugStore", return_value=mock_store
-            ),
+            patch.object(ip, "open_skills", return_value=mock_store),
         ):
-            mock_settings.return_value.ladybug_db_path = str(tmp_path / "test.duck")
+            mock_settings.return_value.duckdb_path = str(tmp_path / "test.duck")
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         # Rollback: successfully ingested skills are deleted, so 0 remain
         assert result["skills_ingested"] == 0
@@ -277,15 +273,12 @@ class TestInstallLocalPack:
         fake_vs = MagicMock()
         fake_vs.embedding_dim.return_value = 1024
         fake_settings = MagicMock()
-        fake_settings.duckdb_path = "/tmp/fake.duck"
+        fake_settings.fragments_lance_path = "/tmp/fake.lance"
         fake_settings.runtime_embedding_model = "corpus-model"
 
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
-            patch(
-                "agentalloy.storage.vector_store.open_or_create",
-                return_value=MagicMock(__enter__=lambda s: fake_vs, __exit__=lambda *a: None),
-            ),
+            patch.object(_ip, "open_fragments", return_value=fake_vs),
         ):
             capsys.readouterr()  # clear any pre-existing capture
             result = _ip._check_embedding_dim(manifest, tmp_path)  # pyright: ignore[reportPrivateUsage]
@@ -303,12 +296,12 @@ class TestInstallLocalPack:
             tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 2}]
         )
         # Create corpus dir + files so the Pattern E corpus verification passes.
-        # Verification checks the ingest paths (settings.duckdb_path /
-        # ladybug_db_path), so point those at the seeded files.
+        # Verification checks the ingest path (settings.duckdb_path), so point it
+        # at the seeded agentalloy.duck.
         corpus_dir = tmp_path / "corpus"
         corpus_dir.mkdir()
-        (corpus_dir / "skills.duck").touch()
-        (corpus_dir / "ladybug").mkdir()
+        (corpus_dir / "agentalloy.duck").touch()
+        (corpus_dir / "fragments.lance").mkdir()
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(
@@ -329,8 +322,8 @@ class TestInstallLocalPack:
             patch(
                 "agentalloy.config.get_settings",
                 return_value=MagicMock(
-                    duckdb_path=str(corpus_dir / "skills.duck"),
-                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                    duckdb_path=str(corpus_dir / "agentalloy.duck"),
+                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
                 ),
             ),
         ):
@@ -345,25 +338,25 @@ class TestInstallLocalPack:
 
 
 def _seed_skill_node(db_path: str, skill_id: str) -> None:
-    """Migrate a fresh LadybugDB and insert a single live Skill node."""
-    from agentalloy.storage.ladybug import LadybugStore
+    """Migrate a fresh skill store and insert a single live skill row."""
+    from agentalloy.storage.skill_store import open_skill_store
 
-    with LadybugStore(db_path) as store:
+    with open_skill_store(db_path) as store:
         store.migrate()
         store.execute(
-            "CREATE (s:Skill {skill_id: $sid, canonical_name: $sid, "
-            "deprecated: false, always_apply: false})",
-            {"sid": skill_id},
+            "INSERT INTO skills (skill_id, canonical_name, deprecated, always_apply) "
+            "VALUES (?, ?, false, false)",
+            [skill_id, skill_id],
         )
 
 
 def _read_skill_flags(db_path: str, skill_id: str) -> tuple[Any, Any] | None:
-    from agentalloy.storage.ladybug import LadybugStore
+    from agentalloy.storage.skill_store import open_skill_store
 
-    with LadybugStore(db_path) as store:
+    with open_skill_store(db_path, read_only=True) as store:
         rows = store.execute(
-            "MATCH (s:Skill {skill_id: $sid}) RETURN s.deprecated, s.superseded_by",
-            {"sid": skill_id},
+            "SELECT deprecated, superseded_by FROM skills WHERE skill_id = ?",
+            [skill_id],
         )
     if not rows:
         return None
@@ -372,12 +365,12 @@ def _read_skill_flags(db_path: str, skill_id: str) -> tuple[Any, Any] | None:
 
 class TestDeprecationPropagation:
     def test_updates_existing_skill_node(self, tmp_path: Path) -> None:
-        """A deprecated YAML whose skill_id is already ingested updates the node."""
-        db_path = str(tmp_path / "ladybug")
+        """A deprecated YAML whose skill_id is already ingested updates the row."""
+        db_path = str(tmp_path / "agentalloy.duck")
         _seed_skill_node(db_path, "old-skill")
 
         fake_settings = MagicMock()
-        fake_settings.ladybug_db_path = db_path
+        fake_settings.duckdb_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             outcome = ip._propagate_deprecation("old-skill", "new-skill")  # pyright: ignore[reportPrivateUsage]
 
@@ -387,16 +380,16 @@ class TestDeprecationPropagation:
 
     def test_skips_when_skill_absent(self, tmp_path: Path) -> None:
         """A deprecated YAML for a skill not in the graph is a plain skip."""
-        db_path = str(tmp_path / "ladybug")
+        db_path = str(tmp_path / "agentalloy.duck")
         _seed_skill_node(db_path, "present-skill")
 
         fake_settings = MagicMock()
-        fake_settings.ladybug_db_path = db_path
+        fake_settings.duckdb_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             outcome = ip._propagate_deprecation("missing-skill", "x")  # pyright: ignore[reportPrivateUsage]
 
         assert outcome == "deprecated"
-        # The unrelated node is untouched.
+        # The unrelated row is untouched.
         assert _read_skill_flags(db_path, "present-skill") == (False, None)
 
     def test_lock_held_does_not_crash(
@@ -404,11 +397,11 @@ class TestDeprecationPropagation:
     ) -> None:
         """A lock-held error warns with a FIX hint and degrades to a skip."""
         fake_settings = MagicMock()
-        fake_settings.ladybug_db_path = str(tmp_path / "ladybug")
+        fake_settings.duckdb_path = str(tmp_path / "agentalloy.duck")
         boom = MagicMock(side_effect=RuntimeError("Could not set lock on file: held by PID 999"))
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
-            patch.object(ip, "LadybugStore", boom),
+            patch.object(ip, "open_skills", boom),
         ):
             capsys.readouterr()
             outcome = ip._propagate_deprecation("old-skill", "new-skill")  # pyright: ignore[reportPrivateUsage]
@@ -419,8 +412,8 @@ class TestDeprecationPropagation:
         assert "FIX" in err
 
     def test_ingest_yaml_deprecated_branch_propagates(self, tmp_path: Path) -> None:
-        """_ingest_yaml on a deprecated YAML reports deprecated_updated when the node exists."""
-        db_path = str(tmp_path / "ladybug")
+        """_ingest_yaml on a deprecated YAML reports deprecated_updated when the row exists."""
+        db_path = str(tmp_path / "agentalloy.duck")
         _seed_skill_node(db_path, "dep-skill")
 
         yaml_path = tmp_path / "dep.yaml"
@@ -437,7 +430,7 @@ class TestDeprecationPropagation:
         )
 
         fake_settings = MagicMock()
-        fake_settings.ladybug_db_path = db_path
+        fake_settings.duckdb_path = db_path
         with patch("agentalloy.config.get_settings", return_value=fake_settings):
             result = ip._ingest_yaml(yaml_path, tmp_path)  # pyright: ignore[reportPrivateUsage]
 

@@ -197,7 +197,7 @@ class TestRenderHumanFailureDetail:
                     "outcome": "failed",
                     "stderr_tail": (
                         "RuntimeError: IO exception: Could not set lock on file "
-                        "ladybug.lock: Lock is held by PID 12345"
+                        "agentalloy.duck: Lock is held by PID 12345"
                     ),
                 }
             ],
@@ -206,7 +206,7 @@ class TestRenderHumanFailureDetail:
         ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
         out = capsys.readouterr().out
         assert "Another process holds the corpus DB lock" in out
-        assert "agentalloy server-stop" in out
+        assert "writing agentalloy.duck" in out
 
 
 class TestCanonicalModelName:
@@ -268,32 +268,25 @@ class TestEmbedModelSoftWarn:
     ) -> str:
         """Drive ``_check_embedding_dim`` with dims that AGREE so only the
         soft model-name warning path can fire. Returns captured stderr."""
-        from contextlib import contextmanager
         from types import SimpleNamespace
         from unittest.mock import MagicMock
 
         manifest = {"embedding_dim": pack_dim, "embed_model": pack_model}
         fake_settings = SimpleNamespace(
             duckdb_path="/tmp/unused.duck",
+            fragments_lance_path="/tmp/unused.lance",
             runtime_embedding_model=runtime_model,
         )
 
         vs = MagicMock()
         vs.embedding_dim.return_value = corpus_dim
 
-        @contextmanager
-        def _fake_open_or_create(_path: object):
-            yield vs
-
         import io
 
         buf = io.StringIO()
         with (
             patch("agentalloy.config.get_settings", return_value=fake_settings),
-            patch(
-                "agentalloy.storage.vector_store.open_or_create",
-                _fake_open_or_create,
-            ),
+            patch.object(ip, "open_fragments", return_value=vs),
             patch("sys.stderr", buf),
         ):
             err = ip._check_embedding_dim(manifest, Path("/tmp"))  # pyright: ignore[reportPrivateUsage]

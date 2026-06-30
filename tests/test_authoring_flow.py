@@ -28,7 +28,7 @@ from agentalloy.bootstrap import main as bootstrap_main
 from agentalloy.ingest import EXIT_OK as INGEST_OK
 from agentalloy.ingest import EXIT_VALIDATION as INGEST_VALIDATION
 from agentalloy.ingest import main as ingest_main
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.skill_store import open_skill_store
 
 _FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
@@ -109,25 +109,22 @@ def test_loaded_authoring_prompt_matches_pending_qa_contract() -> None:
 
 def _make_settings(db_path: str) -> object:
     class FakeSettings:
-        ladybug_db_path = db_path
+        duckdb_path = db_path
 
     return FakeSettings()
 
 
-def _fresh_db(tmp_path: Path, subdir: str = "ladybug") -> str:
+def _fresh_db(tmp_path: Path, subdir: str = "agentalloy.duck") -> str:
     """Create, migrate, and immediately close a DB; return its path."""
     db_path = str(tmp_path / subdir)
-    store = LadybugStore(db_path)
-    store.open()
-    store.migrate()
+    store = open_skill_store(db_path)  # opens + migrates
     store.close()
     return db_path
 
 
 def _api_client(app: FastAPI, db_path: str) -> TestClient:
-    """Return a TestClient wired to a freshly opened store at db_path."""
-    store = LadybugStore(db_path)
-    store.open()
+    """Return a TestClient wired to a freshly opened (read-only) store at db_path."""
+    store = open_skill_store(db_path, read_only=True)
     app.dependency_overrides[get_skill_store] = lambda: store
     return TestClient(app)
 
@@ -143,10 +140,9 @@ def test_bootstrap_loads_skill_authoring_agent(tmp_path: Path) -> None:
 
     assert code == BOOTSTRAP_OK
 
-    store = LadybugStore(db_path)
-    store.open()
+    store = open_skill_store(db_path, read_only=True)
     name = store.scalar(
-        "MATCH (s:Skill {skill_id: 'sys-skill-authoring-agent'}) RETURN s.canonical_name"
+        "SELECT canonical_name FROM skills WHERE skill_id = 'sys-skill-authoring-agent'"
     )
     assert name == "Skill Authoring Agent"
     store.close()
@@ -184,12 +180,12 @@ def test_domain_review_yaml_loads_and_retrieves(tmp_path: Path, app: FastAPI) ->
 
     assert code == INGEST_OK
 
-    store = LadybugStore(db_path)
-    store.open()
+    store = open_skill_store(db_path, read_only=True)
     fragment_count = store.scalar(
         """
-        MATCH (:Skill {skill_id: 'authoring-test-domain'})-[:HAS_VERSION]->(v)-[:DECOMPOSES_TO]->(f)
-        RETURN count(f)
+        SELECT count(*) FROM fragments f
+        JOIN skill_versions v ON v.version_id = f.version_id
+        WHERE v.skill_id = 'authoring-test-domain'
         """
     )
     store.close()

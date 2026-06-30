@@ -35,8 +35,9 @@ from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.orchestration.compose import ComposeOrchestrator
 from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.runtime_state import load_runtime_cache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import open_or_create
+from agentalloy.storage.fragment_store import LanceFragmentStore
+from agentalloy.storage.skill_store import DuckDBSkillStore, open_skill_store
+from agentalloy.storage.telemetry_store import open_telemetry_store
 from agentalloy.telemetry.writer import DuckDBTelemetryWriter
 
 pytestmark = pytest.mark.integration
@@ -79,12 +80,11 @@ def _embed_model_responds(model: str) -> bool:
 
 
 @pytest.fixture(scope="module")
-def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> LadybugStore:
+def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> DuckDBSkillStore:
     if not _embed_model_responds(EMBED_MODEL):
         pytest.skip(f"FastFlowLM embed model {EMBED_MODEL} not responding")
     tmp = tmp_path_factory.mktemp("golden")
-    store = LadybugStore(str(tmp / "ladybug"))
-    store.open()
+    store = open_skill_store(str(tmp / "agentalloy.duck"))
     store.migrate()
     summary = load_fixtures(store)
     assert summary.skills > 0, "fixture loader must seed at least one skill"
@@ -92,29 +92,31 @@ def seeded_store(tmp_path_factory: pytest.TempPathFactory) -> LadybugStore:
 
 
 @pytest.fixture(scope="module")
-def golden_app(seeded_store: LadybugStore, tmp_path_factory: pytest.TempPathFactory) -> FastAPI:
+def golden_app(seeded_store: DuckDBSkillStore, tmp_path_factory: pytest.TempPathFactory) -> FastAPI:
     if not _embed_model_responds(EMBED_MODEL):
         pytest.skip(f"FastFlowLM embed model {EMBED_MODEL} not responding")
 
     tmp = tmp_path_factory.mktemp("golden_tel")
-    duck_path = str(tmp / "skills.duck")
 
     lm = OpenAICompatClient(LM_BASE)
     runtime = load_runtime_cache(seeded_store)
-    vector_store = open_or_create(duck_path)
-    telemetry = DuckDBTelemetryWriter(vector_store)
+    # v6 splits the old conflated store: Lance for fragment search, a separate
+    # telemetry.duck for composition traces.
+    fragment_store = LanceFragmentStore(tmp / "fragments.lance")
+    telemetry_store = open_telemetry_store(tmp / "telemetry.duck")
+    telemetry = DuckDBTelemetryWriter(telemetry_store)
 
-    # Populate DuckDB fragment_embeddings for the loaded corpus so retrieve
+    # Populate the Lance fragments dataset for the loaded corpus so retrieve
     # has something to rank. Mirrors the reembed CLI inline.
     from agentalloy.reads import get_active_fragments
-    from agentalloy.storage.vector_store import FragmentEmbedding
+    from agentalloy.storage.protocols import FragmentEmbedding
 
     fragments = get_active_fragments(seeded_store)
     if fragments:
         contents = [f.content for f in fragments]
         vectors = lm.embed(model=EMBED_MODEL, texts=contents)
         now = int(time.time())
-        vector_store.insert_embeddings(
+        fragment_store.insert_embeddings(
             [
                 FragmentEmbedding(
                     fragment_id=f.fragment_id,
@@ -129,21 +131,22 @@ def golden_app(seeded_store: LadybugStore, tmp_path_factory: pytest.TempPathFact
                 for f, vec in zip(fragments, vectors, strict=True)
             ]
         )
+        fragment_store.rebuild_fts_index()  # BM25 leg + fallback path need the FTS index
 
     compose_orch = ComposeOrchestrator(
         runtime,
         lm,
-        vector_store,
+        fragment_store,
         telemetry,
         embedding_model=EMBED_MODEL,
     )
     retrieve_orch = RetrieveOrchestrator(
-        runtime, lm, vector_store, telemetry, embedding_model=EMBED_MODEL
+        runtime, lm, fragment_store, telemetry, embedding_model=EMBED_MODEL
     )
     health_checker = HealthChecker(
         seeded_store,
         lm,
-        vector_store,
+        telemetry_store,
         EMBED_MODEL,
         runtime_load_error=None,
     )
@@ -155,7 +158,7 @@ def golden_app(seeded_store: LadybugStore, tmp_path_factory: pytest.TempPathFact
     app.dependency_overrides[get_skill_store] = lambda: seeded_store
     app.state.health_checker = health_checker
     app.state.diagnostics_checker = diagnostics_checker
-    app.state.vector_store = vector_store
+    app.state.telemetry_store = telemetry_store
     return app
 
 
@@ -217,11 +220,11 @@ def test_compose_includes_system_skills(golden_app: FastAPI) -> None:
 
 
 def test_retrieve_by_id_returns_active_skill(
-    golden_app: FastAPI, seeded_store: LadybugStore
+    golden_app: FastAPI, seeded_store: DuckDBSkillStore
 ) -> None:
     """GET /retrieve/{skill_id} must return active skill content."""
     rows = seeded_store.execute(
-        "MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion) RETURN s.skill_id LIMIT 1"
+        "SELECT skill_id FROM skills WHERE current_version_id IS NOT NULL LIMIT 1"
     )
     assert rows, "seeded store must have at least one active skill"
     skill_id = str(rows[0][0])
@@ -252,11 +255,11 @@ def test_semantic_retrieve_returns_ranked_hits(golden_app: FastAPI) -> None:
 
 
 def test_skill_inspection_returns_full_detail(
-    golden_app: FastAPI, seeded_store: LadybugStore
+    golden_app: FastAPI, seeded_store: DuckDBSkillStore
 ) -> None:
     """GET /skills/{skill_id} must return active version detail and fragments."""
     rows = seeded_store.execute(
-        "MATCH (s:Skill)-[:CURRENT_VERSION]->(v:SkillVersion) RETURN s.skill_id LIMIT 1"
+        "SELECT skill_id FROM skills WHERE current_version_id IS NOT NULL LIMIT 1"
     )
     skill_id = str(rows[0][0])
 
@@ -277,27 +280,19 @@ def test_compose_trace_written_to_telemetry(golden_app: FastAPI) -> None:
     # Brief pause to let the background drain thread flush.
     time.sleep(0.2)
 
-    vector_store = golden_app.state.vector_store
-    rows = vector_store._conn.execute(  # pyright: ignore[reportPrivateUsage]
-        """
-        SELECT status, task_prompt, source_skill_ids, selected_fragment_ids,
-               assembly_tier, retrieval_latency_ms, assembly_latency_ms, total_latency_ms
-        FROM composition_traces
-        WHERE status = 'compose'
-        ORDER BY request_ts DESC LIMIT 1
-        """
-    ).fetchall()
+    telemetry_store = golden_app.state.telemetry_store
+    traces = telemetry_store.query_traces(status="compose", limit=1)
 
-    assert rows, "no compose trace found in telemetry store"
-    status, task_prompt, source_ids, selected_ids, tier, ret_ms, asm_ms, tot_ms = rows[0]
+    assert traces, "no compose trace found in telemetry store"
+    t = traces[0]
 
-    assert status == "compose"
-    assert task_prompt == GOLDEN_TASK
-    assert source_ids and len(source_ids) >= 1, (
-        f"source_skill_ids must have ≥1 entries, got: {source_ids}"
+    assert t.status == "compose"
+    assert t.task_prompt == GOLDEN_TASK
+    assert t.source_skill_ids and len(t.source_skill_ids) >= 1, (
+        f"source_skill_ids must have ≥1 entries, got: {t.source_skill_ids}"
     )
-    assert selected_ids, "selected_fragment_ids must be non-empty"
-    assert tier == "0", f"assembly_tier must be '0' (no LLM), got: {tier!r}"
-    assert ret_ms is not None and ret_ms >= 0
-    assert asm_ms == 0
-    assert tot_ms is not None and tot_ms >= 0
+    assert t.selected_fragment_ids, "selected_fragment_ids must be non-empty"
+    assert t.assembly_tier == "0", f"assembly_tier must be '0' (no LLM), got: {t.assembly_tier!r}"
+    assert t.retrieval_latency_ms is not None and t.retrieval_latency_ms >= 0
+    assert t.assembly_latency_ms == 0
+    assert t.total_latency_ms is not None and t.total_latency_ms >= 0

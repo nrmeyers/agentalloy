@@ -17,7 +17,7 @@ the sibling ``.qa.md`` reports, then runs::
 
     python -m agentalloy.ingest skill-source/pending-review
 
-to load approved skills into LadybugDB.
+to load approved skills into the skill store.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from contextlib import closing
 from pathlib import Path
 
 from agentalloy.authoring.driver import run_author, run_revise
@@ -32,8 +33,7 @@ from agentalloy.authoring.paths import PipelinePaths, default_paths
 from agentalloy.authoring.pipeline import SkillResult, run_per_skill, summarize_results
 from agentalloy.authoring.qa_gate import GateResult, run_qa
 from agentalloy.config import get_settings
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import open_or_create
+from agentalloy.storage.open import open_fragments, open_skills
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.authoring",
-        description="Author + QA pipeline for populating LadybugDB from SKILL.md sources.",
+        description="Author + QA pipeline for populating the skill store from SKILL.md sources.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -141,8 +141,8 @@ def _cmd_qa(repo_root: Path, paths: PipelinePaths) -> int:
     settings = get_settings()
     settings.ensure_data_dirs()
     with (
-        LadybugStore(settings.ladybug_db_path) as store,
-        open_or_create(settings.duckdb_path) as vector_store,
+        open_skills(settings, read_only=True) as store,
+        closing(open_fragments(settings)) as vector_store,
     ):
         results = run_qa(paths, repo_root=repo_root, store=store, vector_store=vector_store)
     _print_qa_summary(results, paths)
@@ -165,8 +165,8 @@ def _cmd_run_per_skill(source_dir: Path, repo_root: Path, paths: PipelinePaths) 
     settings = get_settings()
     settings.ensure_data_dirs()
     with (
-        LadybugStore(settings.ladybug_db_path) as store,
-        open_or_create(settings.duckdb_path) as vector_store,
+        open_skills(settings, read_only=True) as store,
+        closing(open_fragments(settings)) as vector_store,
     ):
         results = run_per_skill(
             source_dir, repo_root, paths, store=store, vector_store=vector_store

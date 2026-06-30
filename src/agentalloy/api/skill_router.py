@@ -13,7 +13,7 @@ from agentalloy.reads.active import (
     get_active_skill_by_id,
     get_active_version_by_id,
 )
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.protocols import SkillStore
 
 router = APIRouter()
 
@@ -44,7 +44,7 @@ class SkillInspectionResponse(BaseModel):
     fragments: list[FragmentDetail]
 
 
-def get_skill_store() -> LadybugStore:
+def get_skill_store() -> SkillStore:
     raise RuntimeError("get_skill_store must be bound during app lifespan; no default available")
 
 
@@ -56,7 +56,7 @@ def get_skill_store() -> LadybugStore:
 )
 async def inspect_skill(
     skill_id: str,
-    store: LadybugStore = Depends(get_skill_store),
+    store: SkillStore = Depends(get_skill_store),
 ) -> SkillInspectionResponse:
     skill = await asyncio.to_thread(get_active_skill_by_id, store, skill_id)
     if skill is None:
@@ -87,7 +87,7 @@ async def inspect_skill(
     )
 
 
-def _fetch_version_detail(store: LadybugStore, version_id: str) -> ActiveVersionDetail:
+def _fetch_version_detail(store: SkillStore, version_id: str) -> ActiveVersionDetail:
     data = get_active_version_by_id(store, version_id)
     return ActiveVersionDetail(
         version_id=data["version_id"],

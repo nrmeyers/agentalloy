@@ -321,8 +321,8 @@ def _build_entrypoint_script(packs: str) -> str:
        A corrupted checkpoint file is treated as "no checkpoints" so the
        script never fails closed on a malformed line.
     5. Starts ``uvicorn`` **after** pack ingestion completes, avoiding the
-       Kuzu file-lock conflict that occurred when uvicorn opened Ladybug
-       before pack ingestion finished.
+       DuckDB single-writer lock conflict that occurred when uvicorn opened
+       the skill store before pack ingestion finished.
     6. Prebuilt-corpus seed: if the image carries ``/app/corpus-seed``
        (CI bakes a fully ingested + embedded corpus plus
        ``corpus-stamp.json``) and the data volume has no corpus yet, the
@@ -413,7 +413,7 @@ def _build_entrypoint_script(packs: str) -> str:
         "# still refresh.",
         "NEED_SEED=false",
         'if [ -f "$SEED_DIR/corpus-stamp.json" ]; then',
-        '    if [ ! -f "$APP_DIR/data/skills.duck" ]; then',
+        '    if [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then',
         "        NEED_SEED=true",
         '    elif [ ! -f "$VOL_STAMP" ]; then',
         "        # Corpus present but unstamped (e.g. a pre-stamp volume, or one",
@@ -432,9 +432,9 @@ def _build_entrypoint_script(packs: str) -> str:
         'if [ "$NEED_SEED" = "true" ]; then',
         '    echo ">> Seeding prebuilt corpus from image (skipping pack ingest + re-embed)"',
         '    mkdir -p "$APP_DIR/data"',
-        '    rm -rf "$APP_DIR/data/ladybug" "$APP_DIR/data/skills.duck"',
-        '    cp -a "$SEED_DIR/ladybug" "$APP_DIR/data/ladybug"',
-        '    cp "$SEED_DIR/skills.duck" "$APP_DIR/data/skills.duck"',
+        '    rm -rf "$APP_DIR/data/agentalloy.duck" "$APP_DIR/data/fragments.lance"',
+        '    cp "$SEED_DIR/agentalloy.duck" "$APP_DIR/data/agentalloy.duck"',
+        '    cp -a "$SEED_DIR/fragments.lance" "$APP_DIR/data/fragments.lance"',
         '    cp "$SEED_DIR/corpus-stamp.json" "$VOL_STAMP"',
         "    CORPUS_SEEDED=true",
         "    # Surface the seed to host-side readiness polling (same atomic",
@@ -520,11 +520,11 @@ def _build_entrypoint_script(packs: str) -> str:
         ),
         "",
         "# Pack ingest runs only when there is no corpus to start from: not seeded",
-        "# this boot (CORPUS_SEEDED) AND no existing volume corpus (skills.duck). A",
+        "# this boot (CORPUS_SEEDED) AND no existing volume corpus (agentalloy.duck). A",
         "# reused/populated volume is left to the seed logic above, so we never run a",
         "# partial always-on reconcile over an already-full corpus.",
         'if [ "$BOOTSTRAP_NEEDED" = "true" ] && [ "$CORPUS_SEEDED" = "false" ] \\',
-        '   && [ ! -f "$APP_DIR/data/skills.duck" ]; then',
+        '   && [ ! -f "$APP_DIR/data/agentalloy.duck" ]; then',
     ]
 
     if has_packs:
@@ -608,7 +608,7 @@ def _build_entrypoint_script(packs: str) -> str:
             '    echo ">> Bootstrap complete"',
             "fi",
             "",
-            "# Start uvicorn AFTER bootstrap completes to avoid Ladybug lock conflicts.",
+            "# Start uvicorn AFTER bootstrap completes to avoid DuckDB single-writer lock conflicts.",
             'echo ">> Starting uvicorn..."',
             'uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "${LOG_LEVEL:-info}" &',
             "UVICORN_PID=$!",
@@ -674,8 +674,8 @@ def _run_container(
     * Volume mount: the projects root (``resolve_projects_root()``) bind-mounted
       ``rw`` at the identical host path, so the proxy can read each repo's
       ``.agentalloy/`` phase state and write phase transitions back.
-    * Env vars: ``AGENTALLOY_PACKS``, ``LADYBUG_DB_PATH``,
-      ``DUCKDB_PATH``, ``LOG_LEVEL``
+    * Env vars: ``AGENTALLOY_PACKS``, ``DUCKDB_PATH``,
+      ``FRAGMENTS_LANCE_PATH``, ``TELEMETRY_DB_PATH``, ``LOG_LEVEL``
     * Port mapping: ``-p 47950:47950``
 
     The container runs the image's **baked** ``/app/entrypoint.sh`` (the
@@ -704,8 +704,9 @@ def _run_container(
     """
     env = {
         "AGENTALLOY_PACKS": packs,
-        "LADYBUG_DB_PATH": "/app/data/ladybug",
-        "DUCKDB_PATH": "/app/data/skills.duck",
+        "DUCKDB_PATH": "/app/data/agentalloy.duck",
+        "FRAGMENTS_LANCE_PATH": "/app/data/fragments.lance",
+        "TELEMETRY_DB_PATH": "/app/data/telemetry.duck",
         "LOG_LEVEL": os.environ.get("LOG_LEVEL", "info").lower(),
     }
     env_cmd: list[str] = []

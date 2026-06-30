@@ -8,7 +8,7 @@ from typing import Any
 
 from agentalloy.lm_client import OpenAICompatClient
 from agentalloy.reads.models import ActiveFragment, SkillClass
-from agentalloy.storage.vector_store import EMBEDDING_DIM
+from agentalloy.storage.protocols import EMBEDDING_DIM
 
 
 def fake_fragment(
