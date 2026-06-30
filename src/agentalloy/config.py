@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # gets the correct path. With a plain `default=...` the path would
     # be frozen at module import.
     # v6 two-engine storage. ``agentalloy.duck`` holds skill metadata (folded
-    # out of the retired Kuzu graph) + corpus_meta kv; the serving process opens
+    # out of the retired graph engine) + corpus_meta kv; the serving process opens
     # it READ-ONLY so ingest/reembed can hold its single writer lock without
     # stopping the service. ``fragments.lance`` is the Lance dataset (vector ANN
     # + exact-cosine dedup + native BM25). Telemetry lives in its own

@@ -1,4 +1,4 @@
-"""Re-embed CLI: walks LadybugDB Fragment nodes, embeds via LM Studio,
+"""Re-embed CLI: walks the skill store's fragments, embeds via LM Studio,
 writes L2-normalized rows to DuckDB fragment_embeddings.
 
 Idempotent — skips fragments whose fragment_id is already in DuckDB.

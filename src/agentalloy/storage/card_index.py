@@ -13,7 +13,7 @@ re-embed pass can apply (controlled by ``--card-index``):
 - **cards** — one synthetic "card" document per skill (name + tags +
   description) added to both legs. Cards influence fusion *skill ranking* only;
   they are excluded from ``/compose`` assembly by ``retrieval.domain`` because
-  no LadybugDB ``Fragment`` node hydrates them.
+  no skill-store fragment row hydrates them.
 
 ``off`` applies neither and must reproduce the pre-Stage-0 index byte-for-byte.
 """

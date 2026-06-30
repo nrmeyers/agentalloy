@@ -1,4 +1,4 @@
-"""DuckDB-backed skill store (``agentalloy.duck``) — replaces Kuzu/LadybugDB.
+"""DuckDB-backed skill store (``agentalloy.duck``) — replaces the legacy graph store.
 
 Holds the skill graph folded into relational tables (skills / skill_versions /
 fragments / skill_dependencies) plus the ``corpus_meta`` kv. This is the
@@ -12,7 +12,7 @@ so an ingest/reembed process can take the exclusive write lock without stopping
 the service. ``corpus_meta`` writes during reembed therefore never contend with
 the service (the service is not holding the file open).
 
-The public surface mirrors the old ``LadybugStore`` (``execute`` / ``scalar`` /
+The public surface mirrors the legacy skill-store surface (``execute`` / ``scalar`` /
 ``migrate`` / ``delete_skill`` / ``rollback_skill`` / ``rollback_batch``) so the
 Cypher→SQL port at call sites changes only the query language, plus the
 ``set_meta`` / ``get_meta`` kv that moved here from the old ``VectorStore``.
@@ -97,7 +97,7 @@ class LockHeldError(SkillStoreError):
 
     In v6 this is benign and transient (a reembed/ingest holds the writer for a
     short window); callers retry rather than stop the service. Distinct from the
-    old Kuzu LOCK_HELD_REMEDIATION which told users to stop the service.
+    legacy LOCK_HELD_REMEDIATION which told users to stop the service.
     """
 
 
@@ -158,7 +158,7 @@ class DuckDBSkillStore:
             raise RuntimeError("SkillStore is not open")
         return self._conn
 
-    # -- query workhorse (mirrors LadybugStore.execute/scalar/iter_rows) ------
+    # -- query workhorse (mirrors the legacy store's execute/scalar/iter_rows) --
 
     def execute(self, sql: str, params: Any = None) -> list[tuple[Any, ...]]:
         """Execute SQL and materialize result rows eagerly.
@@ -208,7 +208,7 @@ class DuckDBSkillStore:
         """Delete a skill and all its versions/fragments/deps. Returns skills removed.
 
         Cascade order respects the FK direction (fragments -> versions -> deps ->
-        skill); ports the Kuzu ``DETACH DELETE`` (E1 in the port table).
+        skill); ports the legacy graph ``DETACH DELETE`` (E1 in the port table).
         """
         n = self.scalar("SELECT count(*) FROM skills WHERE skill_id = ?", [skill_id])
         self.conn.execute(

@@ -1,7 +1,7 @@
 """Stale-content diagnostics endpoint — GET /diagnostics/runtime (NXS-778).
 
 Exposes three slices of diagnostic information:
-- store_state: active skill versions currently recorded in LadybugDB
+- store_state: active skill versions currently recorded in the skill store
 - runtime_state: active skill versions loaded into the in-memory RuntimeCache
 - consistency: whether store and cache agree (flags any mismatches)
 - dependency_readiness: which dependencies are reachable, broken out per path
@@ -80,7 +80,7 @@ class RuntimeDiagnosticsResponse(BaseModel):
 class CorpusDiagnosticsResponse(BaseModel):
     """Cheap, read-only corpus counts reported off the live store handles.
 
-    The running service holds the Ladybug(Kuzu)/DuckDB file locks, so a
+    The running service holds the DuckDB file locks, so a
     container-side ``doctor`` cannot open the DBs to count rows. This endpoint
     reads the counts off the long-lived connections already held on
     ``app.state``. The underlying queries are read-only ``COUNT`` scans, which

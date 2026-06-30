@@ -2,7 +2,7 @@
 
 - LanceDB ``fragments`` dataset: vector ANN (retrieval) + exact cosine (dedup)
   + native BM25.  -> ``fragment_store.LanceFragmentStore``
-- DuckDB ``agentalloy.duck``: skill metadata (folded out of Kuzu) + corpus_meta.
+- DuckDB ``agentalloy.duck``: skill metadata (folded out of the legacy graph engine) + corpus_meta.
   -> ``skill_store.DuckDBSkillStore``
 - DuckDB ``telemetry.duck``: composition traces.  -> ``telemetry_store.DuckDBTelemetryStore``
 

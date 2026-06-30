@@ -1,12 +1,12 @@
 """Storage protocols, DTOs, and shared constants for the two-engine backend.
 
 v6 splits the old monolithic ``VectorStore`` (DuckDB-vss + DuckDB-fts + telemetry
-+ corpus_meta) and the Kuzu ``LadybugStore`` into three focused stores:
++ corpus_meta) and the legacy graph store into three focused stores:
 
 - ``FragmentStore``  — LanceDB ``fragments`` dataset: vector ANN (retrieval) +
   exact-cosine (dedup) + native BM25. Derived index, rebuilt from the SQL source.
 - ``SkillStore``     — DuckDB ``agentalloy.duck``: skill metadata (folded out of
-  Kuzu) + ``corpus_meta`` kv. Source of truth for fragment content/metadata.
+  the legacy graph) + ``corpus_meta`` kv. Source of truth for fragment content/metadata.
 - ``TelemetryStore`` — DuckDB ``telemetry.duck``: ``composition_traces`` only,
   service-owned so runtime writes never contend with the reembed writer.
 

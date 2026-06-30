@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export every skill from the live LadybugDB to a YAML in seeds/_exported/.
+"""Export every skill from the live skill store to a YAML in seeds/_exported/.
 
 Used to materialize the original ship-with-wheel skills (and any other
 skills that exist in the DB but aren't in seeds/) into source-of-truth YAML
@@ -41,8 +41,10 @@ def existing_skill_ids() -> set[str]:
 
 def main() -> int:
     sys.path.insert(0, str(REPO_ROOT / "src"))
+    from contextlib import closing  # noqa: E402
+
     from agentalloy.config import get_settings  # noqa: E402
-    from agentalloy.storage.ladybug import LadybugStore  # noqa: E402
+    from agentalloy.storage.open import open_skills  # noqa: E402
 
     settings = get_settings()
     have = existing_skill_ids()
@@ -51,13 +53,14 @@ def main() -> int:
     written = 0
     skipped = 0
 
-    with LadybugStore(settings.ladybug_db_path) as store:
+    with closing(open_skills(settings, read_only=True)) as store:
+        # active version per skill (current_version_id folds the old HAS_VERSION edge)
         rows = store.execute(
             """
-            MATCH (s:Skill)-[:HAS_VERSION]->(v:SkillVersion)
-            RETURN s.skill_id, s.canonical_name, s.category, s.skill_class,
+            SELECT s.skill_id, s.canonical_name, s.category, s.skill_class,
                    s.domain_tags, s.always_apply, s.phase_scope, s.category_scope,
                    v.version_id, v.author, v.change_summary, v.raw_prose
+            FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id
             """
         )
         for r in rows:
@@ -80,14 +83,13 @@ def main() -> int:
                 raw_prose,
             ) = r
 
-            # Fetch fragments
+            # Fetch fragments (DECOMPOSES_TO folds into fragments.version_id)
             frag_rows = store.execute(
                 """
-                MATCH (v:SkillVersion {version_id: $vid})-[:DECOMPOSES_TO]->(f:Fragment)
-                RETURN f.fragment_id, f.sequence, f.fragment_type, f.content
-                ORDER BY f.sequence
+                SELECT fragment_id, sequence, fragment_type, content
+                FROM fragments WHERE version_id = ? ORDER BY sequence
                 """,
-                {"vid": vid},
+                [vid],
             )
             fragments = []
             for fr in frag_rows:
@@ -109,7 +111,7 @@ def main() -> int:
                 "phase_scope": [str(p) for p in (phase or [])] or None,
                 "category_scope": [str(c) for c in (catscope or [])] or None,
                 "author": str(author) if author else "ship-with-wheel",
-                "change_summary": str(summary) if summary else "Exported from LadybugDB",
+                "change_summary": str(summary) if summary else "Exported from corpus",
                 "raw_prose": str(raw_prose) if raw_prose else "",
                 "fragments": fragments,
             }

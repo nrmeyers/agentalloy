@@ -1,7 +1,7 @@
 """Tests for agentalloy.install.container_service.
 
 Covers is_in_container, stop_service_in_container,
-restart_service_in_container, and test_kuzu_lock_released.
+restart_service_in_container, and test_corpus_lock_released.
 """
 
 from __future__ import annotations
@@ -333,106 +333,76 @@ class TestRestartServiceInContainer:
             assert result is False
 
 
-class TestTestKuzuLockReleased:
-    """test_kuzu_lock_released() retry logic for LadybugDB."""
+class TestTestCorpusLockReleased:
+    """test_corpus_lock_released() retry logic for the agentalloy.duck write-lock.
 
-    def _make_fake_ladybug_dir(self, tmp_path: Path) -> Path:
-        """Create a fake ladybug directory that looks like a real LadybugDB DB."""
-        ladybug = tmp_path / "ladybug"
-        ladybug.mkdir()
-        # Create a dummy node directory to make it look like a real LadybugDB DB.
-        (ladybug / "nodes").mkdir()
-        (ladybug / "edges").mkdir()
-        return ladybug
+    The v6 probe opens a read-only skill-store connection (success = no writer
+    holds the lock) and closes it; failure = lock still held, retried up to 5s.
+    """
 
     def test_lock_released_immediately(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Ladybug connection succeeds on first try, should return True."""
-        ladybug = self._make_fake_ladybug_dir(tmp_path)
-        mock_db = MagicMock()
-        mock_conn = MagicMock()
-
-        def fake_db_init(*args, **kwargs):
-            return mock_db
-
-        def fake_conn_init(*args, **kwargs):
-            return mock_conn
-
+        """When the read-only skill-store open succeeds first try, returns True."""
         with monkeypatch.context() as m:
-            m.setattr("ladybug.Database", fake_db_init)
-            m.setattr("ladybug.Connection", fake_conn_init)
+            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
             m.setattr(time, "sleep", lambda s: None)
-            m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
+            m.setattr(
+                "agentalloy.storage.skill_store.open_skill_store",
+                lambda *a, **k: MagicMock(),
+            )
 
-            from agentalloy.install.container_service import test_kuzu_lock_released
+            from agentalloy.install.container_service import test_corpus_lock_released
 
-            result = test_kuzu_lock_released()
-            assert result is True
+            assert test_corpus_lock_released() is True
 
     def test_lock_still_held_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Ladybug fails initially then succeeds, should retry and return True."""
-        ladybug = self._make_fake_ladybug_dir(tmp_path)
+        """When the open fails twice then succeeds, retries and returns True."""
         call_count = [0]
 
-        def fake_db_init(*args, **kwargs):
-            return MagicMock()
-
-        def fake_conn_init(*args, **kwargs):
+        def fake_open(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] < 3:
-                raise Exception("Database is locked")
+                raise RuntimeError("conflicting lock on agentalloy.duck")
             return MagicMock()
 
         with monkeypatch.context() as m:
-            m.setattr("ladybug.Database", fake_db_init)
-            m.setattr("ladybug.Connection", fake_conn_init)
+            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
             m.setattr(time, "sleep", lambda s: None)
-            m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
+            m.setattr("agentalloy.storage.skill_store.open_skill_store", fake_open)
 
-            from agentalloy.install.container_service import test_kuzu_lock_released
+            from agentalloy.install.container_service import test_corpus_lock_released
 
-            result = test_kuzu_lock_released()
-            assert result is True
+            assert test_corpus_lock_released() is True
             assert call_count[0] == 3  # 2 failures + 1 success
 
     def test_lock_still_held_after_retries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When Ladybug keeps failing, should return False after retries exhausted."""
-        ladybug = self._make_fake_ladybug_dir(tmp_path)
+        """When the open keeps failing, returns False after retries exhausted."""
 
-        def fake_db_init(*args, **kwargs):
-            return MagicMock()
-
-        def fake_conn_init(*args, **kwargs):
-            raise Exception("Database is locked")
+        def fake_open(*args, **kwargs):
+            raise RuntimeError("conflicting lock on agentalloy.duck")
 
         with monkeypatch.context() as m:
-            m.setattr("ladybug.Database", fake_db_init)
-            m.setattr("ladybug.Connection", fake_conn_init)
+            m.setenv("DUCKDB_PATH", str(tmp_path / "agentalloy.duck"))
             m.setattr(time, "sleep", lambda s: None)
-            m.setattr("agentalloy.install.state.user_data_dir", lambda: ladybug.parent)
+            m.setattr("agentalloy.storage.skill_store.open_skill_store", fake_open)
 
-            from agentalloy.install.container_service import test_kuzu_lock_released
+            from agentalloy.install.container_service import test_corpus_lock_released
 
-            result = test_kuzu_lock_released()
-            assert result is False
+            assert test_corpus_lock_released() is False
 
-    def test_no_ladybug_dir_returns_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """When no ladybug DB dir exists, function attempts to open DB and
-        returns False (can't confirm lock released without opening DB).
+    def test_no_corpus_returns_false(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """When no corpus DB exists, the function attempts the open and returns
+        False (can't confirm lock released without successfully opening it).
 
-        This is the correct behavior after P1 #8: the function must actually
-        attempt to open the database rather than assuming the lock is released.
+        The probe must actually attempt to open the database rather than
+        assuming the lock is released.
         """
-
-        def fake_user_data_dir():
-            return tmp_path / "nonexistent"
-
         with monkeypatch.context() as m:
-            m.setattr("agentalloy.install.state.user_data_dir", fake_user_data_dir)
+            m.setenv("DUCKDB_PATH", str(tmp_path / "nonexistent" / "agentalloy.duck"))
+            m.setattr(time, "sleep", lambda s: None)
 
-            from agentalloy.install.container_service import test_kuzu_lock_released
+            from agentalloy.install.container_service import test_corpus_lock_released
 
-            result = test_kuzu_lock_released()
-            assert result is False
+            assert test_corpus_lock_released() is False
 
 
 class TestStopServiceNoRestart:

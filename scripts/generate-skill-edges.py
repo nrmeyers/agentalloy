@@ -35,14 +35,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import httpx
 import yaml
 
@@ -52,7 +49,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKS_DIR = REPO_ROOT / "src" / "agentalloy" / "_packs"
-CORPUS_DUCK = Path.home() / ".local" / "share" / "agentalloy" / "corpus" / "skills.duck"
+CORPUS_LANCE = Path.home() / ".local" / "share" / "agentalloy" / "corpus" / "fragments.lance"
 SIDECAR_PATH = REPO_ROOT / "scripts" / "skill-edges-reasons.jsonl"
 
 LM_BASE_URL = "http://192.168.4.26:60000"
@@ -158,27 +155,27 @@ def load_cards() -> dict[str, SkillCard]:
 def neighbor_map(skill_ids: set[str]) -> dict[str, list[str]]:
     """Return ``{skill_id: [neighbor_id, ...]}`` (top-N by card-vector cosine).
 
-    Copies the corpus DuckDB and opens the copy ``read_only`` so a running
-    service is never blocked. Only skills with a card embedding participate."""
-    if not CORPUS_DUCK.is_file():
-        print(f"error: corpus not found at {CORPUS_DUCK}", file=sys.stderr)
+    Reads card embeddings from the Lance ``fragments`` dataset. Lance is MVCC,
+    so a read never blocks a running service (no copy needed). Only skills with
+    a card embedding participate."""
+    if not CORPUS_LANCE.exists():
+        print(f"error: corpus not found at {CORPUS_LANCE}", file=sys.stderr)
         sys.exit(1)
 
-    with tempfile.TemporaryDirectory(prefix="skill-edges-") as tmp:
-        copy_path = Path(tmp) / "corpus.duck"
-        shutil.copyfile(CORPUS_DUCK, copy_path)
-        conn = duckdb.connect(str(copy_path), read_only=True)
-        try:
-            rows = conn.execute(
-                "SELECT skill_id, embedding FROM fragment_embeddings WHERE fragment_type = ?",
-                [CARD_FRAGMENT_TYPE],
-            ).fetchall()
-        finally:
-            conn.close()
+    from agentalloy.storage.fragment_store import LanceFragmentStore
+
+    fs = LanceFragmentStore(str(CORPUS_LANCE))
+    try:
+        rows = fs._table.to_arrow().to_pylist()  # noqa: SLF001 — dev-tool full scan
+    finally:
+        fs.close()
 
     vectors: dict[str, list[float]] = {}
-    for sid, emb in rows:
-        sid = str(sid)
+    for row in rows:
+        if row.get("fragment_type") != CARD_FRAGMENT_TYPE:
+            continue
+        sid = str(row["skill_id"])
+        emb = row.get("embedding")
         if sid in skill_ids and emb is not None:
             vectors[sid] = [float(x) for x in emb]
 

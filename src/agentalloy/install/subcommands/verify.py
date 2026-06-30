@@ -5,7 +5,7 @@ Runs 8 enumerated checks from contracts.md:
 1. embedding_endpoint_reachable
 2. embedding_endpoint_returns_expected_dim
 3. duckdb_present
-4. ladybug_present
+4. skill_store_present
 5. skill_count_meets_minimum
 6. harness_config_present
 7. harness_config_url_matches
@@ -306,7 +306,7 @@ def _check_duckdb_present(
         }
 
 
-def _check_ladybug_present(
+def _check_skill_store_present(
     skills_path: str,
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
@@ -328,7 +328,7 @@ def _check_ladybug_present(
         duration = int((time.monotonic() - t0) * 1000)
         if status == "ok":
             return {
-                "name": "ladybug_present",
+                "name": "skill_store_present",
                 "passed": True,
                 "duration_ms": duration,
                 "detail": (
@@ -337,7 +337,7 @@ def _check_ladybug_present(
                 ),
             }
         return {
-            "name": "ladybug_present",
+            "name": "skill_store_present",
             "passed": False,
             "duration_ms": duration,
             "error": f"/diagnostics/runtime reports runtime_store status={status!r}",
@@ -347,7 +347,7 @@ def _check_ladybug_present(
     if is_container:
         duration = int((time.monotonic() - t0) * 1000)
         return {
-            "name": "ladybug_present",
+            "name": "skill_store_present",
             "passed": False,
             "duration_ms": duration,
             "error": (
@@ -362,7 +362,7 @@ def _check_ladybug_present(
     p = Path(skills_path)
     if not p.exists():
         return {
-            "name": "ladybug_present",
+            "name": "skill_store_present",
             "passed": False,
             "duration_ms": 0,
             "error": f"{skills_path} not found",
@@ -378,7 +378,7 @@ def _check_ladybug_present(
         count = int(rows[0][0]) if rows and rows[0] else 0
         duration = int((time.monotonic() - t0) * 1000)
         return {
-            "name": "ladybug_present",
+            "name": "skill_store_present",
             "passed": True,
             "duration_ms": duration,
             "detail": f"{skills_path} has {count} skills",
@@ -386,7 +386,7 @@ def _check_ladybug_present(
     except Exception as exc:
         duration = int((time.monotonic() - t0) * 1000)
         return {
-            "name": "ladybug_present",
+            "name": "skill_store_present",
             "passed": False,
             "duration_ms": duration,
             "error": str(exc),
@@ -787,7 +787,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
     checks = [
         *embed_checks,
         _check_duckdb_present(fragments_path, diag=diag, is_container=is_container),
-        _check_ladybug_present(skills_path, diag=diag, is_container=is_container),
+        _check_skill_store_present(skills_path, diag=diag, is_container=is_container),
         _check_skill_count(skills_path, diag=diag, is_container=is_container),
         _check_harness_config_present(st),
         _check_harness_config_url(st),

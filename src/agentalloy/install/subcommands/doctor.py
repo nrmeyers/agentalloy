@@ -8,7 +8,7 @@ Two deployment modes (read from ``install-state.json``):
  1. config          — .env exists; RUNTIME_EMBED_BASE_URL / RUNTIME_EMBEDDING_MODEL set
  2. embed_server    — embed llama-server reachable on RUNTIME_EMBED_BASE_URL
  3. corpus_files    — agentalloy.duck + fragments.lance present at corpus_dir()
- 4. ladybug_schema  — skills table exists; lock-held → report + retry remediation
+ 4. skill_schema  — skills table exists; lock-held → report + retry remediation
  5. corpus_count    — skill count >= 25 (agentalloy.duck); embedded-vector count > 0 (fragments.lance)
  6. embedding_dim   — stored fragments dim matches EMBEDDING_DIM constant
  7. service         — port /health responding (down is ok; up-degraded is warned)
@@ -154,7 +154,7 @@ def _check_corpus_files(cdir: Path) -> dict[str, Any]:
     }
 
 
-def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
+def _check_skill_schema(skills_path: str) -> dict[str, Any]:
     """Check 4: skills table exists; distinguish lock-held from schema-missing."""
     t0 = time.monotonic()
     from agentalloy.storage.skill_store import is_lock_held_error, open_skill_store
@@ -164,7 +164,7 @@ def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
     # bail. (Read-only opens used below never create the file.)
     if not Path(skills_path).exists():
         return {
-            "name": "ladybug_schema",
+            "name": "skill_schema",
             "passed": False,
             "lock_held": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
@@ -177,7 +177,7 @@ def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
             rows = store.execute("SELECT count(*) FROM skills")
             _ = rows  # just confirming the table exists
         return {
-            "name": "ladybug_schema",
+            "name": "skill_schema",
             "passed": True,
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "detail": "skills table present",
@@ -186,7 +186,7 @@ def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
         err = str(exc)
         if is_lock_held_error(err):
             return {
-                "name": "ladybug_schema",
+                "name": "skill_schema",
                 "passed": False,
                 "lock_held": True,
                 "duration_ms": int((time.monotonic() - t0) * 1000),
@@ -194,7 +194,7 @@ def _check_ladybug_schema(skills_path: str) -> dict[str, Any]:
                 "remediation": _LOCK_HELD_REMEDIATION,
             }
         return {
-            "name": "ladybug_schema",
+            "name": "skill_schema",
             "passed": False,
             "lock_held": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
@@ -778,7 +778,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
     )
 
     # corpus_stamp — provenance + embedding dim (replaces the lock-bound
-    # ladybug_schema/corpus_count/embedding_dim checks). Absent stamp is a warn.
+    # skill_schema/corpus_count/embedding_dim checks). Absent stamp is a warn.
     stamp_raw = _container_read_file(
         runtime, container_name, f"{_CONTAINER_DATA_DIR}/corpus-stamp.json"
     )
@@ -894,7 +894,7 @@ def _run_doctor_host() -> dict[str, Any]:
         skills_path = str(cdir / "agentalloy.duck")
         fragments_path = str(cdir / "fragments.lance")
 
-    checks.append(_check_ladybug_schema(skills_path))
+    checks.append(_check_skill_schema(skills_path))
     checks.append(_check_corpus_count(skills_path, fragments_path))
     checks.append(_check_embedding_dim(fragments_path))
 
@@ -957,7 +957,7 @@ def _repair(result: dict[str, Any]) -> int:
     checks_by_name = {c["name"]: c for c in result["checks"]}
 
     # Lock-held: abort immediately — must not kill processes
-    schema_check = checks_by_name.get("ladybug_schema", {})
+    schema_check = checks_by_name.get("skill_schema", {})
     if schema_check.get("lock_held"):
         print_rich(
             "[red]ABORT:[/red] DB lock is held by another process. "
@@ -976,7 +976,7 @@ def _repair(result: dict[str, Any]) -> int:
     rc = 0
 
     # Step 1: migrate schema (idempotent)
-    schema_failed = not checks_by_name.get("ladybug_schema", {}).get("passed", True)
+    schema_failed = not checks_by_name.get("skill_schema", {}).get("passed", True)
     corpus_failed = not checks_by_name.get("corpus_files", {}).get("passed", True)
     if schema_failed and not corpus_failed:
         print_rich("[yellow]→ Running schema migration…[/yellow]")

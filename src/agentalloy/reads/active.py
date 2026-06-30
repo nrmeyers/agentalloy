@@ -1,6 +1,6 @@
 """Active-version-only read queries against the DuckDB skill store.
 
-Ported from Cypher (Kuzu) to SQL (``agentalloy.duck``) in the v6 two-engine
+Ported from Cypher to SQL (``agentalloy.duck``) in the v6 two-engine
 rebuild. The graph edges are folded into relational columns/tables:
 ``CURRENT_VERSION`` -> ``skills.current_version_id``; ``HAS_VERSION`` ->
 ``skill_versions.skill_id``; ``DECOMPOSES_TO`` -> ``fragments.version_id``.

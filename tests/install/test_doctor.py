@@ -17,9 +17,9 @@ from agentalloy.install.subcommands.doctor import (
     _check_corpus_files,  # pyright: ignore[reportPrivateUsage]
     _check_embed_server,  # pyright: ignore[reportPrivateUsage]
     _check_embedding_dim,  # pyright: ignore[reportPrivateUsage]
-    _check_ladybug_schema,  # pyright: ignore[reportPrivateUsage]
     _check_pack_manifests,  # pyright: ignore[reportPrivateUsage]
     _check_service,  # pyright: ignore[reportPrivateUsage]
+    _check_skill_schema,  # pyright: ignore[reportPrivateUsage]
     _repair,  # pyright: ignore[reportPrivateUsage]
     _repair_container,  # pyright: ignore[reportPrivateUsage]
     _run_doctor_container,  # pyright: ignore[reportPrivateUsage]
@@ -118,11 +118,11 @@ class TestCheckCorpusFiles:
 
 
 # ---------------------------------------------------------------------------
-# Check 4: ladybug_schema
+# Check 4: skill_schema
 # ---------------------------------------------------------------------------
 
 
-class TestCheckLadybugSchema:
+class TestCheckSkillSchema:
     def test_schema_missing_fails(self, tmp_path: Path) -> None:
         # DB file present but the skills table is missing — the open succeeds, the
         # query raises. (File must exist or the absent-corpus guard fires first.)
@@ -133,7 +133,7 @@ class TestCheckLadybugSchema:
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.execute.side_effect = Exception("Table skills does not exist")
             mock_open.return_value = mock_store
-            result = _check_ladybug_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
         assert result["passed"] is False
         assert result.get("lock_held") is False
         assert "remediation" in result
@@ -148,7 +148,7 @@ class TestCheckLadybugSchema:
                 "Could not set lock on file /corpus/agentalloy.duck"
             )
             mock_open.return_value = mock_store
-            result = _check_ladybug_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
         assert result["passed"] is False
         assert result["lock_held"] is True
         assert "remediation" in result
@@ -161,7 +161,7 @@ class TestCheckLadybugSchema:
             mock_store.__exit__ = MagicMock(return_value=False)
             mock_store.execute.return_value = [[1]]
             mock_open.return_value = mock_store
-            result = _check_ladybug_schema(str(tmp_path / "agentalloy.duck"))
+            result = _check_skill_schema(str(tmp_path / "agentalloy.duck"))
         assert result["passed"] is True
 
 
@@ -411,9 +411,9 @@ def _patch_all_checks(
                 return_value={"name": "corpus_files", "passed": corpus_files_ok},
             ),
             patch(
-                "agentalloy.install.subcommands.doctor._check_ladybug_schema",
+                "agentalloy.install.subcommands.doctor._check_skill_schema",
                 return_value={
-                    "name": "ladybug_schema",
+                    "name": "skill_schema",
                     "passed": schema_ok,
                     "lock_held": lock_held,
                 },
@@ -455,7 +455,7 @@ class TestRunDoctorAllGreen:
             "config",
             "embed_server",
             "corpus_files",
-            "ladybug_schema",
+            "skill_schema",
             "corpus_count",
             "embedding_dim",
             "service",
@@ -501,7 +501,7 @@ class TestRepairLockHeld:
             "all_checks_passed": False,
             "checks": [
                 {
-                    "name": "ladybug_schema",
+                    "name": "skill_schema",
                     "passed": False,
                     "lock_held": True,
                     "remediation": "Stop the service and retry.",
@@ -516,7 +516,7 @@ class TestRepairLockHeld:
             "all_checks_passed": False,
             "checks": [
                 {
-                    "name": "ladybug_schema",
+                    "name": "skill_schema",
                     "passed": False,
                     "lock_held": True,
                     "remediation": "Stop the service and retry.",
@@ -542,7 +542,7 @@ class TestRepairSchemaMissing:
                 {"name": "config", "passed": True},
                 {"name": "embed_server", "passed": True},
                 {"name": "corpus_files", "passed": True},  # files present
-                {"name": "ladybug_schema", "passed": False, "lock_held": False},
+                {"name": "skill_schema", "passed": False, "lock_held": False},
                 {"name": "corpus_count", "passed": False},
                 {"name": "embedding_dim", "passed": True},
                 {"name": "service", "passed": True},
@@ -610,9 +610,9 @@ class TestRepairNoop:
 
 
 class TestNoStubCreation:
-    def test_ladybug_schema_absent_creates_no_stub(self, tmp_path: Path) -> None:
+    def test_skill_schema_absent_creates_no_stub(self, tmp_path: Path) -> None:
         skills_db = tmp_path / "agentalloy.duck"
-        result = _check_ladybug_schema(str(skills_db))
+        result = _check_skill_schema(str(skills_db))
         assert result["passed"] is False
         assert "absent" in result["error"].lower()
         assert not skills_db.exists()

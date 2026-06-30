@@ -117,7 +117,7 @@ class TestRunChecksRouting:
                 return_value={"name": "duck", "passed": True},
             ),
             patch(
-                "agentalloy.install.subcommands.verify._check_ladybug_present",
+                "agentalloy.install.subcommands.verify._check_skill_store_present",
                 return_value={"name": "ladybug", "passed": True},
             ),
             patch(
@@ -168,7 +168,7 @@ class TestRunChecksRouting:
                 return_value={"name": "duck", "passed": True},
             ),
             patch(
-                "agentalloy.install.subcommands.verify._check_ladybug_present",
+                "agentalloy.install.subcommands.verify._check_skill_store_present",
                 return_value={"name": "ladybug", "passed": True},
             ),
             patch(

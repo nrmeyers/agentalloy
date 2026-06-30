@@ -250,7 +250,7 @@ def restart_service_in_container(no_restart: bool = False) -> bool:
     return False
 
 
-def test_kuzu_lock_released() -> bool:
+def test_corpus_lock_released() -> bool:
     """Test whether the corpus DB (agentalloy.duck) write-lock is released.
 
     Prefers ``DUCKDB_PATH`` env var (set by the container run env to

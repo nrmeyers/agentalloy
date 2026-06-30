@@ -21,10 +21,10 @@ from agentalloy.install.subcommands.verify import (
     _check_embedding_via_diagnostics,  # pyright: ignore[reportPrivateUsage]
     _check_harness_config_present,  # pyright: ignore[reportPrivateUsage]
     _check_harness_config_url,  # pyright: ignore[reportPrivateUsage]
-    _check_ladybug_present,  # pyright: ignore[reportPrivateUsage]
     _check_port_available,  # pyright: ignore[reportPrivateUsage]
     _check_reranker_reachable,  # pyright: ignore[reportPrivateUsage]
     _check_skill_count,  # pyright: ignore[reportPrivateUsage]
+    _check_skill_store_present,  # pyright: ignore[reportPrivateUsage]
     run_checks,
 )
 
@@ -189,8 +189,8 @@ class TestEmbeddingViaDiagnostics:
                 return_value={"name": "duckdb_present", "passed": True},
             ),
             patch(
-                "agentalloy.install.subcommands.verify._check_ladybug_present",
-                return_value={"name": "ladybug_present", "passed": True},
+                "agentalloy.install.subcommands.verify._check_skill_store_present",
+                return_value={"name": "skill_store_present", "passed": True},
             ),
             patch(
                 "agentalloy.install.subcommands.verify._check_skill_count",
@@ -238,9 +238,9 @@ class TestDuckDBPresent:
 # ---------------------------------------------------------------------------
 
 
-class TestLadybugPresent:
+class TestSkillStorePresent:
     def test_fail_on_missing_dir(self) -> None:
-        result = _check_ladybug_present("/nonexistent/path/ladybug")
+        result = _check_skill_store_present("/nonexistent/path/ladybug")
         assert result["passed"] is False
 
 
@@ -451,13 +451,13 @@ class TestDBChecksWithServiceUp:
 
     def test_ladybug_passes_when_runtime_ok(self) -> None:
         diag = self._diag(runtime="ok", telemetry="ok", skills=29)
-        result = _check_ladybug_present("/path/that/does/not/exist", diag=diag)
+        result = _check_skill_store_present("/path/that/does/not/exist", diag=diag)
         assert result["passed"] is True
         assert "29 active skills" in result["detail"]
 
     def test_ladybug_fails_when_runtime_unavailable(self) -> None:
         diag = self._diag(runtime="unavailable", telemetry="ok", skills=29)
-        result = _check_ladybug_present("/path/that/does/not/exist", diag=diag)
+        result = _check_skill_store_present("/path/that/does/not/exist", diag=diag)
         assert result["passed"] is False
         assert "runtime_store" in result["error"]
 
@@ -493,8 +493,8 @@ class TestContainerFallback:
         assert "diagnostics endpoint" in result["error"]
         assert "container logs" in result["remediation"]
 
-    def test_ladybug_fallback_skips_file_access(self) -> None:
-        result = _check_ladybug_present("/nonexistent/ladybug", diag=None, is_container=True)
+    def test_skill_store_fallback_skips_file_access(self) -> None:
+        result = _check_skill_store_present("/nonexistent/ladybug", diag=None, is_container=True)
         assert result["passed"] is False
         assert "Service not reachable" in result["error"]
         assert "cannot verify the skill store" in result["error"]

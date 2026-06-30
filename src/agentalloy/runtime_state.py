@@ -33,7 +33,7 @@ class VersionDetail:
 
     version_id: str
     version_number: int
-    authored_at: Any  # datetime — kept as-is from Kuzu
+    authored_at: Any  # datetime — kept as-is from the store
     author: str
     change_summary: str
     raw_prose: str
