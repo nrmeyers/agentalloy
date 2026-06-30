@@ -13,8 +13,8 @@ defaults:
   # batch-of-8 ~1170ms vs 2000ms budget. The launcher (start_rerank_server.py
   # rerank_launch_args) selects the CPU-optimal slot config automatically. Slower
   # CPUs may not hit the budget — Stage B fails open to the deterministic path
-  # (no breakage, just a missed quality lift). Set LM_ASSIST=off to disable.
-  LM_ASSIST: "arbitrate"
+  # v5.0.0: fragment re-rank off (no eval lift, +~500ms); intent reranker stays on.
+  LM_ASSIST: "off"
   # 2s budget gives cold-start + slower-CPU headroom; warm steady-state is well
   # under (single ~145ms, K=8 ~1170ms on Xeon-class CPU).
   LM_ASSIST_TIMEOUT_MS: "2000"

@@ -9,7 +9,8 @@ defaults:
   # Stage B compose fragment re-ranker (lm_assist.py) — on for GPU presets,
   # off for cpu (can't score real fragments inside the budget). 1500ms gives
   # GPU headroom over the 600ms code default.
-  LM_ASSIST: "arbitrate"
+  # v5.0.0: fragment re-rank off (no eval lift, +~500ms); intent reranker stays on.
+  LM_ASSIST: "off"
   # 2s budget: ample headroom for cold-start (~1.2s) and warmup-fallback recovery;
   # warm K=8 lands at ~485ms on GPU (--parallel 2 -c 4096 launcher config — see
   # start_rerank_server.rerank_launch_args).

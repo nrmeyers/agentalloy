@@ -60,16 +60,19 @@ _DEAD_RERANK_PORT = 60001  # old default; pointed at an unrelated local service
 # of truth). Named by hardware target only — see write_env.VALID_PRESETS.
 _HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
 
-# Expected Stage B posture per preset: ALL presets enable the compose re-ranker
-# as of v4.0.2 — CPU was measured viable when the rerank server runs with
-# --parallel 1 -c 2048 (start_rerank_server.rerank_launch_args). Stage B fails
-# open to the deterministic path on any preset, so users on slower hardware
-# than the measurement still get a safe degradation, not a break.
+# Expected Stage B posture per preset. v5.0.0: ALL presets ship LM_ASSIST=off —
+# fragment re-rank showed no lift on the eval set (2026-06-12, reproduced by a
+# blind judge during the v5 migration) and adds ~500ms/compose. v4.0.2 had set
+# it arbitrate to address n=2 / real-life skill-ranking issues the eval set
+# doesn't capture; off for now pending a cleaner fix. The intent reranker
+# (SIGNAL_INTENT_BACKEND=reranker) — the measured win — stays on, independently.
+# The dormant LM_ASSIST_{TIMEOUT_MS,MAX_CANDIDATES,DOC_CAP_CHARS} keys remain in
+# the presets so re-enabling is a one-line flip back to "arbitrate".
 _LM_ASSIST_BY_PRESET = {
-    "cpu": "arbitrate",
-    "nvidia": "arbitrate",
-    "radeon": "arbitrate",
-    "apple-silicon": "arbitrate",
+    "cpu": "off",
+    "nvidia": "off",
+    "radeon": "off",
+    "apple-silicon": "off",
 }
 
 # The .env.example template documents every knob; it's not a per-hardware source
