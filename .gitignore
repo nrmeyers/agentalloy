@@ -7,10 +7,8 @@
 
 # Bundled-corpus binaries are no longer committed (pack-based distribution).
 # They're generated locally when packs are installed.
-src/agentalloy/_corpus/ladybug
-src/agentalloy/_corpus/skills.duck
-src/agentalloy/_corpus/skills.duck.wal
-src/agentalloy/_corpus/skills.duck.tmp
+src/agentalloy/_corpus/agentalloy.duck
+src/agentalloy/_corpus/fragments.lance/
 *.duck.wal
 *.duck.tmp
 
@@ -48,8 +46,8 @@ dist/
 *.egg-info/
 *.egg
 
-# Track pre-seeded corpus (src/agentalloy/_corpus/skills.duck + ladybug/) so a
-# fresh clone is a working install. The corpus ships inside the wheel as
+# Track pre-seeded corpus (src/agentalloy/_corpus/agentalloy.duck + fragments.lance/)
+# so a fresh clone is a working install. The corpus ships inside the wheel as
 # package data; on first run it's copied to the user data dir. Ignore
 # runtime telemetry, per-install scratch, and any tmp build artifacts.
 src/agentalloy/_corpus/**/*-shm
@@ -114,6 +112,15 @@ docs/archive/
 
 # Serena MCP tooling state
 .serena/
+
+# v5 two-engine storage — never commit generated corpus/engine files
+*.duck
+*.lance/
+fragments.lance/
+agentalloy.duck
+telemetry.duck
+*.gguf
+models/
 
 # Test-run residue (podman storage + tmp scripts from test suite)
 containers-user-1000/
