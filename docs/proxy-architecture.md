@@ -46,10 +46,10 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 │  └──────────────┘  └──────────────┘  └──────────────────┘   │
 │                                                              │
 │  ┌──────────────┐  ┌──────────────┐                         │
-│  │  LadybugDB   │  │  DuckDB      │                         │
-│  │  (Kuzu graph)│  │  (vectors+   │                         │
-│  │  (skill/     │  │   FTS+       │                         │
-│  │   version/   │  │   traces)    │                         │
+│  │  DuckDB      │  │  LanceDB     │                         │
+│  │  (skill      │  │  (vectors +  │                         │
+│  │   graph:     │  │   Tantivy    │                         │
+│  │   skill/ver/ │  │   BM25)      │                         │
 │  │   fragment)  │  │              │                         │
 │  └──────────────┘  └──────────────┘                         │
 └────────────────────────────┬─────────────────────────────────┘
@@ -215,7 +215,7 @@ When the signal layer finds no match, the proxy forwards the request unchanged t
 ### Composition
 
 Uses the existing compose engine (deterministic by default):
-- Hybrid BM25 + dense retrieval from LadybugDB/DuckDB
+- Hybrid BM25 + dense retrieval from DuckDB/LanceDB
 - RRF fusion with phase-tuned leg weighting
 - Applicability filter (deterministic predicates)
 - Optional flag-gated LM fragment re-rank post-fusion (`LM_ASSIST=arbitrate`, off by default, fail-open)
@@ -281,7 +281,7 @@ For the full proxy-wired and sidecar harness sets, see [Harness Classification](
 
 The old three-tier model (hooks / per-session injection / sidecar) collapsed to a binary proxy-wired vs sidecar classification (see [Harness Classification](harness-classification.md)). The proxy is now the universal mechanism for interceptable harnesses; the file-watching sidecar remains for non-interceptable ones (cursor, windsurf, github-copilot, gemini-cli).
 
-There is **no hook transport**. Claude Code is **proxy-wired** via the native Anthropic passthrough at `/proj/<token>/v1/messages` (`ANTHROPIC_BASE_URL`); the per-turn hook routes have been removed. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 47951, queries prefixed `search_query: ` and documents `search_document: `), LadybugDB/DuckDB, signal layer, phase file, and contracts all carried over unchanged.
+There is **no hook transport**. Claude Code is **proxy-wired** via the native Anthropic passthrough at `/proj/<token>/v1/messages` (`ANTHROPIC_BASE_URL`); the per-turn hook routes have been removed. The embedding model (`nomic-embed-text-v1.5.Q8_0.gguf`, served by llama-server with `--embeddings --pooling mean --ctx-size 2048 --ubatch-size 2048` on port 47951, queries prefixed `search_query: ` and documents `search_document: `), DuckDB/LanceDB, signal layer, phase file, and contracts all carried over unchanged.
 
 ## Telemetry
 

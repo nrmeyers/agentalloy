@@ -30,7 +30,7 @@
 
 This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
 
-Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage — a local fragment re-ranker that only reorders candidates and fails open — now enabled out-of-box on every preset (GPU and CPU) as of v4.0.2. The launcher picks hardware-appropriate slot config automatically (`--parallel 2` on GPU, `--parallel 1` on CPU), and Stage B always degrades cleanly to deterministic selection if the reranker can't meet the budget. The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over embedded [LadybugDB](https://docs.ladybugdb.com/) + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
+Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage — a local fragment re-ranker that only reorders candidates and fails open — now enabled out-of-box on every preset (GPU and CPU) as of v4.0.2. The launcher picks hardware-appropriate slot config automatically (`--parallel 2` on GPU, `--parallel 1` on CPU), and Stage B always degrades cleanly to deterministic selection if the reranker can't meet the budget. The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over an embedded LanceDB vector store + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
 
 Things your agent gets composed-and-injected without you pasting them into the prompt:
 
@@ -196,7 +196,7 @@ The setup wizard:
 │  ├── Touch .bootstrap-complete                   │
 │  ├── exec uvicorn (main service, :47950)         │
 │                                                  │
-│  ENV: AGENTALLOY_PACKS, LADYBUG_DB_PATH          │
+│  ENV: AGENTALLOY_PACKS, FRAGMENTS_LANCE_PATH          │
 │      DUCKDB_PATH, LOG_LEVEL                       │
 └───────────┬──────────────────────────────────────┘
             │ -p 47950:47950
@@ -480,7 +480,7 @@ Every skill is sourced from authoritative upstream docs and validated against th
 AgentAlloy is a three-layer system:
 
 1. **Signal layer** — deterministic Python that wakes on phase transitions, contract writes, or tool fires. Pre-filters cheaply, evaluates exit gates, and composes skills only when needed.
-2. **Composition engine** — hybrid BM25 + dense retrieval over LadybugDB (skill graph) and DuckDB (vector index), fused via phase-tuned Reciprocal Rank Fusion.
+2. **Composition engine** — hybrid BM25 + dense retrieval over DuckDB (skill graph) and LanceDB (vector + BM25 index), fused via phase-tuned Reciprocal Rank Fusion.
 3. **Proxy** — OpenAI-compatible and Anthropic Messages API endpoints that intercept harness traffic, inject composed skills, and forward to the upstream LLM.
 
 Both runtime paths are **deterministic by default** — the only optional LM stages (the composition re-ranker and the signal-layer intent reranker) fail safe to deterministic scoring. See [docs/proxy-architecture.md](docs/proxy-architecture.md) for the full design.
