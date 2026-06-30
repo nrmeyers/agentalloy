@@ -18,9 +18,9 @@ live here as the single canonical home; callers import from
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 EMBEDDING_DIM = 768
 """Vector dimensionality. Tied to ``nomic-embed-text-v1.5`` (768-dim). Fixed:
@@ -194,8 +194,12 @@ class SkillStore(Protocol):
     """Skill metadata + corpus_meta (DuckDB ``agentalloy.duck``)."""
 
     def migrate(self) -> None: ...
-    def execute(self, sql: str, params: Sequence[object] | None = None) -> object: ...
-    def scalar(self, sql: str, params: Sequence[object] | None = None) -> object: ...
+    def execute(
+        self, sql: str, params: Sequence[object] | Mapping[str, object] | None = None
+    ) -> list[tuple[Any, ...]]: ...
+    def scalar(
+        self, sql: str, params: Sequence[object] | Mapping[str, object] | None = None
+    ) -> Any: ...
     def begin(self) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...

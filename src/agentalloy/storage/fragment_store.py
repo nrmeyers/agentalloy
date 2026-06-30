@@ -258,7 +258,11 @@ class LanceFragmentStore:
         if self._table.count_rows() == 0:
             return []
         q = l2_normalize(query_vec)
-        search = self._table.search(q, vector_column_name="embedding").distance_type("cosine")
+        # ``distance_type`` lives on the vector-query subclass; LanceDB's stubs
+        # type ``.search()`` as the base builder, so pyright can't see it.
+        search = self._table.search(q, vector_column_name="embedding").distance_type(  # pyright: ignore[reportAttributeAccessIssue]
+            "cosine"
+        )
         if exact and self._has_vector_index:
             with contextlib.suppress(Exception):
                 search = search.bypass_vector_index()

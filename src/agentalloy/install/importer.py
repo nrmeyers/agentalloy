@@ -23,7 +23,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -171,7 +171,7 @@ def reembed_corpus(
     fs: LanceFragmentStore,
     ss: DuckDBSkillStore,
     *,
-    embed,
+    embed: Callable[[list[str]], list[list[float]]],
     model: str,
     batch_size: int = 32,
 ) -> int:
