@@ -1,6 +1,6 @@
 """Fresh-build importer: pack YAML -> agentalloy.duck (+ fragments.lance reembed).
 
-The v6 deterministic corpus builder. Reads ``_packs/<pack>/pack.yaml`` and the
+The v5 deterministic corpus builder. Reads ``_packs/<pack>/pack.yaml`` and the
 referenced skill YAMLs and writes the relational skill graph (skills /
 skill_versions / fragments / skill_dependencies) into ``agentalloy.duck``,
 mirroring the graph structure the old Cypher ``ingest._insert`` produced:

@@ -145,7 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Expose for proxy router dependencies
     app.state.embed_client = embed_client
     # The Lance fragment store (vector + BM25). Name kept as ``vector_store`` for
-    # the diagnostics/proxy app.state contract; it is a FragmentStore in v6.
+    # the diagnostics/proxy app.state contract; it is a FragmentStore in v5.
     app.state.vector_store = vector_store
     # Service-owned telemetry.duck handle — the proxy trace writers and the
     # telemetry querier record/read composition traces here (decoupled from the

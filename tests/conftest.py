@@ -358,7 +358,7 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 def vector_store(tmp_path: Path) -> Iterator[LanceFragmentStore]:
     """Empty Lance fragment store at a tmp path. Tests that exercise
     compose/retrieve construction use this for the ``vector_store``
-    constructor parameter (a FragmentStore in v6). Empty store means
+    constructor parameter (a FragmentStore in v5). Empty store means
     search_similar returns no hits — fine for tests that mock retrieval
     results anyway."""
     fs = LanceFragmentStore(tmp_path / "fragments.lance")

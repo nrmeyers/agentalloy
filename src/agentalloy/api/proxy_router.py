@@ -77,7 +77,7 @@ def get_embed_async_client(request: Request) -> httpx.AsyncClient | None:
 def get_vector_store(request: Request) -> TelemetryStore | None:
     """Return the telemetry store from app.state (the proxy trace sink).
 
-    Named ``get_vector_store`` for call-site stability; in v6 the proxy telemetry
+    Named ``get_vector_store`` for call-site stability; in v5 the proxy telemetry
     path writes composition traces to the service-owned telemetry.duck, so this
     resolves ``app.state.telemetry_store`` (not the Lance fragment store).
     """

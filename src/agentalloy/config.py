@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     # imported (or in test environments that monkeypatch the env var)
     # gets the correct path. With a plain `default=...` the path would
     # be frozen at module import.
-    # v6 two-engine storage. ``agentalloy.duck`` holds skill metadata (folded
+    # v5 two-engine storage. ``agentalloy.duck`` holds skill metadata (folded
     # out of the retired graph engine) + corpus_meta kv; the serving process opens
     # it READ-ONLY so ingest/reembed can hold its single writer lock without
     # stopping the service. ``fragments.lance`` is the Lance dataset (vector ANN

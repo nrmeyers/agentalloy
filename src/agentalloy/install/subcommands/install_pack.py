@@ -54,7 +54,7 @@ SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
 
 # Shown when the skill store's single writer lock is held by a concurrent writer.
-# In v6 this is benign and transient — wait and retry. Imported by install_packs.
+# In v5 this is benign and transient — wait and retry. Imported by install_packs.
 LOCK_HELD_REMEDIATION = (
     "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
     "writing agentalloy.duck). Wait for it to finish and re-run the command."

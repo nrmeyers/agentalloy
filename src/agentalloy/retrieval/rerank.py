@@ -1,4 +1,4 @@
-"""Cross-encoder rerank stage for the domain retrieval pipeline (v6 — Stage A).
+"""Cross-encoder rerank stage for the domain retrieval pipeline (v5 — Stage A).
 
 A pluggable scorer reorders the top candidate skills by a (query, passage)
 relevance score. Two backends, selected via ``RUNTIME_RERANK_MODE``:

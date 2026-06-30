@@ -3,7 +3,7 @@
 Not a product capability. Only used by tests and by local developers to get a
 representative runtime store without going through the real ingest flow.
 
-In v6 the skill graph (skills / skill_versions / fragments + folded edges) lives
+In v5 the skill graph (skills / skill_versions / fragments + folded edges) lives
 in DuckDB ``agentalloy.duck`` (the ``SkillStore``); embeddings live in the Lance
 ``fragments`` dataset. This loader only writes the skill graph. After loading
 fixtures, run ``python -m agentalloy.reembed`` to build the Lance fragments

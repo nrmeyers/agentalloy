@@ -1,4 +1,4 @@
-"""Unit tests for the DuckDB TelemetryStore (v6 storage layer).
+"""Unit tests for the DuckDB TelemetryStore (v5 storage layer).
 
 Covers the analytics output contract (D15): aggregate_savings totals + shape,
 the 40-field query_traces roundtrip, and clear_telemetry counts.

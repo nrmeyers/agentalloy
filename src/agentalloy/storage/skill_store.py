@@ -95,7 +95,7 @@ class SkillStoreError(Exception):
 class LockHeldError(SkillStoreError):
     """Raised when the DuckDB file write-lock is held by another process.
 
-    In v6 this is benign and transient (a reembed/ingest holds the writer for a
+    In v5 this is benign and transient (a reembed/ingest holds the writer for a
     short window); callers retry rather than stop the service. Distinct from the
     legacy LOCK_HELD_REMEDIATION which told users to stop the service.
     """

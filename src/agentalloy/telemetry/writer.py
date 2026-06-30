@@ -1,6 +1,6 @@
 """Telemetry writer protocol, no-op stub, and DuckDB-backed writer.
 
-In v6 composition telemetry lives in its own service-owned DuckDB file
+In v5 composition telemetry lives in its own service-owned DuckDB file
 (``telemetry.duck``, ``composition_traces``), decoupled from the skill graph
 and the Lance fragment index so the reembed writer never contends with runtime
 telemetry writes (decision D4). Writes are inline before the response — no

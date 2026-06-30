@@ -72,7 +72,7 @@ _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
 
 # Shown when the skill store's single writer lock is held by a concurrent writer
-# (another ingest/reembed). In v6 this is benign and transient — wait and retry.
+# (another ingest/reembed). In v5 this is benign and transient — wait and retry.
 LOCK_HELD_REMEDIATION = (
     "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
     "writing agentalloy.duck). Wait for it to finish and re-run the command."
@@ -750,7 +750,7 @@ def main(argv: list[str] | None = None) -> int:
         return dedup_exit
     except Exception as exc:
         # The skill store enforces a single writer; a concurrent ingest/reembed
-        # may briefly hold the lock and the open above fails. In v6 this is
+        # may briefly hold the lock and the open above fails. In v5 this is
         # transient — tell the user to retry rather than crash.
         if not is_lock_held_error(str(exc)):
             raise

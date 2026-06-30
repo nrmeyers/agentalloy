@@ -1,6 +1,6 @@
 """Tests for the reembed CLI and the Lance FTS rebuild path.
 
-v6 note: reembed no longer stops/restarts the agentalloy service. Lance is MVCC
+v5 note: reembed no longer stops/restarts the agentalloy service. Lance is MVCC
 (atomic versioned writes) and telemetry lives in a separate ``telemetry.duck``,
 so a reembed is a live, zero-downtime operation (decisions D3/D4). The old
 service-manager detection (``_detect_service_manager``), running-state probe
@@ -121,7 +121,7 @@ def test_rebuild_fts_exit_ok_on_failure(caplog: pytest.LogCaptureFixture) -> Non
 def test_no_restart_flag_accepted_but_ignored(caplog: pytest.LogCaptureFixture) -> None:
     """--no-restart is accepted for backward compatibility and changes nothing.
 
-    v6 reembed never stops/restarts the service, so the flag is a documented
+    v5 reembed never stops/restarts the service, so the flag is a documented
     no-op; the pass still runs and stamps metadata normally.
     """
     with _patched_stores() as (mock_store, mock_vs):
@@ -133,7 +133,7 @@ def test_no_restart_flag_accepted_but_ignored(caplog: pytest.LogCaptureFixture) 
 
 
 # ---------------------------------------------------------------------------
-# FTS rebuild warning (v6: no remediation hint — the BM25 leg simply degrades)
+# FTS rebuild warning (v5: no remediation hint — the BM25 leg simply degrades)
 # ---------------------------------------------------------------------------
 
 
@@ -146,14 +146,14 @@ def test_fts_rebuild_warning_emitted_on_failure(caplog: pytest.LogCaptureFixture
             code = reembed_main(["--rebuild-fts"])
 
         assert code == EXIT_OK
-        # v6 dropped the old "agentalloy server-stop" / re-run remediation hint
+        # v5 dropped the old "agentalloy server-stop" / re-run remediation hint
         # from this warning — the failure is benign (Lance manages FTS) and the
         # message is just the degraded-leg notice.
         assert "BM25 leg degraded" in caplog.text
 
 
 # ---------------------------------------------------------------------------
-# Lock-held error recognition (issue #84 — remediation reworded for v6)
+# Lock-held error recognition (issue #84 — remediation reworded for v5)
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def test_lock_held_error_returns_exit_db_with_remediation(
 ) -> None:
     """A DuckDB single-writer lock failure (a concurrent ingest/reembed holding
     agentalloy.duck) must exit EXIT_DB with a targeted remediation instead of an
-    unhandled traceback. In v6 the remediation is 'wait and re-run' (the writer
+    unhandled traceback. In v5 the remediation is 'wait and re-run' (the writer
     lock is benign + transient), not 'stop the service'."""
     from agentalloy.reembed.cli import EXIT_DB
 

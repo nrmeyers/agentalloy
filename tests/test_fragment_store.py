@@ -1,4 +1,4 @@
-"""Unit tests for the LanceDB FragmentStore (v6 storage layer).
+"""Unit tests for the LanceDB FragmentStore (v5 storage layer).
 
 NOTE: these are self-contained (own tmp Lance dataset); they do not use the
 ``conftest`` corpus fixtures, which are rewired to the two-engine backend in the

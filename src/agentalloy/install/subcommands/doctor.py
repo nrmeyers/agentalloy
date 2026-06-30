@@ -48,7 +48,7 @@ SCHEMA_VERSION = 2
 _MIN_SKILL_COUNT = 25
 
 # Remediation shown when the corpus DB (agentalloy.duck) write-lock is held by
-# another process. In v6 a held lock is usually transient — an in-flight
+# another process. In v5 a held lock is usually transient — an in-flight
 # reembed/ingest holds the single writer for a short window — so the fix is to
 # wait or stop the service, never to kill processes (repair aborts on this).
 _LOCK_HELD_REMEDIATION = (

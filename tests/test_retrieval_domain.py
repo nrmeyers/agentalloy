@@ -113,7 +113,7 @@ def test_domain_tags_narrow_further(
 # Ranking by cosine similarity now happens in the Lance fragment store
 # (cosine ANN / brute-force scan) — see ``test_fragment_store.py`` for the
 # corresponding tests. The previous in-Python ranking test against
-# ``ActiveFragment.embedding`` is obsolete with the v6 storage split.
+# ``ActiveFragment.embedding`` is obsolete with the v5 storage split.
 
 
 # -------- AC-3: structural diversity --------

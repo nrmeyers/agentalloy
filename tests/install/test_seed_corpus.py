@@ -69,7 +69,7 @@ class TestMissingFiles:
         Surface the failure rather than silently overwriting."""
         # Pre-create a directory where the telemetry DuckDB file must go.
         # DuckDB refuses to open a directory, so empty-corpus init fails cleanly
-        # (the v6 analog of the old "ladybug dir where Kuzu wants a file" case).
+        # (the v5 analog of the old "ladybug dir where Kuzu wants a file" case).
         (user_corpus / "telemetry.duck").mkdir()
         result = check_corpus(repo_root)
         assert result["action"] == "init_failed"

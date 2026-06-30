@@ -203,7 +203,7 @@ def test_step_4_reembed_populates_lance(
     assert stats.embedded == len(fragments)
     assert fresh_fragments.count_embeddings() == len(fragments)
 
-    # v6: vectors are L2-normalized on insert inside LanceFragmentStore. The old
+    # v5: vectors are L2-normalized on insert inside LanceFragmentStore. The old
     # raw ``SELECT embedding FROM fragment_embeddings`` peek is gone — Lance stores
     # a FixedSizeList(float32, EMBEDDING_DIM), not a DuckDB array. The stored dim is
     # the contract; the normalized vectors' coherence is proven end-to-end by the

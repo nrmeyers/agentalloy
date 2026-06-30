@@ -2,7 +2,7 @@
 """``seed-corpus`` subcommand — presence + integrity check.
 
 The corpus lives at ``${XDG_DATA_HOME:-~/.local/share}/agentalloy/corpus/`` as the
-v6 two-engine store: ``agentalloy.duck`` (skill graph + corpus_meta),
+v5 two-engine store: ``agentalloy.duck`` (skill graph + corpus_meta),
 ``fragments.lance`` (vector + BM25 index), and ``telemetry.duck``. This
 subcommand verifies the skill store exists, the schema version matches, and the
 skill count meets the minimum threshold. No network calls.
@@ -109,7 +109,7 @@ def _embedding_meta(settings: Settings) -> dict[str, Any]:
 
 
 def _initialize_empty_corpus(settings: Settings) -> None:
-    """Initialize the three v6 stores in an empty corpus dir.
+    """Initialize the three v5 stores in an empty corpus dir.
 
     Writer-mode opens create the file and run the (idempotent) schema migration,
     so the subsequent ``install-packs`` step has tables to write into. The Lance

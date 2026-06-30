@@ -1,7 +1,7 @@
 """Fixture loader tests.
 
 Per v5.3 the loader writes graph-only; embeddings live in the Lance fragment
-store and are populated separately by the reembed CLI. In v6 the skill graph is
+store and are populated separately by the reembed CLI. In v5 the skill graph is
 DuckDB ``agentalloy.duck`` (the SkillStore), so the old Cypher reads become SQL.
 """
 

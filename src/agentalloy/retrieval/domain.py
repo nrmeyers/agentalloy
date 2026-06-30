@@ -6,7 +6,7 @@ a BM25 lexical leg via Reciprocal Rank Fusion (RRF), hydrate
 ActiveFragment metadata from the DuckDB skill store, then apply skill-granular
 selection to prevent sibling skills from crowding out unrelated relevant skills.
 
-In v6, vector storage is the Lance ``fragments`` dataset; cosine ranking
+In v5, vector storage is the Lance ``fragments`` dataset; cosine ranking
 (ANN for retrieval, exact for dedup) happens inside LanceDB over L2-normalized
 vectors.
 

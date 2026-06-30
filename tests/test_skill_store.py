@@ -1,4 +1,4 @@
-"""Unit tests for the DuckDB SkillStore (v6 storage layer)."""
+"""Unit tests for the DuckDB SkillStore (v5 storage layer)."""
 
 from __future__ import annotations
 

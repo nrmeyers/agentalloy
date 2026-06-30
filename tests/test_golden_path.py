@@ -100,7 +100,7 @@ def golden_app(seeded_store: DuckDBSkillStore, tmp_path_factory: pytest.TempPath
 
     lm = OpenAICompatClient(LM_BASE)
     runtime = load_runtime_cache(seeded_store)
-    # v6 splits the old conflated store: Lance for fragment search, a separate
+    # v5 splits the old conflated store: Lance for fragment search, a separate
     # telemetry.duck for composition traces.
     fragment_store = LanceFragmentStore(tmp / "fragments.lance")
     telemetry_store = open_telemetry_store(tmp / "telemetry.duck")

@@ -1,6 +1,6 @@
 """Storage protocols, DTOs, and shared constants for the two-engine backend.
 
-v6 splits the old monolithic ``VectorStore`` (DuckDB-vss + DuckDB-fts + telemetry
+v5 splits the old monolithic ``VectorStore`` (DuckDB-vss + DuckDB-fts + telemetry
 + corpus_meta) and the legacy graph store into three focused stores:
 
 - ``FragmentStore``  — LanceDB ``fragments`` dataset: vector ANN (retrieval) +
@@ -73,7 +73,7 @@ def l2_normalize(vec: Sequence[float]) -> list[float]:
 @dataclass(frozen=True)
 class FragmentEmbedding:
     """A fragment's embedding plus the denormalized columns that make filtered
-    vector search cheap. In v6 these columns are a *derived projection* of the
+    vector search cheap. In v5 these columns are a *derived projection* of the
     SQL-canonical source (``agentalloy.duck``), rebuilt on every reembed, so
     they cannot drift (decision D8: always consistent)."""
 

@@ -144,7 +144,7 @@ def test_savings_prefix_does_not_leak_sibling_repo(store: DuckDBTelemetryStore) 
 
 
 # Schema migration: the v5.3 additive-ALTER ``repo``-column backfill is obsolete
-# in v6 — telemetry.duck is created from a single canonical CREATE (every column
+# in v5 — telemetry.duck is created from a single canonical CREATE (every column
 # folded in, ``DuckDBTelemetryStore`` does no per-open ALTER), so a "pre-existing
 # DB missing the repo column" can no longer occur. The former
 # ``test_migration_adds_repo_column`` exercised that deleted code path and was

@@ -1,4 +1,4 @@
-"""Storage adapters — v6 two-engine backend.
+"""Storage adapters — v5 two-engine backend.
 
 - LanceDB ``fragments`` dataset: vector ANN (retrieval) + exact cosine (dedup)
   + native BM25.  -> ``fragment_store.LanceFragmentStore``

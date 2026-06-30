@@ -67,7 +67,7 @@ def test_tokens_columns_default_zero_on_fresh_db(store: DuckDBTelemetryStore) ->
 
 
 # Schema migration: the v5.3 additive-ALTER token-column backfill is obsolete in
-# v6. ``DuckDBTelemetryStore`` creates telemetry.duck from one canonical CREATE
+# v5. ``DuckDBTelemetryStore`` creates telemetry.duck from one canonical CREATE
 # (``tokens_returned`` / ``tokens_flat_equivalent`` and every other column folded
 # in, no per-open ALTER), so a "pre-existing DB missing the token columns" can no
 # longer occur. The former ``test_migration_adds_columns_to_preexisting_db``

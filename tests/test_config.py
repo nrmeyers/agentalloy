@@ -29,7 +29,7 @@ def test_defaults_when_env_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.chdir(tmp_path)
     s = Settings()
     assert s.runtime_embed_base_url == "http://localhost:47951"
-    # v6 two-engine storage: ladybug_db_path is gone; the skill DuckDB is now
+    # v5 two-engine storage: ladybug_db_path is gone; the skill DuckDB is now
     # agentalloy.duck, with the Lance fragment dataset + telemetry DuckDB alongside.
     expected_corpus = str(tmp_path / "_xdg_data" / "agentalloy" / "corpus")
     assert s.duckdb_path == f"{expected_corpus}/agentalloy.duck"

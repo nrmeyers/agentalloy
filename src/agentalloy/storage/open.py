@@ -1,4 +1,4 @@
-"""Store factory: open the three v6 engines with the right access mode per role.
+"""Store factory: open the three v5 engines with the right access mode per role.
 
 Roles encode the DuckDB cross-process locking constraint (decision D4):
 

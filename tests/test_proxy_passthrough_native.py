@@ -86,7 +86,7 @@ def _make_app(
     )
     app.state.embed_client = MagicMock()
     # The proxy trace sink: get_vector_store resolves app.state.telemetry_store
-    # (a TelemetryStore on telemetry.duck) in v6.
+    # (a TelemetryStore on telemetry.duck) in v5.
     app.state.telemetry_store = MagicMock()
     if orchestrator is not None:
         from agentalloy.api.compose_router import get_orchestrator

@@ -142,12 +142,12 @@ def _make_app(
     app.state.embed_client = mock_embed
 
     # Vector store (mock) -- FragmentStore role (search retrieval), NOT the
-    # telemetry sink. In v6 the proxy reads search from app.state.vector_store.
+    # telemetry sink. In v5 the proxy reads search from app.state.vector_store.
     if mock_vector_store is None:
         mock_vector_store = MagicMock()
     app.state.vector_store = mock_vector_store
 
-    # Telemetry store (mock) -- the proxy trace sink. In v6 get_vector_store()
+    # Telemetry store (mock) -- the proxy trace sink. In v5 get_vector_store()
     # resolves app.state.telemetry_store and writes record_composition_trace there.
     if mock_telemetry_store is None:
         mock_telemetry_store = MagicMock()

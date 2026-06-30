@@ -336,7 +336,7 @@ class TestRestartServiceInContainer:
 class TestTestCorpusLockReleased:
     """test_corpus_lock_released() retry logic for the agentalloy.duck write-lock.
 
-    The v6 probe opens a read-only skill-store connection (success = no writer
+    The v5 probe opens a read-only skill-store connection (success = no writer
     holds the lock) and closes it; failure = lock still held, retried up to 5s.
     """
 
