@@ -63,8 +63,20 @@ class Settings(BaseSettings):
     # imported (or in test environments that monkeypatch the env var)
     # gets the correct path. With a plain `default=...` the path would
     # be frozen at module import.
-    ladybug_db_path: str = Field(default_factory=lambda: str(_user_corpus_dir() / "ladybug"))
-    duckdb_path: str = Field(default_factory=lambda: str(_user_corpus_dir() / "skills.duck"))
+    # v6 two-engine storage. ``agentalloy.duck`` holds skill metadata (folded
+    # out of the retired Kuzu graph) + corpus_meta kv; the serving process opens
+    # it READ-ONLY so ingest/reembed can hold its single writer lock without
+    # stopping the service. ``fragments.lance`` is the Lance dataset (vector ANN
+    # + exact-cosine dedup + native BM25). Telemetry lives in its own
+    # service-owned ``telemetry.duck`` so runtime trace writes never contend with
+    # the reembed writer. Env: DUCKDB_PATH, FRAGMENTS_LANCE_PATH, TELEMETRY_DB_PATH.
+    duckdb_path: str = Field(default_factory=lambda: str(_user_corpus_dir() / "agentalloy.duck"))
+    fragments_lance_path: str = Field(
+        default_factory=lambda: str(_user_corpus_dir() / "fragments.lance")
+    )
+    telemetry_db_path: str = Field(
+        default_factory=lambda: str(_user_corpus_dir() / "telemetry.duck")
+    )
     log_level: str = "INFO"
 
     # Runtime serving (retrieve / compose). The runtime path holds zero
@@ -128,9 +140,15 @@ class Settings(BaseSettings):
         return Path(self.duckdb_path)
 
     def ensure_data_dirs(self) -> None:
-        """Create parent directories for LadybugDB and DuckDB if missing."""
-        Path(self.ladybug_db_path).parent.mkdir(parents=True, exist_ok=True)
+        """Create the corpus directory holding both storage engines if missing.
+
+        Lance creates its own dataset directory on first write; we only ensure
+        its parent corpus dir exists. The two DuckDB files need their parent
+        present before open.
+        """
         Path(self.duckdb_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.telemetry_db_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.fragments_lance_path).parent.mkdir(parents=True, exist_ok=True)
 
     def require_authoring_config(self) -> AuthoringConfig:
         """Extract authoring config from environment.

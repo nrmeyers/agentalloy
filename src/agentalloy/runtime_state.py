@@ -22,7 +22,7 @@ from agentalloy.reads.active import (
     get_active_skills,
 )
 from agentalloy.reads.models import ActiveFragment, ActiveSkill, SkillClass
-from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.protocols import SkillStore
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ def invalidate_profile_cache(profile_name: str) -> None:
         _PROFILE_CACHES.pop(profile_name, None)
 
 
-def load_runtime_cache(store: LadybugStore) -> RuntimeCache:
+def load_runtime_cache(store: SkillStore) -> RuntimeCache:
     """Query the store and build a ``RuntimeCache``.
 
     Raises on any store or consistency error — the caller (lifespan) should
@@ -198,26 +198,26 @@ def load_runtime_cache(store: LadybugStore) -> RuntimeCache:
     version_ids: set[str] = {s.active_version_id for s in skills_list}
 
     version_details: dict[str, VersionDetail] = {}
-    for vid in version_ids:
+    if version_ids:
+        # One batched query (was an N+1 per-version loop under Cypher).
         rows = store.execute(
-            """
-            MATCH (v:SkillVersion {version_id: $vid})
-            RETURN v.version_id, v.version_number, v.authored_at, v.author,
-                   v.change_summary, v.raw_prose
-            """,
-            {"vid": vid},
+            "SELECT version_id, version_number, authored_at, author, "
+            "change_summary, raw_prose FROM skill_versions "
+            "WHERE list_contains($vids, version_id)",
+            {"vids": list(version_ids)},
         )
-        if not rows:
-            raise RuntimeError(f"version {vid!r} not found during cache load")
-        row = rows[0]
-        version_details[vid] = VersionDetail(
-            version_id=str(row[0]),
-            version_number=int(row[1]),
-            authored_at=row[2],
-            author=str(row[3]),
-            change_summary=str(row[4]),
-            raw_prose=str(row[5]),
-        )
+        for row in rows:
+            version_details[str(row[0])] = VersionDetail(
+                version_id=str(row[0]),
+                version_number=int(row[1]),
+                authored_at=row[2],
+                author=str(row[3]),
+                change_summary=str(row[4]),
+                raw_prose=str(row[5]),
+            )
+    missing = version_ids - set(version_details)
+    if missing:
+        raise RuntimeError(f"version {next(iter(missing))!r} not found during cache load")
 
     from agentalloy.reads import get_deprecated_skill_ids as _get_deprecated_ids
 
@@ -227,7 +227,8 @@ def load_runtime_cache(store: LadybugStore) -> RuntimeCache:
     # corpus that declares none. One query; grouped into {source: [target,...]}.
     requires_edges: dict[str, list[str]] = {}
     edge_rows = store.execute(
-        "MATCH (s:Skill)-[:REQUIRES_COMPOSITIONAL]->(t:Skill) RETURN s.skill_id, t.skill_id"
+        "SELECT source_skill_id, target_skill_id FROM skill_dependencies "
+        "WHERE rel_type = 'requires'"
     )
     for row in edge_rows:
         requires_edges.setdefault(str(row[0]), []).append(str(row[1]))
