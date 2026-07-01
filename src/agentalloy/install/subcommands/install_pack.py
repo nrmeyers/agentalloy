@@ -755,9 +755,7 @@ def install_local_pack(
             "action": "corpus_verification_failed",
             "pack": name,
             "pack_dir": str(pack_dir),
-            "error": (
-                f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"
-            ),
+            "error": (f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "
                 "then re-install the pack."
@@ -1077,9 +1075,7 @@ def install_pack(
             "action": "corpus_verification_failed",
             "pack": name,
             "manifest_url": url,
-            "error": (
-                f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"
-            ),
+            "error": (f"Corpus file missing after ingest: agentalloy.duck={duck_path.exists()}"),
             "remediation": (
                 "Re-run `agentalloy seed-corpus` to initialize the corpus, "
                 "then re-install the pack."

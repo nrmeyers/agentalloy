@@ -298,7 +298,9 @@ def test_dedup_candidates_hardest_is_min_distance_across_fragments(
     assert result.hardest.fragment_id == "existing-0"  # exact match wins
 
 
-def test_dedup_candidates_deduplicates_soft_by_fragment_id(seeded_store: LanceFragmentStore) -> None:
+def test_dedup_candidates_deduplicates_soft_by_fragment_id(
+    seeded_store: LanceFragmentStore,
+) -> None:
     """If two candidate fragments both flag the same existing fragment as
     a soft match, the dedupe result's ``soft_all`` lists it once."""
     import math

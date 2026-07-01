@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 
 def phase_scope_by_skill(store: SkillStore) -> dict[str, list[str] | None]:
     """Read authored ``phase_scope`` for every active skill from the skill store."""
-    rows = store.execute(
-        "SELECT skill_id, phase_scope FROM skills WHERE deprecated = false"
-    )
+    rows = store.execute("SELECT skill_id, phase_scope FROM skills WHERE deprecated = false")
     return {str(sid): (list(scope) if scope else None) for sid, scope in rows}
 
 

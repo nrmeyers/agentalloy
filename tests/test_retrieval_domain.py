@@ -370,7 +370,9 @@ def test_empty_eligible_returns_empty_result(
     assert result.retrieval_ms >= 0
 
 
-def test_retrieval_records_latency(populated: DuckDBSkillStore, populated_vectors: FragmentStore) -> None:
+def test_retrieval_records_latency(
+    populated: DuckDBSkillStore, populated_vectors: FragmentStore
+) -> None:
     result = retrieve_domain_candidates(
         populated,
         StubLMClient(),

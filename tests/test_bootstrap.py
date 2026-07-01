@@ -88,9 +88,7 @@ def test_insert_new_skill(tmp_path: Path, md_file: Path) -> None:
     )
     assert fragment_count == 1
 
-    current = store.scalar(
-        "SELECT current_version_id FROM skills WHERE skill_id = 'sys-sample'"
-    )
+    current = store.scalar("SELECT current_version_id FROM skills WHERE skill_id = 'sys-sample'")
     assert current == "sys-sample-v1"
     store.close()
 

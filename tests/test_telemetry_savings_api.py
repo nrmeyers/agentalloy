@@ -116,9 +116,7 @@ class TestSavingsCliRouting:
         with (
             patch("agentalloy.install.subcommands.telemetry._service_port", return_value=47950),
             patch("agentalloy.install.server_proc.port_reachable", return_value=False),
-            patch(
-                "agentalloy.storage.open.open_telemetry", return_value=fake_vs
-            ) as mock_open,
+            patch("agentalloy.storage.open.open_telemetry", return_value=fake_vs) as mock_open,
         ):
             rc = telemetry._run_savings(_args())
         assert rc == 0

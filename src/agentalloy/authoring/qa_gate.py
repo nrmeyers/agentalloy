@@ -82,9 +82,7 @@ class GateResult:
 # ---------------------------------------------------------------------------
 
 
-def run_deterministic(
-    draft_path: Path, store: SkillStore
-) -> tuple[ReviewRecord | None, list[str]]:
+def run_deterministic(draft_path: Path, store: SkillStore) -> tuple[ReviewRecord | None, list[str]]:
     """Parse YAML, validate schema + vocab, check skill_id collision.
 
     Returns ``(record, errors)``. ``record`` is None iff parsing failed.

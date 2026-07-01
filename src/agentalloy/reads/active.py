@@ -42,9 +42,7 @@ _FRAGMENT_COLS = (
     "s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags, "
     "s.phase_scope, s.description"
 )
-_ACTIVE_JOIN = (
-    "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id"
-)
+_ACTIVE_JOIN = "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id"
 _FRAGMENT_JOIN = _ACTIVE_JOIN + " JOIN fragments f ON f.version_id = v.version_id"
 
 
@@ -76,10 +74,7 @@ def get_active_skills(
     if cls:
         filters.append(cls)
 
-    sql = (
-        f"SELECT {_SKILL_COLS} {_ACTIVE_JOIN} "
-        f"WHERE {' AND '.join(filters)} ORDER BY s.skill_id"
-    )
+    sql = f"SELECT {_SKILL_COLS} {_ACTIVE_JOIN} WHERE {' AND '.join(filters)} ORDER BY s.skill_id"
     return [_row_to_active_skill(row) for row in store.execute(sql, params)]
 
 
@@ -206,8 +201,7 @@ def _run_consistency_guard(
 
     # (a) CURRENT_VERSION points at a non-active version.
     rows = store.execute(
-        f"SELECT s.skill_id, v.status {_ACTIVE_JOIN} "
-        f"WHERE v.status <> 'active'{class_and} LIMIT 1",
+        f"SELECT s.skill_id, v.status {_ACTIVE_JOIN} WHERE v.status <> 'active'{class_and} LIMIT 1",
         params,
     )
     if rows:

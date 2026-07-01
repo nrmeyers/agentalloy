@@ -222,9 +222,9 @@ class DuckDBTelemetryStore:
         until: int | None = None,
     ) -> int:
         where, params = _trace_where(phase=phase, status=status, since=since, until=until)
-        row = self._c().execute(
-            f"SELECT COUNT(*) FROM composition_traces {where}", params
-        ).fetchone()
+        row = (
+            self._c().execute(f"SELECT COUNT(*) FROM composition_traces {where}", params).fetchone()
+        )
         return int(row[0]) if row else 0
 
     def query_traces(
@@ -312,8 +312,10 @@ class DuckDBTelemetryStore:
         repo_clause, repo_params = _repo_clause(repo)
         repo_and = f" AND {repo_clause}" if repo_clause else ""
 
-        overall = self._c().execute(
-            f"""
+        overall = (
+            self._c()
+            .execute(
+                f"""
             SELECT
                 COUNT(*) AS total_composes,
                 COALESCE(SUM(tokens_returned), 0) AS sum_returned,
@@ -321,16 +323,20 @@ class DuckDBTelemetryStore:
             FROM composition_traces
             WHERE status = 'proxy_composed'{repo_and}
             """,
-            repo_params,
-        ).fetchone()
+                repo_params,
+            )
+            .fetchone()
+        )
         total_composes = int(overall[0]) if overall else 0
         sum_returned = int(overall[1]) if overall else 0
         sum_flat = int(overall[2]) if overall else 0
         tokens_saved = max(0, sum_flat - sum_returned)
         savings_pct = round(tokens_saved / sum_flat * 100, 1) if sum_flat > 0 else 0.0
 
-        phase_rows = self._c().execute(
-            f"""
+        phase_rows = (
+            self._c()
+            .execute(
+                f"""
             SELECT
                 phase,
                 COUNT(*) AS composes,
@@ -341,8 +347,10 @@ class DuckDBTelemetryStore:
             GROUP BY phase
             ORDER BY composes DESC
             """,
-            repo_params,
-        ).fetchall()
+                repo_params,
+            )
+            .fetchall()
+        )
         per_phase: list[dict[str, object]] = []
         for row in phase_rows:
             ph_flat = int(row[3])

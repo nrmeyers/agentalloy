@@ -154,9 +154,7 @@ def test_step_2_ingest_populates_skill_store_only(
     _insert(fresh_skills, record, force=False)
 
     assert (
-        fresh_skills.scalar(
-            "SELECT count(*) FROM skills WHERE skill_id = ?", [record.skill_id]
-        )
+        fresh_skills.scalar("SELECT count(*) FROM skills WHERE skill_id = ?", [record.skill_id])
         == 1
     )
     assert fresh_skills.scalar("SELECT count(*) FROM skill_versions") == 1

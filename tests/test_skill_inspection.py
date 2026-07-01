@@ -71,7 +71,9 @@ def test_active_skill_returns_fragments(
 
 
 # AC-3: is_active clearly set to True for the runtime-eligible version
-def test_is_active_is_true(client_with_store: TestClient, populated_store: DuckDBSkillStore) -> None:
+def test_is_active_is_true(
+    client_with_store: TestClient, populated_store: DuckDBSkillStore
+) -> None:
     skill_id = _first_skill_id(populated_store)
     resp = client_with_store.get(f"/skills/{skill_id}")
     assert resp.status_code == 200

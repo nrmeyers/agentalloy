@@ -255,9 +255,7 @@ class DuckDBSkillStore:
     def get_meta(self, key: str) -> str | None:
         """Return the corpus_meta value for ``key``, or None if unset/absent."""
         try:
-            row = self.conn.execute(
-                "SELECT value FROM corpus_meta WHERE key = ?", [key]
-            ).fetchone()
+            row = self.conn.execute("SELECT value FROM corpus_meta WHERE key = ?", [key]).fetchone()
         except Exception:  # noqa: BLE001 - table absent on a not-yet-migrated corpus
             return None
         return str(row[0]) if row else None

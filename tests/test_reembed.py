@@ -81,9 +81,7 @@ def test_rebuild_fts_runs_when_zero_fragments(caplog: pytest.LogCaptureFixture) 
 
         assert code == EXIT_OK
         mock_vs.rebuild_fts_index.assert_called_once()
-        assert (
-            "running --rebuild-fts only" in caplog.text or "rebuild-fts requested" in caplog.text
-        )
+        assert "running --rebuild-fts only" in caplog.text or "rebuild-fts requested" in caplog.text
         # Every pass stamps the corpus schema version into corpus_meta (on the
         # SkillStore now) — even the zero-fragment / idempotent path — so existing
         # corpora pick up the explicit marker without a full re-embed.

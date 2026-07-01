@@ -44,14 +44,15 @@ import statistics
 import sys
 from dataclasses import dataclass
 
+from agentalloy.storage.ladybug import LadybugStore
+from agentalloy.storage.vector_store import open_or_create
+
 from agentalloy.config import get_settings
 from agentalloy.embed_provider import get_embed_client
 from agentalloy.retrieval.domain import retrieve_domain_candidates
 from agentalloy.retrieval.embedding_errors import EmbeddingErrorResult
 from agentalloy.retrieval.lm_assist import FragmentScorer, load_config, max_candidates
 from agentalloy.runtime_state import load_runtime_cache
-from agentalloy.storage.ladybug import LadybugStore
-from agentalloy.storage.vector_store import open_or_create
 
 _DEFAULT_PROBES: list[tuple[str, str]] = [
     ("webhook", "set up webhook signature verification for my API"),

@@ -98,9 +98,7 @@ def test_insert_domain_skill(tmp_path: Path, seeded_db: tuple[str, DuckDBSkillSt
     assert code == EXIT_OK
 
     store.open()
-    name = store.scalar(
-        "SELECT canonical_name FROM skills WHERE skill_id = 'test-domain-skill'"
-    )
+    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'test-domain-skill'")
     assert name == "Test Domain Skill"
     fragment_count = store.scalar(
         """
@@ -143,9 +141,7 @@ def test_insert_benchmark_category_domain_skill(
     assert code == EXIT_OK
 
     store.open()
-    name = store.scalar(
-        "SELECT canonical_name FROM skills WHERE skill_id = 'test-benchmark-skill'"
-    )
+    name = store.scalar("SELECT canonical_name FROM skills WHERE skill_id = 'test-benchmark-skill'")
     assert name == "Test Benchmark Skill"
     category = store.scalar("SELECT category FROM skills WHERE skill_id = 'test-benchmark-skill'")
     assert category == "benchmark"
