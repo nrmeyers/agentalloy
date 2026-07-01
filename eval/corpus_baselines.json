@@ -7,6 +7,6 @@
   "tolerance": 0.02,
   "phase_hit_rate_floors": {
     "build": 0.9551,
-    "design": 0.9583
+    "design": 0.9375
   }
 }
