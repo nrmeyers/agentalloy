@@ -153,6 +153,11 @@ def test_native_ordering_uv_tool():
             "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
             return_value=100,
         ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,  # Lance already populated → no forced reembed
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
 
@@ -186,11 +191,206 @@ def test_native_dim_mismatch_triggers_forced_reembed():
         patch.object(up, "_start_service"),
         patch.object(up, "_run_cli", side_effect=rec_cli),
         patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=300,  # skill store populated → no registry reset
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,  # isolate: reembed here is dim-driven, not empty-index
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
 
     assert any(c == "reembed --force --no-restart" for c in cli_calls)
     assert any("re-embedded" in a for a in actions)
+
+
+def test_native_empty_lance_forces_reembed_same_dim():
+    """v4->v5 engine migration: install-packs reports success and the dim is
+    unchanged (768), so the dim-mismatch check is False — but v4 kept vectors in
+    DuckDB, so fragments.lance lands empty. The upgrade must force a reembed on a
+    zero-vector index, and NOT gate it behind the confirm prompt (assume_yes=False)
+    since the service cannot retrieve without it."""
+    state = {"installed_packs": ["core"]}
+    cli_calls: list[str] = []
+
+    def rec_cli(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        cli_calls.append(" ".join(args))
+        return _proc(0)  # every step succeeds; no dim mismatch anywhere
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", side_effect=rec_cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch.object(up, "_confirm", return_value=False),  # must NOT gate the empty case
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=0,  # empty Lance dataset after ingest
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=300,  # skills populated — only the vector index is empty
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
+    ):
+        actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=False)
+
+    assert any(c == "reembed --force --no-restart" for c in cli_calls)
+    assert any("engine migration" in a for a in actions)
+    assert not any("re-embed skipped" in w for w in warnings)
+
+
+def test_native_empty_skill_store_clears_registry():
+    """v4->v5 engine migration: install-state still lists all packs (with content
+    hashes) but the new agentalloy.duck is empty, so install-packs' version gate
+    would skip every pack. The upgrade must clear the stale registry so ingest
+    actually re-populates the new store."""
+    state = {"installed_packs": [{"name": "core", "version": "1.0", "content_hash": "abc"}]}
+    cli_calls: list[str] = []
+
+    def rec_cli(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        cli_calls.append(" ".join(args))
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", side_effect=rec_cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=0,  # new skill store is empty
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,  # isolate: this test is about the registry reset
+        ),
+        patch.object(up, "_reset_pack_registry", return_value=True) as reset,
+    ):
+        actions, warnings = up._upgrade_native("v5.0.0", state, assume_yes=True)
+
+    reset.assert_called_once()
+    assert any("cleared stale pack registry" in a for a in actions)
+    assert any(c.startswith("install-packs") for c in cli_calls)
+
+
+def test_reset_pack_registry_clears_and_reports():
+    st = {"installed_packs": [{"name": "core", "version": "1.0"}], "deployment": "native"}
+    saved: dict[str, Any] = {}
+    with (
+        patch.object(up.install_state, "load_state", return_value=st),
+        patch.object(up.install_state, "save_state", side_effect=lambda s: saved.update(s)),
+    ):
+        assert up._reset_pack_registry() is True
+    assert saved["installed_packs"] == []
+    assert saved["deployment"] == "native"  # other fields preserved
+
+
+def test_reset_pack_registry_noop_when_empty():
+    with (
+        patch.object(up.install_state, "load_state", return_value={"installed_packs": []}),
+        patch.object(up.install_state, "save_state") as save,
+    ):
+        assert up._reset_pack_registry() is False
+    save.assert_not_called()
+
+
+def test_installed_packs_extracts_names_from_dicts():
+    """Registry entries are dicts (one per install, so names repeat across
+    versions) — extract + de-dupe names rather than falling through to 'all'."""
+    state = {
+        "installed_packs": [
+            {"name": "core", "version": "1.0", "content_hash": "a"},
+            {"name": "fastapi", "version": "2.0", "content_hash": "b"},
+            {"name": "core", "version": "1.1", "content_hash": "c"},  # dup name, newer
+        ]
+    }
+    assert up._installed_packs(state) == "core,fastapi"
+
+
+def test_installed_packs_falls_back_to_all():
+    assert up._installed_packs({"installed_packs": []}) == "all"
+    assert up._installed_packs({}) == "all"
+
+
+def test_installed_packs_tolerates_bare_strings():
+    assert up._installed_packs({"installed_packs": ["core", "fastapi"]}) == "core,fastapi"
+
+
+def test_drop_legacy_corpus_files_removes_v4_artifacts(tmp_path: Any):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "agentalloy.duck").write_text("v5")  # new engine — must survive
+    (corpus / "skills.duck").write_text("v4")
+    lady = corpus / "ladybug"  # ladybug has shipped as a dir
+    lady.mkdir()
+    (lady / "node.kz").write_text("kuzu")
+    settings = MagicMock(duckdb_path=str(corpus / "agentalloy.duck"))
+    with patch("agentalloy.config.get_settings", return_value=settings):
+        removed = up._drop_legacy_corpus_files()
+    assert set(removed) == {"skills.duck", "ladybug"}
+    assert not (corpus / "skills.duck").exists()
+    assert not lady.exists()
+    assert (corpus / "agentalloy.duck").exists()  # v5 files untouched
+    # idempotent — nothing left to remove
+    with patch("agentalloy.config.get_settings", return_value=settings):
+        assert up._drop_legacy_corpus_files() == []
+
+
+def test_native_healthy_upgrade_drops_legacy_files():
+    """A healthy post-upgrade corpus reclaims the v4 engine files."""
+    state = {"installed_packs": ["core"]}
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=300,  # healthy corpus → cleanup runs
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=["ladybug", "skills.duck"]),
+    ):
+        actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
+    assert any("removed legacy v4 corpus files" in a for a in actions)
+
+
+def test_native_unhealthy_corpus_keeps_legacy_files():
+    """A half-populated corpus must NOT delete the v4 fallback files."""
+    state = {"installed_packs": ["core"]}
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=0,  # empty → cleanup must be skipped
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,
+        ),
+        patch.object(up, "_reset_pack_registry", return_value=False),
+        patch.object(up, "_drop_legacy_corpus_files") as drop,
+    ):
+        up._upgrade_native("v2.3.0", state, assume_yes=True)
+    drop.assert_not_called()
 
 
 def test_native_dim_mismatch_declined_warns():
@@ -203,6 +403,15 @@ def test_native_dim_mismatch_declined_warns():
         patch.object(up, "_run_cli", return_value=_proc(1, stderr="embedding_dim mismatch")),
         patch.object(up.subprocess, "run", return_value=_proc(0)),
         patch.object(up, "_confirm", return_value=False),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=300,  # skill store populated → no registry reset
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,  # index populated → decline path is reachable
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=False)
     assert any("re-embed skipped" in w for w in warnings)
@@ -223,6 +432,13 @@ def test_native_empty_corpus_after_upgrade_warns():
             "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
             return_value=0,
         ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,  # isolate the skill-count guard from the empty-index path
+        ),
+        # skill_count==0 would trip the registry-reset branch; stub it so the test
+        # never touches the real install-state on disk.
+        patch.object(up, "_reset_pack_registry", return_value=False),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
     assert any("corpus is missing or empty after upgrade" in w for w in warnings)
@@ -242,6 +458,11 @@ def test_native_populated_corpus_no_warning():
             "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
             return_value=300,
         ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
     ):
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
     assert not any("corpus is missing or empty" in w for w in warnings)

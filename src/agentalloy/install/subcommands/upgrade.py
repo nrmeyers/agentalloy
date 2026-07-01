@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -221,9 +222,76 @@ def _confirm(prompt: str, *, assume_yes: bool) -> bool:
 
 
 def _installed_packs(state: dict[str, Any]) -> str:
-    packs = state.get("installed_packs") or []
-    names = [p for p in packs if isinstance(p, str)]
+    """Comma-joined pack names to re-install, from the install-state registry.
+
+    Entries are dicts (``{name, version, content_hash}``) and the registry keeps
+    one per install, so the same name can appear across versions — extract the
+    ``name`` and de-dupe, order-preserving. (A bare string entry is tolerated for
+    forward/backward compatibility.) Falls back to ``"all"`` when the registry is
+    empty or unusable so an upgrade never silently installs nothing.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for p in state.get("installed_packs") or []:
+        name = p if isinstance(p, str) else (p.get("name") if isinstance(p, dict) else None)
+        if isinstance(name, str) and name and name not in seen:
+            seen.add(name)
+            names.append(name)
     return ",".join(names) if names else "all"
+
+
+def _reset_pack_registry() -> bool:
+    """Clear ``installed_packs`` in install-state so the version gate re-ingests.
+
+    Used on an engine migration where the on-disk pack registry (written by the
+    old version) no longer reflects the empty new skill store; without this,
+    install-packs' content-hash gate skips every pack. install-packs rewrites the
+    registry as it re-ingests. Returns True iff a non-empty registry was cleared.
+    """
+    try:
+        st = install_state.load_state()
+    except Exception:  # noqa: BLE001 — best-effort; a read failure just means no reset
+        return False
+    if not st.get("installed_packs"):
+        return False
+    st["installed_packs"] = []
+    try:
+        install_state.save_state(st)
+    except OSError:
+        return False
+    return True
+
+
+# v4 engine artifacts left beside the v5 corpus (Kuzu graph + DuckDB skill/vector
+# store). Removed only after the v5 corpus is confirmed populated.
+_LEGACY_CORPUS_FILES = ("skills.duck", "skills.duck.wal", "ladybug", "ladybug.wal")
+
+
+def _drop_legacy_corpus_files() -> list[str]:
+    """Delete v4 corpus artifacts (``ladybug``, ``skills.duck``) beside the v5
+    corpus after a successful engine migration. Returns the names removed.
+
+    Best-effort: a file that can't be removed is skipped, never fatal — a stale
+    v4 file is unused dead weight, not a correctness problem. Handles both file
+    and directory forms (``ladybug`` has shipped as either).
+    """
+    from agentalloy.config import get_settings
+
+    try:
+        corpus_dir = Path(get_settings().duckdb_path).parent
+    except Exception:  # noqa: BLE001 — path resolution failure just means no cleanup
+        return []
+    removed: list[str] = []
+    for name in _LEGACY_CORPUS_FILES:
+        target = corpus_dir / name
+        if not target.exists():
+            continue
+        try:
+            shutil.rmtree(target) if target.is_dir() else target.unlink()
+        except OSError:
+            continue
+        removed.append(name)
+    return removed
 
 
 def _upgrade_native(
@@ -270,15 +338,44 @@ def _upgrade_native(
     # Inference servers must be up for pack ingest / re-embed.
     _start_inference_servers()
 
+    # Freshly imported (not at module top) so a native upgrade runs the NEW
+    # post-swap code, not this still-loaded pre-swap module.
+    from agentalloy.install.subcommands import seed_corpus
+
+    # Engine-migration guard: a v4 install recorded its packs (with content
+    # hashes) in install-state, but v5's skill store (agentalloy.duck) starts
+    # empty. install-packs' version gate keys off that record, so it reports every
+    # pack "already installed" and skips ingest — leaving the new engine empty.
+    # When the skill store is empty yet the registry still claims packs, clear the
+    # registry so ingest actually re-populates the new store (install-packs then
+    # rewrites the registry as it goes).
+    if seed_corpus.corpus_skill_count() == 0 and _reset_pack_registry():
+        actions.append("cleared stale pack registry (engine migration) — forcing full re-ingest")
+
     packs = _installed_packs(state)
     with progress_activity("ingesting skill packs", enabled=show_progress):
         ingest = _run_cli(["install-packs", "--packs", packs, "--no-restart"], capture=True)
-    if _is_dim_mismatch(ingest):
-        warnings.append("embedding dimension changed — a full re-embed is required")
-        if _confirm(
+
+    dim_changed = _is_dim_mismatch(ingest)
+    # A same-dim engine migration (v4 stored vectors in DuckDB, v5 in
+    # fragments.lance) is invisible to the dim-mismatch check: install-packs
+    # writes fragment METADATA to agentalloy.duck but the vector index is built
+    # by reembed, so the Lance dataset lands empty and retrieval silently dies.
+    lance_empty = seed_corpus.corpus_embedding_count() == 0
+
+    if dim_changed or lance_empty:
+        if dim_changed:
+            warnings.append("embedding dimension changed — a full re-embed is required")
+        else:
+            actions.append("vector index empty (engine migration) — rebuilding embeddings")
+        # A dim change is long and needs a human OK; an empty index is
+        # non-negotiable (the service cannot retrieve without it), so don't gate
+        # that case behind a prompt — always rebuild.
+        proceed = lance_empty or _confirm(
             "  Re-embed the whole corpus now? This can take 30–40 min on CPU",
             assume_yes=assume_yes,
-        ):
+        )
+        if proceed:
             # Stream reembed (capture=False): it prints its own live `embedded
             # N/M` counter to stderr, which beats a blind spinner. The trailing
             # re-ingest is the silent one, so wrap only that.
@@ -311,8 +408,6 @@ def _upgrade_native(
     # install-packs only re-embeds on a dimension mismatch, so a silently empty
     # corpus would otherwise restart the service on a half-upgrade. A warning here
     # makes `_run` return a non-clean status (mirrors setup's #261 guard).
-    from agentalloy.install.subcommands import seed_corpus
-
     skill_count = seed_corpus.corpus_skill_count()
     if skill_count < seed_corpus.MIN_SKILL_COUNT:
         warnings.append(
@@ -320,6 +415,12 @@ def _upgrade_native(
             f"embedded, expected >= {seed_corpus.MIN_SKILL_COUNT}) — run "
             f"`agentalloy reembed --force` then `agentalloy doctor`"
         )
+    else:
+        # New corpus is confirmed healthy — safe to reclaim the v4 engine files
+        # (Kuzu ladybug + skills.duck). Only now, never on a half-populated corpus.
+        dropped = _drop_legacy_corpus_files()
+        if dropped:
+            actions.append(f"removed legacy v4 corpus files ({', '.join(dropped)})")
 
     # corpus schema migrations + model-drift report. Capture the JSON output so it
     # does not spill to the terminal; surface only its warnings, cleanly.

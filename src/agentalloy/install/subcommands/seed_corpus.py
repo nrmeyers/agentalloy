@@ -48,6 +48,28 @@ def corpus_skill_count() -> int:
         return 0
 
 
+def corpus_embedding_count() -> int:
+    """Vector count in ``fragments.lance``; 0 if absent/empty/unreadable.
+
+    Post-upgrade guard seam: a same-dim engine migration (v4 stored vectors in
+    DuckDB, v5 in Lance) leaves this at 0 even when ``corpus_skill_count()`` is
+    healthy — install-packs writes fragment *metadata* to ``agentalloy.duck`` but
+    the vector index is built by reembed. Callers use a 0 here to force a reembed
+    the dim-mismatch check can't see. Never raises.
+    """
+    from agentalloy.storage.open import open_fragments
+
+    settings = get_settings()
+    try:
+        vs = open_fragments(settings)
+        try:
+            return int(vs.count_embeddings())
+        finally:
+            vs.close()
+    except Exception:
+        return 0
+
+
 def _check_skill_store(settings: Settings) -> dict[str, Any]:
     """Read skill/fragment counts + recorded schema_version from ``agentalloy.duck``.
 
