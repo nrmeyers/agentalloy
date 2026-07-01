@@ -119,10 +119,17 @@ def _detect_install_method() -> str:
 
 
 def _swap_command(method: str, ref: str) -> list[str]:
-    """Build the package re-install command for ``method`` at git ``ref``."""
+    """Build the package re-install command for ``method`` at git ``ref``.
+
+    Prefers ``uv tool install`` whenever ``uv`` is on PATH — this is safe even
+    for plain-pip installs and avoids `_detect_install_method`'s uv-tool-list
+    probe (which can misclassify a uv-tool install as "pip" on any hiccup,
+    then shell `python -m pip` into a venv that ships no pip). Falls back to
+    pip only when ``uv`` truly isn't available.
+    """
     target = f"git+{_GIT_URL}@{ref}"
-    if method == "uv-tool":
-        return ["uv", "tool", "install", "--force", target]
+    if method != "source" and shutil.which("uv"):
+        return ["uv", "tool", "install", "--force", "--from", target, "agentalloy"]
     return [sys.executable, "-m", "pip", "install", "--upgrade", target]
 
 

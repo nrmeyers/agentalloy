@@ -60,6 +60,52 @@ def test_target_image_preserves_full_variant():
     )
 
 
+def test_swap_command_prefers_uv_when_on_path():
+    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+        assert up._swap_command("pip", "v2.3.0") == [
+            "uv",
+            "tool",
+            "install",
+            "--force",
+            "--from",
+            f"git+{up._GIT_URL}@v2.3.0",
+            "agentalloy",
+        ]
+        assert up._swap_command("uv-tool", "v2.3.0") == [
+            "uv",
+            "tool",
+            "install",
+            "--force",
+            "--from",
+            f"git+{up._GIT_URL}@v2.3.0",
+            "agentalloy",
+        ]
+
+
+def test_swap_command_falls_back_to_pip_without_uv():
+    with patch.object(up.shutil, "which", return_value=None):
+        assert up._swap_command("pip", "v2.3.0") == [
+            up.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"git+{up._GIT_URL}@v2.3.0",
+        ]
+
+
+def test_swap_command_never_uses_uv_for_source():
+    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+        assert up._swap_command("source", "v2.3.0") == [
+            up.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"git+{up._GIT_URL}@v2.3.0",
+        ]
+
+
 # --- orchestration: check / already-current ---------------------------------
 
 
