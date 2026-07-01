@@ -530,6 +530,16 @@ def test_approval_required_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
     assert approval_required("sdd-fast") is True
 
 
+def test_approval_required_add_skill_unconditional(monkeypatch: pytest.MonkeyPatch) -> None:
+    # add-skill is in _ALWAYS_APPROVAL_PHASES: installing a skill changes what
+    # gets composed into every future session — no settings flag can waive it
+    # (contrast sdd-fast, which is flag-gated).
+    monkeypatch.delenv("SDD_FAST_REQUIRE_APPROVAL", raising=False)
+    assert approval_required("add-skill") is True
+    monkeypatch.setenv("SDD_FAST_REQUIRE_APPROVAL", "0")
+    assert approval_required("add-skill") is True
+
+
 def test_approval_recorded_no_marker_not_met(tmp_path: Path) -> None:
     _spec_doc(tmp_path)
     ctx = _ctx(tmp_path, current_phase="spec")

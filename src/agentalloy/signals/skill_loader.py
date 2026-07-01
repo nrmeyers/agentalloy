@@ -417,8 +417,9 @@ def _read_intake_route(project_root: Path) -> str | None:
     """The ``route`` field declared by the intake contract, or ``None``.
 
     Reads the newest contract under ``.agentalloy/contracts/intake/`` and returns
-    its ``route`` (``"full"`` | ``"fast"``). Best-effort: any failure (no dir, no
-    contract, malformed frontmatter, unreadable) returns ``None``. Never raises.
+    its ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
+    failure (no dir, no contract, malformed frontmatter, unreadable) returns
+    ``None``. Never raises.
     """
     intake_dir = project_root / ".agentalloy" / "contracts" / "intake"
     try:
@@ -451,6 +452,8 @@ def _intake_route_hint(project_root: Path) -> str | None:
     route = _read_intake_route(project_root)
     if route == "fast":
         return "sdd-fast"
+    if route == "add-skill":
+        return "add-skill"
     if route == "full":
         return None
 

@@ -1,8 +1,9 @@
 """``approve`` subcommand — record a human approval marker and auto-advance.
 
-    agentalloy approve spec     — sign off the spec phase, then advance to design
-    agentalloy approve design   — sign off the design phase, then advance to build
-    agentalloy approve sdd-fast — sign off the fast lane (gated only when enabled)
+    agentalloy approve spec      — sign off the spec phase, then advance to design
+    agentalloy approve design    — sign off the design phase, then advance to build
+    agentalloy approve sdd-fast  — sign off the fast lane (gated only when enabled)
+    agentalloy approve add-skill — sign off the custom skill, then return to intake
 
 The marker lives at ``.agentalloy/approved/<phase>`` and records who approved,
 when, and a SHA-256 over the phase's exit artifact(s). The digest gives post-hoc
@@ -22,11 +23,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-_APPROVABLE = ("spec", "design", "sdd-fast")
+_APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
 _EXIT_ARTIFACT_GLOB = {
     "spec": "docs/spec/*.md",
     "design": "docs/design/**/*.md",
     "sdd-fast": "docs/fast/*.md",
+    "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 
 

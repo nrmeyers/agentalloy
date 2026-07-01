@@ -1,0 +1,139 @@
+skill_id: sdd-add-skill
+canonical_name: SDD — Add a Custom Skill (add-skill)
+description: "Author a custom skill for this repo's local corpus: pick the skill class, draft prose + fragments, self-critique against the R1-R9 authoring contract, scaffold and validate the pack, then stop for explicit human approval before install — the deliverable is an installed corpus skill, not a code change."
+category: operational
+skill_class: workflow
+domain_tags:
+  - skill-authoring
+  - custom-skill
+  - corpus
+  - skill-pack
+requires: []
+always_apply: false
+applies_to_phases:
+  - add-skill
+# Load-bearing command tokens not derivable from exit_gates: the validate loop
+# and the human sign-off that releases the exit gate. A customization may reword
+# the prose but must keep these verbatim.
+prose_invariants:
+  - "agentalloy validate-pack"
+  - "agentalloy approve add-skill"
+exit_gates:
+  all_of:
+    - artifact_exists:
+        path: ".agentalloy/custom-skills/**/*.yaml"
+    # Unconditional human checkpoint — unlike sdd-fast's flag-gated one:
+    # installing a skill changes what gets composed into every future session
+    # in this repo. `agentalloy approve add-skill` writes the marker; editing
+    # the skill YAML after approval makes the marker stale and re-blocks.
+    - approval_recorded:
+        since: ".agentalloy/custom-skills/**/*.yaml"
+signal_keywords:
+  - ready to install
+  - install the skill
+  - looks good
+  - approve
+  - ship the skill
+contract_template: |
+  ---
+  phase: add-skill
+  task_slug: {{task_slug}}
+  route: add-skill
+  domain_tags: []
+  scope:
+    touches: []
+    avoids: []
+  success_criteria: []
+  related_contracts: []
+  created_at: {{created_at}}
+  ---
+
+  # {{task_slug_title}}
+
+  ## What the skill should cover
+
+  <one paragraph: what knowledge or process this skill teaches, and why the
+  corpus needs it>
+
+  ## Done when
+
+  <the skill is validated, human-approved, and installed into the local corpus>
+phase_scope: []
+category_scope: [process]
+author: navistone
+change_summary: "add-skill lane workflow — guided custom-skill authoring (class choice → draft → R1-R9 self-critique → scaffold + validate → unconditional human approval → install), third intake route alongside full and fast"
+raw_prose: |
+  # SDD — Add a Custom Skill (add-skill)
+
+  **Approval first — burn this in.** You MUST NOT run `agentalloy approve add-skill` or
+  `agentalloy install-pack` until the human has explicitly said to proceed in this
+  conversation. Installing a skill changes what gets composed into every future session
+  in this repo; the exit gate blocks the phase until a human approval marker exists, and
+  it is not yours to write on their behalf.
+
+  You're authoring a **skill for this repo's local corpus** — teaching AgentAlloy
+  something it should know from now on. The deliverable is an installed corpus
+  skill, not a code change. Work in one pass:
+
+  ## 1. Pick the skill class
+
+  Default to **domain** — teaching a framework, an internal API, a team convention,
+  a process the corpus keeps missing. Reach for `system` (an always-on operational
+  rule) or `workflow` (a lifecycle-phase process) only when the user explicitly
+  describes one — both are rare, advanced cases; say so before choosing them.
+
+  ## 2. Draft it
+
+  Write the `raw_prose` first: concrete, imperative, self-contained. For a domain
+  skill, slice it into 3+ fragments across the six-type taxonomy — `execution`,
+  `verification`, and `rationale` at minimum (the scaffold enforces the same
+  floor). Every fragment must stand alone: a reader landing on it cold should know
+  what to do without the surrounding prose.
+
+  ## 3. Self-critique against R1–R9
+
+  Check the draft against the authoring contract in the corpus's
+  `sys-skill-authoring-rules` (the R1–R9 quality rules) — all nine, with an
+  explicit verdict per rule. For a hand-authored, non-sourced skill some rules are
+  legitimately **N/A** — say so per rule, don't silently skip: tiered sourcing is
+  N/A when the skill isn't derived from an external framework's docs; date-stamping
+  is N/A for claims with no version dependency. A rule that isn't N/A must pass, or
+  the draft goes another round.
+
+  ## 4. Scaffold and validate
+
+  Scaffold into the conventional location — **this path is load-bearing**: the exit
+  gate and the approval command both check it, and a pack elsewhere cannot pass the
+  phase.
+
+      agentalloy new-skill-pack .agentalloy/custom-skills/<pack-name> \
+          --skill-id <skill-id> [--skill-class domain]
+
+  Replace the scaffold placeholders with the real draft, then validate — strict,
+  iterating until it reports **zero errors**:
+
+      agentalloy validate-pack .agentalloy/custom-skills/<pack-name>
+
+  Don't reach for `--allow-lint-warnings` unless the user has explicitly accepted
+  a specific warning.
+
+  ## 5. Stop for human approval
+
+  Present the final skill content — the actual prose and fragments, not a summary —
+  plus one line on what install will do (strict lint already passed; the dedup gate
+  runs at install and flags near-duplicates against the existing corpus). Then
+  **stop and wait**. When, and only when, the human says to proceed:
+
+      agentalloy approve add-skill
+      agentalloy install-pack .agentalloy/custom-skills/<pack-name>
+
+  Approval auto-advances the phase back to `intake` — don't run `phase set`
+  yourself. If install's dedup gate reports a hard match, bring it back to the
+  human: the corpus may already cover this, and superseding beats duplicating.
+
+  ## Not this
+
+  Don't install first and ask forgiveness. Don't pad the corpus with a skill that
+  restates what retrieval already surfaces — that's what the dedup gate is for.
+  And don't write code: if the request turns out to be a code change, bail —
+  `agentalloy phase set intake` — and re-route down the full or fast lane.

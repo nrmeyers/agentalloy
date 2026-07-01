@@ -34,6 +34,12 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "agentalloy"
 SERVER_VERSION = "0.1.0"
 
+# Compose-target phases exposed to MCP callers: the full Phase vocabulary minus
+# "intake" (the session front door — never a compose probe target; the tool
+# defaults to "build"). tests/test_config_consistency.py asserts this stays in
+# lockstep with api.compose_models.Phase.
+MCP_PHASES = ("spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
+
 # JSON-RPC error codes (a subset of the standard set)
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -57,7 +63,7 @@ _TOOL_DEFINITION: dict[str, Any] = {
             },
             "phase": {
                 "type": "string",
-                "enum": ["spec", "design", "build", "qa", "ship", "sdd-fast"],
+                "enum": list(MCP_PHASES),
                 "description": "Lifecycle phase. Defaults to 'build' if omitted.",
             },
         },
@@ -115,7 +121,7 @@ def _handle_tools_call(request_id: Any, params: dict[str, Any], port: int) -> di
     if not isinstance(task, str) or not task.strip():
         return _err(request_id, INVALID_PARAMS, "'task' must be a non-empty string")
     phase = args.get("phase", "build")
-    if phase not in ("spec", "design", "build", "qa", "ship", "sdd-fast"):
+    if phase not in MCP_PHASES:
         return _err(
             request_id,
             INVALID_PARAMS,

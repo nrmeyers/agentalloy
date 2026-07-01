@@ -63,6 +63,43 @@ def test_approve_refuses_without_exit_artifact(repo_root: Path) -> None:
     assert run_phase_get(root=repo_root)["phase"] == "spec"
 
 
+def _write_custom_skill_pack(repo_root: Path) -> None:
+    """A custom-skill pack YAML satisfying add-skill's exit-artifact glob."""
+    pack = repo_root / ".agentalloy" / "custom-skills" / "my-pack"
+    pack.mkdir(parents=True, exist_ok=True)
+    (pack / "my-skill.yaml").write_text("skill_id: my-skill\n")
+
+
+def test_approve_add_skill_writes_marker_and_returns_to_intake(repo_root: Path) -> None:
+    run_phase_set("add-skill", root=repo_root)
+    _write_custom_skill_pack(repo_root)
+
+    result = run_approve("add-skill", root=repo_root, approver="alice")
+
+    assert result["ok"] is True
+    marker = Path(result["marker"])
+    assert marker == repo_root / ".agentalloy" / "approved" / "add-skill"
+    assert "approver: alice" in marker.read_text()
+    # add-skill's deliverable is an installed corpus skill — approval advances
+    # back to intake (via _PHASE_GRAPH), not onward through the SDD graph.
+    assert result["advanced"]["phase"] == "intake"
+    assert run_phase_get(root=repo_root)["phase"] == "intake"
+
+
+def test_approve_add_skill_refuses_without_scaffolded_pack(repo_root: Path) -> None:
+    # The conventional .agentalloy/custom-skills/ location is load-bearing: a
+    # pack scaffolded elsewhere leaves the exit-artifact glob empty and approval
+    # is refused.
+    run_phase_set("add-skill", root=repo_root)
+
+    result = run_approve("add-skill", root=repo_root)
+
+    assert result["ok"] is False
+    assert "exit artifact" in result["error"]
+    assert not (repo_root / ".agentalloy" / "approved" / "add-skill").exists()
+    assert run_phase_get(root=repo_root)["phase"] == "add-skill"
+
+
 def test_approve_refuses_on_phase_mismatch(repo_root: Path) -> None:
     run_phase_set("build", root=repo_root)
     result = run_approve("spec", root=repo_root)

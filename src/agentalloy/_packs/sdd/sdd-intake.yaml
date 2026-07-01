@@ -1,6 +1,6 @@
 skill_id: sdd-intake
 canonical_name: SDD — Intake (sdd-intake)
-description: "Open every session: check for work in progress (resume or new), then for new work run a short intent interview, decide full SDD vs the fast lane, and write a contract that hands off to the chosen route."
+description: "Open every session: check for work in progress (resume or new), then for new work run a short intent interview, decide full SDD vs the fast lane vs the add-skill lane (custom-skill authoring), and write a contract that hands off to the chosen route."
 category: operational
 skill_class: workflow
 domain_tags:
@@ -18,6 +18,7 @@ applies_to_phases:
 prose_invariants:
   - "agentalloy phase set spec"
   - "agentalloy phase set sdd-fast"
+  - "agentalloy phase set add-skill"
 exit_gates:
   artifact_exists:
     path: ".agentalloy/contracts/**/*.md"
@@ -56,13 +57,13 @@ contract_template: |
 
   ## Proposed route
 
-  <full SDD or sdd-fast (the fast lane), and why — default is full>
+  <full SDD, sdd-fast (the fast lane), or add-skill (custom-skill authoring), and why — default is full>
 # Workflow skills are selected by applies_to_phases (signal layer), not by
 # phase_scope, so this is left empty and scoped via category instead.
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: intake authors the next phase's work-item contract (contracts/spec/ or contracts/sdd-fast/) with the work's technology domain_tags + a concrete request body that becomes that phase's retrieval prompt — prior-authors-next, so each phase opens already primed; resume-aware front door + full/fast routing unchanged"
+change_summary: "third route out of intake: add-skill (custom-skill authoring for the local corpus) alongside full and fast — route on requests to add/create/teach a skill rather than change code; two-tier cascade and resume-aware front door unchanged"
 raw_prose: |
   # SDD — Intake
 
@@ -89,17 +90,23 @@ raw_prose: |
   ## 2. Frame it (briefly)
 
   Ask only what you can't infer. You need just enough to answer one question —
-  **full SDD, or the fast lane?**
+  **full SDD, the fast lane, or the add-skill lane?**
 
   - **Full** (`spec → design → build → qa → ship`): new surface area, real design
     choices, multiple components, risky or hard to reverse, or fuzzy acceptance.
   - **Fast** (`sdd-fast` — one compressed spec-build-test-deliver): you could
     confidently land it in a single PR with an obvious "done" — a small fix, a
     localized change, a well-understood tweak.
+  - **Add-skill** (`add-skill` — custom-skill authoring): the user isn't asking
+    for a code change at all — they want to add, create, or teach you a skill for
+    this repo's AgentAlloy corpus ("remember how we do X", "add a skill for our
+    deploy process"). The deliverable is an installed corpus skill.
 
-  When in doubt, choose **full**. The fast lane is only for work that's *clearly*
-  bounded — and if `sdd-fast` turns out harder than it looked, it bails back to
-  `spec`, so under-calling it isn't a trap.
+  When in doubt between full and fast, choose **full**. The fast lane is only for
+  work that's *clearly* bounded — and if `sdd-fast` turns out harder than it
+  looked, it bails back to `spec`, so under-calling it isn't a trap. The add-skill
+  lane isn't a judgment call about size — it's simply whether the ask is a corpus
+  skill rather than a code change.
 
   ## 3. Hand off the next phase's work-item
 
@@ -109,6 +116,8 @@ raw_prose: |
       agentalloy contract init --phase spec --slug <task-slug>       # full lane
       # or, for the fast lane:
       agentalloy contract init --phase sdd-fast --slug <task-slug>
+      # or, for custom-skill authoring:
+      agentalloy contract init --phase add-skill --slug <task-slug>
 
   Fill `domain_tags` with the work's *technology surface* (the concrete tech it
   touches — not process words like "spec" or "build") and write the body as a
@@ -116,7 +125,8 @@ raw_prose: |
   retrieval prompt: on entry the proxy front-loads the skills matching it, so the
   next phase starts already primed. Set `scope.touches` too. Writing the contract
   completes intake. Advance to the route you agreed: `agentalloy phase set spec`
-  for the full lane, or `agentalloy phase set sdd-fast` for the fast lane. (The
+  for the full lane, `agentalloy phase set sdd-fast` for the fast lane, or
+  `agentalloy phase set add-skill` for custom-skill authoring. (The
   contract write also advances on the next turn, so the new phase opens either
   way; running it yourself just keeps you moving now.) Stop here only if the route
   itself is genuinely unclear — surface that and let the user make the call.

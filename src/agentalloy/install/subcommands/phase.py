@@ -20,7 +20,7 @@ from typing import Any
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
-VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
 
 SCHEMA_VERSION = 1
 
@@ -31,6 +31,7 @@ _APPROVAL_SINCE = {
     "spec": "docs/spec/*.md",
     "design": "docs/design/**/*.md",
     "sdd-fast": "docs/fast/*.md",
+    "add-skill": ".agentalloy/custom-skills/**/*.yaml",
 }
 
 
@@ -283,7 +284,7 @@ def add_parser(
     p_set.add_argument(
         "phase",
         choices=VALID_PHASES,
-        help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast",
+        help="Phase to set: intake, spec, design, build, qa, ship, sdd-fast, add-skill",
     )
     p_set.add_argument(
         "--force",

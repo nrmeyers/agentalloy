@@ -284,6 +284,12 @@ class TestContractRoute:
         f = _write_contract(tmp_path / "c.md", extra_fields={"route": "fast"})
         assert parse_contract(f).route == "fast"
 
+    def test_route_add_skill(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import parse_contract
+
+        f = _write_contract(tmp_path / "c.md", extra_fields={"route": "add-skill"})
+        assert parse_contract(f).route == "add-skill"
+
     def test_route_invalid_rejected(self, tmp_path: Path) -> None:
         from agentalloy.contracts import ContractMalformed, parse_contract
 
@@ -310,6 +316,14 @@ class TestIntakeRouteHint:
 
         self._write_intake(tmp_path, "fast")
         assert _intake_route_hint(tmp_path) == "sdd-fast"
+
+    def test_add_skill_route_field_hints_add_skill(self, tmp_path: Path) -> None:
+        """route: add-skill routes to the custom-skill authoring lane (1:1 with
+        the phase name — no fast/sdd-fast style indirection)."""
+        from agentalloy.signals.skill_loader import _intake_route_hint
+
+        self._write_intake(tmp_path, "add-skill")
+        assert _intake_route_hint(tmp_path) == "add-skill"
 
     def test_full_route_field_hints_none(self, tmp_path: Path) -> None:
         from agentalloy.signals.skill_loader import _intake_route_hint

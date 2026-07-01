@@ -201,8 +201,10 @@ def parse_contract(path: Path) -> Contract:
             pass
 
     route = str(data.get("route") or "full").strip().lower()
-    if route not in ("full", "fast"):
-        raise ContractMalformed(f"Contract 'route' must be 'full' or 'fast', got '{route}'")
+    if route not in ("full", "fast", "add-skill"):
+        raise ContractMalformed(
+            f"Contract 'route' must be 'full', 'fast', or 'add-skill', got '{route}'"
+        )
 
     return Contract(
         path=path.resolve(),

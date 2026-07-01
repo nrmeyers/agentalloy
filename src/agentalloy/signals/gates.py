@@ -35,6 +35,9 @@ _PHASE_GRAPH: dict[str, str] = {
     "qa": "ship",
     "sdd-fast": "qa",  # fast lane: compressed spec+design+build, then merge into
     #                    the standard qa → ship verification + delivery
+    "add-skill": "intake",  # custom-skill authoring lane: deliverable is a locally
+    #                         installed corpus skill, not a shippable change — return
+    #                         to intake for whatever comes next
     "ship": "ship",  # terminal
 }
 

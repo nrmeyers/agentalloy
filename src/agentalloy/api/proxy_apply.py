@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast")
+_VALID_PHASES = ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill")
 
 
 def _tier2_k() -> int | None:

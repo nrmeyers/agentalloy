@@ -18,15 +18,19 @@ import yaml
 _PACKS = Path(__file__).parent.parent / "src" / "agentalloy" / "_packs" / "sdd"
 
 # Forward (self-advance) routes each skill's prose must name. Mirrors the linear
-# SDD graph and the two intake routes (full → spec, fast → sdd-fast).
+# SDD graph and the three intake routes (full → spec, fast → sdd-fast,
+# add-skill → add-skill).
 _FORWARD: dict[str, list[str]] = {
-    "sdd-intake.yaml": ["phase set spec", "phase set sdd-fast"],
+    "sdd-intake.yaml": ["phase set spec", "phase set sdd-fast", "phase set add-skill"],
     "sdd-spec-and-scoping.yaml": ["phase set design"],
     "sdd-design-and-planning.yaml": ["phase set build"],
     "sdd-build.yaml": ["phase set qa"],
     "sdd-verify-and-review.yaml": ["phase set ship"],
     "sdd-fast.yaml": ["phase set qa"],  # fast merges into the standard qa → ship
     "sdd-deliver-and-ship.yaml": ["phase set intake"],  # the user-confirmed reset
+    # add-skill's forward route is `agentalloy approve add-skill` (approve
+    # auto-advances back to intake) — no self phase-set; see the dedicated test.
+    "sdd-add-skill.yaml": [],
 }
 
 # Backward / bail routes that must survive the prose rewrite (route-by-cause).
@@ -40,6 +44,7 @@ _BACKWARD: dict[str, list[str]] = {
     ],
     "sdd-fast.yaml": ["phase set spec"],
     "sdd-deliver-and-ship.yaml": ["phase set build"],
+    "sdd-add-skill.yaml": ["phase set intake"],  # bail: the ask was a code change
 }
 
 
@@ -65,6 +70,18 @@ def test_backward_routes_preserved() -> None:
         prose = _prose(name)
         for cmd in cmds:
             assert cmd in prose, f"{name} dropped backward route `{cmd}`"
+
+
+def test_add_skill_forward_is_approve_not_phase_set() -> None:
+    # add-skill's one way forward is the human sign-off: `agentalloy approve
+    # add-skill` writes the marker and auto-advances to intake. The prose must
+    # carry the approve command and the validate loop (both prose_invariants),
+    # and tell the agent not to advance itself.
+    prose = _prose("sdd-add-skill.yaml")
+    assert "agentalloy approve add-skill" in prose
+    assert "agentalloy validate-pack" in prose
+    assert "auto-advances" in prose
+    assert "don't run `phase set`" in prose.lower()
 
 
 def test_ship_is_terminal_and_user_confirmed() -> None:

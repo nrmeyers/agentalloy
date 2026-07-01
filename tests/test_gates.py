@@ -226,6 +226,13 @@ def test_phase_graph_sdd_fast_routes_to_qa():
     assert _PHASE_GRAPH["sdd-fast"] == "qa"
 
 
+def test_phase_graph_add_skill_routes_to_intake():
+    """The add-skill lane's deliverable is an installed corpus skill, not a
+    shippable change — on completion the session returns to intake, and this
+    same edge drives `agentalloy approve add-skill`'s auto-advance."""
+    assert _PHASE_GRAPH["add-skill"] == "intake"
+
+
 def test_decide_transition_sdd_fast_to_qa(tmp_path: Path):
     """Fast brief (all three sections) + code + tests advances sdd-fast → qa."""
     ctx = _ctx(tmp_path, phase="sdd-fast")

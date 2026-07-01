@@ -268,6 +268,38 @@ def test_k_and_max_tokens_tables_cover_full_phase_and_agree_on_keys() -> None:
     assert set(DEFAULT_MAX_TOKENS_BY_PHASE) == phases
 
 
+def test_phase_vocabulary_sites_stay_in_lockstep() -> None:
+    # The phase vocabulary is declared in several modules; a phase added to one
+    # but not another breaks routing or validation in ways no single-module test
+    # catches (the add-skill lane audit found 11 sites). Every site must equal
+    # the Phase Literal.
+    from agentalloy import bootstrap, ingest
+    from agentalloy.api import proxy_apply
+    from agentalloy.install import mcp_server
+    from agentalloy.install.subcommands import approve as approve_cli
+    from agentalloy.install.subcommands import phase as phase_cli
+    from agentalloy.signals import gates
+
+    phases = set(_ALL_PHASES)
+    assert set(ingest._VALID_PHASES) == phases  # pyright: ignore[reportPrivateUsage]
+    assert set(gates._PHASE_GRAPH) == phases  # pyright: ignore[reportPrivateUsage]
+    assert set(phase_cli.VALID_PHASES) == phases
+    assert set(bootstrap._VALID_PHASES) == phases  # pyright: ignore[reportPrivateUsage]
+    assert set(proxy_apply._VALID_PHASES) == phases  # pyright: ignore[reportPrivateUsage]
+    # MCP exposes compose-target phases only: everything except the intake
+    # front door (never a compose probe target).
+    assert set(mcp_server.MCP_PHASES) == phases - {"intake"}
+    # The approve CLI and the phase CLI keep twin approval-artifact maps — same
+    # phases, same globs, or staleness detection and approval disagree.
+    assert (
+        approve_cli._EXIT_ARTIFACT_GLOB  # pyright: ignore[reportPrivateUsage]
+        == phase_cli._APPROVAL_SINCE  # pyright: ignore[reportPrivateUsage]
+    )
+    assert set(approve_cli._APPROVABLE) == set(  # pyright: ignore[reportPrivateUsage]
+        approve_cli._EXIT_ARTIFACT_GLOB  # pyright: ignore[reportPrivateUsage]
+    )
+
+
 def test_default_k_by_phase_values() -> None:
     # #13 raised build/ship 2→4; sdd-fast stays tight; long-form phases unchanged.
     assert DEFAULT_K_BY_PHASE["build"] == 4
