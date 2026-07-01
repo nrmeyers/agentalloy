@@ -239,19 +239,39 @@ def _run_savings(args: argparse.Namespace) -> int:
         return 1
 
     # Service is down — safe to open the telemetry store directly.
+    from pathlib import Path
+
     from agentalloy.config import get_settings
     from agentalloy.storage.open import open_telemetry
 
     settings = get_settings()
-    ts = open_telemetry(settings, read_only=True)
-    try:
-        result = ts.aggregate_savings(repo)
-    finally:
-        ts.close()
+    # A fresh install has no telemetry.duck yet. DuckDB refuses to open a
+    # non-existent file read-only, and a read command must not create it, so
+    # synthesize the empty aggregate (same shape as aggregate_savings()).
+    if not Path(settings.telemetry_db_path).exists():
+        result = _empty_savings()
+    else:
+        ts = open_telemetry(settings, read_only=True)
+        try:
+            result = ts.aggregate_savings(repo)
+        finally:
+            ts.close()
 
     result["repo"] = repo
     write_result(result, args, human_fn=render)
     return 0
+
+
+def _empty_savings() -> dict[str, Any]:
+    """Zero-valued savings aggregate matching ``TelemetryStore.aggregate_savings``."""
+    return {
+        "total_composes": 0,
+        "tokens_returned": 0,
+        "tokens_flat_equivalent": 0,
+        "tokens_saved": 0,
+        "savings_pct": 0.0,
+        "per_phase": [],
+    }
 
 
 def _render_savings(result: dict[str, Any], repo: str | None = None) -> None:

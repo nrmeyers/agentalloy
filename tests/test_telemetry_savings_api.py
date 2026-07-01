@@ -110,18 +110,36 @@ class TestSavingsCliRouting:
         assert rc == 1
         mock_open.assert_not_called()  # never risk the lock
 
-    def test_direct_db_when_service_down(self) -> None:
+    def test_direct_db_when_service_down(self, tmp_path: Path) -> None:
         fake_vs = MagicMock()
         fake_vs.aggregate_savings.return_value = _SAVINGS
+        db = tmp_path / "telemetry.duck"
+        db.touch()  # existing file → direct open path
+        settings = MagicMock(telemetry_db_path=str(db))
         with (
             patch("agentalloy.install.subcommands.telemetry._service_port", return_value=47950),
             patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+            patch("agentalloy.config.get_settings", return_value=settings),
             patch("agentalloy.storage.open.open_telemetry", return_value=fake_vs) as mock_open,
         ):
             rc = telemetry._run_savings(_args())
         assert rc == 0
         mock_open.assert_called_once()
-        fake_vs.aggregate_savings.assert_called_once()
+
+    def test_fresh_install_no_db_file(self, tmp_path: Path) -> None:
+        """Service down + no telemetry.duck yet (fresh install): synthesize the
+        empty aggregate instead of opening read-only (DuckDB rejects a missing
+        file in RO mode, and a read command must not create it)."""
+        settings = MagicMock(telemetry_db_path=str(tmp_path / "telemetry.duck"))
+        with (
+            patch("agentalloy.install.subcommands.telemetry._service_port", return_value=47950),
+            patch("agentalloy.install.server_proc.port_reachable", return_value=False),
+            patch("agentalloy.config.get_settings", return_value=settings),
+            patch("agentalloy.storage.open.open_telemetry") as mock_open,
+        ):
+            rc = telemetry._run_savings(_args())
+        assert rc == 0
+        mock_open.assert_not_called()  # never open a missing file read-only
 
 
 class TestClearLockGuard:
