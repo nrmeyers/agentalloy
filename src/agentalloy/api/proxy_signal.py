@@ -354,8 +354,16 @@ async def evaluate_signal(
     cwd: Path,
     embed_client: EmbedClient | None = None,
     session_id: str | None = None,
+    *,
+    mutate: bool = True,
 ) -> SignalResult:
     """Evaluate the signal layer for an incoming proxy request.
+
+    ``mutate=False`` runs the full evaluation read-only — no phase-file write on
+    a met transition and no banner-turn counter bump — for simulators (the web
+    UI's signal playground) that must observe the decision without advancing
+    repo state. Cadence markers are never written here either way; that's
+    ``commit_markers``'s job, which a simulator simply never calls.
 
     Flow:
     1. Read phase file (``.agentalloy/phase``)
@@ -448,10 +456,11 @@ async def evaluate_signal(
         if bt_phase != phase or bt_session != session_key:
             bt_count = 0  # phase/session changed -> fresh start, emit now
         emit_banner = bt_count % _banner_turn_cadence() == 0
-        try:
-            _write_banner_turn_atomic(cwd, phase, session_key, bt_count + 1)
-        except OSError:
-            logger.debug("banner-turns write failed", exc_info=True)
+        if mutate:
+            try:
+                _write_banner_turn_atomic(cwd, phase, session_key, bt_count + 1)
+            except OSError:
+                logger.debug("banner-turns write failed", exc_info=True)
 
     # 2. Load workflow skill for the phase (sync DB query — run in thread)
     skill = await asyncio.to_thread(_load_workflow_skill_for_phase, phase, cwd)
@@ -535,7 +544,7 @@ async def evaluate_signal(
                 lm_client=embed_client,
                 next_phase_hint=route_hint,
             )
-            if decision.should_transition and decision.to_phase:
+            if mutate and decision.should_transition and decision.to_phase:
                 try:
                     _write_phase_atomic(cwd, decision.to_phase)
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
