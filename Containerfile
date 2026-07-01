@@ -62,8 +62,9 @@ COPY README.md ./
 COPY src/ ./src/
 
 # Create an empty data dir so the image is runnable without a bind mount.
-# The corpus (LadybugDB + DuckDB) is not committed to the repo — CI bakes a
-# prebuilt corpus into published images under /app/corpus-seed (see
+# The corpus (LanceDB fragments.lance + DuckDB agentalloy.duck) is not committed
+# to the repo — CI bakes a prebuilt corpus into published images under
+# /app/corpus-seed (see
 # .github/workflows/container-build.yml); the entrypoint copies it into the
 # data volume on first run so users skip the ~30-min CPU ingest+embed. For
 # local builds corpus-seed/ holds only .keep and the entrypoint falls back
@@ -91,8 +92,9 @@ RUN uv sync --frozen --no-dev
 # is no GPU passthrough), so scoring the ~12 candidate fragments per compose
 # exceeds the latency budget, times out, and fails open. GPU *native* installs
 # enable it via their hardware preset (nvidia / radeon / apple-silicon).
-ENV LADYBUG_DB_PATH=/app/data/ladybug \
-    DUCKDB_PATH=/app/data/skills.duck \
+ENV DUCKDB_PATH=/app/data/agentalloy.duck \
+    FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \
+    TELEMETRY_DB_PATH=/app/data/telemetry.duck \
     LOG_LEVEL=INFO \
     LM_ASSIST=off \
     RUNTIME_EMBED_BASE_URL=http://localhost:47951 \

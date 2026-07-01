@@ -51,8 +51,13 @@ jobs:
           # new embedding model, or a dep upgrade that alters embeddings/storage),
           # else the cache serves stale-format corpora forever. v3 = nomic-embed-
           # text 768-dim (was qwen3-embedding 1024) — invalidates any cached
-          # 1024 / empty-embeddings corpus from the v2.0 transition.
-          key: corpus-seed-v3-${{ hashFiles('src/agentalloy/_packs/**') }}
+          # 1024 / empty-embeddings corpus from the v2.0 transition. v5 = the v5.0.0
+          # two-engine migration (LanceDB fragments.lance + DuckDB agentalloy.duck,
+          # replacing ladybug + skills.duck): the storage FORMAT changed with no
+          # pack-content change, so v3 would have served the old-format seed (which
+          # it did — v5.0.0's build cache-hit baked ladybug+skills.duck, and the
+          # entrypoint crash-looped on the missing agentalloy.duck).
+          key: corpus-seed-v5-${{ hashFiles('src/agentalloy/_packs/**') }}
 
       - name: Install uv
         if: steps.corpus-cache.outputs.cache-hit != 'true'
