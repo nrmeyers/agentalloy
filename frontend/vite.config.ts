@@ -17,6 +17,9 @@ export default defineConfig({
       '/health': BACKEND,
       '/readiness': BACKEND,
       '/diagnostics': BACKEND,
+      '/retrieve': BACKEND,
+      '/compose': BACKEND,
+      '/skills': BACKEND,
     },
   },
 });

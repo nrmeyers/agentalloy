@@ -1,20 +1,60 @@
 import type {
+  ComposeResponse,
   ConfigData,
   ConfigUpdate,
   ConfigUpdateResult,
   CorpusDiagnostics,
   CoverageResponse,
   HealthResponse,
+  OverrideUpdate,
+  OverrideWriteResult,
   ReadinessResponse,
   ReloadResult,
+  RetrieveRequest,
+  RetrieveResponse,
   RuntimeDiagnostics,
   SavingsResponse,
+  SignalEvaluateRequest,
+  SignalVerdict,
+  SkillDetail,
+  SkillOverride,
+  SkillsListParams,
+  SkillsListResponse,
+  SkillVersionsResponse,
   TracesParams,
   TracesResponse,
 } from './types';
 
 // Relative base — same origin in production, Vite proxy in dev.
 const BASE = '';
+
+/**
+ * HTTP failure carrying the status code and parsed JSON body so callers can
+ * branch on status (404 = not overridable) or read structured validation
+ * errors ({"detail": {"error": "validation_failed", "errors": [...]}}).
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/** Extract the errors[] list from a validation_failed 400 body, if present. */
+export function extractValidationErrors(err: unknown): string[] | null {
+  if (!(err instanceof ApiError) || err.status !== 400) return null;
+  if (!err.body || typeof err.body !== 'object') return null;
+  const detail = (err.body as Record<string, unknown>).detail;
+  if (!detail || typeof detail !== 'object') return null;
+  const errors = (detail as Record<string, unknown>).errors;
+  if (!Array.isArray(errors)) return null;
+  return errors.map((e) => String(e));
+}
 
 /**
  * Extract a human-readable message from an error body. FastAPI nests custom
@@ -50,20 +90,24 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     throw new Error(`Network error reaching ${url}`);
   }
   if (!res.ok) {
+    let body: unknown;
     let bodyMessage: string | undefined;
     try {
-      bodyMessage = extractErrorMessage(await res.json());
+      body = await res.json();
+      bodyMessage = extractErrorMessage(body);
     } catch {
       // non-JSON error body — fall through to the status message
     }
     if (res.status === 403) {
-      throw new Error(
+      throw new ApiError(
         bodyMessage
           ? `Forbidden (403): ${bodyMessage}`
           : 'Forbidden (403): missing or rejected X-AgentAlloy-CSRF header',
+        res.status,
+        body,
       );
     }
-    throw new Error(bodyMessage ?? `${method} ${url} failed (${res.status})`);
+    throw new ApiError(bodyMessage ?? `${method} ${url} failed (${res.status})`, res.status, body);
   }
   return res.json() as Promise<T>;
 }
@@ -127,4 +171,70 @@ export function getHealth(): Promise<HealthResponse> {
 
 export function getReadiness(): Promise<ReadinessResponse> {
   return request<ReadinessResponse>('/readiness');
+}
+
+// --- Skills --------------------------------------------------------------------
+
+export function getSkills(params: SkillsListParams): Promise<SkillsListResponse> {
+  return request<SkillsListResponse>(`/api/skills${query({ ...params })}`);
+}
+
+export function getSkillDetail(skillId: string): Promise<SkillDetail> {
+  return request<SkillDetail>(`/skills/${encodeURIComponent(skillId)}`);
+}
+
+export function getSkillVersions(skillId: string): Promise<SkillVersionsResponse> {
+  return request<SkillVersionsResponse>(`/api/skills/${encodeURIComponent(skillId)}/versions`);
+}
+
+/** Throws ApiError with status 404 when the skill is not overridable. */
+export function getSkillOverride(skillId: string): Promise<SkillOverride> {
+  return request<SkillOverride>(`/api/skills/${encodeURIComponent(skillId)}/override`);
+}
+
+export function putSkillOverride(
+  skillId: string,
+  body: OverrideUpdate,
+): Promise<OverrideWriteResult> {
+  return request<OverrideWriteResult>(`/api/skills/${encodeURIComponent(skillId)}/override`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteSkillOverride(
+  skillId: string,
+  layer = 'profile',
+): Promise<OverrideWriteResult> {
+  return request<OverrideWriteResult>(
+    `/api/skills/${encodeURIComponent(skillId)}/override${query({ layer })}`,
+    { method: 'DELETE' },
+  );
+}
+
+// --- Playground ------------------------------------------------------------------
+
+export function postRetrieve(body: RetrieveRequest): Promise<RetrieveResponse> {
+  return request<RetrieveResponse>('/retrieve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function postCompose(body: RetrieveRequest): Promise<ComposeResponse> {
+  return request<ComposeResponse>('/compose', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function evaluateSignal(body: SignalEvaluateRequest): Promise<SignalVerdict> {
+  return request<SignalVerdict>('/api/signal/evaluate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }

@@ -18,7 +18,7 @@ export const RANGE_MS: Record<string, number> = {
   '7d': 604_800_000,
 };
 
-function FilterSelect({
+export function FilterSelect({
   label,
   value,
   options,

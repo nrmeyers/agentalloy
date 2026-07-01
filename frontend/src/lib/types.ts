@@ -205,6 +205,180 @@ export interface CorpusDiagnostics {
 }
 
 // ---------------------------------------------------------------------------
+// Skills (/api/skills, /skills/{id})
+// ---------------------------------------------------------------------------
+
+export type SkillClass = 'domain' | 'system' | 'workflow';
+export type OverrideLayer = 'project' | 'profile';
+
+export interface SkillSummary {
+  skill_id: string;
+  canonical_name: string;
+  category: string;
+  skill_class: SkillClass;
+  domain_tags: string[];
+  phase_scope: string[] | null;
+  tier: string | null;
+  description: string | null;
+  always_apply: boolean;
+  pack: string | null;
+  override_layer: OverrideLayer | null;
+}
+
+export interface SkillsListResponse {
+  total: number;
+  skills: SkillSummary[];
+}
+
+export interface SkillsListParams {
+  class?: string;
+  category?: string;
+  phase?: string;
+  q?: string;
+}
+
+export interface SkillActiveVersion {
+  version_id: string;
+  version_number: number;
+  authored_at: string | null;
+  author: string | null;
+  change_summary: string | null;
+  raw_prose: string;
+}
+
+export interface SkillFragment {
+  fragment_id: string;
+  fragment_type: string;
+  sequence: number;
+  content: string;
+}
+
+export interface SkillDetail {
+  skill_id: string;
+  canonical_name: string;
+  category: string;
+  skill_class: SkillClass;
+  is_active: boolean;
+  active_version: SkillActiveVersion | null;
+  fragments: SkillFragment[];
+  // Detail endpoint may carry more metadata than the summary; tolerate drift.
+  tier?: string | null;
+  domain_tags?: string[];
+  [key: string]: unknown;
+}
+
+export interface SkillVersion {
+  version_id: string;
+  version_number: number;
+  authored_at: string | null;
+  author: string | null;
+  change_summary: string | null;
+  status: string | null;
+  raw_prose: string;
+  is_active: boolean;
+}
+
+export interface SkillVersionsResponse {
+  skill_id: string;
+  versions: SkillVersion[];
+}
+
+export interface SkillOverride {
+  skill_id: string;
+  skill_class: string | null;
+  active_layer: 'project' | 'profile' | 'default';
+  active_profile: string;
+  paths: {
+    project: string | null;
+    profile: string | null;
+    default: string | null;
+  };
+  raw_prose: string | null;
+  domain_tags: string[];
+  shipped_raw_prose: string | null;
+  locked_fields: Record<string, unknown>;
+  prose_invariants: string[];
+}
+
+export interface OverrideUpdate {
+  layer: OverrideLayer;
+  raw_prose: string;
+  domain_tags?: string[];
+}
+
+export interface OverrideWriteResult {
+  status: string;
+  layer?: string;
+  path?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Playground (/retrieve, /compose, /api/signal/evaluate)
+// ---------------------------------------------------------------------------
+
+export interface RetrieveRequest {
+  task: string;
+  phase?: string;
+  domain_tags?: string[];
+  k?: number;
+}
+
+export interface RetrieveResult {
+  skill_id: string;
+  version_id: string;
+  canonical_name: string;
+  raw_prose: string;
+  /** 0..1 */
+  score: number;
+}
+
+export interface RetrieveResponse {
+  status: string;
+  results: RetrieveResult[];
+}
+
+/** Compose is rendered defensively — every key optional, unknowns surfaced raw. */
+export interface ComposeResponse {
+  status?: string;
+  result_type?: string;
+  output?: string;
+  source_skills?: string[];
+  latency_ms?: {
+    retrieval_ms?: number;
+    assembly_ms?: number;
+    total_ms?: number;
+    [key: string]: unknown;
+  };
+  dense_leg_degraded?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SignalEvaluateRequest {
+  repo: string;
+  prompt: string;
+}
+
+export interface SignalVerdict {
+  should_compose: boolean;
+  phase: string | null;
+  task: string | null;
+  domain_tags: string[];
+  announce: boolean;
+  workflow_skill_id: string | null;
+  current_contract: string | null;
+  pre_filter_matched: string | null;
+  gates_met: string[];
+  gates_unmet: string[];
+  qwen_calls: number;
+  phase_gate_embed_failed: boolean;
+  advisories: string[];
+  banner: string | null;
+  would_announce: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Health (/health, /readiness) — tolerate shape drift.
 // ---------------------------------------------------------------------------
 

@@ -12,11 +12,13 @@ export function DataTable<T>({
   columns,
   rowKey,
   emptyLabel = 'No data',
+  onRowClick,
 }: {
   data: T[];
   columns: Column<T>[];
   rowKey: (row: T, index: number) => string | number;
   emptyLabel?: string;
+  onRowClick?: (row: T) => void;
 }) {
   if (data.length === 0) {
     return <div className="py-6 text-center text-sm text-gray-500">{emptyLabel}</div>;
@@ -38,7 +40,11 @@ export function DataTable<T>({
         </thead>
         <tbody className="divide-y divide-gray-200">
           {data.map((row, i) => (
-            <tr key={rowKey(row, i)}>
+            <tr
+              key={rowKey(row, i)}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className={onRowClick ? 'cursor-pointer hover:bg-gray-50' : undefined}
+            >
               {columns.map((col) => (
                 <td key={col.key} className={`px-4 py-2 text-sm text-gray-900 ${col.className ?? ''}`}>
                   {col.render(row)}
