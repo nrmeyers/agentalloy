@@ -25,7 +25,7 @@ def _trace(tid: str, ts_: int, phase: str, ret: int, flat: int, **kw) -> Composi
         request_ts=ts_,
         phase=phase,
         task_prompt="p",
-        status="proxy_composed",
+        status=kw.pop("status", "proxy_composed"),
         tokens_returned=ret,
         tokens_flat_equivalent=flat,
         **kw,
@@ -82,3 +82,50 @@ def test_clear_telemetry(store):
 def test_savings_pct_zero_when_no_flat(store):
     store.record_composition_trace(_trace("t1", 1, "build", 0, 0))
     assert store.aggregate_savings()["savings_pct"] == 0.0
+
+
+def test_query_traces_repo_filter(store):
+    store.record_composition_trace(_trace("t1", 1, "build", 1, 4, repo="/a"))
+    store.record_composition_trace(_trace("t2", 2, "build", 1, 4, repo="/a/sub"))
+    store.record_composition_trace(_trace("t3", 3, "build", 1, 4, repo="/b"))
+    assert {t.trace_id for t in store.query_traces(repo="/a")} == {"t1", "t2"}
+    assert store.count_traces_filtered(repo="/a") == 2
+
+
+def test_aggregate_coverage_contract(store):
+    store.record_composition_trace(_trace("t1", 1, "build", 100, 400, repo="/a"))
+    store.record_composition_trace(
+        _trace("t2", 2, "build", 0, 0, status="proxy_passthrough", repo="/a")
+    )
+    store.record_composition_trace(
+        _trace("t3", 3, "qa", 0, 0, status="proxy_passthrough", repo="/b")
+    )
+    # Non-proxy rows (e.g. direct /compose) don't count toward coverage.
+    store.record_composition_trace(_trace("t4", 4, "build", 10, 40, status="compose"))
+
+    agg = store.aggregate_coverage()
+    assert agg["total"] == 3
+    assert agg["composed"] == 1
+    assert agg["passthrough"] == 2
+    assert agg["compose_rate"] == round(1 / 3 * 100, 1)
+    by_phase = {p["phase"]: p for p in agg["per_phase"]}
+    assert by_phase["build"] == {"phase": "build", "composed": 1, "passthrough": 1}
+    assert by_phase["qa"] == {"phase": "qa", "composed": 0, "passthrough": 1}
+    by_repo = {r["repo"]: r for r in agg["per_repo"]}
+    assert by_repo["/a"]["composed"] == 1
+
+    scoped = store.aggregate_coverage(repo="/a")
+    assert scoped["total"] == 2
+    assert scoped["compose_rate"] == 50.0
+
+
+def test_aggregate_coverage_empty(store):
+    agg = store.aggregate_coverage()
+    assert agg == {
+        "total": 0,
+        "composed": 0,
+        "passthrough": 0,
+        "compose_rate": 0.0,
+        "per_phase": [],
+        "per_repo": [],
+    }

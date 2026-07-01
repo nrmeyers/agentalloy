@@ -82,7 +82,12 @@ CREATE INDEX IF NOT EXISTS idx_traces_session ON composition_traces(session_key)
 
 
 def _trace_where(
-    *, phase: str | None, status: str | None, since: int | None, until: int | None
+    *,
+    phase: str | None,
+    status: str | None,
+    since: int | None,
+    until: int | None,
+    repo: str | None = None,
 ) -> tuple[str, list[object]]:
     clauses: list[str] = []
     params: list[object] = []
@@ -98,6 +103,10 @@ def _trace_where(
     if until is not None:
         clauses.append("request_ts <= ?")
         params.append(until)
+    if repo is not None:
+        clause, repo_params = _repo_clause(repo)
+        clauses.append(clause)
+        params.extend(repo_params)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -220,8 +229,11 @@ class DuckDBTelemetryStore:
         status: str | None = None,
         since: int | None = None,
         until: int | None = None,
+        repo: str | None = None,
     ) -> int:
-        where, params = _trace_where(phase=phase, status=status, since=since, until=until)
+        where, params = _trace_where(
+            phase=phase, status=status, since=since, until=until, repo=repo
+        )
         row = (
             self._c().execute(f"SELECT COUNT(*) FROM composition_traces {where}", params).fetchone()
         )
@@ -234,10 +246,13 @@ class DuckDBTelemetryStore:
         status: str | None = None,
         since: int | None = None,
         until: int | None = None,
+        repo: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CompositionTrace]:
-        where, params = _trace_where(phase=phase, status=status, since=since, until=until)
+        where, params = _trace_where(
+            phase=phase, status=status, since=since, until=until, repo=repo
+        )
         sql = f"""
             SELECT trace_id, correlation_id, request_ts, phase, category,
                    task_prompt, selected_fragment_ids, source_skill_ids,
@@ -375,6 +390,77 @@ class DuckDBTelemetryStore:
             "tokens_saved": tokens_saved,
             "savings_pct": savings_pct,
             "per_phase": per_phase,
+        }
+
+    def aggregate_coverage(self, repo: str | None = None) -> dict[str, object]:
+        """Coverage v2 — composed vs passthrough rate over proxy traces.
+
+        Counts ``status IN ('proxy_composed', 'proxy_passthrough')`` rows (one
+        per proxied request) and answers "how often does composition actually
+        fire, and where does it pass through?" — per phase and per repo. This
+        replaces the hook-era coverage roll-up whose event types were purged in
+        v3.11.0; it is a plain aggregation over the same ``composition_traces``
+        rows the savings report reads.
+        """
+        repo_clause, repo_params = _repo_clause(repo)
+        repo_and = f" AND {repo_clause}" if repo_clause else ""
+        base = (
+            "FROM composition_traces "
+            f"WHERE status IN ('proxy_composed', 'proxy_passthrough'){repo_and}"
+        )
+
+        def _split(rows: list[tuple[object, ...]]) -> list[dict[str, object]]:
+            out: list[dict[str, object]] = []
+            for key, composed, passthrough in rows:
+                out.append(
+                    {
+                        "composed": int(composed),  # pyright: ignore[reportArgumentType]
+                        "passthrough": int(passthrough),  # pyright: ignore[reportArgumentType]
+                        "key": key,
+                    }
+                )
+            return out
+
+        agg = (
+            "COUNT(*) FILTER (WHERE status = 'proxy_composed') AS composed, "
+            "COUNT(*) FILTER (WHERE status = 'proxy_passthrough') AS passthrough"
+        )
+        overall = self._c().execute(f"SELECT {agg} {base}", repo_params).fetchone()
+        composed = int(overall[0]) if overall else 0
+        passthrough = int(overall[1]) if overall else 0
+        total = composed + passthrough
+        compose_rate = round(composed / total * 100, 1) if total > 0 else 0.0
+
+        phase_rows = (
+            self._c()
+            .execute(f"SELECT phase, {agg} {base} GROUP BY phase ORDER BY phase", repo_params)
+            .fetchall()
+        )
+        repo_rows = (
+            self._c()
+            .execute(
+                f"SELECT repo, {agg} {base} GROUP BY repo ORDER BY (composed + passthrough) DESC",
+                repo_params,
+            )
+            .fetchall()
+        )
+        return {
+            "total": total,
+            "composed": composed,
+            "passthrough": passthrough,
+            "compose_rate": compose_rate,
+            "per_phase": [
+                {"phase": str(e["key"]), "composed": e["composed"], "passthrough": e["passthrough"]}
+                for e in _split(phase_rows)
+            ],
+            "per_repo": [
+                {
+                    "repo": str(e["key"]) if e["key"] is not None else None,
+                    "composed": e["composed"],
+                    "passthrough": e["passthrough"],
+                }
+                for e in _split(repo_rows)
+            ],
         }
 
 

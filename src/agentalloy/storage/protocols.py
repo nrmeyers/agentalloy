@@ -224,6 +224,7 @@ class TelemetryStore(Protocol):
         status: str | None = None,
         since: int | None = None,
         until: int | None = None,
+        repo: str | None = None,
     ) -> int: ...
     def query_traces(
         self,
@@ -232,10 +233,12 @@ class TelemetryStore(Protocol):
         status: str | None = None,
         since: int | None = None,
         until: int | None = None,
+        repo: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CompositionTrace]: ...
     def aggregate_savings(self, repo: str | None = None) -> dict[str, object]: ...
+    def aggregate_coverage(self, repo: str | None = None) -> dict[str, object]: ...
     def clear_telemetry(self) -> dict[str, int]: ...
     def close(self) -> None: ...
 
