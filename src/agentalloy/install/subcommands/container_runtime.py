@@ -663,6 +663,7 @@ def _run_container(
     packs: str,
     image_ref: str | None = None,
     projects_root: Path | None = None,
+    port: int = 47950,
 ) -> int:
     """Run the agentalloy container with volumes, env, and port mapping.
 
@@ -696,6 +697,10 @@ def _run_container(
         via the ``AGENTALLOY_PACKS`` env var.
     image_ref : str | None
         Image reference to run. Defaults to ``ghcr.io/nrmeyers/agentalloy:latest``.
+    port : int
+        Host-side port to publish. The container-internal side always stays
+        ``47950`` (that's what the baked entrypoint binds to) — only the host
+        side is configurable, per ``install-state.json["port"]``.
 
     Returns
     -------
@@ -766,7 +771,7 @@ def _run_container(
         "--name",
         "agentalloy",
         "-p",
-        "47950:47950",
+        f"{port}:47950",
         "-v",
         "agentalloy-data:/app/data",
         *projects_mount,
@@ -799,7 +804,7 @@ def _run_container(
         if bind_failure:
             _print(
                 f"  [red]Port bind failed — another container may be publishing "
-                f"port 47950.[/red]\n"
+                f"port {port}.[/red]\n"
                 f"  [dim]Run `{runtime} ps -a` and remove conflicting containers, "
                 f"then re-run setup.[/dim]"
             )

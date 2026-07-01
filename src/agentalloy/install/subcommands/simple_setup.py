@@ -1306,7 +1306,7 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
         "published images ship a prebuilt skill corpus, locally built images "
         "also build the corpus, adding 20+ min on CPU; restarts: 30-60s)...[/dim]"
     )
-    rc = _run_container(binary_path, cfg.packs)
+    rc = _run_container(binary_path, cfg.packs, port=cfg.port)
     if rc != 0:
         return rc
     _print("  [green]  Done.[/green]")

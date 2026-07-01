@@ -163,6 +163,60 @@ class TestContainerModeFixedValues:
             del os.environ["XDG_CONFIG_HOME"]
             del os.environ["XDG_DATA_HOME"]
 
+    def test_container_flow_threads_configured_port_to_run_container(self, tmp_path: Path):
+        """issue #300: _run_container must receive the configured port, not a
+        hardcoded 47950 — this call site was the one missed by the fix.
+
+        cfg.port is forced to 47950 by the "Set fixed values" block (line 1157)
+        before this call is reached, so both the kwarg's presence and its value
+        are asserted; a prior regression here would silently omit the kwarg.
+        """
+        import agentalloy.install.subcommands.simple_setup as mod
+
+        SetupConfig, _run_container_flow = (
+            mod.SetupConfig,
+            mod._run_container_flow,
+        )
+
+        config_dir = tmp_path / ".config"
+        data_dir = tmp_path / ".local" / "share"
+        config_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True)
+        os.environ["XDG_CONFIG_HOME"] = str(config_dir)
+        os.environ["XDG_DATA_HOME"] = str(data_dir)
+
+        try:
+            cfg = SetupConfig(
+                deployment="native",
+                runner="lm-studio",
+                port=9999,
+                mode="persistent",
+                harness="claude-code",
+                non_interactive=True,
+            )
+
+            with (
+                patch.object(mod.preflight, "run_preflight", return_value={"checks": []}),
+                patch.object(mod, "_detect_functional_runtimes", return_value=["podman"]),
+                patch.object(mod.shutil, "which", side_effect=lambda n: f"/usr/bin/{n}"),
+                patch.object(mod, "_reconcile_native_port_holder", return_value=0),
+                patch.object(mod, "_list_project_containers", return_value=[]),
+                patch.object(mod, "_list_conflicting_containers", return_value=[]),
+                patch.object(mod, "_pull_image", return_value=0),
+                patch.object(mod, "_ensure_volume"),
+                # Stop right after the (mocked-to-fail) container start so we
+                # never reach the real readiness wait.
+                patch.object(mod, "_run_container", return_value=1) as run_container,
+            ):
+                rc = _run_container_flow(cfg, 0.0)
+
+            assert rc == 1
+            run_container.assert_called_once()
+            assert run_container.call_args.kwargs["port"] == 47950
+        finally:
+            del os.environ["XDG_CONFIG_HOME"]
+            del os.environ["XDG_DATA_HOME"]
+
     def test_native_mode_does_not_override(self, tmp_path: Path):
         """Native run_setup forces runner=llama-server but preserves user mode/harness.
 

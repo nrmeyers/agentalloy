@@ -451,6 +451,62 @@ class TestRunContainerBindHint:
 
 
 # ---------------------------------------------------------------------------
+# Port threading: the configured host port must reach the `-p` publish flag
+# (issue #300 — was hardcoded to 47950:47950, ignoring install-state.json's
+# `port`), and the bind-failure hint must reflect the actual port.
+# ---------------------------------------------------------------------------
+
+
+class TestRunContainerPort:
+    """_run_container publishes host:container as ``{port}:47950``."""
+
+    def _argv(self, monkeypatch: pytest.MonkeyPatch, **kwargs: object) -> list[str]:
+        monkeypatch.delenv("AGENTALLOY_PROJECTS_ROOT", raising=False)
+        captured: list[str] = []
+
+        def _fake_run(cmd, **_kwargs):  # type: ignore[no-untyped-def]
+            if cmd[:2] == ["podman", "run"]:
+                captured.clear()
+                captured.extend(cmd)
+            return MagicMock(returncode=0)
+
+        with patch(
+            "agentalloy.install.subcommands.container_runtime.subprocess.run",
+            side_effect=_fake_run,
+        ):
+            rc = container_runtime._run_container("podman", "", **kwargs)
+        assert rc == 0
+        return captured
+
+    def test_default_port_publishes_47950_both_sides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cmd = self._argv(monkeypatch)
+        assert "47950:47950" in cmd
+
+    def test_custom_port_publishes_host_side_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        cmd = self._argv(monkeypatch, port=9999)
+        assert "9999:47950" in cmd
+        assert "47950:47950" not in cmd
+
+    def test_bind_failure_hint_reflects_custom_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        err = subprocess.CalledProcessError(126, ["podman", "run"])  # stderr=None
+        printed: list[str] = []
+        with (
+            patch(
+                "agentalloy.install.subcommands.container_runtime.subprocess.run",
+                side_effect=err,
+            ),
+            patch(
+                "agentalloy.install.subcommands.container_runtime._print",
+                side_effect=lambda msg: printed.append(str(msg)),
+            ),
+        ):
+            rc = container_runtime._run_container("podman", "", port=9999)
+        assert rc == 126
+        assert any("9999" in p for p in printed)
+        assert not any("47950" in p for p in printed)
+
+
+# ---------------------------------------------------------------------------
 # UT-6: _list_conflicting_containers()
 # ---------------------------------------------------------------------------
 

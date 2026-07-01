@@ -578,12 +578,38 @@ def test_container_recreates_with_versioned_image():
     # The recreate must NOT generate a host entrypoint (temp-leak fix) — packs
     # are delivered via env to the baked /app/entrypoint.sh.
     assert "entrypoint" not in run_ct.call_args.kwargs
+    # No `port` in state -> the recreate falls back to the documented default,
+    # never silently omits the flag (issue #300 regression guard).
+    assert run_ct.call_args.kwargs["port"] == 47950
     assert any("recreated container" in a for a in actions)
     assert not warnings
     # install-state image_tag is pinned to the image we actually ran (preserving
     # the -full variant), so doctor + the next upgrade's base reflect reality.
     assert state["image_tag"] == "ghcr.io/nrmeyers/agentalloy:2.2.1-full"
     save.assert_called_once()
+
+
+def test_container_recreate_threads_configured_port():
+    """issue #300: a non-default `port` in install-state.json must reach
+    _run_container, not be silently dropped in favor of the 47950 default."""
+    state = {
+        "deployment": "container",
+        "runtime_binary": "podman",
+        "image_tag": "ghcr.io/nrmeyers/agentalloy:2.2.0-full",
+        "installed_packs": ["core"],
+        "port": 8123,
+    }
+    from agentalloy.install.subcommands import container_runtime as cr
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="source"),
+        patch.object(cr, "_pull_image", return_value=0),
+        patch.object(cr, "_run_container", return_value=0) as run_ct,
+        patch.object(up, "_verify_container_spec", return_value=[]),
+    ):
+        up._upgrade_container("v2.2.1", state, assume_yes=True)
+
+    assert run_ct.call_args.kwargs["port"] == 8123
 
 
 def test_container_pull_failure_aborts_before_cli_swap():

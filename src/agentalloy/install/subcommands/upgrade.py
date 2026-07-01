@@ -567,11 +567,12 @@ def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[
     image = image or _target_image(state.get("image_tag"), None)
 
     packs = _installed_packs(state)
+    port = install_state.validate_port(state.get("port", 47950))
     # Runs the image's baked /app/entrypoint.sh with AGENTALLOY_PACKS — no
     # host-generated entrypoint bind-mount. This both makes the container
     # survive `start`/reboot and fixes the prior temp-file leak: the old path
     # called _generate_entrypoint (a NamedTemporaryFile) but never cleaned it up.
-    if cr._run_container(runtime, packs, image_ref=image) != 0:
+    if cr._run_container(runtime, packs, image_ref=image, port=port) != 0:
         warnings.append("container recreate failed")
         return actions, warnings
     actions.append("recreated container")
@@ -581,8 +582,6 @@ def _recreate_container(image: str | None, state: dict[str, Any]) -> tuple[list[
     # ":latest" after pinning to a versioned tag is misleading and loses the
     # -full variant across upgrades.
     if image and state.get("image_tag") != image:
-        from agentalloy.install import state as install_state
-
         state["image_tag"] = image
         try:
             install_state.save_state(state)
