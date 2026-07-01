@@ -58,6 +58,10 @@ def _runtime_is_functional(binary: str) -> bool:
             capture_output=True,
             timeout=15,
             check=False,
+            # cwd="/" — immune to the rootless-podman bind-mount-teardown race
+            # that can transiently break getcwd() for callers whose cwd is
+            # under the bind-mounted projects root (issue #303).
+            cwd="/",
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -146,6 +150,7 @@ def _pull_image(
                 check=True,
                 capture_output=True,
                 timeout=300,
+                cwd="/",
             )
             _print("  [green]-> Image loaded from tarball[/green]")
             # Verify the expected image tag is present after load (handles tarball tag mismatch)
@@ -154,6 +159,7 @@ def _pull_image(
                 capture_output=True,
                 text=True,
                 timeout=10,
+                cwd="/",
             )
             # Also check by ID for digest-based matching as fallback
             id_result = subprocess.run(
@@ -161,6 +167,7 @@ def _pull_image(
                 capture_output=True,
                 text=True,
                 timeout=10,
+                cwd="/",
             )
             # Must verify the SPECIFIC image we expected — the ID check alone is
             # too permissive (any image would satisfy it).  First try exact
@@ -199,6 +206,7 @@ def _pull_image(
                 [runtime, "pull", image],
                 check=True,
                 timeout=600,
+                cwd="/",
             )
             _print("  [green]-> Image pulled successfully[/green]")
             return 0
@@ -243,6 +251,7 @@ def _ensure_volume(runtime: str) -> None:
             [runtime, "volume", "create", "agentalloy-data"],
             check=True,
             capture_output=True,
+            cwd="/",
         )
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or b"").decode(errors="replace").lower()
@@ -756,6 +765,7 @@ def _run_container(
             [runtime, "rm", "-f", "agentalloy"],
             check=False,
             capture_output=True,
+            cwd="/",
         )
 
     cmd = [
@@ -780,7 +790,7 @@ def _run_container(
     ]
 
     try:
-        subprocess.run(cmd, check=True, timeout=300)
+        subprocess.run(cmd, check=True, timeout=300, cwd="/")
         return 0
     except subprocess.CalledProcessError as exc:
         # Surface a port-reservation hint when the runtime reports a bind
@@ -867,6 +877,7 @@ def _list_conflicting_containers(
             capture_output=True,
             text=True,
             timeout=10,
+            cwd="/",
         )
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -893,6 +904,7 @@ def _list_conflicting_containers(
             capture_output=True,
             text=True,
             timeout=10,
+            cwd="/",
         )
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -928,6 +940,7 @@ def _check_container_running(
             capture_output=True,
             text=True,
             timeout=10,
+            cwd="/",
         )
         return container_name in result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError, UnicodeDecodeError):
@@ -956,6 +969,7 @@ def _tail_container_logs(
             capture_output=True,
             text=True,
             timeout=10,
+            cwd="/",
         )
         if result.returncode != 0:
             return ""
@@ -977,6 +991,7 @@ def _container_state(runtime: str, container_name: str = "agentalloy") -> str:
             capture_output=True,
             text=True,
             timeout=10,
+            cwd="/",
         )
         if result.returncode != 0:
             return ""
@@ -1164,6 +1179,7 @@ def _get_bootstrap_progress(runtime: str, container_name: str = "agentalloy") ->
             check=True,
             capture_output=True,
             timeout=5,
+            cwd="/",
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return {}

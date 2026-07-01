@@ -84,6 +84,10 @@ def _runtime_call(
         text=True,
         timeout=timeout,
         check=False,
+        # cwd="/" — immune to the rootless-podman bind-mount-teardown race
+        # that can transiently break getcwd() for callers whose cwd is under
+        # the bind-mounted projects root (issue #303).
+        cwd="/",
     )
 
 

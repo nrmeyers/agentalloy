@@ -234,7 +234,12 @@ class TestOfflineLoad:
             # First call is podman load; verify the load command
             load_call = mock_run.call_args_list[0]
             assert load_call[0][0] == ["podman", "load", "-i", str(tarball)]
-            assert load_call[1] == {"check": True, "capture_output": True, "timeout": 300}
+            assert load_call[1] == {
+                "check": True,
+                "capture_output": True,
+                "timeout": 300,
+                "cwd": "/",
+            }
 
     def test_offline_missing_tarball(self, tmp_path: Path):
         """Returns 1 when tarball does not exist."""

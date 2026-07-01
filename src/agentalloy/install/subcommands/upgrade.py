@@ -626,6 +626,11 @@ def _verify_container_spec(runtime: str, cr: Any) -> list[str]:
             text=True,
             timeout=30,
             check=False,
+            # cwd="/" — this runs right after the container recreate, the
+            # exact window where rootless podman's bind-mount teardown can
+            # transiently break getcwd() for callers under the bind-mounted
+            # projects root (issue #303).
+            cwd="/",
         )
     except (OSError, subprocess.SubprocessError):
         return []
