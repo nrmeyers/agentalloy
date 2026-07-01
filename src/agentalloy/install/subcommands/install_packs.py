@@ -821,6 +821,7 @@ def _run_container_guard(
         restart_service_in_container,
         stop_service_in_container,
     )
+    from agentalloy.reembed.cli import run_bulk_reembed
 
     no_restart: bool = getattr(args, "no_restart", False)
     if not isinstance(no_restart, bool):
@@ -861,10 +862,20 @@ def _run_container_guard(
         for pack_name in selected:  # P10-R2: bounded by len(selected)
             pack_dir = packs_root / pack_name
             print(f"  → {pack_name}", file=sys.stderr, flush=True)
-            r = install_local_pack(pack_dir, root=root, no_restart=True)
+            # strict=False: the bundled corpus predates the lint gate and isn't
+            # guaranteed --strict-clean; only the third-party install-pack path
+            # (install_local_pack's own default) opts into strict lint.
+            # run_reembed=False: this guard reembeds exactly once for the whole
+            # run (below), not once per pack — install_local_pack's own default
+            # (run_reembed=True) is for its standalone third-party caller.
+            r = install_local_pack(
+                pack_dir, root=root, no_restart=True, strict=False, run_reembed=False
+            )
             named_results.append((pack_name, r))
         # no_restart=True: reembed does NOT restart — this guard owns the lifecycle.
-        reembed_rc = _bulk_reembed(no_restart=True)
+        # allow_duplicates not passed: install-packs behavior is unchanged — a
+        # hard cross-pack duplicate in the bundled corpus still fails the pass.
+        reembed_rc = run_bulk_reembed(no_restart=True)
     finally:
         if container_stopped and not no_restart:
             ok: bool = restart_service_in_container()
@@ -883,23 +894,6 @@ def _run_container_guard(
             _restart_native_service()
 
     return [r for _, r in named_results], named_results, reembed_rc
-
-
-def _bulk_reembed(no_restart: bool = False) -> int:
-    """Run the reembed CLI in-process. Returns its exit code."""
-    try:
-        from agentalloy.reembed.cli import main as reembed_main
-
-        argv = ["--no-restart"] if no_restart else []
-        return reembed_main(argv)
-    except Exception as exc:  # noqa: BLE001 — surface but don't crash setup
-        print(f"install-packs: reembed raised: {exc}", file=sys.stderr)
-        from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
-        from agentalloy.storage.skill_store import is_lock_held_error
-
-        if is_lock_held_error(str(exc)):
-            print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
-        return 2
 
 
 def run(args: argparse.Namespace) -> int:

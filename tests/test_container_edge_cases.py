@@ -182,15 +182,20 @@ class TestPortInUse:
         """preflight._check_port_free returns failed check when port is bound."""
         import socket
 
+        # Bind to an OS-assigned ephemeral port (port=0) rather than the real
+        # 47950 default: a dev host may already have a live agentalloy
+        # container bound to 47950, which would make this bind() itself raise
+        # OSError before the code under test ever runs.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(("127.0.0.1", 47950))
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
             from agentalloy.install.subcommands.preflight import _check_port_free
 
-            result = _check_port_free(47950)
+            result = _check_port_free(port)
             assert result["name"] == "port_free"
             assert result["passed"] is False
-            assert "port 47950 in use" in result["error"]
+            assert f"port {port} in use" in result["error"]
 
     def test_preflight_passes_when_port_free(self):
         """preflight._check_port_free passes when port is free."""
@@ -672,12 +677,12 @@ class TestNonInteractiveMode:
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
     @patch(
-        "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+        "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
-    @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._pull_image", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._ensure_volume")
+    @patch("agentalloy.install.subcommands.simple_setup._run_container", return_value=0)
     @patch(
         "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
         return_value=Path("/tmp/entry.sh"),
@@ -789,12 +794,12 @@ class TestNonInteractiveMode:
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
     @patch(
-        "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+        "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
-    @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._pull_image", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._ensure_volume")
+    @patch("agentalloy.install.subcommands.simple_setup._run_container", return_value=0)
     @patch(
         "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
         return_value=Path("/tmp/entry.sh"),
@@ -992,12 +997,12 @@ class TestCancelDuringCPUWarning:
     @patch("agentalloy.install.subcommands.simple_setup._run_quiet", return_value=0)
     @patch("agentalloy.install.subcommands.simple_setup._wait_for_one_shot", return_value=0)
     @patch(
-        "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
+        "agentalloy.install.subcommands.simple_setup._detect_runtime_binary",
         return_value="podman",
     )
-    @patch("agentalloy.install.subcommands.container_runtime._pull_image", return_value=0)
-    @patch("agentalloy.install.subcommands.container_runtime._ensure_volume")
-    @patch("agentalloy.install.subcommands.container_runtime._run_container", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._pull_image", return_value=0)
+    @patch("agentalloy.install.subcommands.simple_setup._ensure_volume")
+    @patch("agentalloy.install.subcommands.simple_setup._run_container", return_value=0)
     @patch(
         "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
         return_value=Path("/tmp/entry.sh"),

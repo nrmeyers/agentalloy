@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import yaml
 
@@ -28,24 +28,73 @@ from agentalloy.pack_validation import (
 # ---------------------------------------------------------------------------
 
 
+# Fragment content templates that are simultaneously:
+#   - >= _FRAG_WORDS_WARN_MIN (25) words, so `_lint` doesn't flag them as
+#     under-discriminative for nomic-embed-text-v1.5 (folded into hard errors
+#     under --strict);
+#   - reused verbatim in `raw_prose` below, so `_lint`'s content-drift check
+#     ("fragment content is not a contiguous slice of raw_prose") never fires.
+_LINT_CLEAN_FRAGMENT_TEMPLATES: dict[str, str] = {
+    "execution": (
+        "Run the {skill_id} workflow end to end by gathering every required input "
+        "value, invoking the primary command with those inputs, waiting for it to "
+        "finish, and confirming the operation completed without raising any errors "
+        "before moving on to the next stage of the task."
+    ),
+    "verification": (
+        "After completing the {skill_id} steps, verify the outcome by checking that "
+        "the expected artifacts exist on disk, the logs show no unexpected errors, "
+        "and any downstream consumer can read the produced output without further "
+        "manual intervention."
+    ),
+    "rationale": (
+        "This approach is recommended for {skill_id} because it keeps the workflow "
+        "predictable and auditable, reduces the chance of a silent failure going "
+        "unnoticed, and matches the conventions already established elsewhere in "
+        "the corpus for comparable domain skills."
+    ),
+    "example": (
+        "For example, a typical {skill_id} invocation supplies a small, realistic "
+        "input, runs the command exactly as documented, and inspects the resulting "
+        "output to confirm it matches the documented shape before trusting it in a "
+        "larger automated pipeline."
+    ),
+}
+
+# execution first (hard-required by `_validate`), then verification and
+# rationale (both required by `_lint` under --strict) — anything beyond
+# index 2 cycles back through `example` so larger fixtures stay lint-clean.
+_LINT_CLEAN_TYPE_ORDER = ["execution", "verification", "rationale", "example"]
+
+
 def _write_skill_yaml(
     pack_dir: Path,
     skill_id: str,
     *,
-    fragments: int = 2,
+    fragments: int = 3,
     canonical_name: str | None = None,
     category: str = "engineering",
     extra: dict[str, Any] | None = None,
 ) -> Path:
-    """Write a minimal valid domain-skill YAML."""
-    frag_list = [
-        {
-            "sequence": i + 1,
-            "fragment_type": "execution" if i == 0 else "rationale",
-            "content": f"This is fragment {i + 1} with enough words to pass the hard floor check here.",
-        }
-        for i in range(fragments)
+    """Write a lint-clean domain-skill YAML (passes `ingest._lint` under --strict).
+
+    Lint-clean requires >= 3 fragments: `execution` is hard-required by
+    `_validate`, and `_lint` (under --strict, the new install-pack default)
+    additionally requires a `rationale` and a `verification` fragment — with
+    only 1-2 fragments, at least one of those is structurally impossible to
+    include, so `fragments < 3` will not pass a strict Gate 1. Callers that
+    never reach a strict lint gate (e.g. `_read_pack_manifest` drift checks,
+    `check_version_gate` unit tests) may still use `fragments < 3`.
+    """
+    frag_types = [_LINT_CLEAN_TYPE_ORDER[i % len(_LINT_CLEAN_TYPE_ORDER)] for i in range(fragments)]
+    frag_contents = [
+        _LINT_CLEAN_FRAGMENT_TEMPLATES[t].format(skill_id=skill_id) for t in frag_types
     ]
+    frag_list = [
+        {"sequence": i + 1, "fragment_type": t, "content": c}
+        for i, (t, c) in enumerate(zip(frag_types, frag_contents, strict=True))
+    ]
+    raw_prose = f"# {skill_id}\n\n" + "\n\n".join(frag_contents)
     doc: dict[str, Any] = {
         "skill_id": skill_id,
         "canonical_name": canonical_name or skill_id.replace("-", " ").title(),
@@ -57,8 +106,7 @@ def _write_skill_yaml(
         "category_scope": None,
         "author": "test",
         "change_summary": "initial authoring",
-        "raw_prose": f"# {skill_id}\n\nThis skill describes {skill_id} in detail. "
-        "It provides actionable guidance for engineers working with this domain.",
+        "raw_prose": raw_prose,
         "fragments": frag_list,
     }
     if extra:
@@ -103,6 +151,8 @@ class TestSchemaGate:
     def test_valid_skill_passes(self, tmp_path: Path) -> None:
         _write_skill_yaml(tmp_path, "my-skill")
         entries = [{"skill_id": "my-skill", "file": "my-skill.yaml"}]
+        # Default strict=True: the fixture is lint-clean, so this exercises
+        # both _validate and _lint together.
         result = validate_pack_skills(tmp_path, entries)
         assert result.ok
         assert result.errors == []
@@ -330,7 +380,7 @@ class TestInstallLocalPackGatesIntegration:
         _write_pack_manifest(
             tmp_path,
             "test-pack",
-            [{"skill_id": "bad", "file": "bad.yaml", "fragment_count": 2}],
+            [{"skill_id": "bad", "file": "bad.yaml", "fragment_count": 3}],
         )
 
         with patch.object(ip, "_check_embedding_dim", return_value=None):
@@ -353,7 +403,7 @@ class TestInstallLocalPackGatesIntegration:
         _write_pack_manifest(
             tmp_path,
             "test-pack",
-            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}],
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 3}],
         )
 
         # State says pack was installed with a different content hash (old content)
@@ -371,6 +421,8 @@ class TestInstallLocalPackGatesIntegration:
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(ip.install_state, "load_state", return_value=installed_state),
         ):
+            # Default strict=True: the fixture is lint-clean, so Gate 1 passes
+            # for real and the version gate (not lint) drives this outcome.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
 
         assert result["action"] == "version_unchanged"
@@ -385,7 +437,7 @@ class TestInstallLocalPackGatesIntegration:
         _write_pack_manifest(
             tmp_path,
             "test-pack",
-            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}],
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 3}],
         )
         entries = [{"skill_id": "good", "file": "good.yaml"}]
         current_hash = content_hash(tmp_path, entries)
@@ -404,6 +456,8 @@ class TestInstallLocalPackGatesIntegration:
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(ip.install_state, "load_state", return_value=installed_state),
         ):
+            # Default strict=True: the fixture is lint-clean, so Gate 1 passes
+            # for real and the version gate (not lint) drives this outcome.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
 
         assert result["action"] == "already_installed"
@@ -416,7 +470,7 @@ class TestInstallLocalPackGatesIntegration:
         _write_pack_manifest(
             tmp_path,
             "new-pack",
-            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}],
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 3}],
         )
 
         # Simulate all skills already-present (duplicate) from ingest so we
@@ -449,6 +503,8 @@ class TestInstallLocalPackGatesIntegration:
                 ),
             ),
         ):
+            # Default strict=True: the fixture is lint-clean, so this genuinely
+            # exercises Gate 1's --strict lint fold, not just gate plumbing.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
 
         # Should not fail at schema or version gates; outcome should be
@@ -470,7 +526,7 @@ class TestInstallLocalPackGatesIntegration:
         _write_pack_manifest(
             tmp_path,
             "test-pack",
-            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}],
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 3}],
             version="1.1.0",
         )
 
@@ -518,10 +574,19 @@ class TestInstallLocalPackGatesIntegration:
                     fragments_lance_path=str(corpus_dir / "fragments.lance"),
                 ),
             ),
+            # This run ingests a skill (outcome="ingested"), which triggers the
+            # post-ingest reembed/dedup wiring — stub it so the test doesn't hit
+            # a real embed server/DB.
+            patch("agentalloy.reembed.cli.run_bulk_reembed", return_value=0) as reembed_mock,
         ):
+            # Default strict=True: the fixture is lint-clean, so Gate 1 passes
+            # for real; this test's own focus (force re-ingest + vector
+            # invalidation) is exercised on top of that.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
 
+        reembed_mock.assert_called_once()
         assert result["action"] == "ingested"
+        assert result["dedup_exit_code"] == 0
         # Every skill must be ingested with force=True so the existing node is
         # overwritten rather than skipped as a duplicate.
         assert ingest_mock.call_count == 1
@@ -531,3 +596,421 @@ class TestInstallLocalPackGatesIntegration:
         invalidate_mock.assert_called_once()
         passed_entries = invalidate_mock.call_args.args[0]
         assert any(e.get("skill_id") == "good" for e in passed_entries)
+
+    def test_missing_rationale_fragment_rejected_under_strict(self, tmp_path: Path) -> None:
+        """A skill missing a 'rationale' fragment fails Gate 1 under --strict
+        (the new install_local_pack default): the lint message must appear in
+        errors, and no ingest subprocess may be spawned.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        exec_content = _LINT_CLEAN_FRAGMENT_TEMPLATES["execution"].format(skill_id="no-rationale")
+        verify_content = _LINT_CLEAN_FRAGMENT_TEMPLATES["verification"].format(
+            skill_id="no-rationale"
+        )
+        _write_skill_yaml(
+            tmp_path,
+            "no-rationale",
+            extra={
+                "fragments": [
+                    {"sequence": 1, "fragment_type": "execution", "content": exec_content},
+                    {"sequence": 2, "fragment_type": "verification", "content": verify_content},
+                ],
+                # Otherwise fully lint-clean (execution + verification present,
+                # content matches raw_prose, plenty of words) so the ONLY lint
+                # signal is the missing 'rationale' fragment.
+                "raw_prose": f"# no-rationale\n\n{exec_content}\n\n{verify_content}",
+            },
+        )
+        _write_pack_manifest(
+            tmp_path,
+            "test-pack",
+            [{"skill_id": "no-rationale", "file": "no-rationale.yaml", "fragment_count": 2}],
+        )
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml") as ingest_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path)
+
+        assert result["action"] == "schema_invalid"
+        errors = result["errors"]
+        assert len(errors) == 1
+        assert errors[0]["skill_id"] == "no-rationale"
+        assert any("rationale" in e for e in errors[0]["errors"])
+        # Gate 1 rejects before any ingest subprocess is spawned.
+        ingest_mock.assert_not_called()
+
+    def test_missing_rationale_fragment_allowed_with_strict_false(self, tmp_path: Path) -> None:
+        """The same missing-rationale fixture installs cleanly with
+        strict=False (the ``--allow-lint-warnings`` CLI flag's equivalent) —
+        _validate hard errors still block, but lint warnings no longer do.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        exec_content = _LINT_CLEAN_FRAGMENT_TEMPLATES["execution"].format(skill_id="no-rationale")
+        verify_content = _LINT_CLEAN_FRAGMENT_TEMPLATES["verification"].format(
+            skill_id="no-rationale"
+        )
+        _write_skill_yaml(
+            tmp_path,
+            "no-rationale",
+            extra={
+                "fragments": [
+                    {"sequence": 1, "fragment_type": "execution", "content": exec_content},
+                    {"sequence": 2, "fragment_type": "verification", "content": verify_content},
+                ],
+                "raw_prose": f"# no-rationale\n\n{exec_content}\n\n{verify_content}",
+            },
+        )
+        _write_pack_manifest(
+            tmp_path,
+            "test-pack",
+            [{"skill_id": "no-rationale", "file": "no-rationale.yaml", "fragment_count": 2}],
+        )
+
+        fake_ingest = {
+            "yaml": "no-rationale.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "skills.duck").touch()
+        (corpus_dir / "ladybug").mkdir()
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest) as ingest_mock,
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            # new_count > 0 triggers the post-ingest reembed/dedup wiring —
+            # stub it so the test doesn't hit a real embed server/DB.
+            patch("agentalloy.reembed.cli.run_bulk_reembed", return_value=0) as reembed_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path, strict=False)
+
+        assert result["action"] == "ingested"
+        assert result.get("errors") is None
+        ingest_mock.assert_called_once()
+        # strict=False must still reach the ingest subprocess with --strict
+        # omitted — see TestIngestYamlStrictFlag below for the direct
+        # subprocess-cmd assertion; here we only assert the gate let it through.
+        reembed_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _ingest_yaml's strict -> --strict subprocess-cmd translation
+# ---------------------------------------------------------------------------
+
+
+class TestIngestYamlStrictFlag:
+    """Direct unit coverage for `_ingest_yaml`'s `strict` -> subprocess `cmd`
+    translation (install_pack.py:292-293). Every higher-level test above
+    mocks `_ingest_yaml` itself, so nothing else in the suite would catch a
+    regression that drops or inverts `if strict: cmd.append("--strict")`.
+    """
+
+    @staticmethod
+    def _write_yaml(tmp_path: Path) -> Path:
+        yaml_path = tmp_path / "skill.yaml"
+        yaml_path.write_text("skill_id: some-skill\n", encoding="utf-8")
+        return yaml_path
+
+    def test_strict_true_appends_strict_flag(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import install_pack as ip
+
+        yaml_path = self._write_yaml(tmp_path)
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(ip.subprocess, "run", return_value=fake_result) as run_mock:
+            ip._ingest_yaml(yaml_path, tmp_path, strict=True)
+
+        cmd = run_mock.call_args.args[0]
+        assert "--strict" in cmd
+
+    def test_strict_false_omits_strict_flag(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands import install_pack as ip
+
+        yaml_path = self._write_yaml(tmp_path)
+        fake_result = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(ip.subprocess, "run", return_value=fake_result) as run_mock:
+            ip._ingest_yaml(yaml_path, tmp_path, strict=False)
+
+        cmd = run_mock.call_args.args[0]
+        assert "--strict" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# Dedup gate wiring — install_local_pack/install_pack -> run_bulk_reembed
+# ---------------------------------------------------------------------------
+
+
+class TestDedupGateWiring:
+    """`install_local_pack`/`install_pack` fold `run_bulk_reembed`'s exit code
+    into `dedup_exit_code` and the resulting `remediation`, mirroring
+    `install-packs`' existing "WARN: bulk reembed exited non-zero" pattern.
+
+    A full end-to-end dedup test (two packs, near-paraphrase skills, real
+    embeddings, hard-match at `dedup_hard_threshold`) needs a live embed
+    server — out of scope for this mocked-network/subprocess test file (see
+    `tests/test_dedup_gate.py` for the dedup classification logic itself,
+    exercised there with deterministic synthetic vectors). This class
+    verifies the wiring point instead: `run_bulk_reembed`'s return code
+    propagates end to end.
+    """
+
+    @staticmethod
+    def _good_pack(tmp_path: Path) -> None:
+        _write_skill_yaml(tmp_path, "good")
+        _write_pack_manifest(
+            tmp_path,
+            "test-pack",
+            [{"skill_id": "good", "file": "good.yaml", "fragment_count": 3}],
+        )
+
+    @staticmethod
+    def _corpus_dir(tmp_path: Path) -> Path:
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        (corpus_dir / "skills.duck").touch()
+        (corpus_dir / "ladybug").mkdir()
+        return corpus_dir
+
+    def test_dedup_exit_nonzero_propagates_to_result(self, tmp_path: Path) -> None:
+        """A hard cross-pack duplicate (`run_bulk_reembed` -> EXIT_DEDUP)
+        surfaces as a non-zero `dedup_exit_code` and a WARN remediation —
+        vectors are still written (the gate reports, it doesn't roll back).
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+        from agentalloy.reembed.cli import EXIT_DEDUP
+
+        self._good_pack(tmp_path)
+        corpus_dir = self._corpus_dir(tmp_path)
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            patch(
+                "agentalloy.reembed.cli.run_bulk_reembed", return_value=EXIT_DEDUP
+            ) as reembed_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path)
+
+        reembed_mock.assert_called_once()
+        assert result["action"] == "ingested"
+        assert result["dedup_exit_code"] == EXIT_DEDUP
+        assert "WARN" in (result.get("remediation") or "")
+        assert "reembed exited non-zero" in (result.get("remediation") or "")
+
+    def test_allow_duplicates_forwarded_to_run_bulk_reembed(self, tmp_path: Path) -> None:
+        """``allow_duplicates=True`` (the CLI ``--allow-duplicates`` flag) must
+        reach ``run_bulk_reembed`` so a knowingly-accepted cross-pack overlap
+        downgrades from a failing exit code to a warning.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        self._good_pack(tmp_path)
+        corpus_dir = self._corpus_dir(tmp_path)
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            patch("agentalloy.reembed.cli.run_bulk_reembed", return_value=0) as reembed_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path, allow_duplicates=True)
+
+        assert result["action"] == "ingested"
+        assert result["dedup_exit_code"] == 0
+        reembed_mock.assert_called_once_with(
+            no_restart=False, allow_duplicates=True, result_sink=ANY
+        )
+
+    def test_hard_and_soft_matches_propagate_from_result_sink(self, tmp_path: Path) -> None:
+        """`run_bulk_reembed` populates its `result_sink` kwarg with
+        `dedup_hard`/`dedup_soft` match detail (skill IDs, fragment IDs,
+        similarity) — `install_local_pack` must surface that as
+        `dedup_hard_matches`/`dedup_soft_matches` in its own result, not just
+        the bare exit code.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+        from agentalloy.reembed.cli import EXIT_DEDUP
+
+        self._good_pack(tmp_path)
+        corpus_dir = self._corpus_dir(tmp_path)
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+        hard_match = {
+            "incoming_skill_id": "good",
+            "existing_skill_id": "other-skill",
+            "fragment_id_incoming": "good-v1-f1",
+            "fragment_id_existing": "other-skill-v1-f2",
+            "similarity": 0.97,
+            "verdict": "hard",
+        }
+
+        def fake_run_bulk_reembed(
+            no_restart: bool = False,
+            allow_duplicates: bool = False,
+            *,
+            result_sink: dict[str, Any] | None = None,
+        ) -> int:
+            if result_sink is not None:
+                result_sink["dedup_hard"] = [hard_match]
+                result_sink["dedup_soft"] = []
+            return EXIT_DEDUP
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            patch("agentalloy.reembed.cli.run_bulk_reembed", side_effect=fake_run_bulk_reembed),
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path)
+
+        assert result["dedup_exit_code"] == EXIT_DEDUP
+        assert result["dedup_hard_matches"] == [hard_match]
+        assert result["dedup_soft_matches"] == []
+
+    def test_run_reembed_false_skips_the_call_entirely(self, tmp_path: Path) -> None:
+        """``run_reembed=False`` (install-packs' bulk-bootstrap loop) must
+        skip this call's own reembed pass even though a skill was ingested —
+        install-packs triggers exactly one reembed for the whole run, after
+        its loop, not one per pack (see install_packs.py's
+        `_run_container_guard`).
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        self._good_pack(tmp_path)
+        corpus_dir = self._corpus_dir(tmp_path)
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 0,
+            "outcome": "ingested",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            patch("agentalloy.reembed.cli.run_bulk_reembed") as reembed_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path, run_reembed=False)
+
+        assert result["action"] == "ingested"
+        assert result["dedup_exit_code"] is None
+        assert result["dedup_hard_matches"] == []
+        reembed_mock.assert_not_called()
+
+    def test_dedup_exit_zero_by_default_when_no_new_skills(self, tmp_path: Path) -> None:
+        """`run_bulk_reembed` is never invoked when nothing new was ingested
+        (e.g. every skill in the pack was already a duplicate) — matches the
+        existing bulk-reembed "only fires on new fragments" guard.
+        """
+        from agentalloy.install.subcommands import install_pack as ip
+
+        self._good_pack(tmp_path)
+        corpus_dir = self._corpus_dir(tmp_path)
+        fake_ingest = {
+            "yaml": "good.yaml",
+            "exit_code": 4,
+            "outcome": "duplicate",
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", return_value=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value={}),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(corpus_dir / "skills.duck"),
+                    ladybug_db_path=str(corpus_dir / "ladybug"),
+                ),
+            ),
+            patch("agentalloy.reembed.cli.run_bulk_reembed") as reembed_mock,
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path)
+
+        assert result["action"] == "already_installed"
+        assert result["dedup_exit_code"] is None
+        reembed_mock.assert_not_called()

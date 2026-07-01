@@ -23,6 +23,45 @@ from agentalloy.install.subcommands import install_packs as ips
 # ---------------------------------------------------------------------------
 
 
+# Fragment content templates that are simultaneously:
+#   - >= _FRAG_WORDS_WARN_MIN (25) words, so `_lint` doesn't flag them as
+#     under-discriminative for nomic-embed-text-v1.5 (folded into hard errors
+#     under --strict, the new install_local_pack default);
+#   - reused verbatim in `raw_prose` below, so `_lint`'s content-drift check
+#     ("fragment content is not a contiguous slice of raw_prose") never fires.
+_LINT_CLEAN_FRAGMENT_TEMPLATES: dict[str, str] = {
+    "execution": (
+        "Run the {skill_id} workflow end to end by gathering every required input "
+        "value, invoking the primary command with those inputs, waiting for it to "
+        "finish, and confirming the operation completed without raising any errors "
+        "before moving on to the next stage of the task."
+    ),
+    "verification": (
+        "After completing the {skill_id} steps, verify the outcome by checking that "
+        "the expected artifacts exist on disk, the logs show no unexpected errors, "
+        "and any downstream consumer can read the produced output without further "
+        "manual intervention."
+    ),
+    "rationale": (
+        "This approach is recommended for {skill_id} because it keeps the workflow "
+        "predictable and auditable, reduces the chance of a silent failure going "
+        "unnoticed, and matches the conventions already established elsewhere in "
+        "the corpus for comparable domain skills."
+    ),
+    "example": (
+        "For example, a typical {skill_id} invocation supplies a small, realistic "
+        "input, runs the command exactly as documented, and inspects the resulting "
+        "output to confirm it matches the documented shape before trusting it in a "
+        "larger automated pipeline."
+    ),
+}
+
+# execution first (hard-required by `_validate`), then verification and
+# rationale (both required by `_lint` under --strict) — anything beyond
+# index 2 cycles back through `example` so larger fixtures stay lint-clean.
+_LINT_CLEAN_TYPE_ORDER = ["execution", "verification", "rationale", "example"]
+
+
 def _write_skill_yaml(
     pack_dir: Path,
     skill_id: str,
@@ -30,16 +69,24 @@ def _write_skill_yaml(
     fragments: int = 3,
     canonical_name: str | None = None,
 ) -> Path:
-    """Write a minimal valid domain-skill YAML."""
+    """Write a lint-clean domain-skill YAML (passes `ingest._lint` under --strict).
+
+    Lint-clean requires >= 3 fragments: `execution` is hard-required by
+    `_validate`, and `_lint` (under --strict, the new install_local_pack
+    default) additionally requires a `rationale` and a `verification`
+    fragment — with only 1-2 fragments, at least one of those is
+    structurally impossible to include, so `fragments < 3` will not pass a
+    strict Gate 1. Callers that never reach a strict lint gate (e.g. the
+    `_read_pack_manifest` drift-detection tests) may still use
+    `fragments < 3`.
+    """
+    frag_types = [_LINT_CLEAN_TYPE_ORDER[i % len(_LINT_CLEAN_TYPE_ORDER)] for i in range(fragments)]
+    frag_contents = [
+        _LINT_CLEAN_FRAGMENT_TEMPLATES[t].format(skill_id=skill_id) for t in frag_types
+    ]
     fy = [
-        {
-            "sequence": i + 1,
-            "fragment_type": "execution" if i == 0 else "rationale",
-            "content": (
-                f"This is fragment {i + 1} content with sufficient words to pass validation."
-            ),
-        }
-        for i in range(fragments)
+        {"sequence": i + 1, "fragment_type": t, "content": c}
+        for i, (t, c) in enumerate(zip(frag_types, frag_contents, strict=True))
     ]
     doc = {
         "skill_id": skill_id,
@@ -52,7 +99,7 @@ def _write_skill_yaml(
         "category_scope": None,
         "author": "test",
         "change_summary": "test fixture",
-        "raw_prose": f"# {skill_id}\n\ntest body",
+        "raw_prose": f"# {skill_id}\n\n" + "\n\n".join(frag_contents),
         "fragments": fy,
     }
     path = pack_dir / f"{skill_id}.yaml"
@@ -231,14 +278,14 @@ class TestInstallLocalPack:
             },
         ]
         for sid in ("a", "b", "c"):
-            _write_skill_yaml(tmp_path, sid, fragments=2)
+            _write_skill_yaml(tmp_path, sid)
         _write_pack_manifest(
             tmp_path,
             "x",
             [
-                {"skill_id": "a", "file": "a.yaml", "fragment_count": 2},
-                {"skill_id": "b", "file": "b.yaml", "fragment_count": 2},
-                {"skill_id": "c", "file": "c.yaml", "fragment_count": 2},
+                {"skill_id": "a", "file": "a.yaml", "fragment_count": 3},
+                {"skill_id": "b", "file": "b.yaml", "fragment_count": 3},
+                {"skill_id": "c", "file": "c.yaml", "fragment_count": 3},
             ],
         )
         # Stub embedding-dim check and the skill store for rollback
@@ -253,6 +300,8 @@ class TestInstallLocalPack:
             patch.object(ip, "open_skills", return_value=mock_store),
         ):
             mock_settings.return_value.duckdb_path = str(tmp_path / "test.duck")
+            # Default strict=True: the fixture is lint-clean, so Gate 1 passes
+            # for real and _ingest_yaml's mocked outcomes drive rollback below.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         # Rollback: successfully ingested skills are deleted, so 0 remain
         assert result["skills_ingested"] == 0
@@ -291,9 +340,9 @@ class TestInstallLocalPack:
 
     def test_action_already_installed_when_all_duplicates(self, tmp_path: Path) -> None:
         """If every skill in the pack is already present, action is 'already_installed'."""
-        _write_skill_yaml(tmp_path, "a", fragments=2)
+        _write_skill_yaml(tmp_path, "a")
         _write_pack_manifest(
-            tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 2}]
+            tmp_path, "x", [{"skill_id": "a", "file": "a.yaml", "fragment_count": 3}]
         )
         # Create corpus dir + files so the Pattern E corpus verification passes.
         # Verification checks the ingest path (settings.duckdb_path), so point it
@@ -327,6 +376,8 @@ class TestInstallLocalPack:
                 ),
             ),
         ):
+            # Default strict=True: the fixture is lint-clean, so Gate 1 passes
+            # for real and the mocked "duplicate" ingest outcome drives this.
             result = ip.install_local_pack(tmp_path, root=tmp_path)
         assert result["action"] == "already_installed"
         assert result["ingest_failures"] == 0

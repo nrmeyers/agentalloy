@@ -30,8 +30,8 @@ import logging
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from agentalloy.config import get_settings
 from agentalloy.dedup_gate import DedupGateResult, run_dedup_gate
@@ -544,7 +544,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = None) -> int:
+    """Run the reembed CLI. ``result_sink``, if given, is populated with
+
+    ``dedup_hard``/``dedup_soft`` (plain-dict serializations of the
+    ``DedupMatch`` records the dedup gate found) so in-process callers that
+    need match detail — not just the exit code — can retrieve it without
+    parsing stderr. The argv-based CLI contract (bare exit code) is
+    unchanged for callers that don't pass this.
+    """
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     # Silence httpx per-request INFO logs during the embedding phase
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -732,6 +740,9 @@ def main(argv: list[str] | None = None) -> int:
                 soft_similarity=settings.dedup_soft_threshold,
             )
             dedup_exit = _report_dedup(gate_result, allow_duplicates=args.allow_duplicates)
+            if result_sink is not None:
+                result_sink["dedup_hard"] = [asdict(m) for m in gate_result.hard]
+                result_sink["dedup_soft"] = [asdict(m) for m in gate_result.soft]
 
         if stats.embedded > 0 or args.rebuild_fts:
             if stats.embedded > 0:
@@ -763,6 +774,44 @@ def main(argv: list[str] | None = None) -> int:
             store.close()
         if vs is not None:
             vs.close()
+
+
+def run_bulk_reembed(
+    no_restart: bool = False,
+    allow_duplicates: bool = False,
+    *,
+    result_sink: dict[str, Any] | None = None,
+) -> int:
+    """Run the reembed CLI in-process. Returns its exit code.
+
+    Shared entry point for callers that need to trigger a bulk reembed pass
+    after ingesting new skills — ``install-packs`` (bundled-corpus bootstrap)
+    and ``install-pack``/``install_local_pack`` (third-party path) both call
+    this instead of each keeping a private copy.
+
+    ``result_sink``, if given, is forwarded to :func:`main` and populated
+    with ``dedup_hard``/``dedup_soft`` match detail — see its docstring.
+
+    Never raises: a reembed failure (including a held DuckDB writer lock)
+    is logged/printed with remediation and surfaced as exit code 2, not
+    propagated as an exception, so callers can fold it into their own result
+    dict without a try/except of their own.
+    """
+    try:
+        argv: list[str] = []
+        if no_restart:
+            argv.append("--no-restart")
+        if allow_duplicates:
+            argv.append("--allow-duplicates")
+        return main(argv, result_sink=result_sink)
+    except Exception as exc:  # noqa: BLE001 — surface but don't crash the caller
+        print(f"reembed raised: {exc}", file=sys.stderr)
+        from agentalloy.install.subcommands.install_pack import LOCK_HELD_REMEDIATION
+        from agentalloy.storage.skill_store import is_lock_held_error
+
+        if is_lock_held_error(str(exc)):
+            print(f"FIX:   {LOCK_HELD_REMEDIATION}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

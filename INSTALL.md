@@ -540,11 +540,52 @@ Operator commands the user can run later (these are NOT part of this runbook —
 | `agentalloy doctor` | Runtime health check on demand |
 | `agentalloy update` | Migrate corpus in place after a version bump |
 | `agentalloy install-pack <name>` | Add a published skill pack to the user corpus |
+| `agentalloy install-pack <path-to-pack-dir>` | Add a hand-authored skill pack from a local directory — no network or registry involved. See [Adding a custom skill pack](#adding-a-custom-skill-pack-local-directory) |
+| `agentalloy new-skill-pack <pack_dir> --skill-id <id>` | Scaffold a `pack.yaml` + skill YAML in `<pack_dir>` for a new custom skill, ready to fill in. See [Adding a custom skill pack](#adding-a-custom-skill-pack-local-directory) |
+| `agentalloy validate-pack <pack_dir>` | Dry-run the schema + lint checks `install-pack` would run, with no ingestion, reembed, or corpus mutation — check your work before installing. See [Adding a custom skill pack](#adding-a-custom-skill-pack-local-directory) |
 | `agentalloy customize <list\|edit\|diff\|reset>` | View and override individual system/workflow skills, per profile or per project. Overrides survive upgrades; `agentalloy customize revalidate` re-checks them against newly shipped skills and disables any that drifted |
 | `agentalloy reset-step <name>` | Clear a specific install step (escape hatch for changing config without full uninstall) |
 | `agentalloy cleanup` | Reap orphaned runtime artifacts (stale processes, service units, dangling shim) — foreign-safe recovery. `--deep` escalates to a full, state-independent host sanitize — see below |
 | `agentalloy upgrade` | Pull and install the latest release — native: re-install + re-ingest packs + revalidate overrides; container: pull + recreate. `--check` previews the release first; `--dismiss` mutes the update nudge. See [Upgrading](#upgrading) |
 | `agentalloy uninstall` | Full teardown — see below for exactly what's removed |
+
+### Adding a custom skill pack (local directory)
+
+`agentalloy install-pack <path-to-pack-dir>` — a directory containing `pack.yaml` plus
+its skill YAMLs — is the recommended way to add a custom or new skill today: no
+registry, no network, works offline. It's the shipped, usable path; it is **not**
+`src/agentalloy/authoring/` (the author-critic generation pipeline), which is excluded
+from the wheel and under redesign.
+
+The fastest way to start is to scaffold, fill in, validate, then install:
+
+```bash
+agentalloy new-skill-pack ./my-pack --skill-id my-skill   # scaffold pack.yaml + skill YAML
+# edit ./my-pack/my-skill.yaml — fill in the [FILL IN] placeholders
+agentalloy validate-pack ./my-pack                        # check schema + lint, no install
+agentalloy install-pack ./my-pack                         # ship it
+```
+
+- **`agentalloy new-skill-pack <pack_dir> --skill-id <id>`** creates `pack_dir` if
+  needed, writes a `pack.yaml` if one doesn't already exist (or appends a new skill
+  entry to an existing one), and generates `pack_dir/<skill-id>.yaml` with a valid,
+  clean-lint skeleton for the chosen `--skill-class` (`domain` by default, or
+  `system`/`workflow`). It refuses to overwrite an existing `<skill-id>.yaml`. Use
+  `--canonical-name` and `--pack-name` to override the derived defaults.
+- **`agentalloy validate-pack <pack_dir>`** runs the exact same schema +
+  fragmentation validation `install-pack` uses — including the strict-by-default
+  lint (`--allow-lint-warnings` to accept warnings) — but performs no ingestion, no
+  re-embed, no network call, and no corpus mutation. It's a pure check: fix the
+  reported errors and re-run until it passes before touching the real corpus.
+- **`agentalloy install-pack ./my-pack`** — installing still runs the same
+  validation as above, plus:
+  - **Cross-pack near-duplicate check.** Before reporting success it runs the same
+    re-embed pass used elsewhere and checks the new skills against the existing corpus
+    for near-duplicates. A hard duplicate fails the install; pass `--allow-duplicates`
+    to downgrade that to a warning.
+- **Format reference:** the scaffolded YAMLs already match the schema; for full
+  details or hand-authoring from scratch, see `docs/skill-authoring-and-overrides-spec.md`'s
+  "Pack structure" and "Skill YAML schema" sections.
 
 ### Container operational commands
 

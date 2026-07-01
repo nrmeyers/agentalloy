@@ -236,6 +236,7 @@ def _ingest_yaml(
     *,
     no_restart: bool = False,
     force: bool = False,
+    strict: bool = False,
 ) -> dict[str, Any]:
     """Run the existing ingest pipeline on one YAML. Returns parsed result.
 
@@ -260,11 +261,19 @@ def _ingest_yaml(
     returning ``EXIT_DUPLICATE``. Used for version-bump upgrades, where the
     skill already exists but its content changed — without it the rewrite is
     silently skipped and the corpus keeps serving the stale prose.
+
+    ``strict`` passes ``--strict`` so the ingest subprocess's own ``_lint``
+    quality-bar warnings (missing rationale/verification fragment, all-execution
+    monotony, drifted fragment content, tag lint) are promoted to hard errors.
+    Defaults to False so any caller that doesn't explicitly opt in keeps
+    today's non-blocking-lint behavior.
     """
     if not isinstance(no_restart, bool):
         raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
     if not isinstance(force, bool):
         raise TypeError(f"force must be bool, got {type(force).__name__}")
+    if not isinstance(strict, bool):
+        raise TypeError(f"strict must be bool, got {type(strict).__name__}")
     # --- check for deprecated before calling ingest ---
     is_dep, skill_id, superseded_by = _is_deprecated(yaml_path)
     if is_dep:
@@ -288,6 +297,8 @@ def _ingest_yaml(
         cmd.append("--force")
     if no_restart:
         cmd.append("--no-restart")
+    if strict:
+        cmd.append("--strict")
 
     try:
         result = subprocess.run(  # noqa: S603 — fixed args, no shell
@@ -551,18 +562,48 @@ def install_local_pack(
     *,
     root: Path,
     no_restart: bool = False,
+    strict: bool = True,
+    allow_duplicates: bool = False,
+    run_reembed: bool = True,
 ) -> dict[str, Any]:
     """Install a pack from a local directory (containing pack.yaml + YAMLs).
 
     No tarball download, no sha256 check. Trusts the local filesystem.
 
+    ``run_reembed=False`` skips this call's own post-ingest reembed/dedup
+    pass — used by install-packs' bulk-bootstrap loop, which calls this
+    function once per pack but must trigger exactly one reembed pass for
+    the whole run (its own, after the loop), not one per pack.
+
     ``no_restart`` is forwarded to each ``_ingest_yaml()`` call so that
     the container stop/restart lifecycle is owned by the outermost caller
     (e.g. ``_run_container_guard()`` in install-packs) rather than each
     individual ingest subprocess.
+
+    ``strict`` (default True — strict-by-default for the third-party
+    install-pack path) promotes ``ingest._lint`` quality-bar warnings to
+    hard errors, both in Gate 1's schema validation
+    (``validate_pack_skills(..., strict=strict)``) and in the ``--strict``
+    flag passed to each ingest subprocess. Callers that need the legacy,
+    non-strict behavior (the bundled ``install-packs`` bootstrap, whose
+    packs predate this gate) pass ``strict=False`` explicitly.
+
+    ``allow_duplicates`` is forwarded to the post-ingest ``run_bulk_reembed``
+    call (see below) — it downgrades a hard cross-pack near-duplicate from
+    a failing exit code to a warning; vectors are written either way.
+
+    After a successful ingest loop that ingested at least one new skill,
+    this triggers an in-process bulk reembed (``run_bulk_reembed``) so the
+    new skills get real vectors and pass through the cross-pack dedup gate
+    immediately, instead of silently serving zero vectors until someone
+    remembers to run ``agentalloy reembed``.
     """
     if not isinstance(no_restart, bool):
         raise TypeError(f"no_restart must be bool, got {type(no_restart).__name__}")
+    if not isinstance(strict, bool):
+        raise TypeError(f"strict must be bool, got {type(strict).__name__}")
+    if not isinstance(allow_duplicates, bool):
+        raise TypeError(f"allow_duplicates must be bool, got {type(allow_duplicates).__name__}")
     t0 = time.monotonic()
     pack_dir = pack_dir.resolve()
 
@@ -595,8 +636,10 @@ def install_local_pack(
 
     skills_entries = manifest.get("skills") or []
 
-    # --- Gate 1: Schema + vocabulary validation ---
-    schema_result: PackValidationResult = validate_pack_skills(pack_dir, skills_entries)
+    # --- Gate 1: Schema + vocabulary validation (+ lint, when strict) ---
+    schema_result: PackValidationResult = validate_pack_skills(
+        pack_dir, skills_entries, strict=strict
+    )
     if not schema_result.ok:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -666,7 +709,9 @@ def install_local_pack(
         yaml_path = pack_dir / str(entry["file"])
         # T1: pass no_restart so ingest subprocess suppresses its own stop/restart.
         ingest_results.append(
-            _ingest_yaml(yaml_path, root, no_restart=no_restart, force=force_reingest)
+            _ingest_yaml(
+                yaml_path, root, no_restart=no_restart, force=force_reingest, strict=strict
+            )
         )
 
     new_count = sum(1 for r in ingest_results if r["outcome"] == "ingested")
@@ -799,6 +844,31 @@ def install_local_pack(
     else:
         action = "ingested"
 
+    # Reembed + cross-pack dedup gate — only fires when this run actually
+    # ingested a new skill, mirroring reembed's own "dedup gate — only fires
+    # when new fragments were actually embedded" guard. Populates real
+    # vectors for the just-ingested skills and runs the hard-duplicate check
+    # immediately, instead of leaving them as zero vectors until someone
+    # remembers to run `agentalloy reembed`.
+    dedup_exit_code: int | None = None
+    dedup_hard_matches: list[dict[str, Any]] = []
+    dedup_soft_matches: list[dict[str, Any]] = []
+    dedup_remediation: str | None = None
+    if new_count > 0 and run_reembed:
+        from agentalloy.reembed.cli import run_bulk_reembed
+
+        sink: dict[str, Any] = {}
+        dedup_exit_code = run_bulk_reembed(
+            no_restart=no_restart, allow_duplicates=allow_duplicates, result_sink=sink
+        )
+        dedup_hard_matches = sink.get("dedup_hard", [])
+        dedup_soft_matches = sink.get("dedup_soft", [])
+        if dedup_exit_code != 0:
+            dedup_remediation = (
+                "WARN: bulk reembed exited non-zero (dedup or embedding failure); "
+                "run `agentalloy reembed` to retry or inspect stderr for hard-duplicate matches."
+            )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "action": action,
@@ -812,11 +882,14 @@ def install_local_pack(
         "skills_deprecated_updated": deprecated_updated_count,
         "ingest_results": ingest_results,
         "ingest_failures": len(failed),
+        "dedup_exit_code": dedup_exit_code,
+        "dedup_hard_matches": dedup_hard_matches,
+        "dedup_soft_matches": dedup_soft_matches,
         "remediation": (
             "Some YAMLs failed to ingest; inspect ingest_results.stderr_tail and "
             "re-run `python -m agentalloy.ingest <yaml>` manually."
             if failed
-            else None
+            else dedup_remediation
         ),
         "duration_ms": int((time.monotonic() - t0) * 1000),
     }
@@ -826,6 +899,9 @@ def install_pack(
     name_or_path: str,
     manifest_url: str | None = None,
     root: Path | None = None,
+    *,
+    strict: bool = True,
+    allow_duplicates: bool = False,
 ) -> dict[str, Any]:
     """Install a skill pack. Returns contract-shaped result.
 
@@ -833,6 +909,14 @@ def install_pack(
       1. A path to a local pack directory containing pack.yaml → local install.
       2. A pack name (resolved via manifest URL pattern) → remote tarball install.
       3. A pack name + --manifest-url override → remote tarball install.
+
+    ``strict`` (default True) and ``allow_duplicates`` (default False) are
+    forwarded to ``install_local_pack`` for shape 1, and drive the same
+    ``--strict`` ingest flag + post-ingest ``run_bulk_reembed`` wiring for
+    shapes 2/3 below. Both default to the strict, third-party-safe posture;
+    pass ``strict=False`` for legacy-style packs (mirrors CLI
+    ``--allow-lint-warnings``) or ``allow_duplicates=True`` for a knowingly
+    accepted cross-pack overlap (mirrors CLI ``--allow-duplicates``).
     """
     from agentalloy.install.state import pack_source_dir
 
@@ -842,7 +926,9 @@ def install_pack(
     # Branch: local directory? (Path-like and exists as a dir on disk.)
     candidate = Path(name_or_path)
     if candidate.is_dir() and (candidate / "pack.yaml").is_file():
-        return install_local_pack(candidate, root=root)
+        return install_local_pack(
+            candidate, root=root, strict=strict, allow_duplicates=allow_duplicates
+        )
 
     # Otherwise: remote pack-by-name flow.
     name = name_or_path
@@ -984,7 +1070,7 @@ def install_pack(
         # 4. Ingest each YAML via the existing pipeline
         ingest_results: list[dict[str, Any]] = []
         for target in ingest_targets:
-            ingest_results.append(_ingest_yaml(target, root))
+            ingest_results.append(_ingest_yaml(target, root, strict=strict))
 
     # Same outcome classification as the local-pack flow: only `failed`
     # counts as a real failure; `duplicate` and `deprecated` are benign skips.
@@ -1109,6 +1195,26 @@ def install_pack(
     else:
         action = "ingested"
 
+    # Reembed + cross-pack dedup gate — only fires when this run actually
+    # ingested a new skill. See install_local_pack's identical comment for
+    # the reasoning.
+    dedup_exit_code: int | None = None
+    dedup_hard_matches: list[dict[str, Any]] = []
+    dedup_soft_matches: list[dict[str, Any]] = []
+    dedup_remediation: str | None = None
+    if new_count > 0:
+        from agentalloy.reembed.cli import run_bulk_reembed
+
+        sink: dict[str, Any] = {}
+        dedup_exit_code = run_bulk_reembed(allow_duplicates=allow_duplicates, result_sink=sink)
+        dedup_hard_matches = sink.get("dedup_hard", [])
+        dedup_soft_matches = sink.get("dedup_soft", [])
+        if dedup_exit_code != 0:
+            dedup_remediation = (
+                "WARN: bulk reembed exited non-zero (dedup or embedding failure); "
+                "run `agentalloy reembed` to retry or inspect stderr for hard-duplicate matches."
+            )
+
     duration_ms = int((time.monotonic() - t0) * 1000)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1123,11 +1229,14 @@ def install_pack(
         "skills_deprecated_updated": deprecated_updated_count,
         "ingest_results": ingest_results,
         "ingest_failures": len(failed),
+        "dedup_exit_code": dedup_exit_code,
+        "dedup_hard_matches": dedup_hard_matches,
+        "dedup_soft_matches": dedup_soft_matches,
         "remediation": (
             "Some YAMLs failed to ingest; inspect ingest_results.stderr_tail and "
             "re-run `python -m agentalloy.ingest <yaml>` manually for each failure."
             if failed
-            else None
+            else dedup_remediation
         ),
         "duration_ms": duration_ms,
     }
@@ -1159,6 +1268,24 @@ def add_parser(
             "Default: https://github.com/navistone/skill-pack-{name}/releases/latest/download/manifest.json"
         ),
     )
+    p.add_argument(
+        "--allow-lint-warnings",
+        action="store_true",
+        help=(
+            "Downgrade authoring-contract lint warnings (fragment sizes, missing "
+            "rationale/verification, tag issues) from errors to warnings for this "
+            "install. Off by default — new third-party skills are held to the "
+            "strict quality bar."
+        ),
+    )
+    p.add_argument(
+        "--allow-duplicates",
+        action="store_true",
+        help=(
+            "Downgrade cross-pack near-duplicate detection from an error to a "
+            "warning. Vectors are always written; this only controls the exit code."
+        ),
+    )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
@@ -1180,6 +1307,25 @@ def _render_human(result: dict[str, Any]) -> None:
         print_rich(f"  Skills skipped (deprecated): {skills_deprecated}")
     if skills_deprecated_updated:
         print_rich(f"  Skills retired (deprecation propagated): {skills_deprecated_updated}")
+    dedup_exit_code = result.get("dedup_exit_code")
+    if dedup_exit_code is not None:
+        reembed_status = "ok" if dedup_exit_code == 0 else f"exit {dedup_exit_code}"
+        print_rich(f"  Reembed: {reembed_status}")
+        for match in result.get("dedup_hard_matches") or []:
+            print_rich(
+                f"  HARD duplicate: '{match.get('incoming_skill_id')}' ~ "
+                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})"
+            )
+        for match in result.get("dedup_soft_matches") or []:
+            print_rich(
+                f"  soft near-duplicate: '{match.get('incoming_skill_id')}' ~ "
+                f"'{match.get('existing_skill_id')}' (similarity={match.get('similarity'):.4f})"
+            )
+        if dedup_exit_code != 0:
+            print_rich(
+                "  WARN: bulk reembed exited non-zero (dedup or embedding failure); "
+                "run `agentalloy reembed` to retry or inspect stderr for hard-duplicate matches."
+            )
     if failures:
         first_fail = next(
             (r for r in result.get("ingest_results") or [] if r.get("outcome") == "failed"),
@@ -1199,9 +1345,16 @@ def _render_human(result: dict[str, Any]) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
-    result = install_pack(args.pack, manifest_url=args.manifest_url)
+    result = install_pack(
+        args.pack,
+        manifest_url=args.manifest_url,
+        strict=not args.allow_lint_warnings,
+        allow_duplicates=args.allow_duplicates,
+    )
     write_result(result, args, human_fn=_render_human)
     if result.get("ingest_failures", 0) > 0:
+        return 2
+    if result.get("dedup_exit_code"):
         return 2
     if result.get("action") not in ("ingested", "already_installed"):
         return 1

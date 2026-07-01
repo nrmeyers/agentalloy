@@ -7,6 +7,7 @@ field validation, sha256 mismatch handling, tarball safety).
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -317,3 +318,128 @@ class TestEmbedModelSoftWarn:
     def test_real_mismatch_against_bare_runtime_name_warns(self) -> None:
         err = self._run_check("nomic-embed-text-v1.5", "bge-large-en-v1.5")
         assert "WARN" in err
+
+
+class TestRunStrictAndDedupWiring:
+    """`_run` (the argparse entry point) forwards --allow-lint-warnings /
+    --allow-duplicates into `install_pack` and treats a non-zero
+    `dedup_exit_code` as the same failure tier as an ingest failure.
+
+    `install_pack` itself is mocked (this file's existing convention —
+    network/subprocess paths are mocked) so no real ingest/reembed runs.
+    """
+
+    @staticmethod
+    def _args(**overrides: object) -> argparse.Namespace:
+        defaults: dict[str, object] = {
+            "pack": "frontend",
+            "manifest_url": None,
+            "allow_lint_warnings": False,
+            "allow_duplicates": False,
+            "json": True,  # avoid the human-readable renderer touching stdout
+            "quiet": False,
+        }
+        defaults.update(overrides)
+        return argparse.Namespace(**defaults)
+
+    def test_default_flags_forward_strict_true_and_no_duplicates(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch.object(
+            ip,
+            "install_pack",
+            return_value={"action": "ingested", "ingest_failures": 0, "dedup_exit_code": 0},
+        ) as m:
+            rc = ip._run(self._args())  # pyright: ignore[reportPrivateUsage]
+        capsys.readouterr()
+        m.assert_called_once_with(
+            "frontend", manifest_url=None, strict=True, allow_duplicates=False
+        )
+        assert rc == 0
+
+    def test_allow_lint_warnings_forwards_strict_false(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch.object(
+            ip,
+            "install_pack",
+            return_value={"action": "ingested", "ingest_failures": 0, "dedup_exit_code": 0},
+        ) as m:
+            rc = ip._run(self._args(allow_lint_warnings=True))  # pyright: ignore[reportPrivateUsage]
+        capsys.readouterr()
+        m.assert_called_once_with(
+            "frontend", manifest_url=None, strict=False, allow_duplicates=False
+        )
+        assert rc == 0
+
+    def test_allow_duplicates_forwarded(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with patch.object(
+            ip,
+            "install_pack",
+            return_value={"action": "ingested", "ingest_failures": 0, "dedup_exit_code": 0},
+        ) as m:
+            rc = ip._run(self._args(allow_duplicates=True))  # pyright: ignore[reportPrivateUsage]
+        capsys.readouterr()
+        m.assert_called_once_with("frontend", manifest_url=None, strict=True, allow_duplicates=True)
+        assert rc == 0
+
+    def test_nonzero_dedup_exit_code_is_a_failure(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A hard cross-pack duplicate (dedup_exit_code != 0) is the same
+        severity tier as an ingest failure — `_run` must return non-zero even
+        though `action` is "ingested" and `ingest_failures` is 0."""
+        with patch.object(
+            ip,
+            "install_pack",
+            return_value={"action": "ingested", "ingest_failures": 0, "dedup_exit_code": 4},
+        ):
+            rc = ip._run(self._args())  # pyright: ignore[reportPrivateUsage]
+        capsys.readouterr()
+        assert rc == 2
+
+    def test_dedup_exit_code_none_is_not_a_failure(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`dedup_exit_code` is None when reembed never ran (e.g. every skill
+        was already a duplicate) — must not be treated as a failure."""
+        with patch.object(
+            ip,
+            "install_pack",
+            return_value={
+                "action": "already_installed",
+                "ingest_failures": 0,
+                "dedup_exit_code": None,
+            },
+        ):
+            rc = ip._run(self._args())  # pyright: ignore[reportPrivateUsage]
+        capsys.readouterr()
+        assert rc == 0
+
+    def test_render_human_reports_reembed_ok(self, capsys: pytest.CaptureFixture[str]) -> None:
+        ip._render_human(  # pyright: ignore[reportPrivateUsage]
+            {"action": "ingested", "dedup_exit_code": 0, "skill_count": 1}
+        )
+        out = capsys.readouterr().out
+        assert "Reembed: ok" in out
+
+    def test_render_human_reports_reembed_failure_with_warn(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        ip._render_human(  # pyright: ignore[reportPrivateUsage]
+            {"action": "ingested", "dedup_exit_code": 4, "skill_count": 1}
+        )
+        out = capsys.readouterr().out
+        assert "Reembed: exit 4" in out
+        assert "WARN" in out
+        assert "reembed exited non-zero" in out
+
+
+class TestInstallLocalPackAutoRouteStrictForwarding:
+    """`install_pack`'s local-directory branch forwards strict/allow_duplicates
+    to `install_local_pack` unchanged — regression guard for the new kwargs
+    threaded through by the quality-gate spec."""
+
+    def test_local_dir_branch_forwards_strict_and_allow_duplicates(self, tmp_path: Path) -> None:
+        (tmp_path / "pack.yaml").write_text("name: x\n")
+        with patch.object(ip, "install_local_pack", return_value={"action": "ingested"}) as m:
+            ip.install_pack(str(tmp_path), root=tmp_path, strict=False, allow_duplicates=True)
+        m.assert_called_once_with(tmp_path, root=tmp_path, strict=False, allow_duplicates=True)

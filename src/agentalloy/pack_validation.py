@@ -57,17 +57,28 @@ class PackValidationResult:
 
 
 def validate_pack_skills(
-    pack_dir: Path, skills_entries: list[dict[str, Any]]
+    pack_dir: Path, skills_entries: list[dict[str, Any]], *, strict: bool = True
 ) -> PackValidationResult:
     """Validate every skill YAML in *skills_entries* against the ingest schema.
 
-    Imports ``_load_yaml`` and ``_validate`` from ``agentalloy.ingest`` so the
-    ingest path and the bundled-corpus tests share one implementation.
+    Imports ``_load_yaml``, ``_validate``, and (when ``strict``) ``_lint`` from
+    ``agentalloy.ingest`` so the ingest path and the bundled-corpus tests share
+    one implementation.
+
+    When ``strict`` is True (the default — the third-party ``install-pack``
+    path), each skill that passes ``_validate`` also runs through ``_lint``;
+    any non-empty lint output (missing rationale/verification fragment,
+    all-execution monotony, drifted fragment content, mechanical tag issues,
+    etc.) is folded into that skill's error list so it fails Gate 1 alongside
+    a hard schema error, in one aggregated report, before any ingest
+    subprocess or network cost. ``strict=False`` (the legacy bundled-corpus
+    path, and ``--allow-lint-warnings``) skips the lint call entirely — lint
+    warnings are non-blocking there, same as today.
 
     Returns a :class:`PackValidationResult` — check ``.ok`` before proceeding
     to the ingest subprocess loop.
     """
-    from agentalloy.ingest import IngestError, _load_yaml, _validate  # noqa: PLC0415
+    from agentalloy.ingest import IngestError, _lint, _load_yaml, _validate  # noqa: PLC0415
 
     skill_errors: list[SkillValidationError] = []
     for entry in skills_entries:
@@ -91,6 +102,8 @@ def validate_pack_skills(
             continue
 
         errs = _validate(record)
+        if strict:
+            errs = [*errs, *_lint(record, yaml_path)]
         if errs:
             skill_errors.append(
                 SkillValidationError(

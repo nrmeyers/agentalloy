@@ -7,6 +7,7 @@ install-packs from prompting the user twice for the same pack selection.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,7 +15,6 @@ import pytest
 
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands.install_packs import (
-    _bulk_reembed,
     _clear_pending_pack_selection,
     _ensure_skill_schema,
     _installed_pack_names,
@@ -25,6 +25,7 @@ from agentalloy.install.subcommands.install_packs import (
     _select_packs,
     _summarize_install_result,
 )
+from agentalloy.reembed.cli import run_bulk_reembed
 
 _LOCK_ERR = (
     "RuntimeError: IO exception: Could not set lock on file agentalloy.duck: "
@@ -302,7 +303,7 @@ class TestBulkReembedLockHint:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError(_LOCK_ERR)):
-            rc = _bulk_reembed()
+            rc = run_bulk_reembed()
         assert rc == 2
         err = capsys.readouterr().err
         assert "reembed raised" in err
@@ -310,7 +311,7 @@ class TestBulkReembedLockHint:
 
     def test_other_exception_has_no_lock_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
         with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError("kaboom")):
-            rc = _bulk_reembed()
+            rc = run_bulk_reembed()
         assert rc == 2
         err = capsys.readouterr().err
         assert "reembed raised" in err
@@ -420,3 +421,51 @@ class TestInstallSummaryRender:
         assert "1 failed" in line
         assert "reembed: exit 2" in line
         assert "failed packs: redis" in line
+
+
+class TestRunContainerGuardReembedCadence:
+    """`_run_container_guard` must trigger exactly one reembed pass for the
+    whole run (`run_bulk_reembed` once, after its loop) — not one per pack.
+
+    Regression coverage: `install_local_pack`'s own post-ingest reembed call
+    fires unconditionally unless told not to, which would turn "reembed
+    once" into "reembed once per pack" now that this guard reuses
+    `install_local_pack` in a loop with its own final `run_bulk_reembed`
+    call. `run_reembed=False` on each loop call is what prevents that.
+    """
+
+    def test_reembed_called_exactly_once_across_multiple_packs(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands.install_packs import _run_container_guard
+
+        packs_root = tmp_path / "packs"
+        packs_root.mkdir()
+        for name in ("pack-a", "pack-b", "pack-c"):
+            (packs_root / name).mkdir()
+
+        args = argparse.Namespace(no_restart=True)
+        fake_result = {
+            "action": "ingested",
+            "skills_ingested": 1,
+            "ingest_failures": 0,
+            "dedup_exit_code": None,
+        }
+
+        with (
+            patch("agentalloy.install.container_service.is_in_container", return_value=False),
+            patch(
+                "agentalloy.install.subcommands.install_packs._reclaim_native_corpus_lock",
+                return_value=False,
+            ),
+            patch("agentalloy.install.subcommands.install_packs._ensure_skill_schema"),
+            patch(
+                "agentalloy.install.subcommands.install_packs.install_local_pack",
+                return_value=fake_result,
+            ) as install_mock,
+            patch("agentalloy.reembed.cli.run_bulk_reembed", return_value=0) as reembed_mock,
+        ):
+            _run_container_guard(args, ["pack-a", "pack-b", "pack-c"], packs_root, tmp_path)
+
+        assert install_mock.call_count == 3
+        for call in install_mock.call_args_list:
+            assert call.kwargs.get("run_reembed") is False
+        reembed_mock.assert_called_once_with(no_restart=True)
