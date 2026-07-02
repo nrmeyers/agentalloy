@@ -148,6 +148,14 @@ class ComposeRequest(BaseModel):
         default=None,
         description="Explicit contract tags (bypasses contract_path loading; useful for tests).",
     )
+    debug: bool = Field(
+        default=False,
+        description=(
+            "Attach per-stage retrieval detail (fused scores, skill ranking, "
+            "Stage A/B outcomes) to the response. Observability only — the "
+            "composition itself is unchanged."
+        ),
+    )
 
     def resolved_k(self) -> int:
         """Server-side resolution: caller's k if provided, else phase default."""
@@ -233,6 +241,26 @@ class ComposeTelemetry(BaseModel):
     lm_assist_scores: dict[str, float] = Field(default_factory=dict)
 
 
+class RetrievalDebug(BaseModel):
+    """Per-stage retrieval detail, attached when ``ComposeRequest.debug`` is set.
+
+    Mirrors the in-process ``RetrievalResult`` observability fields that are
+    otherwise consumed into telemetry and discarded — the web playground's
+    "explain this composition" view.
+    """
+
+    eligible_count: int
+    scores_by_id: dict[str, float]
+    skills_ranked: list[str]
+    bm25_source: str
+    reranked: bool
+    lm_assist_outcome: str
+    lm_assist_kept_ids: list[str]
+    lm_assist_dropped_ids: list[str]
+    lm_assist_scores: dict[str, float]
+    dense_leg_degraded: bool
+
+
 class ComposedResult(BaseModel):
     """Successful composition — HTTP 200."""
 
@@ -270,6 +298,9 @@ class ComposedResult(BaseModel):
             "callers that suppress the orchestrator's internal trace write."
         ),
     )
+    debug: RetrievalDebug | None = Field(
+        default=None, description="Per-stage retrieval detail; present only when requested."
+    )
 
 
 class EmptyResult(BaseModel):
@@ -288,6 +319,9 @@ class EmptyResult(BaseModel):
     recommended_max_tokens: int | None = None
     dense_leg_degraded: bool = False
     telemetry: ComposeTelemetry = Field(default_factory=ComposeTelemetry)
+    debug: RetrievalDebug | None = Field(
+        default=None, description="Per-stage retrieval detail; present only when requested."
+    )
 
 
 class ErrorAvailable(BaseModel):

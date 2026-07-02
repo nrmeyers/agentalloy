@@ -23,6 +23,7 @@ from agentalloy.api.compose_models import (
     ErrorAvailable,
     ErrorCode,
     LatencyBreakdown,
+    RetrievalDebug,
     _phase_max_tokens,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.embed_provider import EmbedClient
@@ -154,6 +155,24 @@ class ComposeOrchestrator:
         else:
             stage_b_kept, stage_b_dropped, stage_b_scores = [], [], {}
 
+        # Observability-only: mirror the RetrievalResult internals into the
+        # response when the caller asked. The BM25-only/error fallback carries
+        # no stage detail worth mirroring — debug stays None there.
+        retrieval_debug: RetrievalDebug | None = None
+        if req.debug and isinstance(retrieval, RetrievalResult):
+            retrieval_debug = RetrievalDebug(
+                eligible_count=retrieval.eligible_count,
+                scores_by_id=dict(retrieval.scores_by_id),
+                skills_ranked=list(retrieval.skills_ranked),
+                bm25_source=retrieval.bm25_source,
+                reranked=retrieval.reranked,
+                lm_assist_outcome=retrieval.lm_assist_outcome,
+                lm_assist_kept_ids=list(stage_b_kept),
+                lm_assist_dropped_ids=list(stage_b_dropped),
+                lm_assist_scores=dict(stage_b_scores),
+                dense_leg_degraded=retrieval.dense_leg_degraded,
+            )
+
         if isinstance(retrieval, EmbeddingErrorResult):
             retrieval_error_code = retrieval.error.code.value
             logger.warning(
@@ -209,6 +228,7 @@ class ComposeOrchestrator:
                 recommended_max_tokens=_phase_max_tokens(req.phase),
                 dense_leg_degraded=dense_leg_degraded,
                 telemetry=empty_telemetry,
+                debug=retrieval_debug,
             )
 
         output = _format_fragments(system.candidates, retrieval.candidates)
@@ -308,6 +328,7 @@ class ComposeOrchestrator:
             recommended_max_tokens=_phase_max_tokens(req.phase),
             dense_leg_degraded=dense_leg_degraded,
             telemetry=telemetry,
+            debug=retrieval_debug,
         )
 
     async def retrieve(self, req: ComposeRequest) -> RetrievalResult | EmbeddingErrorResult:
