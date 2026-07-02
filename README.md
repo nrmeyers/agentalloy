@@ -222,7 +222,7 @@ operational command reference live in [INSTALL.md](INSTALL.md) and
 
 ### Hardware requirements
 
-Container deployment is **CPU-only** on every host. GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) only works with a native install. The bundled `llama-server` instances run on CPU using `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` — functional for embeddings and intent reranking but slower than GPU.
+Container deployment is **CPU-only** on every host; GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) requires a native install. The bundled `llama-server` instances run `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` on CPU — fast enough for the runtime path (short-text embeds and intent reranking); only corpus-wide work such as a full reembed runs meaningfully slower than on GPU.
 
 | Requirement | Minimum |
 |---|---|

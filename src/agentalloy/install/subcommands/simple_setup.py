@@ -1107,17 +1107,16 @@ def _run_container_flow(cfg: SetupConfig, t0: float) -> int:
     # 2b. Container = CPU-only, on every host. GPU passthrough is intentionally
     # out of scope: nvidia needs nvidia-container-toolkit + deploy.resources,
     # AMD needs ROCm device mounts + a ROCm llama-server image, and Docker Desktop
-    # on macOS cannot pass Metal through at all. Users who want GPU should
-    # choose the native install. The bundled llama-server handles inference
-    # on CPU using the nomic-embed-text-v1.5 model — functional for embeddings
-    # but slower than GPU.
+    # on macOS cannot pass Metal through at all. CPU inference is fine for the
+    # runtime path (short-text embeds, <200ms — see recommend_host_targets);
+    # only corpus-wide work (a full reembed) is meaningfully slower, so this is
+    # an informational note, not a warning steering users to native.
     _print(
-        "\n  [yellow]Note — container deployment is CPU-only on every host.[/yellow]\n"
-        "  GPU acceleration (NVIDIA/AMD/Apple Metal) only works with a native\n"
-        "  install. The bundled llama-server runs on CPU; for a 600M embedding model\n"
-        "  on short text this is functional but noticeably slower than GPU.\n"
-        "  If you want GPU acceleration, cancel and re-run setup choosing the\n"
-        "  native deployment."
+        "\n  [cyan]Note — container deployment runs inference on CPU on every host.[/cyan]\n"
+        "  That's fine for normal use (short-text embeds are fast on CPU); only\n"
+        "  corpus-wide work like a full reembed runs meaningfully slower. GPU\n"
+        "  acceleration (NVIDIA/AMD/Apple Metal), if you want it for that, needs\n"
+        "  the native deployment."
     )
     if not cfg.non_interactive:
         ans = input("  Continue with container (CPU-only)? [Y/n]: ").strip().lower()
