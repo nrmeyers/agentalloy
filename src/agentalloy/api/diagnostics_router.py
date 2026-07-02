@@ -10,20 +10,17 @@ Exposes three slices of diagnostic information:
 from __future__ import annotations
 
 import asyncio
-from typing import Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from agentalloy.api.health_router import HealthChecker
+from agentalloy.api.health_router import DepStatus, HealthChecker
 from agentalloy.reads.active import get_active_skills
 from agentalloy.reads.models import ActiveSkill
 from agentalloy.runtime_state import RuntimeCache
 from agentalloy.storage.protocols import EMBEDDING_DIM, SkillStore
 
 router = APIRouter()
-
-DepStatus = Literal["ok", "unavailable"]
 
 
 class SkillVersionEntry(BaseModel):
