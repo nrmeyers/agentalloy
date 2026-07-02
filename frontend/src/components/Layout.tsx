@@ -7,6 +7,7 @@ const navItems = [
   { path: '/repos', label: 'Repos', icon: '📁' },
   { path: '/approvals', label: 'Approvals', icon: '✅' },
   { path: '/skills', label: 'Skills', icon: '🧩' },
+  { path: '/wizard', label: 'New Skill', icon: '✨' },
   { path: '/playground', label: 'Playground', icon: '🧪' },
   { path: '/telemetry', label: 'Telemetry', icon: '📊' },
   { path: '/diagnostics', label: 'Diagnostics', icon: '🔍' },

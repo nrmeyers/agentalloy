@@ -533,6 +533,94 @@ export interface ProfileResolveResult {
 }
 
 // ---------------------------------------------------------------------------
+// Wizard (/api/wizard/*) — custom-skill creation, the human-driven twin of the
+// add-skill lane: scaffold → draft → validate → approve + install.
+// ---------------------------------------------------------------------------
+
+export interface WizardScaffoldRequest {
+  repo: string;
+  pack: string;
+  skill_id: string;
+  skill_class?: string;
+  canonical_name?: string;
+}
+
+/** new-skill-pack result — open shape; skill_file/skill_yaml are appended by the API. */
+export interface WizardScaffoldResult {
+  skill_file?: string;
+  skill_yaml?: string;
+  action?: string;
+  [key: string]: unknown;
+}
+
+export interface WizardPackFile {
+  name: string;
+  content: string;
+}
+
+export interface WizardPackContents {
+  pack: string;
+  pack_dir: string;
+  exists: boolean;
+  files: WizardPackFile[];
+}
+
+export interface WizardFileWriteRequest {
+  repo: string;
+  pack: string;
+  file: string;
+  content: string;
+}
+
+export interface WizardFileWriteResult {
+  status: string;
+  path: string;
+}
+
+/**
+ * validate-pack result — rendered defensively: the contract is open, so every
+ * key is optional and error-ish arrays are discovered at runtime.
+ */
+export interface WizardValidateResult {
+  ok?: boolean;
+  valid?: boolean;
+  errors?: unknown[];
+  warnings?: unknown[];
+  skills?: unknown;
+  [key: string]: unknown;
+}
+
+export interface WizardInstallRequest {
+  repo: string;
+  pack: string;
+  approver?: string;
+  allow_duplicates?: boolean;
+}
+
+/** run_approve outcome when the repo sat in the add-skill lane; null otherwise. */
+export interface WizardApprovalOutcome {
+  ok?: boolean;
+  phase?: string;
+  approver?: string;
+  marker?: string;
+  advanced?: { phase?: string; [key: string]: unknown } | null;
+  [key: string]: unknown;
+}
+
+export interface WizardInstallOutcome {
+  action?: string;
+  skills_ingested?: number;
+  dedup_hard?: Record<string, unknown>[];
+  dedup_soft?: Record<string, unknown>[];
+  [key: string]: unknown;
+}
+
+export interface WizardInstallResult {
+  approval: WizardApprovalOutcome | null;
+  install: WizardInstallOutcome;
+}
+
+// ---------------------------------------------------------------------------
 // Health (/health, /readiness) — tolerate shape drift.
 // ---------------------------------------------------------------------------
 

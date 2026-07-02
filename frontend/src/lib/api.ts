@@ -34,6 +34,14 @@ import type {
   SkillVersionsResponse,
   TracesParams,
   TracesResponse,
+  WizardFileWriteRequest,
+  WizardFileWriteResult,
+  WizardInstallRequest,
+  WizardInstallResult,
+  WizardPackContents,
+  WizardScaffoldRequest,
+  WizardScaffoldResult,
+  WizardValidateResult,
 } from './types';
 
 // Relative base — same origin in production, Vite proxy in dev.
@@ -283,6 +291,47 @@ export function resolveProfile(repo: string): Promise<ProfileResolveResult> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo }),
+  });
+}
+
+// --- Wizard (custom-skill creation) --------------------------------------------------
+
+/** 400 = {"detail": {"error": "<action>", "detail": "<why>"}} (invalid names, already-exists). */
+export function postWizardScaffold(body: WizardScaffoldRequest): Promise<WizardScaffoldResult> {
+  return request<WizardScaffoldResult>('/api/wizard/scaffold', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function getWizardPack(repo: string, pack: string): Promise<WizardPackContents> {
+  return request<WizardPackContents>(`/api/wizard/pack${query({ repo, pack })}`);
+}
+
+/** 400 = {"detail": {"error": "invalid_yaml", "detail": "<parser message>"}}. */
+export function putWizardFile(body: WizardFileWriteRequest): Promise<WizardFileWriteResult> {
+  return request<WizardFileWriteResult>('/api/wizard/file', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function postWizardValidate(repo: string, pack: string): Promise<WizardValidateResult> {
+  return request<WizardValidateResult>('/api/wizard/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, pack }),
+  });
+}
+
+/** 409 = {"detail": {"error": "approve_refused", "detail": "<why>"}}. */
+export function postWizardInstall(body: WizardInstallRequest): Promise<WizardInstallResult> {
+  return request<WizardInstallResult>('/api/wizard/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
 }
 

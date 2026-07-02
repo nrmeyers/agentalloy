@@ -10,6 +10,7 @@ import { ReposPage } from './pages/ReposPage';
 import { SkillDetailPage } from './pages/SkillDetailPage';
 import { SkillsPage } from './pages/SkillsPage';
 import { TelemetryPage } from './pages/TelemetryPage';
+import { WizardPage } from './pages/WizardPage';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/ops" element={<OpsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:skillId" element={<SkillDetailPage />} />
+          <Route path="/wizard" element={<WizardPage />} />
           <Route path="/playground" element={<PlaygroundPage />} />
           <Route path="/telemetry" element={<TelemetryPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage />} />
