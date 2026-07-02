@@ -59,6 +59,7 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - [Packs shipping in-tree](#packs-shipping-in-tree)
 - [Architecture](#architecture)
 - [Telemetry](#telemetry)
+- [Web UI](#web-ui)
 - [Configuration](#configuration)
 - [Development](#development)
 - [Need Help?](#need-help)
@@ -254,11 +255,11 @@ Three small artifacts on disk drive everything AgentAlloy does. None of them bel
 .agentalloy/phase       →  phase: build
 ```
 
-A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Small, low-risk tasks can take the **fast lane** — at intake the agent routes to `sdd-fast`, a single compressed spec-design-build phase, giving `intake → sdd-fast → qa → ship`. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
+A sticky, one-line YAML file under your project. Tracks where the agent is in the SDD lifecycle: `intake → spec → design → build → qa → ship`. Small, low-risk tasks can take the **fast lane** — at intake the agent routes to `sdd-fast`, a single compressed spec-design-build phase, giving `intake → sdd-fast → qa → ship`. Requests that are about *teaching the corpus* rather than changing code ("add a skill for our deploy process") take the **add-skill lane** (`intake → add-skill → intake`): guided custom-skill authoring — draft, R1–R9 self-critique, scaffold into `.agentalloy/custom-skills/`, strict `validate-pack` — ending in a human-approved `install-pack`, after which the session returns to intake. Each phase has a corresponding **workflow skill** (e.g., `sdd-build`) that ships persona prose and a set of declarative **exit gates**. When the agent enters a phase, that workflow skill's prose is injected as the persona for the duration; when the exit gates pass, the phase advances and the next workflow skill takes over.
 
 The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `off` stays wired but composes nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
 
-On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`. See [docs/operator.md](docs/operator.md) for the full gate inventory.
+On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. The **add-skill lane** is always approval-gated — `agentalloy approve add-skill` is the only way forward and no setting disables it, because installing a skill changes what gets composed into every future session in that repo. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`. See [docs/operator.md](docs/operator.md) for the full gate inventory.
 
 ### 2. Task contracts
 
@@ -491,7 +492,23 @@ Both runtime paths are **deterministic by default** — the only optional LM sta
 
 Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace to DuckDB before the response returns — no async backlog, no dropped traces. Trace-write failures never propagate.
 
-Query via `GET /telemetry/traces`; the CLI exposes `agentalloy telemetry savings` (token-savings summary — one `status='proxy_composed'` row per proxy request) and `agentalloy telemetry clear` (truncates `composition_traces`). See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
+Query via `GET /telemetry/traces` (filterable by phase, status, time window, and repo), `GET /telemetry/savings` (token-savings aggregation), and `GET /telemetry/coverage` (composed vs passthrough rate per phase and repo) — or browse all three interactively in the [web UI](#web-ui). The CLI exposes `agentalloy telemetry savings` and `agentalloy telemetry clear` (truncates `composition_traces`). See [docs/operator.md](docs/operator.md) for the full trace schema and filter options.
+
+---
+
+## Web UI
+
+The service ships a browser dashboard served from the same FastAPI process at [http://localhost:47950/](http://localhost:47950/) — no extra daemon, localhost-only, no auth. Pages:
+
+- **Config** — edit the user-scoped `.env` with field validation and masked secrets; soft-reload without a restart.
+- **Telemetry** — trace explorer with the full signal story per request (gates met/unmet, pre-filter, Stage A/B rerank outcomes), token-savings charts, and composed-vs-passthrough coverage.
+- **Skills** — browse the corpus with pack provenance and override badges, inspect full version history, and customize system/workflow prose in a one-click editor with a live `prose_invariants` checklist and a diff against the shipped default (replaces the `customize edit → validate → update` loop).
+- **Playground** — ranked retrieval with scores, compose preview with a `debug=true` per-stage explain mode, and a read-only signal simulator ("would this prompt compose right now?").
+- **Repos & Approvals** — every wired repo's phase, gate blockers, and per-repo upstream; an actionable approval queue for `spec`/`design`/`add-skill` sign-offs (approving records the marker and auto-advances the phase; editing an artifact after sign-off resurfaces it as stale).
+- **Ops** — doctor checks, reembed status and runs, pack install state, profile resolution.
+- **New Skill** — a four-step wizard on the same rails as the add-skill lane: scaffold → draft (with an R1–R9 self-check panel) → strict validate → approve + install.
+
+Build it once with `cd frontend && pnpm install && pnpm build`; the service serves `frontend/dist` automatically from then on. Without a build the API is unaffected and `/` answers 501 with instructions. Mutating endpoints require the `X-AgentAlloy-CSRF: 1` header (the UI sends it; with no CORS grant on the localhost-only service, foreign origins can't). Design: [docs/web-ui-and-add-skill-combined-spec.md](docs/web-ui-and-add-skill-combined-spec.md).
 
 ---
 

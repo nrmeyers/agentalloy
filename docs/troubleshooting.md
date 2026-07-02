@@ -174,3 +174,32 @@ A step ran successfully before. The install state is up to date.
 
 **Fix:** No action needed. If you want to re-run a specific step, use
 `agentalloy reset-step <step-name>` first.
+
+## Web UI
+
+### `/` answers 501 "web_ui_not_built"
+
+The API is running but no frontend build exists (`frontend/dist` is not committed).
+
+**Fix:** `cd frontend && pnpm install && pnpm build` (Node via mise, pnpm — not
+npm), then reload the page. No service restart needed unless the service was
+started before the repo checkout existed. `AGENTALLOY_WEB_DIST` can point at a
+build elsewhere.
+
+### Writes fail with 403
+
+Mutating endpoints require the `X-AgentAlloy-CSRF: 1` header. The shipped UI
+sends it; a 403 usually means a hand-rolled curl/script — add the header.
+
+### Approve returns 409 "approve_refused"
+
+The repo's current phase doesn't match, or the phase's exit artifact is missing
+(e.g. approving `add-skill` with nothing under `.agentalloy/custom-skills/`).
+The error detail names the exact refusal; the per-repo gate status on the Repos
+page shows what's missing.
+
+### Config edits don't take effect
+
+Saving writes the user-scoped `.env`; click **Reload** to apply. Reload is
+soft — per-request settings update, but store and embed-server connections
+opened at startup keep their old config until a real service restart.

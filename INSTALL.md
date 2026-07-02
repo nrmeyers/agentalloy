@@ -566,6 +566,12 @@ agentalloy validate-pack ./my-pack                        # check schema + lint,
 agentalloy install-pack ./my-pack                         # ship it
 ```
 
+Prefer clicking? The web UI's **New Skill** wizard (`http://localhost:47950/#/wizard`)
+drives the same scaffold → draft → validate → install rails, with an R1–R9
+self-check panel beside the editor. Or skip the tooling entirely: in a wired
+repo, ask your agent to "add a skill for X" — intake routes it down the
+**add-skill lane**, which ends at a human-approval gate before install.
+
 - **`agentalloy new-skill-pack <pack_dir> --skill-id <id>`** creates `pack_dir` if
   needed, writes a `pack.yaml` if one doesn't already exist (or appends a new skill
   entry to an existing one), and generates `pack_dir/<skill-id>.yaml` with a valid,

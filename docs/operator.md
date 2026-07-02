@@ -84,13 +84,13 @@ Phases track where the agent is in the software development lifecycle. The **aut
 intake → spec → design → build → qa → ship
 ```
 
-Plus a fast lane for small, clearly-bounded work that intake can route to (`intake → sdd-fast → qa → ship` — the fast lane compresses spec+design+build, then merges into the standard qa → ship verification and delivery). In the default lifecycle mode every session opens with intake: the proxy composes the intake workflow on the first request of a fresh session (the signal layer handles `intake` unconditionally), gated per-repo by `lifecycle_mode` — see **Lifecycle modes** below.
+Plus two more routes intake can take. The **fast lane** for small, clearly-bounded work (`intake → sdd-fast → qa → ship` — compresses spec+design+build, then merges into the standard qa → ship verification and delivery). The **add-skill lane** for requests that teach the local corpus rather than change code (`intake → add-skill → intake` — guided custom-skill authoring: scaffold into `.agentalloy/custom-skills/`, strict `validate-pack`, an **unconditional** human-approval exit gate, then `install-pack`; `agentalloy approve add-skill` records the sign-off and auto-advances back to intake). In the default lifecycle mode every session opens with intake: the proxy composes the intake workflow on the first request of a fresh session (the signal layer handles `intake` unconditionally), gated per-repo by `lifecycle_mode` — see **Lifecycle modes** below.
 
 The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
 
 Two separate vocabularies exist for **skill authoring/ingest** and should not be confused with the runtime lifecycle above:
 
-- **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `intake`, `spec`, `design`, `build`, `qa`, `ship`, `sdd-fast` — the values a skill may scope itself to at ingest time (reconciled to the runtime lifecycle).
+- **`phase_scope` validation** (`ingest.py` `_VALID_PHASES`): `intake`, `spec`, `design`, `build`, `qa`, `ship`, `sdd-fast`, `add-skill` — the values a skill may scope itself to at ingest time (reconciled to the runtime lifecycle; a config-consistency test keeps every phase-vocabulary site in lockstep with the `Phase` Literal).
 - **Workflow position markers** (`ingest.py` `WORKFLOW_POSITION_MARKERS`): `sdd`, `phase:spec`, `phase:design`, `phase:plan`, `phase:testgen`, `phase:build`, `phase:verify`, `phase:deliver`, `code-review`, `release`, `incident`, `rfc` — tags describing where in a process a skill applies.
 
 ### Lifecycle modes
@@ -294,7 +294,7 @@ QA reviews against the R1-R8 quality contract (clear triggers, actionable steps,
 
 ### Skill Override CLI
 
-`agentalloy customize {list,edit,validate,update,diff,reset}` with `--profile` and `--project` flags. Edits a skill's prose, gates, or applicability without forking shipped defaults.
+`agentalloy customize {list,edit,validate,update,diff,reset}` with `--profile` and `--project` flags. Edits a system/workflow skill's `raw_prose` and `domain_tags` without forking shipped defaults; workflow structural fields (exit gates, signal keywords, contract templates) are product-owned and locked, and `prose_invariants` (load-bearing commands) must survive any rewrite. The web UI's **Skills** page wraps the same validator as a one-click editor — layer banner, live invariant checklist, diff against the shipped default.
 
 ### Adding Packs
 
@@ -333,8 +333,15 @@ Canonical category values validated by the ingest pipeline (from `ingest.py`):
 
 A skill about "how to write tests" in category `ops` is a category-fit failure. Categories must describe the actual content of the skill.
 
+## Web UI
+
+The service serves a browser dashboard at `http://localhost:47950/` from the same process — build once with `cd frontend && pnpm install && pnpm build` (Node via mise; the API runs fine without a build, `/` answers 501). Pages: Config (.env editor + soft reload), Telemetry (traces/savings/coverage), Skills (browser, version history, override editor), Playground (retrieval/compose/signal simulator — the simulator is read-only, never advances repo state), Repos (per-repo phase/gates/upstream), Approvals (pending sign-offs; approving auto-advances the phase), Ops (doctor read-only — repair stays on the CLI, reembed, packs, profiles), New Skill (wizard over the add-skill rails).
+
+Operator notes: everything is localhost-only with no auth; mutating endpoints (`PUT /api/config`, `POST /api/repos/approve`, wizard writes, reembed) require the `X-AgentAlloy-CSRF: 1` header, which the UI sends. Config **reload is soft** — per-request settings pick up changes, but store/embed connections opened at startup need a service restart. The approval queue lists only actionable sign-offs (exit artifacts exist); a phase can still be approval-blocked without appearing there — the per-repo gate status shows that.
+
 ## Cross-References
 
+- [Web UI + add-skill Combined Spec](web-ui-and-add-skill-combined-spec.md) — the web UI surface and the add-skill lane design, verified against v5.0.3
 - [Profiles and Overrides](profiles-and-overrides.md) — profiles, per-profile datastores, three-layer overrides
 - [Sidecar Experience](sidecar-experience.md) — sidecar architecture, watcher setup, capability comparison
 - [Harness Classification](harness-classification.md) — proxy-wired vs sidecar classification spec
