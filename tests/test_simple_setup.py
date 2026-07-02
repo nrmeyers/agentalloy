@@ -1681,10 +1681,13 @@ class TestContainerFlow:
         # image_tag is always "ghcr.io/nrmeyers/agentalloy:latest" regardless of build context
         assert st["image_tag"] == "ghcr.io/nrmeyers/agentalloy:latest"
 
-    def test_container_cpu_only_warning_shown_to_every_host(
+    def test_container_cpu_note_shown_to_every_host(
         self, tmp_state_dir: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
     ):
-        """Container deployment always warns CPU-only and auto-continues non-interactive."""
+        """Container deployment always notes CPU inference and auto-continues
+        non-interactive. Informational tone: it must not steer users to cancel
+        for native — CPU is fine for the runtime path; only corpus-wide work
+        (full reembed) is meaningfully slower."""
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
@@ -1704,9 +1707,12 @@ class TestContainerFlow:
 
         assert rc == 0
         out = capsys.readouterr().out.lower()
-        assert "cpu-only" in out
-        assert "gpu acceleration" in out
-        # Regression guard: the previous Apple-Silicon-specific phrasing is gone.
+        assert "inference on cpu" in out
+        assert "gpu" in out
+        # Regression guards: no scare framing, no cancel-for-native steer, and
+        # the previous Apple-Silicon-specific phrasing stays gone.
+        assert "noticeably slower" not in out
+        assert "cancel and re-run" not in out
         assert "apple silicon" not in out
 
     def test_container_cpu_only_warning_cancels_on_no(
