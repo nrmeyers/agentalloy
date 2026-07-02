@@ -394,39 +394,85 @@ def _check_skill_store_present(
         }
 
 
+def _registry_expected_skills(st: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    """(expected_skill_ids, bundled_pack_names, unverifiable_pack_names) from
+    the install-state pack registry.
+
+    Expected ids come from each recorded BUNDLED pack's manifest (deprecated
+    tombstones excluded). Third-party packs aren't bundled in the wheel, so
+    their contents can't be enumerated here — they're reported unverifiable
+    rather than silently folded into the floor. Empty registry → ([], [], []),
+    and the caller falls back to the flat MIN_SKILL_COUNT floor.
+    """
+    import yaml
+
+    import agentalloy
+    from agentalloy.pack_validation import expected_active_skill_ids
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for entry in st.get("installed_packs") or []:
+        name = (
+            entry
+            if isinstance(entry, str)
+            else (entry.get("name") if isinstance(entry, dict) else None)
+        )
+        if isinstance(name, str) and name and name not in seen:
+            seen.add(name)
+            names.append(name)
+
+    packs_root = Path(agentalloy.__file__).resolve().parent / "_packs"
+    expected: list[str] = []
+    bundled: list[str] = []
+    unverifiable: list[str] = []
+    for name in names:
+        pack_dir = packs_root / name
+        manifest_path = pack_dir / "pack.yaml"
+        if not manifest_path.is_file():
+            unverifiable.append(name)
+            continue
+        try:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            entries = manifest.get("skills") or []
+        except Exception:  # noqa: BLE001 — a broken bundled manifest ≠ a broken corpus
+            unverifiable.append(name)
+            continue
+        bundled.append(name)
+        expected.extend(expected_active_skill_ids(pack_dir, entries))
+    return expected, bundled, unverifiable
+
+
 def _check_skill_count(
     skills_path: str,
+    st: dict[str, Any],
     diag: dict[str, Any] | None = None,
     is_container: bool = False,
 ) -> dict[str, Any]:
-    """Check 5: Skill count >= MIN_SKILL_COUNT.
+    """Check 5: every skill the pack registry promises is active in the corpus.
 
-    When the service is running, count active skills via
-    /diagnostics/runtime; otherwise fall back to a direct skill-store read.
+    The expectation derives from the RECORDED pack set — a lean sdd-only
+    install expects 8 skills, not a hardcoded 25, and a fat install is
+    checked skill-by-skill rather than against a floor it clears trivially.
+    Falls back to the flat ``MIN_SKILL_COUNT`` floor when the registry is
+    empty/unreadable (fresh or legacy installs).
 
-    In container mode, direct file access is not available on the host;
-    the diagnostics endpoint is the only reliable source.
+    Active ids come from /diagnostics/runtime when the service is running,
+    else from a direct read-only store query. In container mode the
+    diagnostics endpoint is the only reliable source.
     """
     t0 = time.monotonic()
+
+    active_ids: set[str] | None = None
+    source = ""
     if diag is not None:
-        count = len(diag.get("store_state", []))
-        duration = int((time.monotonic() - t0) * 1000)
-        if count >= MIN_SKILL_COUNT:
-            return {
-                "name": "skill_count_meets_minimum",
-                "passed": True,
-                "duration_ms": duration,
-                "detail": (f"{count} >= {MIN_SKILL_COUNT} (via /diagnostics/runtime)"),
-            }
-        return {
-            "name": "skill_count_meets_minimum",
-            "passed": False,
-            "duration_ms": duration,
-            "error": f"{count} < {MIN_SKILL_COUNT} (via /diagnostics/runtime)",
-            "remediation": "Corpus is incomplete. Run `python -m agentalloy.install install-packs`",
+        active_ids = {
+            str(e.get("skill_id"))
+            for e in diag.get("store_state", [])
+            if isinstance(e, dict) and e.get("skill_id")
         }
-    # Container fallback: direct file access not available on host
-    if is_container:
+        source = "via /diagnostics/runtime"
+    elif is_container:
+        # Container fallback: direct file access not available on host.
         duration = int((time.monotonic() - t0) * 1000)
         return {
             "name": "skill_count_meets_minimum",
@@ -441,38 +487,80 @@ def _check_skill_count(
                 "for startup errors. The service may still be bootstrapping."
             ),
         }
-    try:
-        from agentalloy.storage.skill_store import open_skill_store
+    else:
+        try:
+            from agentalloy.storage.skill_store import open_skill_store
 
-        # Context manager closes the read-only connection so the fallback
-        # never contends with a writer's single-writer lock.
-        with open_skill_store(str(skills_path), read_only=True) as store:
-            rows = store.execute("SELECT count(*) FROM skills")
-        count = int(rows[0][0]) if rows and rows[0] else 0
-        duration = int((time.monotonic() - t0) * 1000)
+            # Context manager closes the read-only connection so the fallback
+            # never contends with a writer's single-writer lock.
+            with open_skill_store(str(skills_path), read_only=True) as store:
+                rows = store.execute(
+                    "SELECT s.skill_id FROM skills s "
+                    "JOIN skill_versions v ON v.version_id = s.current_version_id "
+                    "WHERE v.status = 'active' AND s.deprecated = false"
+                )
+            active_ids = {str(r[0]) for r in rows}
+            source = "direct store read"
+        except Exception as exc:
+            duration = int((time.monotonic() - t0) * 1000)
+            return {
+                "name": "skill_count_meets_minimum",
+                "passed": False,
+                "duration_ms": duration,
+                "error": str(exc),
+                "remediation": "Run `python -m agentalloy.install seed-corpus`",
+            }
+
+    expected, bundled, unverifiable = _registry_expected_skills(st)
+    count = len(active_ids)
+    duration = int((time.monotonic() - t0) * 1000)
+
+    if not expected:
+        # No usable registry — legacy flat floor.
         if count >= MIN_SKILL_COUNT:
             return {
                 "name": "skill_count_meets_minimum",
                 "passed": True,
                 "duration_ms": duration,
-                "detail": f"{count} >= {MIN_SKILL_COUNT} (MIN_SKILL_COUNT)",
+                "detail": f"{count} >= {MIN_SKILL_COUNT} ({source}; no pack registry)",
             }
         return {
             "name": "skill_count_meets_minimum",
             "passed": False,
             "duration_ms": duration,
-            "error": f"{count} < {MIN_SKILL_COUNT} (MIN_SKILL_COUNT)",
+            "error": f"{count} < {MIN_SKILL_COUNT} ({source}; no pack registry)",
             "remediation": "Corpus is incomplete. Run `python -m agentalloy.install install-packs`",
         }
-    except Exception as exc:
-        duration = int((time.monotonic() - t0) * 1000)
+
+    missing = sorted(sid for sid in expected if sid not in active_ids)
+    extra_note = f"; {len(unverifiable)} third-party pack(s) not verifiable" if unverifiable else ""
+    if not missing:
         return {
             "name": "skill_count_meets_minimum",
-            "passed": False,
+            "passed": True,
             "duration_ms": duration,
-            "error": str(exc),
-            "remediation": "Run `python -m agentalloy.install seed-corpus`",
+            "detail": (
+                f"all {len(expected)} skills from {len(bundled)} installed pack(s) "
+                f"active ({source}{extra_note})"
+            ),
         }
+    sample = ", ".join(missing[:5]) + (", …" if len(missing) > 5 else "")
+    return {
+        "name": "skill_count_meets_minimum",
+        "passed": False,
+        "duration_ms": duration,
+        "error": (
+            f"{len(missing)} of {len(expected)} skills promised by the pack "
+            f"registry ({', '.join(bundled)}) have no active version in the "
+            f"corpus ({source}{extra_note}): {sample}"
+        ),
+        "remediation": (
+            "Corpus is missing installed packs' skills. Stop the service "
+            "(`agentalloy server-stop`) and run "
+            "`python -m agentalloy.install install-packs` — it re-ingests any "
+            "pack whose skills are absent from the corpus."
+        ),
+    }
 
 
 def _check_harness_config_present(st: dict[str, Any]) -> dict[str, Any]:
@@ -489,9 +577,20 @@ def _check_harness_config_present(st: dict[str, Any]) -> dict[str, Any]:
             "duration_ms": 0,
             "detail": "manual harness — user-owned config, no files to verify",
         }
+    stale: list[str] = []
+    verified: list[str] = []
     for entry in files_written:
         fp = Path(entry["path"])
         if not fp.exists():
+            # A record whose whole repo is gone is a stale wiring entry (a
+            # deleted checkout), not a broken install — skip it with a note
+            # instead of failing verify forever. A missing file inside a
+            # still-existing repo remains a real failure.
+            repo_root = entry.get("repo_root")
+            anchor = Path(repo_root) if repo_root else fp.parent.parent
+            if not anchor.exists():
+                stale.append(str(fp))
+                continue
             duration = int((time.monotonic() - t0) * 1000)
             return {
                 "name": "harness_config_present",
@@ -513,13 +612,21 @@ def _check_harness_config_present(st: dict[str, Any]) -> dict[str, Any]:
                 "error": f"Sentinel block missing from {entry['path']}",
                 "remediation": "Re-run `python -m agentalloy.install wire-harness`",
             }
+        verified.append(str(fp))
     duration = int((time.monotonic() - t0) * 1000)
-    path = files_written[0]["path"]
+    stale_note = f" ({len(stale)} stale record(s) for deleted repos ignored)" if stale else ""
+    if not verified:
+        return {
+            "name": "harness_config_present",
+            "passed": True,
+            "duration_ms": duration,
+            "detail": f"all wiring records point at deleted repos{stale_note} — nothing to verify",
+        }
     return {
         "name": "harness_config_present",
         "passed": True,
         "duration_ms": duration,
-        "detail": f"{path} contains agentalloy sentinel block",
+        "detail": f"{verified[0]} contains agentalloy sentinel block{stale_note}",
     }
 
 
@@ -539,9 +646,11 @@ def _check_harness_config_url(st: dict[str, Any]) -> dict[str, Any]:
             "duration_ms": 0,
             "detail": "manual harness — user-owned config, URL not verified",
         }
+    any_live = False
     for entry in files_written:
         fp = Path(entry["path"])
         if fp.exists():
+            any_live = True
             content = fp.read_text()
             if expected_url in content:
                 duration = int((time.monotonic() - t0) * 1000)
@@ -552,6 +661,15 @@ def _check_harness_config_url(st: dict[str, Any]) -> dict[str, Any]:
                     "detail": f"Injected URL {expected_url} matches configured port",
                 }
     duration = int((time.monotonic() - t0) * 1000)
+    if not any_live:
+        # Every recorded wiring file is gone (deleted checkouts) — stale
+        # records, mirrored by harness_config_present; nothing to match.
+        return {
+            "name": "harness_config_url_matches",
+            "passed": True,
+            "duration_ms": duration,
+            "detail": "all wiring records point at deleted repos — URL not verified",
+        }
     return {
         "name": "harness_config_url_matches",
         "passed": False,
@@ -788,7 +906,7 @@ def run_checks(st: dict[str, Any], root: Path | None = None) -> dict[str, Any]: 
         *embed_checks,
         _check_duckdb_present(fragments_path, diag=diag, is_container=is_container),
         _check_skill_store_present(skills_path, diag=diag, is_container=is_container),
-        _check_skill_count(skills_path, diag=diag, is_container=is_container),
+        _check_skill_count(skills_path, st, diag=diag, is_container=is_container),
         _check_harness_config_present(st),
         _check_harness_config_url(st),
         _check_port_available(port),

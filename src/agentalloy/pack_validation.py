@@ -121,6 +121,38 @@ def validate_pack_skills(
 # ---------------------------------------------------------------------------
 
 
+def expected_active_skill_ids(pack_dir: Path, skills_entries: list[dict[str, Any]]) -> list[str]:
+    """skill_ids the corpus should hold with an ACTIVE version once the pack
+    is installed: every manifest entry except those whose YAML carries
+    ``deprecated: true`` (ingest processes those as deprecation tombstones,
+    never as active skills).
+
+    Shared by the corpus-aware skip in ``install_local_pack`` and verify's
+    registry-derived skill-count check. Unreadable YAMLs stay included —
+    ingest surfaces the real error, and verify counting one too many beats
+    silently expecting one too few.
+    """
+    import yaml
+
+    ids: list[str] = []
+    for entry in skills_entries:
+        sid = entry.get("skill_id")
+        fname = str(entry.get("file", ""))
+        deprecated = False
+        path = pack_dir / fname if fname else None
+        if path is not None and path.is_file():
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                if isinstance(data, dict):
+                    deprecated = bool(data.get("deprecated", False))
+                    sid = sid or data.get("skill_id")
+            except Exception:  # noqa: BLE001 — ingest surfaces the real error
+                pass
+        if sid and not deprecated:
+            ids.append(str(sid))
+    return ids
+
+
 def content_hash(pack_dir: Path, skills_entries: list[dict[str, Any]]) -> str:
     """Return a stable SHA-256 of the pack's manifest + all skill YAML bytes.
 

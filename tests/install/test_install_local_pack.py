@@ -597,3 +597,162 @@ class TestPackSelector:
         assert "nodejs" in chosen
         assert "nonexistent" not in chosen
         assert unknown == ["nonexistent"]
+
+
+# ---------------------------------------------------------------------------
+# Corpus-aware version-gate skip — _corpus_missing_active / install_local_pack
+# ---------------------------------------------------------------------------
+
+
+def _seed_active_skill(db_path: str, skill_id: str) -> None:
+    """Fresh store with one skill whose current version is active."""
+    from agentalloy.storage.skill_store import open_skill_store
+
+    with open_skill_store(db_path) as store:
+        store.migrate()
+        store.execute(
+            "INSERT INTO skills (skill_id, canonical_name, deprecated, always_apply, "
+            "current_version_id) VALUES (?, ?, false, false, ?)",
+            [skill_id, skill_id, f"{skill_id}-v1"],
+        )
+        store.execute(
+            "INSERT INTO skill_versions (version_id, skill_id, version_number, status, "
+            "raw_prose) VALUES (?, ?, 1, 'active', 'p')",
+            [f"{skill_id}-v1", skill_id],
+        )
+
+
+class TestCorpusMissingActive:
+    def _settings(self, db_path: Path) -> MagicMock:
+        return MagicMock(duckdb_path=str(db_path))
+
+    def test_present_active_skill_is_not_missing(self, tmp_path: Path) -> None:
+        db = tmp_path / "agentalloy.duck"
+        _seed_active_skill(str(db), "a")
+        with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
+            assert ip._corpus_missing_active(["a"]) == []  # pyright: ignore[reportPrivateUsage]
+
+    def test_absent_skill_is_missing(self, tmp_path: Path) -> None:
+        db = tmp_path / "agentalloy.duck"
+        _seed_active_skill(str(db), "a")
+        with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
+            missing = ip._corpus_missing_active(["a", "b"])  # pyright: ignore[reportPrivateUsage]
+        assert missing == ["b"]
+
+    def test_no_store_file_reports_all_missing(self, tmp_path: Path) -> None:
+        db = tmp_path / "never-created.duck"
+        with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
+            assert ip._corpus_missing_active(["a", "b"]) == ["a", "b"]  # pyright: ignore[reportPrivateUsage]
+
+    def test_unreadable_store_reports_all_missing(self, tmp_path: Path) -> None:
+        # A wrong skip is unfixable; a redundant re-ingest is idempotent.
+        db = tmp_path / "agentalloy.duck"
+        db.write_text("not a duckdb file")
+        with patch("agentalloy.config.get_settings", return_value=self._settings(db)):
+            assert ip._corpus_missing_active(["a"]) == ["a"]  # pyright: ignore[reportPrivateUsage]
+
+    def test_empty_id_list_short_circuits(self) -> None:
+        assert ip._corpus_missing_active([]) == []  # pyright: ignore[reportPrivateUsage]
+
+
+class TestCorpusAwareSkip:
+    """The version gate's 'already_installed' must be confirmed against the
+    corpus: a registry that outlives the store (engine migration, wiped
+    corpus) otherwise wedges install-packs into a skip no re-run can fix —
+    the exact sdd-only-corpus failure after the v4→v5 migration."""
+
+    def _install(self, tmp_path: Path, *, seed_corpus_skill: bool):
+        from agentalloy.pack_validation import content_hash
+
+        _write_skill_yaml(tmp_path, "a")
+        entries = [{"skill_id": "a", "file": "a.yaml", "fragment_count": 3}]
+        _write_pack_manifest(tmp_path, "x", entries)
+
+        corpus_dir = tmp_path / "corpus"
+        corpus_dir.mkdir()
+        db_path = corpus_dir / "agentalloy.duck"
+        (corpus_dir / "fragments.lance").mkdir()
+        if seed_corpus_skill:
+            _seed_active_skill(str(db_path), "a")
+        else:
+            from agentalloy.storage.skill_store import open_skill_store
+
+            with open_skill_store(str(db_path)) as store:  # real, migrated, empty
+                store.migrate()
+
+        # Registry says pack x is installed with EXACTLY this content.
+        state = {
+            "installed_packs": [
+                {
+                    "name": "x",
+                    "version": "1.0.0",
+                    "content_hash": content_hash(tmp_path, entries),
+                }
+            ]
+        }
+        ingest_forces: list[bool] = []
+
+        def fake_ingest(yaml_path, root, *, no_restart, force, strict):
+            ingest_forces.append(force)
+            return {
+                "yaml": "a.yaml",
+                "exit_code": 0,
+                "outcome": "ingested",
+                "stdout_tail": "",
+                "stderr_tail": "",
+            }
+
+        with (
+            patch.object(ip, "_check_embedding_dim", return_value=None),
+            patch.object(ip, "_ingest_yaml", side_effect=fake_ingest),
+            patch.object(ip.install_state, "load_state", return_value=state),
+            patch.object(ip.install_state, "save_state"),
+            patch.object(ip.install_state, "record_step"),
+            patch.object(ip.install_state, "corpus_dir", return_value=corpus_dir),
+            patch(
+                "agentalloy.config.get_settings",
+                return_value=MagicMock(
+                    duckdb_path=str(db_path),
+                    fragments_lance_path=str(corpus_dir / "fragments.lance"),
+                ),
+            ),
+        ):
+            result = ip.install_local_pack(tmp_path, root=tmp_path, run_reembed=False)
+        return result, ingest_forces
+
+    def test_skip_honored_when_corpus_has_the_skills(self, tmp_path: Path) -> None:
+        result, forces = self._install(tmp_path, seed_corpus_skill=True)
+        assert result["action"] == "already_installed"
+        assert forces == []  # no ingest ran
+
+    def test_skip_overridden_when_corpus_is_missing_the_skills(self, tmp_path: Path) -> None:
+        result, forces = self._install(tmp_path, seed_corpus_skill=False)
+        assert result["action"] == "ingested"
+        assert forces == [True]  # fell through to a FORCE re-ingest
+
+
+class TestExpectedActiveSkillIds:
+    def test_excludes_deprecated_tombstones(self, tmp_path: Path) -> None:
+        from agentalloy.pack_validation import expected_active_skill_ids
+
+        (tmp_path / "live.yaml").write_text("skill_id: live\n", encoding="utf-8")
+        (tmp_path / "dead.yaml").write_text("skill_id: dead\ndeprecated: true\n", encoding="utf-8")
+        entries = [
+            {"skill_id": "live", "file": "live.yaml"},
+            {"skill_id": "dead", "file": "dead.yaml"},
+        ]
+        assert expected_active_skill_ids(tmp_path, entries) == ["live"]
+
+    def test_skill_id_falls_back_to_yaml(self, tmp_path: Path) -> None:
+        from agentalloy.pack_validation import expected_active_skill_ids
+
+        (tmp_path / "a.yaml").write_text("skill_id: from-yaml\n", encoding="utf-8")
+        assert expected_active_skill_ids(tmp_path, [{"file": "a.yaml"}]) == ["from-yaml"]
+
+    def test_unreadable_yaml_stays_included(self, tmp_path: Path) -> None:
+        # Counting one too many beats silently expecting one too few.
+        from agentalloy.pack_validation import expected_active_skill_ids
+
+        (tmp_path / "bad.yaml").write_text(":\n\t- not yaml", encoding="utf-8")
+        entries = [{"skill_id": "kept", "file": "bad.yaml"}]
+        assert expected_active_skill_ids(tmp_path, entries) == ["kept"]

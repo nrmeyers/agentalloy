@@ -455,6 +455,10 @@ class TestInstallLocalPackGatesIntegration:
         with (
             patch.object(ip, "_check_embedding_dim", return_value=None),
             patch.object(ip.install_state, "load_state", return_value=installed_state),
+            # The corpus-aware confirmation is covered by its own tests
+            # (test_install_local_pack.TestCorpusAwareSkip); pin it here so
+            # this test exercises the version gate in isolation.
+            patch.object(ip, "_corpus_missing_active", return_value=[]),
         ):
             # Default strict=True: the fixture is lint-clean, so Gate 1 passes
             # for real and the version gate (not lint) drives this outcome.

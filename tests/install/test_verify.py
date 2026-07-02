@@ -283,6 +283,74 @@ class TestHarnessConfigPresent:
         result = _check_harness_config_present(st)
         assert result["passed"] is False
 
+    def test_stale_record_for_deleted_repo_is_skipped(self, tmp_path: Path) -> None:
+        """A record whose whole repo was deleted is stale wiring, not a broken
+        install — verify must not fail forever on it."""
+        live = tmp_path / "live-repo" / ".claude" / "settings.json"
+        live.parent.mkdir(parents=True)
+        live.write_text("<!-- BEGIN agentalloy install -->x<!-- END agentalloy install -->")
+        st: dict[str, Any] = {
+            "harness_files_written": [
+                {
+                    "path": str(tmp_path / "deleted-repo" / ".claude" / "settings.json"),
+                    "sentinel_begin": None,
+                },
+                {"path": str(live), "sentinel_begin": "<!-- BEGIN agentalloy install -->"},
+            ],
+        }
+        result = _check_harness_config_present(st)
+        assert result["passed"] is True
+        assert "stale" in result["detail"]
+
+    def test_all_records_stale_passes_with_note(self, tmp_path: Path) -> None:
+        st: dict[str, Any] = {
+            "harness_files_written": [
+                {
+                    "path": str(tmp_path / "gone" / ".claude" / "settings.json"),
+                    "sentinel_begin": None,
+                }
+            ],
+        }
+        result = _check_harness_config_present(st)
+        assert result["passed"] is True
+        assert "deleted repos" in result["detail"]
+
+    def test_missing_file_in_existing_repo_still_fails(self, tmp_path: Path) -> None:
+        """The repo is there but the wiring file is gone — a real failure."""
+        repo = tmp_path / "repo" / ".claude"
+        repo.mkdir(parents=True)
+        st: dict[str, Any] = {
+            "harness_files_written": [
+                {"path": str(repo / "settings.json"), "sentinel_begin": None}
+            ],
+        }
+        result = _check_harness_config_present(st)
+        assert result["passed"] is False
+        assert "File not found" in result["error"]
+
+    def test_stale_detection_prefers_recorded_repo_root(self, tmp_path: Path) -> None:
+        """When the record carries repo_root, staleness keys off it rather
+        than the path-shape heuristic."""
+        repo = tmp_path / "shallow"
+        repo.mkdir()
+        st: dict[str, Any] = {
+            "harness_files_written": [
+                {
+                    # file directly under the repo (parent.parent == tmp_path,
+                    # which exists) — repo_root is what proves the repo lives.
+                    "path": str(repo / "AGENTS.md"),
+                    "repo_root": str(repo),
+                    "sentinel_begin": None,
+                }
+            ],
+        }
+        result = _check_harness_config_present(st)
+        assert result["passed"] is False  # repo exists, file missing → real failure
+
+        st["harness_files_written"][0]["repo_root"] = str(tmp_path / "gone-repo")
+        result = _check_harness_config_present(st)
+        assert result["passed"] is True  # recorded repo gone → stale record
+
     def test_pass_when_manual_harness(self) -> None:
         """Empty harness_files_written with no integration_vector is manual harness."""
         st: dict[str, Any] = {"harness_files_written": []}
@@ -462,14 +530,54 @@ class TestDBChecksWithServiceUp:
         assert "runtime_store" in result["error"]
 
     def test_skill_count_passes_when_at_minimum(self) -> None:
+        # Empty registry ({}): the check falls back to the flat floor.
         diag = self._diag(runtime="ok", telemetry="ok", skills=MIN_SKILL_COUNT)
-        result = _check_skill_count("/unused", diag=diag)
+        result = _check_skill_count("/unused", {}, diag=diag)
         assert result["passed"] is True
 
     def test_skill_count_fails_when_below_minimum(self) -> None:
         diag = self._diag(runtime="ok", telemetry="ok", skills=MIN_SKILL_COUNT - 1)
-        result = _check_skill_count("/unused", diag=diag)
+        result = _check_skill_count("/unused", {}, diag=diag)
         assert result["passed"] is False
+
+    def test_skill_count_derives_from_pack_registry(self) -> None:
+        # An sdd-only install expects sdd's skills — not the flat 25 floor.
+        # Build the diag from the real bundled manifest so the test tracks it.
+        from agentalloy.install.subcommands.verify import _registry_expected_skills
+
+        st = {"installed_packs": [{"name": "sdd", "version": "1.1.0"}]}
+        expected, bundled, unverifiable = _registry_expected_skills(st)
+        assert bundled == ["sdd"] and not unverifiable
+        assert 0 < len(expected) < MIN_SKILL_COUNT  # the lean-install case
+
+        diag = self._diag(runtime="ok", telemetry="ok", skills=0)
+        diag["store_state"] = [{"skill_id": sid} for sid in expected]
+        result = _check_skill_count("/unused", st, diag=diag)
+        assert result["passed"] is True
+        assert "installed pack(s)" in result["detail"]
+
+    def test_skill_count_fails_listing_missing_registry_skills(self) -> None:
+        from agentalloy.install.subcommands.verify import _registry_expected_skills
+
+        st = {"installed_packs": [{"name": "sdd", "version": "1.1.0"}]}
+        expected, _, _ = _registry_expected_skills(st)
+        present, absent = expected[:-2], expected[-2:]
+
+        diag = self._diag(runtime="ok", telemetry="ok", skills=0)
+        diag["store_state"] = [{"skill_id": sid} for sid in present]
+        result = _check_skill_count("/unused", st, diag=diag)
+        assert result["passed"] is False
+        assert "2 of" in result["error"]
+        assert absent[0] in result["error"] or absent[1] in result["error"]
+        assert "install-packs" in result["remediation"]
+
+    def test_skill_count_third_party_packs_are_noted_not_failed(self) -> None:
+        # A registry with only non-bundled packs can't be enumerated — the
+        # check falls back to the flat floor and notes nothing is verifiable.
+        st = {"installed_packs": [{"name": "my-private-pack", "version": "1.0.0"}]}
+        diag = self._diag(runtime="ok", telemetry="ok", skills=MIN_SKILL_COUNT)
+        result = _check_skill_count("/unused", st, diag=diag)
+        assert result["passed"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +609,7 @@ class TestContainerFallback:
         assert "container logs" in result["remediation"]
 
     def test_skill_count_fallback_skips_file_access(self) -> None:
-        result = _check_skill_count("/nonexistent/ladybug", diag=None, is_container=True)
+        result = _check_skill_count("/nonexistent/ladybug", {}, diag=None, is_container=True)
         assert result["passed"] is False
         assert "Service not reachable" in result["error"]
         assert "count skills" in result["error"]

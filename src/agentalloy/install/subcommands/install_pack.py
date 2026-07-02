@@ -43,6 +43,7 @@ from agentalloy.pack_validation import (
     VersionGateResult,
     check_version_gate,
     content_hash,
+    expected_active_skill_ids,
     validate_pack_skills,
 )
 from agentalloy.storage.open import open_fragments, open_skills
@@ -562,6 +563,38 @@ def _check_embedding_dim(manifest: dict[str, Any], root: Path) -> str | None:
     return None
 
 
+def _corpus_missing_active(skill_ids: list[str]) -> list[str]:
+    """The subset of ``skill_ids`` with no active version in the corpus.
+
+    Confirms a version-gate skip against the store itself: the registry can
+    outlive the corpus, and returning ``already_installed`` for skills that
+    aren't there leaves the corpus broken with no re-run that can fix it. On
+    any read failure everything is reported missing — a force re-ingest is
+    idempotent, a wrong skip is not. Deliberately does NOT filter on
+    ``skills.deprecated``: a tombstoned skill still counts as present.
+    """
+    if not skill_ids:
+        return []
+    try:
+        from agentalloy.config import get_settings
+        from agentalloy.storage.skill_store import open_skill_store
+
+        settings = get_settings()
+        if not Path(settings.duckdb_path).exists():
+            return list(skill_ids)
+        with open_skill_store(settings.duckdb_path, read_only=True) as store:
+            rows = store.execute(
+                "SELECT s.skill_id FROM skills s "
+                "JOIN skill_versions v ON v.version_id = s.current_version_id "
+                "WHERE v.status = 'active' AND list_contains($ids, s.skill_id)",
+                {"ids": list(skill_ids)},
+            )
+        present = {str(r[0]) for r in rows}
+        return [sid for sid in skill_ids if sid not in present]
+    except Exception:  # noqa: BLE001 — unreadable store → re-ingest, never skip
+        return list(skill_ids)
+
+
 def install_local_pack(
     pack_dir: Path,
     *,
@@ -677,22 +710,38 @@ def install_local_pack(
         installed_packs=installed_packs_list,
     )
     if version_result.skip:
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "action": "already_installed",
-            "pack": name,
-            "pack_dir": str(pack_dir),
-            "version": manifest.get("version"),
-            "skill_count": len(skills_entries),
-            "skills_ingested": 0,
-            "skills_already_present": len(skills_entries),
-            "skills_deprecated": 0,
-            "skills_deprecated_updated": 0,
-            "ingest_results": [],
-            "ingest_failures": 0,
-            "remediation": None,
-            "duration_ms": int((time.monotonic() - t0) * 1000),
-        }
+        # The registry can outlive the corpus (engine migration, a wiped or
+        # reseeded store): "already installed" is only true if the pack's
+        # skills actually sit in the corpus with active versions. When they
+        # don't, fall through to a FORCE re-ingest instead of skipping — a
+        # skip here is a lie no re-run can fix (issue: sdd-only corpora after
+        # the v4→v5 migration).
+        missing = _corpus_missing_active(expected_active_skill_ids(pack_dir, skills_entries))
+        if missing:
+            logger.info(
+                "version gate says already-installed, but %d of the pack's skills "
+                "are absent from the corpus (e.g. %s) — forcing re-ingest",
+                len(missing),
+                missing[0],
+            )
+            version_result = VersionGateResult(ok=True, changed=True)
+        else:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "action": "already_installed",
+                "pack": name,
+                "pack_dir": str(pack_dir),
+                "version": manifest.get("version"),
+                "skill_count": len(skills_entries),
+                "skills_ingested": 0,
+                "skills_already_present": len(skills_entries),
+                "skills_deprecated": 0,
+                "skills_deprecated_updated": 0,
+                "ingest_results": [],
+                "ingest_failures": 0,
+                "remediation": None,
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+            }
     if not version_result.ok:
         return {
             "schema_version": SCHEMA_VERSION,
