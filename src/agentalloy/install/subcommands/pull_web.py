@@ -20,12 +20,15 @@ import argparse
 import logging
 import shutil
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 from agentalloy.install import state as install_state
 from agentalloy.install.release_check import REPO, current_version
 from agentalloy.install.subcommands.pull_models import (
+    _DOWNLOAD_USER_AGENT,
     _download_with_retry,
     _extract_archive,
 )
@@ -45,6 +48,26 @@ def web_dist_dir(version: str) -> Path:
 
 def _asset_url(version: str) -> str:
     return f"https://github.com/{REPO}/releases/download/v{version}/{WEB_DIST_ASSET}"
+
+
+def _asset_available(url: str) -> bool:
+    """HEAD probe so a missing asset fails fast.
+
+    A 404 means no bundle was published for this version (releases <= v5.1.3
+    predate bundle assets) — that's permanent, and letting it ride the
+    transient-error retry loop stalls setup for minutes. Anything else
+    (transient error, other status) defers to the retry downloader.
+    """
+    request = urllib.request.Request(  # noqa: S310 — https only
+        url, method="HEAD", headers={"User-Agent": _DOWNLOAD_USER_AGENT}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10):  # noqa: S310 — https only
+            return True
+    except urllib.error.HTTPError as exc:
+        return exc.code != 404
+    except OSError:
+        return True
 
 
 def _prune_other_versions(root: Path, keep: str) -> list[str]:
@@ -73,6 +96,14 @@ def pull_web_dist(version: str | None = None, *, force: bool = False) -> dict[st
     root = web_dist_root()
     root.mkdir(parents=True, exist_ok=True)
     url = _asset_url(ver)
+    if not _asset_available(url):
+        return {
+            "success": False,
+            "skipped": False,
+            "version": ver,
+            "dest": str(dest),
+            "error": f"no web UI bundle published for v{ver} ({url})",
+        }
 
     with tempfile.TemporaryDirectory(dir=root, prefix=".pull-web-") as tmp:
         archive = Path(tmp) / WEB_DIST_ASSET

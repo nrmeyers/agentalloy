@@ -35,6 +35,12 @@ def _fake_download(bundle_ok: bool = True, *, with_index: bool = True):
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _no_head_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the asset-existence probe — no test here may touch the network."""
+    monkeypatch.setattr(pull_web, "_asset_available", lambda url: True)
+
+
 def test_pull_installs_versioned_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pull_web, "_download_with_retry", _fake_download())
     result = pull_web.pull_web_dist("9.9.9")
@@ -57,6 +63,18 @@ def test_pull_prunes_other_versions(monkeypatch: pytest.MonkeyPatch) -> None:
     pull_web.pull_web_dist("2.0.0")
     assert not pull_web.web_dist_dir("1.0.0").exists()
     assert (pull_web.web_dist_dir("2.0.0") / "index.html").is_file()
+
+
+def test_missing_asset_fails_fast_without_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pull_web, "_asset_available", lambda url: False)
+
+    def boom(url: str, dest_path: Path, *, label: str = "") -> dict[str, Any]:
+        raise AssertionError("retry downloader must not run when the asset is absent")
+
+    monkeypatch.setattr(pull_web, "_download_with_retry", boom)
+    result = pull_web.pull_web_dist("9.9.9")
+    assert result["success"] is False
+    assert "no web UI bundle published" in result["error"]
 
 
 def test_download_failure_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:

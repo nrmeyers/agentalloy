@@ -74,6 +74,19 @@ class MockSetup:
             self.mocks[name].return_value = 0
             self.patchers.append(mp)
 
+        # Step h calls pull_web_dist() directly (not .run()); stub it so setup
+        # tests never probe/download the GitHub release asset.
+        pw = patch(f"{self._get_patch_path('pull_web')}.pull_web_dist")
+        self.mocks["pull_web"] = pw.start()
+        self.mocks["pull_web"].return_value = {
+            "success": True,
+            "skipped": False,
+            "version": "0.0.0",
+            "dest": "/tmp/web-dist",
+            "error": None,
+        }
+        self.patchers.append(pw)
+
         # preflight.run_preflight is a module-level function, not .run()
         pf = patch("agentalloy.install.subcommands.preflight.run_preflight")
         self.mocks["preflight"] = pf.start()
