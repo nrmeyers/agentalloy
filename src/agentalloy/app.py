@@ -82,9 +82,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # that don't use /app should skip this silently.
     if Path("/.dockerenv").exists() or Path("/app").is_dir():
         Path("/app/data").mkdir(parents=True, exist_ok=True)
-    # Ensure the skill schema exists, then serve it READ-ONLY (decision D4): the
-    # writers — ingest / reembed, separate processes — take the exclusive lock,
-    # and the service answers from the in-memory RuntimeCache. The brief
+    # Ensure the skill schema exists, then serve it READ-ONLY for the app's
+    # lifetime. DuckDB grants a writer only while nothing else holds the file
+    # — this read-only handle included — so out-of-process writers (the
+    # reembed / install-pack CLIs) stop this service first (`agentalloy
+    # reembed` does so automatically), and in-process writers (web reembed /
+    # wizard install) wrap the write in ``store.released()``. The brief
     # writer-migrate here runs before serving begins. Fragments live in Lance
     # (MVCC, no lock); telemetry is a separate service-owned RW file.
     _writer = open_skills(settings, read_only=False)
@@ -131,6 +134,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.dependency_overrides[get_orchestrator] = lambda: orchestrator
     app.dependency_overrides[get_retrieve_orchestrator] = lambda: retrieve_orch
     app.dependency_overrides[get_skill_store] = lambda: store  # inspection always live
+    # Stashed so an in-process corpus write (web reembed / wizard install) can
+    # rebind a freshly reloaded RuntimeCache — see web/runtime_refresh.py.
+    app.state.compose_orchestrator = orchestrator
+    app.state.retrieve_orchestrator = retrieve_orch
     health_checker = HealthChecker(
         store,
         embed_client,

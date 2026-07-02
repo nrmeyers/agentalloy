@@ -16,6 +16,7 @@ instead.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -426,10 +427,19 @@ async def reembed(
 
     def _run() -> dict[str, Any]:
         from agentalloy.reembed.cli import run_bulk_reembed
+        from agentalloy.web.runtime_refresh import refresh_runtime_cache
 
         sink: dict[str, Any] = {}
-        rc = run_bulk_reembed(no_restart=True, result_sink=sink)
-        return {"dry_run": False, "exit_code": rc, **sink}
+        # This process holds the skill store read-only for its lifetime, and
+        # DuckDB grants the reembed writer only while nothing else has the
+        # file open — release the handle for the duration, reconnect after,
+        # then reload the cache so the new corpus serves without a restart.
+        store = getattr(request.app.state, "store", None)
+        release = store.released() if store is not None else nullcontext()
+        with release:
+            rc = run_bulk_reembed(no_restart=True, result_sink=sink)
+        refreshed = refresh_runtime_cache(request.app)
+        return {"dry_run": False, "exit_code": rc, "cache_refreshed": refreshed, **sink}
 
     return await asyncio.to_thread(_run)
 

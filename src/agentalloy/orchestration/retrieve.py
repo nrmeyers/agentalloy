@@ -47,6 +47,11 @@ class RetrieveOrchestrator:
         self._telemetry = telemetry
         self._embedding_model = embedding_model
 
+    def rebind_source(self, source: RuntimeCache | SkillStore) -> None:
+        """Swap the skill source — a freshly reloaded RuntimeCache after an
+        in-process corpus write (see web/runtime_refresh.py)."""
+        self._source = source
+
     async def by_id(self, skill_id: str) -> RetrieveByIdResponse | None:
         start_ns = time.perf_counter_ns()
         skill = await asyncio.to_thread(self._get_skill_by_id, skill_id)

@@ -97,6 +97,27 @@ def _read_corpus_schema_version(duck_path: Path) -> int | None:
     return None
 
 
+def _stamp_corpus_schema_version(duck_path: Path, version: int) -> bool:
+    """Write the ``schema_version`` marker in place (brief writer open).
+
+    Returns False when the writer lock is unavailable — a running service or a
+    concurrent ingest holds the file — leaving the caller to warn instead. In
+    the ``upgrade`` flow the service is stopped when this runs, so the marker
+    lands here and the old post-upgrade advice to run a full ``reembed
+    --force`` (30–40 min on CPU) just to stamp one row never fires.
+    """
+    try:
+        from agentalloy.storage.card_index import META_KEY_SCHEMA_VERSION
+        from agentalloy.storage.skill_store import DuckDBSkillStore
+
+        with DuckDBSkillStore(str(duck_path)) as store:
+            store.migrate()  # legacy corpora may predate the corpus_meta table
+            store.set_meta(META_KEY_SCHEMA_VERSION, str(version))
+        return True
+    except Exception:
+        return False
+
+
 def _expected_corpus_schema_version() -> int:
     """Code's expected corpus schema version. Bump when migrations land."""
     from agentalloy.install.subcommands.seed_corpus import EXPECTED_CORPUS_SCHEMA_VERSION
@@ -209,11 +230,21 @@ def update(root: Path | None = None) -> dict[str, Any]:
 
         # 2. Schema migrations
         if recorded is None:
-            summary["warnings"].append(
-                f"Corpus predates the schema_version marker; treating as v{expected} "
-                "(current — harmless). The marker is stamped on the next corpus "
-                "rebuild (`agentalloy reembed --force`)."
-            )
+            # Missing marker means "current" (no migrations to run) — so stamp
+            # it in place rather than telling the user to run a full corpus
+            # rebuild for one metadata row. Falls back to a warning when the
+            # file is held open (a running service blocks the brief writer).
+            if _stamp_corpus_schema_version(duck_path, expected):
+                summary["corpus"]["recorded_schema_version"] = expected
+                summary["corpus"]["schema_version_stamped"] = True
+            else:
+                summary["warnings"].append(
+                    f"Corpus predates the schema_version marker; treating as "
+                    f"v{expected} (current — harmless). Could not stamp it in "
+                    "place (the corpus DB is held open, likely by the running "
+                    "service); the marker is written by the next `agentalloy "
+                    "upgrade` or reembed pass."
+                )
         elif recorded < expected:
             summary["migrations"] = _run_migrations(duck_path, recorded, expected)
             failed = [m for m in summary["migrations"] if not m.get("applied")]

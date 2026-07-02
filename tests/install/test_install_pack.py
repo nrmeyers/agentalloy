@@ -206,8 +206,10 @@ class TestRenderHumanFailureDetail:
         )
         ip._render_human(result)  # pyright: ignore[reportPrivateUsage]
         out = capsys.readouterr().out
-        assert "Another process holds the corpus DB lock" in out
-        assert "writing agentalloy.duck" in out
+        # The remediation names the usual holder — a running service — and the
+        # stop/re-run/start sequence, not just "wait and retry".
+        assert "Another process is holding the corpus DB" in out
+        assert "server-stop" in out
 
 
 class TestCanonicalModelName:

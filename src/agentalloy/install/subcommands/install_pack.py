@@ -53,11 +53,16 @@ logger = __import__("logging").getLogger(__name__)
 SCHEMA_VERSION = 1
 STEP_NAME = "install-pack"
 
-# Shown when the skill store's single writer lock is held by a concurrent writer.
-# In v5 this is benign and transient — wait and retry. Imported by install_packs.
+# Shown when the corpus DB is held by another process. The usual holder is the
+# running agentalloy service (its read-only handle blocks writers for its whole
+# lifetime); a concurrent ingest/reembed is the transient case. Imported by
+# install_packs and reembed.
 LOCK_HELD_REMEDIATION = (
-    "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
-    "writing agentalloy.duck). Wait for it to finish and re-run the command."
+    "Another process is holding the corpus DB (agentalloy.duck) open. A running "
+    "agentalloy service blocks writers for its whole lifetime — stop it first "
+    "(`agentalloy server-stop`), re-run this command, then `agentalloy "
+    "server-start`. If a concurrent ingest/reembed briefly holds the lock "
+    "instead, wait and re-run."
 )
 
 # Hardcoded URL pattern. The placeholder org is ``navistone``; this lands

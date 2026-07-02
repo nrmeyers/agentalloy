@@ -165,3 +165,37 @@ def test_install_in_lane_records_approval_and_advances(
     # The lane completes: approval auto-advances back to intake.
     assert body["approval"]["advanced"]["phase"] == "intake"
     assert (repo / ".agentalloy" / "approved" / "add-skill").is_file()
+
+
+def test_install_releases_store_handle_during_write(
+    client, repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """install-pack's ingest + reembed need the DuckDB writer, which this
+    process's read-only handle would block — the install must run inside the
+    store's released() window."""
+    from contextlib import contextmanager
+
+    _scaffold(client, repo)
+    events: list[str] = []
+
+    class FakeStore:
+        @contextmanager
+        def released(self):
+            events.append("released-enter")
+            yield
+            events.append("released-exit")
+
+    client.app.state.store = FakeStore()
+    monkeypatch.setattr(
+        "agentalloy.install.subcommands.install_pack.install_local_pack",
+        lambda pack_dir, **kw: events.append("install") or {"action": "ingested"},
+    )
+    r = client.post(
+        "/api/wizard/install",
+        json={"repo": str(repo), "pack": "team-pack"},
+        headers=_CSRF,
+    )
+    assert r.status_code == 200
+    assert events == ["released-enter", "install", "released-exit"]
+    # No real runtime in the test app — refresh reports False, never raises.
+    assert r.json()["cache_refreshed"] is False

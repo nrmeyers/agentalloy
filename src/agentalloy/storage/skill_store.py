@@ -5,12 +5,15 @@ fragments / skill_dependencies) plus the ``corpus_meta`` kv. This is the
 SQL-canonical source of truth for fragment content + metadata (decision D7);
 the Lance ``fragments`` dataset is a derived index built from it.
 
-Concurrency (decisions D4 / OQ#4): DuckDB is single-writer across processes. The
-serving process opens this file READ-ONLY, transiently — it loads the in-memory
-``RuntimeCache`` at boot (and again after a reembed) and then closes the handle,
-so an ingest/reembed process can take the exclusive write lock without stopping
-the service. ``corpus_meta`` writes during reembed therefore never contend with
-the service (the service is not holding the file open).
+Concurrency (decisions D4 / OQ#4): DuckDB is single-writer across processes,
+and a writer can only attach while NO other process holds the file — read-only
+handles included. The serving process holds this store read-only for its whole
+lifetime (live inspection reads come from it, not just the boot-time
+``RuntimeCache`` load), so out-of-process writers (the ingest / reembed CLIs)
+must stop the service first — ``agentalloy reembed`` does that automatically —
+and in-process writers (the web UI's reembed / pack install) wrap the write in
+:meth:`DuckDBSkillStore.released`, which closes the handle for the duration
+and reconnects afterwards.
 
 The public surface mirrors the legacy skill-store surface (``execute`` / ``scalar`` /
 ``migrate`` / ``delete_skill`` / ``rollback_skill`` / ``rollback_batch``) so the
@@ -23,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
 from typing import Any
@@ -151,6 +155,24 @@ class DuckDBSkillStore:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    @contextmanager
+    def released(self) -> Iterator[None]:
+        """Temporarily release the DuckDB file handle; reconnect on exit.
+
+        A writer can only attach to ``agentalloy.duck`` while no other
+        connection — same process or not, read-only or not — holds the file.
+        The long-lived service keeps this store open read-only, so in-process
+        writers (the web UI's reembed / pack install) wrap their write in this
+        context manager. The object stays valid for everyone holding a
+        reference; operations *during* the window raise ``RuntimeError``
+        ("not open").
+        """
+        self.close()
+        try:
+            yield
+        finally:
+            self.open()
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:

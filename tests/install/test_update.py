@@ -50,14 +50,65 @@ class TestSchemaDrift:
         (user_corpus / "agentalloy.duck").write_text("fake")
         (user_corpus / "fragments.lance").mkdir(exist_ok=True)
 
-    def test_no_meta_table_warns(self, repo_root: Path) -> None:
+    def test_no_meta_table_warns_when_stamp_blocked(self, repo_root: Path) -> None:
+        # The fake (non-DuckDB) file makes the in-place stamp fail, standing in
+        # for the real blocked case: a running service holding the file open.
         self._setup(repo_root)
         with patch.object(upd, "_read_corpus_schema_version", return_value=None):
             result = upd.update(root=repo_root)
-        # Missing marker is harmless (implicit == current schema); the note
-        # points at the rebuild that stamps it, not the bogus ingest command.
+        # Missing marker is harmless (implicit == current schema); the warning
+        # must not tell the user to run a command that is doomed while the
+        # service holds the file (the old advice was `reembed --force`).
         assert any("schema_version marker" in w for w in result["warnings"])
+        assert not any("reembed --force" in w for w in result["warnings"])
         assert not any("agentalloy.ingest" in w for w in result["warnings"])
+
+    def test_missing_marker_is_stamped_in_place(self, repo_root: Path) -> None:
+        """With the writer lock free (the upgrade flow: service stopped), a
+        missing schema_version marker is stamped directly instead of deferring
+        to a full corpus rebuild."""
+        from agentalloy.install import state as install_state
+        from agentalloy.storage.skill_store import DuckDBSkillStore
+
+        user_corpus = install_state.corpus_dir()
+        user_corpus.mkdir(parents=True, exist_ok=True)
+        duck_path = user_corpus / "agentalloy.duck"
+        with DuckDBSkillStore(str(duck_path)) as store:
+            store.migrate()  # real schema, no schema_version marker yet
+        (user_corpus / "fragments.lance").mkdir(exist_ok=True)
+
+        result = upd.update(root=repo_root)
+
+        assert result["corpus"]["schema_version_stamped"] is True
+        expected = upd._expected_corpus_schema_version()
+        assert result["corpus"]["recorded_schema_version"] == expected
+        assert not any("schema_version marker" in w for w in result["warnings"])
+        # The marker is durable — a second update reads it back normally.
+        assert upd._read_corpus_schema_version(duck_path) == expected
+
+    def test_stamp_blocked_by_open_handle_warns(self, repo_root: Path) -> None:
+        """A concurrently held handle (the running service) blocks the brief
+        stamp writer; update() falls back to the warning instead of failing."""
+        from agentalloy.install import state as install_state
+        from agentalloy.storage.skill_store import DuckDBSkillStore
+
+        user_corpus = install_state.corpus_dir()
+        user_corpus.mkdir(parents=True, exist_ok=True)
+        duck_path = user_corpus / "agentalloy.duck"
+        with DuckDBSkillStore(str(duck_path)) as store:
+            store.migrate()
+        (user_corpus / "fragments.lance").mkdir(exist_ok=True)
+
+        # Hold the file read-only for the duration — DuckDB then refuses the
+        # stamp's writer connection (mixed-config in-process, lock cross-process).
+        holder = DuckDBSkillStore(str(duck_path), read_only=True).open()
+        try:
+            result = upd.update(root=repo_root)
+        finally:
+            holder.close()
+
+        assert "schema_version_stamped" not in result["corpus"]
+        assert any("held open" in w for w in result["warnings"])
 
     def test_corpus_ahead_of_code_warns(self, repo_root: Path) -> None:
         self._setup(repo_root)

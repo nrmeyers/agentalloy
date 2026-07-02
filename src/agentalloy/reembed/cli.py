@@ -6,9 +6,14 @@ embedding (vector writes to the Lance ``fragments`` dataset). This CLI is the
 embedding half — it runs after ingest and can be re-run safely: fragments whose
 ids already have Lance rows are skipped.
 
-Reembed is a live, zero-downtime operation: Lance is MVCC (atomic versioned
-writes) and telemetry lives in a separate file, so the running service is never
-touched — no service stop/restart is required (decisions D3/D4).
+Reembed needs the corpus writer lock, and DuckDB grants a writer only while no
+other process holds ``agentalloy.duck`` — including the running service's
+lifetime read-only handle. In native mode the CLI therefore stops the main API
+service for the duration and restarts it afterwards (the restart also reloads
+the service's in-memory cache, so it serves the corpus this pass wrote). Pass
+``--no-restart`` when a caller manages the service itself (``upgrade``) or the
+call is in-process (the web UI, which releases its own handle instead). Lance
+is MVCC and telemetry is a separate file, so nothing else needs pausing.
 
 Usage::
 
@@ -54,7 +59,7 @@ from agentalloy.storage.card_index import (
 )
 from agentalloy.storage.open import open_fragments, open_skills
 from agentalloy.storage.protocols import FragmentEmbedding
-from agentalloy.storage.skill_store import is_lock_held_error
+from agentalloy.storage.skill_store import LockHeldError, is_lock_held_error
 
 if TYPE_CHECKING:
     from agentalloy.storage.fragment_store import LanceFragmentStore
@@ -71,11 +76,16 @@ EXIT_DEDUP = 4
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
 
-# Shown when the skill store's single writer lock is held by a concurrent writer
-# (another ingest/reembed). In v5 this is benign and transient — wait and retry.
+# Shown when the corpus DB is held by another process. The usual holder is the
+# running agentalloy service (its read-only handle blocks writers for its whole
+# lifetime); a concurrent ingest/reembed is the transient case.
 LOCK_HELD_REMEDIATION = (
-    "Another process holds the corpus DB lock (a concurrent ingest or reembed is "
-    "writing agentalloy.duck). Wait for it to finish and re-run the command."
+    "Another process is holding the corpus DB (agentalloy.duck) open. A running "
+    "agentalloy service blocks writers for its whole lifetime — reembed "
+    "stops/restarts it automatically unless --no-restart was passed; for other "
+    "commands run `agentalloy server-stop` first, then `agentalloy server-start` "
+    "after. If a concurrent ingest/reembed briefly holds the lock instead, wait "
+    "and re-run."
 )
 
 
@@ -529,8 +539,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-restart",
         action="store_true",
         help=(
-            "Accepted for backward compatibility and ignored: reembed is a live, "
-            "zero-downtime operation and never stops the agentalloy service."
+            "Do not stop/restart the agentalloy service around the write pass. "
+            "For callers that already manage the service (e.g. `agentalloy "
+            "upgrade`) and in-process callers (the web UI). Without this flag, "
+            "a running native service — whose open corpus handle blocks the "
+            "writer lock — is stopped for the pass and restarted (picking up "
+            "the new corpus) afterwards."
         ),
     )
     parser.add_argument(
@@ -563,15 +577,27 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
     model_id = args.model or settings.runtime_embedding_model
     settings.ensure_data_dirs()
 
-    # No service stop/restart: Lance is MVCC (atomic versioned writes) and
-    # telemetry lives in a separate file, so a live reembed is safe by
-    # construction (decisions D3/D4). The skill store's transient writer lock
-    # can still be contended by a concurrent ingest/reembed — that surfaces as a
-    # lock-held error below and is benign (retry).
+    # Lance is MVCC and telemetry is a separate file; only the skill store
+    # needs the exclusive DuckDB writer. A writer is granted only while no
+    # other process holds the file — and a running native service keeps a
+    # read-only handle for its whole lifetime — so on a lock conflict we stop
+    # the service, take the lock, and restart it in the finally below (the
+    # restart also reloads its in-memory cache, so it serves this pass's
+    # corpus). ``--no-restart`` opts out for callers that manage the service
+    # themselves (`upgrade`) or run in-process (the web UI).
     store: DuckDBSkillStore | None = None
     vs: LanceFragmentStore | None = None
+    service_mode: str | None = None
     try:
-        store = open_skills(settings, read_only=False)
+        try:
+            store = open_skills(settings, read_only=False)
+        except LockHeldError:
+            if args.no_restart:
+                raise
+            service_mode = _stop_main_service()
+            if service_mode is None:
+                raise
+            store = _reopen_after_stop(settings)
         vs = open_fragments(settings)
         # Writer-mode open already migrated; re-assert idempotently.
         store.migrate()
@@ -774,6 +800,78 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
             store.close()
         if vs is not None:
             vs.close()
+        if service_mode is not None:
+            _start_main_service(service_mode)
+
+
+def _stop_main_service() -> str | None:
+    """Stop a running native main-API service so the corpus writer lock can be
+    taken. Returns the mode used (``"systemd"`` | ``"port"``), or None when
+    nothing was stopped (not running, container deployment, or the stop
+    failed). The embed/rerank llama-servers stay up — the embed pass needs
+    them.
+    """
+    from agentalloy.install import server_proc
+    from agentalloy.install.subcommands.upgrade import (  # pyright: ignore[reportPrivateUsage]
+        _is_systemd,
+        _systemctl,
+    )
+
+    try:
+        if _is_systemd() and _systemctl("is-active", "agentalloy.service") == 0:
+            if _systemctl("stop", "agentalloy.service") != 0:
+                return None
+            logger.info("stopped agentalloy.service (it held the corpus DB open)")
+            return "systemd"
+        target = server_proc.resolve_deployment(None)
+        if target.deployment == "container":
+            return None
+        pid = server_proc.find_listening_pid(target.port)
+        if pid is None:
+            return None
+        server_proc.stop(pid, timeout_s=10.0)
+        logger.info("stopped agentalloy server pid %d (it held the corpus DB open)", pid)
+        return "port"
+    except Exception as exc:  # noqa: BLE001 — fall through to the lock-error path
+        logger.warning("could not stop the running service: %s", exc)
+        return None
+
+
+def _start_main_service(mode: str) -> None:
+    """Restart what :func:`_stop_main_service` stopped. Best-effort: a restart
+    failure must never fail the (already completed) embed pass."""
+    from agentalloy.install import server_proc
+    from agentalloy.install.subcommands.upgrade import (  # pyright: ignore[reportPrivateUsage]
+        _systemctl,
+    )
+
+    try:
+        if mode == "systemd":
+            if _systemctl("start", "agentalloy.service") != 0:
+                raise RuntimeError("systemctl start returned non-zero")
+            logger.info("restarted agentalloy.service")
+            return
+        port = server_proc.configured_port()
+        server_proc.start_background(port)
+        logger.info("restarted agentalloy server on port %d", port)
+    except Exception as exc:  # noqa: BLE001 — never fail the pass over the restart
+        logger.warning(
+            "could not restart the service (%s) — start it with `agentalloy server-start`", exc
+        )
+
+
+def _reopen_after_stop(settings: Any) -> DuckDBSkillStore:
+    """Retry the writer open after stopping the service; the OS may take a
+    moment to release the old process's file handle."""
+    last: Exception | None = None
+    for delay in (0.2, 0.5, 1.0, 2.0):
+        try:
+            return open_skills(settings, read_only=False)
+        except LockHeldError as exc:
+            last = exc
+            time.sleep(delay)
+    assert last is not None
+    raise last
 
 
 def run_bulk_reembed(

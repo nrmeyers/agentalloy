@@ -97,6 +97,11 @@ class ComposeOrchestrator:
     def lm(self, client: EmbedClient) -> None:
         self._lm = client
 
+    def rebind_source(self, source: RuntimeCache | SkillStore) -> None:
+        """Swap the skill source — a freshly reloaded RuntimeCache after an
+        in-process corpus write (see web/runtime_refresh.py)."""
+        self._source = source
+
     async def compose(
         self,
         req: ComposeRequest,

@@ -102,3 +102,23 @@ def test_read_only_open(tmp_path):
     with pytest.raises(RuntimeError):
         ro.migrate()  # RO cannot migrate
     ro.close()
+
+
+def test_released_lets_an_in_process_writer_attach_then_reconnects(tmp_path):
+    """The service holds the store read-only for its lifetime; released()
+    closes the handle so an in-process writer (web reembed / pack install)
+    can attach, then reconnects — the object stays valid for its holders."""
+    p = str(tmp_path / "agentalloy.duck")
+    open_skill_store(p).close()  # create + migrate, then release
+
+    holder = open_skill_store(p, read_only=True)
+    # Mixed-mode open in the same process is refused while the handle is live…
+    with pytest.raises(Exception, match="(?i)configuration|lock"):
+        open_skill_store(p)
+    # …but inside released() a writer attaches, and the holder reconnects after.
+    with holder.released():
+        w = open_skill_store(p)
+        w.set_meta("k", "v")
+        w.close()
+    assert holder.get_meta("k") == "v"
+    holder.close()

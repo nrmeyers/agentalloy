@@ -158,10 +158,10 @@ def test_fts_rebuild_warning_emitted_on_failure(caplog: pytest.LogCaptureFixture
 def test_lock_held_error_returns_exit_db_with_remediation(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A DuckDB single-writer lock failure (a concurrent ingest/reembed holding
-    agentalloy.duck) must exit EXIT_DB with a targeted remediation instead of an
-    unhandled traceback. In v5 the remediation is 'wait and re-run' (the writer
-    lock is benign + transient), not 'stop the service'."""
+    """A DuckDB single-writer lock failure must exit EXIT_DB with a targeted
+    remediation instead of an unhandled traceback. The remediation names the
+    usual holder — a running service, whose lifetime read-only handle blocks
+    writers — not just the transient concurrent-ingest case."""
     from agentalloy.reembed.cli import EXIT_DB
 
     lock_err = RuntimeError(
@@ -177,8 +177,51 @@ def test_lock_held_error_returns_exit_db_with_remediation(
 
     assert code == EXIT_DB
     err = capsys.readouterr().err
-    assert "Another process holds the corpus DB lock" in err
-    assert "re-run the command" in err
+    assert "Another process is holding the corpus DB" in err
+    assert "server-stop" in err
+
+
+def test_lock_held_stops_service_and_restarts_in_finally(tmp_path: Path) -> None:
+    """A typed LockHeldError at open triggers the stop-service path; the
+    restart runs in the finally even when the retry never gets the lock."""
+    from agentalloy.reembed.cli import EXIT_DB
+    from agentalloy.storage.skill_store import LockHeldError
+
+    lock_err = LockHeldError("Could not set lock on file 'agentalloy.duck'")
+    with (
+        patch("agentalloy.reembed.cli.open_skills", side_effect=lock_err),
+        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
+        patch("agentalloy.reembed.cli._stop_main_service", return_value="systemd") as stop,
+        patch("agentalloy.reembed.cli._start_main_service") as start,
+        patch("agentalloy.reembed.cli.time.sleep"),
+    ):
+        mock_settings.return_value.runtime_embedding_model = "test-model"
+        code = reembed_main([])
+
+    assert code == EXIT_DB
+    stop.assert_called_once()
+    start.assert_called_once_with("systemd")
+
+
+def test_no_restart_skips_service_stop(tmp_path: Path) -> None:
+    """--no-restart (callers that manage the service themselves) must never
+    touch the service; the lock error surfaces directly."""
+    from agentalloy.reembed.cli import EXIT_DB
+    from agentalloy.storage.skill_store import LockHeldError
+
+    lock_err = LockHeldError("Could not set lock on file 'agentalloy.duck'")
+    with (
+        patch("agentalloy.reembed.cli.open_skills", side_effect=lock_err),
+        patch("agentalloy.reembed.cli.get_settings") as mock_settings,
+        patch("agentalloy.reembed.cli._stop_main_service") as stop,
+        patch("agentalloy.reembed.cli._start_main_service") as start,
+    ):
+        mock_settings.return_value.runtime_embedding_model = "test-model"
+        code = reembed_main(["--no-restart"])
+
+    assert code == EXIT_DB
+    stop.assert_not_called()
+    start.assert_not_called()
 
 
 def test_non_lock_db_error_still_raises() -> None:

@@ -240,8 +240,8 @@ class TestEnsureSkillSchema:
             mock_settings.return_value.duckdb_path = str(tmp_path / "agentalloy.duck")
             _ensure_skill_schema()
         err = capsys.readouterr().err
-        assert "Another process holds the corpus DB lock" in err
-        assert "writing agentalloy.duck" in err
+        assert "Another process is holding the corpus DB" in err
+        assert "server-stop" in err
 
 
 class TestSummarizeInstallResult:
@@ -307,7 +307,7 @@ class TestBulkReembedLockHint:
         assert rc == 2
         err = capsys.readouterr().err
         assert "reembed raised" in err
-        assert "Another process holds the corpus DB lock" in err
+        assert "Another process is holding the corpus DB" in err
 
     def test_other_exception_has_no_lock_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
         with patch("agentalloy.reembed.cli.main", side_effect=RuntimeError("kaboom")):

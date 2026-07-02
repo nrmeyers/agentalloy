@@ -163,6 +163,37 @@ def test_reembed_status_and_dry_run(client, monkeypatch: pytest.MonkeyPatch):
     assert r.json() == {"dry_run": True, "would_embed": 3}
 
 
+def test_reembed_run_releases_store_handle_around_write(client, monkeypatch: pytest.MonkeyPatch):
+    """The service process holds the skill store read-only; the write pass must
+    run inside released() (handle closed) and refresh the cache afterwards."""
+    from contextlib import contextmanager
+
+    events: list[str] = []
+
+    class FakeStore:
+        @contextmanager
+        def released(self):
+            events.append("released-enter")
+            yield
+            events.append("released-exit")
+
+    client.app.state.store = FakeStore()
+    monkeypatch.setattr(
+        "agentalloy.reembed.cli.run_bulk_reembed",
+        lambda **kw: events.append("reembed") or 0,
+    )
+    monkeypatch.setattr(
+        "agentalloy.web.runtime_refresh.refresh_runtime_cache",
+        lambda app: events.append("refresh") or True,
+    )
+    r = client.post("/api/reembed", json={"dry_run": False}, headers=_CSRF)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["exit_code"] == 0
+    assert body["cache_refreshed"] is True
+    assert events == ["released-enter", "reembed", "released-exit", "refresh"]
+
+
 def test_profiles_list_and_resolve(client, tmp_path: Path):
     body = client.get("/api/profiles").json()
     assert any(p["name"] == "default" for p in body["profiles"])

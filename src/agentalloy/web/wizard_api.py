@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Annotated, Any
 
 import yaml
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from agentalloy.web.config_api import _require_csrf
@@ -179,6 +180,7 @@ class InstallRequest(BaseModel):
     summary="Approve (when in the add-skill lane) and install the pack",
 )
 async def install(
+    request: Request,
     body: InstallRequest,
     x_agentalloy_csrf: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
@@ -205,13 +207,23 @@ async def install(
                     status_code=409,
                     detail={"error": "approve_refused", "detail": approval.get("error")},
                 )
-        result = install_local_pack(
-            pack_dir,
-            root=root,
-            no_restart=True,
-            strict=True,
-            allow_duplicates=body.allow_duplicates,
-        )
-        return {"approval": approval, "install": result}
+        # This process holds the skill store read-only for its lifetime, and
+        # install-pack's ingest + reembed need the DuckDB writer — release the
+        # handle for the duration, reconnect after, then reload the cache so
+        # the newly installed skills serve without a restart.
+        from agentalloy.web.runtime_refresh import refresh_runtime_cache
+
+        store = getattr(request.app.state, "store", None)
+        release = store.released() if store is not None else nullcontext()
+        with release:
+            result = install_local_pack(
+                pack_dir,
+                root=root,
+                no_restart=True,
+                strict=True,
+                allow_duplicates=body.allow_duplicates,
+            )
+        refreshed = refresh_runtime_cache(request.app)
+        return {"approval": approval, "install": result, "cache_refreshed": refreshed}
 
     return await asyncio.to_thread(_run)
