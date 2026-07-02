@@ -144,6 +144,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         telemetry_store,
         settings.runtime_embedding_model,
         runtime_load_error=runtime_load_error,
+        upstream_summary=(
+            f"url={settings.upstream_url} model={settings.upstream_model}"
+            if settings.upstream_configured()
+            else None
+        ),
     )
     app.state.health_checker = health_checker
     # Readiness checker reads bootstrap markers under /app. Wire it whenever

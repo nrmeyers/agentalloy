@@ -6,7 +6,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["AuthoringConfig", "Settings", "configure_logging", "get_settings"]
@@ -112,6 +112,27 @@ class Settings(BaseSettings):
     forced_profile: str | None = None
 
     code_indexer_url: str = "http://127.0.0.1:8003"
+
+    @field_validator("upstream_url")
+    @classmethod
+    def _normalize_upstream_url(cls, v: str) -> str:
+        """Normalize UPSTREAM_URL to the server root.
+
+        The proxy client posts the relative path ``/v1/chat/completions``
+        against this URL, so a value that already ends in ``/v1`` (the common
+        OpenAI-style base URL) would silently produce ``/v1/v1/...`` → 404.
+        Accept both forms by stripping a trailing ``/v1``.
+        """
+        stripped = v.rstrip("/")
+        if stripped.endswith("/v1"):
+            old = v
+            stripped = stripped[: -len("/v1")].rstrip("/")
+            logger.warning(
+                "UPSTREAM_URL %r ends in /v1; using %r — the proxy appends /v1/... itself.",
+                old,
+                stripped,
+            )
+        return stripped
 
     def upstream_configured(self) -> bool:
         """Return True when upstream URL and model are set.

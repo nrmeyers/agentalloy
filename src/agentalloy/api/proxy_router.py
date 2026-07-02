@@ -297,7 +297,10 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
         )
     payload: dict[str, Any] = {
         "model": resolved,
-        "messages": [m.model_dump() for m in request.messages],
+        # exclude_none: strict upstreams (llama.cpp) reject explicit nulls on
+        # optional message fields — e.g. `"tool_call_id": null` fails template
+        # parsing with "type must be string, but is null".
+        "messages": [m.model_dump(exclude_none=True) for m in request.messages],
         "stream": request.stream,
     }
     if request.temperature is not None:

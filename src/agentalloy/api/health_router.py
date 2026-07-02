@@ -28,7 +28,7 @@ router = APIRouter()
 # Health (dependency) models and checker (existing)
 # ---------------------------------------------------------------------------
 
-DepStatus = Literal["ok", "unavailable"]
+DepStatus = Literal["ok", "unavailable", "not_configured"]
 OverallStatus = Literal["healthy", "degraded", "unavailable"]
 
 
@@ -65,12 +65,15 @@ class HealthChecker:
         embedding_model: str,
         *,
         runtime_load_error: str | None = None,
+        upstream_summary: str | None = None,
     ) -> None:
         self._store = store
         self._lm = lm
         self._telemetry_store = telemetry_store
         self._embedding_model = embedding_model
         self._runtime_load_error = runtime_load_error
+        # "url=... model=..." when the global upstream is configured, else None.
+        self._upstream_summary = upstream_summary
 
     async def check(self) -> HealthResponse:
         store_ok, tel_ok, embed_ok = await asyncio.gather(
@@ -118,6 +121,18 @@ class HealthChecker:
                 if rerank_err
                 else None,
                 detail=rerank_err,
+            ),
+            # Not part of the overall-status computation: per-repo upstreams
+            # (.agentalloy/upstream) are a valid deployment without a global
+            # one. Surfaced so an unconfigured upstream is visible before the
+            # first proxied request 503s.
+            "upstream_llm": DependencyStatus(
+                status="ok" if self._upstream_summary else "not_configured",
+                impact=None
+                if self._upstream_summary
+                else "proxied chat completions will return 503 for repos without a "
+                "per-repo .agentalloy/upstream; set UPSTREAM_URL and UPSTREAM_MODEL",
+                detail=self._upstream_summary,
             ),
         }
 

@@ -157,3 +157,35 @@ def test_health_reranker_ok_when_disabled(monkeypatch: pytest.MonkeyPatch) -> No
     assert resp.dependencies is not None
     assert resp.dependencies["reranker"].status == "ok"
     assert resp.status == "healthy"
+
+
+def test_health_upstream_not_configured_is_visible_but_not_degrading() -> None:
+    import asyncio
+
+    resp = asyncio.run(_real_checker_with_healthy_deps().check())
+
+    assert resp.dependencies is not None
+    upstream = resp.dependencies["upstream_llm"]
+    assert upstream.status == "not_configured"
+    assert upstream.impact is not None and "UPSTREAM_URL" in upstream.impact
+    # Per-repo upstreams are a valid deployment; overall stays healthy.
+    assert resp.status == "healthy"
+
+
+def test_health_upstream_configured_reports_ok() -> None:
+    import asyncio
+
+    checker = HealthChecker(
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        "stub-embed",
+        upstream_summary="url=http://h:9000 model=qwen",
+    )
+    resp = asyncio.run(checker.check())
+
+    assert resp.dependencies is not None
+    upstream = resp.dependencies["upstream_llm"]
+    assert upstream.status == "ok"
+    assert upstream.detail == "url=http://h:9000 model=qwen"
+    assert resp.status == "healthy"

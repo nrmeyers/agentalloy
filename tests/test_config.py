@@ -124,16 +124,41 @@ def test_upstream_configured_true_when_all_set(
 
 
 def test_upstream_env_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Upstream fields are read correctly from env vars."""
+    """Upstream fields are read correctly from env vars; /v1 suffix is normalized away."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("UPSTREAM_URL", "http://llm.internal:8080/v1")
     monkeypatch.setenv("UPSTREAM_MODEL", "llama3")
     monkeypatch.setenv("UPSTREAM_API_KEY", "bearer-token-abc")
     s = Settings()
-    assert s.upstream_url == "http://llm.internal:8080/v1"
+    assert s.upstream_url == "http://llm.internal:8080"
     assert s.upstream_model == "llama3"
     assert s.upstream_api_key == "bearer-token-abc"
     assert s.upstream_configured() is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The proxy client posts /v1/chat/completions relative to this URL, so
+        # an OpenAI-style base URL ending in /v1 must be stripped (else /v1/v1).
+        ("http://h:9000/v1", "http://h:9000"),
+        ("http://h:9000/v1/", "http://h:9000"),
+        ("http://h:9000/", "http://h:9000"),
+        ("http://h:9000", "http://h:9000"),
+        # Only a trailing path *segment* /v1 is stripped.
+        ("http://h:9000/v1proxy", "http://h:9000/v1proxy"),
+        ("http://h:9000/api/v1", "http://h:9000/api"),
+        ("", ""),
+    ],
+)
+def test_upstream_url_normalization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str, expected: str
+) -> None:
+    """UPSTREAM_URL is normalized to the server root (trailing slash and /v1 stripped)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPSTREAM_URL", raw)
+    s = Settings()
+    assert s.upstream_url == expected
 
 
 def test_upstream_configured_false_when_api_key_empty_string(
