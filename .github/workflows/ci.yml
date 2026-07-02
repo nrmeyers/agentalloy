@@ -51,6 +51,31 @@ jobs:
           PACK_GUARD_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: uv run pytest tests/test_pack_version_bump_guard.py::test_pack_version_bump_guard -q
 
+  # Guards the release-time bundle: the container-build release job runs this
+  # same tsc + vite build to produce the web-dist.tar.gz asset that
+  # `agentalloy pull-web` downloads, so a PR that breaks it must fail here.
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build web UI
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          test -f dist/index.html
+
   pipx-smoke:
     runs-on: ubuntu-latest
     steps:

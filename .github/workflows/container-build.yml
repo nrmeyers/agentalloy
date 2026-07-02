@@ -337,6 +337,27 @@ jobs:
         with:
           fetch-depth: 0 # full history so --generate-notes can diff from the last tag
 
+      # Build the web UI bundle and attach it as a release asset. Installs are
+      # source builds on machines without node, so `agentalloy pull-web`
+      # downloads this web-dist.tar.gz (version-matched to the tag) instead.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Build web UI bundle
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          test -f dist/index.html
+          tar -czf ../web-dist.tar.gz -C dist .
+
       - name: Publish GitHub Release (after images are live)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -349,3 +370,4 @@ jobs:
             echo "Creating release $TAG (both images are published)."
             gh release create "$TAG" --verify-tag --latest --generate-notes --title "$TAG"
           fi
+          gh release upload "$TAG" web-dist.tar.gz --clobber

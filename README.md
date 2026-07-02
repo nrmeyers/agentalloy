@@ -508,7 +508,7 @@ The service ships a browser dashboard served from the same FastAPI process at [h
 - **Ops** — doctor checks, reembed status and runs, pack install state, profile resolution.
 - **New Skill** — a four-step wizard on the same rails as the add-skill lane: scaffold → draft (with an R1–R9 self-check panel) → strict validate → approve + install.
 
-Build it once with `cd frontend && pnpm install && pnpm build`; the service serves `frontend/dist` automatically from then on. Without a build the API is unaffected and `/` answers 501 with instructions. Mutating endpoints require the `X-AgentAlloy-CSRF: 1` header (the UI sends it; with no CORS grant on the localhost-only service, foreign origins can't). Design: [docs/web-ui-and-add-skill-combined-spec.md](docs/web-ui-and-add-skill-combined-spec.md).
+Setup downloads the prebuilt UI bundle automatically (`agentalloy pull-web` re-fetches it; upgrades refresh it to the matching version), and container images ship it baked in. On a dev checkout, `cd frontend && pnpm install && pnpm build` serves your local `frontend/dist` instead. Without a bundle the API is unaffected and `/` answers 501 with instructions. Mutating endpoints require the `X-AgentAlloy-CSRF: 1` header (the UI sends it; with no CORS grant on the localhost-only service, foreign origins can't). Design: [docs/web-ui-and-add-skill-combined-spec.md](docs/web-ui-and-add-skill-combined-spec.md).
 
 ---
 

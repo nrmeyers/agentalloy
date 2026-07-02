@@ -442,6 +442,16 @@ def _upgrade_native(
     except (json.JSONDecodeError, ValueError):
         pass
 
+    # Web UI bundle is version-matched to the server; fetch the new tag's
+    # asset via the freshly-installed binary (its current_version() is the new
+    # version). Non-fatal: the API works without it and / serves a hint.
+    with progress_activity("downloading web UI bundle", enabled=show_progress):
+        web = _run_cli(["pull-web"], check=False, capture=True)
+    if web.returncode == 0:
+        actions.append("refreshed web UI bundle")
+    else:
+        warnings.append("web UI bundle download failed — run `agentalloy pull-web` and restart")
+
     _start_service()
     actions.append("restarted service")
     return actions, warnings

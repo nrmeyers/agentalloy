@@ -35,6 +35,7 @@ from agentalloy.install.subcommands import (
     install_packs,
     preflight,
     pull_models,
+    pull_web,
     seed_corpus,
     start_embed_server,
     start_rerank_server,
@@ -2032,7 +2033,21 @@ def run_setup(cfg: SetupConfig) -> int:
         )
         return 1
 
-    # Step h: Enable service
+    # Step h: Web UI bundle. Non-fatal: the API works without the dashboard,
+    # and the service's / route serves a `pull-web` hint until it lands.
+    # Runs before enable-service so the SPA mount sees the bundle on first start.
+    _print("  [dim]-> Downloading web UI bundle[/dim]")
+    web_result = pull_web.pull_web_dist()
+    if web_result["success"]:
+        _print("  [green]  Done.[/green]")
+    else:
+        _print(
+            f"  [yellow]  Web UI bundle unavailable ({web_result['error']}). "
+            "The API works without it; retry later with `agentalloy pull-web` "
+            "then restart the service.[/yellow]"
+        )
+
+    # Step i: Enable service
     _print("  [dim]-> Enabling service[/dim]")
     mode_flag = "native" if cfg.mode == "persistent" else "manual"
     rc = enable_service.run(_build_namespace(cfg, mode=mode_flag, runtime=None, port=cfg.port))

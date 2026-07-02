@@ -179,12 +179,15 @@ A step ran successfully before. The install state is up to date.
 
 ### `/` answers 501 "web_ui_not_built"
 
-The API is running but no frontend build exists (`frontend/dist` is not committed).
+The API is running but no web UI bundle exists. Setup downloads the prebuilt
+bundle from the GitHub release matching your version; a 501 means that download
+failed (offline install, GitHub unreachable) or predates the bundle assets.
 
-**Fix:** `cd frontend && pnpm install && pnpm build` (Node via mise, pnpm — not
-npm), then reload the page. No service restart needed unless the service was
-started before the repo checkout existed. `AGENTALLOY_WEB_DIST` can point at a
-build elsewhere.
+**Fix:** `agentalloy pull-web`, then `agentalloy server-restart`. On a dev
+checkout you can instead build locally: `cd frontend && pnpm install && pnpm
+build` (Node via mise, pnpm — not npm) — the repo-layout build wins over the
+downloaded bundle. `AGENTALLOY_WEB_DIST` can point at a build elsewhere.
+Container images ship the UI baked in and never need this.
 
 ### Writes fail with 403
 

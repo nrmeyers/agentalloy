@@ -17,6 +17,11 @@ build/
 dist/
 *.egg-info/
 
+# The webui stage builds the SPA from frontend/ sources — keep local build
+# output and node_modules out of the context (fresh install in the stage).
+frontend/node_modules/
+frontend/dist/
+
 # Skill-source workspace and vendored marketplace content — not needed at runtime
 skill-source/
 agents/

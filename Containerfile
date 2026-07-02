@@ -26,6 +26,17 @@
 # ---------------------------------------------------------------------------
 FROM ghcr.io/ggml-org/llama.cpp:full AS llamacpp
 
+# ---------------------------------------------------------------------------
+# Stage 1: web UI build. Bakes the SPA into the image so the dashboard is live
+# on first boot — container users never run `agentalloy pull-web`.
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS webui
+WORKDIR /web
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN corepack enable && corepack prepare pnpm@10 --activate && pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build && test -f dist/index.html
+
 FROM python:3.12-slim AS base
 
 # Install uv (Astral) and minimal runtime deps. libgomp1 is the OpenMP runtime
@@ -72,6 +83,10 @@ COPY src/ ./src/
 RUN mkdir -p data
 COPY corpus-seed/ /app/corpus-seed/
 
+# Prebuilt web UI (from the webui stage); AGENTALLOY_WEB_DIST below points
+# spa.py at it, short-circuiting the repo-layout / pull-web resolution.
+COPY --from=webui /web/dist /app/web-dist/
+
 # Bake the bootstrap entrypoint into the image so bare ``podman run``
 # bootstraps correctly without requiring the setup wizard to bind-mount a
 # generated script. container/entrypoint.sh is generated from
@@ -92,7 +107,8 @@ RUN uv sync --frozen --no-dev
 # is no GPU passthrough), so scoring the ~12 candidate fragments per compose
 # exceeds the latency budget, times out, and fails open. GPU *native* installs
 # enable it via their hardware preset (nvidia / radeon / apple-silicon).
-ENV DUCKDB_PATH=/app/data/agentalloy.duck \
+ENV AGENTALLOY_WEB_DIST=/app/web-dist \
+    DUCKDB_PATH=/app/data/agentalloy.duck \
     FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \
     TELEMETRY_DB_PATH=/app/data/telemetry.duck \
     LOG_LEVEL=INFO \
