@@ -1,9 +1,12 @@
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout, ToastContainer } from './components';
+import { ApprovalsPage } from './pages/ApprovalsPage';
 import { ConfigPage } from './pages/ConfigPage';
 import { DiagnosticsPage } from './pages/DiagnosticsPage';
 import { HealthPage } from './pages/HealthPage';
+import { OpsPage } from './pages/OpsPage';
 import { PlaygroundPage } from './pages/PlaygroundPage';
+import { ReposPage } from './pages/ReposPage';
 import { SkillDetailPage } from './pages/SkillDetailPage';
 import { SkillsPage } from './pages/SkillsPage';
 import { TelemetryPage } from './pages/TelemetryPage';
@@ -15,6 +18,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/config" replace />} />
           <Route path="/config" element={<ConfigPage />} />
+          <Route path="/repos" element={<ReposPage />} />
+          <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/ops" element={<OpsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:skillId" element={<SkillDetailPage />} />
           <Route path="/playground" element={<PlaygroundPage />} />

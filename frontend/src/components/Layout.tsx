@@ -1,14 +1,30 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useApprovals } from '../hooks/useRepos';
 
 const navItems = [
   { path: '/config', label: 'Config', icon: '⚙️' },
+  { path: '/repos', label: 'Repos', icon: '📁' },
+  { path: '/approvals', label: 'Approvals', icon: '✅' },
   { path: '/skills', label: 'Skills', icon: '🧩' },
   { path: '/playground', label: 'Playground', icon: '🧪' },
   { path: '/telemetry', label: 'Telemetry', icon: '📊' },
   { path: '/diagnostics', label: 'Diagnostics', icon: '🔍' },
+  { path: '/ops', label: 'Ops', icon: '🛠️' },
   { path: '/health', label: 'Health', icon: '❤️' },
 ];
+
+/** Pending-approvals count — shares the ['approvals'] query (30s poll) with the page. */
+function ApprovalsBadge() {
+  const { data } = useApprovals();
+  const count = data?.total ?? 0;
+  if (count === 0) return null;
+  return (
+    <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold tabular-nums">
+      {count}
+    </span>
+  );
+}
 
 export function Layout({ children }: { children: ReactNode }) {
   return (
@@ -30,6 +46,7 @@ export function Layout({ children }: { children: ReactNode }) {
             >
               <span>{item.icon}</span>
               {item.label}
+              {item.path === '/approvals' && <ApprovalsBadge />}
             </NavLink>
           ))}
         </nav>

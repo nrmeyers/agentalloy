@@ -379,6 +379,160 @@ export interface SignalVerdict {
 }
 
 // ---------------------------------------------------------------------------
+// Repos (/api/repos, /api/repos/gates)
+// ---------------------------------------------------------------------------
+
+export interface RepoEntry {
+  repo_root: string;
+  harnesses: string[];
+  exists: boolean;
+  phase: string | null;
+  lifecycle_mode: string | null;
+  profile: string | null;
+  upstream_url: string | null;
+  upstream_model: string | null;
+  cursor: string | null;
+  contracts_by_phase: Record<string, number>;
+  approval_required: boolean;
+  approval_pending: boolean;
+}
+
+export interface ReposResponse {
+  total: number;
+  repos: RepoEntry[];
+}
+
+export interface RepoGates {
+  repo: string;
+  phase: string | null;
+  next_phase: string | null;
+  blocked: boolean;
+  advisories: string[];
+  approval_required: boolean;
+  approval_pending: boolean;
+  approver: string | null;
+  /** ISO datetime string. */
+  approved_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Approvals (/api/approvals, /api/repos/approve)
+// ---------------------------------------------------------------------------
+
+export interface PendingApproval {
+  repo: string;
+  phase: string;
+  next_phase: string | null;
+  /** true = approved once, but the artifact changed after sign-off. */
+  stale: boolean;
+  artifacts: string[];
+}
+
+export interface ApprovalsResponse {
+  total: number;
+  pending: PendingApproval[];
+}
+
+export interface ApproveRequest {
+  repo: string;
+  phase: string;
+  approver?: string;
+}
+
+/** run_approve result — approval AUTO-ADVANCES the repo phase. */
+export interface ApproveResult {
+  ok: boolean;
+  phase: string;
+  approver: string;
+  marker: string;
+  advanced?: { phase?: string; [key: string]: unknown } | null;
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Doctor (/api/doctor) — render defensively, every key optional.
+// ---------------------------------------------------------------------------
+
+export interface DoctorCheck {
+  name?: string;
+  passed?: boolean;
+  duration_ms?: number;
+  detail?: string;
+  error?: string;
+  remediation?: string;
+  severity?: string;
+  [key: string]: unknown;
+}
+
+export interface DoctorResponse {
+  schema_version?: number | string;
+  all_checks_passed?: boolean;
+  checks?: DoctorCheck[];
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Packs (/api/packs)
+// ---------------------------------------------------------------------------
+
+export interface PackEntry {
+  name: string;
+  version: string | null;
+  tier: string | null;
+  description: string | null;
+  skill_count: number;
+  installed_count: number;
+}
+
+export interface PacksResponse {
+  total: number;
+  packs: PackEntry[];
+}
+
+// ---------------------------------------------------------------------------
+// Reembed (/api/reembed, /api/reembed/status)
+// ---------------------------------------------------------------------------
+
+export interface ReembedStatus {
+  embedded_total: number;
+  unembedded: number;
+}
+
+/** dry_run:true → would_embed; dry_run:false → exit_code (+ optional dedup lists). */
+export interface ReembedResult {
+  dry_run: boolean;
+  would_embed?: number;
+  exit_code?: number;
+  dedup_hard?: Record<string, unknown>[];
+  dedup_soft?: Record<string, unknown>[];
+  [key: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Profiles (/api/profiles, /api/profiles/resolve)
+// ---------------------------------------------------------------------------
+
+export interface ProfileEntry {
+  name: string;
+  is_default: boolean;
+  active_for_cwd: boolean;
+  match_remote: string[];
+  match_path: string[];
+  has_overrides: boolean;
+}
+
+export interface ProfilesResponse {
+  total: number;
+  profiles: ProfileEntry[];
+}
+
+export interface ProfileResolveResult {
+  repo: string;
+  profile: string;
+  is_default: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Health (/health, /readiness) — tolerate shape drift.
 // ---------------------------------------------------------------------------
 

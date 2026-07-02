@@ -1,15 +1,26 @@
 import type {
+  ApprovalsResponse,
+  ApproveRequest,
+  ApproveResult,
   ComposeResponse,
   ConfigData,
   ConfigUpdate,
   ConfigUpdateResult,
   CorpusDiagnostics,
   CoverageResponse,
+  DoctorResponse,
   HealthResponse,
   OverrideUpdate,
   OverrideWriteResult,
+  PacksResponse,
+  ProfileResolveResult,
+  ProfilesResponse,
   ReadinessResponse,
+  ReembedResult,
+  ReembedStatus,
   ReloadResult,
+  RepoGates,
+  ReposResponse,
   RetrieveRequest,
   RetrieveResponse,
   RuntimeDiagnostics,
@@ -211,6 +222,68 @@ export function deleteSkillOverride(
     `/api/skills/${encodeURIComponent(skillId)}/override${query({ layer })}`,
     { method: 'DELETE' },
   );
+}
+
+// --- Repos -----------------------------------------------------------------------
+
+export function getRepos(): Promise<ReposResponse> {
+  return request<ReposResponse>('/api/repos');
+}
+
+export function getRepoGates(repo: string): Promise<RepoGates> {
+  return request<RepoGates>(`/api/repos/gates${query({ repo })}`);
+}
+
+// --- Approvals ---------------------------------------------------------------------
+
+export function getApprovals(): Promise<ApprovalsResponse> {
+  return request<ApprovalsResponse>('/api/approvals');
+}
+
+/**
+ * Sign off a pending gate. IMPORTANT: approval auto-advances the repo phase.
+ * 409 = {"detail": {"error": "approve_refused", "detail": "<why>"}}.
+ */
+export function postApprove(body: ApproveRequest): Promise<ApproveResult> {
+  return request<ApproveResult>('/api/repos/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+// --- Ops (doctor / packs / reembed / profiles) --------------------------------------
+
+export function getDoctor(): Promise<DoctorResponse> {
+  return request<DoctorResponse>('/api/doctor');
+}
+
+export function getPacks(): Promise<PacksResponse> {
+  return request<PacksResponse>('/api/packs');
+}
+
+export function getReembedStatus(): Promise<ReembedStatus> {
+  return request<ReembedStatus>('/api/reembed/status');
+}
+
+export function postReembed(dryRun: boolean): Promise<ReembedResult> {
+  return request<ReembedResult>('/api/reembed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dry_run: dryRun }),
+  });
+}
+
+export function getProfiles(): Promise<ProfilesResponse> {
+  return request<ProfilesResponse>('/api/profiles');
+}
+
+export function resolveProfile(repo: string): Promise<ProfileResolveResult> {
+  return request<ProfileResolveResult>('/api/profiles/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo }),
+  });
 }
 
 // --- Playground ------------------------------------------------------------------

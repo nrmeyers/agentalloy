@@ -31,6 +31,19 @@ export function truncate(s: string | null | undefined, max = 60): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
+/** ISO datetime string to a local datetime; falls back to the raw string. */
+export function fmtIsoTs(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+/** Last path segment (repo basename); tolerates trailing slashes. */
+export function basename(path: string): string {
+  const parts = path.replace(/\/+$/, '').split('/');
+  return parts[parts.length - 1] || path;
+}
+
 /**
  * Render a rate as a percentage. Accepts either a 0..1 fraction or an
  * already-scaled 0..100 percentage (backend contract leaves this open).
