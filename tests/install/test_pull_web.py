@@ -108,6 +108,44 @@ def test_default_version_is_installed_version(monkeypatch: pytest.MonkeyPatch) -
     assert seen == [f"https://github.com/{pull_web.REPO}/releases/download/v3.2.1/web-dist.tar.gz"]
 
 
+def test_update_ensures_bundle_when_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`update` pulls the bundle when no dist resolves — this is what closes
+    the 5.1.x → 5.2.x upgrade gap (the old orchestrator runs the new
+    binary's `update`, which lands the bundle before the service restart)."""
+    from agentalloy.install.subcommands import update as upd
+
+    monkeypatch.setattr("agentalloy.web.spa._dist_dir", lambda: None)
+    monkeypatch.setattr(pull_web, "_download_with_retry", _fake_download())
+    result = upd._ensure_web_bundle()
+    assert result == {
+        "present": True,
+        "pulled": True,
+        "dest": str(pull_web.web_dist_dir(pull_web.current_version())),
+    }
+
+
+def test_update_skips_when_dist_resolves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from agentalloy.install.subcommands import update as upd
+
+    monkeypatch.setattr("agentalloy.web.spa._dist_dir", lambda: tmp_path)
+
+    def boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("must not pull when a dist already resolves")
+
+    monkeypatch.setattr(pull_web, "pull_web_dist", boom)
+    assert upd._ensure_web_bundle() == {"present": True, "pulled": False}
+
+
+def test_update_reports_pull_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentalloy.install.subcommands import update as upd
+
+    monkeypatch.setattr("agentalloy.web.spa._dist_dir", lambda: None)
+    monkeypatch.setattr(pull_web, "_asset_available", lambda url: False)
+    result = upd._ensure_web_bundle()
+    assert result["present"] is False
+    assert "no web UI bundle published" in result["error"]
+
+
 def test_run_exit_codes(monkeypatch: pytest.MonkeyPatch) -> None:
     ns = argparse.Namespace(version="9.9.9", force=False)
     monkeypatch.setattr(pull_web, "_download_with_retry", _fake_download())

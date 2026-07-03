@@ -31,6 +31,7 @@ from typing import Any
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, render_lifecycle_result, write_result
+from agentalloy.install.subcommands import pull_web
 
 SCHEMA_VERSION = 1
 STEP_NAME = "update"
@@ -264,6 +265,19 @@ def update(root: Path | None = None) -> dict[str, Any]:
     # 3. Model drift (informational)
     summary["models"] = _model_drift(state)
 
+    # 3.5 Web UI bundle. The pre-5.2.0 upgrade orchestrator predates the
+    # pull-web step, but it does run the NEW binary's `update` — ensuring the
+    # bundle here closes the 5.1.x → 5.2.x transition (the orchestrator
+    # restarts the service afterwards, which mounts it). Instant no-op when a
+    # dist already resolves (env override, repo build, or pulled bundle);
+    # failure is a warning — the API works without the UI.
+    summary["web_ui"] = _ensure_web_bundle()
+    if summary["web_ui"].get("error"):
+        summary["warnings"].append(
+            f"web UI bundle unavailable ({summary['web_ui']['error']}) — "
+            "run `agentalloy pull-web` later, then restart the service."
+        )
+
     # 4. Record the update step — but only if no migration failed. A failed
     #    migration recorded as "completed" would mask the problem on next
     #    run and make the install state lie about its corpus.
@@ -279,6 +293,18 @@ def update(root: Path | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Subcommand interface
 # ---------------------------------------------------------------------------
+
+
+def _ensure_web_bundle() -> dict[str, Any]:
+    """Make sure a web UI dist is servable; pull the release asset if not."""
+    from agentalloy.web.spa import _dist_dir  # pyright: ignore[reportPrivateUsage]
+
+    if _dist_dir() is not None:
+        return {"present": True, "pulled": False}
+    result = pull_web.pull_web_dist()
+    if result["success"]:
+        return {"present": True, "pulled": True, "dest": result["dest"]}
+    return {"present": False, "pulled": False, "error": result["error"]}
 
 
 def add_parser(

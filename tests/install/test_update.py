@@ -11,6 +11,15 @@ from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import update as upd
 
 
+@pytest.fixture(autouse=True)
+def _no_web_bundle_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the web-bundle ensure step — these tests must not touch the network.
+
+    Its real behavior is covered in tests/install/test_pull_web.py.
+    """
+    monkeypatch.setattr(upd, "_ensure_web_bundle", lambda: {"present": True, "pulled": False})
+
+
 @pytest.fixture()
 def repo_root(tmp_path: Path) -> Path:
     (tmp_path / "pyproject.toml").write_text("")

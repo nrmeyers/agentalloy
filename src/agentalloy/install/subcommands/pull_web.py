@@ -51,12 +51,13 @@ def _asset_url(version: str) -> str:
 
 
 def _asset_available(url: str) -> bool:
-    """HEAD probe so a missing asset fails fast.
+    """HEAD probe requiring positive confirmation before the retry download.
 
     A 404 means no bundle was published for this version (releases <= v5.1.3
-    predate bundle assets) — that's permanent, and letting it ride the
-    transient-error retry loop stalls setup for minutes. Anything else
-    (transient error, other status) defers to the retry downloader.
+    predate bundle assets) — permanent, so letting it ride the transient-error
+    retry loop would stall setup/update for minutes. A network error gets the
+    same treatment: if a 10s HEAD can't complete, the download won't either,
+    and every caller is non-fatal with a `pull-web` retry hint.
     """
     request = urllib.request.Request(  # noqa: S310 — https only
         url, method="HEAD", headers={"User-Agent": _DOWNLOAD_USER_AGENT}
@@ -67,7 +68,7 @@ def _asset_available(url: str) -> bool:
     except urllib.error.HTTPError as exc:
         return exc.code != 404
     except OSError:
-        return True
+        return False
 
 
 def _prune_other_versions(root: Path, keep: str) -> list[str]:
@@ -102,7 +103,7 @@ def pull_web_dist(version: str | None = None, *, force: bool = False) -> dict[st
             "skipped": False,
             "version": ver,
             "dest": str(dest),
-            "error": f"no web UI bundle published for v{ver} ({url})",
+            "error": f"no web UI bundle published for v{ver}, or GitHub unreachable ({url})",
         }
 
     with tempfile.TemporaryDirectory(dir=root, prefix=".pull-web-") as tmp:
