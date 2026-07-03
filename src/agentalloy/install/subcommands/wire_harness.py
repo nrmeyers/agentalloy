@@ -1109,7 +1109,29 @@ def _activation_managers() -> set[str]:
     return {name for name in ("direnv", "mise") if shutil.which(name)}
 
 
-def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> bool:
+def _mise_trust(mise_path: Path) -> bool:
+    """Run ``mise trust`` on *mise_path* so the just-written carrier loads.
+
+    mise refuses to read untrusted config files, so a freshly created carrier
+    is inert until trusted. Non-fatal: any failure returns False and the
+    caller falls back to the manual ``mise trust`` hint.
+    """
+    mise = shutil.which("mise")
+    if mise is None:
+        return False
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [mise, "trust", str(mise_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[Path, bool] | None:
     """Add ``HERMES_HOME`` to the repo's mise config ``[env]`` table.
 
     Targets an existing ``mise.toml`` / ``.mise.toml`` (in that order) or
@@ -1121,9 +1143,12 @@ def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> bool:
     - existing ``[env]`` table: insert only the sentinel-bounded key line right
       after the header — TOML forbids a second ``[env]`` table.
 
-    The result is validated with ``tomllib``; on a parse failure the original
-    content is restored and False is returned so the caller can fall back to
-    the manual hint. Returns True when the carrier landed.
+    The result is validated with ``tomllib``; on a parse failure nothing is
+    written and ``None`` is returned so the caller can fall back to the manual
+    hint. On success returns ``(path, created)`` — ``created`` is True when
+    the file did not exist before (the caller only auto-trusts a file we
+    authored in full; pre-existing configs the user may not have reviewed are
+    never trusted on their behalf).
     """
     import tomllib
 
@@ -1167,7 +1192,7 @@ def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> bool:
             "skipped the mise carrier.",
             file=sys.stderr,
         )
-        return False
+        return None
 
     install_state._atomic_write(mise_path, new_content)  # pyright: ignore[reportPrivateUsage]
     records.append(
@@ -1178,7 +1203,7 @@ def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> bool:
             **({"original_content": original} if original is not None else {}),
         }
     )
-    return True
+    return mise_path, original is None
 
 
 def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
@@ -1304,8 +1329,17 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
         activated.append(".envrc (direnv: run `direnv allow` once)")
 
     has_mise_config = (root / "mise.toml").exists() or (root / ".mise.toml").exists()
-    if ("mise" in managers or has_mise_config) and _write_hermes_mise_env(root, records):
-        activated.append("mise.toml [env] (run `mise trust` once; loads on cd)")
+    if "mise" in managers or has_mise_config:
+        mise_result = _write_hermes_mise_env(root, records)
+        if mise_result is not None:
+            mise_path, created = mise_result
+            # Auto-trust only a file we authored in full — blessing a
+            # pre-existing, possibly unreviewed config on the user's behalf
+            # would bypass mise's trust prompt for content we didn't write.
+            if created and _mise_trust(mise_path):
+                activated.append(f"{mise_path.name} [env] (trusted; loads on cd)")
+            else:
+                activated.append(f"{mise_path.name} [env] (run `mise trust` once; loads on cd)")
 
     if activated:
         print(

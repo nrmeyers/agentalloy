@@ -84,6 +84,9 @@ def _never_launch_hermes_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentalloy.install.subcommands import wire_harness
 
     monkeypatch.setattr(wire_harness, "_restart_hermes_gateway", lambda root: True)
+    # Same rationale for `mise trust`: never touch the developer's real mise
+    # trust database from tests.
+    monkeypatch.setattr(wire_harness, "_mise_trust", lambda path: True)
 
 
 @pytest.fixture(autouse=True)

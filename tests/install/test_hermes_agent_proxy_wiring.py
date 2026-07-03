@@ -47,6 +47,13 @@ class TestHermesAgentProxyWiring:
         """Pin activation-manager detection so tests don't depend on the host PATH."""
         monkeypatch.setattr(wire_harness, "_activation_managers", lambda: {"direnv", "mise"})
 
+    @pytest.fixture(autouse=True)
+    def stub_mise_trust(self, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+        """Never touch the real mise trust database; record trust calls."""
+        calls: list[Path] = []
+        monkeypatch.setattr(wire_harness, "_mise_trust", lambda path: calls.append(path) or True)
+        return calls
+
     def test_scope_is_ignored_always_repo_local(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -223,6 +230,39 @@ class TestHermesAgentProxyWiring:
         content = (tmp_path / "mise.toml").read_text()
         assert content.count("HERMES_HOME") == 1
         tomllib.loads(content)
+
+    def test_mise_created_file_is_auto_trusted(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_mise_trust: list[Path],
+    ) -> None:
+        """A mise.toml we author in full is auto-trusted."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        assert stub_mise_trust == [tmp_path / "mise.toml"]
+
+    def test_mise_preexisting_file_never_auto_trusted(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        stub_mise_trust: list[Path],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A pre-existing mise config is edited but never trusted on the user's behalf."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        (tmp_path / "mise.toml").write_text('[tools]\nnode = "24"\n')
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        assert stub_mise_trust == []
+        assert "run `mise trust` once" in capsys.readouterr().err
 
     def test_no_managers_prints_manual_hint(
         self,
