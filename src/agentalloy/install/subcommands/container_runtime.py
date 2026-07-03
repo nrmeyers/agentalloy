@@ -205,7 +205,7 @@ def _pull_image(
             subprocess.run(
                 [runtime, "pull", image],
                 check=True,
-                timeout=600,
+                timeout=1500,
                 cwd="/",
             )
             _print("  [green]-> Image pulled successfully[/green]")
@@ -218,7 +218,7 @@ def _pull_image(
             )
             return exc.returncode
         except subprocess.TimeoutExpired:
-            _print("  [red]Image pull timed out after 600s[/red]")
+            _print("  [red]Image pull timed out after 1500s[/red]")
             _print(
                 "  [dim]Remediation: Check network connectivity, "
                 "or use --image-path for offline mode.[/dim]"
