@@ -159,7 +159,7 @@ class TestProxyPassthrough:
                     "frequency_penalty": 0.1,
                     "n": 1,
                     "user": "user-123",
-                    "metadata": {"cwd": "/home/user/project"},
+                    "metadata": {"cwd": "/home/user/project", "sessionId": "s-1"},
                 },
             )
 
@@ -174,7 +174,10 @@ class TestProxyPassthrough:
         assert received_request["frequency_penalty"] == 0.1
         assert received_request["n"] == 1
         assert received_request["user"] == "user-123"
-        assert received_request["metadata"]["cwd"] == "/home/user/project"
+        # "cwd" is the proxy's repo-resolution channel and is stripped before
+        # forwarding; other metadata keys pass through.
+        assert "cwd" not in received_request["metadata"]
+        assert received_request["metadata"]["sessionId"] == "s-1"
 
     def test_upstream_error_500(self, app_with_upstream: Any) -> None:
         """Upstream 5xx returns 503 to the client."""

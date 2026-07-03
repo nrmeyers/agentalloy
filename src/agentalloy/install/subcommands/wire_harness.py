@@ -46,6 +46,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -1037,18 +1040,83 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _restart_hermes_gateway(root: Path) -> bool:
+    """Restart (or start) the repo-scoped Hermes gateway under ``<root>/.hermes``.
+
+    The Hermes gateway is a long-lived daemon that captures ``HERMES_HOME`` at
+    process start, so the repo-local proxy config only takes effect once a
+    gateway is (re)started under the repo home. Gateways are home-scoped (pid
+    file + flock under ``HERMES_HOME``, no control port), so this per-repo
+    gateway coexists with the user's global one.
+
+    Returns True when the restart succeeded, False otherwise — a failure never
+    fails the wiring itself; the manual steps are printed instead.
+    """
+    manual_hint = (
+        "[AgentAlloy] Start the repo gateway manually before using hermes here:\n"
+        "    source .hermes/.agentalloy-env && hermes gateway restart\n"
+        "then open a new hermes session in this repo."
+    )
+
+    hermes = shutil.which("hermes")
+    if hermes is None:
+        print(
+            "[AgentAlloy] `hermes` not found on PATH — could not start the repo gateway.",
+            file=sys.stderr,
+        )
+        print(manual_hint, file=sys.stderr)
+        return False
+
+    env = {**os.environ, "HERMES_HOME": str(root / ".hermes")}
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [hermes, "gateway", "restart"],
+            env=env,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"[AgentAlloy] hermes gateway restart failed: {e}", file=sys.stderr)
+        print(manual_hint, file=sys.stderr)
+        return False
+
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+        print(
+            f"[AgentAlloy] hermes gateway restart exited {proc.returncode}: " + " | ".join(tail),
+            file=sys.stderr,
+        )
+        print(manual_hint, file=sys.stderr)
+        return False
+
+    print(
+        "[AgentAlloy] Repo-scoped hermes gateway (re)started under .hermes/ — "
+        "new sessions in this repo route through the proxy.",
+        file=sys.stderr,
+    )
+    return True
+
+
 def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
     """Wire Hermes Agent to use the AgentAlloy proxy (per-repo interception).
 
     Hermes config is home-scoped (``~/.hermes/config.yaml``) with no per-repo
     form, but the proxy needs a per-repo ``/proj/<token>`` discriminator. So we
-    isolate per repo via ``HERMES_HOME``: a repo-local ``.hermes/`` the user
-    activates by sourcing ``.hermes/.agentalloy-env`` before running hermes there.
+    isolate per repo via ``HERMES_HOME``: a repo-local ``.hermes/`` activated by
+    ``.hermes/.agentalloy-env`` (sourced directly, or automatically on ``cd``
+    via the ``.envrc`` written below for direnv users).
 
     The repo-local ``config.yaml`` is a copy of the user's global one with only
     the ``model`` block redirected at the proxy, so their other tuning survives.
     Where the proxy then *forwards* (upstream adoption) is handled separately by
     ``agentalloy add`` writing ``.agentalloy/upstream``.
+
+    Because the hermes gateway daemon captures ``HERMES_HOME`` at startup, the
+    wiring finishes by (re)starting a repo-scoped gateway via
+    :func:`_restart_hermes_gateway` — without it the env file alone changes
+    nothing for gateway-routed sessions.
 
     ``scope`` is ignored: hermes is inherently per-repo (like claude-code), so it
     always wires the repo-local carrier at *root*.
@@ -1110,10 +1178,50 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
         }
     )
 
+    # direnv carrier: auto-activate HERMES_HOME on cd. Same sentinel style as
+    # the claude-code wiring so uninstall's record walk handles it; unlike
+    # claude-code we create .envrc when absent — hermes has no native
+    # settings-file carrier, so the env var is the only activation path.
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+    rel_env = env_path.relative_to(root).as_posix()
+    envrc_path = root / ".envrc"
+    envrc_original = _capture_original(envrc_path)
+    envrc_block = f"{sentinel_begin}\nsource_env {rel_env}\n{sentinel_end}"
+    if envrc_path.exists():
+        envrc_content = envrc_path.read_text()
+        if sentinel_begin in envrc_content and sentinel_end in envrc_content:
+            begin_idx = envrc_content.index(sentinel_begin)
+            end_idx = envrc_content.index(sentinel_end) + len(sentinel_end)
+            if end_idx < len(envrc_content) and envrc_content[end_idx] == "\n":
+                end_idx += 1
+            envrc_content = envrc_content[:begin_idx] + envrc_block + "\n" + envrc_content[end_idx:]
+        else:
+            if envrc_content and not envrc_content.endswith("\n"):
+                envrc_content += "\n"
+            envrc_content += envrc_block + "\n"
+    else:
+        envrc_content = envrc_block + "\n"
+    install_state._atomic_write(envrc_path, envrc_content)  # pyright: ignore[reportPrivateUsage]
+    records.append(
+        {
+            "path": str(envrc_path),
+            "action": "wrote_new_file" if envrc_original is None else "replaced_file",
+            "content_sha256": _sha256(envrc_block),
+            **({"original_content": envrc_original} if envrc_original is not None else {}),
+        }
+    )
+
     print(
-        "[AgentAlloy] Activate proxy: source .hermes/.agentalloy-env",
+        f"[AgentAlloy] Shell activation: `source {rel_env}` "
+        "(direnv users: `direnv allow` loads it on cd).",
         file=sys.stderr,
     )
+
+    # The gateway daemon captured HERMES_HOME at startup — without a restart
+    # under the repo home, gateway-routed sessions keep the old endpoint.
+    _restart_hermes_gateway(root)
+
     return records
 
 

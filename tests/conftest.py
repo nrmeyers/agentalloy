@@ -72,6 +72,21 @@ def _guard_real_home_wiring() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _never_launch_hermes_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep hermes-agent wiring from spawning a real gateway daemon.
+
+    ``_wire_proxy_hermes_agent`` ends by (re)starting a repo-scoped hermes
+    gateway via subprocess; on a dev box with hermes on PATH that would launch
+    a live daemon against a tmp_path home. Tests that exercise the restart
+    logic itself re-patch this (tests/install/test_hermes_agent_proxy_wiring.py
+    ``TestRestartHermesGateway`` stubs subprocess.run / shutil.which instead).
+    """
+    from agentalloy.install.subcommands import wire_harness
+
+    monkeypatch.setattr(wire_harness, "_restart_hermes_gateway", lambda root: True)
+
+
+@pytest.fixture(autouse=True)
 def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the signals-layer intent backend to the deterministic cosine floor.
 

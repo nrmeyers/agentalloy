@@ -318,7 +318,12 @@ def _build_payload(request: ProxyRequest, upstream_model: str | None = None) -> 
     if request.user is not None:
         payload["user"] = request.user
     if request.metadata is not None:
-        payload["metadata"] = request.metadata
+        # "cwd" is the proxy's own repo-resolution channel (resolve_working_dir),
+        # not an upstream concern — strict OpenAI-compat servers can reject
+        # unknown metadata keys. Forward the rest (e.g. qwen-oauth sessionId).
+        upstream_metadata = {k: v for k, v in request.metadata.items() if k != "cwd"}
+        if upstream_metadata:
+            payload["metadata"] = upstream_metadata
     if request.tools is not None:
         payload["tools"] = request.tools
     if request.tool_choice is not None:

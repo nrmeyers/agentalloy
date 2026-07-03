@@ -8,7 +8,13 @@ import pytest
 import yaml
 
 from agentalloy.api.proxy_context import decode_proj_token, encode_proj_token
+from agentalloy.install.subcommands import wire_harness
 from tests._wire_compat import wire_compat
+
+# Bound at import time so TestRestartHermesGateway exercises the real function
+# even though conftest's autouse _never_launch_hermes_gateway fixture replaces
+# the wire_harness module attribute.
+_real_restart_hermes_gateway = wire_harness._restart_hermes_gateway  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.fixture
@@ -26,6 +32,15 @@ class TestHermesAgentProxyWiring:
     """hermes-agent is inherently per-repo: it wires the repo-local carrier at
     *root* regardless of the requested scope (like claude-code), never touching
     the user's global ~/.hermes/config.yaml."""
+
+    @pytest.fixture(autouse=True)
+    def stub_gateway_restart(self, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+        """Never launch a real hermes gateway from tests; record restart calls."""
+        calls: list[Path] = []
+        monkeypatch.setattr(
+            wire_harness, "_restart_hermes_gateway", lambda root: calls.append(root) or True
+        )
+        return calls
 
     def test_scope_is_ignored_always_repo_local(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -124,6 +139,104 @@ class TestHermesAgentProxyWiring:
         assert isinstance(model, dict)
         assert ":9999/proj/" in model["base_url"]
         assert "5555" not in model["base_url"]
+
+    def test_writes_envrc_direnv_carrier(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Wiring creates an .envrc sourcing the HERMES_HOME env file."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        envrc = (tmp_path / ".envrc").read_text()
+        assert "source_env .hermes/.agentalloy-env" in envrc
+
+    def test_existing_envrc_content_preserved_and_idempotent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-existing .envrc keeps its content; re-wiring never stacks blocks."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        (tmp_path / ".envrc").write_text("export FOO=bar\n")
+
+        wire_compat("hermes-agent", port=5555, root=tmp_path, scope="repo")
+        wire_compat("hermes-agent", port=9999, root=tmp_path, scope="repo")
+
+        envrc = (tmp_path / ".envrc").read_text()
+        assert "export FOO=bar" in envrc
+        assert envrc.count("source_env .hermes/.agentalloy-env") == 1
+
+    def test_gateway_restart_invoked_for_repo_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stub_gateway_restart: list[Path]
+    ) -> None:
+        """Wiring (re)starts the repo-scoped gateway so the config takes effect."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        assert stub_gateway_restart == [tmp_path]
+
+
+class TestRestartHermesGateway:
+    """_restart_hermes_gateway never fails the wiring; it degrades to guidance."""
+
+    def test_hermes_missing_prints_manual_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(wire_harness.shutil, "which", lambda _: None)
+
+        assert _real_restart_hermes_gateway(tmp_path) is False
+        err = capsys.readouterr().err
+        assert "hermes gateway restart" in err
+
+    def test_restart_runs_with_repo_hermes_home(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            seen["cmd"] = cmd
+            seen["env"] = kwargs["env"]
+
+            class Proc:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return Proc()
+
+        monkeypatch.setattr(wire_harness.shutil, "which", lambda _: "/usr/bin/hermes")
+        monkeypatch.setattr(wire_harness.subprocess, "run", fake_run)
+
+        assert _real_restart_hermes_gateway(tmp_path) is True
+        assert seen["cmd"] == ["/usr/bin/hermes", "gateway", "restart"]
+        env = seen["env"]
+        assert isinstance(env, dict)
+        assert env["HERMES_HOME"] == str(tmp_path / ".hermes")
+
+    def test_nonzero_exit_prints_manual_steps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def fake_run(cmd: list[str], **kwargs: object) -> object:
+            class Proc:
+                returncode = 1
+                stdout = ""
+                stderr = "boom\n"
+
+            return Proc()
+
+        monkeypatch.setattr(wire_harness.shutil, "which", lambda _: "/usr/bin/hermes")
+        monkeypatch.setattr(wire_harness.subprocess, "run", fake_run)
+
+        assert _real_restart_hermes_gateway(tmp_path) is False
+        err = capsys.readouterr().err
+        assert "exited 1" in err
+        assert "source .hermes/.agentalloy-env" in err
 
 
 class TestExtractUpstream:
