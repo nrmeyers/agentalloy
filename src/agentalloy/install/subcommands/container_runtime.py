@@ -721,6 +721,11 @@ def _run_container(
         "DUCKDB_PATH": "/app/data/agentalloy.duck",
         "FRAGMENTS_LANCE_PATH": "/app/data/fragments.lance",
         "TELEMETRY_DB_PATH": "/app/data/telemetry.duck",
+        # Per-turn cadence state (announced/composed/banner-turns) lives on the
+        # data volume, keyed by /proj token — writing it into the repo's
+        # .agentalloy/ mid-session trips harness file-watchers (Claude Code
+        # flags "a background process modified <file>" to the user).
+        "AGENTALLOY_RUNTIME_STATE_DIR": "/app/data/runtime-state",
         "LOG_LEVEL": os.environ.get("LOG_LEVEL", "info").lower(),
     }
     env_cmd: list[str] = []

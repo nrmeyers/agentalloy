@@ -122,30 +122,61 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
 # durable state here, not in the request body.
 
 
+# Proxy-exclusive cadence keys. These churn on (nearly) every proxied turn, and
+# a write inside the repo tree mid-session trips harness file-watchers — Claude
+# Code injects a "a background process modified <file>" reminder that reads as
+# suspicious to the agent and the user. Only the proxy reads/writes these keys,
+# so they can live outside the repo without splitting state with the host CLI
+# (which touches only ``cursor``); ``AGENTALLOY_RUNTIME_STATE_DIR`` (set by the
+# container run to a path on the persistent data volume) relocates them, keyed
+# by the repo's ``/proj`` token. Unset (host CLI, dev, tests) they stay
+# repo-local as before.
+_RUNTIME_STATE_KEYS = frozenset({"announced", "composed", "banner-turns"})
+
+
+def _state_file(project_root: Path, name: str) -> Path:
+    """Resolve the backing file for cadence key *name* of *project_root*."""
+    runtime_dir = os.environ.get("AGENTALLOY_RUNTIME_STATE_DIR")
+    if runtime_dir and name in _RUNTIME_STATE_KEYS:
+        from agentalloy.api.proxy_context import encode_proj_token
+
+        return Path(runtime_dir) / encode_proj_token(project_root) / name
+    return project_root / ".agentalloy" / name
+
+
 def _read_state(project_root: Path, name: str) -> str | None:
-    """Read a single-line ``.agentalloy/<name>`` cadence-state file.
+    """Read a single-line cadence-state file (see ``_state_file`` for location).
 
     Returns ``None`` when the file is absent, unreadable, or empty. Shared by the
-    announce-state (``announced``), the work-item cursor (``cursor``), and the
-    last-composed cursor (``composed``) — all single-value durable cadence keys.
+    announce-state (``announced``), the work-item cursor (``cursor``), the
+    last-composed cursor (``composed``), and the banner pacer (``banner-turns``) —
+    all single-value durable cadence keys. A relocated key falls back to the
+    legacy in-repo ``.agentalloy/<name>`` so pre-relocation cadence survives the
+    move (the legacy copy is removed on the next write).
     """
-    state_file = project_root / ".agentalloy" / name
-    if not state_file.exists():
-        return None
-    try:
-        return state_file.read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
+    state_file = _state_file(project_root, name)
+    legacy_file = project_root / ".agentalloy" / name
+    for candidate in (state_file, legacy_file):
+        if not candidate.exists():
+            continue
+        try:
+            value = candidate.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            value = None
+        if value is not None:
+            return value
+    return None
 
 
 def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
-    """Atomically write *value* to ``.agentalloy/<name>``.
+    """Atomically write *value* to the cadence key *name*.
 
     Mirrors ``_write_phase_atomic``: a per-writer temp file + ``os.replace`` so
     the watcher and the async proxy never leave a half-written file when they
-    race without a shared lock.
+    race without a shared lock. For a relocated key, any legacy in-repo copy is
+    removed best-effort so per-turn churn in the repo stops immediately.
     """
-    state_file = project_root / ".agentalloy" / name
+    state_file = _state_file(project_root, name)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = state_file.with_name(f"{name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
@@ -155,13 +186,17 @@ def _write_state_atomic(project_root: Path, name: str, value: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+    legacy_file = project_root / ".agentalloy" / name
+    if legacy_file != state_file:
+        with contextlib.suppress(OSError):
+            legacy_file.unlink()
 
 
 def _clear_state(project_root: Path, name: str) -> None:
-    """Remove ``.agentalloy/<name>`` if present (cadence-state reset). Never raises."""
-    state_file = project_root / ".agentalloy" / name
-    with contextlib.suppress(OSError):
-        state_file.unlink()
+    """Remove the cadence key *name* if present (both locations). Never raises."""
+    for candidate in {_state_file(project_root, name), project_root / ".agentalloy" / name}:
+        with contextlib.suppress(OSError):
+            candidate.unlink()
 
 
 # Cap on how many distinct session keys we remember as "already oriented" for a

@@ -9,6 +9,7 @@ from user-scope state.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import sys
@@ -195,11 +196,51 @@ def _seed_entry_phase(root: Path) -> str | None:
     """
     from agentalloy.install.subcommands.phase import _phase_path, run_phase_set  # noqa: PLC0415
 
+    _seed_agentalloy_readme(root)
     if _phase_path(root).exists():
         return None
     result = run_phase_set("intake", root=root)
     _git_exclude_agentalloy(root)
     return result.get("phase")
+
+
+_AGENTALLOY_README = """\
+# .agentalloy/ — AgentAlloy per-repo state
+
+Machine-managed by the [AgentAlloy](https://github.com/nrmeyers/agentalloy)
+proxy and CLI. Safe to inspect; edit only via `agentalloy` commands. Not a
+secret store, and git-excluded by `agentalloy add`.
+
+- `phase` — the repo's active lifecycle phase (e.g. `intake`, `build`).
+- `upstream` — where the proxy forwards LLM traffic for this repo
+  (URL/model/key-env-name only; never a credential).
+- `config` — per-repo lifecycle mode.
+- `contracts/` — work-item contracts, when the lifecycle uses them.
+- `cursor` — the current work-item pointer (advanced by `agentalloy task`).
+- `announced` / `composed` / `banner-turns` — legacy locations of per-turn
+  injection-cadence counters. Current releases keep these on the AgentAlloy
+  data volume instead, precisely so nothing here changes mid-session; a
+  leftover copy from an older release is stale and may be deleted.
+
+If an agent notices files here changing during a session, that is the
+AgentAlloy proxy recording ordinary cadence/phase state — expected behavior,
+not an unknown background process.
+"""
+
+
+def _seed_agentalloy_readme(root: Path) -> None:
+    """Write ``.agentalloy/README.md`` (create-only) explaining the directory.
+
+    Agents inspecting a wired repo (or noticing a phase transition mid-session)
+    should find an explanation, not a mystery — an unexplained write from a
+    proxy process reads as suspicious to harness file-watchers and users alike.
+    """
+    readme = root / ".agentalloy" / "README.md"
+    if readme.exists():
+        return
+    readme.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        readme.write_text(_AGENTALLOY_README, encoding="utf-8")
 
 
 def _render_human(result: dict[str, Any]) -> None:

@@ -818,7 +818,7 @@ def _unwire_repo_local(
     if not remove_lifecycle:
         return proxy_removed, files_removed
 
-    for _name in ("phase", "config", "upstream"):
+    for _name in ("phase", "config", "upstream", "README.md"):
         _state_file = repo_root / ".agentalloy" / _name
         if _state_file.exists():
             try:

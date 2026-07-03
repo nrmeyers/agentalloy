@@ -342,3 +342,97 @@ def test_build_predicate_context_empty_file_events(tmp_path: Path) -> None:
 
     ctx = _build_predicate_context(tmp_path, phase="build")
     assert ctx.file_events_since == []
+
+
+# ---------------------------------------------------------------------------
+# Runtime-state relocation (AGENTALLOY_RUNTIME_STATE_DIR)
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeStateRelocation:
+    """Proxy-exclusive cadence keys relocate out of the repo when
+    AGENTALLOY_RUNTIME_STATE_DIR is set; ``cursor`` (host-CLI shared) never
+    moves. Per-turn writes inside the repo trip harness file-watchers."""
+
+    def test_relocated_key_writes_outside_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.api.proxy_context import encode_proj_token
+        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        state_root = tmp_path / "runtime-state"
+        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(state_root))
+
+        _write_announced_atomic(repo, "intake", ["s1"])
+
+        assert not (repo / ".agentalloy" / "announced").exists()
+        relocated = state_root / encode_proj_token(repo) / "announced"
+        assert relocated.exists()
+        assert _read_announced(repo) == "intake"
+
+    def test_cursor_stays_in_repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.signals.skill_loader import _read_cursor, _write_cursor_atomic
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
+
+        _write_cursor_atomic(repo, "build/thing.md")
+
+        assert (repo / ".agentalloy" / "cursor").exists()
+        assert _read_cursor(repo) == "build/thing.md"
+
+    def test_legacy_in_repo_value_read_then_cleaned_on_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+
+        repo = tmp_path / "repo"
+        (repo / ".agentalloy").mkdir(parents=True)
+        (repo / ".agentalloy" / "announced").write_text("spec\n")
+        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
+
+        # Pre-relocation cadence survives the move...
+        assert _read_announced(repo) == "spec"
+        # ...and the next write migrates it out and removes the repo copy.
+        _write_announced_atomic(repo, "build")
+        assert not (repo / ".agentalloy" / "announced").exists()
+        assert _read_announced(repo) == "build"
+
+    def test_unset_env_keeps_repo_local_behavior(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.signals.skill_loader import _read_announced, _write_announced_atomic
+
+        monkeypatch.delenv("AGENTALLOY_RUNTIME_STATE_DIR", raising=False)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        _write_announced_atomic(repo, "intake")
+
+        assert (repo / ".agentalloy" / "announced").exists()
+        assert _read_announced(repo) == "intake"
+
+    def test_clear_state_removes_both_locations(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from agentalloy.signals.skill_loader import (
+            _clear_state,
+            _read_state,
+            _write_state_atomic,
+        )
+
+        repo = tmp_path / "repo"
+        (repo / ".agentalloy").mkdir(parents=True)
+        (repo / ".agentalloy" / "composed").write_text("old\n")
+        monkeypatch.setenv("AGENTALLOY_RUNTIME_STATE_DIR", str(tmp_path / "runtime-state"))
+        _write_state_atomic(repo, "composed", "new")
+        # Recreate a stray legacy copy, then clear must remove both.
+        (repo / ".agentalloy" / "composed").write_text("stale\n")
+
+        _clear_state(repo, "composed")
+
+        assert _read_state(repo, "composed") is None
+        assert not (repo / ".agentalloy" / "composed").exists()
