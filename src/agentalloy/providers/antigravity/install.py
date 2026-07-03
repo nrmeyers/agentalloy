@@ -1,7 +1,7 @@
-"""Gemini CLI install module — apply_persistent_config / install_writer.
+"""Antigravity CLI install module — apply_persistent_config / install_writer.
 
 Writes GEMINI.md with a sentinel-bounded block containing the
-AgentAlloy skill-context prose for Gemini CLI.
+AgentAlloy skill-context prose for Antigravity CLI.
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ def _inject_sentinel_block(existing: str, block: str) -> str:
 
 
 def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[WireRecord]:
-    """Install persistent wiring for gemini-cli.
+    """Install persistent wiring for antigravity.
 
     Writes GEMINI.md with a sentinel-bounded block containing the
-    AgentAlloy skill-context prose for Gemini CLI.
+    AgentAlloy skill-context prose for Antigravity CLI.
 
     Args:
         port: The AgentAlloy proxy port.
@@ -72,6 +72,6 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
             action="wrote_new_file" if original_content is None else "injected_block",
             content_sha256=_sha256(instruction_content),
             original_content=original_content,
-            marker_key="gemini-cli.instructions",
+            marker_key="antigravity.instructions",
         )
     ]

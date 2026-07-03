@@ -2188,7 +2188,7 @@ def add_parser(
         action="store_true",
         default=False,
         dest="acknowledge_sidecar",
-        help="Acknowledge sidecar harness limitations (required for non-interactive setup of cursor/windsurf/github-copilot/gemini-cli).",
+        help="Acknowledge sidecar harness limitations (required for non-interactive setup of cursor/windsurf/github-copilot/antigravity).",
     )
     # Deprecated alias; preserved for backward compatibility. Sets the same dest.
     p.add_argument(

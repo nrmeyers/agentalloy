@@ -180,19 +180,27 @@ class TestHermesAgent:
 
 
 # ---------------------------------------------------------------------------
-# Gemini CLI
+# Antigravity CLI (formerly Gemini CLI)
 # ---------------------------------------------------------------------------
 
 
-class TestGeminiCli:
+class TestAntigravity:
     def test_creates_gemini_md(self, repo_root: Path) -> None:
-        result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
-        assert result["harness"] == "gemini-cli"
+        result = wire_compat("antigravity", port=8000, root=repo_root, legacy=True)
+        assert result["harness"] == "antigravity"
         gemini_md = repo_root / "GEMINI.md"
         assert gemini_md.exists()
         content = gemini_md.read_text()
         assert SENTINEL_BEGIN in content
         assert "shell tool" in content
+
+    def test_gemini_cli_alias_still_wires(self, repo_root: Path) -> None:
+        """The deprecated ``gemini-cli`` alias wires identically to antigravity."""
+        result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
+        assert result["harness"] == "gemini-cli"
+        gemini_md = repo_root / "GEMINI.md"
+        assert gemini_md.exists()
+        assert SENTINEL_BEGIN in gemini_md.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -501,13 +509,13 @@ class TestRewireMerge:
         otherwise uninstall can't clean up the prior harness's sentinel block."""
         from agentalloy.install.state import load_state
 
-        # Wire gemini-cli first (uses markdown injection)
-        wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
+        # Wire antigravity first (uses markdown injection)
+        wire_compat("antigravity", port=8000, root=repo_root, legacy=True)
         st = load_state(repo_root)
         first_paths = {f["path"] for f in st["harness_files_written"]}
         assert any("GEMINI.md" in p for p in first_paths)
 
-        # Now wire cursor — gemini-cli's GEMINI.md entry must remain
+        # Now wire cursor — antigravity's GEMINI.md entry must remain
         wire_compat("cursor", port=8000, root=repo_root, legacy=True)
         st = load_state(repo_root)
         merged_paths = {f["path"] for f in st["harness_files_written"]}
@@ -515,14 +523,14 @@ class TestRewireMerge:
         assert any(".cursor" in p for p in merged_paths)
         # Each entry records which harness wrote it.
         harnesses = {f["harness"] for f in st["harness_files_written"]}
-        assert harnesses == {"gemini-cli", "cursor"}
+        assert harnesses == {"antigravity", "cursor"}
 
     def test_rewire_same_harness_replaces_entry_in_place(self, repo_root: Path) -> None:
         """Re-wiring the same harness must not duplicate the same path entry."""
         from agentalloy.install.state import load_state
 
-        wire_compat("gemini-cli", port=8000, root=repo_root, force=True, legacy=True)
-        wire_compat("gemini-cli", port=9000, root=repo_root, force=True, legacy=True)
+        wire_compat("antigravity", port=8000, root=repo_root, force=True, legacy=True)
+        wire_compat("antigravity", port=9000, root=repo_root, force=True, legacy=True)
         st = load_state(repo_root)
         paths = [f["path"] for f in st["harness_files_written"]]
         # No duplicates of the same path
@@ -675,9 +683,9 @@ class TestIntakeActivationMarkers:
         for marker in self._INTAKE_MARKERS:
             assert marker in content, f"Missing marker: {marker}"
 
-    def test_gemini_cli_has_intake_markers(self, repo_root: Path) -> None:
-        """gemini-cli uses markdown injection."""
-        wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
+    def test_antigravity_has_intake_markers(self, repo_root: Path) -> None:
+        """antigravity uses markdown injection."""
+        wire_compat("antigravity", port=8000, root=repo_root, legacy=True)
         content = (repo_root / "GEMINI.md").read_text()
         for marker in self._INTAKE_MARKERS:
             assert marker in content, f"Missing marker: {marker}"
@@ -903,8 +911,8 @@ class TestLegacyFlag:
     """Verify --legacy flag routes to markdown-injection wiring."""
 
     def test_legacy_flag_uses_markdown_injection(self, repo_root: Path) -> None:
-        """--legacy writes the markdown-injection block (gemini-cli)."""
-        result = wire_compat("gemini-cli", port=8000, root=repo_root, legacy=True)
+        """--legacy writes the markdown-injection block (antigravity)."""
+        result = wire_compat("antigravity", port=8000, root=repo_root, legacy=True)
         assert result["integration_vector"] == "markdown_injection"
         gemini_md = repo_root / "GEMINI.md"
         assert gemini_md.exists()

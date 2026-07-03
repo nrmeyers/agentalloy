@@ -112,7 +112,7 @@ agentalloy setup -n --hardware nvidia --packs all --harness claude-code
 agentalloy setup -n --deployment container --harness claude-code
 # container, pinning the runtime non-interactively
 agentalloy setup -n --deployment container --runtime docker --harness claude-code
-# sidecar harnesses (cursor, windsurf, github-copilot, gemini-cli) also need --acknowledge-sidecar:
+# sidecar harnesses (cursor, windsurf, github-copilot, antigravity) also need --acknowledge-sidecar:
 agentalloy setup -n --hardware nvidia --packs all --harness cursor --acknowledge-sidecar
 ```
 
@@ -361,7 +361,7 @@ The one caveat: corpus *mutations* (`agentalloy install-packs`, `agentalloy reem
 
 ### Wired into a sidecar harness
 
-A few harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI) route through their own backends and can't be intercepted. For those, AgentAlloy writes a static rules file and a file-watching sidecar regenerates that file within ~1s of a phase or contract change. You start the sidecar once per session:
+A few harnesses (Cursor, Windsurf, GitHub Copilot, Antigravity CLI) route through their own backends and can't be intercepted. For those, AgentAlloy writes a static rules file and a file-watching sidecar regenerates that file within ~1s of a phase or contract change. You start the sidecar once per session:
 
 ```bash
 agentalloy wire --harness <name>
@@ -391,7 +391,7 @@ See [profiles-and-overrides.md](docs/profiles-and-overrides.md) for full details
 Harnesses fall into two categories:
 
 - **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, Codex, OpenClaw, OpenCode, Hermes Agent) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
-- **Sidecar** (Cursor, Windsurf, GitHub Copilot, Gemini CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Sidecar** (Cursor, Windsurf, GitHub Copilot, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
 
 Proxy-wired is the preferred mode. Full per-harness catalog: [docs/install/harness-catalog.md](docs/install/harness-catalog.md).
 

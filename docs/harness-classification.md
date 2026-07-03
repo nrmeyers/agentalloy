@@ -54,7 +54,7 @@ If yes â€” the harness honors an OpenAI / Anthropic / custom base-URL override â
 | `cursor` | Routes through Cursor's service; no first-party base-URL override | `.cursor/rules/agentalloy.mdc` (dedicated) or `.cursorrules` (shared) |
 | `windsurf` | No first-party base-URL override | `.windsurf/rules/agentalloy.md` (dedicated) or `.windsurfrules` (shared) |
 | `github-copilot` | Closed routing through GitHub backend | `.github/copilot-instructions.md` (shared, marker-bounded) |
-| `gemini-cli` | Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars | `GEMINI.md` (shared, marker-bounded) |
+| `antigravity` (alias `gemini-cli`) | Antigravity CLI (formerly Gemini CLI). Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars | `GEMINI.md` (shared, marker-bounded) |
 
 ### Non-Classified
 

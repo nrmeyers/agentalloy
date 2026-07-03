@@ -46,7 +46,7 @@ def test_sidecar_interactive_code_path(tmp_path: Path):
     """The sidecar interactive code path calls _prompt_context with 'Continue' message."""
     from agentalloy.install.subcommands import simple_setup as ss
 
-    _sidecar = frozenset({"cursor", "windsurf", "github-copilot", "gemini-cli"})
+    _sidecar = frozenset({"cursor", "windsurf", "github-copilot", "antigravity", "gemini-cli"})
     harness = "cursor"
     assert harness in _sidecar  # sanity check
 

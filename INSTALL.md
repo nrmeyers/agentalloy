@@ -352,7 +352,7 @@ If the user wants a non-default port (because 47950 is taken on their machine), 
 > Ask the user which coding harness they're using. Read the list aloud:
 > > "What harness will be calling the skill API?
 > > 1. Claude Code
-> > 2. Gemini CLI
+> > 2. Antigravity CLI (formerly Gemini CLI)
 > > 3. Cursor
 > > 4. Continue.dev with a closed/cloud model (Anthropic, OpenAI)
 > > 5. Continue.dev with a locally-hosted model
@@ -364,7 +364,7 @@ If the user wants a non-default port (because 47950 is taken on their machine), 
 >
 > Wait for the user's choice. Note: option 10 is a compound — if chosen, follow up with "which of options 1–8 should the MCP server be configured for?"
 
-Record the harness choice. The CLI uses one of: `claude-code`, `gemini-cli`, `cursor`, `continue-closed`, `continue-local`, `opencode`, `aider`, `cline`, `manual`. For the strict-tools MCP fallback, pass `--mcp-fallback` with one of the supported harnesses (claude-code, cursor, continue-closed, continue-local).
+Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (alias: `gemini-cli`), `cursor`, `continue-closed`, `continue-local`, `opencode`, `aider`, `cline`, `manual`. For the strict-tools MCP fallback, pass `--mcp-fallback` with one of the supported harnesses (claude-code, cursor, continue-closed, continue-local).
 
 ---
 
@@ -383,7 +383,7 @@ Record the harness choice. The CLI uses one of: `claude-code`, `gemini-cli`, `cu
 3. `.aider.conf.yml` → `aider`
 4. `.opencode/` → `opencode`
 5. `.clinerules` → `cline`
-6. `GEMINI.md` → `gemini-cli`
+6. `GEMINI.md` → `antigravity`
 7. `CLAUDE.md` → `claude-code`
 
 A repo with multiple markers (e.g. both `.cursor/` and `CLAUDE.md`, common when more than one agent is wired to the project) will pick the higher-priority entry and print a `NOTE:` line so the user can pass `--harness <name>` to override. Tool-specific dotfiles outrank `CLAUDE.md` because the latter is shared by several agents and is a weaker signal.

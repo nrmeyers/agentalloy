@@ -9,7 +9,7 @@ The AgentAlloy proxy intercepts LLM traffic from harnesses that honor a custom A
 | Cursor | Routes through Cursor's own service; no first-party base-URL override |
 | Windsurf | No first-party base-URL override |
 | GitHub Copilot | Closed routing through GitHub's backend |
-| Gemini CLI | Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars |
+| Antigravity CLI (formerly Gemini CLI) | Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars |
 
 Every other supported harness (Claude Code, Cline, Aider, Continue.dev, OpenCode, Hermes Agent) is proxy-wired by default and does **not** need the watcher.
 
@@ -59,7 +59,7 @@ This writes the initial harness configuration (see [harness-catalog.md](install/
 ### 2. Start the watcher
 
 ```bash
-agentalloy watch start --harness <cursor|windsurf|github-copilot|gemini-cli>
+agentalloy watch start --harness <cursor|windsurf|github-copilot|antigravity>
 ```
 
 The watcher runs in the foreground. Press Ctrl+C to stop.
@@ -94,7 +94,7 @@ The file contains user content alongside AgentAlloy content. Only the sentinel-b
 |---|---|---|
 | Windsurf | `.windsurfrules` | `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` |
 | GitHub Copilot | `.github/copilot-instructions.md` | Same markers |
-| Gemini CLI | `GEMINI.md` | Same markers |
+| Antigravity CLI | `GEMINI.md` | Same markers |
 
 The marker block strategy ensures user edits outside the block survive regeneration. If the markers already exist, the block is replaced in place. On first write, the block is appended.
 
@@ -247,5 +247,5 @@ rm ~/.agentalloy/watch/<profile_name>.pid
 ### Regeneration errors
 
 Check the log file for `Regeneration failed` messages. Common causes:
-- No regenerator registered for the harness (must be one of: cursor, windsurf, github-copilot, gemini-cli; legacy: cline, aider)
+- No regenerator registered for the harness (must be one of: cursor, windsurf, github-copilot, antigravity; legacy: cline, aider, gemini-cli alias)
 - Disk full or permission denied on the target file path

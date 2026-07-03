@@ -12,10 +12,10 @@ from agentalloy.watch.regenerators import (
     AGENTALLOY_MARKER,
     REGENERATORS,
     regenerate_aider,
+    regenerate_antigravity,
     regenerate_cline,
     regenerate_copilot,
     regenerate_cursor,
-    regenerate_gemini,
     regenerate_windsurf,
     update_block,
 )
@@ -95,11 +95,11 @@ def test_regenerate_cline(tmp_path: Path):
     assert "cline prose" in f.read_text()
 
 
-def test_regenerate_gemini(tmp_path: Path):
-    regenerate_gemini("gemini prose", tmp_path)
+def test_regenerate_antigravity(tmp_path: Path):
+    regenerate_antigravity("antigravity prose", tmp_path)
     f = tmp_path / "GEMINI.md"
     assert f.exists()
-    assert "gemini prose" in f.read_text()
+    assert "antigravity prose" in f.read_text()
 
 
 def test_regenerate_aider(tmp_path: Path):
@@ -115,7 +115,8 @@ def test_all_regenerators_registered():
         "windsurf",
         "github-copilot",
         "cline",
-        "gemini-cli",
+        "antigravity",
+        "gemini-cli",  # deprecated alias for antigravity
         "aider",
     }
 

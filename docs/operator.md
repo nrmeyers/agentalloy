@@ -124,7 +124,7 @@ The signal layer is a Python module (deterministic by default) that evaluates co
 2. **Gate evaluation** — deterministic predicates (`artifact_exists`, `git_state`, `contract_has_tags`) plus named-intent gates. The named-intent gates score utterances with the `qwen3-reranker-0.6b` cross-encoder (`SIGNAL_INTENT_BACKEND=reranker`, **the default** — a measured win on the labeled intent benchmark, see BENCHMARKS.md). This backend needs a reranker server — a `llama-server` running `Qwen3-Reranker-0.6B-Q8_0.gguf` (completions mode), default `127.0.0.1:47952`; if it is unreachable, or you set `SIGNAL_INTENT_BACKEND=cosine`, the gates fall open to cosine-similarity scoring against reference phrase sets, byte-for-byte. Cosine is the fail-open floor, so the default is safe even where the reranker server is not running — but the lift only materializes where it is.
 3. **Action** — write phase file atomically, emit workflow skill prose, or fire system skills.
 
-The signal layer runs per-request through the proxy for proxy-wired harnesses. For sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Gemini CLI), the proxy path is not available and the signal layer is replaced by a file-watching sidecar. See [Sidecar Experience](sidecar-experience.md).
+The signal layer runs per-request through the proxy for proxy-wired harnesses. For sidecar harnesses (Cursor, Windsurf, GitHub Copilot, Antigravity CLI), the proxy path is not available and the signal layer is replaced by a file-watching sidecar. See [Sidecar Experience](sidecar-experience.md).
 
 ### Proxy interception
 
@@ -139,7 +139,7 @@ The sidecar is a file-watching process for harnesses that can't be proxy-wired. 
 Harness classification determines which integration vector is available:
 
 - **Proxy-wired** — harness honors a custom API base URL (OpenAI / Anthropic / config-file `apiBase`). Full capability: per-request context injection, gate enforcement at the proxy, automatic phase transitions. Examples: Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent.
-- **Sidecar** — harness routes through its own backend and cannot be intercepted. Capabilities reduced: advisory-only system skills, file-watcher phase detection. Examples: Cursor, Windsurf, GitHub Copilot, Gemini CLI.
+- **Sidecar** — harness routes through its own backend and cannot be intercepted. Capabilities reduced: advisory-only system skills, file-watcher phase detection. Examples: Cursor, Windsurf, GitHub Copilot, Antigravity CLI.
 
 See [Harness Catalog](install/harness-catalog.md) for the full list and [Harness Classification](harness-classification.md) for the classification spec.
 

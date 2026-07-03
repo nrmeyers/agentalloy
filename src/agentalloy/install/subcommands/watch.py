@@ -92,7 +92,7 @@ def _start(args: argparse.Namespace) -> int:
     if harness is None:
         print(
             "ERROR: --harness required (could not detect from state.json).\n"
-            "Use: agentalloy watch start --harness <cursor|windsurf|github-copilot|gemini-cli>",
+            "Use: agentalloy watch start --harness <cursor|windsurf|github-copilot|antigravity>",
             file=sys.stderr,
         )
         return 1
@@ -193,7 +193,7 @@ def add_parser(
     start.add_argument(
         "--harness",
         default=None,
-        help="Sidecar harness name (e.g. cursor, windsurf, github-copilot, gemini-cli)",
+        help="Sidecar harness name (e.g. cursor, windsurf, github-copilot, antigravity)",
     )
     start.add_argument("--profile", default=None, help="Profile name (default: default)")
 

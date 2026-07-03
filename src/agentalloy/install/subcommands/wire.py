@@ -1,7 +1,7 @@
 """``wire`` verb — per-repo harness wiring.
 
 Convenience wrapper over ``wire-harness``. Auto-detects the harness from
-markers in the cwd (`.cursor/` → cursor, `GEMINI.md` → gemini-cli,
+markers in the cwd (`.cursor/` → cursor, `GEMINI.md` → antigravity,
 `.continuerc.json` → continue-closed, etc.) and reads the service port
 from user-scope state.
 """
@@ -704,7 +704,7 @@ _HARNESS_MARKERS: list[tuple[str, list[str]]] = [
     ("aider", [".aider.conf.yml"]),
     ("opencode", [".opencode"]),
     ("cline", [".clinerules"]),
-    ("gemini-cli", ["GEMINI.md"]),
+    ("antigravity", ["GEMINI.md"]),
     ("github-copilot", [".github/copilot-instructions.md"]),
     ("claude-code", ["CLAUDE.md"]),
     ("hermes-agent", [".hermes", "AGENTS.md"]),

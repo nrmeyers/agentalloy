@@ -13,7 +13,7 @@ clean removal by ``uninstall``.
 
 Closed harnesses (markdown injection):
   claude-code     → CLAUDE.md
-  gemini-cli      → GEMINI.md
+  antigravity     → GEMINI.md  (Antigravity CLI, formerly Gemini CLI)
   cursor          → .cursor/rules/agentalloy.mdc   (or .cursorrules fallback)
   windsurf        → .windsurf/rules/agentalloy.md  (or .windsurfrules fallback)
   github-copilot  → .github/copilot-instructions.md
@@ -73,9 +73,10 @@ _HARNESS_REGISTRY: dict[str, dict[str, Any]] = {
         "dedicated": False,
         "vector": "markdown_injection",
     },
-    "gemini-cli": {
+    "antigravity": {
+        # Antigravity CLI (formerly Gemini CLI) still reads GEMINI.md.
         "target": "GEMINI.md",
-        "template": "gemini-cli.md",
+        "template": "antigravity.md",
         "dedicated": False,
         "vector": "markdown_injection",
     },
@@ -170,6 +171,9 @@ _HARNESS_REGISTRY: dict[str, dict[str, Any]] = {
         "vector": "proxy",
     },
 }
+
+# Deprecated alias — Antigravity CLI was formerly Gemini CLI. Same config dict.
+_HARNESS_REGISTRY["gemini-cli"] = _HARNESS_REGISTRY["antigravity"]
 
 VALID_HARNESSES: frozenset[str] = frozenset(REGISTRY.keys())
 
@@ -711,7 +715,7 @@ def _probe_code_indexer(root: Path) -> None:
     install_state.save_state(st, root)
 
 
-# Harnesses we know how to wire MCP for. Others (gemini-cli, opencode,
+# Harnesses we know how to wire MCP for. Others (antigravity, opencode,
 # aider, cline) get a clear "not yet supported" error.
 _MCP_SUPPORTED = frozenset({"claude-code", "cursor", "continue-closed", "continue-local"})
 

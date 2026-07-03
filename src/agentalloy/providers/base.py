@@ -184,7 +184,7 @@ def sdd_instructions_markdown(port: int) -> str:
     """Shared SDD instruction block for markdown-delivered harnesses.
 
     One source of truth for the harnesses that wire via an instruction file
-    (cursor, windsurf, github-copilot, gemini-cli, aider, hermes-agent), so the
+    (cursor, windsurf, github-copilot, antigravity, aider, hermes-agent), so the
     session-start / intake-front-door behaviour can't drift between them — the
     same drift that bit the ``Phases:`` line. Proxy-wired harnesses
     (claude-code and the OpenAI-compatible ones) get it via per-turn

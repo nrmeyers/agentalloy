@@ -13,7 +13,7 @@ Every proxy-wired harness is configured to use the synthetic model name
 `agentalloy-proxy`, which the proxy resolves to the user's configured upstream model
 (via `_resolve_model()` in `proxy_router.py`).
 
-Harnesses that cannot be configured natively (cursor, windsurf, gemini-cli,
+Harnesses that cannot be configured natively (cursor, windsurf, antigravity,
 github-copilot) receive a proxy instruction block explaining the proxy is active.
 
 ### Wiring modes
@@ -108,14 +108,14 @@ These harnesses route through their own backends and cannot be intercepted by th
 | `cursor` | `.cursor/rules/agentalloy.mdc` (or `.cursorrules` fallback) | Cursor routes through its own service; no first-party base-URL override |
 | `windsurf` | `.windsurf/rules/agentalloy.md` (or `.windsurfrules` fallback) | No first-party base-URL override |
 | `github-copilot` | `.github/copilot-instructions.md` (shared, marker-bounded) | Closed routing through GitHub backend |
-| `gemini-cli` | `GEMINI.md` (shared, marker-bounded) | Ignores `OPENAI_*` / `ANTHROPIC_*` env vars; talks to Google's Gemini API |
+| `antigravity` (alias `gemini-cli`) | `GEMINI.md` (shared, marker-bounded) | Antigravity CLI (formerly Gemini CLI). Ignores `OPENAI_*` / `ANTHROPIC_*` env vars; talks to Google's Gemini API |
 
 **Per-harness regeneration details** (from `regenerators.py`):
 
 - **Cursor** — writes `.cursor/rules/agentalloy-context.mdc` with YAML frontmatter (`description`, `globs`, `alwaysApply: true`). Full file overwrite — AgentAlloy owns this dedicated file entirely. Falls back to `.cursorrules` (shared, marker-bounded) if `.cursor/` directory does not exist.
 - **Windsurf** — writes `.windsurf/rules/agentalloy.md`. Falls back to `.windsurfrules` (shared, marker-bounded) if `.windsurf/` directory does not exist.
 - **GitHub Copilot** — marker-block replacement in `.github/copilot-instructions.md` using `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` markers.
-- **Gemini CLI** — marker-block replacement in `GEMINI.md` using the same `AGENTALLOY-CONTEXT` markers.
+- **Antigravity CLI** (formerly Gemini CLI) — marker-block replacement in `GEMINI.md` using the same `AGENTALLOY-CONTEXT` markers.
 
 > **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire --legacy`. Both are proxy-wired by default and should not need the sidecar.
 
@@ -138,7 +138,7 @@ When you run `agentalloy wire` without `--harness`, AgentAlloy scans the current
 | 4 | `aider` | `.aider.conf.yml` |
 | 5 | `opencode` | `.opencode/` |
 | 6 | `cline` | `.clinerules` |
-| 7 | `gemini-cli` | `GEMINI.md` |
+| 7 | `antigravity` | `GEMINI.md` |
 | 8 | `github-copilot` | `.github/copilot-instructions.md` |
 | 9 | `claude-code` | `CLAUDE.md` |
 | 10 | `hermes-agent` | `.hermes/`, `AGENTS.md` |
@@ -179,7 +179,7 @@ Same concept as sentinel-bounded injection, but uses the `AGENTALLOY-CONTEXT` ma
 <!-- END AGENTALLOY-CONTEXT -->
 ```
 
-Used by sidecar regenerator functions (`regenerators.py`) for: Windsurf, GitHub Copilot, Gemini CLI.
+Used by sidecar regenerator functions (`regenerators.py`) for: Windsurf, GitHub Copilot, Antigravity CLI.
 
 ## MCP Fallback
 
@@ -223,7 +223,7 @@ The server reads JSON-RPC messages from stdin (newline-delimited), writes respon
 
 ### Unsatisfied harnesses
 
-Using `--mcp-fallback` with unsupported harnesses (e.g., `gemini-cli`, `opencode`, `aider`, `cline`) raises a clear error listing the four supported harnesses and suggesting the default markdown-injection variant instead.
+Using `--mcp-fallback` with unsupported harnesses (e.g., `antigravity`, `opencode`, `aider`, `cline`) raises a clear error listing the four supported harnesses and suggesting the default markdown-injection variant instead.
 
 ### Legacy `mcp-only` harness
 

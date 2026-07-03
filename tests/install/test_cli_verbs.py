@@ -190,10 +190,10 @@ class TestWire:
         from agentalloy.install.subcommands import wire
 
         # CLAUDE.md present (would auto-detect claude-code) but caller
-        # forces gemini-cli — a separate file should be created.
+        # forces antigravity — a separate file should be created.
         (repo_root / "CLAUDE.md").write_text("# Project\n")
         monkeypatch.chdir(repo_root)
-        args = argparse.Namespace(harness="gemini-cli", port=None, force=False)
+        args = argparse.Namespace(harness="antigravity", port=None, force=False)
         rc = wire._run(args)
         assert rc == 0
         assert (repo_root / "GEMINI.md").exists()

@@ -77,8 +77,8 @@ def regenerate_cline(content: str, project_root: Path) -> None:
     update_block(project_root / ".clinerules", AGENTALLOY_MARKER, content)
 
 
-def regenerate_gemini(content: str, project_root: Path) -> None:
-    """Marker-block replacement in GEMINI.md."""
+def regenerate_antigravity(content: str, project_root: Path) -> None:
+    """Marker-block replacement in GEMINI.md (Antigravity CLI, formerly Gemini CLI)."""
     update_block(project_root / "GEMINI.md", AGENTALLOY_MARKER, content)
 
 
@@ -94,6 +94,7 @@ REGENERATORS: dict[str, Callable[[str, Path], None]] = {
     "windsurf": regenerate_windsurf,
     "github-copilot": regenerate_copilot,
     "cline": regenerate_cline,
-    "gemini-cli": regenerate_gemini,
+    "antigravity": regenerate_antigravity,
+    "gemini-cli": regenerate_antigravity,  # deprecated alias
     "aider": regenerate_aider,
 }

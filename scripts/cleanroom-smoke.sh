@@ -103,7 +103,7 @@ done
 
 echo "== auto-detection from repo markers (wire with no --harness) =="
 # marker:expected — mirrors wire.py _HARNESS_MARKERS (representative subset).
-for pair in "CLAUDE.md:claude-code" "GEMINI.md:gemini-cli" ".cursorrules:cursor" \
+for pair in "CLAUDE.md:claude-code" "GEMINI.md:antigravity" ".cursorrules:cursor" \
             ".clinerules:cline" ".aider.conf.yml:aider"; do
   marker="${pair%%:*}"
   expect="${pair##*:}"
