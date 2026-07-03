@@ -42,6 +42,11 @@ class TestHermesAgentProxyWiring:
         )
         return calls
 
+    @pytest.fixture(autouse=True)
+    def both_managers_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pin activation-manager detection so tests don't depend on the host PATH."""
+        monkeypatch.setattr(wire_harness, "_activation_managers", lambda: {"direnv", "mise"})
+
     def test_scope_is_ignored_always_repo_local(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -168,6 +173,89 @@ class TestHermesAgentProxyWiring:
         envrc = (tmp_path / ".envrc").read_text()
         assert "export FOO=bar" in envrc
         assert envrc.count("source_env .hermes/.agentalloy-env") == 1
+
+    def test_mise_env_carrier_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """mise on PATH: wiring writes mise.toml with HERMES_HOME under [env]."""
+        import tomllib
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        data = tomllib.loads((tmp_path / "mise.toml").read_text())
+        assert data["env"]["HERMES_HOME"] == "{{config_root}}/.hermes"
+
+    def test_mise_existing_env_table_gets_key_inserted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An existing [env] table gains the key without a duplicate table."""
+        import tomllib
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        (tmp_path / "mise.toml").write_text('[tools]\nnode = "24"\n\n[env]\nFOO = "bar"\n')
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        data = tomllib.loads((tmp_path / "mise.toml").read_text())
+        assert data["env"]["HERMES_HOME"] == "{{config_root}}/.hermes"
+        assert data["env"]["FOO"] == "bar"
+        assert data["tools"]["node"] == "24"
+
+    def test_mise_rewire_is_idempotent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Re-wiring never stacks sentinel blocks or duplicates the key."""
+        import tomllib
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        wire_compat("hermes-agent", port=5555, root=tmp_path, scope="repo")
+        wire_compat("hermes-agent", port=9999, root=tmp_path, scope="repo")
+
+        content = (tmp_path / "mise.toml").read_text()
+        assert content.count("HERMES_HOME") == 1
+        tomllib.loads(content)
+
+    def test_no_managers_prints_manual_hint(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Neither direnv nor mise: no carrier files, manual source hint printed."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(wire_harness, "_activation_managers", lambda: set())
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        assert not (tmp_path / ".envrc").exists()
+        assert not (tmp_path / "mise.toml").exists()
+        assert "source .hermes/.agentalloy-env" in capsys.readouterr().err
+
+    def test_existing_envrc_wired_even_without_direnv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pre-existing .envrc is wired even when direnv isn't on PATH."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.setattr(wire_harness, "_activation_managers", lambda: set())
+        (tmp_path / ".envrc").write_text("export FOO=bar\n")
+
+        wire_compat("hermes-agent", port=6666, root=tmp_path, scope="repo")
+
+        envrc = (tmp_path / ".envrc").read_text()
+        assert "source_env .hermes/.agentalloy-env" in envrc
 
     def test_gateway_restart_invoked_for_repo_home(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stub_gateway_restart: list[Path]

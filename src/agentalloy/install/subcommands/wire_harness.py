@@ -1099,6 +1099,88 @@ def _restart_hermes_gateway(root: Path) -> bool:
     return True
 
 
+def _activation_managers() -> set[str]:
+    """Which per-directory env managers are installed (``direnv``, ``mise``).
+
+    Detected at wire time from PATH — the activation carriers below are only
+    written for managers that can actually load them, so ``agentalloy add``
+    never litters a repo with files nothing will read.
+    """
+    return {name for name in ("direnv", "mise") if shutil.which(name)}
+
+
+def _write_hermes_mise_env(root: Path, records: list[dict[str, Any]]) -> bool:
+    """Add ``HERMES_HOME`` to the repo's mise config ``[env]`` table.
+
+    Targets an existing ``mise.toml`` / ``.mise.toml`` (in that order) or
+    creates ``mise.toml``. The insertion is sentinel-bounded for uninstall and
+    idempotent for re-wiring. Two shapes:
+
+    - no ``[env]`` table: append a sentinel-bounded block declaring one at EOF
+      (a trailing table never collides with earlier tables);
+    - existing ``[env]`` table: insert only the sentinel-bounded key line right
+      after the header — TOML forbids a second ``[env]`` table.
+
+    The result is validated with ``tomllib``; on a parse failure the original
+    content is restored and False is returned so the caller can fall back to
+    the manual hint. Returns True when the carrier landed.
+    """
+    import tomllib
+
+    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
+    sentinel_end = "# <!-- END agentalloy install -->"
+    key_line = 'HERMES_HOME = "{{config_root}}/.hermes"'
+
+    mise_path = next(
+        (p for name in ("mise.toml", ".mise.toml") if (p := root / name).exists()),
+        root / "mise.toml",
+    )
+    original = _capture_original(mise_path)
+    content = original if original is not None else ""
+
+    if sentinel_begin in content and sentinel_end in content:
+        # Idempotent replace of the prior block (key line or full [env] block).
+        begin_idx = content.index(sentinel_begin)
+        end_idx = content.index(sentinel_end) + len(sentinel_end)
+        had_env_outside = "[env]" in (content[:begin_idx] + content[end_idx:])
+        block = (
+            f"{sentinel_begin}\n{key_line}\n{sentinel_end}"
+            if had_env_outside
+            else f"{sentinel_begin}\n[env]\n{key_line}\n{sentinel_end}"
+        )
+        new_content = content[:begin_idx] + block + content[end_idx:]
+    elif "[env]" in content:
+        header_end = content.index("[env]") + len("[env]")
+        insertion = f"\n{sentinel_begin}\n{key_line}\n{sentinel_end}"
+        new_content = content[:header_end] + insertion + content[header_end:]
+    else:
+        block = f"{sentinel_begin}\n[env]\n{key_line}\n{sentinel_end}\n"
+        if content and not content.endswith("\n"):
+            content += "\n"
+        new_content = content + block
+
+    try:
+        tomllib.loads(new_content)
+    except tomllib.TOMLDecodeError as e:
+        print(
+            f"[AgentAlloy] {mise_path.name} edit would produce invalid TOML ({e}) — "
+            "skipped the mise carrier.",
+            file=sys.stderr,
+        )
+        return False
+
+    install_state._atomic_write(mise_path, new_content)  # pyright: ignore[reportPrivateUsage]
+    records.append(
+        {
+            "path": str(mise_path),
+            "action": "wrote_new_file" if original is None else "replaced_file",
+            "content_sha256": _sha256(new_content),
+            **({"original_content": original} if original is not None else {}),
+        }
+    )
+    return True
+
+
 def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str, Any]]:
     """Wire Hermes Agent to use the AgentAlloy proxy (per-repo interception).
 
@@ -1106,7 +1188,8 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
     form, but the proxy needs a per-repo ``/proj/<token>`` discriminator. So we
     isolate per repo via ``HERMES_HOME``: a repo-local ``.hermes/`` activated by
     ``.hermes/.agentalloy-env`` (sourced directly, or automatically on ``cd``
-    via the ``.envrc`` written below for direnv users).
+    via the activation carriers written below — ``.envrc`` for direnv users,
+    a ``mise.toml`` ``[env]`` entry for mise users, chosen by PATH detection).
 
     The repo-local ``config.yaml`` is a copy of the user's global one with only
     the ``model`` block redirected at the proxy, so their other tuning survives.
@@ -1178,45 +1261,63 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
         }
     )
 
-    # direnv carrier: auto-activate HERMES_HOME on cd. Same sentinel style as
-    # the claude-code wiring so uninstall's record walk handles it; unlike
-    # claude-code we create .envrc when absent — hermes has no native
-    # settings-file carrier, so the env var is the only activation path.
+    # Activation carriers: auto-set HERMES_HOME on cd, but only via managers
+    # actually installed (PATH detection) — hermes has no native settings-file
+    # carrier, so the env var is the only activation path, and a carrier no
+    # manager reads is just litter. Sentinel style matches the claude-code
+    # wiring so uninstall's record walk handles it.
+    managers = _activation_managers()
     sentinel_begin = "# <!-- BEGIN agentalloy install -->"
     sentinel_end = "# <!-- END agentalloy install -->"
     rel_env = env_path.relative_to(root).as_posix()
-    envrc_path = root / ".envrc"
-    envrc_original = _capture_original(envrc_path)
-    envrc_block = f"{sentinel_begin}\nsource_env {rel_env}\n{sentinel_end}"
-    if envrc_path.exists():
-        envrc_content = envrc_path.read_text()
-        if sentinel_begin in envrc_content and sentinel_end in envrc_content:
-            begin_idx = envrc_content.index(sentinel_begin)
-            end_idx = envrc_content.index(sentinel_end) + len(sentinel_end)
-            if end_idx < len(envrc_content) and envrc_content[end_idx] == "\n":
-                end_idx += 1
-            envrc_content = envrc_content[:begin_idx] + envrc_block + "\n" + envrc_content[end_idx:]
-        else:
-            if envrc_content and not envrc_content.endswith("\n"):
-                envrc_content += "\n"
-            envrc_content += envrc_block + "\n"
-    else:
-        envrc_content = envrc_block + "\n"
-    install_state._atomic_write(envrc_path, envrc_content)  # pyright: ignore[reportPrivateUsage]
-    records.append(
-        {
-            "path": str(envrc_path),
-            "action": "wrote_new_file" if envrc_original is None else "replaced_file",
-            "content_sha256": _sha256(envrc_block),
-            **({"original_content": envrc_original} if envrc_original is not None else {}),
-        }
-    )
+    activated: list[str] = []
 
-    print(
-        f"[AgentAlloy] Shell activation: `source {rel_env}` "
-        "(direnv users: `direnv allow` loads it on cd).",
-        file=sys.stderr,
-    )
+    envrc_path = root / ".envrc"
+    if "direnv" in managers or envrc_path.exists():
+        envrc_original = _capture_original(envrc_path)
+        envrc_block = f"{sentinel_begin}\nsource_env {rel_env}\n{sentinel_end}"
+        if envrc_path.exists():
+            envrc_content = envrc_path.read_text()
+            if sentinel_begin in envrc_content and sentinel_end in envrc_content:
+                begin_idx = envrc_content.index(sentinel_begin)
+                end_idx = envrc_content.index(sentinel_end) + len(sentinel_end)
+                if end_idx < len(envrc_content) and envrc_content[end_idx] == "\n":
+                    end_idx += 1
+                envrc_content = (
+                    envrc_content[:begin_idx] + envrc_block + "\n" + envrc_content[end_idx:]
+                )
+            else:
+                if envrc_content and not envrc_content.endswith("\n"):
+                    envrc_content += "\n"
+                envrc_content += envrc_block + "\n"
+        else:
+            envrc_content = envrc_block + "\n"
+        install_state._atomic_write(envrc_path, envrc_content)  # pyright: ignore[reportPrivateUsage]
+        records.append(
+            {
+                "path": str(envrc_path),
+                "action": "wrote_new_file" if envrc_original is None else "replaced_file",
+                "content_sha256": _sha256(envrc_block),
+                **({"original_content": envrc_original} if envrc_original is not None else {}),
+            }
+        )
+        activated.append(".envrc (direnv: run `direnv allow` once)")
+
+    has_mise_config = (root / "mise.toml").exists() or (root / ".mise.toml").exists()
+    if ("mise" in managers or has_mise_config) and _write_hermes_mise_env(root, records):
+        activated.append("mise.toml [env] (mise loads it on cd)")
+
+    if activated:
+        print(
+            f"[AgentAlloy] HERMES_HOME auto-activation wired: {'; '.join(activated)}.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"[AgentAlloy] No direnv/mise detected — activate manually per shell: "
+            f"`source {rel_env}` before running hermes in this repo.",
+            file=sys.stderr,
+        )
 
     # The gateway daemon captured HERMES_HOME at startup — without a restart
     # under the repo home, gateway-routed sessions keep the old endpoint.
