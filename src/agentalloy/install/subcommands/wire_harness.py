@@ -1305,7 +1305,7 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
 
     has_mise_config = (root / "mise.toml").exists() or (root / ".mise.toml").exists()
     if ("mise" in managers or has_mise_config) and _write_hermes_mise_env(root, records):
-        activated.append("mise.toml [env] (mise loads it on cd)")
+        activated.append("mise.toml [env] (run `mise trust` once; loads on cd)")
 
     if activated:
         print(
