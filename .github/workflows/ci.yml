@@ -28,7 +28,10 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --frozen
+        # --extra code-index: the vendored engine's tests need tree-sitter +
+        # grammars. The pipx-smoke job stays core-only to prove the base
+        # wheel works without the extra.
+        run: uv sync --frozen --extra code-index
 
       - name: Lint
         run: uv run ruff check .
