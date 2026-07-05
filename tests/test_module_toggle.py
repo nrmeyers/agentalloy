@@ -47,17 +47,19 @@ def test_compose_disabled_unregisters_routers(
         assert body["modules"]["compose"] == "disabled"
 
 
-def test_code_index_enabled_without_module_reports_unavailable(
+def test_code_index_enabled_mounts_module(
     client_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The code_index package doesn't ship yet (PR2+); the toggle must degrade
-    # to "unavailable", not crash app creation.
+    # PR4+: the module ships (routers + ingest pipeline). With the toggle on
+    # it mounts under /code and reports "enabled". (The "unavailable" degrade
+    # path still exists for installs without the [code-index] extra — it
+    # can't be exercised here because this environment has the extra.)
     monkeypatch.setenv("CODE_INDEX_ENABLED", "1")
     app = create_app(use_default_lifespan=False)
     with TestClient(app) as client:
         body = client.get("/health").json()
-        assert body["modules"]["code_index"] == "unavailable"
-        assert not any(p.startswith("/code/") for p in _routes(client))
+        assert body["modules"]["code_index"] == "enabled"
+        assert any(p.startswith("/code/") for p in _routes(client))
 
 
 def test_code_index_data_dir_created_only_when_enabled(

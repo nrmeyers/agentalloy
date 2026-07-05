@@ -10,11 +10,15 @@ __all__ = ["build_code_index_router"]
 def build_code_index_router() -> APIRouter:
     """Assemble the ``/code`` router from the module's sub-routers.
 
-    Scaffolding stage: the module's routers land in follow-up PRs; until the
-    engine and storage layers exist this raises ImportError so ``create_app``
-    reports the module ``unavailable`` instead of mounting a dead prefix.
+    Imports stay inside the function: the routers pull in the ingest pipeline
+    → facade → vendored tree-sitter engine, so an install without the
+    ``[code-index]`` extra raises ImportError here and ``create_app`` reports
+    the module ``unavailable`` instead of crashing.
     """
-    raise ImportError(
-        "the code-index module is not functional yet (scaffolding only); "
-        "routers arrive with the engine + storage layers"
-    )
+    from agentalloy.code_index.api.index_router import router as index_router
+    from agentalloy.code_index.api.repos_router import router as repos_router
+
+    root = APIRouter(prefix="/code", tags=["code-index"])
+    root.include_router(index_router)
+    root.include_router(repos_router)
+    return root

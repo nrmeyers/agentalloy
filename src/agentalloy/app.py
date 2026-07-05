@@ -210,6 +210,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     anthropic_passthrough_client = AnthropicPassthroughClient(settings.anthropic_upstream_url)
     app.state.anthropic_passthrough_client = anthropic_passthrough_client
 
+    # Code-index module state: constructed only when the module's router was
+    # actually mounted (toggle on AND the [code-index] extra importable). All
+    # code_index imports stay inside this branch so a disabled module never
+    # imports tree-sitter. Jobs run as asyncio tasks tracked on the state.
+    code_index_state = None
+    _ci_provider = None
+    if getattr(app.state, "module_status", {}).get("code_index") == "enabled":
+        from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
+        from agentalloy.code_index.store import open_jobs
+
+        ci_jobs = open_jobs(settings)
+        code_index_state = CodeIndexState(
+            settings=settings, embed_client=embed_client, jobs=ci_jobs
+        )
+        # Retire active job rows orphaned by a previous (now-dead) process.
+        ci_jobs.sweep_interrupted(code_index_state.worker_token)
+        if settings.code_index_watch:
+            code_index_state.enable_watch(asyncio.get_running_loop())
+        _ci_provider = get_code_index_state
+        app.dependency_overrides[_ci_provider] = lambda: code_index_state
+        app.state.code_index_state = code_index_state
+
     # Background release-update check — the service's only outbound call, kept
     # off the request path. Throttled (once per CHECK_INTERVAL_SECONDS), fail-
     # silent, opt-out via AGENTALLOY_RELEASE_CHECK=0. The initial delay lets a
@@ -225,6 +247,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await task
+        # Code-index shutdown: cancel + await running index tasks, stop
+        # watches, close the jobs store (aclose does all three).
+        if code_index_state is not None:
+            with suppress(Exception):
+                await code_index_state.aclose()
+        if _ci_provider is not None:
+            app.dependency_overrides.pop(_ci_provider, None)
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
