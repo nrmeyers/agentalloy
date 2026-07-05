@@ -134,3 +134,27 @@ def test_language_filter(fixture_repo: Path, tmp_path: Path) -> None:
 def test_unknown_language_rejected(fixture_repo: Path, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unsupported language"):
         parse_repo(fixture_repo, cache_dir=tmp_path / "cache", languages=["cobol"])
+
+
+def test_unreadable_file_skips_not_crashes(fixture_repo: Path, tmp_path: Path) -> None:
+    """A permission-denied file must skip, not fail the whole parse.
+
+    Real working trees contain unreadable corners (e.g. leftover rootless
+    container-storage overlays from killed test runs). stat() succeeds on
+    them but open() raises EACCES — found live indexing this very repo.
+    """
+    import os
+
+    blocked = fixture_repo / "pkg" / "blocked.py"
+    blocked.write_text("def hidden():\n    return 1\n")
+    blocked.chmod(0o000)
+    if os.access(blocked, os.R_OK):  # pragma: no cover — root ignores modes
+        pytest.skip("running as privileged user; chmod 000 not enforced")
+    try:
+        result = parse_repo(fixture_repo, cache_dir=tmp_path / "cache")
+    finally:
+        blocked.chmod(0o644)
+
+    names = {s.qualified_name for s in result.symbols}
+    assert "demo.pkg.util.helper" in names, "readable files still parse"
+    assert not any("blocked" in n for n in names), "unreadable file is skipped"

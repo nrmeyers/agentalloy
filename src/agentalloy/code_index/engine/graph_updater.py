@@ -634,7 +634,20 @@ class GraphUpdater:
                 # time, so the cached_stat won't match. We pay the SHA cost
                 # once; the new stat entry persists and subsequent runs hit
                 # the fast path again.
-                current_hash = _hash_file(filepath)
+                try:
+                    current_hash = _hash_file(filepath)
+                except OSError as exc:
+                    # stat() succeeded but open() failed — e.g. an unreadable
+                    # file (EACCES) inside leftover container-storage overlays
+                    # in the working tree. One bad file must not fail the
+                    # whole index job; skip it like a vanished file.
+                    logger.warning(
+                        "Skipping unreadable file during scan: %s (%s)",
+                        file_key,
+                        exc,
+                    )
+                    current_file_keys.discard(file_key)
+                    continue
 
             new_hashes[file_key] = current_hash
             new_stats[file_key] = StatEntry(mtime_ns=mtime_ns, size=size, sha=current_hash)
@@ -664,7 +677,20 @@ class GraphUpdater:
                 logger.debug(ls.FILE_HASH_NEW, path=file_key)
 
             changed_count += 1
-            self._process_single_file(filepath)
+            try:
+                self._process_single_file(filepath)
+            except OSError as exc:
+                # Same doctrine as the hash guard above: a file that turns
+                # unreadable between hash and parse skips, not crashes. Drop
+                # its cache entries so the next run retries it.
+                logger.warning(
+                    "Skipping unreadable file during parse: %s (%s)", file_key, exc
+                )
+                current_file_keys.discard(file_key)
+                new_hashes.pop(file_key, None)
+                new_stats.pop(file_key, None)
+                changed_count -= 1
+                continue
             _files_since_cb += 1
 
             _now = _time.monotonic()
