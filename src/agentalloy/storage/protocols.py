@@ -149,6 +149,89 @@ class CompositionTrace:
 
 
 # ---------------------------------------------------------------------------
+# Code-index DTOs (per-repo symbol graph + vector index; see
+# ``agentalloy.code_index.store``)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CodeSymbol:
+    """One code symbol row in the per-repo DuckDB graph.
+
+    Field names line up with ``code_index.facade.ParsedSymbol`` so ingest is a
+    plain field-copy; ``contextual_prefix`` / ``content_hash`` are storage-side
+    enrichments (embedding context, incremental-reindex change detection).
+    """
+
+    qualified_name: str
+    kind: str
+    name: str
+    file_path: str | None
+    start_line: int | None
+    end_line: int | None
+    docstring: str | None
+    decorators: list[str]
+    is_exported: bool | None
+    is_async: bool
+    is_generator: bool
+    source_code: str | None
+    contextual_prefix: str = ""
+    content_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class CodeEdge:
+    """One relationship row (CALLS / CONTAINS / IMPORTS / ...) between two
+    qualified names. Endpoints may dangle (unresolved externals) — no FKs."""
+
+    src: str
+    dst: str
+    kind: str
+    file_path: str = ""
+    line_start: int = 0
+    col_start: int = 0
+    resolved_via: str = "unknown"
+    confidence: float = 1.0
+    new_target: str = ""
+
+
+@dataclass(frozen=True)
+class CodeVectorRow:
+    """A symbol's embedding plus the denormalized columns the search surface
+    returns. Derived from the graph store; rebuilt on re-embed."""
+
+    qualified_name: str
+    embedding: Sequence[float]  # raw; normalized on insert
+    symbol_type: str
+    file_path: str
+    start_line: int | None
+    end_line: int | None
+    text: str  # embedded text (contextual prefix + source); indexed for BM25
+    indexed_at: int  # unix epoch seconds
+
+
+@dataclass(frozen=True)
+class CallSite:
+    """One caller/callee hit for the symbol-relations query surface."""
+
+    qualified_name: str
+    file_path: str | None
+    line: int | None
+
+
+@dataclass(frozen=True)
+class CodeSearchHit:
+    """One vector/FTS search hit. ``score`` is higher-is-better (cosine
+    similarity for the dense leg, BM25 for the sparse leg)."""
+
+    qualified_name: str
+    file_path: str
+    start_line: int | None
+    end_line: int | None
+    score: float
+
+
+# ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
 
@@ -243,6 +326,67 @@ class TelemetryStore(Protocol):
     def close(self) -> None: ...
 
 
+@runtime_checkable
+class CodeGraphStore(Protocol):
+    """Per-repo symbol graph (DuckDB ``graph.duck``). Source of truth for the
+    code index; the Lance vector dataset is derived from it."""
+
+    def migrate(self) -> None: ...
+    def replace_all(
+        self, symbols: Iterable[CodeSymbol], edges: Iterable[CodeEdge]
+    ) -> tuple[int, int]: ...
+    def upsert_symbols(self, symbols: Iterable[CodeSymbol]) -> int: ...
+    def upsert_edges(self, edges: Iterable[CodeEdge]) -> int: ...
+    def delete_for_files(self, file_paths: Sequence[str]) -> int: ...
+    def symbol(self, qualified_name: str) -> CodeSymbol | None: ...
+    def callers(self, fqn: str) -> list[CallSite]: ...
+    def callees(self, fqn: str) -> list[CallSite]: ...
+    def transitive_callers(self, fqn: str, *, max_depth: int = 4) -> list[CallSite]: ...
+    def counts_by_kind(self) -> dict[str, int]: ...
+    def list_files(
+        self, *, prefix: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[str]: ...
+    def calls_edges(self) -> list[tuple[str, str]]: ...
+    def write_centrality(self, scores: Mapping[str, float]) -> int: ...
+    def read_centrality(self, qualified_names: Sequence[str]) -> dict[str, float]: ...
+    def top_centrality(self, limit: int = 20) -> list[tuple[str, float]]: ...
+    def content_hashes(self) -> dict[str, str]: ...
+    def set_meta(self, key: str, value: str) -> None: ...
+    def get_meta(self, key: str) -> str | None: ...
+    def close(self) -> None: ...
+
+
+@runtime_checkable
+class CodeVectorStore(Protocol):
+    """Per-repo vector ANN + BM25 over symbols (LanceDB ``vectors.lance``)."""
+
+    def upsert(self, rows: Iterable[CodeVectorRow]) -> int: ...
+    def bulk_replace(self, rows: Iterable[CodeVectorRow]) -> int: ...
+    def search_similar(self, query_vec: Sequence[float], *, k: int = 10) -> list[CodeSearchHit]: ...
+    def search_bm25(self, query: str, *, k: int = 10) -> list[tuple[str, float]]: ...
+    def delete(self, qualified_names: Sequence[str]) -> int: ...
+    def count(self) -> int: ...
+    def rebuild_fts_index(self) -> None: ...
+    def embedding_dim(self) -> int | None: ...
+    def close(self) -> None: ...
+
+
+@dataclass
+class CodeIndexHandles:
+    """Bundle returned by ``code_index.store.open.open_code_index``."""
+
+    slug: str
+    graph: CodeGraphStore
+    vectors: CodeVectorStore
+
+    def close(self) -> None:
+        import contextlib
+
+        for s in (self.graph, self.vectors):
+            with contextlib.suppress(Exception):
+                s.close()
+
+
 @dataclass
 class Stores:
     """Bundle returned by ``open_stores``. Callers request only what they need."""
@@ -272,4 +416,12 @@ __all__ = [
     "SkillStore",
     "TelemetryStore",
     "Stores",
+    "CodeSymbol",
+    "CodeEdge",
+    "CodeVectorRow",
+    "CallSite",
+    "CodeSearchHit",
+    "CodeGraphStore",
+    "CodeVectorStore",
+    "CodeIndexHandles",
 ]
