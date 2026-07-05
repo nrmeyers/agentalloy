@@ -31,6 +31,7 @@ def test_build_router_mounts_expected_routes() -> None:
         "/code/repos",
         "/code/repos/{slug}/stats",
         "/code/repos/{slug}/reindex",
+        "/code/repos/{slug}/watch",
         "/code/search/semantic",
         "/code/search/lexical",
         "/code/search/symbol",

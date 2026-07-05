@@ -51,6 +51,8 @@ class TestParserRegistration:
         assert _parse(["code", "bundle", "task"]).func is code_mod._run_bundle  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "remove", "--yes"]).func is code_mod._run_remove  # pyright: ignore[reportPrivateUsage]
         assert _parse(["code", "watch", "status"]).func is code_mod._run_watch  # pyright: ignore[reportPrivateUsage]
+        assert _parse(["code", "watch", "enable"]).func is code_mod._run_watch_enable  # pyright: ignore[reportPrivateUsage]
+        assert _parse(["code", "watch", "disable", "/x"]).func is code_mod._run_watch_disable  # pyright: ignore[reportPrivateUsage]
 
     def test_bare_code_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         args = _parse(["code"])
@@ -466,4 +468,216 @@ class TestWatch:
         args = _parse(["code", "watch", "status", "--port", "1", "--json"])
         assert args.func(args) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert payload == {"configured": False, "module": "unreachable"}
+        assert payload == {"configured": False, "module": "unreachable", "enrolled_repos": None}
+
+    def test_watch_status_lists_enrolled_repos(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_state_dir: tuple[Path, Path],
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            assert request.url.path == "/code/repos"
+            return httpx.Response(
+                200,
+                json=[
+                    {"slug": "org__a", "repo_path": "/src/a", "watch_enabled": True},
+                    {"slug": "org__b", "repo_path": "/src/b", "watch_enabled": False},
+                ],
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "watch", "status", "--port", "1"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "Watch-enrolled repos (1)" in out
+        assert "org__a" in out
+        assert "org__b" not in out
+
+    def test_watch_enable_posts_enrollment(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        bodies: list[dict[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            assert request.url.path == "/code/repos/org__repo/watch"
+            bodies.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "slug": "org__repo",
+                    "watch_enabled": True,
+                    "watching": True,
+                    "master_switch": True,
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "watch", "enable", "org__repo", "--port", "1"])
+        assert args.func(args) == 0
+        assert bodies == [{"enabled": True}]
+        assert "Watch enabled for org__repo" in capsys.readouterr().out
+
+    def test_watch_enable_master_off_explains(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(
+                200,
+                json={
+                    "slug": "org__repo",
+                    "watch_enabled": True,
+                    "watching": False,
+                    "master_switch": False,
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "watch", "enable", "org__repo", "--port", "1"])
+        assert args.func(args) == 0
+        assert "CODE_INDEX_WATCH" in capsys.readouterr().out
+
+    def test_watch_disable_posts_enrollment_off(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        bodies: list[dict[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            bodies.append(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "slug": "org__repo",
+                    "watch_enabled": False,
+                    "watching": False,
+                    "master_switch": True,
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "watch", "disable", "org__repo", "--port", "1"])
+        assert args.func(args) == 0
+        assert bodies == [{"enabled": False}]
+        assert "Watch disabled for org__repo" in capsys.readouterr().out
+
+    def test_watch_enable_service_down(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "watch", "enable", "org__repo", "--port", "1"])
+        assert args.func(args) == 1
+        assert "Cannot reach the agentalloy service" in capsys.readouterr().err
+
+
+class TestStatusStaleness:
+    @staticmethod
+    def _git(repo: Path, *argv: str) -> str:
+        import subprocess
+
+        out = subprocess.run(
+            ["git", "-C", str(repo), *argv], capture_output=True, text=True, check=True
+        )
+        return out.stdout.strip()
+
+    def _make_repo(self, root: Path) -> str:
+        root.mkdir(parents=True, exist_ok=True)
+        self._git(root, "init", "-q")
+        self._git(root, "config", "user.email", "t@example.com")
+        self._git(root, "config", "user.name", "t")
+        (root / "a.py").write_text("x = 1\n")
+        self._git(root, "add", ".")
+        self._git(root, "commit", "-q", "-m", "one")
+        return self._git(root, "rev-parse", "HEAD")
+
+    def _status_handler(self, repo: dict[str, Any]) -> Any:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            if request.url.path == "/code/repos":
+                return httpx.Response(200, json=[repo])
+            return httpx.Response(200, json=[])
+
+        return handler
+
+    def _repo_view(self, path: str, sha: str | None) -> dict[str, Any]:
+        return {
+            "slug": "org__repo",
+            "repo_path": path,
+            "last_indexed_at": 1,
+            "head_sha": sha,
+            "watch_enabled": False,
+            "symbol_count": 10,
+            "edge_count": 5,
+        }
+
+    def test_moved_head_shows_stale_with_commit_count(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        first = self._make_repo(repo)
+        (repo / "b.py").write_text("y = 2\n")
+        self._git(repo, "add", ".")
+        self._git(repo, "commit", "-q", "-m", "two")
+
+        _mock_client(monkeypatch, self._status_handler(self._repo_view(str(repo), first)))
+        args = _parse(["code", "status", "--port", "1"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "[stale" in out
+        assert "1 commits behind" in out
+        assert f"agentalloy code index {repo}" in out
+
+    def test_fresh_head_shows_no_stale_marker(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        sha = self._make_repo(repo)
+        _mock_client(monkeypatch, self._status_handler(self._repo_view(str(repo), sha)))
+        args = _parse(["code", "status", "--port", "1"])
+        assert args.func(args) == 0
+        assert "[stale" not in capsys.readouterr().out
+
+    def test_rebased_away_sha_falls_back_to_plain_stale(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        repo = tmp_path / "repo"
+        self._make_repo(repo)
+        view = self._repo_view(str(repo), "0" * 40)  # sha not in history (post-rebase)
+        _mock_client(monkeypatch, self._status_handler(view))
+        args = _parse(["code", "status", "--port", "1"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "[stale" in out
+        assert "commits behind" not in out
+
+    def test_non_git_and_missing_paths_stay_silent(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        view = self._repo_view(str(plain), "abc123")
+        _mock_client(monkeypatch, self._status_handler(view))
+        args = _parse(["code", "status", "--port", "1"])
+        assert args.func(args) == 0
+        assert "[stale" not in capsys.readouterr().out
+
+    def test_watch_enrollment_marker_in_status(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    ) -> None:
+        view = self._repo_view(str(tmp_path), None)
+        view["watch_enabled"] = True
+        _mock_client(monkeypatch, self._status_handler(view))
+        args = _parse(["code", "status", "--port", "1"])
+        assert args.func(args) == 0
+        assert "watch=on" in capsys.readouterr().out

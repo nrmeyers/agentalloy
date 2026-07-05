@@ -166,3 +166,69 @@ def test_indexed_repos_registry(store: CodeIndexJobsStore) -> None:
     assert store.delete_repo("org__y") is True
     assert store.delete_repo("org__y") is False
     assert store.get_repo("org__y") is None
+
+
+def test_watch_enrollment_flag(store: CodeIndexJobsStore) -> None:
+    store.upsert_repo(slug="org__x", repo_path="/src/x", data_dir="/d/org__x")
+    store.upsert_repo(slug="org__y", repo_path="/src/y", data_dir="/d/org__y")
+    repo = store.get_repo("org__x")
+    assert repo is not None and repo.watch_enabled is False  # default off
+    assert store.list_watch_enabled_repos() == []
+
+    assert store.set_watch_enabled("org__x", True) is True
+    enrolled = store.list_watch_enabled_repos()
+    assert [r.slug for r in enrolled] == ["org__x"]
+    assert enrolled[0].watch_enabled is True
+
+    # Upsert (re-index) must not clobber enrollment.
+    store.upsert_repo(slug="org__x", repo_path="/src/x", data_dir="/d/org__x")
+    kept = store.get_repo("org__x")
+    assert kept is not None and kept.watch_enabled is True
+
+    assert store.set_watch_enabled("org__x", False) is True
+    assert store.list_watch_enabled_repos() == []
+    assert store.set_watch_enabled("missing", True) is False
+
+
+def test_watch_enabled_column_migrated_on_existing_db(tmp_path: Path) -> None:
+    """A jobs.sqlite created before the watch_enabled column gains it on open."""
+    import sqlite3
+
+    db = tmp_path / "jobs.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        CREATE TABLE indexed_repos (
+          slug TEXT PRIMARY KEY,
+          repo_path TEXT NOT NULL,
+          data_dir TEXT NOT NULL,
+          last_indexed_at INTEGER,
+          head_sha TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO indexed_repos (slug, repo_path, data_dir, created_at, updated_at) "
+        "VALUES ('org__old', '/src/old', '/d/org__old', 1, 1)"
+    )
+    conn.commit()
+    conn.close()
+
+    migrated = CodeIndexJobsStore(db)
+    try:
+        repo = migrated.get_repo("org__old")
+        assert repo is not None and repo.watch_enabled is False  # ALTER default 0
+        assert migrated.set_watch_enabled("org__old", True) is True
+        assert [r.slug for r in migrated.list_watch_enabled_repos()] == ["org__old"]
+    finally:
+        migrated.close()
+
+    # Re-open: migration is idempotent (column already present).
+    reopened = CodeIndexJobsStore(db)
+    try:
+        again = reopened.get_repo("org__old")
+        assert again is not None and again.watch_enabled is True
+    finally:
+        reopened.close()

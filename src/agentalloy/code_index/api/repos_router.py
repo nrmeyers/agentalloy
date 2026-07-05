@@ -12,8 +12,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from agentalloy.code_index.api.models import CentralityEntry, JobView, RepoStats, RepoView
+from agentalloy.code_index.api.models import (
+    CentralityEntry,
+    JobView,
+    RepoStats,
+    RepoView,
+    WatchToggleRequest,
+    WatchToggleView,
+)
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
+from agentalloy.code_index.ingest.watch import WatchCapacityError
 from agentalloy.code_index.store import code_index_paths, open_code_index
 
 router = APIRouter()
@@ -56,6 +64,40 @@ async def repo_stats(
             handles.close()
 
     return await asyncio.to_thread(_collect)
+
+
+@router.post(
+    "/repos/{slug}/watch",
+    response_model=WatchToggleView,
+    summary="Enroll/unenroll a repo for file watching (reacts immediately)",
+    responses={409: {"description": "The per-process watch capacity is exhausted"}},
+)
+async def set_watch(
+    slug: str,
+    req: WatchToggleRequest,
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> WatchToggleView:
+    repo = state.jobs.get_repo(slug)
+    if repo is None:
+        raise HTTPException(status_code=404, detail=f"no such repo: {slug}")
+    master = state.watch is not None
+    watching = False
+    if req.enabled:
+        # Start the observer BEFORE persisting enrollment so a capacity error
+        # never leaves an enrolled-but-unwatchable row behind.
+        repo_path = Path(repo.repo_path)
+        if state.watch is not None and repo_path.is_dir():
+            try:
+                state.watch.start(slug, repo_path)
+                watching = True
+            except WatchCapacityError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif state.watch is not None:
+        state.watch.stop(slug)
+    state.jobs.set_watch_enabled(slug, req.enabled)
+    return WatchToggleView(
+        slug=slug, watch_enabled=req.enabled, watching=watching, master_switch=master
+    )
 
 
 @router.post(

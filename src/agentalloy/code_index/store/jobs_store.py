@@ -75,10 +75,21 @@ CREATE TABLE IF NOT EXISTS indexed_repos (
   data_dir TEXT NOT NULL,
   last_indexed_at INTEGER,
   head_sha TEXT,
+  watch_enabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 """
+
+# Additive column migrations for databases created before the column existed
+# in _DDL (CREATE TABLE IF NOT EXISTS never alters an existing table).
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "indexed_repos",
+        "watch_enabled",
+        "ALTER TABLE indexed_repos ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0",
+    ),
+)
 
 _TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "failed", "cancelled", "interrupted"})
 _ACTIVE_STATUSES: frozenset[str] = frozenset({"queued", "running"})
@@ -123,6 +134,7 @@ class IndexedRepo:
     data_dir: str
     last_indexed_at: int | None
     head_sha: str | None
+    watch_enabled: bool
     created_at: int
     updated_at: int
 
@@ -159,6 +171,7 @@ def _row_to_repo(row: sqlite3.Row) -> IndexedRepo:
         data_dir=str(row["data_dir"]),
         last_indexed_at=(None if row["last_indexed_at"] is None else int(row["last_indexed_at"])),
         head_sha=None if row["head_sha"] is None else str(row["head_sha"]),
+        watch_enabled=bool(row["watch_enabled"]),
         created_at=int(row["created_at"]),
         updated_at=int(row["updated_at"]),
     )
@@ -179,7 +192,16 @@ class CodeIndexJobsStore:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.executescript(_DDL)
+        self._apply_migrations(conn)
         self._conn: sqlite3.Connection | None = conn
+
+    @staticmethod
+    def _apply_migrations(conn: sqlite3.Connection) -> None:
+        """Additive schema migrations (ALTER TABLE ADD COLUMN) for existing DBs."""
+        for table, column, ddl in _MIGRATIONS:
+            cols = {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                conn.execute(ddl)
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -497,6 +519,22 @@ class CodeIndexJobsStore:
 
     def list_repos(self) -> list[IndexedRepo]:
         rows = self.conn.execute("SELECT * FROM indexed_repos ORDER BY updated_at DESC").fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def set_watch_enabled(self, slug: str, enabled: bool) -> bool:
+        """Flip per-repo watch enrollment. True iff the registry row exists."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? WHERE slug = ?",
+                (1 if enabled else 0, int(time.time()), slug),
+            )
+            return cur.rowcount > 0
+
+    def list_watch_enabled_repos(self) -> list[IndexedRepo]:
+        """Registry rows enrolled for watching (service-startup observer set)."""
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE watch_enabled = 1 ORDER BY slug"
+        ).fetchall()
         return [_row_to_repo(r) for r in rows]
 
     def delete_repo(self, slug: str) -> bool:

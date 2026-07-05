@@ -62,6 +62,7 @@ class RepoView(BaseModel):
     repo_path: str
     last_indexed_at: int | None
     head_sha: str | None
+    watch_enabled: bool
     symbol_count: int
     edge_count: int
 
@@ -72,9 +73,25 @@ class RepoView(BaseModel):
             repo_path=repo.repo_path,
             last_indexed_at=repo.last_indexed_at,
             head_sha=repo.head_sha,
+            watch_enabled=repo.watch_enabled,
             symbol_count=last_done.symbol_count if last_done else 0,
             edge_count=last_done.edge_count if last_done else 0,
         )
+
+
+class WatchToggleRequest(BaseModel):
+    """POST /code/repos/{slug}/watch body."""
+
+    enabled: bool = Field(description="Enroll (true) or unenroll (false) this repo for watching.")
+
+
+class WatchToggleView(BaseModel):
+    """POST /code/repos/{slug}/watch response."""
+
+    slug: str
+    watch_enabled: bool
+    watching: bool  # an observer is running right now (master switch on + started)
+    master_switch: bool  # CODE_INDEX_WATCH in the running service
 
 
 class CentralityEntry(BaseModel):

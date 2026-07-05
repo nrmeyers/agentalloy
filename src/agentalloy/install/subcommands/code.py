@@ -10,7 +10,8 @@ Thin HTTP clients against the local agentalloy service:
     agentalloy code callees <fqn> [--repo]
     agentalloy code bundle <task> [--repo] [--budget N]
     agentalloy code remove [path] [--yes]
-    agentalloy code watch start|stop|status
+    agentalloy code watch enable|disable [path]         Per-repo watch enrollment
+    agentalloy code watch status|start|stop             Master switch + enrollment report
 
 The module is served by the main agentalloy service (port from user state,
 default 47950) when ``CODE_INDEX_ENABLED=1``; there is no separate daemon.
@@ -28,6 +29,7 @@ from typing import Any
 import httpx
 
 from agentalloy.code_index.slug import repo_slug
+from agentalloy.code_index.staleness import check_staleness
 from agentalloy.install import state as install_state
 
 _TERMINAL_JOB_STATES = frozenset({"done", "failed", "cancelled", "interrupted"})
@@ -212,6 +214,27 @@ def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
     return 1
 
 
+def _staleness_marker(repo: dict[str, Any]) -> str:
+    """`` [stale ...]`` suffix when the repo's HEAD moved since its index.
+
+    Silent (empty string) for non-git repos, missing paths, or when the
+    comparison is impossible — a nudge, never an error.
+    """
+    repo_path = repo.get("repo_path")
+    head_sha = repo.get("head_sha")
+    if not isinstance(repo_path, str) or not isinstance(head_sha, str):
+        return ""
+    verdict = check_staleness(Path(repo_path), head_sha)
+    if not verdict.stale:
+        return ""
+    if verdict.commits_behind is not None:
+        return (
+            f"  [stale — {verdict.commits_behind} commits behind; "
+            f"run `agentalloy code index {repo_path}`]"
+        )
+    return f"  [stale — run `agentalloy code index {repo_path}`]"
+
+
 def _run_status(args: argparse.Namespace) -> int:
     port = _resolve_port(args)
     try:
@@ -239,10 +262,14 @@ def _run_status(args: argparse.Namespace) -> int:
     if not repos:
         print("  (none — run `agentalloy code index` in a repo)")
     for r in repos:
-        print(
+        line = (
             f"  {r.get('slug')}  {r.get('repo_path')}  "
             f"symbols={r.get('symbol_count')} edges={r.get('edge_count')}"
         )
+        if r.get("watch_enabled"):
+            line += "  watch=on"
+        line += _staleness_marker(r)
+        print(line)
     print(f"Active jobs ({len(active)}):")
     if not active:
         print("  (none)")
@@ -426,51 +453,108 @@ def _run_remove(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# watch — honest env-driven toggle reporting (no fake runtime toggles)
+# watch — master switch is env-driven (honest howto); per-repo enrollment is a
+# live service call (POST /code/repos/{slug}/watch) so it reacts immediately.
 # ---------------------------------------------------------------------------
 
 _WATCH_HOWTO = (
-    "The file watcher is a service-side setting (CODE_INDEX_WATCH), not a runtime\n"
-    "toggle. To change it:\n"
+    "The master file-watcher switch is a service-side setting (CODE_INDEX_WATCH),\n"
+    "not a runtime toggle. To change it:\n"
     "  1. agentalloy write-env --preset <preset> --overrides CODE_INDEX_ENABLED=1 "
     "CODE_INDEX_WATCH={value}\n"
-    "  2. agentalloy server-restart"
+    "  2. agentalloy server-restart\n"
+    "Per-repo enrollment is `agentalloy code watch enable|disable [path]`."
 )
+
+
+def _run_watch_toggle(args: argparse.Namespace, *, enabled: bool) -> int:
+    """``watch enable|disable [path]`` — flip per-repo enrollment via the service."""
+    slug = _resolve_repo_slug(getattr(args, "path", None))
+    port = _resolve_port(args)
+    try:
+        with _make_client(port) as client:
+            rc = _guard_module(client)
+            if rc is not None:
+                return rc
+            resp = client.post(f"/code/repos/{slug}/watch", json={"enabled": enabled})
+            resp.raise_for_status()
+            body: dict[str, Any] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        return _http_error(exc, slug=slug)
+    except httpx.HTTPError as exc:
+        return _service_down_error(port, exc)
+    if args.json:
+        _print_json(body)
+        return 0
+    if enabled:
+        if body.get("watching"):
+            print(f"Watch enabled for {slug} (observer running).")
+        elif not body.get("master_switch"):
+            print(
+                f"Watch enrollment recorded for {slug}. The master switch "
+                "(CODE_INDEX_WATCH) is off, so no observer runs until it is enabled."
+            )
+        else:
+            print(f"Watch enrollment recorded for {slug} (observer not started).")
+    else:
+        print(f"Watch disabled for {slug}.")
+    return 0
+
+
+def _run_watch_enable(args: argparse.Namespace) -> int:
+    return _run_watch_toggle(args, enabled=True)
+
+
+def _run_watch_disable(args: argparse.Namespace) -> int:
+    return _run_watch_toggle(args, enabled=False)
 
 
 def _run_watch(args: argparse.Namespace) -> int:
     action = getattr(args, "watch_action", None)
     if action == "start":
-        print("Watch is enabled via config, not started by this command.")
+        print("The master watch switch is enabled via config, not by this command.")
         print(_WATCH_HOWTO.format(value="1"))
         return 0
     if action == "stop":
-        print("Watch is disabled via config, not stopped by this command.")
+        print("The master watch switch is disabled via config, not by this command.")
         print(_WATCH_HOWTO.format(value="0"))
         return 0
     if action == "status":
         env = install_state.parse_env_file()
         configured = env.get("CODE_INDEX_WATCH", "0") in ("1", "true", "True")
         port = _resolve_port(args)
-        service_state: str | None
+        service_state: str | None = None
+        enrolled: list[dict[str, Any]] | None = None
         try:
             with _make_client(port) as client:
                 service_state = _check_module(client)
+                if service_state == "enabled":
+                    resp = client.get("/code/repos")
+                    resp.raise_for_status()
+                    repos: list[dict[str, Any]] = resp.json()
+                    enrolled = [r for r in repos if r.get("watch_enabled")]
         except httpx.HTTPError:
             service_state = None
-        report = {
+        report: dict[str, Any] = {
             "configured": configured,
             "module": service_state or "unreachable",
+            "enrolled_repos": enrolled,
         }
         if args.json:
             _print_json(report)
-        else:
-            print(f"CODE_INDEX_WATCH (configured): {'on' if configured else 'off'}")
-            print(f"code_index module (service):   {report['module']}")
-            if service_state is None:
-                print("(service unreachable — the configured value applies on next start)")
+            return 0
+        print(f"CODE_INDEX_WATCH (master switch): {'on' if configured else 'off'}")
+        print(f"code_index module (service):      {report['module']}")
+        if service_state is None:
+            print("(service unreachable — the configured value applies on next start)")
+        elif enrolled is not None:
+            print(f"Watch-enrolled repos ({len(enrolled)}):")
+            if not enrolled:
+                print("  (none — enroll with `agentalloy code watch enable [path]`)")
+            for r in enrolled:
+                print(f"  {r.get('slug')}  {r.get('repo_path')}")
         return 0
-    print("Usage: agentalloy code watch {start,stop,status}", file=sys.stderr)
+    print("Usage: agentalloy code watch {enable,disable,status,start,stop}", file=sys.stderr)
     return 1
 
 
@@ -554,14 +638,28 @@ def add_parser(
     _add_common(remove_p)
     remove_p.set_defaults(func=_run_remove)
 
-    watch_p = sub.add_parser("watch", help="Report/explain the CODE_INDEX_WATCH setting.")
+    watch_p = sub.add_parser(
+        "watch", help="Per-repo watch enrollment + the CODE_INDEX_WATCH master switch."
+    )
     watch_sub: argparse._SubParsersAction[argparse.ArgumentParser] = watch_p.add_subparsers(  # pyright: ignore[reportPrivateUsage]
         dest="watch_action"
     )
+    enable_p = watch_sub.add_parser(
+        "enable", help="Enroll a repo for watching (observer starts if the master switch is on)."
+    )
+    enable_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
+    _add_common(enable_p)
+    enable_p.set_defaults(func=_run_watch_enable)
+    disable_p = watch_sub.add_parser(
+        "disable", help="Unenroll a repo from watching (stops its observer immediately)."
+    )
+    disable_p.add_argument("path", nargs="?", default=None, help="Repo path (default: cwd).")
+    _add_common(disable_p)
+    disable_p.set_defaults(func=_run_watch_disable)
     for name, help_text in (
-        ("start", "How to enable the service-side watcher."),
-        ("stop", "How to disable the service-side watcher."),
-        ("status", "Configured vs live watch/module state."),
+        ("start", "How to enable the service-side master switch."),
+        ("stop", "How to disable the service-side master switch."),
+        ("status", "Master switch, module state, and watch-enrolled repos."),
     ):
         wp = watch_sub.add_parser(name, help=help_text)
         _add_common(wp)

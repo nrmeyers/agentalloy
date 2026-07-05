@@ -227,7 +227,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Retire active job rows orphaned by a previous (now-dead) process.
         ci_jobs.sweep_interrupted(code_index_state.worker_token)
         if settings.code_index_watch:
+            # Master switch on: observers start for the ENROLLED registry
+            # repos (per-repo `watch_enabled`), not for everything indexed.
             code_index_state.enable_watch(asyncio.get_running_loop())
+            code_index_state.start_enrolled_watches()
+        # Staleness nudge (log-only, no auto-reindex): one INFO line per repo
+        # whose HEAD moved since its last index. Off the request path; the
+        # method swallows git/registry failures so startup never breaks.
+        code_index_state.log_stale_repos()
         _ci_provider = get_code_index_state
         app.dependency_overrides[_ci_provider] = lambda: code_index_state
         app.state.code_index_state = code_index_state

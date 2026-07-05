@@ -102,6 +102,78 @@ def service_module_status(port: int) -> str | None:
     return None
 
 
+def registry_slugs(port: int) -> list[str] | None:
+    """Slugs in the service's indexed-repos registry, or None (unreachable)."""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/code/repos", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(body, list):
+        return None
+    return [str(r["slug"]) for r in body if isinstance(r, dict) and "slug" in r]
+
+
+def submit_index_job(port: int, repo_path: Path) -> dict[str, Any] | None:
+    """POST /code/index for *repo_path*; the job snapshot, or None on failure."""
+    payload = json.dumps({"repo_path": str(repo_path), "force": False}).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/code/index",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            body = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def offer_index(root: Path, port: int, *, assume_yes: bool = False) -> dict[str, Any] | None:
+    """Offer to index *root* when it isn't in the indexed-repos registry.
+
+    Wire is an explicit enrollment act and the index is what makes the block
+    useful, so the default answer is yes: ``assume_yes`` and non-TTY runs
+    submit without prompting. Fire-and-forget — the job id is printed with an
+    ``agentalloy code status`` pointer, never awaited. Best-effort: an
+    unreachable service prints a hint and wiring proceeds untouched.
+    """
+    slug = repo_slug(root)
+    slugs = registry_slugs(port)
+    if slugs is None:
+        print(
+            "  code-index: service unreachable; index later with `agentalloy code index`",
+            file=sys.stderr,
+        )
+        return None
+    if slug in slugs:
+        return None
+    if not (assume_yes or not sys.stdin.isatty()):
+        try:
+            answer = input("Index this repo now? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            answer = ""
+        if answer not in ("", "y", "yes"):
+            return None
+    job = submit_index_job(port, root)
+    if job is None:
+        print(
+            "  code-index: could not start the index job; run `agentalloy code index` manually",
+            file=sys.stderr,
+        )
+        return None
+    print(
+        f"  code-index: index job started (id={job.get('id')}); "
+        "follow it with `agentalloy code status`",
+        file=sys.stderr,
+    )
+    return job
+
+
 def _strip_block(path: Path, begin: str, end: str, *, rel: str) -> dict[str, Any] | None:
     """Remove one marker pair from *path*; delete a dedicated file left empty."""
     if not path.exists():
@@ -189,10 +261,14 @@ def wire_code_index_block(root: Path, port: int) -> list[dict[str, Any]]:
     return actions
 
 
-def maybe_wire(root: Path, port: int, *, quiet: bool = False) -> list[dict[str, Any]]:
+def maybe_wire(
+    root: Path, port: int, *, quiet: bool = False, assume_yes: bool = False
+) -> list[dict[str, Any]]:
     """Wire (or clean up) the code-index block based on live module state.
 
-    - module ``enabled``  → write/refresh the block (migrating a legacy one).
+    - module ``enabled``  → write/refresh the block (migrating a legacy one),
+      then offer to index the repo if it isn't in the registry yet (see
+      :func:`offer_index`; ``assume_yes`` skips the TTY prompt).
     - anything else       → remove our block AND a legacy block if present,
       but only when one exists (a repo that never had one stays untouched).
 
@@ -208,6 +284,8 @@ def maybe_wire(root: Path, port: int, *, quiet: bool = False) -> list[dict[str, 
         if not quiet:
             for a in actions:
                 print(f"  code-index: {a['action']} {a['path']}", file=sys.stderr)
+        if status == "enabled":
+            offer_index(root, port, assume_yes=assume_yes)
         return actions
     except (OSError, ValueError) as exc:
         if not quiet:

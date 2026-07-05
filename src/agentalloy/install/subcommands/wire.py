@@ -108,6 +108,15 @@ def add_parser(
             "not just conflicting ones."
         ),
     )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        dest="assume_yes",
+        help=(
+            "Assume yes for wiring prompts (currently: index the repo when the "
+            "code-index module is enabled and the repo isn't indexed yet)."
+        ),
+    )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
@@ -725,7 +734,9 @@ def _run(args: argparse.Namespace) -> int:
     # up an existing (or legacy codebase-indexer) block instead. Best-effort.
     from agentalloy.install import code_index_wiring
 
-    ci_actions = code_index_wiring.maybe_wire(cwd, port, quiet=True)
+    ci_actions = code_index_wiring.maybe_wire(
+        cwd, port, quiet=True, assume_yes=bool(getattr(args, "assume_yes", False))
+    )
     if ci_actions:
         result["code_index_wiring"] = ci_actions
 

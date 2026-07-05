@@ -226,3 +226,113 @@ class TestUninstallPurge:
             stop_services=False,
         )
         assert ci_dir.exists()
+
+
+class TestOfferIndex:
+    """Wire offers to index an unregistered repo (feature: wire-index offer)."""
+
+    def _seams(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        slugs: list[str] | None,
+        job: dict[str, Any] | None = None,
+    ) -> list[Path]:
+        """Patch the registry/submit seams; returns the submit-call record."""
+        _fake_slug(monkeypatch)
+        submitted: list[Path] = []
+
+        def _submit(port: int, repo_path: Path) -> dict[str, Any] | None:
+            submitted.append(repo_path)
+            return job if job is not None else {"id": "j1", "slug": "org__repo"}
+
+        monkeypatch.setattr(ciw, "registry_slugs", lambda port: slugs)
+        monkeypatch.setattr(ciw, "submit_index_job", _submit)
+        return submitted
+
+    def _tty(self, monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
+        it = iter(answers)
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(it))
+
+    def test_tty_accept_submits_and_points_at_status(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=[])
+        self._tty(monkeypatch, [""])  # default answer is yes
+        job = ciw.offer_index(tmp_path, 47950)
+        assert job is not None and job["id"] == "j1"
+        assert submitted == [tmp_path]
+        err = capsys.readouterr().err
+        assert "index job started (id=j1)" in err
+        assert "agentalloy code status" in err
+
+    def test_tty_decline_skips_submit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=[])
+        self._tty(monkeypatch, ["n"])
+        assert ciw.offer_index(tmp_path, 47950) is None
+        assert submitted == []
+
+    def test_non_tty_defaults_to_submit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import sys as _sys
+
+        submitted = self._seams(monkeypatch, slugs=[])
+        monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
+        assert ciw.offer_index(tmp_path, 47950) is not None
+        assert submitted == [tmp_path]
+
+    def test_assume_yes_skips_prompt_on_tty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=[])
+        self._tty(monkeypatch, [])  # any input() call would raise StopIteration
+        assert ciw.offer_index(tmp_path, 47950, assume_yes=True) is not None
+        assert submitted == [tmp_path]
+
+    def test_already_registered_repo_not_offered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=["org__repo"])
+        assert ciw.offer_index(tmp_path, 47950, assume_yes=True) is None
+        assert submitted == []
+
+    def test_service_unreachable_hints_and_wiring_proceeds(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=None)  # registry unreachable
+        monkeypatch.setattr(ciw, "service_module_status", lambda port: "enabled")
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        actions = ciw.maybe_wire(tmp_path, 47950, quiet=True)
+        assert actions  # the block still landed — wiring succeeded
+        assert ciw.SENTINEL_BEGIN in (tmp_path / "CLAUDE.md").read_text()
+        assert submitted == []
+        assert "index later with `agentalloy code index`" in capsys.readouterr().err
+
+    def test_maybe_wire_offers_after_block_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=[])
+        monkeypatch.setattr(ciw, "service_module_status", lambda port: "enabled")
+        (tmp_path / "CLAUDE.md").write_text("# Repo\n")
+        ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
+        assert submitted == [tmp_path]
+
+    def test_maybe_wire_disabled_module_never_offers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        submitted = self._seams(monkeypatch, slugs=[])
+        monkeypatch.setattr(ciw, "service_module_status", lambda port: "disabled")
+        ciw.maybe_wire(tmp_path, 47950, quiet=True, assume_yes=True)
+        assert submitted == []

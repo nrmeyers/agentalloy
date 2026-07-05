@@ -82,10 +82,13 @@ class CodeIndexState:
             index_markdown=index_markdown,
             job_id=job_id,
         )
-        # Successful index of a watched-eligible repo: begin watching it.
+        # Successful index of a watch-ENROLLED repo: begin watching it. A repo
+        # that never opted in (`agentalloy code watch enable`) is left alone.
         if result.status == "done" and self.watch is not None:
-            with contextlib.suppress(Exception):
-                self.watch.start(slug, repo_path)
+            repo = self.jobs.get_repo(slug)
+            if repo is not None and repo.watch_enabled:
+                with contextlib.suppress(Exception):
+                    self.watch.start(slug, repo_path)
 
     def enable_watch(self, loop: asyncio.AbstractEventLoop) -> None:
         """Construct the watch manager (``CODE_INDEX_WATCH=1`` only).
@@ -103,6 +106,65 @@ class CodeIndexState:
             loop.call_soon_threadsafe(_kick, slug, repo_path)
 
         self.watch = WatchManager(_on_change)
+
+    def start_enrolled_watches(self) -> list[str]:
+        """Start observers for every watch-enrolled registry repo (startup).
+
+        No-op when the master switch is off (:meth:`enable_watch` not called).
+        Best-effort per repo: a missing path or a capacity/observer failure
+        skips that repo (logged) and never breaks startup. Returns the slugs
+        actually started.
+        """
+        if self.watch is None:
+            return []
+        started: list[str] = []
+        for repo in self.jobs.list_watch_enabled_repos():
+            repo_path = Path(repo.repo_path)
+            if not repo_path.is_dir():
+                logger.warning(
+                    "code_index.watch skipping enrolled repo %s: path missing (%s)",
+                    repo.slug,
+                    repo_path,
+                )
+                continue
+            try:
+                self.watch.start(repo.slug, repo_path)
+                started.append(repo.slug)
+            except Exception:  # noqa: BLE001 — startup must survive one bad repo
+                logger.warning("code_index.watch failed to start slug=%s", repo.slug, exc_info=True)
+        return started
+
+    def log_stale_repos(self) -> None:
+        """One INFO line per registry repo whose HEAD moved since its index.
+
+        Startup-only nudge (no auto-reindex). Fully wrapped: git failures,
+        missing paths, and non-git dirs are silent.
+        """
+        from agentalloy.code_index.staleness import check_staleness
+
+        try:
+            repos = self.jobs.list_repos()
+        except Exception:  # noqa: BLE001 — never break startup over a nudge
+            logger.debug("code_index staleness check skipped", exc_info=True)
+            return
+        for repo in repos:
+            try:
+                verdict = check_staleness(Path(repo.repo_path), repo.head_sha)
+            except Exception:  # noqa: BLE001
+                continue
+            if not verdict.stale:
+                continue
+            behind = (
+                f" ({verdict.commits_behind} commits behind)"
+                if verdict.commits_behind is not None
+                else ""
+            )
+            logger.info(
+                "code_index: repo %s is stale%s — reindex with `agentalloy code index %s`",
+                repo.slug,
+                behind,
+                repo.repo_path,
+            )
 
     async def aclose(self) -> None:
         """Stop watches, cancel + await running index tasks, close the store."""
