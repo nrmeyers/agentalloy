@@ -10,6 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agentalloy.code_index.store import CodeIndexJob, IndexedRepo
+from agentalloy.storage.protocols import CallSite, CodeSymbol
 
 
 class IndexRequest(BaseModel):
@@ -88,3 +89,58 @@ class RepoStats(BaseModel):
     counts_by_kind: dict[str, int]
     top_centrality: list[CentralityEntry]
     vector_count: int
+
+
+class SymbolView(BaseModel):
+    """One symbol-graph row (``/code/search/symbol``, ``/code/symbols/*``)."""
+
+    qualified_name: str
+    kind: str
+    name: str
+    file_path: str | None
+    start_line: int | None
+    end_line: int | None
+    docstring: str | None
+    decorators: list[str]
+    is_exported: bool | None
+    is_async: bool
+    is_generator: bool
+    source_code: str | None
+
+    @classmethod
+    def from_symbol(cls, s: CodeSymbol) -> SymbolView:
+        return cls(
+            qualified_name=s.qualified_name,
+            kind=s.kind,
+            name=s.name,
+            file_path=s.file_path,
+            start_line=s.start_line,
+            end_line=s.end_line,
+            docstring=s.docstring,
+            decorators=list(s.decorators),
+            is_exported=s.is_exported,
+            is_async=s.is_async,
+            is_generator=s.is_generator,
+            source_code=s.source_code,
+        )
+
+
+class CallSiteView(BaseModel):
+    """One caller/callee hit (structural queries + ``/code/symbols/*``)."""
+
+    qualified_name: str
+    file_path: str | None
+    line: int | None
+
+    @classmethod
+    def from_call_site(cls, s: CallSite) -> CallSiteView:
+        return cls(qualified_name=s.qualified_name, file_path=s.file_path, line=s.line)
+
+
+class CentralitySymbol(BaseModel):
+    """One top-centrality row hydrated with its location."""
+
+    qualified_name: str
+    pagerank: float
+    file_path: str | None
+    start_line: int | None

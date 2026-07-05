@@ -15,10 +15,16 @@ def build_code_index_router() -> APIRouter:
     ``[code-index]`` extra raises ImportError here and ``create_app`` reports
     the module ``unavailable`` instead of crashing.
     """
+    from agentalloy.code_index.api.bundle_router import router as bundle_router
     from agentalloy.code_index.api.index_router import router as index_router
     from agentalloy.code_index.api.repos_router import router as repos_router
+    from agentalloy.code_index.api.search_router import router as search_router
+    from agentalloy.code_index.api.symbols_router import router as symbols_router
 
     root = APIRouter(prefix="/code", tags=["code-index"])
     root.include_router(index_router)
     root.include_router(repos_router)
+    root.include_router(search_router)
+    root.include_router(symbols_router)
+    root.include_router(bundle_router)
     return root
