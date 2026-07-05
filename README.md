@@ -349,6 +349,8 @@ agentalloy wire --harness <name>
 
 **Claude Code is auth-transparent.** Wiring writes a per-repo `.agentalloy/claude-code-env.sh` that exports **only** `ANTHROPIC_BASE_URL=http://localhost:47950/proj/<token>` — never an API key. The `/proj/<token>` segment is `base64url(realpath)` of the repo, so the proxy resolves this repo's phase and lifecycle straight from the URL (no shared state). Because no key is set, Claude Code attaches your **own** credential and the proxy forwards it verbatim — account/OAuth auth (Pro/Max/Team, who have no API key) keeps working unchanged. The env file is sourced via direnv if a `.envrc` is present, otherwise `wire` prints a one-line `source` hint.
 
+The passthrough upstream is configurable (`ANTHROPIC_UPSTREAM_URL`), so Claude Code can also be served by **any Anthropic-compatible provider** — e.g. a GLM coding-plan subscription — or chained through another proxy. See [docs/operator.md](docs/operator.md#alternative-anthropic-compatible-upstreams).
+
 ### Parallel sessions with git worktrees
 
 Run several agent sessions against the same repo at once — each on its own branch, each at its own phase — with one command:

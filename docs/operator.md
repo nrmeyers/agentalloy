@@ -288,7 +288,7 @@ profiles:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `ANTHROPIC_UPSTREAM_URL` | Upstream for the native Anthropic passthrough (`/proj/<token>/v1/messages`); point at another proxy to chain | `https://api.anthropic.com` |
+| `ANTHROPIC_UPSTREAM_URL` | Upstream for the native Anthropic passthrough (`/proj/<token>/v1/messages`); point at another proxy to chain, or at an Anthropic-compatible provider (see below) | `https://api.anthropic.com` |
 | `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
 | `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `nomic-embed-text-v1.5.Q8_0.gguf` |
 | `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |
@@ -296,6 +296,32 @@ profiles:
 | `SIGNAL_INTENT_RERANK_MODEL` | Reranker model (GGUF) | `Qwen3-Reranker-0.6B-Q8_0.gguf` |
 | `RUNTIME_DIVERSITY_SELECTION` | Diversity mode | `on` |
 | `AGENTALLOY_RELEASE_CHECK` | New-release check: the service polls the GitHub releases API at most once a day (its only outbound call, fail-silent) and caches the result for the status-line badge, `agentalloy status`, and the server-start line. Set `0`/`off` to disable. | `1` |
+
+### Alternative Anthropic-compatible upstreams
+
+The native passthrough forwards the Messages API verbatim — including the
+caller's own credential — so Claude Code can be served by **any provider that
+implements the Anthropic Messages API**, not just Anthropic. Example: a GLM
+coding-plan subscription (Zhipu's endpoint is Anthropic-compatible):
+
+1. In the service `.env` (`~/.config/agentalloy/.env`):
+   `ANTHROPIC_UPSTREAM_URL=https://api.z.ai/api/anthropic` — then restart the
+   service. The passthrough appends the inbound path, so requests land on
+   `…/api/anthropic/v1/messages`.
+2. In the **user's Claude Code environment**: `export ANTHROPIC_AUTH_TOKEN=<GLM key>`.
+   The proxy stores no credential and forwards this token untouched; the
+   repo wiring (`ANTHROPIC_BASE_URL=http://localhost:47950/proj/<token>`) is
+   unchanged.
+3. Verify: run one session in a wired repo and check
+   `agentalloy telemetry savings` records the request — skill injection is
+   model-agnostic and happens before forwarding. Providers map the `claude-*`
+   model ids Claude Code sends onto their own models.
+
+Caveats: the setting is **service-wide** — every repo wired through the native
+passthrough talks to the same upstream (per-repo upstreams exist only on the
+OpenAI-compatible surface via `agentalloy add`). Compatibility layers are
+close but not byte-identical to Anthropic's API; if a provider misbehaves,
+test it directly (bypass the proxy) before filing a proxy issue.
 
 ### Release-update check
 
