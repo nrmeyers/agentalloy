@@ -299,6 +299,7 @@ _CONTAINER_FILES = (
     "test_container_edge_cases",
     "test_container_service",
     "test_container_e2e",
+    "test_container_code_index",
 )
 
 

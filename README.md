@@ -56,6 +56,7 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - [Standalone CLI](#standalone-cli)
 - [REST API](#rest-api)
 - [MCP Server](#mcp-server)
+- [Code index (optional)](#code-index-optional)
 - [Packs shipping in-tree](#packs-shipping-in-tree)
 - [Architecture](#architecture)
 - [Telemetry](#telemetry)
@@ -433,6 +434,7 @@ AgentAlloy serves both OpenAI-compatible and Anthropic Messages API endpoints th
 - `POST /v1/chat/completions` — OpenAI-compatible proxy
 - `POST /compose` — Manual skill composition
 - `GET /health` — Liveness probe
+- `/code/*` — [code-index module](#code-index-optional) endpoints (when enabled)
 
 See [proxy-architecture.md](docs/proxy-architecture.md) for the full endpoint list and request/response schemas.
 
@@ -452,6 +454,20 @@ agentalloy wire-harness --harness cursor --mcp-fallback
 ```
 
 Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md) for per-harness configuration details.
+
+---
+
+## Code index (optional)
+
+A second context module alongside skill composition: a tree-sitter symbol graph plus hybrid semantic/lexical search over **your own repos**, served under `/code/*` on the same port. Off by default — enable it in the setup wizard's module selection or set `CODE_INDEX_ENABLED=1`. The module's dependencies live behind the `[code-index]` extra (`uv tool install 'agentalloy[code-index]'`); the container image ships it preinstalled.
+
+```bash
+agentalloy code index                      # index the current repo (incremental; --force for full)
+agentalloy code search "where are auth tokens validated"
+agentalloy code status                     # indexed repos + active jobs
+```
+
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled. See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
 
 ---
 

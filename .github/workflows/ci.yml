@@ -108,6 +108,27 @@ jobs:
       - name: Smoke — entry point resolves
         run: agentalloy --help
 
+      - name: Smoke — code subcommand ships in the core wheel
+        # The `code` CLI is HTTP-only (talks to the service) so it must be
+        # present and importable without the [code-index] extra.
+        run: |
+          set -e
+          agentalloy --help | grep -qw code
+          agentalloy code --help > /dev/null
+
+      - name: Smoke — CODE_INDEX_ENABLED degrades gracefully on the core wheel
+        # The core wheel ships no tree-sitter; enabling the module must start
+        # the app with modules.code_index == "unavailable", not crash.
+        run: |
+          CODE_INDEX_ENABLED=1 "$(uv tool dir)/agentalloy/bin/python" - <<'PY'
+          from agentalloy.app import create_app
+
+          app = create_app(use_default_lifespan=False)
+          status = app.state.module_status
+          print(f"module_status: {status}")
+          assert status["code_index"] == "unavailable", status
+          PY
+
       - name: Smoke — wheel-bundled packs discoverable
         run: agentalloy install-packs --list
 
