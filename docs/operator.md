@@ -104,6 +104,24 @@ Set it with `agentalloy wire --lifecycle-mode {full,off}`. When wiring detects a
 
 In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
 
+### Free-flow mode
+
+For sessions where you have **no specific task in mind** — exploring, poking, reading — free-flow pauses the workflow without giving up skill composition:
+
+```
+agentalloy flow free      # pause workflow steering; prior phase preserved
+agentalloy flow resume    # pick up at exactly the phase you left
+agentalloy flow status    # current mode, phase, and since-when
+```
+
+While free-flow is active, the proxy suppresses **all workflow steering** — the intake front-door, orientation scaffold, phase banners, exit-gate evaluation, phase transitions, and drift corpus — but **keeps composing domain skills** for whatever you're touching. The `phase` value in `.agentalloy/phase` is never changed; `flow resume` returns to it exactly, and the next request re-runs orientation (and intake, if it never ran) as a fresh session.
+
+How it differs from `lifecycle_mode: off`: `off` is a standing per-repo deployment posture (full passthrough, nothing composes); free-flow is a temporary state of mind — skills still compose, the pause is visible, and resume is one command.
+
+So a paused repo is never silently forgotten: the status line shows a `⏸FREE` badge the whole time, and at most once per 24 hours the proxy injects a single reminder line ("workflow paused since <date> — `agentalloy flow resume` when ready"). There is no auto-expiry — re-enabling gates mid-exploration would be worse than the reminder.
+
+Free-flow state lives in the shared per-repo phase file, so `flow free`/`flow resume` affects **every session in that repo**, same as `phase set`. Free-mode composes still write telemetry rows tagged `category=free-flow`, so free→contract conversion is measurable.
+
 ### Contracts
 
 Task contracts are markdown files under `.agentalloy/contracts/<phase>/` that declare task intent. Frontmatter includes:
@@ -241,6 +259,10 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 - `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — dedup cosine thresholds (defaults `0.92` / `0.80`)
 - `BOUNCE_BUDGET` — re-bounce budget
 - `LOG_LEVEL` — service log level
+- `COMPOSE_ENABLED` — the instruction-injector module (compose/retrieve/proxy; default on)
+- `CODE_INDEX_ENABLED` — the code-index module (`/code/*`; default off; needs the `[code-index]` extra)
+- `CODE_INDEX_DATA_DIR` — per-repo index data root (default `~/.local/share/agentalloy/code_index`)
+- `CODE_INDEX_WATCH` — file-watch master switch (per-repo enrollment via `agentalloy code watch enable`)
 
 Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/vector_store.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding uses the bare env vars `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` as the **global fallback**; a per-repo upstream captured by `agentalloy add` (written to that repo's `.agentalloy/upstream`) **overrides** them for requests from that repo (see Environment Variables below).
 

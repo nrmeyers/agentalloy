@@ -260,6 +260,8 @@ A sticky, one-line YAML file under your project. Tracks where the agent is in th
 
 The lifecycle is per-repo and opt-out. Set the mode with `agentalloy wire --lifecycle-mode {full,off}` (stored in `.agentalloy/config`): `full` (default) runs the intake front-door and the full phase lifecycle; `off` stays wired but composes nothing. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive only; non-interactive defaults to `full`).
 
+No task in mind? **`agentalloy flow free`** pauses all workflow steering (intake, banners, gates, transitions) while domain skills keep composing — the phase is preserved and **`agentalloy flow resume`** picks up exactly where you left off. The status line shows `⏸FREE` while paused, and a single once-a-day reminder line keeps the pause from being forgotten. See [docs/operator.md](docs/operator.md#free-flow-mode).
+
 On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. The **add-skill lane** is always approval-gated — `agentalloy approve add-skill` is the only way forward and no setting disables it, because installing a skill changes what gets composed into every future session in that repo. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`. See [docs/operator.md](docs/operator.md) for the full gate inventory.
 
 ### 2. Task contracts
@@ -410,6 +412,8 @@ agentalloy add <harness>                  # Adopt a harness's own upstream + wir
 agentalloy worktree <harness> <branch> -b # Create a git worktree + wire it (parallel agent sessions)
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
+agentalloy flow free|resume|status        # Pause/resume workflow steering (skills keep composing)
+agentalloy code <index|search|status|…>   # Code-index module CLI (see docs/code-index.md)
 agentalloy compose --contract <path>      # One-shot composition
 agentalloy approve <phase>                # Record the human-in-the-loop approval marker (spec | design)
 agentalloy customize <list|edit|diff|reset>  # Manage per-profile / per-project skill overrides
@@ -464,10 +468,13 @@ A second context module alongside skill composition: a tree-sitter symbol graph 
 ```bash
 agentalloy code index                      # index the current repo (incremental; --force for full)
 agentalloy code search "where are auth tokens validated"
-agentalloy code status                     # indexed repos + active jobs
+agentalloy code callers <fqn>              # call sites (--depth N for transitive)
+agentalloy code bundle "<task>"            # budgeted context bundle for a task
+agentalloy code status                     # indexed repos + active jobs + staleness
+agentalloy code watch enable               # per-repo file-watch enrollment (CODE_INDEX_WATCH is the master switch)
 ```
 
-Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled. See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled, and offers to index an unindexed repo on the spot; `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
 
 ---
 

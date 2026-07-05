@@ -35,6 +35,7 @@ All routes are prefixed `/code` and registered only when the module is enabled
 | GET | `/code/repos` | List indexed repos |
 | GET | `/code/repos/{slug}/stats` | Per-repo graph/vector stats (kind counts, top centrality, vector count) |
 | POST | `/code/repos/{slug}/reindex` | Force a full reindex using the registry's stored repo path |
+| POST | `/code/repos/{slug}/watch` | Enroll/unenroll the repo for file-watching (`{"enabled": bool}`); the running service starts/stops its observer immediately |
 | GET | `/code/search/semantic` | Hybrid semantic search (dense + pagerank fusion + RRF/BM25) |
 | GET | `/code/search/lexical` | BM25-only lexical search |
 | GET | `/code/search/symbol` | Exact symbol lookup by fully-qualified name |
@@ -53,14 +54,16 @@ the core wheel — only the service needs the extra):
 
 ```
 agentalloy code index [path] [--force] [--wait]     Start (and follow) an index job
-agentalloy code status                              Indexed repos + active jobs
+agentalloy code status                              Indexed repos + active jobs + staleness
 agentalloy code search <query> [--repo] [--lexical] [-k N]
 agentalloy code symbol <fqn> [--repo]
 agentalloy code callers <fqn> [--depth N]           Call sites (transitive with --depth)
 agentalloy code callees <fqn>
 agentalloy code bundle <task>                       Budgeted context bundle
-agentalloy code remove <slug>                       Remove a repo's index
-agentalloy code watch …                             Report/explain CODE_INDEX_WATCH
+agentalloy code remove [path]                       Remove a repo's index (confirms; --yes)
+agentalloy code watch enable|disable [path]         Per-repo watch enrollment (live)
+agentalloy code watch status                        Master switch + enrolled repos
+agentalloy code watch start|stop                    How to flip the CODE_INDEX_WATCH master switch
 ```
 
 ## Storage layout
@@ -86,8 +89,22 @@ Every symbol row carries a SHA-1 content hash of its embed text. A non-force
 re-index re-parses the tree but skips embedding for symbols whose hash is
 unchanged, and diffs the symbol sets to delete removed rows — so a re-run on a
 lightly-changed repo is cheap. `--force` (or `POST /code/repos/{slug}/reindex`)
-rebuilds from scratch. `CODE_INDEX_WATCH=1` adds a watchdog-driven incremental
-reindex on file changes (off by default).
+rebuilds from scratch.
+
+### Freshness: watch and staleness
+
+Two mechanisms, both opt-in, neither auto-reindexes behind your back:
+
+- **Watch** — two switches must both be on: `CODE_INDEX_WATCH=1` (the master
+  switch, service-level env) and per-repo enrollment (`agentalloy code watch
+  enable [path]`, persisted on the repo's registry row). Enrolling/unenrolling
+  reaches the running service immediately; on startup the service watches all
+  enrolled repos. Changes trigger a debounced incremental reindex.
+- **Staleness nudge** — `agentalloy code status` compares each repo's stored
+  `head_sha` against its current `git rev-parse HEAD` and shows
+  `[stale — N commits behind; run agentalloy code index <path>]`; the service
+  logs one INFO line per stale repo at startup. Nothing reindexes
+  automatically — watch is the opt-in for that.
 
 ## Harness wiring
 
@@ -99,3 +116,10 @@ independent of the main install block — into the repo's agent-instruction file
 is enabled AND the local service reports `modules.code_index == "enabled"`;
 `unwire`/`uninstall` sweep it, and a legacy standalone `codebase-indexer`
 block is migrated in place.
+
+Wiring an unindexed repo offers to index it on the spot (`[Y/n]`; `wire --yes`
+and non-TTY submit by default — the job runs async, wiring never waits).
+`unwire` asks whether to also remove the repo's index and defaults to **keep**
+(indexes are expensive to rebuild; removing the block is not a statement about
+the data). Pass `--remove-index` to remove it non-interactively; removal is
+refused while an index job is active.
