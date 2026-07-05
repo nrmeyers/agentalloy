@@ -169,13 +169,43 @@ async def _embed_batches(
     *,
     heartbeat: Callable[[], None],
 ) -> list[list[float]]:
-    """Batch-embed synchronously via ``asyncio.to_thread`` (loop never blocks)."""
+    """Batch-embed synchronously via ``asyncio.to_thread`` (loop never blocks).
+
+    A batch that the server rejects (typically "input is too large" — a text
+    whose token count beat the client-side char cap despite the code-realistic
+    ratio) falls back to per-item embedding with progressive halving, so one
+    pathological symbol degrades to a shorter embed instead of failing the
+    whole index job.
+    """
     vectors: list[list[float]] = []
     for start in range(0, len(texts), EMBED_BATCH_SIZE):
         batch = texts[start : start + EMBED_BATCH_SIZE]
-        vectors.extend(await asyncio.to_thread(embed_client.embed, model=model, texts=batch))
+        try:
+            vectors.extend(await asyncio.to_thread(embed_client.embed, model=model, texts=batch))
+        except Exception:
+            for text in batch:
+                vectors.append(await _embed_one_with_halving(embed_client, model, text))
         heartbeat()
     return vectors
+
+
+async def _embed_one_with_halving(
+    embed_client: EmbedClient, model: str, text: str, *, min_chars: int = 256
+) -> list[float]:
+    """Embed one text, halving its length on each server rejection.
+
+    Gives up (re-raising the last error) only when the text is already at
+    ``min_chars`` — at that point the failure is the server, not the input.
+    """
+    attempt = text
+    while True:
+        try:
+            return (await asyncio.to_thread(embed_client.embed, model=model, texts=[attempt]))[0]
+        except Exception:
+            if len(attempt) <= min_chars:
+                raise
+            logger.warning("embed rejected a %d-char input; retrying at half length", len(attempt))
+            attempt = attempt[: len(attempt) // 2]
 
 
 async def run_index_job(

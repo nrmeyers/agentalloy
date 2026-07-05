@@ -11,9 +11,14 @@ nomic-embed-text-v1.5 constraints enforced here (the single choke point):
 - Documents carry a literal ``search_document: `` prefix (queries — a later
   PR — use ``search_query: ``). Omitting it silently degrades recall.
 - The embed server (llama-server, no RoPE scaling) has a HARD 2048-token
-  context ceiling. Inputs are truncated CLIENT-SIDE with a conservative
-  ~4 chars/token heuristic: the final text (prefix included) never exceeds
-  :data:`MAX_EMBED_TEXT_CHARS`, and truncation is recorded in the stored text.
+  context ceiling. Inputs are truncated CLIENT-SIDE: the final text (prefix
+  included) never exceeds :data:`MAX_EMBED_TEXT_CHARS`, and truncation is
+  recorded in the stored text. The cap assumes ~2.4 chars/token — measured on
+  real source code, which tokenizes far denser than the ~4 chars/token prose
+  heuristic (a 6000-char code body reached 2489 tokens and 500'd the server
+  during the first live index of this repo). The batch embedder additionally
+  retries per-item with progressive halving when the server still rejects an
+  input, so a pathological symbol can never fail an index job.
 """
 
 from __future__ import annotations
@@ -25,9 +30,11 @@ from agentalloy.code_index.facade import ParsedSymbol
 DOCUMENT_PREFIX = "search_document: "
 """nomic-embed-text-v1.5 document-side task prefix (query side: ``search_query: ``)."""
 
-MAX_EMBED_TEXT_CHARS = 6000
-"""Hard cap on the final embed input, prefix included. ~1500 tokens at the
-conservative 4 chars/token heuristic — well under nomic's 2048-token ceiling."""
+MAX_EMBED_TEXT_CHARS = 4200
+"""Hard cap on the final embed input, prefix included. ~1750 tokens at the
+code-realistic 2.4 chars/token ratio — under nomic's 2048-token ceiling with
+headroom for tokenizer variance. Prose truncates earlier than strictly needed;
+code (the dominant payload) stays safely under the server limit."""
 
 TRUNCATION_MARKER = "\n# [truncated]"
 """Appended to a capped text so the stored copy records that truncation happened."""

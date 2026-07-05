@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentalloy.code_index.ingest.embed_text import DOCUMENT_PREFIX
 from agentalloy.code_index.ingest.pipeline import IndexResult, run_index_job
 from agentalloy.code_index.store import CodeIndexJobsStore, open_code_index, open_jobs
@@ -243,3 +245,48 @@ async def test_head_sha_recorded_for_git_repo(settings: Settings, fixture_repo: 
         assert repo.head_sha is not None and len(repo.head_sha) == 40
     finally:
         jobs.close()
+
+
+async def test_embed_batches_halving_fallback() -> None:
+    """A server-rejected batch degrades to per-item halving, not job failure.
+
+    Found live: a 6000-char code body reached 2489 tokens (code tokenizes
+    ~2.4 chars/token) and 500'd llama-server, killing the whole index job.
+    """
+    from agentalloy.code_index.ingest.pipeline import _embed_batches
+
+    class SizeLimitedEmbedClient:
+        """Rejects any request containing a text over the limit (like llama-server)."""
+
+        def __init__(self, limit: int) -> None:
+            self.limit = limit
+            self.calls: list[list[str]] = []
+
+        def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+            self.calls.append(list(texts))
+            if any(len(t) > self.limit for t in texts):
+                raise RuntimeError("input is too large to process")
+            return [[1.0] + [0.0] * 767 for _ in texts]
+
+        def close(self) -> None:  # pragma: no cover - protocol completeness
+            pass
+
+    client = SizeLimitedEmbedClient(limit=1000)
+    texts = ["ok " * 10, "x" * 3000, "fine"]  # middle one beats the server limit
+    vectors = await _embed_batches(client, "m", texts, heartbeat=lambda: None)
+
+    assert len(vectors) == 3
+    assert all(len(v) == 768 for v in vectors)
+    # The oversized text was halved until acceptable (3000 -> 1500 -> 750).
+    assert any(len(t[0]) == 750 for t in client.calls if len(t) == 1)
+
+
+async def test_embed_one_halving_gives_up_at_floor() -> None:
+    from agentalloy.code_index.ingest.pipeline import _embed_one_with_halving
+
+    class AlwaysRejects:
+        def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("input is too large to process")
+
+    with pytest.raises(RuntimeError):
+        await _embed_one_with_halving(AlwaysRejects(), "m", "y" * 4000, min_chars=256)

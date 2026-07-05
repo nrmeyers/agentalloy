@@ -683,9 +683,7 @@ class GraphUpdater:
                 # Same doctrine as the hash guard above: a file that turns
                 # unreadable between hash and parse skips, not crashes. Drop
                 # its cache entries so the next run retries it.
-                logger.warning(
-                    "Skipping unreadable file during parse: %s (%s)", file_key, exc
-                )
+                logger.warning("Skipping unreadable file during parse: %s (%s)", file_key, exc)
                 current_file_keys.discard(file_key)
                 new_hashes.pop(file_key, None)
                 new_stats.pop(file_key, None)
