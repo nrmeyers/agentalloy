@@ -42,11 +42,14 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_cursor,
     _read_lifecycle_mode,
     _read_phase,
+    _read_state,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
     _write_phase_atomic,
+    _write_state_atomic,
     exit_gates_for_phase,
+    read_flow_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -127,6 +130,16 @@ class SignalResult:
     # cursor id for the composed file.
     pending_announce: tuple[str, list[str]] | None = None
     pending_composed: str | None = None
+
+    # Free-flow mode (``mode: free`` in ``.agentalloy/phase``): ALL workflow
+    # steering is paused (orientation, banner, exit gates, transitions, intake)
+    # but domain-skill composition keyed on the request's task text is kept.
+    # When True the compose path takes the compose-only branch
+    # (``_compose_free_block``) instead of the 3-tier workflow block.
+    free_mode: bool = False
+    # The once-per-24h free-flow reminder line ("workflow paused ... flow
+    # resume"), riding the same injection block. None when not due this turn.
+    reminder: str | None = None
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
@@ -349,6 +362,140 @@ def _glob_first_exists(path_glob: str, project_root: Path) -> bool:
         return False
 
 
+# Sentinel recorded in `.agentalloy/announced` while free-flow is active. It can
+# never equal a real phase name, so (a) the free-mode domain compose gets its own
+# once-per-session cadence on the existing announced machinery, and (b) on resume
+# the recorded "phase" mismatches the real one, guaranteeing a fresh orientation
+# (intake included) as if it were the first request.
+_FREE_ANNOUNCED = "__free__"
+
+
+def _free_reminder_due(cwd: Path, free_since: str | None) -> bool:
+    """Whether the daily free-flow reminder should fire this turn.
+
+    Baseline is the last-reminder marker (``.agentalloy/free-reminded``) when
+    present, else ``free_since``; due when the baseline is >= 24h old. No
+    baseline at all (hand-edited phase file without ``free_since``) → never due;
+    an unparseable baseline → due (the stamp that follows repairs it).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    raw = _read_state(cwd, "free-reminded") or free_since
+    if not raw:
+        return False
+    try:
+        baseline = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if baseline.tzinfo is None:
+            baseline = baseline.replace(tzinfo=UTC)
+    except ValueError:
+        return True
+    return datetime.now(UTC) - baseline >= timedelta(hours=24)
+
+
+def _evaluate_free_flow(
+    request: ProxyRequest,
+    cwd: Path,
+    phase: str,
+    free_since: str | None,
+    session_id: str | None,
+    *,
+    mutate: bool,
+) -> SignalResult:
+    """Evaluate a proxy request for a repo in free-flow mode (compose-only).
+
+    Workflow steering is fully suppressed — no Tier 1 orientation, no banner, no
+    exit-gate evaluation, no phase transition, no intake compose, no advisories.
+    What remains:
+
+    - **Domain compose**, once per (carrier) session, keyed on the request's task
+      text rather than a work-item contract. Cadence rides the existing announced
+      machinery under the :data:`_FREE_ANNOUNCED` sentinel; the marker is
+      committed by the injection path only after delivery (``pending_announce``),
+      exactly like the workflow-mode Tier 1.
+    - **The daily reminder**: one line, at most once per 24h, stamped eagerly
+      here (mirroring the banner-turn counter precedent — best-effort cadence, a
+      one-off miss on an upstream error is harmless).
+
+    Carrier-gated like workflow mode: a tool-less background request neither
+    composes nor burns any cadence.
+    """
+    task = _extract_task_from_messages(request)
+    repo = str(cwd)
+    session_key, session_source = resolve_session_key(request, session_id)
+
+    if not request.tools:  # not a carrier turn — quiet passthrough
+        return SignalResult(
+            should_compose=False,
+            phase=phase,
+            task=task,
+            free_mode=True,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
+        )
+
+    reminder: str | None = None
+    if _free_reminder_due(cwd, free_since):
+        since_date = (free_since or "")[:10] or "recently"
+        reminder = (
+            f"AgentAlloy workflow paused (free-flow) since {since_date} — "
+            "run `agentalloy flow resume` when ready."
+        )
+        if mutate:
+            from datetime import UTC, datetime
+
+            try:
+                _write_state_atomic(
+                    cwd, "free-reminded", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+                )
+            except OSError:
+                logger.debug("free-reminded write failed", exc_info=True)
+
+    # Once-per-session domain compose cadence, on the announced machinery under
+    # the free sentinel. Without a session key, fall back to once-per-entry.
+    last_phase, last_sessions = _read_announced_state(cwd)
+    announce = (
+        (last_phase != _FREE_ANNOUNCED or session_key not in last_sessions)
+        if session_key
+        else last_phase != _FREE_ANNOUNCED
+    )
+    announce = announce and bool(task)
+
+    if not (announce or reminder):
+        return SignalResult(
+            should_compose=False,
+            phase=phase,
+            task=task,
+            free_mode=True,
+            repo=repo,
+            session_key=session_key,
+            session_source=session_source,
+        )
+
+    pending_announce: tuple[str, list[str]] | None = None
+    if announce:
+        if last_phase != _FREE_ANNOUNCED:
+            new_sessions = [session_key] if session_key else []
+        elif session_key:
+            new_sessions = [*last_sessions, session_key][-_MAX_ANNOUNCED_SESSIONS:]
+        else:
+            new_sessions = last_sessions
+        pending_announce = (_FREE_ANNOUNCED, new_sessions)
+
+    return SignalResult(
+        should_compose=True,
+        announce=announce,
+        phase=phase,
+        task=task,
+        free_mode=True,
+        reminder=reminder,
+        repo=repo,
+        session_key=session_key,
+        session_source=session_source,
+        pending_announce=pending_announce,
+    )
+
+
 async def evaluate_signal(
     request: ProxyRequest,
     cwd: Path,
@@ -416,6 +563,18 @@ async def evaluate_signal(
                     agentalloy_dir,
                 )
         return SignalResult(should_compose=False)
+
+    # 1b. Free-flow guard (single guard point). ``mode: free`` in the phase file
+    # flips the whole request into compose-only handling: no orientation, no
+    # banner, no gate eval, no phase transition, no intake compose — but domain
+    # skills for the task content still compose (via SignalResult.free_mode →
+    # `_compose_free_block`). The phase value itself is untouched; resume
+    # returns to it exactly. Because this branch never commits the announce /
+    # composed / banner markers under their workflow keys, resuming re-orients
+    # (and re-runs intake) as if this were the first request.
+    flow_mode, free_since = read_flow_state(cwd)
+    if flow_mode == "free":
+        return _evaluate_free_flow(request, cwd, phase, free_since, session_id, mutate=mutate)
 
     task = _extract_task_from_messages(request)
 

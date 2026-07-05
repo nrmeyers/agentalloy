@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from agentalloy.signals.predicates import PredicateContext
 
 __all__ = [
+    "FLOW_MODES",
     "LIFECYCLE_MODES",
     "_build_predicate_context",
     "_load_workflow_skill_for_phase",
@@ -40,6 +41,7 @@ __all__ = [
     "_write_lifecycle_mode",
     "_write_phase_atomic",
     "exit_gates_for_phase",
+    "read_flow_state",
 ]
 
 # Per-repo lifecycle modes (see ``_read_lifecycle_mode``). ``full`` is the
@@ -47,6 +49,14 @@ __all__ = [
 # opt out of AgentAlloy's intake front-door, phase machine, and composition.
 LIFECYCLE_MODES = ("full", "off")
 _DEFAULT_LIFECYCLE_MODE = "full"
+
+# Per-repo flow modes, stored as an optional ``mode`` field in the phase file
+# (see ``read_flow_state``). ``workflow`` (the default — an absent/unknown
+# ``mode`` reads as workflow) is today's full SDD steering; ``free`` pauses ALL
+# workflow steering (orientation, banners, exit gates, transitions, intake)
+# while keeping domain-skill composition. Entering free-flow never changes the
+# ``phase`` value, so resume returns to exactly the prior phase.
+FLOW_MODES = ("workflow", "free")
 
 
 # ---------------------------------------------------------------------------
@@ -77,21 +87,70 @@ def _read_phase(project_root: Path) -> str | None:
         return None
 
 
+def _read_phase_data(project_root: Path) -> dict[str, str]:
+    """Flat-parse ``.agentalloy/phase`` into a ``key -> value`` dict.
+
+    Hand-parses ``key: value`` lines (partition on the first colon, quotes
+    stripped) rather than yaml.safe_load, mirroring the CLI parser in
+    ``install.subcommands.phase`` — tolerant of unknown extra keys, and immune
+    to YAML 1.1 scalar coercion. A legacy bare-phase file (no colon) yields an
+    empty dict; callers wanting just the phase should use :func:`_read_phase`,
+    which handles that form. Never raises.
+    """
+    phase_file = project_root / ".agentalloy" / "phase"
+    data: dict[str, str] = {}
+    try:
+        raw = phase_file.read_text(encoding="utf-8")
+    except OSError:
+        return data
+    for line in raw.splitlines():
+        if ":" not in line or line.strip().startswith("#"):
+            continue
+        key, _, value = line.partition(":")
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
+
+
+def read_flow_state(project_root: Path) -> tuple[str, str | None]:
+    """Read the per-repo flow mode from the phase file as ``(mode, free_since)``.
+
+    ``mode`` is ``"free"`` only when the phase file carries ``mode: free``;
+    anything else (absent file, absent key, unknown value, legacy bare-phase
+    file) reads as ``"workflow"`` — the historical behavior. ``free_since`` is
+    the ISO timestamp recorded when free-flow was entered (drives the daily
+    reminder), or ``None``. Never raises.
+    """
+    data = _read_phase_data(project_root)
+    if data.get("mode", "").lower() == "free":
+        return "free", data.get("free_since") or None
+    return "workflow", None
+
+
 def _write_phase_atomic(project_root: Path, phase: str) -> None:
     """Atomically write *phase* to ``.agentalloy/phase``.
 
     Uses a temp file + ``os.replace`` so concurrent writers never leave
-    a partially-written file.
+    a partially-written file. The phase line is always written first; the
+    free-flow fields (``mode``, ``free_since``) are preserved from the existing
+    file so an auto-transition never silently drops the repo out of (or into)
+    free-flow — only ``agentalloy flow free/resume`` touches them.
     """
     phase_file = project_root / ".agentalloy" / "phase"
     phase_file.parent.mkdir(parents=True, exist_ok=True)
     prev = _read_phase(project_root)
+    prev_data = _read_phase_data(project_root)
+    lines = [f"phase: {phase}"]
+    for key in ("mode", "free_since"):
+        value = prev_data.get(key)
+        if value:
+            # Quote ISO timestamps so YAML parsers read them back as strings.
+            lines.append(f'{key}: "{value}"' if "T" in value else f"{key}: {value}")
     # Unique tmp per writer: the watcher and the async proxy both call this with
     # no shared lock, so a fixed tmp name lets two writers race on the same file
     # and defeat the os.replace atomicity. A per-writer tmp keeps it atomic.
     tmp = phase_file.with_name(f"phase.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     try:
-        tmp.write_text(f"phase: {phase}\n", encoding="utf-8")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
         os.replace(tmp, phase_file)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -131,7 +190,7 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
 # container run to a path on the persistent data volume) relocates them, keyed
 # by the repo's ``/proj`` token. Unset (host CLI, dev, tests) they stay
 # repo-local as before.
-_RUNTIME_STATE_KEYS = frozenset({"announced", "composed", "banner-turns"})
+_RUNTIME_STATE_KEYS = frozenset({"announced", "composed", "banner-turns", "free-reminded"})
 
 
 def _state_file(project_root: Path, name: str) -> Path:

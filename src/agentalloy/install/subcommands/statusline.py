@@ -57,35 +57,43 @@ def _cwd_from_stdin() -> Path | None:
     return None
 
 
-def _find_phase(start: Path) -> str | None:
-    """Walk up from *start* (stopping at $HOME / filesystem root) for a phase.
+def _find_phase(start: Path) -> tuple[str | None, str | None]:
+    """Walk up from *start* (stopping at $HOME / filesystem root) for the phase
+    file, returning ``(phase, mode)``.
 
     Claude Code usually runs the status-line command at the workspace root, but
     a subdirectory cwd should still resolve the repo's phase. Mirrors the
-    ``.agentalloy/phase`` location used elsewhere; reads the flat ``phase: <v>``
-    line directly to avoid importing the YAML path on a hot per-turn command.
+    ``.agentalloy/phase`` location used elsewhere; reads the flat ``key: value``
+    lines directly to avoid importing the YAML path on a hot per-turn command.
+    ``mode`` is the optional free-flow field (``"free"`` while workflow steering
+    is paused), or None.
     """
     home = Path.home().resolve()
     try:
         cur = start.resolve()
     except OSError:
-        return None
+        return None, None
     seen = 0
     while True:
         phase_file = cur / ".agentalloy" / "phase"
         if phase_file.is_file():
+            phase: str | None = None
+            mode: str | None = None
             try:
                 for line in phase_file.read_text(encoding="utf-8").splitlines():
                     if ":" not in line or line.strip().startswith("#"):
                         continue
                     key, _, value = line.partition(":")
+                    cleaned = value.strip().strip('"').strip("'") or None
                     if key.strip() == "phase":
-                        return value.strip().strip('"').strip("'") or None
+                        phase = cleaned
+                    elif key.strip() == "mode":
+                        mode = cleaned
             except OSError:
-                return None
-            return None
+                return None, None
+            return phase, mode
         if cur == home or cur.parent == cur or seen > 64:
-            return None
+            return None, None
         cur = cur.parent
         seen += 1
 
@@ -108,12 +116,17 @@ def _release_badge() -> str:
 
 
 def render_statusline(root: Path | None) -> str:
-    """The status-line string for *root* (cwd when None), or "" when inactive."""
+    """The status-line string for *root* (cwd when None), or "" when inactive.
+
+    While the repo is in free-flow (``mode: free``) a ``FREE`` badge follows the
+    phase, matching the compact badge style of the release notice.
+    """
     start = root or _cwd_from_stdin() or Path(os.getcwd())
-    phase = _find_phase(start)
+    phase, mode = _find_phase(start)
     if not phase:
         return ""
-    return f"{_PREFIX} ▸ {phase}{_release_badge()}"
+    free_badge = "  ⏸FREE" if mode == "free" else ""
+    return f"{_PREFIX} ▸ {phase}{free_badge}{_release_badge()}"
 
 
 def add_parser(

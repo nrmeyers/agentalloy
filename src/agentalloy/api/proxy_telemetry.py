@@ -50,6 +50,7 @@ def write_proxy_trace(
     repo: str | None = None,
     session_key: str | None = None,
     session_source: str | None = None,
+    category: str | None = None,
 ) -> None:
     """Write a CompositionTrace for a proxy request.
 
@@ -74,10 +75,14 @@ def write_proxy_trace(
             not have fired).
         repo: Resolved project root (the request's cwd) this trace belongs to, so
             telemetry can be scoped per-repo. None leaves the row unattributed.
+        category: Mode tag reusing the existing free-text ``category`` column —
+            ``"free-flow"`` for a request handled in free-flow mode, else None
+            (workflow mode). Lets free→contract conversion be measured later.
     """
     try:
         trace = CompositionTrace(
             trace_id=str(uuid.uuid4()),
+            category=category,
             request_ts=int(time.time() * 1000),
             phase=phase,
             task_prompt=task_prompt[:500],

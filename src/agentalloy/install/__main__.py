@@ -29,6 +29,7 @@ from agentalloy.install.subcommands import (
     detect,
     doctor,
     enable_service,
+    flow,
     install_pack,
     install_packs,
     new_skill_pack,
@@ -105,6 +106,7 @@ _SUBCOMMANDS = [
     status,
     statusline,
     task,
+    flow,
     approve,
     cleanup,
     # Underlying step subcommands (still available for power-users + the

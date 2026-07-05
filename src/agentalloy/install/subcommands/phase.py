@@ -232,6 +232,12 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         "last_updated": now,
         "workflow": f"sdd-{phase}",
     }
+    # Free-flow state (`agentalloy flow free`) rides the same file — a phase set
+    # must not silently drop the repo out of free-flow.
+    if existing:
+        for key in ("mode", "free_since"):
+            if key in existing:
+                data[key] = existing[key]
 
     _write_phase(data, root)
     # On a real transition, drop the work-item cursor so the new phase resolves its own

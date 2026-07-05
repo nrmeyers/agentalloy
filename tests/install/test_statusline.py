@@ -70,6 +70,24 @@ class TestRenderStatusline:
         # The badge must never break the per-turn status line.
         assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
 
+    def test_free_badge_when_free_flow(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
+        d = tmp_path / ".agentalloy"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "phase").write_text('phase: build\nmode: free\nfree_since: "2026-07-01T00:00:00Z"\n')
+        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build  ⏸FREE"
+
+    def test_no_free_badge_in_workflow_mode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
+        _phase(tmp_path, "build")
+        assert "FREE" not in render_statusline(tmp_path)
+
     def test_empty_when_no_phase(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Bound the walk-up at tmp_path so it can't reach a real ancestor phase.
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -80,7 +98,7 @@ class TestRenderStatusline:
         _phase(tmp_path, "spec")
         sub = tmp_path / "src" / "deep"
         sub.mkdir(parents=True)
-        assert _find_phase(sub) == "spec"
+        assert _find_phase(sub) == ("spec", None)
 
     def test_stops_at_home_boundary(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         # Phase lives ABOVE $HOME → not found (the walk stops at the home boundary).
@@ -89,7 +107,7 @@ class TestRenderStatusline:
         _phase(tmp_path, "qa")  # at tmp_path, above home
         start = tmp_path / "home" / "proj"
         start.mkdir()
-        assert _find_phase(start) is None
+        assert _find_phase(start) == (None, None)
 
 
 class TestStatuslineSettingsWiring:

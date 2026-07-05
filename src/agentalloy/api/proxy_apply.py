@@ -136,7 +136,14 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     Returns a :class:`_ComposedBlock` whose ``text`` is the parts joined (``""``
     when none has content) and whose flags tell the caller which cadence markers
     are safe to commit post-injection.
+
+    Free-flow (``signal.free_mode``) takes the compose-only branch instead: no
+    advisory / Tier 1 / Tier 2, just the task-keyed domain leg plus the daily
+    reminder line (see :func:`_compose_free_block`).
     """
+    if signal.free_mode:
+        return await _compose_free_block(signal, orchestrator)
+
     phase = signal.phase
     compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
 
@@ -209,6 +216,61 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
         cursor_terminal=tier2_terminal,
         cursor_text=bool(tier2),
         telemetry=_merge_compose_telemetry(signal, tier1_result, tier2_result),
+    )
+
+
+async def _compose_free_block(
+    signal: SignalResult, orchestrator: ComposeOrchestrator
+) -> _ComposedBlock:
+    """Compose the free-flow (compose-only) block.
+
+    Two parts, both riding the standard injection block:
+
+    - **Domain leg** — the domain skills retrieved for the request's task text
+      (``signal.task``), gated on ``signal.announce`` (once per session, on the
+      free sentinel cadence). No workflow prose, no system leg, no banner.
+    - **Reminder** — the once-per-24h "workflow paused" line (already
+      cadence-stamped by the signal layer).
+
+    Marker semantics: ``tier1_text`` is True on a *terminal* domain compose
+    (delivered skills OR a clean empty result — mirrors the workflow-mode cursor
+    semantics), so the per-session free marker commits once the block is
+    delivered and a transient compose error re-fires next turn. The Tier 2
+    cursor channel is never used in free mode.
+    """
+    phase = signal.phase
+    compose_phase: Phase = phase if phase in _VALID_PHASES else "build"  # type: ignore[assignment]
+
+    domain = ""
+    domain_terminal = False
+    domain_result: ComposedResult | EmptyResult | None = None
+    if signal.announce and signal.task:
+        try:
+            domain_req = ComposeRequest(
+                task=signal.task,
+                phase=compose_phase,
+                legs="domain",
+                k=_tier2_k(),
+            )
+            domain_result = await orchestrator.compose(
+                domain_req,
+                repo=signal.repo,
+                session_key=signal.session_key,
+                session_source=signal.session_source,
+                record_trace=False,
+            )
+            domain = "" if isinstance(domain_result, EmptyResult) else domain_result.output
+            domain_terminal = True
+        except Exception:
+            logger.warning("free-flow domain compose failed -- passing through", exc_info=True)
+
+    text = "\n\n".join(p for p in (signal.reminder or "", domain) if p)
+    return _ComposedBlock(
+        text=text,
+        tier1_text=domain_terminal,
+        cursor_terminal=False,
+        cursor_text=False,
+        telemetry=_merge_compose_telemetry(signal, None, domain_result),
     )
 
 

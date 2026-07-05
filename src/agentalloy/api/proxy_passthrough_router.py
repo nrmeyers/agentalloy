@@ -201,6 +201,7 @@ def _write_passthrough_trace(
         repo=signal.repo,
         session_key=signal.session_key,
         session_source=signal.session_source,
+        category="free-flow" if signal.free_mode else None,
     )
 
 

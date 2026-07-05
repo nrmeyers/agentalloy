@@ -373,6 +373,7 @@ async def _write_flow_telemetry(
     repo: str | None = None,
     session_key: str | None = None,
     session_source: str | None = None,
+    category: str | None = None,
 ) -> None:
     """Write one consolidated telemetry trace for the full proxy request flow.
 
@@ -419,6 +420,7 @@ async def _write_flow_telemetry(
         session_source=session_source,
         phase_gate_embed_failed=phase_gate_embed_failed,
         repo=repo,
+        category=category,
     )
 
 
@@ -569,6 +571,9 @@ async def proxy_chat_completions(
     # Carry the phase-gate embed-failure flag into every telemetry write below
     # (computed once; the value is the same for all exit paths of this request).
     gate_embed_failed = signal_result.phase_gate_embed_failed if signal_result else False
+    # Mode tag for every telemetry write of this request: "free-flow" rows are
+    # distinguishable so free→contract conversion is measurable later.
+    trace_category = "free-flow" if signal_result and signal_result.free_mode else None
 
     def _commit(status: int) -> None:
         """Commit the deferred cadence markers, 2xx-gated. No-op if nothing composed."""
@@ -608,6 +613,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _stream_upstream_response(upstream_client, chat_url, payload, on_status=_commit)
 
@@ -634,6 +640,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.TimeoutException as e:
@@ -656,6 +663,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.RequestError as e:
@@ -678,6 +686,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _upstream_unavailable_error(str(e))
     except httpx.HTTPError as e:
@@ -700,6 +709,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _upstream_unavailable_error(str(e))
 
@@ -723,6 +733,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         return _upstream_unavailable_error(f"HTTP {resp.status_code}")
 
@@ -746,6 +757,7 @@ async def proxy_chat_completions(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
+            category=trace_category,
         )
         # Raw passthrough: Response does not re-encode, so a non-JSON upstream
         # body is forwarded verbatim with its original Content-Type (JSONResponse
@@ -772,6 +784,7 @@ async def proxy_chat_completions(
         repo=repo,
         session_key=session_key,
         session_source=session_source,
+        category=trace_category,
     )
 
     _commit(resp.status_code)
