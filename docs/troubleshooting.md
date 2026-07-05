@@ -152,6 +152,73 @@ The current directory doesn't contain a recognized harness configuration file.
 **Fix:** `cd` into a project directory that has a supported harness (e.g., one with
 `CLAUDE.md`, `.cursor/`, `.opencode/`, etc.).
 
+## Code Index
+
+### `/health` shows `modules.code_index: "unavailable"`
+
+The toggle is on but the module's dependencies (tree-sitter + grammars) are not
+installed — the service starts anyway and degrades.
+
+**Fix:** `uv tool install 'agentalloy[code-index]'` and restart the service.
+(The container image ships the extra preinstalled — this only happens on
+native installs of the core wheel.)
+
+### `agentalloy code …` says the module is disabled
+
+The service is running but `CODE_INDEX_ENABLED` is not set.
+
+**Fix:** Re-run `agentalloy setup` and pick the codebase-indexer module, or add
+`CODE_INDEX_ENABLED=1` to `~/.config/agentalloy/.env` and restart the service.
+
+### Index job fails in the `embed` phase (`LMUnavailable`)
+
+The embed llama-server on 47951 is down or unreachable. Parsing and the graph
+write don't need it; embedding does. (Oversized inputs are handled client-side —
+a size rejection degrades to a shorter embed, so `LMUnavailable` here almost
+always means the server itself.)
+
+**Fix:** `agentalloy start-embed-server`, confirm `/health` shows
+`embedding_runtime: ok`, then re-run `agentalloy code index` — completed
+phases are incremental, so the re-run is cheap.
+
+### Repo shows `[stale — N commits behind]`
+
+Informational, not an error: the index was built at an older `git HEAD`.
+Nothing auto-reindexes.
+
+**Fix:** `agentalloy code index <path>` — or enroll the repo with
+`agentalloy code watch enable` for automatic incremental reindexing.
+
+### Watch is enabled but changes don't trigger a reindex
+
+Watching needs BOTH switches: the `CODE_INDEX_WATCH=1` master switch
+(service env) and per-repo enrollment.
+
+**Fix:** `agentalloy code watch status` shows which half is missing;
+`agentalloy code watch enable [path]` enrolls the repo, `agentalloy code watch
+start` prints how to flip the master switch.
+
+### Repo removal returns 409
+
+An index job for that repo is still active — removal is refused rather than
+pulling the store out from under it.
+
+**Fix:** `agentalloy code status` to find the job, cancel it (or let it
+finish), then retry `agentalloy code remove`.
+
+### Legacy standalone codebase-indexer detected
+
+`agentalloy doctor` reports a listener on port 8003 or an old
+`~/.local/share/codebase-indexer/` data directory. The standalone service is
+superseded by this module; its indexes can't be migrated (different storage
+engines) — reindexing is the migration.
+
+**Fix:** Stop the old daemon (`code-indexer stop`), index your repos with
+`agentalloy code index`, verify with `agentalloy code status`, then delete
+`~/.local/share/codebase-indexer/`. Old `<!-- BEGIN codebase-indexer -->`
+blocks in harness files are replaced in place the next time you run
+`agentalloy wire`.
+
 ## General
 
 ### `agentalloy` command not found after install
