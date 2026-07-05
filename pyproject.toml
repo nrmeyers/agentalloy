@@ -29,6 +29,23 @@ rerank = [
     "onnxruntime>=1.18",
     "tokenizers>=0.20",
 ]
+# Vendored tree-sitter parsing engine (src/agentalloy/code_index/engine/).
+# Grammar list + pins mirror the upstream codebase-indexer pyproject.
+code-index = [
+    "tree-sitter==0.25.2",
+    "tree-sitter-python>=0.23.6",
+    "tree-sitter-javascript>=0.23.1",
+    "tree-sitter-typescript>=0.23.2",
+    "tree-sitter-c-sharp>=0.23.5",
+    "tree-sitter-go>=0.23.4",
+    "tree-sitter-java>=0.23.5",
+    "tree-sitter-rust>=0.24.0",
+    # dependency_parser.py reads pyproject/csproj manifests.
+    "toml>=0.10.2",
+    "defusedxml>=0.7.1",
+    # docstring_format.py structured-docstring extraction.
+    "docstring-parser>=0.16",
+]
 dev = [
     "pyjwt>=2.12.1",
     "pyright>=1.1.408",
@@ -78,6 +95,10 @@ ignore = ["E501", "N818", "SIM117", "N806"]
 # pytest --import-mode=importlib) before its own imports run — module-level
 # imports after that setup are intentional, not E402 violations.
 "tests/conftest.py" = ["E402"]
+# Vendored engine (see src/agentalloy/code_index/engine/VENDORED.md): keep
+# upstream's style to minimize the re-vendoring diff — relax the noisy
+# style-only rules; E/F correctness rules still apply.
+"src/agentalloy/code_index/engine/**" = ["SIM102", "SIM105", "SIM114", "SIM118", "B905", "N815", "N817"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Depends/Query/Header/Body are the standard FastAPI default-argument idiom.
@@ -92,7 +113,9 @@ include = ["src"]
 # Authoring subpackage is being redesigned — exclude from strict typecheck
 # until the new approach lands. See the navistone fork divergence note in
 # the 0875b29 merge commit (authoring kept here, removed on nrmeyers).
-exclude = ["src/agentalloy/authoring/**", "tests/**"]
+# The vendored tree-sitter engine (see code_index/engine/VENDORED.md) keeps
+# upstream's looser typing; only the facade boundary is strict-checked.
+exclude = ["src/agentalloy/authoring/**", "src/agentalloy/code_index/engine/**", "tests/**"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
