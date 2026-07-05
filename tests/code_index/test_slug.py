@@ -1,9 +1,9 @@
-"""Pin AgentAlloy's code-indexer slug to codebase-indexer's canonical rule.
+"""Pin the code-index repo-slug derivation rule.
 
-These assertions encode the contract that codebase-indexer's
-``app/services/slug.py`` is the system of record. If codebase-indexer changes
-its slug derivation, these tests should change in lockstep — a silent drift
-here means AgentAlloy's ``/search`` queries start 404ing.
+The slug is the key every ``/code/*`` index and search lookup resolves by
+(single github.com origin → ``{org}__{repo}``, else the slugified directory
+basename). These tests freeze that rule — a silent change strands existing
+per-repo indexes under keys nothing queries anymore.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agentalloy.code_indexer_slug import (
+from agentalloy.code_index.slug import (
     derive_slug,
     parse_github_remote,
     repo_slug,
@@ -67,7 +67,7 @@ def test_single_github_origin_yields_org_repo(tmp_path):
     repo.mkdir()
     _git(repo, "init", "-q")
     _git(repo, "remote", "add", "origin", "git@github.com:navistone/TheForge.git")
-    # This is the exact string codebase-indexer stores its index under.
+    # This is the exact string the code-index module stores its index under.
     assert repo_slug(repo) == "navistone__TheForge"
 
 

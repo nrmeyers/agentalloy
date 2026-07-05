@@ -370,3 +370,83 @@ class TestIntakeRouteHint:
         from agentalloy.signals.skill_loader import _intake_route_hint
 
         assert _intake_route_hint(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# code_index_query_params — contract → /code/search/* query construction
+# ---------------------------------------------------------------------------
+
+
+def _init_git_origin(path: Path, origin_url: str) -> None:
+    """Init a real git repo at ``path`` with a single ``origin`` remote."""
+    import subprocess
+
+    subprocess.run(["git", "-C", str(path), "init", "-q"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "remote", "add", "origin", origin_url],
+        check=True,
+        capture_output=True,
+    )
+
+
+class TestCodeIndexQueryParams:
+    def _contract(self, tmp_path: Path, *, touches: list[str] | None = None):
+        from agentalloy.contracts import parse_contract
+
+        f = _write_contract(
+            tmp_path / "c.md",
+            task_slug="add-auth-middleware",
+            domain_tags=["NestJS", "JWT validation"],
+            scope={"touches": ["src/auth/**"] if touches is None else touches, "avoids": []},
+            body="# Add Auth Middleware\n\nTask description here.\n",
+        )
+        return parse_contract(f)
+
+    def test_full_contract(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import code_index_query_params
+
+        contract = self._contract(tmp_path)
+        _init_git_origin(tmp_path, "git@github.com:nrmeyers/agentalloy.git")
+
+        params = code_index_query_params(contract, tmp_path)
+
+        # Canonical slug — byte-identical to the key the code-index module
+        # stores each per-repo index under.
+        assert params.repo == "nrmeyers__agentalloy"
+        assert params.semantic_q == "Add Auth Middleware"
+        assert params.lexical_q == "NestJS JWT validation"
+        assert "src/auth/**" in params.path_globs
+
+    def test_empty_scope_touches_whole_repo(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from agentalloy.contracts import code_index_query_params
+
+        contract = self._contract(tmp_path, touches=[])
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="", returncode=1)
+            params = code_index_query_params(contract, tmp_path)
+
+        assert params.path_globs == []
+
+    def test_non_github_remote_falls_back_to_basename(self, tmp_path: Path) -> None:
+        from agentalloy.contracts import code_index_query_params
+
+        contract = self._contract(tmp_path)
+        _init_git_origin(tmp_path, "https://gitlab.com/myorg/myrepo.git")
+
+        # Non-GitHub host → directory basename, same as the slug rule the
+        # code-index module keys its indexes by off GitHub.
+        params = code_index_query_params(contract, tmp_path)
+        assert params.repo == tmp_path.name
+
+    def test_no_git_falls_back_to_dir_name(self, tmp_path: Path) -> None:
+        from unittest.mock import patch
+
+        from agentalloy.contracts import code_index_query_params
+
+        contract = self._contract(tmp_path)
+        with patch("subprocess.run", side_effect=OSError("no git")):
+            params = code_index_query_params(contract, tmp_path)
+
+        assert params.repo == tmp_path.name

@@ -341,8 +341,13 @@ def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
 
 
 @dataclass(frozen=True)
-class CodeIndexerQuery:
-    """Parameters for a code-indexer search derived from a contract."""
+class CodeIndexQuery:
+    """Parameters for an in-process code-index search derived from a contract.
+
+    ``repo`` + ``semantic_q`` map onto ``GET /code/search/semantic?repo=&q=``
+    and ``repo`` + ``lexical_q`` onto ``GET /code/search/lexical?repo=&q=`` on
+    the local service port.
+    """
 
     repo: str
     semantic_q: str
@@ -350,18 +355,18 @@ class CodeIndexerQuery:
     path_globs: list[str]
 
 
-def code_indexer_query_params(contract: Contract, project_root: Path) -> CodeIndexerQuery:
-    """Build code-indexer query parameters from a contract.
+def code_index_query_params(contract: Contract, project_root: Path) -> CodeIndexQuery:
+    """Build ``/code/search/*`` query parameters from a contract.
 
-    Derives the repo slug with the *same* rule codebase-indexer uses to key its
-    index (single github.com origin → ``{org}__{repo}``, else the slugified
-    directory basename), so the resulting ``/search`` query resolves instead of
-    404ing. See ``code_indexer_slug``.
+    Derives the repo slug with the same rule the code-index module uses to key
+    its indexes (single github.com origin → ``{org}__{repo}``, else the
+    slugified directory basename), so the resulting search query resolves
+    instead of 404ing. See ``agentalloy.code_index.slug``.
     """
-    from agentalloy.code_indexer_slug import repo_slug
+    from agentalloy.code_index.slug import repo_slug
 
-    # The repo slug MUST byte-match codebase-indexer's own derivation — it keys
-    # each index by this string, so any divergence 404s the lookup.
+    # The repo slug MUST byte-match the code-index module's own derivation —
+    # it keys each index by this string, so any divergence 404s the lookup.
     repo = repo_slug(project_root)
 
     body = (contract.body or "").strip()
@@ -371,7 +376,7 @@ def code_indexer_query_params(contract: Contract, project_root: Path) -> CodeInd
     lexical_q = " ".join(contract.domain_tags) if contract.domain_tags else None
     path_globs = list(contract.scope.touches) if contract.scope and contract.scope.touches else []
 
-    return CodeIndexerQuery(
+    return CodeIndexQuery(
         repo=repo,
         semantic_q=semantic_q,
         lexical_q=lexical_q,

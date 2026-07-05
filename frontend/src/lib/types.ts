@@ -20,7 +20,6 @@ export interface ConfigData {
   sdd_fast_require_approval: boolean;
   profile_root: string;
   forced_profile: string | null;
-  code_indexer_url: string | null;
   authoring_model: string;
   authoring_critic_model: string;
   authoring_lm_base_url: string;

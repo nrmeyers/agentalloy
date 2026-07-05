@@ -219,7 +219,7 @@ and build details.
    (`runtime_embed_base_url`, `runtime_embedding_model`, `embedding_provider`), runtime
    (`log_level`, `dedup_hard_threshold`, `dedup_soft_threshold`, `bounce_budget`,
    `sdd_fast_require_approval`), profile (`profile_root`, `forced_profile`),
-   integrations (`code_indexer_url`), authoring (`AUTHORING_*` via `AuthoringConfig`,
+   authoring (`AUTHORING_*` via `AuthoringConfig`,
    `config.py:17-34`), read-only paths (`duckdb_path`, `fragments_lance_path`,
    `telemetry_db_path`). Show per-repo upstream overrides (`.agentalloy/upstream`)
    read-only with a pointer to the repos page.

@@ -28,7 +28,6 @@ interface FormState {
   sdd_fast_require_approval: boolean;
   profile_root: string;
   forced_profile: string;
-  code_indexer_url: string;
   authoring_model: string;
   authoring_critic_model: string;
   authoring_lm_base_url: string;
@@ -50,7 +49,6 @@ function seedForm(config: ConfigData): FormState {
     sdd_fast_require_approval: config.sdd_fast_require_approval,
     profile_root: config.profile_root,
     forced_profile: config.forced_profile ?? '',
-    code_indexer_url: config.code_indexer_url ?? '',
     authoring_model: config.authoring_model,
     authoring_critic_model: config.authoring_critic_model,
     authoring_lm_base_url: config.authoring_lm_base_url,
@@ -107,9 +105,6 @@ function buildPartial(config: ConfigData, form: FormState): ConfigUpdate {
   }
   if (nullable(form.forced_profile) !== config.forced_profile) {
     partial.forced_profile = nullable(form.forced_profile);
-  }
-  if (nullable(form.code_indexer_url) !== config.code_indexer_url) {
-    partial.code_indexer_url = nullable(form.code_indexer_url);
   }
   if (form.authoring_model !== config.authoring_model) {
     partial.authoring_model = form.authoring_model;
@@ -377,15 +372,12 @@ export function ConfigPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold mb-4">Profile &amp; Integrations</h2>
+        <h2 className="text-lg font-semibold mb-4">Profile</h2>
         <FormField label="Profile Root">
           <TextInput value={form.profile_root} onChange={(v) => set('profile_root', v)} />
         </FormField>
         <FormField label="Forced Profile" hint="Empty = auto-resolve">
           <TextInput value={form.forced_profile} onChange={(v) => set('forced_profile', v)} />
-        </FormField>
-        <FormField label="Code Indexer URL" hint="Empty = disabled">
-          <TextInput value={form.code_indexer_url} onChange={(v) => set('code_indexer_url', v)} />
         </FormField>
       </Card>
 

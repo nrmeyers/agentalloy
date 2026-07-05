@@ -608,9 +608,6 @@ def _wire_legacy(
     if harness in PROXY_UNABLE_HARNESSES:
         _wire_sidecar_watcher_config(harness, root)
 
-    # Probe for code-indexer and persist result to state.json
-    _probe_code_indexer(root)
-
     return _build_result(harness, reg["vector"], files_written, root)
 
 
@@ -692,30 +689,6 @@ def _wire_sidecar_watcher_config(harness: str, root: Path) -> None:
         "See docs/sidecar-experience.md for the full picture.\n",
         file=sys.stderr,
     )
-
-
-def _probe_code_indexer(root: Path) -> None:
-    """Probe code-indexer health and persist reachability to state.json. Soft-fail."""
-    import time
-    import urllib.request
-
-    from agentalloy.config import get_settings
-
-    ci_url = get_settings().code_indexer_url
-    reachable = False
-    try:
-        req = urllib.request.urlopen(f"{ci_url}/health", timeout=2)
-        reachable = req.status == 200
-    except Exception:
-        pass
-
-    st = install_state.load_state(root)
-    st["code_indexer"] = {
-        "reachable": reachable,
-        "url": ci_url,
-        "last_health_at": int(time.time()),
-    }
-    install_state.save_state(st, root)
 
 
 # Harnesses we know how to wire MCP for. Others (antigravity, opencode,
