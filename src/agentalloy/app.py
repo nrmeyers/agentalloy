@@ -265,6 +265,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     their own dependency overrides via ``app.dependency_overrides``.
     """
     configure_logging()
+    settings = get_settings()
     app = FastAPI(
         title="agentalloy",
         version="1.0.0",
@@ -294,14 +295,46 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
             content=body,
         )
 
+    # Module registration. Health/diagnostics/telemetry and the web UI are
+    # always mounted; each context module's routers register only when its
+    # toggle is on, so a disabled module's endpoints 404 rather than 503.
+    modules: dict[str, str] = {}
+
     app.include_router(health_router)
-    app.include_router(compose_router)
-    app.include_router(retrieve_router)
-    app.include_router(skill_router)
     app.include_router(diagnostics_router)
     app.include_router(telemetry_router)
-    app.include_router(proxy_router)
-    app.include_router(passthrough_router)
+
+    if settings.compose_enabled:
+        app.include_router(compose_router)
+        app.include_router(retrieve_router)
+        app.include_router(skill_router)
+        app.include_router(proxy_router)
+        app.include_router(passthrough_router)
+        modules["compose"] = "enabled"
+    else:
+        modules["compose"] = "disabled"
+
+    if settings.code_index_enabled:
+        # Lazy import: the module lives behind the [code-index] extra, and a
+        # disabled (or uninstalled) module must never import tree-sitter.
+        try:
+            from agentalloy.code_index.api import build_code_index_router
+
+            app.include_router(build_code_index_router())
+            modules["code_index"] = "enabled"
+        except ImportError as exc:
+            logger.error(
+                "CODE_INDEX_ENABLED is set but the code-index module is not "
+                "installed — starting without it. Install with: "
+                "uv tool install 'agentalloy[code-index]' (%s)",
+                exc,
+            )
+            modules["code_index"] = "unavailable"
+    else:
+        modules["code_index"] = "disabled"
+
+    app.state.module_status = modules
+
     app.include_router(web_config_router)
     app.include_router(web_skills_router)
     app.include_router(web_ops_router)

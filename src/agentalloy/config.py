@@ -47,6 +47,12 @@ def _user_corpus_dir() -> Path:
     return Path(base) / "agentalloy" / "corpus"
 
 
+def _user_code_index_dir() -> Path:
+    """Default code-index data root (XDG data dir), sibling of the corpus dir."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "agentalloy" / "code_index"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # No env_file — config comes from process environment. The
@@ -113,6 +119,20 @@ class Settings(BaseSettings):
 
     code_indexer_url: str = "http://127.0.0.1:8003"
 
+    # Module toggles. AgentAlloy serves independent context modules from one
+    # process: the instruction injector (compose/retrieve/proxy — the original
+    # surface) and the codebase indexer (/code/*). Routers for a disabled
+    # module are never registered; a disabled code_index module never imports
+    # tree-sitter. Env: COMPOSE_ENABLED, CODE_INDEX_ENABLED.
+    compose_enabled: bool = True
+    code_index_enabled: bool = False
+    # Per-repo index data (graph.duck + vectors.lance per slug, jobs.sqlite)
+    # lives outside corpus/ — corpus is the global skill store, code_index is
+    # per-repo derived data that is rebuilt, never migrated. Env: CODE_INDEX_DATA_DIR.
+    code_index_data_dir: str = Field(default_factory=lambda: str(_user_code_index_dir()))
+    # Watchdog-driven incremental reindex (off by default). Env: CODE_INDEX_WATCH.
+    code_index_watch: bool = False
+
     @field_validator("upstream_url")
     @classmethod
     def _normalize_upstream_url(cls, v: str) -> str:
@@ -170,6 +190,10 @@ class Settings(BaseSettings):
         Path(self.duckdb_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.telemetry_db_path).parent.mkdir(parents=True, exist_ok=True)
         Path(self.fragments_lance_path).parent.mkdir(parents=True, exist_ok=True)
+        # Only materialize the code-index root when the module is on — a
+        # disabled module should leave no trace on disk.
+        if self.code_index_enabled:
+            Path(self.code_index_data_dir).mkdir(parents=True, exist_ok=True)
 
     def require_authoring_config(self) -> AuthoringConfig:
         """Extract authoring config from environment.

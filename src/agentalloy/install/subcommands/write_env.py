@@ -55,6 +55,10 @@ _KNOWN_KEYS = frozenset(
         "DEDUP_SOFT_THRESHOLD",
         "BOUNCE_BUDGET",
         "LOG_LEVEL",
+        "COMPOSE_ENABLED",
+        "CODE_INDEX_ENABLED",
+        "CODE_INDEX_DATA_DIR",
+        "CODE_INDEX_WATCH",
     }
 )
 

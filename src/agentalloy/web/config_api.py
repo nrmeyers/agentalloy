@@ -46,13 +46,21 @@ _EDITABLE_ENV: dict[str, str] = {
     "profile_root": "PROFILE_ROOT",
     "forced_profile": "FORCED_PROFILE",
     "code_indexer_url": "CODE_INDEXER_URL",
+    "compose_enabled": "COMPOSE_ENABLED",
+    "code_index_enabled": "CODE_INDEX_ENABLED",
+    "code_index_watch": "CODE_INDEX_WATCH",
     "authoring_model": "AUTHORING_MODEL",
     "authoring_critic_model": "AUTHORING_CRITIC_MODEL",
     "authoring_lm_base_url": "AUTHORING_LM_BASE_URL",
 }
 _FLOAT_FIELDS = ("dedup_hard_threshold", "dedup_soft_threshold")
 _INT_FIELDS = ("bounce_budget",)
-_BOOL_FIELDS = ("sdd_fast_require_approval",)
+_BOOL_FIELDS = (
+    "sdd_fast_require_approval",
+    "compose_enabled",
+    "code_index_enabled",
+    "code_index_watch",
+)
 # Optional strings: null (or "") removes the var from .env.
 _NULLABLE_FIELDS = ("forced_profile", "upstream_url", "upstream_model", "upstream_api_key")
 
@@ -178,6 +186,10 @@ async def get_config() -> dict[str, Any]:
         "profile_root": s.profile_root,
         "forced_profile": s.forced_profile,
         "code_indexer_url": s.code_indexer_url or None,
+        "compose_enabled": s.compose_enabled,
+        "code_index_enabled": s.code_index_enabled,
+        "code_index_watch": s.code_index_watch,
+        "code_index_data_dir": s.code_index_data_dir,
         "authoring_model": a.model,
         "authoring_critic_model": a.critic_model,
         "authoring_lm_base_url": a.lm_base_url,

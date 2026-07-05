@@ -50,10 +50,17 @@ class LMAssistConfigView(BaseModel):
     timeout_ms: int
 
 
+ModuleStatus = Literal["enabled", "disabled", "unavailable"]
+
+
 class HealthResponse(BaseModel):
     status: OverallStatus
     dependencies: dict[str, DependencyStatus] | None = None
     lm_assist: LMAssistConfigView | None = None
+    # Per-module registration state ("compose", "code_index"). Set by
+    # create_app from the module toggles; "unavailable" means the toggle is on
+    # but the module failed to import (missing [code-index] extra).
+    modules: dict[str, ModuleStatus] | None = None
 
 
 class HealthChecker:
@@ -209,9 +216,12 @@ class HealthChecker:
 )
 async def health(request: Request) -> HealthResponse:
     checker: HealthChecker | None = getattr(request.app.state, "health_checker", None)
+    modules: dict[str, ModuleStatus] | None = getattr(request.app.state, "module_status", None)
     if checker is None:
-        return HealthResponse(status="healthy")
-    return await checker.check()
+        return HealthResponse(status="healthy", modules=modules)
+    response = await checker.check()
+    response.modules = modules
+    return response
 
 
 # --------------------------------------------------------------------------- #
