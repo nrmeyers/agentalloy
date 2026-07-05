@@ -202,6 +202,8 @@ class SetupConfig:
     non_interactive: bool = False
     force: bool = False
     acknowledge_sidecar: bool = False
+    # Which context modules to enable: "injector" (default), "code-index", "both".
+    modules: str = "injector"
     hardware_target: str = ""  # explicit user choice: "nvidia", "radeon", "apple-silicon", "cpu"
 
     # Deployment type: "native" (default) or "container"
@@ -381,6 +383,44 @@ def _prompt_mode() -> str:
         ],
         default_index=1,
     )
+
+
+# Valid module selections and their COMPOSE_ENABLED / CODE_INDEX_ENABLED pairs.
+_VALID_MODULES = frozenset({"injector", "code-index", "both"})
+
+
+def _prompt_modules() -> str:
+    return _prompt_numbered(
+        "Which modules do you want?",
+        [
+            ("injector", "Instruction injector (skill compose/proxy)   [default]"),
+            ("code-index", "Codebase indexer (code search & call graphs)"),
+            ("both", "Both"),
+        ],
+        default_index=1,
+    )
+
+
+def _module_env_overrides(modules: str) -> list[str]:
+    """The write-env override pairs for a module selection.
+
+    ``injector`` is the backward-compatible default (compose on, code-index
+    off — the same posture as the config defaults).
+    """
+    compose = "0" if modules == "code-index" else "1"
+    code_index = "1" if modules in ("code-index", "both") else "0"
+    return [f"COMPOSE_ENABLED={compose}", f"CODE_INDEX_ENABLED={code_index}"]
+
+
+def _verify_code_index_importable() -> bool:
+    """True when the code-index module's API surface imports cleanly."""
+    import importlib
+
+    try:
+        importlib.import_module("agentalloy.code_index.api")
+    except ImportError:
+        return False
+    return True
 
 
 def _prompt_hardware(default: str) -> str:
@@ -1796,8 +1836,34 @@ def run_setup(cfg: SetupConfig) -> int:
         return 1
     _print(f"  Mode: {cfg.mode}")
 
-    # 6. Packs
+    # 5b. Modules — which context modules the service enables. Non-TTY and
+    # non-interactive runs keep the backward-compatible default (injector only).
     if not cfg.non_interactive:
+        cfg.modules = _prompt_modules()
+    if cfg.modules not in _VALID_MODULES:
+        _print(f"  [red]Invalid modules: {cfg.modules}. Use injector, code-index, or both.[/red]")
+        return 1
+    if cfg.modules in ("code-index", "both") and not _verify_code_index_importable():
+        # Friendlier flow: continue with the module off rather than aborting —
+        # the rest of the install is still valid, and the user can enable the
+        # module later without redoing setup.
+        _print(
+            "  [yellow]The code-index module is not importable — the [code-index] extra "
+            "is missing.[/yellow]"
+        )
+        _print(
+            "  [yellow]Install it with: uv tool install 'agentalloy[code-index]' — then "
+            "re-run setup or set CODE_INDEX_ENABLED=1 via "
+            "`agentalloy write-env --overrides ...`.[/yellow]"
+        )
+        _print("  [yellow]Continuing with the code-index module off.[/yellow]")
+        cfg.modules = "injector"
+    _print(f"  Modules: {cfg.modules}")
+
+    # 6. Packs — skill packs feed the injector's corpus; a code-index-only
+    # install still seeds the always-on corpus (kept unconditional so verify
+    # and the service defaults stay coherent) but skips the selection prompt.
+    if not cfg.non_interactive and cfg.modules != "code-index":
         cfg.packs = _prompt_for_packs()
     _print(f"  Packs: {cfg.packs or '(always-on only)'}")
 
@@ -1833,6 +1899,7 @@ def run_setup(cfg: SetupConfig) -> int:
     _print(f"  Model:      {cfg.model}")
     _print(f"  Port:       {cfg.port}")
     _print(f"  Mode:       {cfg.mode}")
+    _print(f"  Modules:    {cfg.modules}")
     _print(f"  Packs:      {cfg.packs or '(always-on only)'}")
 
     hw_label = _HW_LABELS.get(cfg.hardware_target, cfg.hardware_target)
@@ -1923,9 +1990,15 @@ def run_setup(cfg: SetupConfig) -> int:
         return 1
     _print("  [green]  Preflight (runner) passed.[/green]")
 
-    # Step c: Write .env
+    # Step c: Write .env (module toggles ride the write-env override keys)
     _print("  [dim]-> Writing .env[/dim]")
-    ns = _build_namespace(cfg, preset=preset, port=cfg.port, overrides=None, force=False)
+    ns = _build_namespace(
+        cfg,
+        preset=preset,
+        port=cfg.port,
+        overrides=_module_env_overrides(cfg.modules),
+        force=False,
+    )
     rc = write_env.run(ns)
     if rc not in (0, 4):
         _print(f"  [red]  write-env failed (exit {rc}).[/red]")
@@ -2173,6 +2246,15 @@ def add_parser(
         help="Comma-separated pack names, 'all', or blank for always-on.",
     )
     p.add_argument(
+        "--modules",
+        choices=["injector", "code-index", "both"],
+        default=None,
+        help=(
+            "Context modules to enable: 'injector' (skill compose/proxy, default), "
+            "'code-index' (code search & call graphs), or 'both'."
+        ),
+    )
+    p.add_argument(
         "--harness",
         default=None,
         help="IDE harness to wire (default: manual).",
@@ -2255,6 +2337,7 @@ def _run_from_args(args: argparse.Namespace) -> int:
         mode=args.mode or "persistent",
         packs=args.packs or "",
         harness=args.harness or "manual",
+        modules=getattr(args, "modules", None) or "injector",
         hardware_target=getattr(args, "hardware", None) or "",
         deployment=getattr(args, "deployment", None) or "",
         runtime_binary=getattr(args, "runtime", None) or "",

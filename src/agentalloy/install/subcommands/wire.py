@@ -291,6 +291,9 @@ def _render_human(result: dict[str, Any]) -> None:
             "[dim](suppresses ALL global directives here, not just conflicting ones)[/dim]"
         )
 
+    for ci in result.get("code_index_wiring") or []:
+        print_rich(f"  [dim]code-index: {ci.get('action')} {ci.get('path')}[/dim]")
+
     print_rich()
 
 
@@ -716,6 +719,15 @@ def _run(args: argparse.Namespace) -> int:
                 if clean_room:
                     result["clean_room_excludes"] = settings_rec.path
         _persist_extra_records(cwd, harness, extra)
+
+    # Code-index harness block (second sentinel pair). Written only when the
+    # service reports modules.code_index == "enabled"; a disabled module cleans
+    # up an existing (or legacy codebase-indexer) block instead. Best-effort.
+    from agentalloy.install import code_index_wiring
+
+    ci_actions = code_index_wiring.maybe_wire(cwd, port, quiet=True)
+    if ci_actions:
+        result["code_index_wiring"] = ci_actions
 
     # Back-compat: keep the scalar `harness` key for existing callers / single
     # render path; a comma-joined string when several were wired at once.

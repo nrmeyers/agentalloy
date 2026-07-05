@@ -15,6 +15,8 @@ Two deployment modes (read from ``install-state.json``):
  8. pack_manifests  — every bundled pack.yaml parses cleanly (drift → fail)
  9. reranker        — signal-intent reranker (:47952) reachable (warn, not fail)
 10. orphans         — stray runtime processes / dangling shim on host (warn, not fail)
+11. code_index      — module state + /code/repos when CODE_INDEX_ENABLED (warn/fail)
+12. code_indexer_legacy — old standalone daemon (:8003) / data dir leftovers (warn)
 
 ``--repair`` (host):  migrate → install-packs → reembed → re-diagnose (in that
 order). Lock-held aborts repair immediately — repair must not kill processes.
@@ -485,6 +487,135 @@ def _check_orphans() -> dict[str, Any]:
     }
 
 
+def _env_truthy(value: str | None) -> bool:
+    """Env-file truthiness matching pydantic's bool coercion for our toggles."""
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
+    """Check 11: code-index module state + indexed repos (when enabled).
+
+    ``CODE_INDEX_ENABLED`` off → plain pass (module not in use). Enabled →
+    probe ``/health`` ``modules.code_index`` and ``/code/repos``; a stopped
+    service passes with a note (matching the service check), a running service
+    whose module is disabled/unavailable warns/fails with remediation.
+    """
+    t0 = time.monotonic()
+    if not _env_truthy(env.get("CODE_INDEX_ENABLED")):
+        return {
+            "name": "code_index",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "CODE_INDEX_ENABLED is off — module not in use",
+        }
+
+    health = _fetch_health(port)
+    if health is None:
+        return {
+            "name": "code_index",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": f"Service not running on port {port} — module state unknown until start",
+        }
+    modules = health.get("modules") if isinstance(health.get("modules"), dict) else {}
+    state = modules.get("code_index")
+    if state == "unavailable":
+        return {
+            "name": "code_index",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": "code-index module failed to load ([code-index] extra missing)",
+            "remediation": (
+                "Install the extra: `uv tool install 'agentalloy[code-index]'`, "
+                "then restart the service."
+            ),
+        }
+    if state != "enabled":
+        return {
+            "name": "code_index",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": (
+                f"CODE_INDEX_ENABLED is on but the running service reports "
+                f"modules.code_index={state!r}"
+            ),
+            "remediation": "Restart the service so it picks up the .env toggle: "
+            "`agentalloy server-restart`.",
+        }
+
+    # Module live — report indexed repos.
+    try:
+        req = Request(f"http://localhost:{port}/code/repos", method="GET")
+        with urlopen(req, timeout=5) as resp:  # noqa: S310
+            repos = json.loads(resp.read())
+        count = len(repos) if isinstance(repos, list) else 0
+    except (URLError, OSError, json.JSONDecodeError):
+        count = 0
+    return {
+        "name": "code_index",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"code-index module enabled; {count} repo(s) indexed",
+    }
+
+
+# Old standalone codebase-indexer daemon port + data dir (superseded by the
+# in-process code-index module).
+_LEGACY_CODE_INDEXER_PORT = 8003
+_LEGACY_CODE_INDEXER_MIGRATION = (
+    "The standalone codebase-indexer is superseded by agentalloy's code-index "
+    "module. Stop it with `code-indexer stop`; reindex with `agentalloy code "
+    "index`; the old data dir can be deleted."
+)
+
+
+def _legacy_code_indexer_data_dir() -> Path:
+    return Path.home() / ".local" / "share" / "codebase-indexer"
+
+
+def _legacy_port_listening() -> bool:
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            return s.connect_ex(("127.0.0.1", _LEGACY_CODE_INDEXER_PORT)) == 0
+    except OSError:
+        return False
+
+
+def _check_code_indexer_legacy() -> dict[str, Any]:
+    """Check 12: leftovers from the OLD standalone codebase-indexer (warn only).
+
+    Runs regardless of the module toggle — a squatting daemon on :8003 and a
+    stale ``~/.local/share/codebase-indexer/`` data dir deserve migration
+    guidance even when the user hasn't enabled the new module yet.
+    """
+    t0 = time.monotonic()
+    findings: list[str] = []
+    if _legacy_port_listening():
+        findings.append(f"a listener on :{_LEGACY_CODE_INDEXER_PORT} (old standalone daemon)")
+    legacy_dir = _legacy_code_indexer_data_dir()
+    if legacy_dir.is_dir():
+        findings.append(f"old data dir at {legacy_dir}")
+    if not findings:
+        return {
+            "name": "code_indexer_legacy",
+            "passed": True,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "no legacy codebase-indexer leftovers",
+        }
+    return {
+        "name": "code_indexer_legacy",
+        "passed": True,
+        "severity": "warn",
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"Legacy codebase-indexer leftovers: {'; '.join(findings)}",
+        "remediation": _LEGACY_CODE_INDEXER_MIGRATION,
+    }
+
+
 def _check_pack_manifests() -> dict[str, Any]:
     """Check 8: every bundled pack manifest passes full drift validation."""
     t0 = time.monotonic()
@@ -867,7 +998,7 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_doctor_host() -> dict[str, Any]:
-    """Run all 10 doctor checks against host-local resources."""
+    """Run all host doctor checks against host-local resources."""
     from agentalloy.config import get_settings
     from agentalloy.install.state import corpus_dir, env_path, parse_env_file
 
@@ -904,6 +1035,8 @@ def _run_doctor_host() -> dict[str, Any]:
     checks.append(_check_pack_manifests())
     checks.append(_check_reranker(env))
     checks.append(_check_orphans())
+    checks.append(_check_code_index(env, port))
+    checks.append(_check_code_indexer_legacy())
 
     all_passed = all(c["passed"] for c in checks)
     return {

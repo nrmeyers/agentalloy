@@ -810,6 +810,16 @@ def _unwire_repo_local(
     ):
         proxy_removed.extend(uninstall_proxy._unwire_proxy_claude_code_settings(repo_root))
 
+    # Code-index harness block (second sentinel pair, plus the legacy
+    # codebase-indexer block). Repo-shared like the lifecycle state: remove it
+    # on an unscoped teardown or when the last harness leaves the repo.
+    if harness is None or remove_lifecycle:
+        from agentalloy.install import code_index_wiring
+
+        # Surgical sweep must never break teardown.
+        with contextlib.suppress(OSError, ValueError):
+            files_removed.extend(code_index_wiring.remove_code_index_blocks(repo_root))
+
     # Repo-local lifecycle state seeded by `wire`/`add` (.agentalloy/phase,
     # config, upstream) is shared across every harness wired into this repo (one
     # workflow machine per repo). Only tear it down when no other harness remains
@@ -1476,6 +1486,18 @@ def uninstall(
         if corpus.exists():
             shutil.rmtree(corpus)
             files_removed.append({"path": str(corpus), "action": "deleted_data_directory"})
+        # Code-index data dir. Usually inside user_data_dir() (wiped below), but
+        # CODE_INDEX_DATA_DIR may point elsewhere — remove it explicitly so a
+        # purge never leaves per-repo derived index data behind.
+        try:
+            from agentalloy.config import get_settings
+
+            ci_dir = Path(get_settings().code_index_data_dir)
+            if ci_dir.exists():
+                shutil.rmtree(ci_dir)
+                files_removed.append({"path": str(ci_dir), "action": "deleted_code_index_data_dir"})
+        except Exception as exc:  # noqa: BLE001 — best-effort purge
+            warnings.append(f"Could not remove code-index data dir: {exc}")
         # Wipe the (now-empty-of-agentalloy-content) user_data_dir too. Use
         # rmtree so any unexpected nesting is handled, but only when the
         # caller asked for --remove-data — the default keeps the dir intact

@@ -438,6 +438,14 @@ def _patch_all_checks(
                 "agentalloy.install.subcommands.doctor._check_orphans",
                 return_value={"name": "orphans", "passed": True},
             ),
+            patch(
+                "agentalloy.install.subcommands.doctor._check_code_index",
+                return_value={"name": "code_index", "passed": True},
+            ),
+            patch(
+                "agentalloy.install.subcommands.doctor._check_code_indexer_legacy",
+                return_value={"name": "code_indexer_legacy", "passed": True},
+            ),
         ):
             yield
 
@@ -462,6 +470,8 @@ class TestRunDoctorAllGreen:
             "pack_manifests",
             "reranker",
             "orphans",
+            "code_index",
+            "code_indexer_legacy",
         ]
 
     def test_all_checks_have_name_and_passed(self) -> None:
@@ -487,7 +497,7 @@ class TestRunDoctorJson:
         assert "schema_version" in parsed
         assert "all_checks_passed" in parsed
         assert isinstance(parsed["checks"], list)
-        assert len(parsed["checks"]) == 10
+        assert len(parsed["checks"]) == 12
 
 
 # ---------------------------------------------------------------------------

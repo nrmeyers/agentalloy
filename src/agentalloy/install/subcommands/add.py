@@ -151,6 +151,12 @@ def adopt_and_wire(
     result = _wire_harness_core(harness, port=port, root=root, scope="repo")
     phase_seeded = _seed_entry_phase(root)
     _git_exclude_agentalloy(root)  # ensure .agentalloy/ (upstream + phase) stays uncommitted
+
+    # Code-index harness block (second sentinel pair) — written only when the
+    # service reports the module enabled; cleans up stale/legacy blocks otherwise.
+    from agentalloy.install import code_index_wiring
+
+    code_index_wiring.maybe_wire(root, port)
     return upstream, result, phase_seeded
 
 
