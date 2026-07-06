@@ -231,7 +231,11 @@ jobs:
 
       - name: Integration tests
         timeout-minutes: 20
-        run: uv run pytest -m integration -n0 -q
+        # "and not container": several container tests carry BOTH markers, and
+        # a bare `-m integration` cold-builds podman images on the 2-core
+        # runner until the step timeout (first nightly run died exactly this
+        # way, with zero pytest output). Container tests have their own CI job.
+        run: uv run pytest -m "integration and not container" -n0 -q
 
       - name: Upload logs on failure
         if: failure()
