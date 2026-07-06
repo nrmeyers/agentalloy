@@ -205,8 +205,10 @@ This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **insta
 
 Harnesses fall into two categories:
 
-- **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, Codex, OpenClaw, OpenCode, Hermes Agent) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
-- **Sidecar** (Cursor, Windsurf, GitHub Copilot, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Proxy-wired** (Claude Code, Continue.dev, Aider, Cline, Codex, OpenClaw, OpenCode, Hermes Agent, Copilot CLI) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically.
+- **Sidecar** (Cursor, Windsurf, GitHub Copilot IDE/extension, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+
+> Copilot has two entries: the standalone **Copilot CLI** (`copilot-cli`, npm `@github/copilot`) is proxy-wired via its BYOK env vars (`COPILOT_PROVIDER_*`; note BYOK routes model traffic to your configured upstream key, not your Copilot subscription), while the IDE/extension surface (`github-copilot`) routes through GitHub's backend and stays sidecar-only.
 
 Proxy-wired is the preferred mode. Full per-harness catalog: [docs/install/harness-catalog.md](docs/install/harness-catalog.md).
 

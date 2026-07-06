@@ -30,11 +30,12 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 | `claude-code` | per-repo `.claude/settings.local.json` `env` (`ANTHROPIC_BASE_URL=…/proj/<token>`, auto-loaded by Claude Code) + `.agentalloy/claude-code-env.sh` shell/direnv fallback |
 | `continue-closed`, `continue-local` | `.continuerc.json` `models[].apiBase` |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `model`) |
-| `hermes-agent` | `~/.hermes/SOUL.md` (user scope) or `AGENTS.md` instruction (repo scope) |
+| `hermes-agent` | repo-local `.hermes/config.yaml` (`model.base_url=…/proj/<token>/v1`) under `HERMES_HOME`, activated via `.hermes/.agentalloy-env` (+ direnv/mise carriers) + repo-scoped gateway restart |
 | `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `system-prompt.md` |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) |
-| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block) |
+| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block); per-repo `/proj/<token>` only via `agentalloy wrap` (`OPENAI_BASE_URL` env) |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) |
+| `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_BASE_URL=…/proj/<token>/v1`, `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL`) — sourced or injected via `agentalloy wrap` |
 
 ### Sidecar
 
@@ -53,7 +54,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 |---|---|---|
 | `cursor` | Routes through Cursor's service; no first-party base-URL override | `.cursor/rules/agentalloy.mdc` (dedicated) or `.cursorrules` (shared) |
 | `windsurf` | No first-party base-URL override | `.windsurf/rules/agentalloy.md` (dedicated) or `.windsurfrules` (shared) |
-| `github-copilot` | Closed routing through GitHub backend | `.github/copilot-instructions.md` (shared, marker-bounded) |
+| `github-copilot` | IDE/extension surface: closed routing through GitHub backend. The standalone Copilot CLI is proxy-wired as `copilot-cli` (BYOK) | `.github/copilot-instructions.md` (shared, marker-bounded) |
 | `antigravity` (alias `gemini-cli`) | Antigravity CLI (formerly Gemini CLI). Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars | `GEMINI.md` (shared, marker-bounded) |
 
 ### Non-Classified

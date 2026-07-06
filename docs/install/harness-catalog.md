@@ -39,12 +39,13 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 |---------|-----------|---------------|-------|
 | `continue-closed`, `continue-local` | `.continuerc.json` | `models[].apiBase` | P1 |
 | `aider` | `.aider.conf.yml` | `openai-api-base`, `openai-api-key`, `model` | P1 |
-| `hermes-agent` | `~/.hermes/SOUL.md` (user) or `AGENTS.md` (repo) | sentinel-bounded instruction block | P1 |
+| `hermes-agent` | repo-local `.hermes/config.yaml` + `.hermes/.agentalloy-env` (`HERMES_HOME`) | `model.provider`, `model.base_url` (`…/proj/<token>/v1`), `model.default`; direnv/mise activation carriers; gateway restart | P1 |
 | `opencode` | `.opencode/.agentalloy-env` | `OPENAI_API_BASE`, `OPENAI_API_KEY` | P1 |
 | `claude-code` | per-repo `.claude/settings.local.json` `env` (primary) + `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
-| `codex` | `~/.codex/config.toml` | `apiBaseUrl` (sentinel-bounded block) | P1 |
+| `codex` | `~/.codex/config.toml` (user-scoped, tokenless — per-repo routing needs `agentalloy wrap`) | `apiBaseUrl` (sentinel-bounded block) | P1 |
 | `openclaw` | `~/.openclaw/plugins.json` | agentalloy plugin entry (proxy base URL) | P1 |
+| `copilot-cli` | `.copilot/.agentalloy-env` (sourced or injected via `agentalloy wrap`) | BYOK env: `COPILOT_PROVIDER_TYPE`, `COPILOT_PROVIDER_BASE_URL` (`…/proj/<token>/v1`), `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL` | P1 |
 
 #### Multiple harnesses per repo
 
@@ -80,7 +81,7 @@ transport has been removed; `claude-code` is proxy-wired only.
 
 ## Full Harness List
 
-AgentAlloy knows 14 harness entries in its registry. They are grouped below by how AgentAlloy integrates with them under the proxy redesign. See [harness-classification.md](../harness-classification.md) for the classification rule.
+AgentAlloy knows 15 harnesses in its registry (16 keys — `gemini-cli` is an alias for `antigravity`). They are grouped below by how AgentAlloy integrates with them under the proxy redesign. See [harness-classification.md](../harness-classification.md) for the classification rule.
 
 ### Proxy-wired (default)
 
@@ -91,11 +92,12 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 | `claude-code` | per-repo `.claude/settings.local.json` `env` block (`ANTHROPIC_BASE_URL=…/proj/<token>` **only** — never an API key), with `.agentalloy/claude-code-env.sh` as a shell/direnv fallback | Native Anthropic Messages passthrough. settings.local.json is read natively by Claude Code, so the proxy auto-loads with no `source`/direnv step (the file is gitignored, so the machine-specific URL stays out of git). Auth is transparent: the proxy forwards the caller's own credential. |
 | `continue-closed`, `continue-local` | `.continuerc.json` (`models[].apiBase`) | JSON mutation per model entry. |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
-| `hermes-agent` | `~/.hermes/SOUL.md` (user scope) or sentinel block in `AGENTS.md` (repo scope) | Scope resolved at runtime via `--scope user|repo`. |
+| `hermes-agent` | repo-local `.hermes/config.yaml` (copy of `~/.hermes/config.yaml` with the `model` block redirected at `…/proj/<token>/v1`), activated via `HERMES_HOME` from `.hermes/.agentalloy-env` | Inherently per-repo (`--scope` ignored). direnv/mise carriers auto-set `HERMES_HOME` on cd; wiring restarts the repo-scoped hermes gateway. |
 | `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `.opencode/system-prompt.md` | Env file must be sourced before launching OpenCode. |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
-| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block) | OpenAI protocol; points Codex at the local proxy. |
+| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block) | OpenAI protocol; points Codex at the local proxy. **User-scoped and tokenless** — per-repo `/proj/<token>` routing requires launching via `agentalloy wrap codex -- codex` (which bakes the token into `OPENAI_BASE_URL`); a direct `codex` launch is not repo-disambiguated. |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) | OpenAI protocol; JSON plugin config pointing at the local proxy. |
+| `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_*` env vars, per-repo `/proj/<token>` baked in) | Standalone Copilot CLI (npm `@github/copilot`, BYOK GA Apr 2026). Env-var-only carrier: `source` the file or launch via `agentalloy wrap copilot-cli -- copilot`. BYOK routes model traffic to your configured upstream key, not your Copilot subscription. The IDE/extension surface stays sidecar-only as `github-copilot`. |
 
 > **Hook transport removed:** `claude-code` originally used `UserPromptSubmit` / `PreToolUse` / `PostToolUse` hooks installed via `.claude/settings.json`. That transport has been **removed entirely** — `claude-code` is now proxy-wired like every other interceptable harness (the proxy handles phase detection, skill composition, and injection). `agentalloy unwire` still strips any leftover hook entries from a previously hook-wired `~/.claude/settings.json`.
 
@@ -244,10 +246,11 @@ the injected block, then cleans up any dedicated files:
 | Harness | What gets removed |
 |---------|------------------|
 | `aider` | Sentinel block from `.aider.conf.yml`; `.agentalloy-aider-instructions.md` |
-| `hermes-agent` | Sentinel block from `~/.hermes/SOUL.md` (user) or `AGENTS.md` (repo) |
+| `hermes-agent` | Repo-local `.hermes/config.yaml` + `.hermes/.agentalloy-env` (via the WireRecord walk); legacy sentinel blocks in `~/.hermes/config.yaml` / `AGENTS.md` stripped for pre-proxy installs |
 | `opencode` | `.opencode/.agentalloy-env` and `.opencode/system-prompt.md` |
 | `claude-code` | `.claude/settings.local.json` `env.ANTHROPIC_BASE_URL` stripped (other settings preserved) + `.agentalloy/claude-code-env.sh` removed; empty `.agentalloy/` directory is also removed |
 | `cline` | Proxy fields from `.cline/settings.json` (or removes file if empty) |
+| `copilot-cli` | `.copilot/.agentalloy-env` (via the WireRecord walk) |
 
 For `--legacy` installs, uninstall removes the injected sentinel blocks and dedicated files
 using the same `AGENTALLOY-CONTEXT` markers.

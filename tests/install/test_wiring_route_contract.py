@@ -45,7 +45,11 @@ def test_claude_code_env_builder_is_auth_transparent() -> None:
 
 def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:
     routes = _app_route_paths()
-    for harness, key in (("codex", "OPENAI_BASE_URL"), ("openclaw", "OPENAI_BASE_URL")):
+    for harness, key in (
+        ("codex", "OPENAI_BASE_URL"),
+        ("openclaw", "OPENAI_BASE_URL"),
+        ("copilot-cli", "COPILOT_PROVIDER_BASE_URL"),
+    ):
         env = REGISTRY[harness].env_builder(47950)
         base = _base_path(env, key)  # /proj/<token>/v1
         assert base.startswith("/proj/"), f"{harness}: expected /proj/<token> base, got {base!r}"

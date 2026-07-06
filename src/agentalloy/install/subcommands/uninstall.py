@@ -1042,6 +1042,7 @@ def uninstall(
         ".claude/settings.json",  # Claude Code hook wiring (merged hooks)
         "agentalloy-hook-claude-code.sh",  # ~/.agentalloy/hooks/ hook script
         ".openclaw/plugins.json",  # openclaw plugin config
+        ".copilot/.agentalloy-env",  # copilot-cli BYOK env carrier
     )
     root_resolved = root.resolve()
     # Trusted user-scope prefixes, resolved. A prefix that is itself a symlink

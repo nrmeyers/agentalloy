@@ -487,7 +487,7 @@ class TestEdgeCases:
         are excluded from the legacy path test.
         """
         # Harnesses that do not support the legacy (markdown-injection) path
-        legacy_excluded = {"mcp-only", "codex", "openclaw"}
+        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli"}
         for harness in VALID_HARNESSES:
             # Reset state for each
             state_file = repo_root / ".agentalloy" / "install-state.json"
@@ -699,7 +699,7 @@ class TestIntakeActivationMarkers:
         """
         instruction_extensions = {".md", ".mdc"}
         # Harnesses that do not support legacy markdown injection
-        legacy_excluded = {"mcp-only", "codex", "openclaw"}
+        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli"}
         for harness in VALID_HARNESSES:
             state_file = repo_root / ".agentalloy" / "install-state.json"
             if state_file.exists():
