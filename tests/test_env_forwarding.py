@@ -123,10 +123,7 @@ def test_loopback_127_warns():
 
 
 def test_non_loopback_upstream_no_warning():
-    assert (
-        loopback_upstream_warnings({"UPSTREAM_URL": "https://api.openai.com/v1"})
-        == []
-    )
+    assert loopback_upstream_warnings({"UPSTREAM_URL": "https://api.openai.com/v1"}) == []
     assert (
         loopback_upstream_warnings({"UPSTREAM_URL": "http://host.containers.internal:11434/v1"})
         == []
@@ -135,7 +132,4 @@ def test_non_loopback_upstream_no_warning():
 
 def test_localhost_named_host_does_not_false_positive():
     """Substring matches must not trip the warning (localhost.example.com)."""
-    assert (
-        loopback_upstream_warnings({"UPSTREAM_URL": "https://localhost.example.com/v1"})
-        == []
-    )
+    assert loopback_upstream_warnings({"UPSTREAM_URL": "https://localhost.example.com/v1"}) == []

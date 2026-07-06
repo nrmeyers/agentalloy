@@ -794,9 +794,7 @@ class TestGeneratedRunCommandEnvForwarding:
         monkeypatch.setattr(
             "agentalloy.install.subcommands.container_runtime.subprocess.run", fake_run
         )
-        rc = container_runtime._run_container(
-            "podman", "all", projects_root=tmp_path / "projects"
-        )
+        rc = container_runtime._run_container("podman", "all", projects_root=tmp_path / "projects")
         assert rc == 0
         argv = captured[-1]
         flags = [argv[i + 1] for i, a in enumerate(argv) if a == "-e"]
