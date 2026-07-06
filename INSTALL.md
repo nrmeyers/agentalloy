@@ -52,6 +52,32 @@ If you want to walk the user through this carefully (recommended for first insta
 
 ---
 
+## Scripted / non-interactive setup
+
+Skip the wizard with flags:
+
+```bash
+# native
+agentalloy setup -n --hardware nvidia --packs all --harness claude-code
+# container (auto-detects the runtime; podman preferred when both work)
+agentalloy setup -n --deployment container --harness claude-code
+# container, pinning the runtime non-interactively
+agentalloy setup -n --deployment container --runtime docker --harness claude-code
+# sidecar harnesses (cursor, windsurf, github-copilot, antigravity) also need --acknowledge-sidecar:
+agentalloy setup -n --hardware nvidia --packs all --harness cursor --acknowledge-sidecar
+```
+
+For a proxy-wired harness, point it at your upstream LLM with `--upstream-url` / `--upstream-model` / `--upstream-api-key` (or the matching env vars — preferred for the key, which is otherwise visible in process args).
+
+### Choosing a deployment
+
+The wizard's first question is **how to deploy**; both choices run the same wizard:
+
+- **Container** *(recommended for new installs, default)* — agentalloy + two bundled `llama-server` instances in one image pulled from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`). Zero host dependencies, air-gapped friendly, **CPU-only on every host**. Ships a prebuilt corpus, so first run only waits on the model download; port 47950 is the only external surface. Requires a container runtime — Docker or Podman — that is both **installed and running** (see the runtime probe rules under Step 13); if none is usable, setup tells you to install one and re-run, or — interactively — offers to switch to a Native install on the spot.
+- **Native** — runs the models directly on your host via llama-server with GPU acceleration (NVIDIA CUDA / AMD ROCm / Apple Metal, or CPU if you have no GPU). Fastest composition path, full control.
+
+---
+
 ## Upgrading
 
 Once installed, move an existing install to the latest tagged release with one command:
@@ -158,6 +184,8 @@ cd agentalloy
 uv sync
 uv tool install --editable .
 ```
+
+**Migrating from pipx:** if you previously installed AgentAlloy via `pipx`, run `pipx uninstall agentalloy`, then `uv tool install git+https://github.com/nrmeyers/agentalloy.git`. User-scope state (`~/.config/agentalloy/`, corpus DB) is preserved across the swap — pipx and uv installs share the same state location.
 
 Verify it landed by re-running preflight (which is the authoritative PATH check):
 
@@ -536,7 +564,8 @@ Operator commands the user can run later (these are NOT part of this runbook —
 | `agentalloy wire --list` | List the harnesses wired in the current repo (with lifecycle mode + phase) |
 | `agentalloy unwire` | Remove sentinels from the current repo only (keeps user state, `.env`, and corpus). `--harness <name>` unwires just that one harness, leaving any other wired harness and the repo's shared `.agentalloy/{phase,config}` lifecycle state intact; the harness's shared user-scope config is removed only on the last repo using it |
 | `agentalloy add <harness>` | Adopt one harness's own upstream LLM (read from its config) and wire it through the proxy, per-repo — for a repo that should talk to a different model than your global default |
-| `agentalloy worktree <harness> <branch>` | Create a git worktree for `<branch>` and wire `<harness>` through the proxy in it (`-b` to create the branch) — run several agent sessions on one repo in parallel, each with its own phase |
+| `agentalloy worktree <harness> <branch>` | Create a git worktree for `<branch>` and wire `<harness>` through the proxy in it (`-b` to create the branch) — run several agent sessions on one repo in parallel, each with its own phase. Isolation is automatic: the proxy keys per-repo state on `base64url(realpath)` of the working directory, so a worktree's distinct path gets its own `/proj/<token>` — and therefore its own `.agentalloy/` phase and upstream, git-excluded so they never get committed. All worktrees share the one running service and user-scoped corpus; concurrent inference is read-only against that corpus, so sessions never contend. One caveat: corpus *mutations* (`install-packs`, `reembed`) take the single-writer lock and affect every worktree — stop the service before running them |
+| `agentalloy rerank-warmup` | Warm the reranker's KV cache (wired into the systemd unit's `ExecStartPost`) |
 | `agentalloy doctor` | Runtime health check on demand |
 | `agentalloy update` | Migrate corpus in place after a version bump |
 | `agentalloy install-pack <name>` | Add a published skill pack to the user corpus |
@@ -592,6 +621,52 @@ repo, ask your agent to "add a skill for X" — intake routes it down the
 - **Format reference:** the scaffolded YAMLs already match the schema; for full
   details or hand-authoring from scratch, see `docs/skill-authoring-and-overrides-spec.md`'s
   "Pack structure" and "Skill YAML schema" sections.
+
+### Container architecture
+
+The image bundles the service and its inference runners — two `llama-server` instances (embed + reranker), with the llama.cpp toolchain copied from `ghcr.io/ggml-org/llama.cpp:full` — the recommended deployment when you want zero host-side inference dependencies.
+
+The setup wizard's container path:
+
+1. **Detects** a usable container runtime — installed *and* running, probed with `<runtime> info` (see the runtime rules under Step 13).
+2. **Pulls** the pre-built image from GHCR (`ghcr.io/nrmeyers/agentalloy:latest`).
+3. **Creates** a named volume `agentalloy-data` for persistent corpus data.
+4. **Runs** the container with volume mounts, env vars, and port mapping.
+5. **Waits** for the readiness endpoint (`/readiness`) to respond.
+
+```
+┌──────────────────────────────────────────────────┐
+│  agentalloy:latest (podman run --replace)        │
+│                                                  │
+│  /app/entrypoint.sh (bash)                       │
+│  ├── Check .bootstrap-complete (skip if done)    │
+│  ├── Seed prebuilt corpus (published images)     │
+│  ├── Download GGUFs into /app/data/models        │
+│  │     (embed + reranker, if missing)            │
+│  ├── Start embed llama-server (--embeddings :47951)│
+│  ├── Start reranker llama-server (:47952)         │
+│  ├── Run migrations                              │
+│  ├── install-packs (skipped when seeded)         │
+│  ├── Touch .bootstrap-complete                   │
+│  ├── exec uvicorn (main service, :47950)         │
+│                                                  │
+│  ENV: AGENTALLOY_PACKS, FRAGMENTS_LANCE_PATH          │
+│      DUCKDB_PATH, LOG_LEVEL                       │
+└───────────┬──────────────────────────────────────┘
+            │ -p 47950:47950
+            ▼
+   localhost:47950  (external)
+```
+
+### Hardware requirements (container)
+
+Container deployment is **CPU-only** on every host; GPU acceleration (NVIDIA CUDA, AMD ROCm, Apple Metal) requires a native install. The bundled `llama-server` instances run `nomic-embed-text-v1.5.Q8_0.gguf` and `Qwen3-Reranker-0.6B-Q8_0.gguf` on CPU — fast enough for the runtime path (short-text embeds and intent reranking); only corpus-wide work such as a full reembed runs meaningfully slower than on GPU.
+
+| Requirement | Minimum |
+|---|---|
+| RAM | 8 GB |
+| Disk (image + model + data) | ~4 GB |
+| Container runtime | Podman (recommended) or Docker |
 
 ### Container operational commands
 

@@ -104,6 +104,10 @@ Set it with `agentalloy wire --lifecycle-mode {full,off}`. When wiring detects a
 
 In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
 
+### Approval gates
+
+On the **full lane**, two transitions are gated by an explicit human-in-the-loop approval marker: `spec → design` and `design → build`. Run `agentalloy approve <phase>` after reviewing the spec / design artifacts; the marker pins to the artifact's `sha256` so a post-approval edit invalidates it. `--force` does **not** bypass approval (it only carves out the artifact-completeness gates). The **fast lane** keeps `phase set qa` as the forward verb without an approval marker; set `SDD_FAST_REQUIRE_APPROVAL=on` in `.env` to opt in. The **add-skill lane** is always approval-gated — `agentalloy approve add-skill` is the only way forward and no setting disables it, because installing a skill changes what gets composed into every future session in that repo. Build contracts must also carry **≤2 `domain_tags`** (one dominant tech surface) — multi-surface contracts block `design → build` until split, bypassable by `--force`.
+
 ### Free-flow mode
 
 For sessions where you have **no specific task in mind** — exploring, poking, reading — free-flow pauses the workflow without giving up skill composition:
@@ -132,7 +136,26 @@ Task contracts are markdown files under `.agentalloy/contracts/<phase>/` that de
 - `scope.touches` / `scope.avoids` — file path patterns
 - `success_criteria` — acceptance criteria list
 
-When present, `domain_tags` from contracts drive BM25 retrieval — surgical and intent-aware. Without contracts, AgentAlloy falls back to rule-based keyword extraction from the task description.
+Example:
+
+```yaml
+---
+phase: build
+task_slug: add-auth-middleware
+domain_tags: ["NestJS", "Express middleware", "JWT validation"]
+scope:
+  touches: ["src/auth/**", "tests/auth/**"]
+  avoids:  ["src/billing/**"]
+success_criteria:
+  - "Existing auth tests still pass"
+  - "Middleware tested with valid + invalid tokens"
+---
+
+# Add Auth Middleware
+<one paragraph of task prose>
+```
+
+The agent writes the contract once at task start. When present, `domain_tags` from contracts drive BM25 retrieval — surgical, intent-aware, and stable across the conversation. No prompt engineering required; the agent just records what it's about to do. Without contracts, AgentAlloy falls back to rule-based keyword extraction from the task description.
 
 ### Signal Layer
 
@@ -222,7 +245,7 @@ AgentAlloy runs as a FastAPI service on port 47950 (default). Endpoints:
 **Optional flag-gated steps** (all off by default, all fail open to the deterministic path above when the local model or graph is unavailable):
 
 - **Graph expansion** (`RETRIEVAL_GRAPH_EXPAND=on`, default off): splices `requires`-edge neighbors of the top ranked skills into the candidate set before selection.
-- **Stage B LM fragment re-rank** (`LM_ASSIST`; **off by default as of v5.0.0** — no eval-set lift + ~500 ms/compose; v4.0.2 had set it `arbitrate` for n=2 / real-life skill-ranking, off for now; re-enable with `LM_ASSIST=arbitrate`): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top 8 fragments (pairwise yes/no logprobs over `/v1/completions`, bounded by `LM_ASSIST_MAX_CANDIDATES`); the rerank server's `--parallel`/`-c` is hardware-conditional (`start_rerank_server.rerank_launch_args`) — `--parallel 2 -c 4096` on GPU, `--parallel 1 -c 2048` on CPU (the launcher value need NOT match `LM_ASSIST_MAX_CANDIDATES`: on CPU the 8 client requests serialize at the single server slot, which is intentional and faster than `--parallel 8` because it avoids OpenMP thread contention). On a HIT, survivors above `LM_ASSIST_KEEP_THRESHOLD` (default `0.0` — gated-off pending a P(yes) measurement) are routed through the SAME `skill_granular_select` diversity selection as the deterministic path (no longer "diversity off"). On disabled/timeout/error, deterministic selection runs unchanged. Budget is `LM_ASSIST_TIMEOUT_MS` (default 2000ms in presets) — warm K=8 batch lands at ~485ms on GPU, ~1170ms on CPU (Xeon W-2225 measurement).
+- **Stage B LM fragment re-rank** (`LM_ASSIST`; **off by default as of v5.0.0** — no eval-set lift + ~500 ms/compose; v4.0.2 had set it `arbitrate` for n=2 / real-life skill-ranking, off for now; re-enable with `LM_ASSIST=arbitrate`): runs post-fusion, pre-selection. The `qwen3-reranker-0.6b` cross-encoder scores the top 8 fragments (pairwise yes/no logprobs over `/v1/completions`, bounded by `LM_ASSIST_MAX_CANDIDATES`); the rerank server's `--parallel`/`-c` is hardware-conditional (`start_rerank_server.rerank_launch_args`) — `--parallel 2 -c 4096` on GPU (the Pareto sweet spot: ~94% of `--parallel 8` throughput at half the KV memory), `--parallel 1 -c 2048` on CPU (the launcher value need NOT match `LM_ASSIST_MAX_CANDIDATES`: on CPU the 8 client requests serialize at the single server slot, which is intentional and faster than `--parallel 8` because it avoids OpenMP thread contention). On a HIT, survivors above `LM_ASSIST_KEEP_THRESHOLD` (default `0.0` — gated-off pending a P(yes) measurement) are routed through the SAME `skill_granular_select` diversity selection as the deterministic path (no longer "diversity off"). On disabled/timeout/error, deterministic selection runs unchanged. Budget is `LM_ASSIST_TIMEOUT_MS` (default 2000ms in presets) — warm K=8 batch lands at ~485ms on GPU, ~1170ms on CPU (Xeon W-2225 measurement).
 
 ### Embedding Model
 
@@ -241,7 +264,7 @@ Every `/compose`, `/retrieve`, and signal evaluation writes a structured trace t
 
 Signal-layer traces additionally capture: `event_type`, `pre_filter_matched`, `gates_met`, `gates_unmet`, `qwen_calls`.
 
-The proxy records each intercepted request as a single consolidated trace row (`status='proxy_composed'`). Summarize token savings with `agentalloy telemetry savings`, which counts one `proxy_composed` row per proxy request. Query the raw rows with `GET /telemetry/traces`, and reset the table with `agentalloy telemetry clear` (truncates `composition_traces`).
+The proxy records each intercepted request as a single consolidated trace row (`status='proxy_composed'`). Summarize token savings with `agentalloy telemetry savings`, which counts one `proxy_composed` row per proxy request. Query the raw rows with `GET /telemetry/traces` (filterable by phase, status, time window, and repo); `GET /telemetry/savings` returns the token-savings aggregation and `GET /telemetry/coverage` the composed-vs-passthrough rate per phase and repo. Reset the table with `agentalloy telemetry clear` (truncates `composition_traces`). Traces are written synchronously — no async backlog, no dropped traces — and trace-write failures never propagate to the response.
 
 ## Configuration
 
@@ -257,7 +280,8 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 - `SIGNAL_INTENT_RERANK_URL` — reranker llama-server URL
 - `SIGNAL_INTENT_RERANK_MODEL` — reranker model GGUF
 - `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — dedup cosine thresholds (defaults `0.92` / `0.80`)
-- `BOUNCE_BUDGET` — re-bounce budget
+- `BOUNCE_BUDGET` — re-bounce budget (compose retry budget)
+- `PROFILE_ROOT` — per-profile datastores root
 - `LOG_LEVEL` — service log level
 - `COMPOSE_ENABLED` — the instruction-injector module (compose/retrieve/proxy; default on)
 - `CODE_INDEX_ENABLED` — the code-index module (`/code/*`; default off; needs the `[code-index]` extra)
@@ -383,9 +407,17 @@ A skill about "how to write tests" in category `ops` is a category-fit failure. 
 
 ## Web UI
 
-The service serves a browser dashboard at `http://localhost:47950/` from the same process. Setup downloads the prebuilt bundle from the version-matched GitHub release (`agentalloy pull-web` re-fetches; upgrades refresh it); container images bake it in; dev checkouts can build locally with `cd frontend && pnpm install && pnpm build` (Node via mise). The API runs fine without a bundle — `/` answers 501. Pages: Config (.env editor + soft reload), Telemetry (traces/savings/coverage), Skills (browser, version history, override editor), Playground (retrieval/compose/signal simulator — the simulator is read-only, never advances repo state), Repos (per-repo phase/gates/upstream), Approvals (pending sign-offs; approving auto-advances the phase), Ops (doctor read-only — repair stays on the CLI, reembed, packs, profiles), New Skill (wizard over the add-skill rails).
+The service serves a browser dashboard at `http://localhost:47950/` from the same process. Setup downloads the prebuilt bundle from the version-matched GitHub release (`agentalloy pull-web` re-fetches; upgrades refresh it); container images bake it in; dev checkouts can build locally with `cd frontend && pnpm install && pnpm build` (Node via mise). The API runs fine without a bundle — `/` answers 501. Pages:
 
-Operator notes: everything is localhost-only with no auth; mutating endpoints (`PUT /api/config`, `POST /api/repos/approve`, wizard writes, reembed) require the `X-AgentAlloy-CSRF: 1` header, which the UI sends. Config **reload is soft** — per-request settings pick up changes, but store/embed connections opened at startup need a service restart. The approval queue lists only actionable sign-offs (exit artifacts exist); a phase can still be approval-blocked without appearing there — the per-repo gate status shows that.
+- **Config** — edit the user-scoped `.env` with field validation and masked secrets; soft-reload without a restart.
+- **Telemetry** — trace explorer with the full signal story per request (gates met/unmet, pre-filter, Stage A/B rerank outcomes), token-savings charts, and composed-vs-passthrough coverage.
+- **Skills** — browse the corpus with pack provenance and override badges, inspect full version history, and customize system/workflow prose in a one-click editor with a live `prose_invariants` checklist and a diff against the shipped default (replaces the `customize edit → validate → update` loop).
+- **Playground** — ranked retrieval with scores, compose preview with a `debug=true` per-stage explain mode, and a read-only signal simulator ("would this prompt compose right now?") — never advances repo state.
+- **Repos & Approvals** — every wired repo's phase, gate blockers, and per-repo upstream; an actionable approval queue for `spec`/`design`/`add-skill` sign-offs (approving records the marker and auto-advances the phase; editing an artifact after sign-off resurfaces it as stale).
+- **Ops** — doctor checks (read-only — repair stays on the CLI), reembed status and runs, pack install state, profile resolution.
+- **New Skill** — a four-step wizard on the same rails as the add-skill lane: scaffold → draft (with an R1–R9 self-check panel) → strict validate → approve + install.
+
+Operator notes: everything is localhost-only with no auth; mutating endpoints (`PUT /api/config`, `POST /api/repos/approve`, wizard writes, reembed) require the `X-AgentAlloy-CSRF: 1` header, which the UI sends (with no CORS grant on the localhost-only service, foreign origins can't). Config **reload is soft** — per-request settings pick up changes, but store/embed connections opened at startup need a service restart. The approval queue lists only actionable sign-offs (exit artifacts exist); a phase can still be approval-blocked without appearing there — the per-repo gate status shows that.
 
 ## Cross-References
 

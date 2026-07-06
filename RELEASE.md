@@ -89,6 +89,10 @@ PRs — it runs nightly (`corpus-nightly.yml`, `integration-tests` job); failure
 open an issue labeled `nightly-integration`. Run it locally before risky
 retrieval/embedding changes: `uv run pytest -m integration`.
 
+Tests live under `tests/` and cover the install pipeline (`tests/install/`),
+retrieval, composition, applicability filtering, telemetry, and the
+harness-wiring catalog.
+
 ## 4. Versioning (SemVer)
 
 Version lives in `pyproject.toml` (`[project] version`). Bump per
