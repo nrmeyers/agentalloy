@@ -766,7 +766,7 @@ _HARNESS_MARKERS: list[tuple[str, list[str]]] = [
     ("windsurf", [".windsurf", ".windsurfrules"]),
     ("continue-local", [".continuerc.json"]),
     ("aider", [".aider.conf.yml"]),
-    ("opencode", [".opencode"]),
+    ("opencode", [".opencode", "opencode.json"]),
     ("cline", [".clinerules"]),
     ("antigravity", ["GEMINI.md"]),
     ("github-copilot", [".github/copilot-instructions.md"]),

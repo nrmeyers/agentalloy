@@ -620,43 +620,8 @@ class TestAiderProxyWiring:
 # ---------------------------------------------------------------------------
 
 
-class TestOpenCodeProxyWiring:
-    """Proxy-mode wiring for opencode writes env file + system prompt."""
-
-    def test_writes_env_file(self, repo_root: Path) -> None:
-        result = wire_compat("opencode", port=8000, root=repo_root)
-        assert result["integration_vector"] == "proxy"
-        env_path = repo_root / ".opencode" / ".agentalloy-env"
-        assert env_path.exists()
-        content = env_path.read_text()
-        assert "OPENAI_API_BASE=http://localhost:8000/v1" in content
-        assert "OPENAI_API_KEY" in content
-
-    def test_writes_system_prompt(self, repo_root: Path) -> None:
-        wire_compat("opencode", port=8000, root=repo_root)
-        prompt = repo_root / ".opencode" / "system-prompt.md"
-        assert prompt.exists()
-        content = prompt.read_text()
-        assert SENTINEL_BEGIN in content
-        assert "localhost:8000" in content
-
-    def test_idempotent_rewire(self, repo_root: Path) -> None:
-        wire_compat("opencode", port=8000, root=repo_root)
-        wire_compat("opencode", port=9000, root=repo_root)
-        prompt = (repo_root / ".opencode" / "system-prompt.md").read_text()
-        env = (repo_root / ".opencode" / ".agentalloy-env").read_text()
-        assert "localhost:9000" in prompt
-        assert "localhost:8000" not in prompt
-        assert prompt.count(SENTINEL_BEGIN) == 1
-        assert "localhost:9000" in env
-
-    def test_prints_activation_guidance(
-        self, repo_root: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        wire_compat("opencode", port=8000, root=repo_root)
-        captured = capsys.readouterr()
-        assert "source" in captured.err
-        assert ".agentalloy-env" in captured.err
+# OpenCode proxy wiring is covered in tests/install/test_opencode_proxy_wiring.py
+# (repo-local opencode.json provider block — the old env-file carrier was dead).
 
 
 # ---------------------------------------------------------------------------

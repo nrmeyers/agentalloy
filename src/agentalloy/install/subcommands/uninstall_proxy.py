@@ -138,7 +138,13 @@ def _unwire_proxy_hermes_agent(scope: str, root: Path) -> list[Path]:
 
 
 def _unwire_proxy_opencode(root: Path) -> list[Path]:
-    """Remove opencode proxy env file."""
+    """Strip *legacy* opencode carriers (migration cleanup).
+
+    The current carrier (repo-local ``opencode.json`` provider block) is
+    reversed by the generic WireRecord walk. This removes only the dead
+    pre-rewrite carriers: ``.opencode/.agentalloy-env`` (opencode never read
+    it) and the sentinel block in ``.opencode/system-prompt.md``.
+    """
     env_path = root / ".opencode" / ".agentalloy-env"
     prompt_path = root / ".opencode" / "system-prompt.md"
     removed: list[Path] = []  # type: ignore[reportUnknownVariableType]

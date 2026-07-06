@@ -31,7 +31,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 | `continue-closed`, `continue-local` | `.continuerc.json` `models[].apiBase` |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `model`) |
 | `hermes-agent` | repo-local `.hermes/config.yaml` (`model.base_url=…/proj/<token>/v1`) under `HERMES_HOME`, activated via `.hermes/.agentalloy-env` (+ direnv/mise carriers) + repo-scoped gateway restart |
-| `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `system-prompt.md` |
+| `opencode` | repo-local `opencode.json` — `provider.agentalloy` on `@ai-sdk/openai-compatible` (`baseURL=…/proj/<token>/v1`) + default model `agentalloy/agentalloy-proxy` |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) |
 | `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block); per-repo `/proj/<token>` only via `agentalloy wrap` (`OPENAI_BASE_URL` env) |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) |

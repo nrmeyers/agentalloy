@@ -1,8 +1,9 @@
 """OpenCode install module — apply_persistent_config / install_writer.
 
-Proxy wiring: ``.opencode/.agentalloy-env`` (OPENAI_API_BASE/OPENAI_API_KEY,
-sourced before launch) plus a sentinel block in ``.opencode/system-prompt.md``.
-The implementation lives in ``wire_harness._wire_proxy_opencode`` (shared with
+Proxy wiring: repo-local ``opencode.json`` with an ``agentalloy`` provider on
+``@ai-sdk/openai-compatible`` (Chat Completions wire) pointed at the proxy's
+per-repo ``/proj/<token>/v1`` endpoint, selected as the default model. The
+implementation lives in ``wire_harness._wire_proxy_opencode`` (shared with
 ``agentalloy wire``); this module delegates so the provider registry and the
 live wiring can never diverge.
 """

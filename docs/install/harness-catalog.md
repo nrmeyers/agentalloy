@@ -40,7 +40,7 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `continue-closed`, `continue-local` | `.continuerc.json` | `models[].apiBase` | P1 |
 | `aider` | `.aider.conf.yml` | `openai-api-base`, `openai-api-key`, `model` | P1 |
 | `hermes-agent` | repo-local `.hermes/config.yaml` + `.hermes/.agentalloy-env` (`HERMES_HOME`) | `model.provider`, `model.base_url` (`…/proj/<token>/v1`), `model.default`; direnv/mise activation carriers; gateway restart | P1 |
-| `opencode` | `.opencode/.agentalloy-env` | `OPENAI_API_BASE`, `OPENAI_API_KEY` | P1 |
+| `opencode` | repo-local `opencode.json` | `provider.agentalloy` (`@ai-sdk/openai-compatible`, `baseURL=…/proj/<token>/v1`, `apiKey`), `model: agentalloy/agentalloy-proxy` | P1 |
 | `claude-code` | per-repo `.claude/settings.local.json` `env` (primary) + `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
 | `codex` | `~/.codex/config.toml` (user-scoped, tokenless — per-repo routing needs `agentalloy wrap`) | `apiBaseUrl` (sentinel-bounded block) | P1 |
@@ -93,7 +93,7 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 | `continue-closed`, `continue-local` | `.continuerc.json` (`models[].apiBase`) | JSON mutation per model entry. |
 | `aider` | `.aider.conf.yml` (`openai-api-base`, `openai-api-key`, `model`) | Sentinel-bounded YAML block. |
 | `hermes-agent` | repo-local `.hermes/config.yaml` (copy of `~/.hermes/config.yaml` with the `model` block redirected at `…/proj/<token>/v1`), activated via `HERMES_HOME` from `.hermes/.agentalloy-env` | Inherently per-repo (`--scope` ignored). direnv/mise carriers auto-set `HERMES_HOME` on cd; wiring restarts the repo-scoped hermes gateway. |
-| `opencode` | `.opencode/.agentalloy-env` (`OPENAI_API_BASE`) + sentinel block in `.opencode/system-prompt.md` | Env file must be sourced before launching OpenCode. |
+| `opencode` | repo-local `opencode.json` (`provider.agentalloy` on `@ai-sdk/openai-compatible`, default model `agentalloy/agentalloy-proxy`) | OpenCode ignores `OPENAI_API_BASE`, and its built-in openai provider speaks the Responses API (`/v1/responses`), which the proxy does not serve — the config-file provider block is the only working vector (verified live by the harness e2e matrix). Merges over an existing `opencode.json`; per-repo `/proj/<token>` baked in. |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
 | `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block) | OpenAI protocol; points Codex at the local proxy. **User-scoped and tokenless** — per-repo `/proj/<token>` routing requires launching via `agentalloy wrap codex -- codex` (which bakes the token into `OPENAI_BASE_URL`); a direct `codex` launch is not repo-disambiguated. |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) | OpenAI protocol; JSON plugin config pointing at the local proxy. |
@@ -247,7 +247,7 @@ the injected block, then cleans up any dedicated files:
 |---------|------------------|
 | `aider` | Sentinel block from `.aider.conf.yml`; `.agentalloy-aider-instructions.md` |
 | `hermes-agent` | Repo-local `.hermes/config.yaml` + `.hermes/.agentalloy-env` (via the WireRecord walk); legacy sentinel blocks in `~/.hermes/config.yaml` / `AGENTS.md` stripped for pre-proxy installs |
-| `opencode` | `.opencode/.agentalloy-env` and `.opencode/system-prompt.md` |
+| `opencode` | Repo-local `opencode.json` provider block (via the WireRecord walk); legacy `.opencode/.agentalloy-env` + `system-prompt.md` removed for pre-rewrite installs |
 | `claude-code` | `.claude/settings.local.json` `env.ANTHROPIC_BASE_URL` stripped (other settings preserved) + `.agentalloy/claude-code-env.sh` removed; empty `.agentalloy/` directory is also removed |
 | `cline` | Proxy fields from `.cline/settings.json` (or removes file if empty) |
 | `copilot-cli` | `.copilot/.agentalloy-env` (via the WireRecord walk) |

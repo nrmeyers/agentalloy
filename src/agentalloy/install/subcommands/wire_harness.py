@@ -1343,55 +1343,67 @@ def _wire_proxy_hermes_agent(port: int, root: Path, scope: str) -> list[dict[str
 
 
 def _wire_proxy_opencode(port: int, root: Path) -> list[dict[str, Any]]:
-    """Wire OpenCode to use the AgentAlloy proxy.
+    """Wire OpenCode to use the AgentAlloy proxy via repo-local ``opencode.json``.
 
-    Writes two files:
-    - ``.opencode/.agentalloy-env``: shell script exporting OPENAI_API_BASE and
-      OPENAI_API_KEY, which the user sources before launching OpenCode.
-    - ``.opencode/system-prompt.md``: brief proxy-mode instruction appended with
-      sentinel markers.
-
-    Prints a one-line activation reminder to stderr.
+    OpenCode does not honor ``OPENAI_API_BASE`` (the old carrier), and its
+    built-in openai provider speaks the Responses API (``/v1/responses``),
+    which the proxy does not serve. The working vector — verified against a
+    live binary by the harness e2e matrix — is a custom provider on the
+    ``@ai-sdk/openai-compatible`` package (Chat Completions wire) pointed at
+    the proxy's per-repo ``/proj/<token>/v1`` endpoint, selected as the
+    default model. OpenCode merges the repo-local config over the user's
+    global one, so their other settings survive.
     """
-    opencode_dir = root / ".opencode"
-    opencode_dir.mkdir(parents=True, exist_ok=True)
+    from agentalloy.api.proxy_context import encode_proj_token
 
-    # Write env file (always overwrites — it's a generated file we own fully)
-    env_path = opencode_dir / ".agentalloy-env"
-    env_content = (
-        f"export OPENAI_API_BASE=http://localhost:{port}/v1\nexport OPENAI_API_KEY=agentalloy\n"
-    )
-    install_state._atomic_write(env_path, env_content)  # pyright: ignore[reportPrivateUsage]
+    token = encode_proj_token(root)
+    proxy_base = f"http://localhost:{port}/proj/{token}/v1"
 
-    # Write / update system-prompt.md with sentinel block
-    prompt_path = opencode_dir / "system-prompt.md"
-    original_content = _capture_original(prompt_path)
-    instruction = (
-        "## AgentAlloy proxy\n\n"
-        f"An AgentAlloy proxy is active at `http://localhost:{port}/v1`.\n"
-        "It intercepts requests to inject skill context before forwarding to your LLM.\n"
-    )
-    existing = prompt_path.read_text() if prompt_path.exists() else ""
-    result_content = _inject_sentinel_block(existing, instruction)
-    install_state._atomic_write(prompt_path, result_content)  # pyright: ignore[reportPrivateUsage]
+    config_path = root / "opencode.json"
+    config: dict[str, Any] = {}
+    original_content = _capture_original(config_path)
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError as err:
+            print(f"ERROR: {config_path} is not valid JSON", file=sys.stderr)
+            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
+            raise SystemExit(1) from err
+
+    config.setdefault("$schema", "https://opencode.ai/config.json")
+    providers = config.get("provider")
+    if not isinstance(providers, dict):
+        providers = {}
+    providers["agentalloy"] = {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "AgentAlloy",
+        "options": {"baseURL": proxy_base, "apiKey": "agentalloy"},
+        "models": {"agentalloy-proxy": {"name": "AgentAlloy Proxy"}},
+    }
+    config["provider"] = providers
+    config["model"] = "agentalloy/agentalloy-proxy"
+
+    # No in-file install marker: opencode validates its config schema strictly
+    # and rejects unrecognized keys (verified live — the e2e matrix caught it).
+    # Clean removal rides the WireRecord (original_content restore / delete).
+
+    serialized = json.dumps(config, indent=2) + "\n"
+    install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
 
     print(
-        "[AgentAlloy] Activate proxy: source .opencode/.agentalloy-env",
+        "[AgentAlloy] opencode wired via repo-local opencode.json "
+        "(provider 'agentalloy', model agentalloy/agentalloy-proxy).",
         file=sys.stderr,
     )
 
     return [
         {
-            "path": str(env_path),
-            "action": "wrote_new_file",
-            "content_sha256": _sha256(env_content),
-        },
-        {
-            "path": str(prompt_path),
-            "action": "injected_block",
-            "content_sha256": _sha256(instruction.strip()),
+            "path": str(config_path),
+            "action": "wrote_new_file" if original_content is None else "injected_block",
+            "marker_key": "provider.agentalloy",
+            "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        },
+        }
     ]
 
 
