@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Instructions tell your agent how to work here. The code index tells it what's actually here.<br/>AgentAlloy composes both into context — at the exact moment they're needed.</b>
+  <b>Instructions tell your agent how to work here. The code index tells it what's actually here.<br/>AgentAlloy composes the first into your agent's context — and teaches it to query the second.</b>
 </p>
 
 <p align="center">
@@ -25,22 +25,25 @@ Coding agents don't fail for lack of intelligence — they fail for lack of **co
 **AgentAlloy** is a **just-in-time context engine**: one local service, two context modules.
 
 - **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 300+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
-- **Code** — knows *what's there*. Your repos parsed into a symbol graph with hybrid semantic/lexical search: exact call graphs ("what breaks if I change this?"), and budgeted context bundles that ground the agent in the code that already exists instead of the code it imagines.
+- **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs ("what breaks if I change this?") and budgeted context bundles. The agent **queries it**; nothing is pushed. The composed instructions teach the agent when to ask: check blast radius at design, pull a grounded bundle at build, map regression scope at qa.
 
-It attaches as a **local proxy**: your harness points its base URL at AgentAlloy and every request flows through with the right context composed in — for Claude Code, wiring sets a single env var and your own credentials pass through untouched. Smaller models get leverage they don't have alone; larger models get your actual house rules and your actual codebase instead of their best guess. (A third module — **Knowledge**: the decisions behind the code and why they were made — is on the roadmap.)
+It attaches as a **local proxy**: your harness points its base URL at AgentAlloy and every request flows through with the right instructions composed in — for Claude Code, wiring sets a single env var and your own credentials pass through untouched. Smaller models get leverage they don't have alone; larger models get your actual house rules — and a way to interrogate your actual codebase — instead of their best guess. (A third module — **Knowledge**: the decisions behind the code and why they were made — is on the roadmap.)
 
 Everything runs on your machine — one small embed model and a 0.6B reranker over embedded LanceDB + DuckDB. No cloud calls, and zero paid-LLM tokens spent deciding what to inject: routing is **deterministic by default**, and the one optional LM stage in the compose path ships off because it showed no lift on our evals (we measured, so we disabled it — [numbers here](BENCHMARKS.md)).
 
 The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `wire --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy flow free` pauses the workflow anytime without losing your place.
 
-Things your agent gets without you pasting them into the prompt:
+Composed into the prompt without you pasting a thing:
 
 - "How do I write a failing pytest before the implementation?" — TDD workflow + framework idioms, composed from `pytest` + `testing` packs.
 - "How do I structure an incremental dbt model so it stays correct across re-runs?" — data-engineering governance + domain skills, composed from `data-engineering` + `engineering` packs.
 - "Wire OpenTelemetry into this FastAPI app." — observability rules + framework patterns, composed from `fastapi` + `analytics` packs.
 - "I'm reviewing this PR — what should I check?" — review heuristics, composed from `code-review` packs.
-- "What breaks if I change this function's signature?" — exact transitive call sites from the symbol graph, not a grep guess.
-- "Start this task grounded." — a budgeted bundle of the symbols, callers, and docs the task actually touches, straight from the code index.
+
+One question away, because the injected guidance taught the agent to ask:
+
+- "What breaks if I change this function's signature?" — `agentalloy code callers` returns exact transitive call sites, not a grep guess.
+- "Start this task grounded." — `agentalloy code bundle` returns a budgeted slice of the symbols, callers, and docs the task actually touches.
 
 ---
 
