@@ -110,6 +110,7 @@ class ComposeOrchestrator:
         session_key: str | None = None,
         session_source: str | None = None,
         record_trace: bool = True,
+        exclude_system_skill_ids: frozenset[str] = frozenset(),
     ) -> ComposedResult | EmptyResult:
         # repo / session_* are per-request attribution stamped onto the telemetry
         # trace (proxy paths pass them from the signal layer; direct /compose omits
@@ -131,6 +132,22 @@ class ComposeOrchestrator:
             if want_system
             else SystemRetrievalResult(candidates=[], applied_skill_ids=[], retrieval_ms=0)
         )
+        if exclude_system_skill_ids and system.applied_skill_ids:
+            # Proxy-side availability gate: the capability layer
+            # (provides/requires_capability) is deferred by design, so the one
+            # runtime-conditional system skill (sys-code-index) is dropped here by
+            # skill_id when the request's repo can't honor it. Only the proxy
+            # passes this — direct /compose has no repo identity to gate on.
+            # See agentalloy.api.code_index_gate.
+            system = SystemRetrievalResult(
+                candidates=[
+                    f for f in system.candidates if f.skill_id not in exclude_system_skill_ids
+                ],
+                applied_skill_ids=[
+                    s for s in system.applied_skill_ids if s not in exclude_system_skill_ids
+                ],
+                retrieval_ms=system.retrieval_ms,
+            )
         system_fragment_ids = [f.fragment_id for f in system.candidates]
         system_applied = bool(system.candidates)
         retrieval_error_code: str | None = None

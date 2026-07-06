@@ -117,6 +117,12 @@ is enabled AND the local service reports `modules.code_index == "enabled"`;
 `unwire`/`uninstall` sweep it, and a legacy standalone `codebase-indexer`
 block is migrated in place.
 
+Beyond the static wiring block, the `sys-code-index` system skill injects the
+same pull guidance just-in-time through the proxy at design/build/qa — only
+when the request's repo has a completed index in the indexed-repos registry
+(fail-closed: module off, unindexed repo, or an unreadable registry all mean
+no injection).
+
 Wiring an unindexed repo offers to index it on the spot (`[Y/n]`; `wire --yes`
 and non-TTY submit by default — the job runs async, wiring never waits).
 `unwire` asks whether to also remove the repo's index and defaults to **keep**

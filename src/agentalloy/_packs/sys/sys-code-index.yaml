@@ -1,0 +1,30 @@
+skill_id: sys-code-index
+canonical_name: "System — Code Index"
+description: "The repo has a local code index (symbol graph + semantic search); pull commands per phase — blast radius at design, symbol bundles at build, regression scope at qa. Proxy-gated: injected only when the request's repo is actually indexed."
+category: tooling
+skill_class: system
+domain_tags:
+  - code-search
+  - code-index
+always_apply: false
+phase_scope:
+  - design
+  - build
+  - qa
+category_scope: null
+author: navistone
+change_summary: "golden default: phase-scoped pull commands for the local code index; availability-gated proxy-side"
+raw_prose: |
+  # Code index
+
+  This repo has a local code index (symbol graph + semantic search). Ground
+  yourself in the actual codebase before guessing.
+
+  - **design** — check blast radius before committing to an approach:
+    `agentalloy code callers <fqn>` · `agentalloy code search "<topic>"`
+  - **build** — fetch the symbols your task touches before writing:
+    `agentalloy code bundle "<task description>"`
+  - **qa** — regression scope of what you changed:
+    `agentalloy code callers <changed-fqn> --depth 3`
+
+  Results include file:line — read those files rather than re-searching.

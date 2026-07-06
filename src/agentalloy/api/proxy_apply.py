@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agentalloy.api import code_index_gate
 from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyResult, Phase
 from agentalloy.api.proxy_signal import SignalResult, commit_markers
 
@@ -174,6 +175,9 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
                 session_key=signal.session_key,
                 session_source=signal.session_source,
                 record_trace=False,
+                # Availability gate: sys-code-index is dropped unless this repo
+                # actually has a completed code index (fail-closed on any doubt).
+                exclude_system_skill_ids=code_index_gate.system_skill_exclusions(signal.repo),
             )
             if not isinstance(tier1_result, EmptyResult) and tier1_result.output:
                 parts.append(tier1_result.output)

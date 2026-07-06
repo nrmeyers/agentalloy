@@ -1,5 +1,5 @@
 name: sys
-version: 1.0.1
+version: 1.1.0
 tier: foundation
 description: |
   Golden system-capability skills — the org customization surface for the SDD
@@ -28,4 +28,7 @@ skills:
   fragment_count: 0
 - skill_id: sys-deploy-target
   file: sys-deploy-target.yaml
+  fragment_count: 0
+- skill_id: sys-code-index
+  file: sys-code-index.yaml
   fragment_count: 0
