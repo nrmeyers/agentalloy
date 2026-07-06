@@ -92,8 +92,11 @@ retrieval/embedding changes: `uv run pytest -m integration`.
 ## 4. Versioning (SemVer)
 
 Version lives in `pyproject.toml` (`[project] version`). Bump per
-[SemVer](https://semver.org/): **patch** = bug fix / internal change, **minor** =
-backward-compatible feature, **major** = breaking change.
+[SemVer](https://semver.org/), where every tier refers to **shipped code
+only**: **patch** = bug fix to shipped behavior, **minor** =
+backward-compatible feature, **major** = breaking change. Changes outside the
+shipped surface (CI, docs, tests, tooling) have no SemVer tier — they don't
+version at all (see below).
 
 ### When a bump is required: shipped-surface lockstep
 
