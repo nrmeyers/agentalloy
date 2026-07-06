@@ -39,6 +39,8 @@ def test_harness_roundtrip(
 ) -> None:
     if shutil.which(case.binary) is None:
         pytest.skip(f"{case.binary} not installed")
+    if case.xfail_reason:
+        pytest.xfail(case.xfail_reason)
 
     if case.wire is not None:
         case.wire(proxy, work_repo)

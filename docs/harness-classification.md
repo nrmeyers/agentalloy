@@ -33,7 +33,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 | `hermes-agent` | repo-local `.hermes/config.yaml` (`model.base_url=…/proj/<token>/v1`) under `HERMES_HOME`, activated via `.hermes/.agentalloy-env` (+ direnv/mise carriers) + repo-scoped gateway restart |
 | `opencode` | repo-local `opencode.json` — `provider.agentalloy` on `@ai-sdk/openai-compatible` (`baseURL=…/proj/<token>/v1`) + default model `agentalloy/agentalloy-proxy` |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) |
-| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block); per-repo `/proj/<token>` only via `agentalloy wrap` (`OPENAI_BASE_URL` env) |
+| `codex` | ⚠️ currently non-functional — modern codex is Responses-API-only (`wire_api = "responses"`); needs a `/v1/responses` proxy surface (e2e-matrix finding) |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) |
 | `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_BASE_URL=…/proj/<token>/v1`, `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL`) — sourced or injected via `agentalloy wrap` |
 

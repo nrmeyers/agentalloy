@@ -43,7 +43,7 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `opencode` | repo-local `opencode.json` | `provider.agentalloy` (`@ai-sdk/openai-compatible`, `baseURL=…/proj/<token>/v1`, `apiKey`), `model: agentalloy/agentalloy-proxy` | P1 |
 | `claude-code` | per-repo `.claude/settings.local.json` `env` (primary) + `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
-| `codex` | `~/.codex/config.toml` (user-scoped, tokenless — per-repo routing needs `agentalloy wrap`) | `apiBaseUrl` (sentinel-bounded block) | P1 |
+| `codex` | ⚠️ non-functional (Responses-API-only harness; proxy lacks `/v1/responses`) | legacy `apiBaseUrl` block still written (inert) | P1 |
 | `openclaw` | `~/.openclaw/plugins.json` | agentalloy plugin entry (proxy base URL) | P1 |
 | `copilot-cli` | `.copilot/.agentalloy-env` (sourced or injected via `agentalloy wrap`) | BYOK env: `COPILOT_PROVIDER_TYPE`, `COPILOT_PROVIDER_BASE_URL` (`…/proj/<token>/v1`), `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL` | P1 |
 
@@ -95,7 +95,7 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 | `hermes-agent` | repo-local `.hermes/config.yaml` (copy of `~/.hermes/config.yaml` with the `model` block redirected at `…/proj/<token>/v1`), activated via `HERMES_HOME` from `.hermes/.agentalloy-env` | Inherently per-repo (`--scope` ignored). direnv/mise carriers auto-set `HERMES_HOME` on cd; wiring restarts the repo-scoped hermes gateway. |
 | `opencode` | repo-local `opencode.json` (`provider.agentalloy` on `@ai-sdk/openai-compatible`, default model `agentalloy/agentalloy-proxy`) | OpenCode ignores `OPENAI_API_BASE`, and its built-in openai provider speaks the Responses API (`/v1/responses`), which the proxy does not serve — the config-file provider block is the only working vector (verified live by the harness e2e matrix). Merges over an existing `opencode.json`; per-repo `/proj/<token>` baked in. |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
-| `codex` | `~/.codex/config.toml` (`apiBaseUrl`, sentinel-bounded block) | OpenAI protocol; points Codex at the local proxy. **User-scoped and tokenless** — per-repo `/proj/<token>` routing requires launching via `agentalloy wrap codex -- codex` (which bakes the token into `OPENAI_BASE_URL`); a direct `codex` launch is not repo-disambiguated. |
+| `codex` | ⚠️ **currently non-functional** | Modern codex speaks only the OpenAI Responses API: it ignores `OPENAI_BASE_URL` (dials `wss://api.openai.com/v1/responses`), and custom `model_providers` require `wire_api = "responses"` (`wire_api = "chat"` was removed upstream) — verified live by the harness e2e matrix. Proxying codex needs a `/v1/responses` proxy surface; until then wiring prints a warning and codex traffic is not intercepted. |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) | OpenAI protocol; JSON plugin config pointing at the local proxy. |
 | `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_*` env vars, per-repo `/proj/<token>` baked in) | Standalone Copilot CLI (npm `@github/copilot`, BYOK GA Apr 2026). Env-var-only carrier: `source` the file or launch via `agentalloy wrap copilot-cli -- copilot`. BYOK routes model traffic to your configured upstream key, not your Copilot subscription. The IDE/extension surface stays sidecar-only as `github-copilot`. |
 

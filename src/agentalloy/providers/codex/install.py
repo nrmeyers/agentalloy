@@ -84,12 +84,16 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
 
     config_path.write_text(content)
 
-    # Surface the wrap-only caveat at wire time: without `agentalloy wrap`,
-    # nothing injects the per-repo OPENAI_BASE_URL override.
+    # Honest status (harness e2e matrix, live-verified): modern codex cannot
+    # be proxied yet. It ignores OPENAI_BASE_URL (dials its own websocket to
+    # api.openai.com), the [codex] block below is inert (not its schema), and
+    # custom model_providers require wire_api="responses" — an API surface the
+    # proxy does not serve. Do not claim otherwise at wire time.
     print(
-        "[AgentAlloy] codex wired via user-scoped ~/.codex/config.toml (no per-repo token). "
-        "Launch with `agentalloy wrap codex -- codex [args]` for per-repo routing — "
-        "a direct `codex` launch is not repo-disambiguated.",
+        "[AgentAlloy] WARNING: codex proxy support is currently non-functional. "
+        "Modern codex speaks only the OpenAI Responses API (/v1/responses), which "
+        "the AgentAlloy proxy does not serve yet; codex traffic will NOT be "
+        "intercepted. Tracked as a known gap in the harness e2e matrix.",
         file=sys.stderr,
     )
 
