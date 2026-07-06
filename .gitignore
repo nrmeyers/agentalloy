@@ -99,6 +99,8 @@ memory/
 docs/spec/
 docs/design/
 docs/tests/
+docs/qa/
+docs/ship/
 
 # Per-session scratch handoff notes (regenerable; never part of the repo).
 HANDOFF.md
