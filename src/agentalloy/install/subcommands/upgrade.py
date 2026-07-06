@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install import release_check, runtime_artifacts
+from agentalloy.install import env_forwarding, release_check, runtime_artifacts
 from agentalloy.install import state as install_state
 from agentalloy.install.output import (
     add_json_flag,
@@ -734,6 +734,22 @@ def _preflight_confirm(current: str, target: str, ref: str | None, deployment: s
 # ---------------------------------------------------------------------------
 
 
+def _module_notices() -> list[str]:
+    """One line per default-off module toggle absent from the user ``.env``.
+
+    A stale ``.env`` predating a new module means the user was never told the
+    module exists — the exact silence the v6.1.x code-index rollout shipped.
+    Toggle present (either value) → the user has decided; no notice. Module
+    default-on → already running; nothing to announce.
+    """
+    env_values = install_state.parse_env_file()
+    return [
+        f"this version ships the {info.module} module (currently off) — {info.enable_hint}"
+        for key, info in sorted(env_forwarding.MODULE_TOGGLES.items())
+        if key not in env_values and not info.default_enabled
+    ]
+
+
 def upgrade(
     *,
     ref: str | None = None,
@@ -812,6 +828,10 @@ def upgrade(
 
     summary["actions"].extend(actions)
     summary["warnings"].extend(warnings)
+    # Announce default-off modules the user's .env predates — one line each,
+    # never a prompt. The container recreate above already honors a toggle
+    # that IS in the .env (env_forwarding); this covers the one that isn't.
+    summary["notices"] = _module_notices()
     # Read the post-swap version from the new binary; the in-process __version__ is
     # frozen at the pre-upgrade value (module imported before the swap).
     summary["new_version"] = _installed_version_via_cli() or _current_version()
@@ -885,6 +905,12 @@ def _render_human(result: dict[str, Any]) -> None:
         print_rich("\n  [bold]Warnings[/bold]")
         for w in warnings:
             print_rich(f"  [yellow]![/yellow] {w}")
+
+    notices = result.get("notices") or []
+    if notices:
+        print_rich("\n  [bold]New modules[/bold]")
+        for n in notices:
+            print_rich(f"  [cyan]i[/cyan] {n}")
 
     if result.get("dismissed_version") is not None:
         print_rich(

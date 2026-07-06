@@ -116,10 +116,17 @@ URL_CLASS_UPSTREAM_KEYS: frozenset[str] = frozenset(
 
 
 class ModuleToggle(NamedTuple):
-    """Display metadata for a module env toggle (upgrade notice, doctor)."""
+    """Display metadata for a module env toggle (upgrade notice, doctor).
+
+    ``default_enabled`` mirrors the Settings default: the upgrade notice only
+    fires for default-off modules a stale ``.env`` predates — an absent toggle
+    for a default-on module means the module is already running, so there is
+    nothing to announce.
+    """
 
     module: str
     enable_hint: str
+    default_enabled: bool
 
 
 # The module toggles `upgrade` diffs against the user .env to announce
@@ -130,12 +137,14 @@ MODULE_TOGGLES: dict[str, ModuleToggle] = {
         enable_hint=(
             "add COMPOSE_ENABLED=1 to ~/.config/agentalloy/.env, then `agentalloy upgrade`"
         ),
+        default_enabled=True,
     ),
     "CODE_INDEX_ENABLED": ModuleToggle(
         module="codebase indexer",
         enable_hint=(
             "add CODE_INDEX_ENABLED=1 to ~/.config/agentalloy/.env, then `agentalloy upgrade`"
         ),
+        default_enabled=False,
     ),
 }
 
