@@ -1041,7 +1041,8 @@ def uninstall(
         ".cline/settings.json",  # Cline proxy config
         ".claude/settings.json",  # Claude Code hook wiring (merged hooks)
         "agentalloy-hook-claude-code.sh",  # ~/.agentalloy/hooks/ hook script
-        ".openclaw/plugins.json",  # openclaw plugin config
+        ".openclaw/plugins.json",  # openclaw legacy (pre-rewrite) plugin config
+        ".openclaw/openclaw.json",  # openclaw custom model provider config
         ".copilot/.agentalloy-env",  # copilot-cli BYOK env carrier
         "opencode.json",  # opencode repo-local provider config
         ".codex/config.toml",  # codex repo-local CODEX_HOME config

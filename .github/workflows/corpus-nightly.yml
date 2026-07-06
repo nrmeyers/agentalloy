@@ -343,10 +343,11 @@ jobs:
           set -euxo pipefail
           # Pinned majors so upstream releases don't flake nightly; bump
           # deliberately (a bump IS a harness compatibility test).
-          npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
+          npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex openclaw
           uv tool install aider-chat || echo "aider install failed (non-fatal: matrix skips missing binaries)"
-          # copilot-cli and openclaw are auth-gated at launch; not installed
-          # in CI yet — their matrix entries skip until we have a token story.
+          # copilot-cli is auth-gated at launch — its matrix entry skips until
+          # we have a token story. hermes-agent's installer is interactive
+          # (no plain pip/npm recipe); local-verified only for now.
 
       - name: Harness e2e matrix
         timeout-minutes: 30

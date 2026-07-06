@@ -1,307 +1,124 @@
-"""Unit tests for the openclaw provider (Task 10).
+"""Unit tests for the openclaw provider (custom model provider in openclaw.json).
 
-Covers:
-  - HarnessSpec creation and registration
-  - env_builder returns correct OPENAI_BASE_URL and OPENAI_API_KEY
-  - install_writer writes ~/.openclaw/plugins.json with agentalloy plugin entry
-  - Sentinel idempotency (re-running replaces existing block)
-  - Preserves existing content outside agentalloy plugin
-
-Total: 12 unit tests.
+The old ~/.openclaw/plugins.json "proxy plugin" entry was never OpenClaw
+schema, and OpenClaw ignores OPENAI_BASE_URL (e2e-matrix finding). The real
+vector is models.providers.agentalloy in ~/.openclaw/openclaw.json plus
+agents.defaults.model.primary.
 """
 
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-from unittest import TestCase, main
-from unittest.mock import patch
-
-# Ensure the openclaw provider is imported so it registers itself in REGISTRY.
-from agentalloy.providers.openclaw import REGISTRY  # noqa: F401
-
-# ---------------------------------------------------------------------------
-# HarnessSpec tests
-# ---------------------------------------------------------------------------
-
-
-class TestOpenclawHarnessSpec(TestCase):
-    """Tests for the openclaw HarnessSpec registration."""
-
-    def test_openclaw_registered(self):
-        """The openclaw harness is registered in REGISTRY."""
-        self.assertIn("openclaw", REGISTRY)
-
-    def test_openclaw_spec_fields(self):
-        """HarnessSpec has correct name, binary, capabilities, protocol."""
-        from agentalloy.providers import Capability, Protocol
-
-        spec = REGISTRY["openclaw"]
-        self.assertEqual(spec.name, "openclaw")
-        self.assertEqual(spec.binary, "openclaw")
-        self.assertEqual(spec.capabilities, (Capability.PROXY,))
-        self.assertEqual(spec.protocol, Protocol.OPENAI)
-
-    def test_openclaw_env_builder(self):
-        """env_builder returns OPENAI_BASE_URL and OPENAI_API_KEY."""
-        spec = REGISTRY["openclaw"]
-        env = spec.env_builder(47950)
-        self.assertIsInstance(env, dict)
-        # Per-repo /proj/<token> discriminator baked from cwd, then /v1.
-        base = env["OPENAI_BASE_URL"]
-        self.assertTrue(base.startswith("http://localhost:47950/proj/"), base)
-        self.assertTrue(base.endswith("/v1"), base)
-        self.assertEqual(env["OPENAI_API_KEY"], "agentalloy")
-
-    def test_openclaw_install_writer_callable(self):
-        """install_writer is a callable that returns list[WireRecord]."""
-        spec = REGISTRY["openclaw"]
-        self.assertIsNotNone(spec.install_writer)
-        self.assertTrue(callable(spec.install_writer))
-
-
-# ---------------------------------------------------------------------------
-# install module tests
-# ---------------------------------------------------------------------------
-
-
-class TestOpenclawInstall(TestCase):
-    """Tests for the openclaw install module (apply_persistent_config)."""
-
-    def test_apply_persistent_config_creates_plugins_json(self):
-        """install_writer creates ~/.openclaw/plugins.json with agentalloy plugin."""
-        from agentalloy.providers.base import WireRecord
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-
-                config_path = fake_home / ".openclaw" / "plugins.json"
-                self.assertTrue(config_path.exists())
-                plugins = json.loads(config_path.read_text())
-
-                self.assertIn("plugins", plugins)
-                self.assertIn("agentalloy", plugins["plugins"])
-                agentalloy_plugin = plugins["plugins"]["agentalloy"]
-                self.assertEqual(agentalloy_plugin["enabled"], True)
-                self.assertEqual(agentalloy_plugin["type"], "proxy")
-                self.assertEqual(agentalloy_plugin["baseUrl"], "http://localhost:7070/v1")
-                self.assertEqual(agentalloy_plugin["apiKey"], "agentalloy")
-
-                self.assertIsInstance(result, list)
-                self.assertEqual(len(result), 1)
-                self.assertIsInstance(result[0], WireRecord)
-                self.assertEqual(result[0].marker_key, "openclaw.plugins.agentalloy")
-
-    def test_apply_persistent_config_idempotent(self):
-        """Re-running apply_persistent_config updates port."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # First run
-                install.apply_persistent_config(7070, fake_home)
-
-                # Second run with different port
-                install.apply_persistent_config(8080, fake_home)
-
-                config_path = fake_home / ".openclaw" / "plugins.json"
-                plugins = json.loads(config_path.read_text())
-
-                self.assertEqual(
-                    plugins["plugins"]["agentalloy"]["baseUrl"],
-                    "http://localhost:8080/v1",
-                )
-                self.assertNotIn("7070", config_path.read_text())
-
-    def test_apply_persistent_config_preserves_existing_plugins(self):
-        """apply_persistent_config preserves existing plugins in the file."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # Pre-existing plugins.json with another plugin
-                config_path = fake_home / ".openclaw" / "plugins.json"
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                existing = json.dumps(
-                    {
-                        "plugins": {
-                            "other-plugin": {
-                                "enabled": True,
-                                "type": "local",
-                                "path": "/usr/local/bin/other-plugin",
-                            }
-                        }
-                    }
-                )
-                config_path.write_text(existing, encoding="utf-8")
-
-                # Run install
-                install.apply_persistent_config(7070, fake_home)
-
-                plugins = json.loads(config_path.read_text())
-
-                # Other plugin should still be there
-                self.assertIn("other-plugin", plugins["plugins"])
-                self.assertEqual(plugins["plugins"]["other-plugin"]["type"], "local")
-                # Agentalloy plugin should be added
-                self.assertIn("agentalloy", plugins["plugins"])
-                self.assertEqual(
-                    plugins["plugins"]["agentalloy"]["baseUrl"],
-                    "http://localhost:7070/v1",
-                )
-
-    def test_apply_persistent_config_rejects_corrupt_json(self):
-        """apply_persistent_config fails loud on corrupt JSON rather than clobbering it."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # Pre-existing corrupt file
-                config_path = fake_home / ".openclaw" / "plugins.json"
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                config_path.write_text("not valid json{{{", encoding="utf-8")
-
-                # Must refuse rather than silently overwrite the user's config.
-                with self.assertRaises(SystemExit):
-                    install.apply_persistent_config(7070, fake_home)
-
-                # The corrupt file is preserved untouched, not clobbered with {}.
-                self.assertEqual(config_path.read_text(encoding="utf-8"), "not valid json{{{")
-
-    def test_apply_persistent_config_new_file_action(self):
-        """First run returns wrote_new_file action."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-                self.assertEqual(result[0].action, "wrote_new_file")
-
-    def test_apply_persistent_config_existing_file_action(self):
-        """Second run returns injected_block action."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # First run
-                install.apply_persistent_config(7070, fake_home)
-
-                # Second run
-                result = install.apply_persistent_config(8080, fake_home)
-                self.assertEqual(result[0].action, "injected_block")
-
-    def test_apply_persistent_config_creates_directory(self):
-        """install_writer creates ~/.openclaw directory if it doesn't exist."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # Ensure .openclaw doesn't exist
-                openclaw_dir = fake_home / ".openclaw"
-                self.assertFalse(openclaw_dir.exists())
-
-                install.apply_persistent_config(7070, fake_home)
-
-                self.assertTrue(openclaw_dir.exists())
-                self.assertTrue((openclaw_dir / "plugins.json").exists())
-
-    def test_apply_persistent_config_json_formatting(self):
-        """The plugins.json is properly formatted JSON with indentation."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                install.apply_persistent_config(7070, fake_home)
-
-                config_path = fake_home / ".openclaw" / "plugins.json"
-                content = config_path.read_text()
-
-                # Should be valid JSON
-                plugins = json.loads(content)
-                self.assertIn("plugins", plugins)
-
-                # Should be indented (2 spaces)
-                self.assertIn("  ", content)
-
-                # Should end with newline
-                self.assertTrue(content.endswith("\n"))
-
-
-# ---------------------------------------------------------------------------
-# WireRecord tests
-# ---------------------------------------------------------------------------
-
-
-class TestOpenclawWireRecord(TestCase):
-    """Tests for WireRecord returned by openclaw install_writer."""
-
-    def test_wire_record_path(self):
-        """WireRecord path points to ~/.openclaw/plugins.json."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-                self.assertIn(".openclaw/plugins.json", result[0].path)
-
-    def test_wire_record_marker_key(self):
-        """WireRecord has correct marker_key for uninstall."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-                self.assertEqual(result[0].marker_key, "openclaw.plugins.agentalloy")
-
-    def test_wire_record_to_dict(self):
-        """WireRecord.to_dict() serializes correctly."""
-        from agentalloy.providers.openclaw import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-                d = result[0].to_dict()
-                self.assertIn("path", d)
-                self.assertIn("action", d)
-                self.assertIn("content_sha256", d)
-                self.assertIn("marker_key", d)
-
-
-if __name__ == "__main__":
-    main()
+
+import pytest
+
+from agentalloy.providers import REGISTRY, Capability, Protocol
+
+
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
+
+
+def _read_config(home: Path) -> dict[str, object]:
+    data = json.loads((home / ".openclaw" / "openclaw.json").read_text())
+    assert isinstance(data, dict)
+    return data
+
+
+def test_openclaw_spec_fields() -> None:
+    spec = REGISTRY["openclaw"]
+    assert spec.name == "openclaw"
+    assert spec.binary == "openclaw"
+    assert spec.capabilities == (Capability.PROXY,)
+    assert spec.protocol == Protocol.OPENAI
+
+
+def test_env_builder_is_empty() -> None:
+    """OpenClaw ignores OPENAI_BASE_URL — env wiring would be a silent no-op."""
+    assert REGISTRY["openclaw"].env_builder(47950) == {}
+
+
+def test_install_writer_merges_custom_provider(fake_home: Path, tmp_path: Path) -> None:
+    writer = REGISTRY["openclaw"].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
+
+    config = _read_config(fake_home)
+    models = config["models"]
+    assert isinstance(models, dict)
+    providers = models["providers"]
+    assert isinstance(providers, dict)
+    provider = providers["agentalloy"]
+    assert isinstance(provider, dict)
+    assert provider["baseUrl"] == "http://localhost:6666/v1"
+    assert provider["api"] == "openai-completions"
+    model_ids = [m["id"] for m in provider["models"]]
+    assert model_ids == ["agentalloy-proxy"]
+
+    agents = config["agents"]
+    assert isinstance(agents, dict)
+    assert agents["defaults"]["model"]["primary"] == "agentalloy/agentalloy-proxy"
+
+    assert [r.path for r in records] == [str(fake_home / ".openclaw" / "openclaw.json")]
+    assert records[0].action == "wrote_new_file"
+
+
+def test_merges_over_existing_config(fake_home: Path, tmp_path: Path) -> None:
+    openclaw_dir = fake_home / ".openclaw"
+    openclaw_dir.mkdir()
+    (openclaw_dir / "openclaw.json").write_text(
+        json.dumps(
+            {
+                "gateway": {"port": 18789},
+                "models": {"providers": {"ollama": {"baseUrl": "http://localhost:11434"}}},
+            }
+        )
+    )
+
+    writer = REGISTRY["openclaw"].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
+
+    config = _read_config(fake_home)
+    assert config["gateway"] == {"port": 18789}
+    providers = config["models"]["providers"]
+    assert isinstance(providers, dict)
+    assert "ollama" in providers and "agentalloy" in providers
+    assert records[0].action == "injected_block"
+    assert records[0].original_content is not None
+    assert "ollama" in records[0].original_content
+
+
+def test_rewire_is_idempotent(fake_home: Path, tmp_path: Path) -> None:
+    writer = REGISTRY["openclaw"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
+    writer(7777, tmp_path, False)
+
+    config = _read_config(fake_home)
+    provider = config["models"]["providers"]["agentalloy"]
+    assert "localhost:7777" in provider["baseUrl"]
+
+
+def test_invalid_existing_json_is_a_hard_error(fake_home: Path, tmp_path: Path) -> None:
+    openclaw_dir = fake_home / ".openclaw"
+    openclaw_dir.mkdir()
+    (openclaw_dir / "openclaw.json").write_text("{not json")
+
+    writer = REGISTRY["openclaw"].install_writer
+    assert writer is not None
+    with pytest.raises(SystemExit):
+        writer(6666, tmp_path, False)
+
+
+def test_never_writes_dead_plugins_json(fake_home: Path, tmp_path: Path) -> None:
+    """The pre-rewrite plugins.json carrier must stay dead."""
+    writer = REGISTRY["openclaw"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
+    assert not (fake_home / ".openclaw" / "plugins.json").exists()

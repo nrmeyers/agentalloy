@@ -46,10 +46,9 @@ def test_claude_code_env_builder_is_auth_transparent() -> None:
 
 def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:
     routes = _app_route_paths()
-    for harness, key in (
-        ("openclaw", "OPENAI_BASE_URL"),
-        ("copilot-cli", "COPILOT_PROVIDER_BASE_URL"),
-    ):
+    # codex/openclaw/opencode carry their base URL in config files, not env —
+    # their contracts are checked against the rendered configs below.
+    for harness, key in (("copilot-cli", "COPILOT_PROVIDER_BASE_URL"),):
         env = REGISTRY[harness].env_builder(47950)
         base = _base_path(env, key)  # /proj/<token>/v1
         assert base.startswith("/proj/"), f"{harness}: expected /proj/<token> base, got {base!r}"
@@ -79,3 +78,18 @@ def test_codex_config_base_url_resolves_to_responses_route(tmp_path: Path) -> No
     parts = (base + "/responses").split("/")
     parts[2] = "{token}"
     assert "/".join(parts) in _app_route_paths()
+
+
+def test_openclaw_config_base_url_resolves_to_chat_completions_route() -> None:
+    """openclaw wiring (openclaw.json custom provider) points at a served route.
+
+    User-scoped config → bare /v1 surface; the openai-completions API appends
+    /chat/completions.
+    """
+    from agentalloy.providers.openclaw.install import render_config
+
+    config = render_config(47950)
+    provider = config["models"]["providers"]["agentalloy"]
+    assert provider["api"] == "openai-completions"
+    base = urlparse(provider["baseUrl"]).path.rstrip("/")
+    assert base + "/chat/completions" in _app_route_paths()

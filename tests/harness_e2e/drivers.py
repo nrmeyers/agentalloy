@@ -81,6 +81,49 @@ def _copilot_env(port: int, root: Path) -> dict[str, str]:
     return build_env(port, root)
 
 
+def _wire_hermes(port: int, root: Path) -> object:
+    from agentalloy.install.subcommands import wire_harness
+
+    # Sandbox rule: the matrix must never restart the developer's live hermes
+    # gateway. The one-shot `hermes -z` CLI path talks to the model endpoint
+    # directly, so the repo-local config + HERMES_HOME env suffice.
+    orig = wire_harness._restart_hermes_gateway  # pyright: ignore[reportPrivateUsage]
+    wire_harness._restart_hermes_gateway = lambda root: True
+    try:
+        return wire_harness._wire_proxy_hermes_agent(  # pyright: ignore[reportPrivateUsage]
+            port, root, scope="repo"
+        )
+    finally:
+        wire_harness._restart_hermes_gateway = orig
+
+
+def _hermes_env(port: int, root: Path) -> dict[str, str]:
+    # Mirrors .hermes/.agentalloy-env; dummy key only ever reaches the stub.
+    return {"HERMES_HOME": str(root / ".hermes"), "OPENAI_API_KEY": "agentalloy-e2e"}
+
+
+def _wire_openclaw(port: int, root: Path) -> object:
+    # Sandbox rule: never touch the developer's real ~/.openclaw. Render the
+    # same config the real wiring merges, but into a work-repo state dir that
+    # OPENCLAW_STATE_DIR/OPENCLAW_CONFIG_PATH point at.
+    import json
+
+    from agentalloy.providers.openclaw.install import render_config
+
+    state = root / ".openclaw-state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "openclaw.json").write_text(json.dumps(render_config(port), indent=2))
+    return None
+
+
+def _openclaw_env(port: int, root: Path) -> dict[str, str]:
+    state = root / ".openclaw-state"
+    return {
+        "OPENCLAW_STATE_DIR": str(state),
+        "OPENCLAW_CONFIG_PATH": str(state / "openclaw.json"),
+    }
+
+
 def _wire_codex(port: int, root: Path) -> object:
     from agentalloy.providers.codex import install as codex_install
 
@@ -132,6 +175,17 @@ CASES: tuple[HarnessCase, ...] = (
         notes="Reads .aider.conf.yml from cwd — exercises the sentinel YAML carrier.",
     ),
     HarnessCase(
+        name="hermes-agent",
+        binary="hermes",
+        env=_hermes_env,
+        argv=lambda root: ["hermes", "-z", PROMPT, "--cli"],
+        wire=_wire_hermes,
+        notes=(
+            "Repo-local HERMES_HOME (config.yaml model block → /proj/<token>/v1); "
+            "gateway restart stubbed — one-shot CLI path needs no gateway."
+        ),
+    ),
+    HarnessCase(
         name="codex",
         binary="codex",
         env=_codex_env,
@@ -154,8 +208,21 @@ CASES: tuple[HarnessCase, ...] = (
     HarnessCase(
         name="openclaw",
         binary="openclaw",
-        env=_openai_proj_env,
-        argv=lambda root: ["openclaw", "run", PROMPT],
-        notes="Env-only (wrap path): user-scoped ~/.openclaw/plugins.json is never touched.",
+        env=_openclaw_env,
+        argv=lambda root: [
+            "openclaw",
+            "agent",
+            "--local",
+            "-m",
+            PROMPT,
+            "--json",
+            "--session-id",
+            "agentalloy-e2e",
+        ],
+        wire=_wire_openclaw,
+        notes=(
+            "Sandboxed OPENCLAW_STATE_DIR with the rendered custom-provider "
+            "config; user-scoped assistant → bare /v1 surface."
+        ),
     ),
 )

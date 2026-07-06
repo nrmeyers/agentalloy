@@ -34,7 +34,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 | `opencode` | repo-local `opencode.json` — `provider.agentalloy` on `@ai-sdk/openai-compatible` (`baseURL=…/proj/<token>/v1`) + default model `agentalloy/agentalloy-proxy` |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) |
 | `codex` | repo-local `.codex/config.toml` (`CODEX_HOME`, hermes pattern): `model_provider = "agentalloy"`, `[model_providers.agentalloy]` `base_url=…/proj/<token>/v1`, `wire_api = "responses"` → native Responses passthrough (`docs/responses-surface.md`) |
-| `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) |
+| `openclaw` | `~/.openclaw/openclaw.json` — `models.providers.agentalloy` custom provider (`api: openai-completions`, `baseUrl=…/v1`) + default model |
 | `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_BASE_URL=…/proj/<token>/v1`, `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL`) — sourced or injected via `agentalloy wrap` |
 
 ### Sidecar
