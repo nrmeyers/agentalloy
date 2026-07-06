@@ -7,6 +7,7 @@ pointing to the AgentAlloy proxy.
 from __future__ import annotations
 
 import hashlib
+import sys
 from pathlib import Path
 
 from agentalloy.install.sentinel_utils import replace_marked_block
@@ -82,6 +83,15 @@ def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[
     content_sha = _sha256(block)
 
     config_path.write_text(content)
+
+    # Surface the wrap-only caveat at wire time: without `agentalloy wrap`,
+    # nothing injects the per-repo OPENAI_BASE_URL override.
+    print(
+        "[AgentAlloy] codex wired via user-scoped ~/.codex/config.toml (no per-repo token). "
+        "Launch with `agentalloy wrap codex -- codex [args]` for per-repo routing — "
+        "a direct `codex` launch is not repo-disambiguated.",
+        file=sys.stderr,
+    )
 
     return [
         WireRecord(

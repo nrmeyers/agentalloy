@@ -891,6 +891,15 @@ def _wire_proxy(
     if harness == "codex":
         return _wire_proxy_codex(port, root)
 
+    if harness == "copilot-cli":
+        # Env-var-only BYOK carrier (.copilot/.agentalloy-env) — no legacy
+        # registry target, so the instruction fallback below would crash.
+        # Delegate to the provider registry's install_writer.
+        writer = REGISTRY["copilot-cli"].install_writer
+        assert writer is not None, "copilot-cli registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
     if harness == "openclaw":
         # openclaw wires ~/.openclaw/plugins.json, not a repo instruction file —
         # its legacy registry `target` is None, so the instruction fallback below
@@ -1587,53 +1596,15 @@ def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
 def _wire_proxy_codex(port: int, root: Path) -> list[dict[str, Any]]:
     """Wire Codex to use the AgentAlloy proxy.
 
-    Writes ``~/.codex/config.toml`` with a sentinel-bounded TOML block
-    containing ``apiBaseUrl`` and ``apiKey`` pointing to the proxy.
+    Delegates to the provider registry's install_writer (like openclaw) so the
+    provider module and this path cannot diverge. Writes ``~/.codex/config.toml``
+    with a sentinel-bounded TOML block containing ``apiBaseUrl`` and ``apiKey``
+    pointing to the proxy.
     """
-    config_path = Path.home() / ".codex" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    proxy_url = f"http://localhost:{port}/v1"
-    sentinel_begin = "# <!-- BEGIN agentalloy install -->"
-    sentinel_end = "# <!-- END agentalloy install -->"
-
-    block_lines = [
-        sentinel_begin,
-        "[codex]",
-        f'apiBaseUrl = "{proxy_url}"',
-        'apiKey = "agentalloy"',
-        sentinel_end,
-    ]
-    block = "\n".join(block_lines)
-
-    original_content = _capture_original(config_path)
-
-    if config_path.exists():
-        content = config_path.read_text()
-        if sentinel_begin in content and sentinel_end in content:
-            # Replace existing block
-            begin_idx = content.index(sentinel_begin)
-            end_idx = content.index(sentinel_end) + len(sentinel_end)
-            if end_idx < len(content) and content[end_idx] == "\n":
-                end_idx += 1
-            content = content[:begin_idx] + block + "\n" + content[end_idx:]
-        else:
-            if content and not content.endswith("\n"):
-                content += "\n"
-            content += block + "\n"
-    else:
-        content = block + "\n"
-
-    install_state._atomic_write(config_path, content)  # pyright: ignore[reportPrivateUsage]
-
-    return [
-        {
-            "path": str(config_path),
-            "action": "wrote_new_file" if original_content is None else "injected_block",
-            "content_sha256": _sha256(block),
-            **({"original_content": original_content} if original_content is not None else {}),
-        }
-    ]
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None, "codex registers an install_writer"
+    records = writer(port, root, False)
+    return [r.to_dict() for r in records]
 
 
 def _wire_proxy_instruction(
