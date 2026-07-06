@@ -31,12 +31,14 @@ def _env_builder(port: int) -> dict[str, str]:
     return {}
 
 
-def _install_writer(port: int, root: Path, force: bool = False) -> list[WireRecord]:
-    """Install persistent wiring for continue-dev.
+def _install_writer_closed(port: int, root: Path, force: bool = False) -> list[WireRecord]:
+    """Install persistent wiring for continue-closed (.continuerc.json proxy model)."""
+    return install.apply_persistent_config(port, root, force, harness="continue-closed")
 
-    Writes .continuerc.json with proxy model configuration.
-    """
-    return install.apply_persistent_config(port, root, force)
+
+def _install_writer_local(port: int, root: Path, force: bool = False) -> list[WireRecord]:
+    """Install persistent wiring for continue-local (.continuerc.json proxy model)."""
+    return install.apply_persistent_config(port, root, force, harness="continue-local")
 
 
 # Register the ``continue-closed`` harness in the global REGISTRY.
@@ -46,7 +48,7 @@ REGISTRY["continue-closed"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    install_writer=_install_writer,
+    install_writer=_install_writer_closed,
 )
 
 # Register the ``continue-local`` harness in the global REGISTRY.
@@ -56,5 +58,5 @@ REGISTRY["continue-local"] = HarnessSpec(
     capabilities=(Capability.PROXY,),
     protocol=Protocol.OPENAI,
     env_builder=_env_builder,
-    install_writer=_install_writer,
+    install_writer=_install_writer_local,
 )

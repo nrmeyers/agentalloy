@@ -47,3 +47,25 @@ class TestOpenCodeProxyWiring:
         paths = [e["path"] for e in result["files_written"]]
         assert any(".agentalloy-env" in p for p in paths)
         assert any("system-prompt.md" in p for p in paths)
+
+
+def test_registry_install_writer_matches_live_wiring(tmp_path: Path) -> None:
+    """REGISTRY['opencode'].install_writer produces the real proxy wiring.
+
+    Guards against the provider module regressing to the no-op stub it once
+    was (returned [] while the live wiring lived only in wire_harness).
+    """
+    from agentalloy.providers import REGISTRY
+
+    writer = REGISTRY["opencode"].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
+
+    assert records, "opencode install_writer must not be a no-op stub"
+    paths = {r.path for r in records}
+    assert str(tmp_path / ".opencode" / ".agentalloy-env") in paths
+    assert str(tmp_path / ".opencode" / "system-prompt.md") in paths
+
+    env_content = (tmp_path / ".opencode" / ".agentalloy-env").read_text()
+    assert "export OPENAI_API_BASE=http://localhost:6666/v1" in env_content
+    assert "export OPENAI_API_KEY=agentalloy" in env_content

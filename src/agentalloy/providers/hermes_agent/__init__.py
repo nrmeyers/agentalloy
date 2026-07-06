@@ -4,7 +4,8 @@ Registers the ``hermes-agent`` harness in REGISTRY with:
 - Protocol: ANTHROPIC (Hermes Agent speaks the Anthropic Messages API)
 - Capabilities: PROXY (proxy wiring via config file)
 - env_builder: returns empty dict (Hermes Agent uses file-based config)
-- install_writer: writes ~/.hermes/SOUL.md (user scope) or AGENTS.md (repo scope)
+- install_writer: repo-local .hermes/config.yaml + HERMES_HOME activation
+  carriers + gateway restart (delegates to the live wire_harness path)
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ def _env_builder(port: int) -> dict[str, str]:
 def _install_writer(port: int, root: Path, force: bool = False) -> list[WireRecord]:
     """Install persistent wiring for hermes-agent.
 
-    Writes ~/.hermes/SOUL.md (user scope) or AGENTS.md (repo scope)
-    with the AgentAlloy proxy configuration.
+    Writes the repo-local ``.hermes/config.yaml`` + ``HERMES_HOME`` activation
+    carriers and restarts the repo-scoped gateway (via the shared live path).
     """
     return install.apply_persistent_config(port, root, force)
 

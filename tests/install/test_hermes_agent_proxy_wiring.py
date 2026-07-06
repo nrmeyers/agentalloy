@@ -309,6 +309,38 @@ class TestHermesAgentProxyWiring:
 
         assert stub_gateway_restart == [tmp_path]
 
+    def test_registry_install_writer_matches_live_wiring(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """REGISTRY['hermes-agent'].install_writer produces the real proxy wiring.
+
+        Guards against the provider module diverging from the live
+        ``_wire_proxy_hermes_agent`` path (it once wrote a dead SOUL.md/AGENTS.md
+        markdown variant instead).
+        """
+        from agentalloy.providers import REGISTRY
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        writer = REGISTRY["hermes-agent"].install_writer
+        assert writer is not None
+        records = writer(6666, tmp_path, False)
+
+        paths = {r.path for r in records}
+        assert str(tmp_path / ".hermes" / "config.yaml") in paths
+        assert str(tmp_path / ".hermes" / ".agentalloy-env") in paths
+        # The dead markdown variant must stay dead.
+        assert not (fake_home / ".hermes" / "SOUL.md").exists()
+        assert not (tmp_path / "AGENTS.md").exists()
+
+        config = _read_repo_config(tmp_path)
+        model = config["model"]
+        assert isinstance(model, dict)
+        token = encode_proj_token(tmp_path)
+        assert model["base_url"] == f"http://localhost:6666/proj/{token}/v1"
+
 
 class TestRestartHermesGateway:
     """_restart_hermes_gateway never fails the wiring; it degrades to guidance."""

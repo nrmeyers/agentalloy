@@ -117,7 +117,7 @@ class HarnessSpec:
 # WireRecord dataclass
 # ---------------------------------------------------------------------------
 
-_VALID_ACTIONS = frozenset({"wrote_new_file", "injected_block", "env_export"})
+_VALID_ACTIONS = frozenset({"wrote_new_file", "injected_block", "replaced_file", "env_export"})
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ class WireRecord:
     Fields:
         path:                absolute path to the file written or modified.
         action:              one of ``"wrote_new_file"``, ``"injected_block"``,
-                             or ``"env_export"``.
+                             ``"replaced_file"``, or ``"env_export"``.
         content_sha256:      SHA-256 hex digest of the *written* content.
         original_content:    the file's content before this writer ran (may be
                              ``None`` if the file did not exist).
