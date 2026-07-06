@@ -95,6 +95,29 @@ Version lives in `pyproject.toml` (`[project] version`). Bump per
 [SemVer](https://semver.org/): **patch** = bug fix / internal change, **minor** =
 backward-compatible feature, **major** = breaking change.
 
+### When a bump is required: shipped-surface lockstep
+
+The invariant is NOT "main == last tag" — it is **"a tag's version tells the
+truth about shipped content"**: two tags with different versions always differ
+in what users actually run. Mechanically:
+
+- A merge **requires a version bump** (in the same PR or a follow-up bump PR
+  before the next tag) when its diff touches the **shipped surface**:
+  `src/`, `src/agentalloy/_packs/`, `frontend/`, `Containerfile*` /
+  `container/`, or dependency pins in `pyproject.toml` / `uv.lock`.
+- Merges touching only CI workflows, docs, tests, or repo tooling do **not**
+  bump. Main being ahead of the last tag by that class of change is not
+  drift — it's the definition.
+- Never cut a release tag while unversioned shipped-surface changes sit on
+  `main`; bump first.
+
+Rationale: upgrades are not free for users (multi-GB container pull, upgrade
+paths with real failure modes), and the release-check nudges every install.
+Don't spend that on housekeeping — release when shipped value has accumulated.
+The test for "internal change" is just: *does the wheel or image change?* —
+answerable from the diff paths. (v6.1.1 predates this rule: it shipped a
+byte-identical wheel for CI-only changes; harmless, but the nudge was wasted.)
+
 When you bump the version you MUST also:
 
 - **Regenerate and commit `uv.lock`** in the same change — the lock pins
