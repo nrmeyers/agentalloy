@@ -1,7 +1,7 @@
 [project]
 name = "agentalloy"
 version = "6.1.1"
-description = "AgentAlloy — just-in-time agent skill composer. Phase-aware, intent-aware retrieval and assembly from a curated 300+ skill corpus. Deterministic by default, with optional off-by-default local LM-assist. Governance included. Runtime only; see agentalloy-authoring for corpus authoring."
+description = "AgentAlloy — just-in-time context engine for coding agents. Two context modules: phase-aware instruction composition from a curated 300+ skill corpus, and an optional per-repo code index (tree-sitter symbol graph + hybrid search). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

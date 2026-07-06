@@ -305,7 +305,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app = FastAPI(
         title="agentalloy",
         version="1.0.0",
-        description="Runtime skill composition service.",
+        description="Just-in-time context engine: instruction composition + code index.",
         lifespan=lifespan if use_default_lifespan else None,
     )
 

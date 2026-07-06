@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="AgentAlloy_cover.webp" alt="AgentAlloy — Just-in-Time Instruction Composer" width="720" />
+  <img src="AgentAlloy_cover.webp" alt="AgentAlloy — Just-in-Time Context Engine" width="720" />
 </p>
 
 <p align="center">
-  <b>Fuse your base model with the exact governance, workflows, and skills it needs — right now.</b>
+  <b>Fuse your base model with the exact instructions and codebase context it needs — right now.</b>
 </p>
 
 <p align="center">
@@ -20,24 +20,26 @@
   <img src="https://img.shields.io/badge/skills-300+-orange" alt="300+ skills" />
 </p>
 
-`AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session the rules and skills your agent needs change dozens of times, and static files can't keep up. Leave them out and a smaller model flounders on tasks its training never covered; cram them all in and you pay the token tax every turn — or pay it again redoing the work it got wrong.
+Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
-**AgentAlloy** is a **just-in-time instruction composer**. A signal layer — a small local embed model (`nomic-embed-text-v1.5`, served by llama-server) plus deterministic Python — wakes only when your agent's situation shifts: a phase transition, a new task contract, a meaningful file change. Nothing changed means nothing injected — your agent works uninterrupted. When something *has* changed, AgentAlloy composes a fresh, highly targeted pre-prompt, fusing three instruction sets into the exact persona the moment calls for:
+**AgentAlloy** is a **just-in-time context engine** — one local service that composes what the agent needs *at the moment it needs it*, through two context modules (with a third on the roadmap):
 
-- **System Governance** — hard boundaries and operational rules (Linear issue naming, PR branch conventions, CI/deployment gates).
-- **Workflow Directives** — process constraints (Spec-Driven Development rules, defining success criteria without solution wording).
-- **Domain Skills** — a focused slice of a curated 300+ skill corpus (languages, testing frameworks, discovery techniques) retrieved via hybrid BM25 + dense scoring.
+- **Instructions** — the composer. A signal layer (a small local embed model plus deterministic Python) wakes only when your agent's situation shifts — a phase transition, a new task contract, a meaningful file change — and fuses three instruction sets into the exact persona the moment calls for: **system governance** (hard boundaries and operational rules), **workflow directives** (Spec-Driven Development process constraints), and **domain skills** (a focused slice of a curated 300+ skill corpus, retrieved via hybrid BM25 + dense scoring). Nothing changed means nothing injected.
+- **Code** — the index. Your repos parsed into a tree-sitter symbol graph plus hybrid semantic/lexical search: exact call graphs ("who calls this?"), blast-radius analysis, and budgeted context bundles that ground the agent in the code that already exists instead of the code it imagines. Phase-scoped guidance teaches the agent to reach for it at design, build, and qa.
+- *On the roadmap:* **Knowledge** — the decisions behind the code: what was decided, why, and when.
 
-This gives smaller models the leverage to punch above their weight class, and gives larger models a runtime reminder of how they should be operating — both of which mean getting it right the first time, not the third.
+Instructions tell the agent *how to work here*; the code index tells it *what's actually here*. Together they give smaller models the leverage to punch above their weight class, and give larger models a runtime grounding in how they should be operating — both of which mean getting it right the first time, not the third.
 
 Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage — a local fragment re-ranker that only reorders candidates and fails open — ships **off by default** as of v5.0.0 — it only reorders candidates, showed no lift on the eval set, and added ~500 ms/compose, so it's disabled out-of-box (re-enable with `LM_ASSIST=arbitrate`); it always degrades cleanly to deterministic selection. The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over an embedded LanceDB vector store + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
 
-Things your agent gets composed-and-injected without you pasting them into the prompt:
+Things your agent gets without you pasting them into the prompt:
 
 - "How do I write a failing pytest before the implementation?" — TDD workflow + framework idioms, composed from `pytest` + `testing` packs.
 - "How do I structure an incremental dbt model so it stays correct across re-runs?" — data-engineering governance + domain skills, composed from `data-engineering` + `engineering` packs.
 - "Wire OpenTelemetry into this FastAPI app." — observability rules + framework patterns, composed from `fastapi` + `analytics` packs.
 - "I'm reviewing this PR — what should I check?" — review heuristics, composed from `code-review` packs.
+- "What breaks if I change this function's signature?" — exact transitive call sites from the symbol graph, not a grep guess.
+- "Start this task grounded." — a budgeted bundle of the symbols, callers, and docs the task actually touches, straight from the code index.
 
 **This is what zero-shot agentic development looks like.**
 
@@ -49,6 +51,7 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - [Demo](#demo)
 - [What makes the composition different](#what-makes-the-composition-different)
 - [How it works: phases, contracts, signal layer](#how-it-works-phases-contracts-signal-layer)
+- [Code index (optional)](#code-index-optional)
 - [How to use it](#how-to-use-it)
 - [Container deployment](#container-deployment)
 - [Profiles](#profiles-user-scoped-skill-contexts)
@@ -56,7 +59,6 @@ Things your agent gets composed-and-injected without you pasting them into the p
 - [Standalone CLI](#standalone-cli)
 - [REST API](#rest-api)
 - [MCP Server](#mcp-server)
-- [Code index (optional)](#code-index-optional)
 - [Packs shipping in-tree](#packs-shipping-in-tree)
 - [Architecture](#architecture)
 - [Telemetry](#telemetry)
@@ -326,6 +328,23 @@ Phase-gate evaluation is deterministic predicates plus a named-intent classifier
 
 ---
 
+## Code index (optional)
+
+A second context module alongside skill composition: a tree-sitter symbol graph plus hybrid semantic/lexical search over **your own repos**, served under `/code/*` on the same port. Off by default — enable it in the setup wizard's module selection or set `CODE_INDEX_ENABLED=1`. The module's dependencies live behind the `[code-index]` extra (`uv tool install 'agentalloy[code-index]'`); the container image ships it preinstalled.
+
+```bash
+agentalloy code index                      # index the current repo (incremental; --force for full)
+agentalloy code search "where are auth tokens validated"
+agentalloy code callers <fqn>              # call sites (--depth N for transitive)
+agentalloy code bundle "<task>"            # budgeted context bundle for a task
+agentalloy code status                     # indexed repos + active jobs + staleness
+agentalloy code watch enable               # per-repo file-watch enrollment (CODE_INDEX_WATCH is the master switch)
+```
+
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled, and offers to index an unindexed repo on the spot; `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
+
+---
+
 ## How to use it
 
 Three paths, depending on how your harness integrates with external tools.
@@ -460,23 +479,6 @@ agentalloy wire-harness --harness cursor --mcp-fallback
 ```
 
 Supported harnesses: Claude Code, Cursor, Continue.dev. See [Harness Catalog § MCP Fallback](docs/install/harness-catalog.md) for per-harness configuration details.
-
----
-
-## Code index (optional)
-
-A second context module alongside skill composition: a tree-sitter symbol graph plus hybrid semantic/lexical search over **your own repos**, served under `/code/*` on the same port. Off by default — enable it in the setup wizard's module selection or set `CODE_INDEX_ENABLED=1`. The module's dependencies live behind the `[code-index]` extra (`uv tool install 'agentalloy[code-index]'`); the container image ships it preinstalled.
-
-```bash
-agentalloy code index                      # index the current repo (incremental; --force for full)
-agentalloy code search "where are auth tokens validated"
-agentalloy code callers <fqn>              # call sites (--depth N for transitive)
-agentalloy code bundle "<task>"            # budgeted context bundle for a task
-agentalloy code status                     # indexed repos + active jobs + staleness
-agentalloy code watch enable               # per-repo file-watch enrollment (CODE_INDEX_WATCH is the master switch)
-```
-
-Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled, and offers to index an unindexed repo on the spot; `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
 
 ---
 
