@@ -168,3 +168,92 @@ jobs:
             ${{ env.XDG_DATA_HOME }}/agentalloy/logs/rerank-server.log
             service.log
           retention-days: 14
+
+  # Runs the `-m integration` suite (real embed server, no mocked seams) —
+  # the tests the PR pipeline can never run because they need llama-server.
+  # Reuses the corpus job's provisioning recipe on its own runner; failures
+  # open (or update) a labeled issue instead of failing anyone's PR.
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    env:
+      XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
+      XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (with code-index extra)
+        run: uv sync --frozen --extra code-index
+
+      - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
+        timeout-minutes: 3
+        run: |
+          set -euxo pipefail
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Write .env (cpu preset → user XDG config)
+        timeout-minutes: 2
+        run: |
+          set -euxo pipefail
+          mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
+          uv run agentalloy write-env --preset cpu --port 47950 --force
+
+      - name: Pull models (prebuilt llama-server + GGUFs)
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          cat > recommend-models.json <<'JSON'
+          {"schema_version": 1, "preset": "cpu", "selected_runner": "llama-server",
+           "options": [{"default": true,
+             "embed_model": "nomic-embed-text-v1.5.Q8_0.gguf", "embed_runner": "llama-server",
+             "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf", "rerank_runner": "llama-server"}]}
+          JSON
+          uv run agentalloy pull-models --models recommend-models.json --runner llama-server
+
+      - name: Start embed server (llama-server, :47951)
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
+
+      - name: Integration tests
+        timeout-minutes: 20
+        run: uv run pytest -m integration -n0 -q
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-nightly-logs
+          path: ${{ env.XDG_DATA_HOME }}/agentalloy/logs/embed-server.log
+          retention-days: 14
+
+      - name: Open or update failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --label nightly-integration --state open --json number -q '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Nightly integration run failed again: $RUN_URL"
+          else
+            gh issue create \
+              --title "Nightly integration tests failing" \
+              --label nightly-integration \
+              --body "The nightly \`-m integration\` suite failed. Run: $RUN_URL — embed-server log attached as a run artifact. Auto-closes are manual: close this once the suite is green again."
+          fi

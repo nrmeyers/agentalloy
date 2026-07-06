@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter on pull_request: stacked PRs (base = another feature
+  # branch) get CI from birth instead of going unverified until retargeted
+  # at main during a merge train.
   pull_request:
-    branches: [main]
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
@@ -45,14 +47,61 @@ jobs:
       - name: Test (fast, parallel — excludes integration + container)
         run: uv run pytest -m "not integration and not container"
 
-      - name: Container tests (real podman, serial)
-        run: uv run pytest -m "container and not integration" -n0
-
       - name: Pack version bump guard (pull_request only)
         if: github.event_name == 'pull_request'
         env:
           PACK_GUARD_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: uv run pytest tests/test_pack_version_bump_guard.py::test_pack_version_bump_guard -q
+
+  # Split from `quality` so the image build runs in parallel with lint/type/
+  # unit tests and a container flake doesn't force rerunning them. The job
+  # always reports a status (required-check friendly); the heavy steps are
+  # gated on whether the diff touches anything the container tests exercise,
+  # so doc-only PRs skip the image build entirely.
+  container-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect container-relevant changes
+        id: gate
+        # Pushes to main always run (post-merge verification, low frequency).
+        # PRs run only when the diff reaches beyond docs/images: code, tests,
+        # the image definition, dependency pins, or this workflow.
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$BASE" HEAD \
+             | grep -E '^(Containerfile|container/|src/agentalloy/|tests/|scripts/|pyproject\.toml|uv\.lock|\.github/workflows/ci\.yml)' \
+             | grep -qvE '\.(md|png|webp|svg)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No container-relevant changes — container tests skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install uv
+        if: steps.gate.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: uv sync --frozen --extra code-index
+
+      - name: Container tests (real podman, serial)
+        if: steps.gate.outputs.run == 'true'
+        run: uv run pytest -m "container and not integration" -n0
 
   # Guards the release-time bundle: the container-build release job runs this
   # same tsc + vite build to produce the web-dist.tar.gz asset that
