@@ -43,6 +43,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from agentalloy.install import env_forwarding
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
@@ -560,6 +561,63 @@ def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
     }
 
 
+def _check_module_drift(env: dict[str, str], health: dict[str, Any] | None) -> dict[str, Any]:
+    """Check: host .env module intent vs the running container's ``/health``.
+
+    Forwarded env binds at container CREATE — a ``.env`` edit afterward leaves
+    the container on the old intent until a recreate (a plain restart reuses
+    the old spec). Mismatch in either direction names both sides and the exact
+    fix; the agreeing state passes with no finding.
+    """
+    t0 = time.monotonic()
+    if health is None:
+        return {
+            "name": "module_drift",
+            "passed": True,
+            "severity": "warn",
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "detail": "service /health unreachable — module drift unknown",
+        }
+    modules = health.get("modules") if isinstance(health.get("modules"), dict) else {}
+    if not isinstance(modules, dict):
+        modules = {}
+    drifts: list[str] = []
+    states: list[str] = []
+    for key, info in sorted(env_forwarding.MODULE_TOGGLES.items()):
+        expected = _env_truthy(env[key]) if key in env else info.default_enabled
+        actual = modules.get(info.health_key)
+        states.append(f"{info.health_key}={actual}")
+        # "unavailable" is a packaging problem (extra missing), not env drift —
+        # the code_index check owns that finding. A missing modules block means
+        # an older image that predates module reporting; drift is unjudgeable.
+        if actual not in ("enabled", "disabled"):
+            continue
+        if (actual == "enabled") != expected:
+            declared = env.get(key) or f"unset (default {'on' if info.default_enabled else 'off'})"
+            drifts.append(
+                f"host .env says {key}={declared} but the running container reports "
+                f"modules.{info.health_key}={actual}"
+            )
+    if drifts:
+        return {
+            "name": "module_drift",
+            "passed": False,
+            "duration_ms": int((time.monotonic() - t0) * 1000),
+            "error": "; ".join(drifts),
+            "remediation": (
+                "Recreate the container so it picks up the host .env: "
+                "`agentalloy upgrade --recreate-only` (env binds at create; "
+                "a plain restart keeps the old spec)."
+            ),
+        }
+    return {
+        "name": "module_drift",
+        "passed": True,
+        "duration_ms": int((time.monotonic() - t0) * 1000),
+        "detail": f"host .env and container agree ({', '.join(states)})",
+    }
+
+
 # Old standalone codebase-indexer daemon port + data dir (superseded by the
 # in-process code-index module).
 _LEGACY_CODE_INDEXER_PORT = 8003
@@ -984,6 +1042,10 @@ def _run_doctor_container(st: dict[str, Any]) -> dict[str, Any]:
                 else "Re-run the installer to reseed/reindex the corpus volume.",
             }
         )
+
+    # module_drift — host .env intent vs the container's create-time env
+    # (apply-on-recreate window: a .env edit is inert until a recreate).
+    checks.append(_check_module_drift(install_state.parse_env_file(), health))
 
     # Host-side checks: pack manifests (bundled in the host package) and wiring.
     checks.append(_check_pack_manifests())
