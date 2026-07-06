@@ -261,3 +261,49 @@ jobs:
               --label nightly-integration \
               --body "The nightly \`-m integration\` suite failed. Run: $RUN_URL — embed-server log attached as a run artifact. Auto-closes are manual: close this once the suite is green again."
           fi
+
+  # The dual-marked tests (integration AND container): real-podman e2e flows
+  # that pull images / bind the real service port, too slow and port-hungry
+  # for PR CI. The container CI job excludes `integration`, the nightly
+  # integration job excludes `container` — without this job the 18 tests in
+  # test_container_e2e.py (+ dual-marked edge cases) run NOWHERE.
+  container-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies (with code-index extra)
+        run: uv sync --frozen --extra code-index
+
+      - name: Container e2e tests (real podman, serial)
+        timeout-minutes: 50
+        run: uv run pytest -m "integration and container" -n0 -q
+
+      - name: Open or update failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --label nightly-integration --state open --json number -q '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Nightly container-e2e job failed: $RUN_URL"
+          else
+            gh issue create \
+              --title "Nightly container e2e tests failing" \
+              --label nightly-integration \
+              --body "The nightly dual-marked (integration+container) suite failed. Run: $RUN_URL"
+          fi
