@@ -585,7 +585,7 @@ class TestAiderProxyWiring:
         content = conf.read_text()
         assert "openai-api-base: http://localhost:8000/v1" in content
         assert "openai-api-key: agentalloy" in content
-        assert "model: agentalloy-proxy" in content
+        assert "model: openai/agentalloy-proxy" in content
         # Proxy mode does NOT create a separate instructions file — context
         # injection is handled server-side by the proxy
         assert ".agentalloy-aider-instructions.md" not in content

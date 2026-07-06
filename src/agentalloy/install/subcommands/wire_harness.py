@@ -988,7 +988,9 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
         sentinel_begin,
         f"openai-api-base: {proxy_url}",
         "openai-api-key: agentalloy",
-        "model: agentalloy-proxy",
+        # litellm requires a provider prefix; a bare model name dies with
+        # "LLM Provider NOT provided" before any request (e2e-matrix finding).
+        "model: openai/agentalloy-proxy",
         sentinel_end,
     ]
     block = "\n".join(block_lines)

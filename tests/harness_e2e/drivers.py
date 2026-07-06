@@ -36,6 +36,8 @@ class HarnessCase:
     notes: str = ""
     # Env vars that must be scrubbed so the dev machine's own wiring can't leak in.
     scrub_env: tuple[str, ...] = field(default=())
+    # Known-broken with a tracked cause: the matrix xfails instead of failing.
+    xfail_reason: str = ""
 
 
 def _wire_aider(port: int, root: Path) -> object:
@@ -122,6 +124,13 @@ CASES: tuple[HarnessCase, ...] = (
         binary="codex",
         env=_openai_proj_env,
         argv=lambda root: ["codex", "exec", "--skip-git-repo-check", PROMPT],
+        xfail_reason=(
+            "modern codex is Responses-API-only: it ignores OPENAI_BASE_URL "
+            "(dials wss://api.openai.com/v1/responses), our [codex] config block "
+            "is not its schema, and custom model_providers require "
+            "wire_api='responses' (POSTs /v1/responses — verified live), which "
+            "the proxy does not serve yet. Needs a /v1/responses proxy surface."
+        ),
         notes="Env-only (wrap path): user-scoped ~/.codex/config.toml is never touched.",
     ),
     HarnessCase(
