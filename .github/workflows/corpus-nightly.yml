@@ -262,6 +262,113 @@ jobs:
               --body "The nightly \`-m integration\` suite failed. Run: $RUN_URL — embed-server log attached as a run artifact. Auto-closes are manual: close this once the suite is green again."
           fi
 
+  harness-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    env:
+      XDG_CONFIG_HOME: ${{ github.workspace }}/.xdg/config
+      XDG_DATA_HOME: ${{ github.workspace }}/.xdg/data
+      # Corpus + embed server are provisioned below, so marker injection is a
+      # hard assertion, and the proxy fixture reuses the runner's XDG scope.
+      HARNESS_E2E_EXPECT_INJECTION: "1"
+      HARNESS_E2E_USE_REAL_STATE: "1"
+      # claude-code needs *some* credential to run headless; the proxy is
+      # auth-transparent and forwards it to the stub upstream, which ignores it.
+      ANTHROPIC_API_KEY: agentalloy-e2e
+      OPENAI_API_KEY: agentalloy-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies (with code-index extra)
+        run: uv sync --frozen --extra code-index
+
+      - name: llama-server prerequisites (libgomp1 + ~/.local/bin on PATH)
+        timeout-minutes: 3
+        run: |
+          set -euxo pipefail
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libgomp1
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Write .env (cpu preset → user XDG config)
+        timeout-minutes: 2
+        run: |
+          set -euxo pipefail
+          mkdir -p "${XDG_CONFIG_HOME}/agentalloy" "${XDG_DATA_HOME}/agentalloy"
+          uv run agentalloy write-env --preset cpu --port 47950 --force
+
+      - name: Pull models (prebuilt llama-server + GGUFs)
+        timeout-minutes: 30
+        run: |
+          set -euxo pipefail
+          cat > recommend-models.json <<'JSON'
+          {"schema_version": 1, "preset": "cpu", "selected_runner": "llama-server",
+           "options": [{"default": true,
+             "embed_model": "nomic-embed-text-v1.5.Q8_0.gguf", "embed_runner": "llama-server",
+             "rerank_model": "Qwen3-Reranker-0.6B-Q8_0.gguf", "rerank_runner": "llama-server"}]}
+          JSON
+          uv run agentalloy pull-models --models recommend-models.json --runner llama-server
+
+      - name: Start embed server (llama-server, :47951)
+        timeout-minutes: 5
+        run: |
+          set -euxo pipefail
+          uv run agentalloy start-embed-server --models recommend-models.json --timeout 120
+
+      - name: Build corpus (ingest + re-embed all packs)
+        timeout-minutes: 130
+        run: |
+          set -euxo pipefail
+          uv run agentalloy seed-corpus || echo "seed-corpus verification non-fatal (fresh runner)"
+          uv run agentalloy install-packs --packs all --non-interactive --no-restart
+
+      - name: Install harness binaries (pinned)
+        timeout-minutes: 10
+        run: |
+          set -euxo pipefail
+          # Pinned majors so upstream releases don't flake nightly; bump
+          # deliberately (a bump IS a harness compatibility test).
+          npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
+          uv tool install aider-chat || echo "aider install failed (non-fatal: matrix skips missing binaries)"
+          # copilot-cli and openclaw are auth-gated at launch; not installed
+          # in CI yet — their matrix entries skip until we have a token story.
+
+      - name: Harness e2e matrix
+        timeout-minutes: 30
+        run: uv run pytest -m harness_e2e -n0 -q
+
+      - name: Open or update failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          EXISTING=$(gh issue list --label nightly-harness-e2e --state open --json number -q '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "Nightly harness e2e matrix failed again: $RUN_URL"
+          else
+            gh issue create \
+              --title "Nightly harness e2e matrix failing" \
+              --label nightly-harness-e2e \
+              --body "The nightly \`-m harness_e2e\` matrix (real harness binaries → proxy → stub upstream) failed. Run: $RUN_URL. A failure here usually means a harness release changed its config/wire behavior — exactly what this matrix exists to catch before users do."
+          fi
+
   # NOTE: the former `container-e2e` job (dual-marked integration+container
   # tests, `-m "integration and container"`) was removed with issue #347: those
   # tests were never real-podman e2e — their mocks targeted container_runtime

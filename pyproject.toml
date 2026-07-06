@@ -134,12 +134,13 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra --strict-markers --strict-config -m 'not integration and not container' -n auto --dist loadgroup"
+addopts = "-ra --strict-markers --strict-config -m 'not integration and not container and not harness_e2e' -n auto --dist loadgroup"
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: tests requiring a live LM Studio or other external service",
     "container: real-podman tests — slow and port-bound; excluded from the fast parallel default, run serially (`pytest -m container -n0`)",
+    "harness_e2e: drives real harness binaries through a live proxy against a stub upstream; skips per-harness when the binary is absent (`pytest -m harness_e2e -n0`)",
     "xdist_group: pin a group of tests onto a single xdist worker (e.g. real :47950 binders)",
 ]
 asyncio_mode = "auto"
