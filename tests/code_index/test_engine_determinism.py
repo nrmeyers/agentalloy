@@ -131,3 +131,130 @@ def test_ts_property_arrows_attributed_to_own_enclosing_hook(tmp_path: Path) -> 
             f"{qualified_name} carries a foreign closure's source: "
             f"{symbol.source_code.lstrip()[:80]!r}"
         )
+
+
+# Exercises the CommonJS/prototype/ES6-export capture sites that positionally
+# zip()-ed multiple captures() lists (js_ts/module_system.py exports +
+# module.exports + export-const patterns; js_ts/ingest.py prototype
+# inheritance + prototype methods), now paired structurally on the shared
+# assignment_expression / variable_declarator ancestor.
+CJS_ZOO_SOURCE = """'use strict';
+
+function Animal(name) {
+  this.name = name;
+}
+
+Animal.prototype.speak = function () {
+  return 'generic noise from ' + this.name;
+};
+
+Animal.prototype.eat = function () {
+  return this.name + ' is eating';
+};
+
+function Dog(name) {
+  Animal.call(this, name);
+}
+
+Dog.prototype = Object.create(Animal.prototype);
+
+Dog.prototype.speak = function () {
+  return 'woof woof';
+};
+
+exports.makeAnimal = function (name) {
+  return new Animal(name);
+};
+
+exports.makeDog = (name) => new Dog(name);
+
+module.exports.release = function (animal) {
+  return animal.name + ' released to the wild';
+};
+
+module.exports.adopt = (animal) => 'adopted ' + animal.name;
+
+module.exports = { makeAnimal: exports.makeAnimal, makeDog: exports.makeDog };
+"""
+
+ES6_EXPORT_SOURCE = """export const upper = (value: string) => value.toUpperCase();
+
+export const lower = function (value: string) {
+  return value.toLowerCase();
+};
+"""
+
+
+def _write_commonjs_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "demo"
+    (repo / "lib").mkdir(parents=True)
+    (repo / "lib" / "zoo.js").write_text(CJS_ZOO_SOURCE)
+    (repo / "esm.ts").write_text(ES6_EXPORT_SOURCE)
+    return repo
+
+
+def test_commonjs_export_and_prototype_symbols_are_deterministic(tmp_path: Path) -> None:
+    """Two parses of an unchanged CommonJS tree yield identical symbols/edges."""
+    repo = _write_commonjs_repo(tmp_path)
+
+    first = _parse(repo, tmp_path, 1)
+    second = _parse(repo, tmp_path, 2)
+
+    first_symbols = {s.qualified_name: s for s in first.symbols}
+    second_symbols = {s.qualified_name: s for s in second.symbols}
+    assert set(first_symbols) == set(second_symbols)
+    unstable = [qn for qn in first_symbols if first_symbols[qn] != second_symbols[qn]]
+    assert unstable == [], f"symbol properties flipped between identical parses: {unstable}"
+
+    assert sorted(first.edges, key=repr) == sorted(second.edges, key=repr)
+
+
+def test_commonjs_exports_attributed_to_own_function(tmp_path: Path) -> None:
+    """Each exports.X / module.exports.X name maps to its OWN function body.
+
+    Positional zip over captures() lists could bind an export name to a
+    function from a different assignment statement.
+    """
+    repo = _write_commonjs_repo(tmp_path)
+    symbols = {s.qualified_name: s for s in _parse(repo, tmp_path, 1).symbols}
+
+    expected = {
+        "demo.lib.zoo.makeAnimal": "new Animal(",
+        "demo.lib.zoo.makeDog": "new Dog(",
+        "demo.lib.zoo.release": "released to the wild",
+        "demo.lib.zoo.adopt": "'adopted '",
+        "demo.esm.upper": "toUpperCase",
+        "demo.esm.lower": "toLowerCase",
+    }
+    for qualified_name, body_marker in expected.items():
+        symbol = symbols.get(qualified_name)
+        assert symbol is not None, f"missing symbol {qualified_name}"
+        assert symbol.source_code is not None, f"no source for {qualified_name}"
+        assert body_marker in symbol.source_code, (
+            f"{qualified_name} carries a foreign function's source: {symbol.source_code[:80]!r}"
+        )
+
+
+def test_prototype_methods_and_inheritance_attributed_correctly(tmp_path: Path) -> None:
+    """Prototype methods bind to their own constructor; inheritance is Dog→Animal."""
+    repo = _write_commonjs_repo(tmp_path)
+    result = _parse(repo, tmp_path, 1)
+    symbols = {s.qualified_name: s for s in result.symbols}
+
+    expected = {
+        "demo.lib.zoo.Animal.speak": "generic noise",
+        "demo.lib.zoo.Animal.eat": "is eating",
+        "demo.lib.zoo.Dog.speak": "woof woof",
+    }
+    for qualified_name, body_marker in expected.items():
+        symbol = symbols.get(qualified_name)
+        assert symbol is not None, f"missing symbol {qualified_name}"
+        assert symbol.source_code is not None, f"no source for {qualified_name}"
+        assert body_marker in symbol.source_code, (
+            f"{qualified_name} carries a foreign method's source: {symbol.source_code[:80]!r}"
+        )
+
+    inherits = {(e.src, e.dst) for e in result.edges if e.kind == "INHERITS"}
+    assert ("demo.lib.zoo.Dog", "demo.lib.zoo.Animal") in inherits
+    assert ("demo.lib.zoo.Dog", "demo.lib.zoo.Dog") not in inherits
+    assert ("demo.lib.zoo.Animal", "demo.lib.zoo.Dog") not in inherits

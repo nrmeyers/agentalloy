@@ -9,6 +9,49 @@ if TYPE_CHECKING:
     from ...types_defs import LanguageQueries
 
 
+def pair_captures_by_ancestor(
+    ancestor_type: str,
+    *capture_lists: list[Node],
+) -> list[tuple[Node, ...]]:
+    """Pair query-capture lists structurally instead of positionally.
+
+    NONDETERMINISM FIX: ``QueryCursor.captures()`` returns one flat node list
+    per capture name, and those lists are neither positionally aligned with
+    each other nor stably ordered between cursor runs within one process (the
+    order reflects the cursor's in-progress match buffering, not document
+    order). ``zip()``-ing them can therefore bind a captured name to a
+    function node from a DIFFERENT match. All captures of one match share the
+    same nearest enclosing ``ancestor_type`` node (the
+    ``assignment_expression`` / ``variable_declarator`` the pattern matched,
+    possibly at different depths per capture), so group on that ancestor's
+    byte range instead. Incomplete groups are dropped; complete groups are
+    returned in source order so downstream emission order is deterministic
+    too.
+    """
+    grouped: dict[tuple[int, int], list[Node | None]] = {}
+    for index, nodes in enumerate(capture_lists):
+        for node in nodes:
+            ancestor = node.parent
+            while ancestor is not None and ancestor.type != ancestor_type:
+                ancestor = ancestor.parent
+            if ancestor is None:
+                continue
+            slot = grouped.setdefault(
+                (ancestor.start_byte, ancestor.end_byte), [None] * len(capture_lists)
+            )
+            held = slot[index]
+            # Two same-name captures under one ancestor (nested matches):
+            # keep the earliest node so the outcome never depends on the
+            # unstable capture-list order.
+            if held is None or node.start_byte < held.start_byte:
+                slot[index] = node
+    return [
+        tuple(node for node in slot if node is not None)
+        for _, slot in sorted(grouped.items())
+        if all(node is not None for node in slot)
+    ]
+
+
 def get_js_ts_language_obj(
     language: cs.SupportedLanguage,
     queries: dict[cs.SupportedLanguage, "LanguageQueries"],

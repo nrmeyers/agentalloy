@@ -77,7 +77,13 @@ from here is `agentalloy.code_index.facade`.
    `@arrow_function`/`@function_expr` (`parsers/js_ts/ingest.py`), swapping
    closure attribution between enclosing scopes nondeterministically —
    replaced by structural pairing on the shared parent node
-   (`_pair_captures_by_parent`). Additionally, capture lists that feed
+   (`_pair_captures_by_parent`). The same positional-zip pattern in the
+   CommonJS/prototype/ES6-export paths (`module_system.py` `exports.X` /
+   `module.exports.X` / `export const` patterns; `ingest.py` prototype
+   inheritance and prototype method assignments) is fixed by
+   `parsers/js_ts/utils.py::pair_captures_by_ancestor`, which groups the
+   captures of one match on their shared `assignment_expression` /
+   `variable_declarator` ancestor. Additionally, capture lists that feed
    same-qualified-name emissions (Python `@property`/setter pairs, sibling
    callbacks inheriting one declarator name) are sorted into source order via
    `parsers/utils.py::sort_captures_by_position` (applied in

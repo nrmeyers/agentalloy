@@ -18,7 +18,7 @@ from ...types_defs import (
 )
 from ..utils import safe_decode_text, safe_decode_with_fallback
 from .module_system import JsTsModuleSystemMixin
-from .utils import get_js_ts_language_obj
+from .utils import get_js_ts_language_obj, pair_captures_by_ancestor
 
 if TYPE_CHECKING:
     from ...language_spec import LanguageSpec
@@ -125,7 +125,14 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         parent_classes = captures.get(cs.CAPTURE_PARENT_CLASS, [])
 
         if child_classes and parent_classes:
-            for child_node, parent_node in zip(child_classes, parent_classes):
+            # NONDETERMINISM FIX: captures() lists are not positionally
+            # aligned, so zip() could pair a child class with the parent of a
+            # DIFFERENT `X.prototype = Object.create(Y.prototype)` statement.
+            # Both captures of one match (at different depths) live under the
+            # same assignment_expression — pair on that ancestor.
+            for child_node, parent_node in pair_captures_by_ancestor(
+                cs.TS_ASSIGNMENT_EXPRESSION, child_classes, parent_classes
+            ):
                 if not child_node.text or not parent_node.text:
                     continue
                 child_name = safe_decode_text(child_node)
@@ -174,8 +181,13 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         method_names = method_captures.get(cs.CAPTURE_METHOD_NAME, [])
         method_functions = method_captures.get(cs.CAPTURE_METHOD_FUNCTION, [])
 
-        for constructor_node, method_node, func_node in zip(
-            constructor_names, method_names, method_functions
+        # NONDETERMINISM FIX: captures() lists are not positionally aligned,
+        # so zip() could attach a method name/body to the WRONG constructor
+        # across multiple `Ctor.prototype.m = function...` statements. The
+        # three captures of one match (at different depths) share an
+        # assignment_expression — pair on that ancestor.
+        for constructor_node, method_node, func_node in pair_captures_by_ancestor(
+            cs.TS_ASSIGNMENT_EXPRESSION, constructor_names, method_names, method_functions
         ):
             constructor_name = safe_decode_text(constructor_node) if constructor_node.text else None
             method_name = safe_decode_text(method_node) if method_node.text else None

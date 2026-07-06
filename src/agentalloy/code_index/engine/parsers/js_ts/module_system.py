@@ -16,7 +16,7 @@ from ..utils import (
     safe_decode_text,
     safe_decode_with_fallback,
 )
-from .utils import get_js_ts_language_obj
+from .utils import get_js_ts_language_obj, pair_captures_by_ancestor
 
 if TYPE_CHECKING:
     from ...services import IngestorProtocol
@@ -210,8 +210,12 @@ class JsTsModuleSystemMixin:
         export_functions: list[ASTNode],
         module_qn: str,
     ) -> None:
-        for exports_obj, export_name, export_function in zip(
-            exports_objs, export_names, export_functions
+        # NONDETERMINISM FIX: captures() lists are not positionally aligned,
+        # so zip() could bind an export name to a function from a different
+        # `exports.X = ...` statement. All three captures of one match live
+        # under the same assignment_expression — pair on that ancestor.
+        for exports_obj, export_name, export_function in pair_captures_by_ancestor(
+            cs.TS_ASSIGNMENT_EXPRESSION, exports_objs, export_names, export_functions
         ):
             if not (exports_obj.text and export_name.text):
                 continue
@@ -233,8 +237,11 @@ class JsTsModuleSystemMixin:
         export_functions: list[ASTNode],
         module_qn: str,
     ) -> None:
-        for module_obj, exports_prop, export_name, export_function in zip(
-            module_objs, exports_props, export_names, export_functions
+        # NONDETERMINISM FIX: same mechanism as _process_exports_pattern —
+        # pair the four captures of a `module.exports.X = ...` match on their
+        # shared assignment_expression ancestor instead of positional zip.
+        for module_obj, exports_prop, export_name, export_function in pair_captures_by_ancestor(
+            cs.TS_ASSIGNMENT_EXPRESSION, module_objs, exports_props, export_names, export_functions
         ):
             if not (module_obj.text and exports_prop.text and export_name.text):
                 continue
@@ -314,7 +321,14 @@ class JsTsModuleSystemMixin:
                     export_names = captures.get(cs.CAPTURE_EXPORT_NAME, [])
                     export_functions = captures.get(cs.CAPTURE_EXPORT_FUNCTION, [])
 
-                    for export_name, export_function in zip(export_names, export_functions):
+                    # NONDETERMINISM FIX: captures() lists are not
+                    # positionally aligned, so zip() could bind an exported
+                    # const's name to the arrow/function of a DIFFERENT
+                    # `export const` statement. Name and value of one match
+                    # share a variable_declarator — pair on that ancestor.
+                    for export_name, export_function in pair_captures_by_ancestor(
+                        cs.TS_VARIABLE_DECLARATOR, export_names, export_functions
+                    ):
                         if export_name.text and export_function:
                             if function_name := safe_decode_text(export_name):
                                 ingest_exported_function(
