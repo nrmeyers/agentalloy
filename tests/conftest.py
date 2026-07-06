@@ -281,10 +281,14 @@ def _free_default_port(request: pytest.FixtureRequest) -> Iterator[None]:
 # Test files that bind the real :47950 (or start real servers/containers). Under
 # ``-n auto --dist loadgroup`` these are pinned to one worker so two binders never
 # run concurrently, and ``_free_default_port`` arms its cleanup only for them.
+#
+# test_container_e2e / test_container_edge_cases are NOT listed: they are fully
+# mocked (patch-where-used on simple_setup, see test_container_e2e.py's module
+# docstring — issue #347) and never bind a port or touch podman. Listing them
+# here would _kill_port(:47950) around each test, endangering a developer's
+# live agentalloy container.
 _PORT47950_FILES = (
-    "test_container_edge_cases",
     "test_container_service",
-    "test_container_e2e",
     "test_server_proc",
     "test_port_guard",
     "test_wrap",
@@ -295,10 +299,11 @@ _PORT47950_FILES = (
 # Real-podman test files — slow + port-bound; flaky in a fast parallel run. The
 # ``container`` marker excludes them from the default suite (see pyproject
 # addopts); they run serially via ``pytest -m container -n0`` (CI + on demand).
+# test_container_e2e / test_container_edge_cases are hermetic (all podman calls
+# mocked) and belong to the fast default suite — do not re-add them without
+# reintroducing real podman usage.
 _CONTAINER_FILES = (
-    "test_container_edge_cases",
     "test_container_service",
-    "test_container_e2e",
     "test_container_code_index",
 )
 

@@ -1467,9 +1467,13 @@ class TestContainerFlow:
         compose_file.write_text("version: '3'\nservices: {}\n")
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=tmp_path),
@@ -1508,9 +1512,13 @@ class TestContainerFlow:
         Path(setup_mod.__file__).resolve().parents[4]
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             # Empty cwd → must fall through to parents[4] (real repo root).
@@ -1540,9 +1548,13 @@ class TestContainerFlow:
         (tmp_path / "Containerfile").write_text("FROM scratch\n")
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=tmp_path),
@@ -1571,9 +1583,13 @@ class TestContainerFlow:
         (tmp_path / "Dockerfile").write_text("FROM scratch\n")  # not Containerfile
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=tmp_path),
@@ -1617,9 +1633,13 @@ class TestContainerFlow:
         import agentalloy.install.subcommands.simple_setup as setup_mod
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
@@ -1667,9 +1687,13 @@ class TestContainerFlow:
         import agentalloy.install.subcommands.simple_setup as setup_mod
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("pathlib.Path.cwd", return_value=empty_cwd),
@@ -1704,9 +1728,13 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
         ):
@@ -1735,9 +1763,13 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
             patch("builtins.input", return_value="n"),
@@ -1759,9 +1791,13 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
         ):
@@ -1807,9 +1843,13 @@ class TestContainerFlow:
             return mock
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run", side_effect=run_side_effect),
         ):
@@ -1833,9 +1873,13 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch(
                 "agentalloy.install.subcommands.simple_setup._prompt_for_packs",
@@ -1887,9 +1931,13 @@ class TestContainerFlow:
         SetupConfig, run_setup = self._import_run_setup()
 
         with (
+            # PATCH WHERE USED: simple_setup from-imports the container_runtime
+            # helpers at module level, so the flow calls its own bound refs —
+            # patching container_runtime never attaches (issue #347). The flow's
+            # detection seam is _detect_functional_runtimes.
             patch(
-                "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                return_value="podman",
+                "agentalloy.install.subcommands.simple_setup._detect_functional_runtimes",
+                return_value=["podman"],
             ),
             patch("subprocess.run") as mock_run,
         ):

@@ -32,6 +32,37 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture
+def _hermetic_container_flow(monkeypatch: pytest.MonkeyPatch):
+    """Baseline mocks for tests that drive ``_run_container_flow`` end to end.
+
+    PATCH WHERE USED: simple_setup.py from-imports the container_runtime
+    helpers at MODULE level, so the flow calls simple_setup's own bound
+    references — patching ``container_runtime._pull_image`` etc. never
+    attaches and the test silently runs real podman (issue #347; see the
+    docstring of tests/test_container_e2e.py). Everything here is therefore
+    patched on ``simple_setup``. Per-test ``@patch`` decorators apply after
+    this fixture and override individual entries.
+    """
+    import agentalloy.install.subcommands.simple_setup as simple_setup
+
+    monkeypatch.setattr(simple_setup, "_detect_functional_runtimes", lambda: ["podman"])
+    monkeypatch.setattr(simple_setup, "_detect_runtime_binary", lambda: "podman")
+    monkeypatch.setattr(simple_setup, "_list_conflicting_containers", lambda *a, **k: [])
+    monkeypatch.setattr(simple_setup, "_reconcile_native_port_holder", lambda cfg: 0)
+    monkeypatch.setattr(simple_setup, "_pull_image", lambda *a, **k: 0)
+    monkeypatch.setattr(simple_setup, "_ensure_volume", lambda *a, **k: None)
+    monkeypatch.setattr(simple_setup, "_run_container", lambda *a, **k: 0)
+    monkeypatch.setattr(simple_setup, "_wait_for_readiness", lambda *a, **k: True)
+    monkeypatch.setattr(simple_setup, "_check_container_running", lambda *a, **k: True)
+    monkeypatch.setattr(simple_setup, "_tail_container_logs", lambda *a, **k: "")
+    # Keep the runtime-label resolution hermetic on hosts without podman.
+    monkeypatch.setattr(simple_setup.shutil, "which", lambda name: f"/usr/bin/{name}")
+    # The flow reads a (mocked-path) .env for backup; don't touch real files.
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: "")
+
+
 # ---------------------------------------------------------------------------
 # EC-1: Existing container with same name -- handled
 # ---------------------------------------------------------------------------
@@ -651,6 +682,7 @@ class TestDockerVsPodman:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("_hermetic_container_flow")
 class TestNonInteractiveMode:
     """EC-14: Non-interactive mode accepts default values."""
 
@@ -889,9 +921,9 @@ class TestNonInteractiveMode:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
+@pytest.mark.usefixtures("_hermetic_container_flow")
 class TestCancelDuringCPUWarning:
-    """EC-15: User can cancel during CPU-only warning prompt."""
+    """EC-15: User can cancel during CPU-only warning prompt (fully mocked)."""
 
     @patch(
         "agentalloy.install.subcommands.simple_setup.preflight.run_preflight",
@@ -1023,7 +1055,6 @@ class TestCancelDuringCPUWarning:
     @patch("pathlib.Path.resolve", return_value=Path("/a/b/c/d/e/f"))
     @patch("urllib.request.urlopen")
     @patch("builtins.input", return_value="y")
-    @pytest.mark.skip(reason="Timeout during collection - too many mock parameters")
     @patch("agentalloy.install.subcommands.simple_setup._print")
     def test_accept_cpu_warning_continues(
         self,
@@ -1080,10 +1111,9 @@ class TestCancelDuringCPUWarning:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Missing container_runtime mocks - needs refactoring")
-@pytest.mark.integration
+@pytest.mark.usefixtures("_hermetic_container_flow")
 class TestCancelDuringReview:
-    """EC-16: User can cancel during the review confirmation prompt."""
+    """EC-16: User can cancel during the review confirmation prompt (fully mocked)."""
 
     @patch(
         "agentalloy.install.subcommands.simple_setup.preflight.run_preflight",

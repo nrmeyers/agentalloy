@@ -8,18 +8,86 @@ Tests E2E-1 through E2E-4 covering:
 
 All external dependencies (subprocess.run for runtime commands, HTTP health
 checks, DB access, file I/O) are mocked so these tests run in isolation
-and complete in <10s each.
+and complete in <10s each. They are HERMETIC — no podman/docker binary, no
+network, no free port is required — so they carry no `integration`/`container`
+markers and run in the fast default suite.
+
+PATCH-TARGET RULE (the bug this file once had — issue #347): simple_setup.py
+imports the container_runtime helpers at MODULE level::
+
+    from agentalloy.install.subcommands.container_runtime import (_pull_image, ...)
+
+so ``_run_container_flow`` calls simple_setup's OWN bound references. Patching
+``agentalloy.install.subcommands.container_runtime._pull_image`` does nothing
+for the flow — the mocks silently never attach and the "all-mocked" tests run
+REAL ``podman pull`` / ``podman run`` (multi-GB GHCR pulls on bare CI runners,
+"address already in use" on dev hosts, leaked containers from killed runs).
+Every from-imported name MUST be patched where it is USED::
+
+    patch("agentalloy.install.subcommands.simple_setup._pull_image", ...)
+
+Module-attribute access (``preflight.run_preflight``, ``verify.run``,
+``install_state.save_state``) is fine to patch at the source module — the
+consumer holds the module object, not the function. The
+``_no_real_container_runtime`` guard fixture and
+``test_container_runtime_mocks_target_simple_setup`` below enforce this.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Hermeticity guard
+# ---------------------------------------------------------------------------
+
+_REAL_SUBPROCESS_RUN = subprocess.run
+_REAL_SUBPROCESS_POPEN = subprocess.Popen
+
+
+def _argv_program(args: object) -> str:
+    """Best-effort basename of the program a subprocess call would execute."""
+    if isinstance(args, (list, tuple)) and args:
+        head = str(args[0])
+    else:
+        head = str(args).split()[0] if str(args).split() else ""
+    return Path(head).name
+
+
+@pytest.fixture(autouse=True)
+def _no_real_container_runtime(monkeypatch: pytest.MonkeyPatch):
+    """Fail loudly if a real podman/docker invocation escapes the mock harness.
+
+    Every test in this file is fully mocked; a container-runtime subprocess
+    call reaching this guard means a patch target drifted (see the module
+    docstring). Without the guard the call would silently execute — pulling
+    multi-GB images on CI or failing on a dev host whose port is occupied.
+    """
+
+    def _guard(real):
+        def wrapper(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            program = _argv_program(argv)
+            if program in {"podman", "docker"}:
+                raise AssertionError(
+                    f"real container-runtime call escaped the mock harness: {argv!r} — "
+                    "patch the helper on simple_setup (where it is used), "
+                    "not on container_runtime (where it is defined)"
+                )
+            return real(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(subprocess, "run", _guard(_REAL_SUBPROCESS_RUN))
+    monkeypatch.setattr(subprocess, "Popen", _guard(_REAL_SUBPROCESS_POPEN))
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -87,7 +155,21 @@ def _all_common_patches(tmp_path: Path):
         patch(
             "agentalloy.install.subcommands.simple_setup._list_project_containers", return_value=[]
         ),
+        patch(
+            "agentalloy.install.subcommands.simple_setup._list_conflicting_containers",
+            return_value=[],
+        ),
         patch("agentalloy.install.subcommands.simple_setup._remove_containers", return_value=True),
+        patch(
+            "agentalloy.install.subcommands.simple_setup._reconcile_native_port_holder",
+            return_value=0,
+        ),
+        # simple_setup resolves the runtime label via shutil.which; keep the
+        # tests hermetic on hosts without podman/docker on PATH.
+        patch(
+            "agentalloy.install.subcommands.simple_setup.shutil.which",
+            return_value="/usr/bin/podman",
+        ),
         patch(
             "agentalloy.install.subcommands.simple_setup._container_setup_log_path",
             return_value=tmp_path / "setup.log",
@@ -128,85 +210,39 @@ def _run_container_flow_all_mocked(
         Additional patch context managers to apply.
     mock_overrides : dict, optional
         Override shared mock behavior. Keys: "detect_runtime_binary",
-        "pull_image", "run_container", "wait_for_readiness",
-        "urlopen", "monotonic". Values are the new side_effect or
-        return_value to set.
+        "detect_functional_runtimes", "pull_image", "run_container",
+        "wait_for_readiness", "urlopen", "monotonic". Values are the new
+        side_effect or return_value to set.
     """
     patches = _all_common_patches(tmp_path)
 
     # Create shared mock objects that tests can override
     mock_detect_runtime_binary = MagicMock(return_value="podman")
+    mock_detect_functional_runtimes = MagicMock(return_value=["podman"])
     mock_pull_image = MagicMock(return_value=0)
     mock_ensure_volume = MagicMock()
     mock_run_container = MagicMock(return_value=0)
-    mock_generate_entrypoint = MagicMock(return_value=Path("/tmp/entry.sh"))
-    mock_cleanup_temp_entrypoint = MagicMock()
     mock_wait_for_readiness = MagicMock(return_value=True)
     mock_check_container_running = MagicMock(return_value=True)
     mock_tail_container_logs = MagicMock(return_value="")
     mock_urlopen = MagicMock(return_value=_make_urlopen_mock())
     mock_monotonic = MagicMock(return_value=0.0)
 
-    # Apply default mocks for container_runtime functions
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-            mock_detect_runtime_binary,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._pull_image",
-            mock_pull_image,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._ensure_volume",
-            mock_ensure_volume,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._run_container",
-            mock_run_container,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._generate_entrypoint",
-            mock_generate_entrypoint,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._cleanup_temp_entrypoint",
-            mock_cleanup_temp_entrypoint,
-        )
-    )
-    # Patch at the simple_setup import location since simple_setup.py does
-    # `from container_runtime import _check_container_running, _tail_container_logs`
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.simple_setup._check_container_running",
-            mock_check_container_running,
-        )
-    )
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.simple_setup._tail_container_logs",
-            mock_tail_container_logs,
-        )
-    )
-
-    # Patch _wait_for_readiness at the container_runtime source module level
-    # since _run_container_flow imports it locally from there.
-    patches.append(
-        patch(
-            "agentalloy.install.subcommands.container_runtime._wait_for_readiness",
-            mock_wait_for_readiness,
-        )
-    )
+    # PATCH WHERE USED: simple_setup.py from-imports every one of these names
+    # at module level (see the module docstring), so the flow calls
+    # simple_setup's own bound references. Patching them on container_runtime
+    # would never attach — the tests would run real podman.
+    for name, mock_obj in (
+        ("_detect_runtime_binary", mock_detect_runtime_binary),
+        ("_detect_functional_runtimes", mock_detect_functional_runtimes),
+        ("_pull_image", mock_pull_image),
+        ("_ensure_volume", mock_ensure_volume),
+        ("_run_container", mock_run_container),
+        ("_wait_for_readiness", mock_wait_for_readiness),
+        ("_check_container_running", mock_check_container_running),
+        ("_tail_container_logs", mock_tail_container_logs),
+    ):
+        patches.append(patch(f"agentalloy.install.subcommands.simple_setup.{name}", mock_obj))
 
     patches.append(patch("urllib.request.urlopen", mock_urlopen))
     patches.append(patch("time.monotonic", mock_monotonic))
@@ -221,6 +257,12 @@ def _run_container_flow_all_mocked(
                 mock_detect_runtime_binary.side_effect = val
             else:
                 mock_detect_runtime_binary.return_value = val
+        if "detect_functional_runtimes" in mock_overrides:
+            val = mock_overrides["detect_functional_runtimes"]
+            if callable(val) or isinstance(val, BaseException):
+                mock_detect_functional_runtimes.side_effect = val
+            else:
+                mock_detect_functional_runtimes.return_value = val
         if "pull_image" in mock_overrides:
             val = mock_overrides["pull_image"]
             if callable(val) or isinstance(val, BaseException):
@@ -272,7 +314,6 @@ def _run_container_flow_all_mocked(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 class TestFullContainerSetup:
     """E2E-1: Full container setup with mocked runtime binary.
 
@@ -293,15 +334,16 @@ class TestFullContainerSetup:
         """Verify container_runtime functions are called in the correct order.
 
         The new single-container flow calls:
-          1. _detect_runtime_binary -> "podman"
+          1. _detect_functional_runtimes -> ["podman"]
           2. _pull_image(runtime)
           3. _ensure_volume(runtime)
           4. _run_container(runtime, packs)
 
-        The container runs the image's baked /app/entrypoint.sh and reads packs
-        from the AGENTALLOY_PACKS env var, so the flow no longer generates a
-        host entrypoint temp file (_generate_entrypoint / _cleanup_temp_entrypoint
-        are not part of the run path).
+        (_detect_runtime_binary is only consulted when no runtime is
+        functional.) The container runs the image's baked /app/entrypoint.sh
+        and reads packs from the AGENTALLOY_PACKS env var, so the flow no
+        longer generates a host entrypoint temp file (_generate_entrypoint /
+        _cleanup_temp_entrypoint are not part of the run path).
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -315,26 +357,21 @@ class TestFullContainerSetup:
 
                 return tracker
 
-            # We need to patch the container_runtime module's functions with
-            # wrapped versions that track calls. Since simple_setup does
-            # `from container_runtime import ...`, patching the source module
-            # means the import picks up our wrapped mocks.
+            # Trackers must land on simple_setup's bound references (see the
+            # module docstring): extra_patches are applied after the harness
+            # defaults, so these patch-where-used wrappers win.
             rc = _run_container_flow_all_mocked(
                 tmp_path,
                 mock_overrides={
                     "pull_image": make_tracker("_pull_image", 0),
                     "run_container": make_tracker("_run_container", 0),
+                    "detect_functional_runtimes": make_tracker(
+                        "_detect_functional_runtimes", ["podman"]
+                    ),
                 },
                 extra_patches=[
-                    # These track on the container_runtime module; since
-                    # simple_setup imports from there, the wrapped functions
-                    # are what get used.
                     patch(
-                        "agentalloy.install.subcommands.container_runtime._detect_runtime_binary",
-                        side_effect=make_tracker("_detect_runtime_binary", "podman"),
-                    ),
-                    patch(
-                        "agentalloy.install.subcommands.container_runtime._ensure_volume",
+                        "agentalloy.install.subcommands.simple_setup._ensure_volume",
                         side_effect=make_tracker("_ensure_volume"),
                     ),
                 ],
@@ -344,7 +381,7 @@ class TestFullContainerSetup:
             # Verify the expected call order. No _generate_entrypoint: the
             # container runs the image's baked entrypoint with AGENTALLOY_PACKS.
             assert call_order == [
-                "_detect_runtime_binary",
+                "_detect_functional_runtimes",
                 "_pull_image",
                 "_ensure_volume",
                 "_run_container",
@@ -404,7 +441,6 @@ class TestFullContainerSetup:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 class TestModelPullBootstrap:
     """E2E-2: Container bootstrap downloads the GGUF models.
 
@@ -569,7 +605,6 @@ class TestBootstrapIdempotency:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
 class TestCrashRecovery:
     """E2E-4: Container bootstrap crash recovery - re-runs migrations and install-packs.
 
@@ -666,3 +701,60 @@ class TestCrashRecovery:
             assert len(subprocess_calls) == 0, (
                 f"Expected no subprocess calls after preflight failure, got {subprocess_calls}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Meta: patch-target drift guard
+# ---------------------------------------------------------------------------
+
+# Names the harness patches on simple_setup (patch-where-used). Keep in sync
+# with the loop in _run_container_flow_all_mocked.
+_MOCKED_ON_SIMPLE_SETUP = {
+    "_check_container_running",
+    "_detect_functional_runtimes",
+    "_detect_runtime_binary",
+    "_ensure_volume",
+    "_list_conflicting_containers",
+    "_pull_image",
+    "_run_container",
+    "_tail_container_logs",
+    "_wait_for_readiness",
+}
+
+
+def test_container_runtime_mocks_target_simple_setup():
+    """Every container_runtime name simple_setup from-imports must be mocked
+    on simple_setup itself.
+
+    simple_setup binds these names at import time, so a patch on
+    container_runtime never reaches _run_container_flow — the "all-mocked"
+    tests would silently run real podman (issue #347). This meta-test fails
+    when a new from-imported helper is added without a matching
+    patch-where-used entry in the harness.
+    """
+    import ast
+    import inspect
+
+    import agentalloy.install.subcommands.simple_setup as simple_setup
+
+    tree = ast.parse(inspect.getsource(simple_setup))
+    from_imported = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        and node.module.endswith("container_runtime")
+        for alias in node.names
+    }
+    assert from_imported, "expected simple_setup to from-import container_runtime helpers"
+
+    unmocked = from_imported - _MOCKED_ON_SIMPLE_SETUP
+    assert not unmocked, (
+        f"container_runtime names from-imported by simple_setup but not mocked on "
+        f"simple_setup in this harness (patch-where-used, see module docstring): "
+        f"{sorted(unmocked)}"
+    )
+    # And the harness must not reference names simple_setup no longer imports
+    # (mock.patch would raise AttributeError at test time, but fail clearly here).
+    stale = _MOCKED_ON_SIMPLE_SETUP - from_imported
+    assert not stale, f"harness mocks names simple_setup no longer imports: {sorted(stale)}"
