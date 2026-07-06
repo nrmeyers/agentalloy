@@ -212,6 +212,29 @@ class StdlibExtractor:
             import importlib
             import inspect
 
+            # NONDETERMINISM FIX: the hasattr()/ismodule() probe below depends
+            # on which submodules happen to be loaded in THIS process —
+            # ``import urllib`` does not populate ``urllib.parse`` until
+            # someone imports it, and this very function's import_module()
+            # calls mutate that state, so the same name resolved differently
+            # between two parses in one process. For stdlib packages, ask the
+            # import system directly: if the full dotted name imports as a
+            # module, it IS a module path, regardless of what is already
+            # loaded. Restricted to sys.stdlib_module_names so we never deep-
+            # import third-party/indexed project code for its side effects.
+            import sys
+
+            if module_name in sys.stdlib_module_names:
+                try:
+                    importlib.import_module(full_qualified_name)
+                except ImportError:
+                    pass
+                else:
+                    _cache_stdlib_result(
+                        cs.SupportedLanguage.PYTHON, full_qualified_name, full_qualified_name
+                    )
+                    return full_qualified_name
+
             module = importlib.import_module(module_name)
 
             if hasattr(module, entity_name):

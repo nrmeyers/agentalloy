@@ -277,4 +277,28 @@ def _translate(ingestor: CollectingIngestor, repo_root: Path) -> ParseResult:
             )
         )
 
-    return ParseResult(symbols=symbols, edges=edges)
+    return ParseResult(symbols=_dedupe_symbols(symbols), edges=edges)
+
+
+def _dedupe_symbols(symbols: list[ParsedSymbol]) -> list[ParsedSymbol]:
+    """Resolve qualified-name collisions deterministically.
+
+    Distinct nested closures can collapse to one qualified name (two React
+    hooks in a file each defining a ``mutationFn``, say). The engine emits all
+    of them; downstream stores key on ``qualified_name``, so exactly one
+    survives — and if the survivor depended on emission order, the survivor's
+    content hash flipped between otherwise-identical parses, re-embedding
+    ~15 stable symbols per run on this very repo. Pick the winner by a total
+    order over content instead: highest (file_path, start_line, source) wins.
+    Which symbol wins is arbitrary; that it is ALWAYS the same one is the fix.
+    """
+
+    def _key(s: ParsedSymbol) -> tuple[str, int, str]:
+        return (s.file_path or "", s.start_line or -1, s.source_code or "")
+
+    winners: dict[str, ParsedSymbol] = {}
+    for s in symbols:
+        held = winners.get(s.qualified_name)
+        if held is None or _key(s) > _key(held):
+            winners[s.qualified_name] = s
+    return list(winners.values())

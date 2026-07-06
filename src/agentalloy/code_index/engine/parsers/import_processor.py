@@ -21,7 +21,12 @@ from .stdlib_extractor import (
     save_persistent_cache,
 )
 from .tsconfig_resolver import TsconfigResolver
-from .utils import get_query_cursor, safe_decode_text, safe_decode_with_fallback
+from .utils import (
+    get_query_cursor,
+    safe_decode_text,
+    safe_decode_with_fallback,
+    sort_captures_by_position,
+)
 
 
 class ImportProcessor:
@@ -117,7 +122,11 @@ class ImportProcessor:
 
         try:
             cursor = get_query_cursor(imports_query)
-            captures = cursor.captures(root_node)
+            # See sort_captures_by_position: raw captures() order is unstable.
+            # Import order determines both import_mapping insertion order and
+            # which import's full_name last-writes an external Module node's
+            # `path` property, so it must be pinned to source order.
+            captures = sort_captures_by_position(cursor.captures(root_node))
 
             match language:
                 case cs.SupportedLanguage.PYTHON:

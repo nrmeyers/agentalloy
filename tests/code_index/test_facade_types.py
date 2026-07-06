@@ -83,3 +83,35 @@ def test_parse_result_shape() -> None:
     result = ParseResult(symbols=[], edges=[])
     assert result.symbols == []
     assert result.edges == []
+
+
+def test_symbol_collisions_resolve_deterministically() -> None:
+    """FQN collisions must produce the same winner regardless of emission order.
+
+    Found live: nested closures collapsing to one qualified name re-embedded
+    ~15 symbols on every incremental index of an unchanged tree because the
+    last-write winner depended on parse order.
+    """
+    from agentalloy.code_index.facade import ParsedSymbol, _dedupe_symbols
+
+    def sym(src: str, line: int) -> ParsedSymbol:
+        return ParsedSymbol(
+            qualified_name="pkg.mod.hook.mutationFn",
+            kind="Function",
+            name="mutationFn",
+            file_path="pkg/mod.ts",
+            start_line=line,
+            end_line=line + 3,
+            docstring=None,
+            decorators=(),
+            is_exported=False,
+            is_async=False,
+            is_generator=False,
+            source_code=src,
+        )
+
+    a, b = sym("() => alpha()", 10), sym("() => beta()", 40)
+    forward = _dedupe_symbols([a, b])
+    backward = _dedupe_symbols([b, a])
+    assert len(forward) == len(backward) == 1
+    assert forward[0] == backward[0], "winner must not depend on emission order"

@@ -28,6 +28,37 @@ if TYPE_CHECKING:
     from ..import_processor import ImportProcessor
 
 
+def _pair_captures_by_parent(
+    name_nodes: list[ASTNode], value_nodes: list[ASTNode]
+) -> list[tuple[ASTNode, ASTNode]]:
+    """Pair two capture lists structurally instead of positionally.
+
+    ``QueryCursor.captures()`` returns one flat list per capture name whose
+    internal order neither lines up across capture names nor stays stable
+    between cursor runs inside a single process (it reflects the cursor's
+    in-progress match buffering, not document order). Zipping such lists is
+    therefore nondeterministic AND semantically wrong. Two captures from the
+    same query pattern always share the same immediate parent node (the
+    ``pair`` / ``assignment_expression`` that matched), so key on the parent's
+    byte range. Results are sorted by source position for deterministic
+    downstream emission order.
+    """
+    value_by_parent: dict[tuple[int, int], ASTNode] = {
+        (value.parent.start_byte, value.parent.end_byte): value
+        for value in value_nodes
+        if value.parent is not None
+    }
+    pairs: list[tuple[ASTNode, ASTNode]] = []
+    for name_node in name_nodes:
+        if name_node.parent is None:
+            continue
+        value = value_by_parent.get((name_node.parent.start_byte, name_node.parent.end_byte))
+        if value is not None:
+            pairs.append((name_node, value))
+    pairs.sort(key=lambda pair: pair[0].start_byte)
+    return pairs
+
+
 class JsTsIngestMixin(JsTsModuleSystemMixin):
     __slots__ = ()
     ingestor: IngestorProtocol
@@ -378,7 +409,15 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         module_qn: str,
         lang_config,
     ) -> None:
-        for method_name, arrow_function in zip(method_names, arrow_functions):
+        # NONDETERMINISM FIX: QueryCursor.captures() flattens captures per
+        # capture name, and the two lists are NOT positionally aligned (their
+        # internal ordering also varies between cursor runs within one
+        # process). zip() therefore paired a property name with an arrow
+        # function from a DIFFERENT pair node, attributing closures to the
+        # wrong enclosing scope — and which closure got which name flipped
+        # between parses. Pair structurally instead: a name and an arrow
+        # belong together iff they share the same `pair` parent node.
+        for method_name, arrow_function in _pair_captures_by_parent(method_names, arrow_functions):
             if not method_name.text or not arrow_function:
                 continue
 
@@ -437,7 +476,11 @@ class JsTsIngestMixin(JsTsModuleSystemMixin):
         lang_config,
         log_message: str,
     ) -> None:
-        for member_expr, function_node in zip(member_exprs, function_nodes):
+        # NONDETERMINISM FIX: same mechanism as _process_direct_arrow_functions
+        # — captures() lists are not positionally aligned, so zip() could bind
+        # a member expression to a function node from a different assignment.
+        # Pair by shared `assignment_expression` parent instead.
+        for member_expr, function_node in _pair_captures_by_parent(member_exprs, function_nodes):
             if not member_expr.text or not function_node:
                 continue
 

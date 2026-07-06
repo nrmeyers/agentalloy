@@ -70,6 +70,27 @@ from here is `agentalloy.code_index.facade`.
    types (`prompt_toolkit` Style, `AgentLoopUI`, `*_LOOP_UI`); `models.py`
    lost `rich.Console` and the CLI/MCP models (`SessionState`, `AppContext`,
    `ToolMetadata`).
+6. **Deterministic symbol attribution**: `QueryCursor.captures()` returns
+   per-capture-name lists that are neither positionally aligned across
+   capture names nor stably ordered between cursor runs in one process.
+   Upstream zipped `@method_name`/`@member_expr` against
+   `@arrow_function`/`@function_expr` (`parsers/js_ts/ingest.py`), swapping
+   closure attribution between enclosing scopes nondeterministically —
+   replaced by structural pairing on the shared parent node
+   (`_pair_captures_by_parent`). Additionally, capture lists that feed
+   same-qualified-name emissions (Python `@property`/setter pairs, sibling
+   callbacks inheriting one declarator name) are sorted into source order via
+   `parsers/utils.py::sort_captures_by_position` (applied in
+   `get_function_captures`, `parsers/class_ingest/mixin.py`, and
+   `parsers/import_processor.py::parse_imports` — import order decides which
+   import's `full_name` last-writes an external Module node's `path`) so
+   last-write-wins MERGE semantics pick a stable winner. Relatedly,
+   `parsers/stdlib_extractor.py` probed `hasattr(package, name)` to classify
+   Python imports, which depends on which submodules are ALREADY loaded in
+   the running process (and the extractor's own `import_module` calls mutate
+   that state), flipping external-Module rows between parses — it now asks
+   the import system for the full dotted name first. Regression tests:
+   `tests/code_index/test_engine_determinism.py`.
 
 ## Runtime dependencies
 

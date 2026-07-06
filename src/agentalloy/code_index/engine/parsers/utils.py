@@ -29,6 +29,24 @@ class FunctionCapturesResult(NamedTuple):
     captures: dict[str, list[ASTNode]]
 
 
+def sort_captures_by_position(captures: dict[str, list[ASTNode]]) -> dict[str, list[ASTNode]]:
+    """Return ``QueryCursor.captures()`` output with each list in source order.
+
+    NONDETERMINISM FIX: the order of nodes inside a captures() list reflects
+    the query cursor's internal match buffering, which varies between cursor
+    runs within a single process. When several captured nodes emit graph
+    properties under the SAME qualified name (a ``@property``/setter pair, or
+    sibling callbacks that inherit one declarator name), MERGE semantics make
+    the last emission win — so an unstable iteration order flips which node's
+    start_line/end_line/docstring survive between two parses of an unchanged
+    tree. Sorting by byte position pins a deterministic, source-order winner.
+    """
+    return {
+        name: sorted(nodes, key=lambda node: (node.start_byte, node.end_byte))
+        for name, nodes in captures.items()
+    }
+
+
 def get_function_captures(
     root_node: ASTNode,
     language: cs.SupportedLanguage,
@@ -41,7 +59,8 @@ def get_function_captures(
         return None
 
     cursor = QueryCursor(query)
-    captures = cursor.captures(root_node)
+    # See sort_captures_by_position: raw captures() order is unstable.
+    captures = sort_captures_by_position(cursor.captures(root_node))
     return FunctionCapturesResult(lang_config, captures)
 
 
