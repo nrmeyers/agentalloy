@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Fuse your base model with the exact instructions and codebase context it needs — right now.</b>
+  <b>Instructions tell your agent how to work here. The code index tells it what's actually here.<br/>AgentAlloy composes both into context — at the exact moment they're needed.</b>
 </p>
 
 <p align="center">
@@ -22,15 +22,14 @@
 
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
-**AgentAlloy** is a **just-in-time context engine** — one local service that composes what the agent needs *at the moment it needs it*, through two context modules (with a third on the roadmap):
+**AgentAlloy** is a **just-in-time context engine**: one local service, two context modules, each useful alone and better together.
 
-- **Instructions** — the composer. A signal layer (a small local embed model plus deterministic Python) wakes only when your agent's situation shifts — a phase transition, a new task contract, a meaningful file change — and fuses three instruction sets into the exact persona the moment calls for: **system governance** (hard boundaries and operational rules), **workflow directives** (Spec-Driven Development process constraints), and **domain skills** (a focused slice of a curated 300+ skill corpus, retrieved via hybrid BM25 + dense scoring). Nothing changed means nothing injected.
-- **Code** — the index. Your repos parsed into a tree-sitter symbol graph plus hybrid semantic/lexical search: exact call graphs ("who calls this?"), blast-radius analysis, and budgeted context bundles that ground the agent in the code that already exists instead of the code it imagines. Phase-scoped guidance teaches the agent to reach for it at design, build, and qa.
-- *On the roadmap:* **Knowledge** — the decisions behind the code: what was decided, why, and when.
+- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 300+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
+- **Code** — knows *what's there*. Your repos parsed into a symbol graph with hybrid semantic/lexical search: exact call graphs ("what breaks if I change this?"), and budgeted context bundles that ground the agent in the code that already exists instead of the code it imagines.
 
-Instructions tell the agent *how to work here*; the code index tells it *what's actually here*. Together they give smaller models the leverage to punch above their weight class, and give larger models a runtime grounding in how they should be operating — both of which mean getting it right the first time, not the third.
+Together they give smaller models the leverage to punch above their weight class, and give larger models a runtime grounding in your actual house rules and actual codebase — which means getting it right the first time, not the third. (A third module — **Knowledge**: the decisions behind the code and why they were made — is on the roadmap.)
 
-Phase-aware, intent-aware, and fully local — no remote calls, and zero paid-LLM tokens spent on routing. The composition path is **deterministic by default**: its one optional LM stage — a local fragment re-ranker that only reorders candidates and fails open — ships **off by default** as of v5.0.0 — it only reorders candidates, showed no lift on the eval set, and added ~500 ms/compose, so it's disabled out-of-box (re-enable with `LM_ASSIST=arbitrate`); it always degrades cleanly to deterministic selection. The signals layer's phase-gate classifier *does* default to a small local reranker — a measured win over cosine — falling open to cosine whenever no reranker server is running. Nothing leaves your machine: the whole loop runs on one small embed model (`nomic-embed-text-v1.5`) plus a 0.6B reranker for the intent gates, over an embedded LanceDB vector store + DuckDB. Want it containerized? `agentalloy setup --deployment container` ships the same stack as a single container.
+Everything runs on your machine: one small embed model (`nomic-embed-text-v1.5`) and a 0.6B reranker over embedded LanceDB + DuckDB — no cloud calls, and zero paid-LLM tokens spent deciding what to inject. Routing is **deterministic by default**; the one optional LM stage in the compose path ships off because it showed no lift on our evals (we measured, so we disabled it — [numbers here](BENCHMARKS.md)). The structured SDD workflow is per-repo and opt-out: run `wire --lifecycle-mode off` for pure context injection, or pause it anytime with `agentalloy flow free`. Prefer a container? `agentalloy setup --deployment container` ships the same stack as one image.
 
 Things your agent gets without you pasting them into the prompt:
 
@@ -40,8 +39,6 @@ Things your agent gets without you pasting them into the prompt:
 - "I'm reviewing this PR — what should I check?" — review heuristics, composed from `code-review` packs.
 - "What breaks if I change this function's signature?" — exact transitive call sites from the symbol graph, not a grep guess.
 - "Start this task grounded." — a budgeted bundle of the symbols, callers, and docs the task actually touches, straight from the code index.
-
-**This is what zero-shot agentic development looks like.**
 
 ---
 
