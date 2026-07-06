@@ -288,8 +288,22 @@ jobs:
         run: uv sync --frozen --extra code-index
 
       - name: Container e2e tests (real podman, serial)
-        timeout-minutes: 50
-        run: uv run pytest -m "integration and container" -n0 -q
+        timeout-minutes: 45
+        # First run timed out at 50min with ZERO pytest output — an early test
+        # (or the image fixture) blocked on something a cold runner lacks.
+        # Instrumentation until the whale is named: -v streams per-test
+        # progress into the live log, and the shell `timeout` kills pytest
+        # BEFORE the step deadline so it flushes partial results instead of
+        # dying silently. 124 = timeout's exit code.
+        run: timeout -k 30s 40m uv run pytest -m "integration and container" -n0 -v --durations=10
+
+      - name: Podman forensics (on failure)
+        if: failure()
+        run: |
+          echo "=== podman ps -a ==="; podman ps -a || true
+          echo "=== podman images ==="; podman images || true
+          echo "=== podman volume ls ==="; podman volume ls || true
+          echo "=== disk ==="; df -h / || true
 
       - name: Open or update failure issue
         if: failure()
