@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from agentalloy.install import env_forwarding
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -684,8 +686,11 @@ def _run_container(
     * Volume mount: the projects root (``resolve_projects_root()``) bind-mounted
       ``rw`` at the identical host path, so the proxy can read each repo's
       ``.agentalloy/`` phase state and write phase transitions back.
-    * Env vars: ``AGENTALLOY_PACKS``, ``DUCKDB_PATH``,
-      ``FRAGMENTS_LANCE_PATH``, ``TELEMETRY_DB_PATH``, ``LOG_LEVEL``
+    * Env vars: the baked container spec (``AGENTALLOY_PACKS``,
+      ``DUCKDB_PATH``, ``FRAGMENTS_LANCE_PATH``, ``TELEMETRY_DB_PATH``,
+      ``AGENTALLOY_RUNTIME_STATE_DIR``, ``LOG_LEVEL``) plus every *intent*
+      key present in the host ``.env``, forwarded through the audited
+      allowlist in :mod:`agentalloy.install.env_forwarding`.
     * Port mapping: ``-p 47950:47950``
 
     The container runs the image's **baked** ``/app/entrypoint.sh`` (the
@@ -728,6 +733,15 @@ def _run_container(
         "AGENTALLOY_RUNTIME_STATE_DIR": "/app/data/runtime-state",
         "LOG_LEVEL": os.environ.get("LOG_LEVEL", "info").lower(),
     }
+    # The host .env is the single source of truth for user intent (module
+    # toggles, upstream config, tuning). Intent keys forward through the
+    # audited allowlist; host-topology keys never do — the baked values above
+    # always win because forwarded_env() can't return them. Values bind at
+    # create: a later .env edit needs a recreate (doctor flags the drift).
+    forwarded = env_forwarding.forwarded_env()
+    env.update(forwarded)
+    for warning in env_forwarding.loopback_upstream_warnings(forwarded):
+        _print(f"  [yellow]{warning}[/yellow]")
     env_cmd: list[str] = []
     for k, v in env.items():
         env_cmd.extend(["-e", f"{k}={v}"])
