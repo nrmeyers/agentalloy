@@ -8,6 +8,7 @@ ANTHROPIC_BASE_URL ending in /v1, which produced /v1/v1/messages (404).
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import urlparse
 
 from agentalloy.providers import REGISTRY
@@ -46,7 +47,6 @@ def test_claude_code_env_builder_is_auth_transparent() -> None:
 def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:
     routes = _app_route_paths()
     for harness, key in (
-        ("codex", "OPENAI_BASE_URL"),
         ("openclaw", "OPENAI_BASE_URL"),
         ("copilot-cli", "COPILOT_PROVIDER_BASE_URL"),
     ):
@@ -59,3 +59,23 @@ def test_openai_style_base_urls_resolve_to_chat_completions_route() -> None:
         parts[2] = "{token}"
         full = "/".join(parts)
         assert full in routes, f"{harness}: {full} is not a served route"
+
+
+def test_codex_config_base_url_resolves_to_responses_route(tmp_path: Path) -> None:
+    """codex wiring (repo-local config.toml) points at a served Responses route.
+
+    codex has no base-URL env vector — its carrier is the CODEX_HOME config —
+    so the contract is checked against the rendered config file instead of
+    env_builder output. The Responses SDK requests {base_url}/responses.
+    """
+    import toml
+
+    from agentalloy.providers.codex.install import render_config
+
+    config = toml.loads(render_config(47950, tmp_path))
+    base = urlparse(config["model_providers"]["agentalloy"]["base_url"]).path.rstrip("/")
+    assert base.startswith("/proj/"), f"expected /proj/<token> base, got {base!r}"
+    assert config["model_providers"]["agentalloy"]["wire_api"] == "responses"
+    parts = (base + "/responses").split("/")
+    parts[2] = "{token}"
+    assert "/".join(parts) in _app_route_paths()

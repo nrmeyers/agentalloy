@@ -371,10 +371,11 @@ async def _forward_once(
     inbound_headers: Any,
     body: bytes,
     on_status: Callable[[int], None] = lambda _status: None,
+    path: str = _UPSTREAM_PATH,
 ) -> Response:
     try:
         upstream = await client.forward(
-            path=_UPSTREAM_PATH,
+            path=path,
             query_string=query_string,
             inbound_headers=inbound_headers,
             body=body,
@@ -404,11 +405,12 @@ async def _forward_streaming(
     inbound_headers: Any,
     body: bytes,
     on_status: Callable[[int], None] = lambda _status: None,
+    path: str = _UPSTREAM_PATH,
 ) -> Response | StreamingResponse:
     # Enter the stream manually so we can read the upstream status + headers
     # before constructing the StreamingResponse, then relay raw bytes.
     cm = client.stream(
-        path=_UPSTREAM_PATH,
+        path=path,
         query_string=query_string,
         inbound_headers=inbound_headers,
         body=body,

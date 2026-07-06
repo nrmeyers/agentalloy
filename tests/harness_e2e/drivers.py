@@ -81,6 +81,18 @@ def _copilot_env(port: int, root: Path) -> dict[str, str]:
     return build_env(port, root)
 
 
+def _wire_codex(port: int, root: Path) -> object:
+    from agentalloy.providers.codex import install as codex_install
+
+    return codex_install.apply_persistent_config(port, root)
+
+
+def _codex_env(port: int, root: Path) -> dict[str, str]:
+    # Mirrors .codex/.agentalloy-env; the key is a dummy — it only ever
+    # reaches the stub upstream (auth-transparent forward).
+    return {"CODEX_HOME": str(root / ".codex"), "OPENAI_API_KEY": "agentalloy-e2e"}
+
+
 CASES: tuple[HarnessCase, ...] = (
     HarnessCase(
         name="claude-code",
@@ -122,16 +134,14 @@ CASES: tuple[HarnessCase, ...] = (
     HarnessCase(
         name="codex",
         binary="codex",
-        env=_openai_proj_env,
+        env=_codex_env,
         argv=lambda root: ["codex", "exec", "--skip-git-repo-check", PROMPT],
-        xfail_reason=(
-            "modern codex is Responses-API-only: it ignores OPENAI_BASE_URL "
-            "(dials wss://api.openai.com/v1/responses), our [codex] config block "
-            "is not its schema, and custom model_providers require "
-            "wire_api='responses' (POSTs /v1/responses — verified live), which "
-            "the proxy does not serve yet. Needs a /v1/responses proxy surface."
+        wire=_wire_codex,
+        scrub_env=("OPENAI_BASE_URL",),
+        notes=(
+            "Repo-local CODEX_HOME (config.toml, wire_api=responses) → the "
+            "proxy's native /proj/<token>/v1/responses passthrough."
         ),
-        notes="Env-only (wrap path): user-scoped ~/.codex/config.toml is never touched.",
     ),
     HarnessCase(
         name="copilot-cli",

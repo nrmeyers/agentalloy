@@ -53,6 +53,7 @@ INTENT_KEYS: frozenset[str] = frozenset(
         "UPSTREAM_MODEL",
         "UPSTREAM_API_KEY",
         "ANTHROPIC_UPSTREAM_URL",
+        "RESPONSES_UPSTREAM_URL",
         # Release-check opt-out — pure behavior toggle (not a Settings field;
         # read via os.environ by install/release_check.py).
         "AGENTALLOY_RELEASE_CHECK",
@@ -111,6 +112,7 @@ URL_CLASS_UPSTREAM_KEYS: frozenset[str] = frozenset(
     {
         "UPSTREAM_URL",
         "ANTHROPIC_UPSTREAM_URL",
+        "RESPONSES_UPSTREAM_URL",
     }
 )
 

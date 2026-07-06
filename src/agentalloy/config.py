@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     # (Claude Code → AgentAlloy → … → Anthropic). Env: ANTHROPIC_UPSTREAM_URL.
     anthropic_upstream_url: str = "https://api.anthropic.com"
 
+    # Native OpenAI Responses passthrough upstream (the /proj/<token>/v1/responses
+    # path — codex et al.). Same auth-transparent contract as the Anthropic
+    # passthrough: the caller's own credential is forwarded verbatim.
+    # Env: RESPONSES_UPSTREAM_URL. Spec: docs/responses-surface.md.
+    responses_upstream_url: str = "https://api.openai.com"
+
     # Profile root. Resolves to ~/.agentalloy by default.
     profile_root: str = Field(default_factory=lambda: str(Path.home() / ".agentalloy"))
 

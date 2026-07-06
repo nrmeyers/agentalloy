@@ -43,7 +43,7 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `opencode` | repo-local `opencode.json` | `provider.agentalloy` (`@ai-sdk/openai-compatible`, `baseURL=…/proj/<token>/v1`, `apiKey`), `model: agentalloy/agentalloy-proxy` | P1 |
 | `claude-code` | per-repo `.claude/settings.local.json` `env` (primary) + `.agentalloy/claude-code-env.sh` | `ANTHROPIC_BASE_URL` (only) | P2 |
 | `cline` | `.cline/settings.json` | `apiProvider`, `apiBaseUrl`, `apiKey`, `model` | P2 |
-| `codex` | ⚠️ non-functional (Responses-API-only harness; proxy lacks `/v1/responses`) | legacy `apiBaseUrl` block still written (inert) | P1 |
+| `codex` | repo-local `.codex/` (`CODEX_HOME`) | `config.toml` (`model_provider`, `[model_providers.agentalloy]` with `base_url`, `wire_api="responses"`, `env_key`), `.agentalloy-env`, `.gitignore` | P1 |
 | `openclaw` | `~/.openclaw/plugins.json` | agentalloy plugin entry (proxy base URL) | P1 |
 | `copilot-cli` | `.copilot/.agentalloy-env` (sourced or injected via `agentalloy wrap`) | BYOK env: `COPILOT_PROVIDER_TYPE`, `COPILOT_PROVIDER_BASE_URL` (`…/proj/<token>/v1`), `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL` | P1 |
 
@@ -95,7 +95,7 @@ These harnesses honor a custom API base URL. AgentAlloy points them at the local
 | `hermes-agent` | repo-local `.hermes/config.yaml` (copy of `~/.hermes/config.yaml` with the `model` block redirected at `…/proj/<token>/v1`), activated via `HERMES_HOME` from `.hermes/.agentalloy-env` | Inherently per-repo (`--scope` ignored). direnv/mise carriers auto-set `HERMES_HOME` on cd; wiring restarts the repo-scoped hermes gateway. |
 | `opencode` | repo-local `opencode.json` (`provider.agentalloy` on `@ai-sdk/openai-compatible`, default model `agentalloy/agentalloy-proxy`) | OpenCode ignores `OPENAI_API_BASE`, and its built-in openai provider speaks the Responses API (`/v1/responses`), which the proxy does not serve — the config-file provider block is the only working vector (verified live by the harness e2e matrix). Merges over an existing `opencode.json`; per-repo `/proj/<token>` baked in. |
 | `cline` | `.cline/settings.json` (`apiProvider`, `apiBaseUrl`, `apiKey`, `model`) | Keys merged into existing file; other settings preserved. |
-| `codex` | ⚠️ **currently non-functional** | Modern codex speaks only the OpenAI Responses API: it ignores `OPENAI_BASE_URL` (dials `wss://api.openai.com/v1/responses`), and custom `model_providers` require `wire_api = "responses"` (`wire_api = "chat"` was removed upstream) — verified live by the harness e2e matrix. Proxying codex needs a `/v1/responses` proxy surface; until then wiring prints a warning and codex traffic is not intercepted. |
+| `codex` | repo-local `.codex/config.toml` under `CODEX_HOME` (hermes pattern): global config copied, `model_provider = "agentalloy"`, `[model_providers.agentalloy]` → `base_url=…/proj/<token>/v1`, `wire_api = "responses"`, `env_key = "OPENAI_API_KEY"` | Modern codex is Responses-API-only (ignores `OPENAI_BASE_URL`; `wire_api = "chat"` removed upstream) — served by the proxy's native [Responses passthrough](../responses-surface.md) (`/proj/<token>/v1/responses`, auth-transparent, `RESPONSES_UPSTREAM_URL`). Activate via `source .codex/.agentalloy-env` or `agentalloy wrap codex`. `auth.json` is never copied; `.codex/.gitignore` keeps codex state out of git. Verified live by the harness e2e matrix. |
 | `openclaw` | `~/.openclaw/plugins.json` (agentalloy plugin entry) | OpenAI protocol; JSON plugin config pointing at the local proxy. |
 | `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_*` env vars, per-repo `/proj/<token>` baked in) | Standalone Copilot CLI (npm `@github/copilot`, BYOK GA Apr 2026). Env-var-only carrier: `source` the file or launch via `agentalloy wrap copilot-cli -- copilot`. BYOK routes model traffic to your configured upstream key, not your Copilot subscription. The IDE/extension surface stays sidecar-only as `github-copilot`. |
 
@@ -251,6 +251,7 @@ the injected block, then cleans up any dedicated files:
 | `claude-code` | `.claude/settings.local.json` `env.ANTHROPIC_BASE_URL` stripped (other settings preserved) + `.agentalloy/claude-code-env.sh` removed; empty `.agentalloy/` directory is also removed |
 | `cline` | Proxy fields from `.cline/settings.json` (or removes file if empty) |
 | `copilot-cli` | `.copilot/.agentalloy-env` (via the WireRecord walk) |
+| `codex` | Repo-local `.codex/{config.toml,.agentalloy-env,.gitignore}` (via the WireRecord walk; a pre-existing `config.toml` is restored from `original_content`) |
 
 For `--legacy` installs, uninstall removes the injected sentinel blocks and dedicated files
 using the same `AGENTALLOY-CONTEXT` markers.

@@ -55,6 +55,9 @@ def test_harness_roundtrip(
         case.argv(work_repo),
         cwd=work_repo,
         env=env,
+        # Headless: an inherited stdin pipe makes some harnesses (codex) block
+        # on "reading additional input from stdin".
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         timeout=case.timeout,

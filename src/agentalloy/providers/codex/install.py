@@ -1,7 +1,21 @@
 """Codex install module — apply_persistent_config / install_writer for Codex CLI.
 
-Writes ~/.codex/config.toml with an apiBaseUrl sentinel-bounded block
-pointing to the AgentAlloy proxy.
+Proxy wiring via a repo-local ``CODEX_HOME`` (hermes pattern). Modern codex is
+Responses-API-only: it ignores ``OPENAI_BASE_URL``, and a custom provider must
+declare ``wire_api = "responses"`` (``"chat"`` was removed upstream). The proxy
+serves that wire natively at ``/proj/<token>/v1/responses``
+(docs/responses-surface.md), so wiring writes:
+
+- ``<repo>/.codex/config.toml`` — the user's global ``~/.codex/config.toml``
+  (their tuning survives) with ``model_provider = "agentalloy"`` and an
+  ``[model_providers.agentalloy]`` block pointed at the proxy's per-repo
+  endpoint. Auth rides ``env_key = "OPENAI_API_KEY"`` — the key is the user's
+  real one, forwarded transparently to the Responses upstream; the global
+  ``auth.json`` is never copied into the repo.
+- ``<repo>/.codex/.agentalloy-env`` — exports ``CODEX_HOME`` (source it, or
+  launch via ``agentalloy wrap codex`` which injects it from env_builder).
+- ``<repo>/.codex/.gitignore`` — ``*``: codex writes session state (and would
+  write auth state) under CODEX_HOME; none of it belongs in git.
 """
 
 from __future__ import annotations
@@ -9,12 +23,11 @@ from __future__ import annotations
 import hashlib
 import sys
 from pathlib import Path
+from typing import Any, cast
 
-from agentalloy.install.sentinel_utils import replace_marked_block
+import toml
+
 from agentalloy.providers.base import WireRecord
-
-_SENTINEL_BEGIN = "# <!-- BEGIN agentalloy install -->"
-_SENTINEL_END = "# <!-- END agentalloy install -->"
 
 
 def _sha256(content: str) -> str:
@@ -29,80 +42,102 @@ def _capture_original(path: Path) -> str | None:
     return None
 
 
-def _inject_sentinel_block(existing: str, block: str) -> str:
-    """Insert or replace a sentinel-bounded block in existing content.
+def render_config(port: int, root: Path) -> str:
+    """The repo-local ``config.toml`` content: global config + agentalloy provider."""
+    from agentalloy.api.proxy_context import encode_proj_token
 
-    Delegates to the shared ``replace_marked_block`` helper which
-    validates BEGIN-before-END ordering and duplicate counts.
-    """
-    return replace_marked_block(existing, block, _SENTINEL_BEGIN, _SENTINEL_END)
+    token = encode_proj_token(root)
+    proxy_base = f"http://localhost:{port}/proj/{token}/v1"
+
+    config: dict[str, Any] = {}
+    global_config = Path.home() / ".codex" / "config.toml"
+    if global_config.exists():
+        try:
+            config = toml.loads(global_config.read_text())
+        except Exception:  # noqa: BLE001 — a malformed global config must not block wiring
+            config = {}
+
+    config["model_provider"] = "agentalloy"
+    providers = config.get("model_providers")
+    if not isinstance(providers, dict):
+        providers = {}
+    providers = cast("dict[str, Any]", providers)
+    providers["agentalloy"] = {
+        "name": "AgentAlloy",
+        "base_url": proxy_base,
+        # Modern codex removed wire_api="chat"; the proxy serves the Responses
+        # wire natively (docs/responses-surface.md).
+        "wire_api": "responses",
+        "env_key": "OPENAI_API_KEY",
+    }
+    config["model_providers"] = providers
+    return toml.dumps(config)
 
 
 def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[WireRecord]:
-    """Install wiring for codex by writing ~/.codex/config.toml.
-
-    Creates a TOML config file with an apiBaseUrl sentinel-bounded block
-    pointing to the AgentAlloy proxy.
+    """Install proxy wiring for codex via a repo-local ``CODEX_HOME``.
 
     Args:
         port: The AgentAlloy proxy port.
-        root: The repository root (used for path resolution).
-        force: If True, skip tamper detection.
+        root: The repository root.
+        force: Unused — every file under ``.codex/`` we write is owned fully.
 
     Returns:
         List of WireRecord describing files written.
     """
-    config_path = Path.home() / ".codex" / "config.toml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    _ = force
+    codex_dir = root / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    records: list[WireRecord] = []
 
-    # Tokenless on purpose: this is a USER-scoped config (one ~/.codex/config.toml
-    # for every repo), so it cannot carry a per-repo /proj/<token>. Per-repo
-    # resolution comes from the env_builder instead (it bakes encode_proj_token of
-    # the launch cwd into OPENAI_BASE_URL, which overrides this file). A direct
-    # `codex` launch relying solely on this file is not repo-disambiguated.
-    proxy_url = f"http://localhost:{port}/v1"
+    config_path = codex_dir / "config.toml"
+    original_config = _capture_original(config_path)
+    config_text = render_config(port, root)
+    config_path.write_text(config_text)
+    records.append(
+        WireRecord(
+            path=str(config_path),
+            action="wrote_new_file" if original_config is None else "replaced_file",
+            content_sha256=_sha256(config_text),
+            original_content=original_config,
+            marker_key="codex.model_provider",
+        )
+    )
 
-    # Build the TOML config block WITHOUT sentinel markers.
-    # _inject_sentinel_block will add them.
-    block_lines = [
-        "[codex]",
-        f'apiBaseUrl = "{proxy_url}"',
-        'apiKey = "agentalloy"',
-    ]
-    block = "\n".join(block_lines)
+    env_path = codex_dir / ".agentalloy-env"
+    original_env = _capture_original(env_path)
+    env_text = 'export CODEX_HOME="$PWD/.codex"\n'
+    env_path.write_text(env_text)
+    records.append(
+        WireRecord(
+            path=str(env_path),
+            action="wrote_new_file" if original_env is None else "replaced_file",
+            content_sha256=_sha256(env_text),
+            original_content=original_env,
+            marker_key="codex.env",
+        )
+    )
 
-    original_content = _capture_original(config_path)
+    gitignore_path = codex_dir / ".gitignore"
+    if not gitignore_path.exists():
+        gitignore_text = "*\n"
+        gitignore_path.write_text(gitignore_text)
+        records.append(
+            WireRecord(
+                path=str(gitignore_path),
+                action="wrote_new_file",
+                content_sha256=_sha256(gitignore_text),
+                marker_key="codex.gitignore",
+            )
+        )
 
-    if config_path.exists():
-        content = config_path.read_text()
-        content = _inject_sentinel_block(content, block)
-    else:
-        # Write with sentinels for new files
-        content = f"{_SENTINEL_BEGIN}\n{block}\n{_SENTINEL_END}\n"
-
-    content_sha = _sha256(block)
-
-    config_path.write_text(content)
-
-    # Honest status (harness e2e matrix, live-verified): modern codex cannot
-    # be proxied yet. It ignores OPENAI_BASE_URL (dials its own websocket to
-    # api.openai.com), the [codex] block below is inert (not its schema), and
-    # custom model_providers require wire_api="responses" — an API surface the
-    # proxy does not serve. Do not claim otherwise at wire time.
     print(
-        "[AgentAlloy] WARNING: codex proxy support is currently non-functional. "
-        "Modern codex speaks only the OpenAI Responses API (/v1/responses), which "
-        "the AgentAlloy proxy does not serve yet; codex traffic will NOT be "
-        "intercepted. Tracked as a known gap in the harness e2e matrix.",
+        "[AgentAlloy] codex wired via repo-local CODEX_HOME (.codex/config.toml, "
+        "wire_api=responses). Launch with `agentalloy wrap codex -- codex [args]`, or "
+        "`source .codex/.agentalloy-env` before running `codex` in this repo. "
+        "Auth: codex reads your real OPENAI_API_KEY (env_key) and the proxy forwards "
+        "it transparently to the Responses upstream.",
         file=sys.stderr,
     )
 
-    return [
-        WireRecord(
-            path=str(config_path),
-            action="wrote_new_file" if original_content is None else "injected_block",
-            content_sha256=content_sha,
-            original_content=original_content,
-            marker_key="codex.apiBaseUrl",
-        )
-    ]
+    return records

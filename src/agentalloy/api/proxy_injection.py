@@ -274,6 +274,143 @@ def inject_into_anthropic_messages(
     return {**payload, "messages": new_messages}
 
 
+# ---------------------------------------------------------------------------
+# OpenAI Responses surface (payload["input"] — codex et al.)
+#
+# A Responses user turn is {"type": "message", "role": "user", "content":
+# [{"type": "input_text", "text": ...}]}; `input` may also be a bare string.
+# The top-level `instructions` field is the harness's cached system prompt and
+# is never touched. Spec: docs/responses-surface.md.
+# ---------------------------------------------------------------------------
+
+
+def _input_text_block_contains(block: dict[str, Any], needle: str) -> bool:
+    """True if *block* is an ``input_text`` block whose text contains *needle*."""
+    if block.get("type") != "input_text":
+        return False
+    text = block.get("text")
+    return isinstance(text, str) and needle in text
+
+
+def _last_user_input_index(items: list[Any]) -> int | None:
+    """Index of the last user message item in a Responses ``input`` list."""
+    for i in range(len(items) - 1, -1, -1):
+        item = _as_dict(items[i])
+        if item is not None and item.get("type") == "message" and item.get("role") == "user":
+            return i
+    return None
+
+
+def _input_item_contains(item: Any, needle: str) -> bool:
+    """True if a Responses input item's content contains *needle*."""
+    d = _as_dict(item)
+    if d is None:
+        return False
+    content = d.get("content")
+    if isinstance(content, str):
+        return needle in content
+    if isinstance(content, list):
+        blocks = cast("list[Any]", content)
+        return any(
+            _input_text_block_contains(b, needle)
+            for b in (_as_dict(x) for x in blocks)
+            if b is not None
+        )
+    return False
+
+
+def responses_has_marker(
+    payload: dict[str, Any], *, kind: str = "workflow", phase: str | None = None
+) -> bool:
+    """True if a matching marker is present in the payload's ``input`` items."""
+    raw = payload.get("input")
+    if isinstance(raw, str):
+        if kind == "system":
+            return SYSTEM_MARKER_BEGIN in raw
+        needle = anthropic_marker_begin(phase) if phase is not None else _workflow_begin_any()
+        return needle in raw
+    if not isinstance(raw, list):
+        return False
+    items = cast("list[Any]", raw)
+    if kind == "system":
+        return any(_input_item_contains(i, SYSTEM_MARKER_BEGIN) for i in items)
+    needle = anthropic_marker_begin(phase) if phase is not None else _workflow_begin_any()
+    return any(_input_item_contains(i, needle) for i in items)
+
+
+def inject_into_responses_input(
+    payload: dict[str, Any], block: str, *, phase: str, kind: str = "workflow"
+) -> dict[str, Any]:
+    """Inject *block* into the LAST user message item of a Responses payload.
+
+    The Responses-surface sibling of :func:`inject_into_anthropic_messages`:
+    same marker families and idempotence/stale-strip semantics, operating on
+    ``payload["input"]`` (str or item list). Returns a NEW payload on a real
+    injection and the SAME object on every no-op (identity = delivered). The
+    top-level ``instructions`` field is never touched.
+    """
+    if kind == "system":
+        begin, end = SYSTEM_MARKER_BEGIN, SYSTEM_MARKER_END
+        if responses_has_marker(payload, kind="system"):
+            return payload
+    elif kind == "banner":
+        begin, end = BANNER_MARKER_BEGIN, BANNER_MARKER_END
+    else:
+        begin, end = anthropic_marker_begin(phase), ANTHROPIC_MARKER_END
+        if responses_has_marker(payload, kind="workflow", phase=phase):
+            return payload
+
+    new_block = _block_text(begin, block, end)
+    raw = payload.get("input")
+
+    if isinstance(raw, str):
+        if kind == "workflow":
+            stripped = _strip_workflow_block(raw)
+        elif kind == "banner":
+            stripped = _strip_banner_block(raw)
+        else:
+            stripped = raw
+        new_input: str | list[Any] = f"{stripped}\n\n{new_block}" if stripped else new_block
+        return {**payload, "input": new_input}
+
+    if not isinstance(raw, list):
+        return payload
+    items = cast("list[Any]", raw)
+    idx = _last_user_input_index(items)
+    if idx is None:
+        return payload
+    target = _as_dict(items[idx])
+    if target is None:
+        return payload
+
+    content = target.get("content")
+    if isinstance(content, str):
+        if kind == "workflow":
+            stripped = _strip_workflow_block(content)
+        elif kind == "banner":
+            stripped = _strip_banner_block(content)
+        else:
+            stripped = content
+        new_content: str | list[dict[str, Any]] = (
+            f"{stripped}\n\n{new_block}" if stripped else new_block
+        )
+    elif isinstance(content, list):
+        raw_blocks = cast("list[Any]", content)
+        blocks: list[dict[str, Any]] = [d for b in raw_blocks if (d := _as_dict(b)) is not None]
+        if kind == "workflow":
+            blocks = [b for b in blocks if not _input_text_block_contains(b, _workflow_begin_any())]
+        elif kind == "banner":
+            blocks = [b for b in blocks if not _input_text_block_contains(b, BANNER_MARKER_BEGIN)]
+        new_content = [*blocks, {"type": "input_text", "text": new_block}]
+    else:
+        return payload
+
+    new_item = {**target, "content": new_content}
+    new_items = list(items)
+    new_items[idx] = new_item
+    return {**payload, "input": new_items}
+
+
 def _last_user_message_index(messages: list[ProxyMessage]) -> int | None:
     """Index of the last ``role == "user"`` message in a typed list, or None."""
     for i in range(len(messages) - 1, -1, -1):

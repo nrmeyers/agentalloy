@@ -1,14 +1,17 @@
 """Codex provider — HarnessSpec registration for OpenAI Codex CLI.
 
 Registers the ``codex`` harness in REGISTRY with:
-- Protocol: OPENAI (Codex speaks the OpenAI Chat Completions API)
-- Capabilities: PROXY (proxy wiring via env vars)
-- env_builder: sets OPENAI_BASE_URL for the codex binary
-- install_writer: writes ~/.codex/config.toml with apiBaseUrl sentinel
+- Protocol: OPENAI (modern codex speaks ONLY the OpenAI Responses API; the
+  proxy serves it natively at /proj/<token>/v1/responses —
+  docs/responses-surface.md)
+- Capabilities: PROXY (repo-local CODEX_HOME carrier)
+- env_builder: sets CODEX_HOME so codex reads the repo-local config
+- install_writer: writes <repo>/.codex/{config.toml,.agentalloy-env,.gitignore}
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from agentalloy.providers import REGISTRY
@@ -25,27 +28,21 @@ from . import install
 def _env_builder(port: int) -> dict[str, str]:
     """Build environment dict for the codex subprocess.
 
-    Sets OPENAI_BASE_URL so codex routes API calls through the AgentAlloy proxy.
-    The base URL carries the per-repo ``/proj/<token>`` discriminator (realpath of
-    cwd) so the proxy resolves this repo's phase/lifecycle — parity with the
-    Anthropic path.
+    Sets CODEX_HOME to the launch cwd's ``.codex/`` so codex reads the
+    repo-local config the install_writer wrote (per-repo ``/proj/<token>``
+    base URL, ``wire_api="responses"``). codex ignores OPENAI_BASE_URL, so the
+    config file is the only routing vector; env alone cannot wire it.
     """
-    from pathlib import Path
-
-    from agentalloy.api.proxy_context import encode_proj_token
-
-    token = encode_proj_token(Path.cwd())
-    return {
-        "OPENAI_BASE_URL": f"http://localhost:{port}/proj/{token}/v1",
-        "OPENAI_API_KEY": "agentalloy",
-    }
+    _ = port
+    return {"CODEX_HOME": os.path.join(os.getcwd(), ".codex")}
 
 
 def _install_writer(port: int, root: Path, force: bool = False) -> list[WireRecord]:
-    """Install wiring for codex by writing ~/.codex/config.toml.
+    """Install wiring for codex via a repo-local CODEX_HOME.
 
-    Creates a TOML config with an apiBaseUrl sentinel-bounded block
-    pointing to the AgentAlloy proxy.
+    Writes ``.codex/config.toml`` (global config + agentalloy Responses
+    provider), ``.codex/.agentalloy-env`` (CODEX_HOME export), and a
+    ``.codex/.gitignore`` keeping codex session/auth state out of git.
     """
     return install.apply_persistent_config(port, root, force)
 

@@ -21,6 +21,7 @@ from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker, ReadinessChecker
 from agentalloy.api.health_router import router as health_router
 from agentalloy.api.proxy_passthrough_router import router as passthrough_router
+from agentalloy.api.proxy_responses_router import router as responses_router
 from agentalloy.api.proxy_router import router as proxy_router
 from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
@@ -210,6 +211,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     anthropic_passthrough_client = AnthropicPassthroughClient(settings.anthropic_upstream_url)
     app.state.anthropic_passthrough_client = anthropic_passthrough_client
 
+    # Native OpenAI Responses passthrough client (the /proj/<token>/v1/responses
+    # path — codex et al.). Same auth-transparent contract; the client class is
+    # protocol-agnostic despite its name. Spec: docs/responses-surface.md.
+    responses_passthrough_client = AnthropicPassthroughClient(settings.responses_upstream_url)
+    app.state.responses_passthrough_client = responses_passthrough_client
+
     # Code-index module state: constructed only when the module's router was
     # actually mounted (toggle on AND the [code-index] extra importable). All
     # code_index imports stay inside this branch so a disabled module never
@@ -274,6 +281,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     await aclient.aclose()
         with suppress(Exception):
             await anthropic_passthrough_client.aclose()
+        with suppress(Exception):
+            await responses_passthrough_client.aclose()
         for closeable in (telemetry, embed_client, vector_store, store, telemetry_store):
             with suppress(Exception):
                 closeable.close()
@@ -346,6 +355,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
         app.include_router(skill_router)
         app.include_router(proxy_router)
         app.include_router(passthrough_router)
+        app.include_router(responses_router)
         modules["compose"] = "enabled"
     else:
         modules["compose"] = "disabled"

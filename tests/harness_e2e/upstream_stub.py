@@ -50,9 +50,29 @@ class UpstreamStub:
 
 
 def user_texts(requests: list[CapturedRequest]) -> list[str]:
-    """Last-user-message text per captured request (both API shapes)."""
+    """Last-user-message text per captured request (all three API shapes)."""
     texts: list[str] = []
     for req in requests:
+        raw_input = req.payload.get("input")
+        if isinstance(raw_input, str):
+            texts.append(raw_input)
+            continue
+        if isinstance(raw_input, list):
+            # Responses API: message items with input_text blocks.
+            user_items = [
+                i
+                for i in raw_input
+                if isinstance(i, dict) and i.get("type") == "message" and i.get("role") == "user"
+            ]
+            if user_items:
+                content = user_items[-1].get("content")
+                if isinstance(content, str):
+                    texts.append(content)
+                elif isinstance(content, list):
+                    texts.append(
+                        "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+                    )
+                continue
         messages = req.payload.get("messages", [])
         user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
         if not user_msgs:
@@ -172,6 +192,104 @@ def _anthropic_sse(model: str) -> list[str]:
     return [f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events]
 
 
+def _responses_message_item() -> dict[str, Any]:
+    return {
+        "type": "message",
+        "id": "msg_stub",
+        "status": "completed",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": CANNED_TEXT, "annotations": []}],
+    }
+
+
+def _responses_body(model: str, status: str = "completed") -> dict[str, Any]:
+    return {
+        "id": "resp_stub",
+        "object": "response",
+        "created_at": 0,
+        "status": status,
+        "model": model,
+        "output": [_responses_message_item()] if status == "completed" else [],
+        "error": None,
+        "incomplete_details": None,
+        "usage": {
+            "input_tokens": 1,
+            "output_tokens": 1,
+            "total_tokens": 2,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
+        },
+    }
+
+
+def _responses_sse(model: str) -> list[str]:
+    item = _responses_message_item()
+    events: list[tuple[str, dict[str, Any]]] = [
+        (
+            "response.created",
+            {"type": "response.created", "response": _responses_body(model, "in_progress")},
+        ),
+        (
+            "response.output_item.added",
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {**item, "status": "in_progress", "content": []},
+            },
+        ),
+        (
+            "response.content_part.added",
+            {
+                "type": "response.content_part.added",
+                "item_id": "msg_stub",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []},
+            },
+        ),
+        (
+            "response.output_text.delta",
+            {
+                "type": "response.output_text.delta",
+                "item_id": "msg_stub",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": CANNED_TEXT,
+            },
+        ),
+        (
+            "response.output_text.done",
+            {
+                "type": "response.output_text.done",
+                "item_id": "msg_stub",
+                "output_index": 0,
+                "content_index": 0,
+                "text": CANNED_TEXT,
+            },
+        ),
+        (
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "item_id": "msg_stub",
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "text": CANNED_TEXT, "annotations": []},
+            },
+        ),
+        (
+            "response.output_item.done",
+            {"type": "response.output_item.done", "output_index": 0, "item": item},
+        ),
+        ("response.completed", {"type": "response.completed", "response": _responses_body(model)}),
+    ]
+    frames: list[str] = []
+    for seq, (name, data) in enumerate(events):
+        data["sequence_number"] = seq
+        frames.append(f"event: {name}\ndata: {json.dumps(data)}\n\n")
+    return frames
+
+
 def start_upstream_stub() -> UpstreamStub:
     """Start the stub on an OS-assigned free port; caller must ``stop()`` it."""
     stub = UpstreamStub(port=0)
@@ -222,6 +340,11 @@ def start_upstream_stub() -> UpstreamStub:
                     self._send_sse(_anthropic_sse(model))
                 else:
                     self._send_json(_anthropic_json(model))
+            elif self.path.endswith("/responses"):
+                if stream:
+                    self._send_sse(_responses_sse(model))
+                else:
+                    self._send_json(_responses_body(model))
             else:
                 # Default to the OpenAI chat-completions shape for anything else.
                 if stream:

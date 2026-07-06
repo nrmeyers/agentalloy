@@ -1,255 +1,143 @@
-"""Unit tests for the codex provider (Task 8).
+"""Unit tests for the codex provider (repo-local CODEX_HOME, Responses wire).
 
-Covers:
-  - HarnessSpec creation and registration
-  - env_builder returns correct OPENAI_BASE_URL and OPENAI_API_KEY
-  - install_writer creates ~/.codex/config.toml with apiBaseUrl sentinel
-  - wire_harness integration for codex
-  - Sentinel idempotency (re-running replaces existing block)
-
-Total: 12 unit tests.
+Modern codex is Responses-API-only (e2e-matrix finding): it ignores
+OPENAI_BASE_URL, and custom model_providers require wire_api="responses".
+Wiring is a repo-local CODEX_HOME with config.toml pointing at the proxy's
+/proj/<token>/v1 base (the Responses SDK appends /responses).
 """
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
-from unittest import TestCase
-from unittest.mock import patch
 
-# Ensure the codex provider is imported so it registers itself in REGISTRY.
-from agentalloy.providers.codex import REGISTRY  # noqa: F401
+import pytest
+import toml
 
-# ---------------------------------------------------------------------------
-# HarnessSpec tests
-# ---------------------------------------------------------------------------
+from agentalloy.api.proxy_context import encode_proj_token
+from agentalloy.providers import REGISTRY, Capability, Protocol
 
 
-class TestCodexHarnessSpec(TestCase):
-    """Tests for the codex HarnessSpec registration."""
-
-    def test_codex_registered(self):
-        """The codex harness is registered in REGISTRY."""
-        self.assertIn("codex", REGISTRY)
-
-    def test_codex_spec_fields(self):
-        """HarnessSpec has correct name, binary, capabilities, protocol."""
-        from agentalloy.providers import Capability, Protocol
-
-        spec = REGISTRY["codex"]
-        self.assertEqual(spec.name, "codex")
-        self.assertEqual(spec.binary, "codex")
-        self.assertEqual(spec.capabilities, (Capability.PROXY,))
-        self.assertEqual(spec.protocol, Protocol.OPENAI)
-
-    def test_codex_env_builder(self):
-        """env_builder returns OPENAI_BASE_URL and OPENAI_API_KEY."""
-        spec = REGISTRY["codex"]
-        env = spec.env_builder(47950)
-        self.assertIsInstance(env, dict)
-        # Per-repo /proj/<token> discriminator baked from cwd, then /v1.
-        base = env["OPENAI_BASE_URL"]
-        self.assertTrue(base.startswith("http://localhost:47950/proj/"), base)
-        self.assertTrue(base.endswith("/v1"), base)
-        self.assertEqual(env["OPENAI_API_KEY"], "agentalloy")
-
-    def test_codex_install_writer_callable(self):
-        """install_writer is a callable that returns list[WireRecord]."""
-        spec = REGISTRY["codex"]
-        self.assertIsNotNone(spec.install_writer)
-        self.assertTrue(callable(spec.install_writer))
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    return home
 
 
-# ---------------------------------------------------------------------------
-# install module tests
-# ---------------------------------------------------------------------------
+def _read_config(root: Path) -> dict[str, object]:
+    data = toml.loads((root / ".codex" / "config.toml").read_text())
+    assert isinstance(data, dict)
+    return data
 
 
-class TestCodexInstall(TestCase):
-    """Tests for the codex install module (apply_persistent_config)."""
-
-    def test_apply_persistent_config_creates_config_toml(self):
-        """install_writer creates ~/.codex/config.toml with apiBaseUrl."""
-        from agentalloy.providers.base import WireRecord
-        from agentalloy.providers.codex import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-
-                config_path = fake_home / ".codex" / "config.toml"
-                self.assertTrue(config_path.exists())
-                content = config_path.read_text()
-
-                self.assertIn("# <!-- BEGIN agentalloy install -->", content)
-                self.assertIn("# <!-- END agentalloy install -->", content)
-                self.assertIn("[codex]", content)
-                self.assertIn('apiBaseUrl = "http://localhost:7070/v1"', content)
-                self.assertIn('apiKey = "agentalloy"', content)
-
-                self.assertIsInstance(result, list)
-                self.assertEqual(len(result), 1)
-                self.assertIsInstance(result[0], WireRecord)
-                self.assertEqual(result[0].marker_key, "codex.apiBaseUrl")
-
-    def test_apply_persistent_config_idempotent(self):
-        """Re-running apply_persistent_config replaces existing block."""
-        from agentalloy.providers.codex import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # First run
-                install.apply_persistent_config(7070, fake_home)
-
-                # Second run with different port
-                install.apply_persistent_config(8080, fake_home)
-
-                config_path = fake_home / ".codex" / "config.toml"
-                content = config_path.read_text()
-
-                self.assertIn("localhost:8080", content)
-                self.assertNotIn("localhost:7070", content)
-                self.assertEqual(content.count("# <!-- BEGIN agentalloy install -->"), 1)
-                self.assertEqual(content.count("# <!-- END agentalloy install -->"), 1)
-
-    def test_apply_persistent_config_preserves_existing_content(self):
-        """apply_persistent_config preserves existing content outside sentinels."""
-        from agentalloy.providers.codex import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # Pre-existing config (create the .codex directory first)
-                config_path = fake_home / ".codex" / "config.toml"
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                config_path.write_text("# Existing codex config\nsome_key = true\n")
-
-                # Run install
-                install.apply_persistent_config(7070, fake_home)
-
-                content = config_path.read_text()
-                self.assertIn("# Existing codex config", content)
-                self.assertIn("some_key = true", content)
-                self.assertIn("apiBaseUrl", content)
-
-    def test_apply_persistent_config_new_file_action(self):
-        """First run returns wrote_new_file action."""
-        from agentalloy.providers.codex import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                result = install.apply_persistent_config(7070, fake_home)
-                self.assertEqual(result[0].action, "wrote_new_file")
-
-    def test_apply_persistent_config_existing_file_action(self):
-        """Second run returns injected_block action."""
-        from agentalloy.providers.codex import install
-
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
-
-            with patch.object(Path, "home", return_value=fake_home):
-                # First run
-                install.apply_persistent_config(7070, fake_home)
-
-                # Second run
-                result = install.apply_persistent_config(8080, fake_home)
-                self.assertEqual(result[0].action, "injected_block")
+def test_codex_spec_fields() -> None:
+    spec = REGISTRY["codex"]
+    assert spec.name == "codex"
+    assert spec.binary == "codex"
+    assert spec.capabilities == (Capability.PROXY,)
+    assert spec.protocol == Protocol.OPENAI
 
 
-# ---------------------------------------------------------------------------
-# wire_harness integration tests
-# ---------------------------------------------------------------------------
+def test_env_builder_sets_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    env = REGISTRY["codex"].env_builder(47950)
+    assert env == {"CODEX_HOME": str(tmp_path / ".codex")}
 
 
-class TestCodexWireHarness(TestCase):
-    """Tests for wire_harness integration with codex."""
+def test_install_writer_writes_responses_provider(tmp_path: Path) -> None:
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
 
-    def test_wire_harness_codex_creates_config(self):
-        """wire_compat('codex') creates ~/.codex/config.toml."""
-        from tests._wire_compat import wire_compat
+    config = _read_config(tmp_path)
+    assert config["model_provider"] == "agentalloy"
+    providers = config["model_providers"]
+    assert isinstance(providers, dict)
+    agentalloy = providers["agentalloy"]
+    assert isinstance(agentalloy, dict)
+    token = encode_proj_token(tmp_path)
+    assert agentalloy["base_url"] == f"http://localhost:6666/proj/{token}/v1"
+    assert agentalloy["wire_api"] == "responses"
+    assert agentalloy["env_key"] == "OPENAI_API_KEY"
 
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
+    paths = {r.path for r in records}
+    assert str(tmp_path / ".codex" / "config.toml") in paths
+    assert str(tmp_path / ".codex" / ".agentalloy-env") in paths
+    assert str(tmp_path / ".codex" / ".gitignore") in paths
 
-            with patch.object(Path, "home", return_value=fake_home):
-                result = wire_compat("codex", port=7070, root=fake_home)
 
-                config_path = fake_home / ".codex" / "config.toml"
-                self.assertTrue(config_path.exists())
-                self.assertEqual(result["integration_vector"], "proxy")
-                self.assertEqual(result["harness"], "codex")
+def test_env_file_exports_codex_home(tmp_path: Path) -> None:
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
+    env_text = (tmp_path / ".codex" / ".agentalloy-env").read_text()
+    assert 'export CODEX_HOME="$PWD/.codex"' in env_text
 
-    def test_wire_harness_codex_has_api_base_url(self):
-        """The config.toml contains the correct apiBaseUrl."""
-        from tests._wire_compat import wire_compat
 
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
+def test_gitignore_keeps_codex_state_out_of_git(tmp_path: Path) -> None:
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
+    assert (tmp_path / ".codex" / ".gitignore").read_text() == "*\n"
 
-            with patch.object(Path, "home", return_value=fake_home):
-                wire_compat("codex", port=9999, root=fake_home)
 
-                config_path = fake_home / ".codex" / "config.toml"
-                content = config_path.read_text()
-                self.assertIn('apiBaseUrl = "http://localhost:9999/v1"', content)
+def test_global_config_settings_survive(fake_home: Path, tmp_path: Path) -> None:
+    """The user's global ~/.codex/config.toml tuning is carried into the repo copy."""
+    global_dir = fake_home / ".codex"
+    global_dir.mkdir()
+    (global_dir / "config.toml").write_text('model = "gpt-5-codex"\napproval_policy = "never"\n')
 
-    def test_wire_harness_codex_unknown_harness(self):
-        """wire_harness rejects unknown harness names."""
-        from tests._wire_compat import wire_compat
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
 
-        with self.assertRaises(SystemExit):
-            wire_compat("nonexistent-harness", port=7070, root=Path("/tmp"))
+    config = _read_config(tmp_path)
+    assert config["model"] == "gpt-5-codex"
+    assert config["approval_policy"] == "never"
+    assert config["model_provider"] == "agentalloy"
 
-    def test_wire_harness_codex_idempotent(self):
-        """Re-running wire_harness for codex replaces existing block."""
-        from tests._wire_compat import wire_compat
 
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
+def test_auth_json_never_copied(fake_home: Path, tmp_path: Path) -> None:
+    """OAuth secrets stay in ~/.codex — never copied into the repo."""
+    global_dir = fake_home / ".codex"
+    global_dir.mkdir()
+    (global_dir / "auth.json").write_text('{"token": "secret"}')
 
-            with patch.object(Path, "home", return_value=fake_home):
-                wire_compat("codex", port=7070, root=fake_home)
-                wire_compat("codex", port=8080, root=fake_home)
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
 
-                config_path = fake_home / ".codex" / "config.toml"
-                content = config_path.read_text()
-                self.assertIn("localhost:8080", content)
-                self.assertNotIn("localhost:7070", content)
+    assert not (tmp_path / ".codex" / "auth.json").exists()
 
-    def test_wire_harness_codex_validates_harness(self):
-        """codex is a valid harness name."""
-        from agentalloy.install.subcommands.wire_harness import VALID_HARNESSES
 
-        self.assertIn("codex", VALID_HARNESSES)
+def test_rewire_replaces_and_captures_original(tmp_path: Path) -> None:
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    writer(6666, tmp_path, False)
+    records = writer(7777, tmp_path, False)
 
-    def test_wire_harness_codex_sentinel_markers(self):
-        """The config file uses sentinel markers for uninstall."""
-        from tests._wire_compat import wire_compat
+    config = _read_config(tmp_path)
+    providers = config["model_providers"]
+    assert isinstance(providers, dict)
+    agentalloy = providers["agentalloy"]
+    assert isinstance(agentalloy, dict)
+    assert "localhost:7777" in str(agentalloy["base_url"])
+    config_record = next(r for r in records if r.path.endswith("config.toml"))
+    assert config_record.action == "replaced_file"
+    assert config_record.original_content is not None
+    assert "localhost:6666" in config_record.original_content
 
-        with tempfile.TemporaryDirectory() as tmp:
-            fake_home = Path(tmp) / "home"
-            fake_home.mkdir()
 
-            with patch.object(Path, "home", return_value=fake_home):
-                wire_compat("codex", port=7070, root=fake_home)
+def test_malformed_global_config_does_not_block_wiring(fake_home: Path, tmp_path: Path) -> None:
+    global_dir = fake_home / ".codex"
+    global_dir.mkdir()
+    (global_dir / "config.toml").write_text("{not toml")
 
-                config_path = fake_home / ".codex" / "config.toml"
-                content = config_path.read_text()
-                self.assertIn("# <!-- BEGIN agentalloy install -->", content)
-                self.assertIn("# <!-- END agentalloy install -->", content)
+    writer = REGISTRY["codex"].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
+
+    assert records
+    config = _read_config(tmp_path)
+    assert config["model_provider"] == "agentalloy"

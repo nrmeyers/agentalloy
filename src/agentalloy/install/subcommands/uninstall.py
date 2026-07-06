@@ -1044,6 +1044,9 @@ def uninstall(
         ".openclaw/plugins.json",  # openclaw plugin config
         ".copilot/.agentalloy-env",  # copilot-cli BYOK env carrier
         "opencode.json",  # opencode repo-local provider config
+        ".codex/config.toml",  # codex repo-local CODEX_HOME config
+        ".codex/.agentalloy-env",  # codex CODEX_HOME activation env file
+        ".codex/.gitignore",  # codex repo-local state gitignore
     )
     root_resolved = root.resolve()
     # Trusted user-scope prefixes, resolved. A prefix that is itself a symlink

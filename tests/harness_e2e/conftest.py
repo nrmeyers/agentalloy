@@ -63,6 +63,7 @@ def proxy(upstream_stub: UpstreamStub, tmp_path_factory: pytest.TempPathFactory)
             "UPSTREAM_MODEL": "stub-model",
             "UPSTREAM_API_KEY": "stub-key",
             "ANTHROPIC_UPSTREAM_URL": upstream_stub.base_url,
+            "RESPONSES_UPSTREAM_URL": upstream_stub.base_url,
             "LM_ASSIST": "off",
             "SIGNAL_INTENT_BACKEND": "cosine",
             "AGENTALLOY_RELEASE_CHECK": "0",
