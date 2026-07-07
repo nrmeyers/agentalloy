@@ -140,10 +140,33 @@ When you bump the version you MUST also:
 
 ## 5. Cutting a release
 
-Create the GitHub **release** (not a bare tag) after the version-bump PR is
-merged — the release must exist before the tag build finishes, because
-`container-build.yml` uploads `web-dist.tar.gz` onto it with
-`gh release upload`:
+The cut is **automated**: when a version-bump PR merges to main and that
+commit's CI goes green, `Release Cut` (`.github/workflows/release-cut.yml`)
+creates the GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed
+from the bump PR, generated notes) and dispatches `Container Build & Publish`
+on the new tag. Merging the bump PR IS cutting the release — nothing to run.
+
+What the automation guarantees, and why it's shaped this way:
+
+- The **release exists before the tag build finishes** — `container-build.yml`
+  uploads `web-dist.tar.gz` onto it with `gh release upload`, so the release
+  is created first and the build dispatched second.
+- The tag build publishes the release-pinned
+  `ghcr.io/nrmeyers/agentalloy:v<X.Y.Z>` image (corpus baked in) and attaches
+  the version-matched `web-dist.tar.gz` to the release.
+- The build is **dispatched explicitly** (`workflow_dispatch --ref v<X.Y.Z>`)
+  because tags created with `GITHUB_TOKEN` do not fire `on: push: tags`
+  workflows.
+- Non-bump merges and re-runs are no-ops (version already tagged); a red CI
+  run cuts nothing. The version bump itself stays a human decision in the PR
+  (§4) — only the cut is mechanized.
+- Release title/notes are editable after the fact (`gh release edit`); the
+  automation never touches an existing release or tag.
+
+Confirm completion with `gh run list --workflow container-build.yml` and
+check the asset landed: `gh release view v<X.Y.Z> --json assets`.
+
+**Manual fallback** (automation down or cutting from an unusual state):
 
 ```
 git checkout main && git pull --ff-only origin main
@@ -151,21 +174,10 @@ gh release create v<X.Y.Z> --target main --generate-notes \
   --title "v<X.Y.Z> — <one-line theme>"
 ```
 
-`gh release create` makes the tag and the release in one step and pushing the
-tag triggers everything downstream:
-
-- `Container Build & Publish` (`.github/workflows/container-build.yml`) runs on
-  both `push` to `main` and the `v*` tag. The tag build publishes the
-  release-pinned `ghcr.io/nrmeyers/agentalloy:v<X.Y.Z>` image (corpus baked in)
-  and attaches the version-matched `web-dist.tar.gz` to the release.
-- The tag must point at the squash-merge commit on `main` (where `pyproject`
-  already reads the new version). Don't tag a feature-branch commit.
-- Confirm completion with `gh run list --workflow container-build.yml` and
-  check the asset landed: `gh release view v<X.Y.Z> --json assets`.
-
-Worked example (v6.0.0, 2026-07-06): bump PR #335 merged → `gh release create
-v6.0.0 --target main --generate-notes` → tag build published both arches and
-attached web-dist; corpus cache hit (no pack changes) kept it to minutes.
+The tag must point at the squash-merge commit on `main` (where `pyproject`
+already reads the new version) — never a feature-branch commit. A manually
+pushed tag (your credentials, not `GITHUB_TOKEN`) triggers the container
+build itself; don't also dispatch it.
 
 ## 6. Quick checklist
 
@@ -176,8 +188,8 @@ attached web-dist; corpus cache hit (no pack changes) kept it to minutes.
 - [ ] Local gate green: ruff check + ruff format --check + pyright + pytest.
 - [ ] PR opened against `main`, required checks green, squash-merged with
       authorization (`gh pr merge --auto --squash`).
-- [ ] `gh release create v<X.Y.Z> --target main --generate-notes` on the merge
-      commit; container build + web-dist asset confirmed.
+- [ ] If the PR bumped the version: `Release Cut` created `v<X.Y.Z>` after CI
+      went green; container build + web-dist asset confirmed.
 
 ## 7. Gotchas seen in past releases
 

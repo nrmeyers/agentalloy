@@ -1,0 +1,84 @@
+name: Release Cut
+
+# Cuts the GitHub release automatically when a version bump lands on main:
+# CI green on a main commit whose pyproject version has no tag yet → create
+# release v<version> (tag + notes from the bump PR) → dispatch the container
+# build on the new tag.
+#
+# Two invariants this workflow exists to keep (RELEASE.md §5):
+# - The release must exist BEFORE the tag's container build finishes, because
+#   that build uploads web-dist.tar.gz onto it. Creating the release first and
+#   only then dispatching the build makes the ordering structural.
+# - Tags created with GITHUB_TOKEN do not trigger `on: push: tags` workflows
+#   (GitHub anti-recursion), so the container build is dispatched explicitly
+#   via workflow_dispatch on the tag ref.
+#
+# The version BUMP stays a human decision in the PR; only the cut is
+# mechanized. No-ops: non-bump merges (tag already exists) and CI failures.
+# Never deletes or force-moves a tag; re-runs are idempotent.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the tag + release
+  actions: write # dispatch container-build on the tag
+  pull-requests: read # bump-PR title/body for the release notes
+
+jobs:
+  cut:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Detect untagged version bump
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -Pom1 '^version = "\K[^"]+' pyproject.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh api "repos/${{ github.repository }}/git/ref/tags/v$version" --silent 2>/dev/null; then
+            echo "v$version already tagged — nothing to cut."
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        if: steps.version.outputs.cut == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # Title theme from the bump PR (the human-curated one-liner); the
+          # body is GitHub's generated notes — both editable after the fact.
+          theme=$(gh api "repos/${{ github.repository }}/commits/$HEAD_SHA/pulls" \
+            --jq '.[0].title // empty' || true)
+          theme=${theme:-release}
+          gh release create "v$VERSION" \
+            --target "$HEAD_SHA" \
+            --generate-notes \
+            --title "v$VERSION — $theme"
+
+      - name: Dispatch container build on the tag
+        if: steps.version.outputs.cut == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # GITHUB_TOKEN-created tags don't fire `on: push: tags` — dispatch
+          # the build explicitly on the tag ref (same github.ref semantics).
+          gh workflow run "Container Build & Publish" --ref "v$VERSION"
