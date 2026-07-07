@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "6.3.0"
+version = "6.3.1"
 description = "AgentAlloy — just-in-time context engine for coding agents. Two context modules: phase-aware instruction composition from a curated 300+ skill corpus, and an optional per-repo code index (tree-sitter symbol graph + hybrid search). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,6 +19,8 @@ dependencies = [
     "lancedb>=0.13",
     "pyarrow>=15.0",
     "watchdog>=6.0.0",
+    # codex provider writes .codex/config.toml (reads use stdlib tomllib).
+    "tomli-w>=1.0",
 ]
 
 [project.optional-dependencies]

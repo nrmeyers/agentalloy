@@ -8,10 +8,10 @@ Wiring is a repo-local CODEX_HOME with config.toml pointing at the proxy's
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
-import toml
 
 from agentalloy.api.proxy_context import encode_proj_token
 from agentalloy.providers import REGISTRY, Capability, Protocol
@@ -26,7 +26,7 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _read_config(root: Path) -> dict[str, object]:
-    data = toml.loads((root / ".codex" / "config.toml").read_text())
+    data = tomllib.loads((root / ".codex" / "config.toml").read_text())
     assert isinstance(data, dict)
     return data
 

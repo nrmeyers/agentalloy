@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import hashlib
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any, cast
 
-import toml
+import tomli_w
 
 from agentalloy.providers.base import WireRecord
 
@@ -53,7 +54,7 @@ def render_config(port: int, root: Path) -> str:
     global_config = Path.home() / ".codex" / "config.toml"
     if global_config.exists():
         try:
-            config = toml.loads(global_config.read_text())
+            config = tomllib.loads(global_config.read_text())
         except Exception:  # noqa: BLE001 — a malformed global config must not block wiring
             config = {}
 
@@ -71,7 +72,7 @@ def render_config(port: int, root: Path) -> str:
         "env_key": "OPENAI_API_KEY",
     }
     config["model_providers"] = providers
-    return toml.dumps(config)
+    return tomli_w.dumps(config)
 
 
 def apply_persistent_config(port: int, root: Path, force: bool = False) -> list[WireRecord]:

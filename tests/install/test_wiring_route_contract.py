@@ -67,11 +67,11 @@ def test_codex_config_base_url_resolves_to_responses_route(tmp_path: Path) -> No
     so the contract is checked against the rendered config file instead of
     env_builder output. The Responses SDK requests {base_url}/responses.
     """
-    import toml
+    import tomllib
 
     from agentalloy.providers.codex.install import render_config
 
-    config = toml.loads(render_config(47950, tmp_path))
+    config = tomllib.loads(render_config(47950, tmp_path))
     base = urlparse(config["model_providers"]["agentalloy"]["base_url"]).path.rstrip("/")
     assert base.startswith("/proj/"), f"expected /proj/<token> base, got {base!r}"
     assert config["model_providers"]["agentalloy"]["wire_api"] == "responses"
