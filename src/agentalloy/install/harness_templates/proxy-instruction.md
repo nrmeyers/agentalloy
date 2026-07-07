@@ -1,16 +1,20 @@
-## AgentAlloy — proxy mode
+## AgentAlloy — workflow context (sidecar)
 
-AgentAlloy is wired as a proxy at `http://localhost:{port}/v1`.
+This block is managed by AgentAlloy. This harness is **not** proxy-intercepted:
+your model traffic goes to its usual backend, and AgentAlloy context reaches
+you only through this file.
 
-Your normal chat completions go through the proxy. Skill composition and
-system message injection happen transparently — no manual `/compose` calls
-needed.
+**Current phase.** The project's SDD phase lives in `.agentalloy/phase`. Read
+it at session start and match your behavior to that lifecycle stage.
 
-**Session start — determine phase.** Check `.agentalloy/phase` for the current
-phase. If it exists, the proxy uses it. If not, the proxy passes requests
-through unchanged.
+**Keeping this block fresh.** `agentalloy watch start --harness <name>`
+regenerates this block (phase-specific workflow guidance + contract context)
+within ~1s of any phase or contract change. Without the watcher running, this
+block is static — re-read `.agentalloy/phase` yourself when in doubt.
 
-**Non-SDD work.** Casual chat and questions bypass skill injection
-automatically — the proxy evaluates signals per request.
+**Manual composition.** The AgentAlloy service runs at
+`http://localhost:{port}` — `POST /compose` returns skill context for a task
++ phase on demand.
 
-Phases: `spec`, `design`, `build`, `qa`, `ops`, `meta`, `governance`, `ship`.
+Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship`
+(fast lane: `intake`, `sdd-fast`, `qa`, `ship`).

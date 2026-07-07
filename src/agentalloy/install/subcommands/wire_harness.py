@@ -1611,9 +1611,9 @@ def _wire_proxy_codex(port: int, root: Path) -> list[dict[str, Any]]:
     """Wire Codex to use the AgentAlloy proxy.
 
     Delegates to the provider registry's install_writer (like openclaw) so the
-    provider module and this path cannot diverge. Writes ``~/.codex/config.toml``
-    with a sentinel-bounded TOML block containing ``apiBaseUrl`` and ``apiKey``
-    pointing to the proxy.
+    provider module and this path cannot diverge. Writes the repo-local
+    ``CODEX_HOME`` carrier (``.codex/config.toml`` with the agentalloy
+    Responses provider, ``.agentalloy-env``, ``.gitignore``).
     """
     writer = REGISTRY["codex"].install_writer
     assert writer is not None, "codex registers an install_writer"
@@ -1627,11 +1627,18 @@ def _wire_proxy_instruction(
     root: Path,
     scope: str,
 ) -> list[dict[str, Any]]:
-    """Write a proxy instruction block for the harness.
+    """Write the sidecar workflow-context block for the harness.
 
-    For harnesses that don't support custom API endpoints, this writes a
-    sentinel-bounded instruction block explaining that the proxy is active.
+    For harnesses the proxy cannot intercept (cursor, windsurf,
+    github-copilot, antigravity), this seeds the rules file with a truthful
+    sidecar block. The block uses the SAME ``AGENTALLOY-CONTEXT`` markers the
+    watch sidecar owns (``watch.regenerators.update_block``), so
+    ``agentalloy watch`` replaces this exact block in place with live
+    phase/contract content — a distinct marker family here would leave this
+    seed block stale forever while the watcher appends a second one.
     """
+    from agentalloy.watch.regenerators import AGENTALLOY_MARKER, update_block
+
     # Resolve target path
     if harness == "cursor":
         rel_path, dedicated = _resolve_cursor_path(root)
@@ -1643,31 +1650,24 @@ def _wire_proxy_instruction(
         reg = _HARNESS_REGISTRY[harness]
         rel_path = reg["target"]
         dedicated = reg["dedicated"]
+    _ = dedicated  # dedicated vs shared no longer matters: one marker block either way
 
     target_path = root / rel_path
     original_content = _capture_original(target_path)
     template = _load_template("proxy-instruction.md")
     rendered = _render_template(template, port)
 
-    # Ensure parent directory exists
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if dedicated:
-        install_state._atomic_write(target_path, rendered)  # pyright: ignore[reportPrivateUsage]
-        action = "wrote_new_file"
-        content_sha256 = _sha256(rendered.strip())
-    else:
-        existing = target_path.read_text() if target_path.exists() else ""
-        result_content = _inject_sentinel_block(existing, rendered)
-        install_state._atomic_write(target_path, result_content)  # pyright: ignore[reportPrivateUsage]
-        action = "injected_block"
-        content_sha256 = _sha256(rendered.strip())
+    update_block(target_path, AGENTALLOY_MARKER, rendered)
 
     return [
         {
             "path": str(target_path),
-            "action": action,
-            "content_sha256": content_sha256,
+            "action": "wrote_new_file" if original_content is None else "injected_block",
+            "content_sha256": _sha256(rendered.strip()),
+            # Uninstall's record walk strips by these markers (they override
+            # the default install sentinels).
+            "sentinel_begin": f"<!-- BEGIN {AGENTALLOY_MARKER} -->",
+            "sentinel_end": f"<!-- END {AGENTALLOY_MARKER} -->",
             **({"original_content": original_content} if original_content is not None else {}),
         }
     ]

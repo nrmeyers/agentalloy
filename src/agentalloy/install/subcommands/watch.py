@@ -78,16 +78,20 @@ def _detect_harness() -> str | None:
 def _start(args: argparse.Namespace) -> int:
     import yaml
 
-    # Deprecation warning for the hooks/sidecar model
-    print(
-        "DEPRECATION: the hooks/sidecar watch model is deprecated. "
-        "The proxy model is the recommended approach. "
-        "See docs for migration.",
-        file=sys.stderr,
-    )
-
     profile = getattr(args, "profile", None) or "default"
     harness = getattr(args, "harness", None) or _detect_harness()
+
+    # The watcher is the ONLY live-context channel for proxy-unable harnesses
+    # (cursor, windsurf, github-copilot, antigravity) — don't scare those
+    # users off. It is deprecated only as an alternative to proxy wiring for
+    # harnesses that support a proxy carrier.
+    if harness is not None and harness not in PROXY_UNABLE_HARNESSES:
+        print(
+            "NOTE: this harness supports proxy wiring, which supersedes the "
+            "watch sidecar (per-turn injection, no watcher process). "
+            "Use `agentalloy wire --harness <name>` instead.",
+            file=sys.stderr,
+        )
 
     if harness is None:
         print(

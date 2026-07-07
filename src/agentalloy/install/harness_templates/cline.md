@@ -12,4 +12,4 @@ A local agentalloy service runs at http://localhost:{port}.
 
 **Phase transitions.** Update `.agentalloy/phase` if activity shifts.
 
-Phases: `spec`, `design`, `build`, `qa`, `ops`.
+Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (fast lane: `intake`, `sdd-fast`, `qa`, `ship`).

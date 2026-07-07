@@ -17,4 +17,4 @@ curl -s -X POST http://localhost:{port}/compose/text \
 
 **Phase transitions.** If the user's activity clearly shifts to a different SDD phase, update `.agentalloy/phase` and call `/compose` with the new phase.
 
-Phases: `spec`, `design`, `build`, `qa`, `ops`. Match the phase to the lifecycle stage of the task.
+Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (fast lane: `intake`, `sdd-fast`, `qa`, `ship`). Match the phase to the lifecycle stage of the task.
