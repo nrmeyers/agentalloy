@@ -38,9 +38,6 @@ class HarnessCase:
     scrub_env: tuple[str, ...] = field(default=())
     # Known-broken with a tracked cause: the matrix xfails instead of failing.
     xfail_reason: str = ""
-    # False when the proxy is KNOWN not to inject for this harness (tracked
-    # product gap); transport is still hard-asserted.
-    expect_injection: bool = True
 
 
 def _wire_aider(port: int, root: Path) -> object:
@@ -224,12 +221,9 @@ CASES: tuple[HarnessCase, ...] = (
         ],
         wire=_wire_aider,
         scrub_env=("OPENAI_API_BASE", "OPENAI_BASE_URL"),
-        # Known product gap: aider never sends a `tools` array, and the proxy's
-        # carrier-request gate (proxy_signal.py: is_carrier = bool(request.tools))
-        # only injects on tool-bearing turns — so injection never fires for
-        # aider. Flip back to True when the carrier gate learns to serve
-        # tool-less harnesses.
-        expect_injection=False,
+        # aider never sends a `tools` array; it relies on the carrier gate's
+        # fingerprint-session path (tool-less turns carry when the session is
+        # fingerprint-keyed) for injection — this entry is that path's canary.
         notes="Reads .aider.conf.yml from cwd — exercises the sentinel YAML carrier.",
     ),
     HarnessCase(

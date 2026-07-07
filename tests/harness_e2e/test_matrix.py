@@ -70,7 +70,7 @@ def test_harness_roundtrip(
         f"stderr:\n{result.stderr[-2000:]}"
     )
 
-    if EXPECT_INJECTION and case.expect_injection:
+    if EXPECT_INJECTION:
         texts = user_texts(new_requests)
         assert any(INJECTION_MARKER in t for t in texts), (
             f"{case.name}: request reached upstream but no {INJECTION_MARKER} "

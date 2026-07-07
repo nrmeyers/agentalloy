@@ -116,7 +116,9 @@ The passthrough has all of this. Parity = both surfaces run the identical
 - **Marker/announce state keying without the repo token** — OpenAI harnesses wire tokenless; resolve
   repo/cwd via the existing cwd/metadata chain and decide where the announce/cursor state lives.
 - **Session-id parity** — `proxy_session.extract_session_header` for the carrier gate
-  (`is_carrier = bool(request.tools)`) on the OpenAI path.
+  (`is_carrier = bool(request.tools) or session_source == "fingerprint"` — tool-less turns
+  carry when the session is fingerprint-keyed, since background requests can't share a
+  fingerprint key) on the OpenAI path.
 - **Refactor target** — lift the passthrough's inject + `commit_markers` flow into a shared helper
   both routers call, so Phase 3 has one injection seam, not two.
 

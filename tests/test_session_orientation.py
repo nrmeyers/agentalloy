@@ -35,11 +35,11 @@ from agentalloy.storage.telemetry_store import open_telemetry_store
 def _req(*user_texts: str, tools: bool = True) -> ProxyRequest:
     """A request whose messages are the given user turns (in order).
 
-    Carries a tool array by default, modelling a genuine agent turn — the
-    carrier-request gate in ``evaluate_signal`` only announces / advances the cursor
-    for tool-carrying requests. Pass ``tools=False`` to model a harness background
+    Carries a tool array by default, modelling a genuine agent turn. Pass
+    ``tools=False`` with a ``session_id`` to model a harness background
     micro-request (quota ping, title / topic-detection haiku call) that shares the
-    session id but must never burn a cadence marker.
+    session id but must never burn a cadence marker; a tool-less request WITHOUT a
+    header resolves by fingerprint and is a carrier (the aider path).
     """
     return ProxyRequest(
         model="gpt-4",
@@ -223,6 +223,28 @@ def test_background_request_does_not_advance_cursor(tmp_path: Path) -> None:
     # the carrier turn that follows.
     _set_phase(tmp_path, "build")
     assert _eval(_req("quota", tools=False), tmp_path, session_id="A").announce_cursor is False
+
+
+def test_toolless_fingerprint_session_is_a_carrier(tmp_path: Path) -> None:
+    # A harness that never sends a tool array (aider) resolves its session by
+    # fingerprint. Fingerprint keys are derived from the conversation's own
+    # opening message, so a background request can't share the key and the
+    # marker-burn race doesn't exist — tool-less turns must still orient.
+    _set_phase(tmp_path, "build")
+    assert _eval(_req("aider task", tools=False), tmp_path).announce is True
+    # Once oriented, the same conversation stays quiet.
+    assert _eval(_req("aider task", "more", tools=False), tmp_path).announce is False
+    # A different tool-less conversation is its own session and orients itself
+    # without having been burned by the first.
+    assert _eval(_req("another task", tools=False), tmp_path).announce is True
+
+
+def test_toolless_header_session_still_gated(tmp_path: Path) -> None:
+    # The fingerprint carve-out must not weaken the header-source gate: a
+    # tool-less request WITH a session header is still a background ping.
+    _set_phase(tmp_path, "build")
+    assert _eval(_req("quota", tools=False), tmp_path, session_id="A").announce is False
+    assert _eval(_req("real task"), tmp_path, session_id="A").announce is True
 
 
 def test_fingerprint_session_reorients_when_first_message_changes(tmp_path: Path) -> None:

@@ -23,10 +23,13 @@ class TestAiderProxyWiring:
         assert result["integration_vector"] == "proxy"
         assert result["harness"] == "aider"
 
+        from agentalloy.api.proxy_context import encode_proj_token
+
         conf = repo_root / ".aider.conf.yml"
         assert conf.exists()
         content = conf.read_text()
-        assert "openai-api-base: http://localhost:7777/v1" in content
+        token = encode_proj_token(repo_root)
+        assert f"openai-api-base: http://localhost:7777/proj/{token}/v1" in content
         assert "openai-api-key: agentalloy" in content
         assert "model: openai/agentalloy-proxy" in content
         # Proxy mode does NOT create a separate instructions file

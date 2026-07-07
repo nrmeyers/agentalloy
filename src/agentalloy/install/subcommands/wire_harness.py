@@ -1027,14 +1027,19 @@ def _wire_proxy_aider(port: int, root: Path) -> list[dict[str, Any]]:
 
     Writes a sentinel-bounded YAML block that configures aider's
     ``openai-api-base``, ``openai-api-key``, and ``model`` fields to point
-    at the proxy.
+    at the proxy. The carrier is repo-local, so the base URL embeds the
+    per-repo ``/proj/<token>`` discriminator (like opencode's repo-local
+    config) — a bare ``/v1`` would resolve phase/marker state from the
+    proxy's own deployment cwd, not this repo.
     """
+    from agentalloy.api.proxy_context import encode_proj_token
+
     conf_path = root / ".aider.conf.yml"
     original_content = _capture_original(conf_path)
     sentinel_begin = "# <!-- BEGIN agentalloy install -->"
     sentinel_end = "# <!-- END agentalloy install -->"
 
-    proxy_url = f"http://localhost:{port}/v1"
+    proxy_url = f"http://localhost:{port}/proj/{encode_proj_token(root)}/v1"
     block_lines = [
         sentinel_begin,
         f"openai-api-base: {proxy_url}",

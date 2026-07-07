@@ -26,9 +26,10 @@ from agentalloy.signals.prefilter import PreFilterMatch
 
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
-    # Carries a tool array by default: the carrier-request gate in evaluate_signal
-    # only announces / advances the cursor for tool-carrying (genuine agent) turns.
-    # Pass tools=False to model a background micro-request that must not burn markers.
+    # Carries a tool array by default, modelling a genuine agent turn. Pass
+    # tools=False (with a session_id header at the call site) to model a background
+    # micro-request that must not burn markers; tool-less requests without a header
+    # are fingerprint-keyed and DO carry.
     return ProxyRequest(
         model="gpt-4",
         messages=[ProxyMessage(role="user", content=prompt)],
@@ -810,8 +811,12 @@ class TestEvaluateSignalBanner:
                 return_value=None,
             ),
         ):
-            # tools=None → non-carrier → no banner.
-            result = asyncio.run(evaluate_signal(_req("work", tools=False), tmp_path))
+            # tools=None on a header-keyed session → non-carrier → no banner.
+            # (A session header is what makes a tool-less turn a background ping;
+            # tool-less fingerprint sessions — aider — DO carry.)
+            result = asyncio.run(
+                evaluate_signal(_req("work", tools=False), tmp_path, session_id="sess-bg")
+            )
         assert result.banner is None
 
     def test_lifecycle_off_leaves_banner_none(self, tmp_path: Path) -> None:
