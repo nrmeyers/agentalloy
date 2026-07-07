@@ -31,10 +31,11 @@ def test_copilot_cli_spec_fields() -> None:
     assert spec.protocol == Protocol.OPENAI
 
 
-def test_github_copilot_ide_harness_still_markdown_only() -> None:
-    """Promoting the CLI must not reclassify the IDE/extension surface."""
+def test_github_copilot_ide_harness_is_dual_carrier() -> None:
+    """The IDE surface is PROXY (BYOK custom endpoint) + MARKDOWN_ONLY (ambient
+    instructions) — distinct from this standalone-CLI harness."""
     spec = REGISTRY["github-copilot"]
-    assert spec.capabilities == (Capability.MARKDOWN_ONLY,)
+    assert spec.capabilities == (Capability.PROXY, Capability.MARKDOWN_ONLY)
 
 
 def test_env_builder_returns_byok_vars() -> None:

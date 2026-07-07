@@ -206,9 +206,10 @@ This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **insta
 Harnesses fall into two categories:
 
 - **Proxy-wired** (Claude Code, Aider, Cline, Codex, Continue.dev, OpenClaw, OpenCode, Hermes Agent, Copilot CLI — **all nine live-verified** by the harness e2e matrix, real binaries end to end) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically. Codex rides the native [OpenAI Responses passthrough](docs/responses-surface.md) (`/proj/<token>/v1/responses`).
-- **Sidecar** (Cursor, Windsurf, GitHub Copilot IDE/extension, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Dual-carrier** (GitHub Copilot in VS Code, `github-copilot`) — BYOK "Custom Endpoint" proxy carrier (`chatLanguageModels.json`, agent-mode capable, pending manual verification) **plus** the instructions-file sidecar as ambient context and as the fallback when org policy disables BYOK.
 
-> Copilot has two entries: the standalone **Copilot CLI** (`copilot-cli`, npm `@github/copilot`) is proxy-wired via its BYOK env vars (`COPILOT_PROVIDER_*`; note BYOK routes model traffic to your configured upstream key, not your Copilot subscription), while the IDE/extension surface (`github-copilot`) routes through GitHub's backend and stays sidecar-only.
+> Copilot has two entries: the standalone **Copilot CLI** (`copilot-cli`, npm `@github/copilot`) is proxy-wired via its BYOK env vars (`COPILOT_PROVIDER_*`), and the VS Code surface (`github-copilot`) is dual-carrier as above. In both BYOK modes, model traffic routes to your configured upstream key, not your Copilot subscription.
 
 Proxy-wired is the preferred mode. Full per-harness catalog: [docs/install/harness-catalog.md](docs/install/harness-catalog.md).
 

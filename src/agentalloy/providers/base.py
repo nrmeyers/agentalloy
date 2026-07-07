@@ -143,6 +143,11 @@ class WireRecord:
     content_sha256: str
     original_content: str | None = None
     marker_key: str = ""
+    # Optional sentinel overrides: uninstall's record walk strips by THESE
+    # markers instead of the default install sentinels (used by the sidecar
+    # writers, whose blocks carry the watcher's AGENTALLOY-CONTEXT markers).
+    sentinel_begin: str = ""
+    sentinel_end: str = ""
 
     def __post_init__(self) -> None:
         if self.action not in _VALID_ACTIONS:
@@ -161,6 +166,10 @@ class WireRecord:
             d["original_content"] = self.original_content
         if self.marker_key:
             d["marker_key"] = self.marker_key
+        if self.sentinel_begin:
+            d["sentinel_begin"] = self.sentinel_begin
+        if self.sentinel_end:
+            d["sentinel_end"] = self.sentinel_end
         return d
 
     @staticmethod
@@ -172,6 +181,8 @@ class WireRecord:
             content_sha256=d["content_sha256"],
             original_content=d.get("original_content"),
             marker_key=d.get("marker_key", ""),
+            sentinel_begin=d.get("sentinel_begin", ""),
+            sentinel_end=d.get("sentinel_end", ""),
         )
 
     @staticmethod

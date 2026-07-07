@@ -46,6 +46,7 @@ These harnesses have native proxy wiring via `_wire_proxy_*()` functions:
 | `codex` | repo-local `.codex/` (`CODEX_HOME`) | `config.toml` (`model_provider`, `[model_providers.agentalloy]` with `base_url`, `wire_api="responses"`, `env_key`), `.agentalloy-env`, `.gitignore` | P1 |
 | `openclaw` | `~/.openclaw/openclaw.json` (user-scoped) | `models.providers.agentalloy` (`baseUrl=…/v1`, `api: openai-completions`), `agents.defaults.model.primary` | P1 |
 | `copilot-cli` | `.copilot/.agentalloy-env` (sourced or injected via `agentalloy wrap`) | BYOK env: `COPILOT_PROVIDER_TYPE`, `COPILOT_PROVIDER_BASE_URL` (`…/proj/<token>/v1`), `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL` | P1 |
+| `github-copilot` | VS Code user-profile `chatLanguageModels.json` + `.github/copilot-instructions.md` | BYOK `customendpoint` provider group (`apiType: chat-completions`, model url `…/v1/chat/completions`, `toolCalling: true`) + sidecar instructions block | P2 |
 
 #### Multiple harnesses per repo
 

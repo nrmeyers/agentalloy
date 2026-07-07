@@ -891,6 +891,15 @@ def _wire_proxy(
     if harness == "codex":
         return _wire_proxy_codex(port, root)
 
+    if harness == "github-copilot":
+        # Dual-carrier: instructions sidecar + VS Code BYOK provider group.
+        # Delegate to the provider (openclaw pattern) so the two paths share
+        # one implementation.
+        writer = REGISTRY["github-copilot"].install_writer
+        assert writer is not None, "github-copilot registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
     if harness == "copilot-cli":
         # Env-var-only BYOK carrier (.copilot/.agentalloy-env) — no legacy
         # registry target, so the instruction fallback below would crash.

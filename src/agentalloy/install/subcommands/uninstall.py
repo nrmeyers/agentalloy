@@ -1020,6 +1020,9 @@ def uninstall(
         home / ".agentalloy",
         home / ".openclaw",
         home / ".cline",
+        # VS Code user profile (github-copilot BYOK carrier), per platform.
+        home / ".config" / "Code",
+        home / "Library" / "Application Support" / "Code",
     )
     # Set of harness target basenames / suffix-paths we ever write. Any
     # `path` in state that doesn't end in one of these is rejected even
@@ -1033,6 +1036,7 @@ def uninstall(
         ".windsurfrules",
         ".windsurf/rules/agentalloy.md",
         ".github/copilot-instructions.md",
+        "chatLanguageModels.json",  # VS Code BYOK provider store (github-copilot)
         ".continuerc.json",
         ".continue/agents/agentalloy.yaml",  # continue modern workspace agent
         ".cursor/mcp.json",

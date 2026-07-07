@@ -38,6 +38,24 @@ check confirms the VS Code extension honors it too:
    UI) — that proves the extension used the store, not its cached
    globalState provider.
 
+## github-copilot (VS Code — BYOK proxy carrier, UNVERIFIED until this passes)
+
+The BYOK carrier was built from pinned VS Code docs/schemas but cannot be
+machine-verified (no headless VS Code). **The proxy claim is gated on this
+check** — until it passes once, treat github-copilot proxying as unverified.
+
+1. Wire; confirm the VS Code user profile's `chatLanguageModels.json` carries
+   the `AgentAlloy` customendpoint group (model url → the proxy's
+   `/v1/chat/completions`).
+2. Restart VS Code (the model picker caches). In Copilot Chat, "Chat: Manage
+   Language Models" → the "AgentAlloy Proxy" model should be listed; select
+   it (agent mode should offer it too — `toolCalling: true`).
+3. Send one prompt; confirm the turn completes AND service telemetry shows a
+   `proxy_composed`/`proxy_passthrough` row.
+4. If the model doesn't appear: check for a Copilot Business/Enterprise BYOK
+   policy, or schema drift in `chatLanguageModels.json` (file an issue —
+   that's a real finding).
+
 ## antigravity / gemini-cli (sidecar — GEMINI.md)
 
 1. Wire; confirm `GEMINI.md` carries the marker-bounded AgentAlloy block.

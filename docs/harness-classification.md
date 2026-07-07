@@ -36,6 +36,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 | `codex` | repo-local `.codex/config.toml` (`CODEX_HOME`, hermes pattern): `model_provider = "agentalloy"`, `[model_providers.agentalloy]` `base_url=…/proj/<token>/v1`, `wire_api = "responses"` → native Responses passthrough (`docs/responses-surface.md`) |
 | `openclaw` | `~/.openclaw/openclaw.json` — `models.providers.agentalloy` custom provider (`api: openai-completions`, `baseUrl=…/v1`) + default model |
 | `copilot-cli` | `.copilot/.agentalloy-env` (BYOK `COPILOT_PROVIDER_TYPE=openai`, `COPILOT_PROVIDER_BASE_URL=…/proj/<token>/v1`, `COPILOT_PROVIDER_API_KEY`, `COPILOT_MODEL`) — sourced or injected via `agentalloy wrap` |
+| `github-copilot` | dual-carrier: VS Code user-profile `chatLanguageModels.json` (BYOK `customendpoint` group, `apiType: chat-completions`, full URL `…/v1/chat/completions`, agent-mode capable) **+** the `.github/copilot-instructions.md` sidecar block (ambient context; covers policy-disabled BYOK). ⚠️ Not machine-verifiable (no headless VS Code) — manual-smoke gated. |
 
 ### Sidecar
 
@@ -54,7 +55,7 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 |---|---|---|
 | `cursor` | Routes through Cursor's service; no first-party base-URL override | `.cursor/rules/agentalloy.mdc` (dedicated) or `.cursorrules` (shared) |
 | `windsurf` | No first-party base-URL override | `.windsurf/rules/agentalloy.md` (dedicated) or `.windsurfrules` (shared) |
-| `github-copilot` | IDE/extension surface: closed routing through GitHub backend. The standalone Copilot CLI is proxy-wired as `copilot-cli` (BYOK) | `.github/copilot-instructions.md` (shared, marker-bounded) |
+| `github-copilot` (markdown half) | Copilot-billed model traffic routes through GitHub's backend; the instructions file is the ambient channel and the fallback when org policy disables BYOK. The BYOK carrier above provides the proxy half. | `.github/copilot-instructions.md` (shared, marker-bounded) |
 | `antigravity` (alias `gemini-cli`) | Antigravity CLI (formerly Gemini CLI). Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars | `GEMINI.md` (shared, marker-bounded) |
 
 ### Non-Classified
