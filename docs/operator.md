@@ -313,6 +313,7 @@ profiles:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ANTHROPIC_UPSTREAM_URL` | Upstream for the native Anthropic passthrough (`/proj/<token>/v1/messages`); point at another proxy to chain, or at an Anthropic-compatible provider (see below) | `https://api.anthropic.com` |
+| `RESPONSES_UPSTREAM_URL` | Upstream for the native OpenAI Responses passthrough (`/proj/<token>/v1/responses` — the codex path, [responses-surface.md](responses-surface.md)); auth-transparent like the Anthropic passthrough | `https://api.openai.com` |
 | `RUNTIME_EMBED_BASE_URL` | Embed llama-server URL | `http://localhost:47951` |
 | `RUNTIME_EMBEDDING_MODEL` | Embedding model (GGUF) | `nomic-embed-text-v1.5.Q8_0.gguf` |
 | `SIGNAL_INTENT_BACKEND` | Phase-gate intent backend (`reranker`/`cosine`) | `reranker` |

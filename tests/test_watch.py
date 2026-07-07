@@ -65,8 +65,10 @@ def test_update_block_creates_parent_dirs(tmp_path: Path):
 
 
 def test_regenerate_cursor_writes_valid_mdc(tmp_path: Path):
+    """Dedicated path: refreshes the SAME .mdc file wire seeds."""
+    (tmp_path / ".cursor").mkdir()
     regenerate_cursor("Some workflow prose", tmp_path)
-    mdc = tmp_path / ".cursor" / "rules" / "agentalloy-context.mdc"
+    mdc = tmp_path / ".cursor" / "rules" / "agentalloy.mdc"
     assert mdc.exists()
     content = mdc.read_text()
     assert "alwaysApply: true" in content
@@ -74,9 +76,27 @@ def test_regenerate_cursor_writes_valid_mdc(tmp_path: Path):
     assert "description:" in content
 
 
+def test_regenerate_cursor_shared_fallback(tmp_path: Path):
+    """No .cursor/ dir → marker block in the shared .cursorrules (wire parity)."""
+    regenerate_cursor("Some workflow prose", tmp_path)
+    f = tmp_path / ".cursorrules"
+    assert f.exists()
+    assert "Some workflow prose" in f.read_text()
+    assert "AGENTALLOY-CONTEXT" in f.read_text()
+
+
 def test_regenerate_windsurf(tmp_path: Path):
     regenerate_windsurf("windsurf prose", tmp_path)
     f = tmp_path / ".windsurfrules"
+    assert f.exists()
+    assert "windsurf prose" in f.read_text()
+
+
+def test_regenerate_windsurf_dedicated(tmp_path: Path):
+    """.windsurf/ dir present → refreshes the dedicated rules file wire seeds."""
+    (tmp_path / ".windsurf").mkdir()
+    regenerate_windsurf("windsurf prose", tmp_path)
+    f = tmp_path / ".windsurf" / "rules" / "agentalloy.md"
     assert f.exists()
     assert "windsurf prose" in f.read_text()
 

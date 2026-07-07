@@ -6,7 +6,7 @@ AgentAlloy's FastAPI service acts as an OpenAI- and Anthropic-compatible proxy �
 
 **Problem solved:** The previous tier model required three wiring mechanisms (per-turn hooks, per-session injection, sidecar file watcher) keyed to harness capabilities. The proxy is a single universal mechanism — any harness that supports a custom API base URL points at it and gets the full AgentAlloy experience.
 
-- **What it is:** an OpenAI-compatible `/v1/chat/completions` and native Anthropic `/proj/{token}/v1/messages` passthrough endpoint that reads the request, evaluates the signal layer (phase, pre-filter, gates), composes skills if warranted, injects them, and forwards to the upstream LLM (response passed back unchanged).
+- **What it is:** three surfaces — an OpenAI-compatible `/v1/chat/completions` endpoint, a native Anthropic `/proj/{token}/v1/messages` passthrough, and a native OpenAI Responses `/proj/{token}/v1/responses` passthrough ([responses-surface.md](responses-surface.md)) — each of which reads the request, evaluates the signal layer (phase, pre-filter, gates), composes skills if warranted, injects them, and forwards to the upstream LLM (response passed back unchanged).
 - **What it is not:** middleware that parses responses or intercepts tool calls. It enhances the request before the call and passes everything else through.
 
 The Anthropic surface is a single native passthrough (the bare `/v1/messages` Anthropic→OpenAI translation shim was removed — see [proxy-surfaces.md](proxy-surfaces.md)):
@@ -107,6 +107,7 @@ Same as existing: resolved per-repo via git remote URL, path prefix, or explicit
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/proj/{token}/v1/messages` | **Native Anthropic passthrough** — the primary Claude Code path (wired via `ANTHROPIC_BASE_URL`). `{token}` is a per-repo discriminator (see below). Composes, injects into the last user message, forwards verbatim to the Anthropic upstream. No translation. |
+| `POST` | `/proj/{token}/v1/responses` | **Native OpenAI Responses passthrough** — the codex path ([responses-surface.md](responses-surface.md)). Composes, injects into the last user input item (`instructions` untouched), forwards verbatim to the Responses upstream (`RESPONSES_UPSTREAM_URL`). No translation. |
 | `POST` | `/v1/chat/completions` | OpenAI-compatible proxy — intercepts, composes, forwards |
 | `POST` | `/v1/embeddings` | Forward to embed server (passthrough) |
 
@@ -286,7 +287,7 @@ There is **no hook transport**. Claude Code is **proxy-wired** via the native An
 ## Telemetry
 
 Every proxy request writes a trace to DuckDB:
-- `trace_id`, `request_ts`, `phase`, `task_prompt`, `status`, `assembly_tier`, `assembly_model`, `source_skill_ids`, `system_skill_ids`, `retrieval_latency_ms`, `assembly_latency_ms`, `total_latency_ms`, `session_key`, `repo` (full schema: `CompositionTrace` in `storage/vector_store.py`)
+- `trace_id`, `request_ts`, `phase`, `task_prompt`, `status`, `assembly_tier`, `assembly_model`, `source_skill_ids`, `system_skill_ids`, `retrieval_latency_ms`, `assembly_latency_ms`, `total_latency_ms`, `session_key`, `repo` (full schema: `CompositionTrace` in `storage/protocols.py`)
 - Passthrough requests (no composition) still traced — useful for understanding signal filter hit rates
 
 ## Security

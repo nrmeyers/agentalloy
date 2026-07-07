@@ -1631,15 +1631,15 @@ def _wire_proxy_instruction(
 
     For harnesses the proxy cannot intercept (cursor, windsurf,
     github-copilot, antigravity), this seeds the rules file with a truthful
-    sidecar block. The block uses the SAME ``AGENTALLOY-CONTEXT`` markers the
-    watch sidecar owns (``watch.regenerators.update_block``), so
-    ``agentalloy watch`` replaces this exact block in place with live
-    phase/contract content — a distinct marker family here would leave this
-    seed block stale forever while the watcher appends a second one.
+    sidecar block — written by the SAME per-harness regenerator the watch
+    sidecar uses (``watch.regenerators.REGENERATORS``), so wire-time seed and
+    watcher refresh target one identical file/format and can never diverge
+    (they once wrote different filenames, leaving the seed stale forever).
     """
-    from agentalloy.watch.regenerators import AGENTALLOY_MARKER, update_block
+    from agentalloy.watch.regenerators import AGENTALLOY_MARKER, REGENERATORS
 
-    # Resolve target path
+    # Resolve target path (mirrors the regenerators' own resolution) so the
+    # WireRecord points at the file the regenerator writes.
     if harness == "cursor":
         rel_path, dedicated = _resolve_cursor_path(root)
     elif harness == "windsurf":
@@ -1650,27 +1650,35 @@ def _wire_proxy_instruction(
         reg = _HARNESS_REGISTRY[harness]
         rel_path = reg["target"]
         dedicated = reg["dedicated"]
-    _ = dedicated  # dedicated vs shared no longer matters: one marker block either way
 
     target_path = root / rel_path
     original_content = _capture_original(target_path)
     template = _load_template("proxy-instruction.md")
     rendered = _render_template(template, port)
 
-    update_block(target_path, AGENTALLOY_MARKER, rendered)
+    regenerator = REGENERATORS.get(harness)
+    if regenerator is not None:
+        regenerator(rendered, root)
+    else:
+        # No watcher regenerator for this harness (e.g. hermes legacy scope):
+        # fall back to a marker block at the resolved path.
+        from agentalloy.watch.regenerators import update_block
 
-    return [
-        {
-            "path": str(target_path),
-            "action": "wrote_new_file" if original_content is None else "injected_block",
-            "content_sha256": _sha256(rendered.strip()),
-            # Uninstall's record walk strips by these markers (they override
-            # the default install sentinels).
-            "sentinel_begin": f"<!-- BEGIN {AGENTALLOY_MARKER} -->",
-            "sentinel_end": f"<!-- END {AGENTALLOY_MARKER} -->",
-            **({"original_content": original_content} if original_content is not None else {}),
-        }
-    ]
+        update_block(target_path, AGENTALLOY_MARKER, rendered)
+
+    record: dict[str, Any] = {
+        "path": str(target_path),
+        "action": "wrote_new_file" if original_content is None else "injected_block",
+        "content_sha256": _sha256(rendered.strip()),
+        **({"original_content": original_content} if original_content is not None else {}),
+    }
+    if not dedicated:
+        # Shared files carry a marker block; uninstall strips by these markers
+        # (overriding the default install sentinels). Dedicated files are
+        # deleted/restored whole via the record action.
+        record["sentinel_begin"] = f"<!-- BEGIN {AGENTALLOY_MARKER} -->"
+        record["sentinel_end"] = f"<!-- END {AGENTALLOY_MARKER} -->"
+    return [record]
 
 
 def _wire_mcp_fallback(

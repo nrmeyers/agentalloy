@@ -10,8 +10,9 @@ the service running (`curl -s localhost:47950/health`).
 
 ## cursor (sidecar — rules file)
 
-1. Wire; confirm `.cursor/rules/agentalloy.mdc` (or `.cursorrules`) exists
-   and contains the current phase.
+1. Wire; confirm `.cursor/rules/agentalloy.mdc` (with `.cursor/` present; else
+   a marker block in `.cursorrules`) exists and contains the current phase.
+   The watcher refreshes the same file.
 2. Open the repo in Cursor, start `agentalloy watch start --harness cursor`.
 3. Ask the agent "what phase is this project in per your rules?" — answer
    should match `.agentalloy/phase`.

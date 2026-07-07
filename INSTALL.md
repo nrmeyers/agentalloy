@@ -392,7 +392,7 @@ If the user wants a non-default port (because 47950 is taken on their machine), 
 >
 > Wait for the user's choice. Note: option 10 is a compound — if chosen, follow up with "which of options 1–8 should the MCP server be configured for?"
 
-Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (alias: `gemini-cli`), `cursor`, `continue-closed`, `continue-local`, `opencode`, `aider`, `cline`, `manual`. For the strict-tools MCP fallback, pass `--mcp-fallback` with one of the supported harnesses (claude-code, cursor, continue-closed, continue-local).
+Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (alias: `gemini-cli`), `cursor`, `windsurf`, `continue-closed`, `continue-local`, `opencode`, `aider`, `cline`, `codex`, `openclaw`, `copilot-cli`, `hermes-agent`, `github-copilot`, `manual`. For the strict-tools MCP fallback, pass `--mcp-fallback` with one of the supported harnesses (claude-code, cursor, continue-closed, continue-local).
 
 ---
 
@@ -407,12 +407,15 @@ Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (al
 
 **Auto-detection priority** (used when `--harness` is omitted; first match wins):
 1. `.cursor/` or `.cursorrules` → `cursor`
-2. `.continuerc.json` → `continue-local`
-3. `.aider.conf.yml` → `aider`
-4. `.opencode/` → `opencode`
-5. `.clinerules` → `cline`
-6. `GEMINI.md` → `antigravity`
-7. `CLAUDE.md` → `claude-code`
+2. `.windsurf/` or `.windsurfrules` → `windsurf`
+3. `.continuerc.json` → `continue-local`
+4. `.aider.conf.yml` → `aider`
+5. `.opencode/` or `opencode.json` → `opencode`
+6. `.clinerules` → `cline`
+7. `GEMINI.md` → `antigravity`
+8. `.github/copilot-instructions.md` → `github-copilot`
+9. `CLAUDE.md` → `claude-code`
+10. `.hermes/` or `AGENTS.md` → `hermes-agent`
 
 A repo with multiple markers (e.g. both `.cursor/` and `CLAUDE.md`, common when more than one agent is wired to the project) will pick the higher-priority entry and print a `NOTE:` line so the user can pass `--harness <name>` to override. Tool-specific dotfiles outrank `CLAUDE.md` because the latter is shared by several agents and is a weaker signal.
 
@@ -724,7 +727,7 @@ The container uses a baked entrypoint script (`/app/entrypoint.sh`) that handles
 
 **Always removed** (every preset, default behavior):
 
-- **Sentinel-bounded harness blocks** in *every* repo recorded in install-state.json (CLAUDE.md, GEMINI.md, .clinerules, .cursorrules, .cursor/rules/agentalloy.mdc, .opencode/system-prompt.md, .aider.conf.yml, etc.). The cross-repo walk happens before the CLI is removed; pass `--no-all-repos` to limit to cwd. Tampered blocks (sha256 mismatch — the user edited inside the sentinels) are skipped without `--force`.
+- **Harness carriers** in *every* repo recorded in install-state.json (CLAUDE.md, GEMINI.md, .clinerules, .cursorrules, .cursor/rules/agentalloy.mdc, opencode.json, .aider.conf.yml, .codex/, .copilot/.agentalloy-env, .hermes/, etc. — plus legacy carriers like .opencode/system-prompt.md from pre-rewrite installs). The cross-repo walk happens before the CLI is removed; pass `--no-all-repos` to limit to cwd. Tampered blocks (sha256 mismatch — the user edited inside the sentinels) are skipped without `--force`.
 - **MCP entries** for `agentalloy` from `~/.claude/mcp_servers.json`, the cwd repo's `.cursor/mcp.json`, and `.continuerc.json`. The files are deleted if `agentalloy` was their only entry.
 - **Native service units** on Linux: the main `~/.config/systemd/user/agentalloy.service` (sanitized `agentalloy.env`) plus the two llama-server units `agentalloy-embed.service` (47951) and `agentalloy-rerank.service` (47952). On macOS the launchd plists at `~/Library/LaunchAgents/ai.agentalloy.plist`, `ai.agentalloy.embed.plist`, and `ai.agentalloy.rerank.plist`.
 - **Manual-mode agentalloy server** if it's still listening on the configured port (SIGTERM, escalating to SIGKILL after 10s).

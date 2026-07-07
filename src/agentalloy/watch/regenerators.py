@@ -48,10 +48,17 @@ def update_block(path: Path, marker: str, body: str) -> None:
 
 
 def regenerate_cursor(content: str, project_root: Path) -> None:
-    """Write to .cursor/rules/agentalloy-context.mdc with YAML frontmatter."""
-    path = project_root / ".cursor" / "rules" / "agentalloy-context.mdc"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = f"""---
+    """Refresh the SAME file the wiring seeded (wire/watch must not diverge).
+
+    Mirrors ``wire_harness._resolve_cursor_path``: dedicated
+    ``.cursor/rules/agentalloy.mdc`` when ``.cursor/`` exists, else a marker
+    block in the shared ``.cursorrules``. (This regenerator once wrote its own
+    ``agentalloy-context.mdc``, leaving the seeded file stale forever.)
+    """
+    if (project_root / ".cursor").is_dir():
+        path = project_root / ".cursor" / "rules" / "agentalloy.mdc"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = f"""---
 description: AgentAlloy phase + contract context
 globs: ["**/*"]
 alwaysApply: true
@@ -59,12 +66,24 @@ alwaysApply: true
 
 {content.strip()}
 """
-    path.write_text(body, encoding="utf-8")
+        path.write_text(body, encoding="utf-8")
+    else:
+        update_block(project_root / ".cursorrules", AGENTALLOY_MARKER, content)
 
 
 def regenerate_windsurf(content: str, project_root: Path) -> None:
-    """Marker-block replacement in .windsurfrules."""
-    update_block(project_root / ".windsurfrules", AGENTALLOY_MARKER, content)
+    """Refresh the SAME file the wiring seeded (wire/watch must not diverge).
+
+    Mirrors ``wire_harness._resolve_windsurf_path``: dedicated
+    ``.windsurf/rules/agentalloy.md`` when ``.windsurf/`` exists, else a
+    marker block in the shared ``.windsurfrules``.
+    """
+    if (project_root / ".windsurf").is_dir():
+        path = project_root / ".windsurf" / "rules" / "agentalloy.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.strip() + "\n", encoding="utf-8")
+    else:
+        update_block(project_root / ".windsurfrules", AGENTALLOY_MARKER, content)
 
 
 def regenerate_copilot(content: str, project_root: Path) -> None:

@@ -20,16 +20,20 @@ land the fix on a healthy foundation.**
 
 ## The surfaces
 
-The proxy exposes inbound HTTP surfaces in `src/agentalloy/api/`. After this program there are
-**two** live ones:
+The proxy exposes inbound HTTP surfaces in `src/agentalloy/api/`. There are
+**three** live ones (the third — Responses — was added after this program; see
+[responses-surface.md](responses-surface.md)):
 
 | Surface | Endpoint | Router | Signal layer | Injection point | Markers |
 |---|---|---|---|---|---|
 | **Passthrough** | `POST /proj/{token}/v1/messages` | `proxy_passthrough_router.py` | yes | trailing **user** message | yes (announce/cursor) |
 | **OpenAI** | `POST /v1/chat/completions` | `proxy_router.py` | yes | **system** message | yes (announce/cursor — parity achieved Phase 2; both surfaces share the `apply_signal` seam) |
+| **Responses** | `POST /proj/{token}/v1/responses` | `proxy_responses_router.py` | yes | last user **input item** (`instructions` untouched) | yes (same marker families) |
 
-Claude Code wires to the passthrough (`ANTHROPIC_BASE_URL=…/proj/<token>`). Every OpenAI-format
-harness (aider, codex, cline, continue, cursor via sidecar, …) wires to `/v1/chat/completions`.
+Claude Code wires to the passthrough (`ANTHROPIC_BASE_URL=…/proj/<token>`). OpenAI-format
+harnesses (aider, cline, continue, opencode, openclaw, copilot-cli, …) wire to
+`/v1/chat/completions` (bare or `/proj/<token>`-prefixed). Codex — Responses-API-only —
+wires to `/proj/<token>/v1/responses`.
 
 A third surface — the bare tokenless `POST /v1/messages` Anthropic→OpenAI **translation shim**
 (`proxy_anthropic_router.py`) — is **removed** by this program (Phase 1); see below.
