@@ -51,7 +51,7 @@ Regenerates harness-specific rules file
 ### 1. Wire the harness
 
 ```bash
-agentalloy wire --harness <name>
+agentalloy add <name>
 ```
 
 This writes the initial harness configuration (see [harness-catalog.md](install/harness-catalog.md) for the full list).
@@ -84,7 +84,8 @@ The entire file is owned by AgentAlloy and is overwritten on each regeneration:
 
 | Harness | Target File | Notes |
 |---|---|---|
-| Cursor | `.cursor/rules/agentalloy-context.mdc` | YAML frontmatter with `alwaysApply: true`, `globs: ["**/*"]` |
+| Cursor | `.cursor/rules/agentalloy.mdc` | YAML frontmatter with `alwaysApply: true`, `globs: ["**/*"]` |
+| Windsurf | `.windsurf/rules/agentalloy.md` | Default target; falls back to shared `.windsurfrules` (below) |
 
 ### Shared file (marker block)
 
@@ -92,13 +93,13 @@ The file contains user content alongside AgentAlloy content. Only the sentinel-b
 
 | Harness | Target File | Marker |
 |---|---|---|
-| Windsurf | `.windsurfrules` | `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` |
+| Windsurf (fallback) | `.windsurfrules` | `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` — used only when the dedicated `.windsurf/rules/agentalloy.md` isn't available |
 | GitHub Copilot | `.github/copilot-instructions.md` | Same markers |
 | Antigravity CLI | `GEMINI.md` | Same markers |
 
 The marker block strategy ensures user edits outside the block survive regeneration. If the markers already exist, the block is replaced in place. On first write, the block is appended.
 
-> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire --legacy`, but both are proxy-wired by default and should not need the watcher.
+> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`, but both are proxy-wired by default and should not need the watcher.
 
 ## What the Watcher Does
 
@@ -199,7 +200,7 @@ Some harnesses support an MCP fallback variant instead of the default markdown-i
 **Supported harnesses:** claude-code, cursor, continue-closed, continue-local
 
 ```bash
-agentalloy wire --harness cursor --mcp-fallback
+agentalloy wire-harness --harness cursor --mcp-fallback
 ```
 
 This writes an MCP server configuration instead of a markdown-injection block. The MCP server (`agentalloy.install.mcp_server`) exposes a single tool:

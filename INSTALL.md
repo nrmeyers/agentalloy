@@ -38,10 +38,10 @@ uv tool install git+https://github.com/nrmeyers/agentalloy.git
 # Will prompt: "Do you want agentalloy to run persistently as a background service?"
 agentalloy setup
 
-# Once per repo — wire this project to the service. Auto-detects the harness.
-cd ~/dev/some-project && agentalloy wire
-# Drive the repo from more than one harness? Wire them together (repeatable):
-#   agentalloy wire --harness claude-code --harness hermes-agent
+# Once per repo — add this project to the service (adopts the harness's own upstream).
+cd ~/dev/some-project && agentalloy add claude-code
+# Drive the repo from more than one harness? Run add once per harness:
+#   agentalloy add claude-code && agentalloy add hermes-agent
 # Later, drop just one with: agentalloy unwire --harness claude-code
 
 # If you chose manual mode during setup, start the service now:
@@ -174,7 +174,7 @@ If `uv sync` fails:
 > uv tool install git+https://github.com/nrmeyers/agentalloy.git
 > ```
 
-This installs the `agentalloy` command into the user's PATH (at `~/.local/bin/agentalloy` or equivalent) so it works from any directory — not just from inside this repo. Required so `agentalloy wire`, `agentalloy serve`, and `agentalloy status` work after you `cd` into a project repo.
+This installs the `agentalloy` command into the user's PATH (at `~/.local/bin/agentalloy` or equivalent) so it works from any directory — not just from inside this repo. Required so `agentalloy add`, `agentalloy serve`, and `agentalloy status` work after you `cd` into a project repo.
 
 **Contributor note:** If you're developing agentalloy itself, install editable instead:
 
@@ -400,12 +400,12 @@ Record the harness choice. The CLI uses one of: `claude-code`, `antigravity` (al
 
 > RUN
 > ```bash
-> cd <user's repo> && agentalloy wire --harness <chosen-harness>
+> cd <user's repo> && agentalloy add <chosen-harness>
 > ```
 
-(Substitute the harness key from step 10.) `agentalloy wire` auto-detects the harness from the cwd if you omit `--harness`. `wire` is the convenience wrapper over the explicit `agentalloy wire-harness` command (an accepted alias); user-facing flows should prefer `wire`.
+(Substitute the harness key from step 10.) `add` adopts the harness's own upstream LLM from its config, wires the harness through the proxy, and seeds the repo's entry phase — one command, no re-declaring the upstream. (The older `agentalloy wire` still runs but is deprecated in favor of `add`; if you need harness auto-detection from the cwd, `wire` without `--harness` still provides it using the priority below.)
 
-**Auto-detection priority** (used when `--harness` is omitted; first match wins):
+**Auto-detection priority** (used by `wire` when `--harness` is omitted; first match wins):
 1. `.cursor/` or `.cursorrules` → `cursor`
 2. `.windsurf/` or `.windsurfrules` → `windsurf`
 3. `.continuerc.json` → `continue-local`
@@ -423,7 +423,7 @@ The output lists which file(s) were modified and where the sentinel-bounded agen
 
 > "I added a agentalloy integration block to **CLAUDE.md** in your project. The block is bounded by `<!-- BEGIN agentalloy install -->` / `<!-- END agentalloy install -->` markers — `agentalloy unwire` removes only what's between the markers, so your other content is safe.
 >
-> Repos are wired one-at-a-time. To wire another project, `cd` into it and run `agentalloy wire` again — AgentAlloy state is user-scoped, so you don't need to re-do steps 1–8."
+> Repos are wired one-at-a-time. To add another project, `cd` into it and run `agentalloy add <harness>` again — AgentAlloy state is user-scoped, so you don't need to re-do steps 1–8."
 
 If the user picked `manual`, the output includes copy-pasteable instructions for the user to apply themselves. Read those to the user.
 
@@ -549,9 +549,9 @@ State summary:
 - Models pulled and on disk
 - `.env` written to `${XDG_CONFIG_HOME:-~/.config}/agentalloy/.env`
 - This repo's harness wired with sentinel-bounded injection
-- All 8 verify checks passed
+- All verify checks passed (9 on native installs — 8 core plus the advisory reranker check; 8 in the container)
 
-**To wire another repo to the same service:** `cd ~/dev/other-project && agentalloy wire`. No re-detect, no re-pull, no re-seed needed — the user-scope install serves every repo on this machine.
+**To add another repo to the same service:** `cd ~/dev/other-project && agentalloy add <harness>`. No re-detect, no re-pull, no re-seed needed — the user-scope install serves every repo on this machine.
 
 **To check status across all wired repos:** `agentalloy status` shows the user state, which repos are wired, the corpus location, and whether the service is reachable.
 
@@ -563,10 +563,9 @@ Operator commands the user can run later (these are NOT part of this runbook —
 |---|---|
 | `agentalloy status` | Show user state + wired repos + service reachability |
 | `agentalloy serve` | Start the service in foreground (terminal must stay open) |
-| `agentalloy wire` | Wire the current repo (cwd) to the service. `--harness` is repeatable/comma-tolerant — `agentalloy wire --harness claude-code --harness hermes-agent` wires several at once for a repo you drive from more than one harness |
+| `agentalloy add <harness>` | Add the current repo (cwd) to the service: adopts the harness's own upstream and wires it through the proxy. Run once per harness for a repo you drive from more than one. `--lifecycle-mode off` wires pure context injection with no workflow attached. (Replaces the deprecated `agentalloy wire`.) |
 | `agentalloy wire --list` | List the harnesses wired in the current repo (with lifecycle mode + phase) |
 | `agentalloy unwire` | Remove sentinels from the current repo only (keeps user state, `.env`, and corpus). `--harness <name>` unwires just that one harness, leaving any other wired harness and the repo's shared `.agentalloy/{phase,config}` lifecycle state intact; the harness's shared user-scope config is removed only on the last repo using it |
-| `agentalloy add <harness>` | Adopt one harness's own upstream LLM (read from its config) and wire it through the proxy, per-repo — for a repo that should talk to a different model than your global default |
 | `agentalloy worktree <harness> <branch>` | Create a git worktree for `<branch>` and wire `<harness>` through the proxy in it (`-b` to create the branch) — run several agent sessions on one repo in parallel, each with its own phase. Isolation is automatic: the proxy keys per-repo state on `base64url(realpath)` of the working directory, so a worktree's distinct path gets its own `/proj/<token>` — and therefore its own `.agentalloy/` phase and upstream, git-excluded so they never get committed. All worktrees share the one running service and user-scoped corpus; concurrent inference is read-only against that corpus, so sessions never contend. One caveat: corpus *mutations* (`install-packs`, `reembed`) take the single-writer lock and affect every worktree — stop the service before running them |
 | `agentalloy rerank-warmup` | Warm the reranker's KV cache (wired into the systemd unit's `ExecStartPost`) |
 | `agentalloy doctor` | Runtime health check on demand |
@@ -790,7 +789,7 @@ Common stuck-states:
 - The CLI exits 3 (schema mismatch). The user has a state file from a different version. Tell them to back it up and re-run install with a fresh state.
 - The CLI exits 4 (already-completed). That step ran successfully before. Read the user-scope state file to see what's done; skip ahead. (`agentalloy status` shows this concisely.)
 - A required external tool (`llama-server`) is missing. The setup wizard's runner preflight now **offers to download a prebuilt automatically** (matched to the detected hardware) — accept it and setup continues. Only on a standalone `agentalloy preflight` run, or an unsupported platform, point the user at https://github.com/ggml-org/llama.cpp (or `brew install llama.cpp` on macOS); do NOT auto-execute third-party install scripts.
-- A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy wire` so the harness config gets the new URL.
+- A port collision on 47950. Re-run `write-env` with `--port <n>` and re-run `agentalloy add <harness>` so the harness config gets the new URL.
 - **`llama-server` not on PATH (or a stale launcher):** Step 5/7 can't find the inference binary, or a launcher in `~/.local/bin` points at a runtime that was wiped (e.g. by a data reset). **Fix:** re-run `agentalloy setup` (or `agentalloy pull-models`) — it auto-provisions a prebuilt for your hardware and re-provisions a broken launcher rather than trusting it. Ensure `~/.local/bin` is on `$PATH` and confirm `llama-server --version`. Only an unsupported platform needs a manual install (`brew install llama.cpp` on macOS, or download/build from https://github.com/ggml-org/llama.cpp).
 - **GGUF download failed or incomplete:** the embed server won't start because `nomic-embed-text-v1.5.Q8_0.gguf` is missing from `${XDG_DATA_HOME}/agentalloy/models/`. **Fix:** re-run `agentalloy pull-models` (downloads resume on retry). For the container, `podman restart agentalloy` so the entrypoint re-fetches any missing GGUF.
 - **Embed/reranker server didn't bind (47951/47952):** the runtime can't reach a llama-server. **Fix:** check `curl -sf http://127.0.0.1:47951/health` and `:47952/health`; inspect `~/.local/share/agentalloy/logs/embed-server.log` (native) or `podman logs -f agentalloy` (container). 47951 down breaks composition; 47952 down only falls the intent gates open to cosine.

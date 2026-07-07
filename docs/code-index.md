@@ -108,7 +108,7 @@ Two mechanisms, both opt-in, neither auto-reindexes behind your back:
 
 ## Harness wiring
 
-`agentalloy wire` / `agentalloy add` write a second sentinel block —
+`agentalloy add` (or the deprecated `agentalloy wire`) writes a second sentinel block —
 `<!-- BEGIN agentalloy code-index --> … <!-- END agentalloy code-index -->`,
 independent of the main install block — into the repo's agent-instruction file
 (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.clinerules`, or a dedicated
@@ -123,8 +123,9 @@ when the request's repo has a completed index in the indexed-repos registry
 (fail-closed: module off, unindexed repo, or an unreadable registry all mean
 no injection).
 
-Wiring an unindexed repo offers to index it on the spot (`[Y/n]`; `wire --yes`
-and non-TTY submit by default — the job runs async, wiring never waits).
+Wiring an unindexed repo (via `agentalloy add` or `wire`) offers to index it on
+the spot (`[Y/n]`; `--yes` and non-TTY submit by default — the job runs async,
+wiring never waits).
 `unwire` asks whether to also remove the repo's index and defaults to **keep**
 (indexes are expensive to rebuild; removing the block is not a statement about
 the data). Pass `--remove-index` to remove it non-interactively; removal is

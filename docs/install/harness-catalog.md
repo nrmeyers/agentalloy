@@ -18,10 +18,13 @@ github-copilot) receive a proxy instruction block explaining the proxy is active
 
 ### Wiring modes
 
-`agentalloy wire` always uses proxy wiring (its flags are `--harness`, `--port`,
-`--via proxy`, `--force`, `--lifecycle-mode`, `--clean-room`, `--list`, `--json`). The
-`--legacy` and `--mcp-fallback` flags below live on **`agentalloy wire-harness`**, not on
-`wire`. `--harness` is repeatable and comma-tolerant
+`agentalloy add <harness>` is the primary wiring command — it adopts the harness
+upstream and wires the proxy in one step, and supports `--lifecycle-mode {full,off}`.
+The deprecated `agentalloy wire` remains for harness auto-detection and always uses
+proxy wiring (its flags are `--harness`, `--port`, `--via proxy`, `--force`,
+`--lifecycle-mode`, `--clean-room`, `--list`, `--json`). The `--legacy` and
+`--mcp-fallback` flags below live on **`agentalloy wire-harness`**, not on `wire`.
+`--harness` is repeatable and comma-tolerant
 (`--harness claude-code --harness hermes-agent` or `--harness claude-code,hermes-agent`);
 `wire --list` prints the harnesses currently wired in the cwd repo.
 
@@ -120,7 +123,7 @@ These harnesses route through their own backends and cannot be intercepted by th
 - **GitHub Copilot** — marker-block replacement in `.github/copilot-instructions.md` using `<!-- BEGIN AGENTALLOY-CONTEXT -->` / `<!-- END AGENTALLOY-CONTEXT -->` markers.
 - **Antigravity CLI** (formerly Gemini CLI) — marker-block replacement in `GEMINI.md` using the same `AGENTALLOY-CONTEXT` markers.
 
-> **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire --legacy`. Both are proxy-wired by default and should not need the sidecar.
+> **Legacy regenerators:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`. Both are proxy-wired by default and should not need the sidecar.
 
 ### Other
 
@@ -156,7 +159,7 @@ When multiple markers are detected, AgentAlloy prints a `NOTE:` on stderr and de
 
 AgentAlloy owns the entire file. Written on every regeneration. No sentinels needed inside the file because there is no user content to preserve.
 
-Examples: `.cursor/rules/agentalloy-context.mdc`, `.aider/agentalloy-context.txt`
+Examples: `.cursor/rules/agentalloy.mdc`, `.aider/agentalloy-context.txt`
 
 ### Shared file (sentinel-bounded)
 
@@ -193,7 +196,7 @@ The `--mcp-fallback` flag replaces the default markdown-injection wiring with an
 Usage:
 
 ```bash
-agentalloy wire --harness cursor --mcp-fallback
+agentalloy wire-harness --harness cursor --mcp-fallback
 ```
 
 ### What it does

@@ -116,7 +116,7 @@ See `docs/sidecar-experience.md` for full watcher documentation.
 
 ## Profiles and wiring
 
-Wiring is per-repo: `agentalloy wire` injects sentinels into each project's harness config files (e.g., `.cursor/rules/agentalloy.mdc`). However, the datastores and skills used by a wired project are determined by the active profile, not by the wiring itself.
+Wiring is per-repo: `agentalloy add` injects sentinels into each project's harness config files (e.g., `.cursor/rules/agentalloy.mdc`). However, the datastores and skills used by a wired project are determined by the active profile, not by the wiring itself.
 
 This means you can wire the same harness in multiple repos and have them use different skill overrides based on which profile resolves for each repo's directory.
 

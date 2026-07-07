@@ -2,7 +2,7 @@
 
 Operator guide for AgentAlloy. Covers key concepts, terminology, system architecture, configuration, and customization for operators who install, maintain, and extend their AgentAlloy instance.
 
-> For the step-by-step install runbook, the full `agentalloy` command reference (`add`, `worktree`, `customize`, `cleanup`/`cleanup --deep`, per-harness `wire`/`unwire`, …), and container operations (the `ghcr.io/nrmeyers/agentalloy` image, ports `47950`/`47951`/`47952`, and corpus volume self-heal on reuse), see **[INSTALL.md](../INSTALL.md)**.
+> For the step-by-step install runbook, the full `agentalloy` command reference (`add` — the primary wiring verb, `worktree`, `customize`, `cleanup`/`cleanup --deep`, the deprecated per-harness `wire`/`unwire`, …), and container operations (the `ghcr.io/nrmeyers/agentalloy` image, ports `47950`/`47951`/`47952`, and corpus volume self-heal on reuse), see **[INSTALL.md](../INSTALL.md)**.
 
 ## Key Concepts and Terminology
 
@@ -100,9 +100,9 @@ Whether the phase lifecycle runs at all is a **per-repo** setting, stored at `.a
 - **`full`** (default) — the intake front-door runs on every session and the full phase lifecycle is active; workflow skills inject per phase.
 - **`off`** — wired but composes nothing (full passthrough).
 
-Set it with `agentalloy wire --lifecycle-mode {full,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`). (The legacy `assist` mode was removed with the hook transport; a repo still configured `assist` now reads as `off`.)
+Set it with `agentalloy add <harness> --lifecycle-mode {full,off}`. When wiring detects a repo that already defines its own `.claude/agents/` or `.claude/commands/`, it prompts for the mode (interactive terminals only; non-interactive runs default to `full`). (The legacy `assist` mode was removed with the hook transport; a repo still configured `assist` now reads as `off`.)
 
-In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
+In `full` mode on Claude Code, `wire` also writes a soft-precedence note at `.claude/CLAUDE.md` — loaded last by Claude Code, so a repo's own workflow guidance is weighted over conflicting global directives. The opt-in `agentalloy wire --clean-room` (this flag lives on the deprecated `wire` only) additionally excludes your global `~/.claude/CLAUDE.md` from that repo by adding it to `claudeMdExcludes` in `.claude/settings.json`; note this suppresses **all** of your global directives there, not just conflicting ones. Both writes are reversed by `agentalloy unwire`.
 
 ### Approval gates
 

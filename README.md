@@ -31,7 +31,7 @@ It attaches as a **local proxy**: your harness points its base URL at AgentAlloy
 
 Everything runs on your machine — one small embed model and a 0.6B reranker over embedded LanceDB + DuckDB. No cloud calls, and zero paid-LLM tokens spent deciding what to inject: routing is **deterministic by default**, and the one optional LM stage in the compose path ships off because it showed no lift on our evals (we measured, so we disabled it — [numbers here](BENCHMARKS.md)).
 
-The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `wire --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy flow free` pauses the workflow anytime without losing your place.
+The structured workflow layer (spec → design → build → qa gates) is per-repo and **opt-out**: `agentalloy add <harness> --lifecycle-mode off` gives you pure context injection with no process attached, and `agentalloy flow free` pauses the workflow anytime without losing your place.
 
 Composed into the prompt without you pasting a thing:
 
@@ -84,7 +84,7 @@ Two doors — pick the one that's you:
 curl -LsSf https://astral.sh/uv/install.sh | sh                   # 1. install uv (Linux / macOS)
 uv tool install git+https://github.com/nrmeyers/agentalloy.git    # 2. install the agentalloy CLI
 agentalloy setup                                                  # 3. run the setup wizard
-cd /path/to/your/repo && agentalloy wire --harness claude-code    # 4. wire (per-repo — repeat in each project)
+cd /path/to/your/repo && agentalloy add claude-code              # 4. add each project (per-repo — repeat as needed)
 ```
 
 The wizard detects your hardware, downloads the GGUF models, starts the embed + reranker servers, lets you pick skill packs, wires your IDE harness, and validates the result — **3–5 minutes** on a warm machine. Its first question is **how to deploy**: **Container** (default — one GHCR image, zero host-side inference dependencies, CPU-only) or **Native** (llama-server on your host, GPU acceleration). Trade-offs and the full step-by-step runbook — scripted flags, air-gapped installs — live in **[INSTALL.md](INSTALL.md)**.
@@ -154,7 +154,7 @@ Three small artifacts on disk drive everything AgentAlloy does. None of them bel
 .agentalloy/phase       →  phase: build
 ```
 
-**The phase file.** A sticky, one-line YAML file under your project tracking the SDD lifecycle: `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy wire --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
+**The phase file.** A sticky, one-line YAML file under your project tracking the SDD lifecycle: `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
 
 **Task contracts.** A short markdown file (`.agentalloy/contracts/<phase>/<task>.md`) the agent writes once at task start, declaring `domain_tags`, scope, and success criteria in its frontmatter. From then on, **`domain_tags` is the BM25 input for retrieval** — surgical, intent-aware, and stable across the conversation. Schema and a full example: [docs/operator.md](docs/operator.md#contracts).
 
@@ -175,7 +175,7 @@ agentalloy code status                     # indexed repos + active jobs + stale
 agentalloy code watch enable               # per-repo file-watch enrollment (CODE_INDEX_WATCH is the master switch)
 ```
 
-Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. `agentalloy wire` adds a small code-index block to the repo's agent instructions when the module is enabled, and offers to index an unindexed repo on the spot; `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. When the module is enabled, `agentalloy add` writes a small code-index block into the repo's agent instructions and offers to index an unindexed repo on the spot (adding a repo never enables the module itself — that's the service-side `CODE_INDEX_ENABLED` switch); `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
 
 ---
 
@@ -185,11 +185,11 @@ Four paths, depending on how your harness integrates with external tools.
 
 **Standalone HTTP service.** Run it on its own port and call `POST /compose` from anything — an agent, a script, CI. `python -m agentalloy` serves on :47950; `curl -s localhost:47950/health` confirms it's up.
 
-**Proxy-wired harness (full integration).** If your harness honors a custom API base URL, `agentalloy wire --harness <name>` points it at the local proxy: every LLM request flows through with skills injected and gates evaluated. Claude Code wiring is **auth-transparent** — it sets only `ANTHROPIC_BASE_URL` (a per-repo `/proj/<token>` URL), never an API key, so your own credential (including account/OAuth auth) passes through verbatim; and the upstream is configurable (`ANTHROPIC_UPSTREAM_URL`), so any Anthropic-compatible provider or a chained proxy works. Wiring mechanics: [docs/install/harness-catalog.md](docs/install/harness-catalog.md); upstreams: [docs/operator.md](docs/operator.md#alternative-anthropic-compatible-upstreams).
+**Proxy-wired harness (full integration).** If your harness honors a custom API base URL, `agentalloy add <name>` points it at the local proxy (and adopts the harness's existing upstream, so you never re-declare it): every LLM request flows through with skills injected and gates evaluated. Claude Code wiring is **auth-transparent** — it sets only `ANTHROPIC_BASE_URL` (a per-repo `/proj/<token>` URL), never an API key, so your own credential (including account/OAuth auth) passes through verbatim; and the upstream is configurable (`ANTHROPIC_UPSTREAM_URL`), so any Anthropic-compatible provider or a chained proxy works. Wiring mechanics: [docs/install/harness-catalog.md](docs/install/harness-catalog.md); upstreams: [docs/operator.md](docs/operator.md#alternative-anthropic-compatible-upstreams).
 
 **Parallel sessions with git worktrees.** `agentalloy worktree <harness> <branch> -b` creates the worktree and wires it in one shot; each worktree's distinct path gets its own `/proj/<token>` — its own phase, its own upstream — while all worktrees share the one running service and corpus. One caveat: corpus mutations (`install-packs`, `reembed`) take the single-writer lock and affect every worktree, so stop the service before running them. Details: the `worktree` entry in [INSTALL.md](INSTALL.md).
 
-**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy wire` writes a static rules file and `agentalloy watch start --harness <name>` (once per session) keeps it regenerated within ~1s of a phase or contract change. Capability matrix: [Harness support](#harness-support) below.
+**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy add` writes a static rules file and `agentalloy watch start --harness <name>` (once per session) keeps it regenerated within ~1s of a phase or contract change. Capability matrix: [Harness support](#harness-support) below.
 
 ---
 
@@ -197,7 +197,7 @@ Four paths, depending on how your harness integrates with external tools.
 
 Profiles let you maintain separate skill contexts for different kinds of work — e.g., a `work` profile with stricter CI gates and team governance rules, a `personal` profile with relaxed constraints and hobby-project domain skills. Profiles auto-resolve per-repo based on git remote URL, filesystem path, or an explicit project marker, so you never need to switch them manually.
 
-This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **install is one-time and user-scoped** (state under `~/.config/agentalloy/`, data under `~/.local/share/agentalloy/`) and profiles determine skill overrides per-repo — only the **wiring** is per-repo (`agentalloy wire` injects sentinels into each project's harness config files; the skills those sentinels reference come from the user-scoped profile). Full details: [profiles-and-overrides.md](docs/profiles-and-overrides.md).
+This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **install is one-time and user-scoped** (state under `~/.config/agentalloy/`, data under `~/.local/share/agentalloy/`) and profiles determine skill overrides per-repo — only the **wiring** is per-repo (`agentalloy add` injects sentinels into each project's harness config files; the skills those sentinels reference come from the user-scoped profile). Full details: [profiles-and-overrides.md](docs/profiles-and-overrides.md).
 
 ---
 
@@ -221,14 +221,14 @@ The `agentalloy` CLI handles install, service management, phase control, and com
 
 ```bash
 agentalloy setup                          # Interactive install wizard
-agentalloy wire --harness <name>          # Wire a harness (--lifecycle-mode full|off, --clean-room)
+agentalloy add <harness>                  # Adopt the harness's upstream + wire it through the proxy (per repo)
 agentalloy unwire [--harness <name>]      # Remove wiring (one harness in this repo; --all for every repo)
 agentalloy serve                          # Run the service
 agentalloy phase [set|clear]              # Bare prints current phase; set/clear to change
 agentalloy flow free|resume|status        # Pause/resume workflow steering (skills keep composing)
 agentalloy code <index|search|status|…>   # Code-index module CLI (see docs/code-index.md)
 agentalloy compose --contract <path>      # One-shot composition
-agentalloy approve <phase>                # Record the human-in-the-loop approval marker (spec | design)
+agentalloy approve <phase>                # Record the human-in-the-loop approval marker (spec | design | add-skill)
 agentalloy doctor                         # Diagnose install issues
 agentalloy upgrade                        # Upgrade to the latest release (--check to preview)
 ```

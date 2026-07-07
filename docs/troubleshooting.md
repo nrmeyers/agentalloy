@@ -69,7 +69,7 @@ container, `podman logs -f agentalloy`.
 Another instance of AgentAlloy is running, or another service is using the default port.
 
 **Fix:** Run `agentalloy write-env --preset <preset> --port <n>` with a different port, then re-run
-`agentalloy wire` to update harness configs. If the holder is a *stale* AgentAlloy process (e.g. a
+`agentalloy add <harness>` to update harness configs. If the holder is a *stale* AgentAlloy process (e.g. a
 `llama-server` left over from a previous run), `agentalloy cleanup` reclaims it without touching
 foreign processes.
 
@@ -132,12 +132,12 @@ Or run `agentalloy doctor --repair` to diagnose and fix automatically.
 
 ### Harness config not picking up changes
 
-`agentalloy wire` writes its proxy/wiring configuration inside a **install block**
+`agentalloy add` writes its proxy/wiring configuration inside a **install block**
 bounded by `<!-- BEGIN agentalloy install -->` / `<!-- END agentalloy install -->`.
 If you edited the content inside these markers, the harness may not recognize the
 block.
 
-**Fix:** Run `agentalloy unwire` to remove the sentinels, then `agentalloy wire` to
+**Fix:** Run `agentalloy unwire` to remove the sentinels, then `agentalloy add <harness>` to
 re-wire cleanly.
 
 > Note: this is distinct from the sidecar watcher's **rules block**, bounded by
@@ -145,7 +145,7 @@ re-wire cleanly.
 > watcher regenerates in harness rules files. See
 > [sidecar-experience.md](sidecar-experience.md). Do not confuse the two markers.
 
-### `agentalloy wire` says harness not found
+### `agentalloy add` says harness not found
 
 The current directory doesn't contain a recognized harness configuration file.
 
@@ -217,7 +217,7 @@ engines) — reindexing is the migration.
 `agentalloy code index`, verify with `agentalloy code status`, then delete
 `~/.local/share/codebase-indexer/`. Old `<!-- BEGIN codebase-indexer -->`
 blocks in harness files are replaced in place the next time you run
-`agentalloy wire`.
+`agentalloy add <harness>`.
 
 ## General
 

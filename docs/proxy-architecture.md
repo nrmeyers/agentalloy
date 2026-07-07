@@ -13,7 +13,7 @@ The Anthropic surface is a single native passthrough (the bare `/v1/messages` An
 
 - **Native Anthropic passthrough** (`POST /proj/{token}/v1/messages`) — the primary Claude Code path. Composes and injects AgentAlloy context into the **last user message**, leaves the top-level `system` block byte-unchanged (so prompt caching survives), then forwards the request **verbatim** to a configurable Anthropic upstream and relays the response (raw SSE byte relay when streaming). **No Anthropic↔OpenAI translation.** See [Native Anthropic Passthrough](#native-anthropic-passthrough) below.
 
-AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST`, `arbitrate` on the GPU presets and `off` on cpu/container — scoring the candidate fragments only fits the latency budget on a GPU reranker). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
+AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST`, `off` by default in all presets; re-enable with `LM_ASSIST=arbitrate` if you want the local reranker scoring candidate fragments). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
 
 ## Architecture
 
@@ -256,11 +256,11 @@ The proxy does NOT maintain:
 Harnesses that support custom API endpoints wire to the proxy by changing their LLM configuration to point to `http://localhost:47950/v1`. The harness's own client appends the endpoint path (e.g., `/chat/completions`) to this base URL.
 
 ```bash
-agentalloy wire
+agentalloy add <harness>
 ```
 
-This replaces the previous per-harness wiring logic. The command:
-1. Detects the harness in the current directory
+This replaces the previous per-harness wiring logic (`agentalloy wire`, now deprecated, remains for harness auto-detection). The command:
+1. Adopts the named harness upstream
 2. Writes the proxy URL into the harness's LLM configuration
 3. Installs a minimal `.agentalloy/phase` file if one doesn't exist
 
