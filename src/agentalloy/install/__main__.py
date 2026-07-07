@@ -142,6 +142,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m agentalloy.install",
         description="AgentAlloy installer CLI.",
+        epilog=(
+            "everyday commands:\n"
+            "  agentalloy setup                 one-time install wizard\n"
+            "  agentalloy add <harness>         add the current repo (adopt upstream + wire proxy)\n"
+            "  agentalloy code index|search …   code-index module: index repos, search code\n"
+            "  agentalloy status                install state, wired repos, service health\n"
+            "  agentalloy upgrade               move to the latest release\n"
+            "\n"
+            "run `agentalloy <command> --help` for details on any command."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--quiet",

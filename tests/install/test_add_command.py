@@ -93,3 +93,49 @@ class TestAddRun:
             harness="nope", port=None, upstream_url=None, upstream_model=None, key_env=None
         )
         assert add._run(args) == 1
+
+    def test_add_default_lifecycle_full_seeds_phase(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_hermes_config(home)
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: home)
+        monkeypatch.chdir(repo)
+
+        args = argparse.Namespace(
+            harness="hermes-agent",
+            port=47950,
+            upstream_url=None,
+            upstream_model=None,
+            key_env=None,
+            lifecycle_mode=None,
+        )
+        assert add._run(args) == 0
+        assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: full\n"
+        assert (repo / ".agentalloy" / "phase").exists()
+
+    def test_add_lifecycle_off_skips_phase_and_clears_stale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        _global_hermes_config(home)
+        repo = tmp_path / "repo"
+        (repo / ".agentalloy").mkdir(parents=True)
+        (repo / ".agentalloy" / "phase").write_text("phase: build\n")
+        monkeypatch.setattr(Path, "home", lambda: home)
+        monkeypatch.chdir(repo)
+
+        args = argparse.Namespace(
+            harness="hermes-agent",
+            port=47950,
+            upstream_url=None,
+            upstream_model=None,
+            key_env=None,
+            lifecycle_mode="off",
+        )
+        assert add._run(args) == 0
+        assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: off\n"
+        # off must not seed a phase, and a stale one is cleared.
+        assert not (repo / ".agentalloy" / "phase").exists()
