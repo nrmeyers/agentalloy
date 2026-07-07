@@ -113,7 +113,13 @@ def proxy(upstream_stub: UpstreamStub, tmp_path_factory: pytest.TempPathFactory)
 
 @pytest.fixture
 def work_repo(tmp_path: Path) -> Path:
-    """A minimal git repo for the harness to operate in."""
+    """A minimal git repo for the harness to operate in.
+
+    Seeded with the entry phase via the same helper ``agentalloy wire`` uses:
+    composition short-circuits when ``.agentalloy/phase`` is absent, so a
+    wired-but-phaseless repo is inert and the nightly injection assertion
+    (``HARNESS_E2E_EXPECT_INJECTION=1``) can never pass without it.
+    """
     subprocess.run(
         ["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True, capture_output=True
     )
@@ -134,4 +140,9 @@ def work_repo(tmp_path: Path) -> Path:
         check=True,
         capture_output=True,
     )
+    from agentalloy.install.subcommands.wire import (
+        _seed_entry_phase,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    _seed_entry_phase(tmp_path)
     return tmp_path

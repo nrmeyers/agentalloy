@@ -38,6 +38,9 @@ class HarnessCase:
     scrub_env: tuple[str, ...] = field(default=())
     # Known-broken with a tracked cause: the matrix xfails instead of failing.
     xfail_reason: str = ""
+    # False when the proxy is KNOWN not to inject for this harness (tracked
+    # product gap); transport is still hard-asserted.
+    expect_injection: bool = True
 
 
 def _wire_aider(port: int, root: Path) -> object:
@@ -191,9 +194,18 @@ CASES: tuple[HarnessCase, ...] = (
         name="opencode",
         binary="opencode",
         env=lambda port, root: {},
-        argv=lambda root: ["opencode", "run", PROMPT],
+        # Pin the wired provider/model: opencode auto-registers providers from
+        # ambient credentials (nightly exports ANTHROPIC_API_KEY for
+        # claude-code) and provider auto-selection can beat the config default,
+        # sending the run to api.anthropic.com instead of the proxy.
+        argv=lambda root: ["opencode", "run", "-m", "agentalloy/agentalloy-proxy", PROMPT],
         wire=_wire_opencode,
-        scrub_env=("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_API_KEY"),
+        scrub_env=(
+            "OPENAI_BASE_URL",
+            "OPENAI_API_BASE",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ),
         timeout=300,  # first run fetches @ai-sdk/openai-compatible from npm
         notes="Repo-local opencode.json provider block (per-repo /proj/<token>).",
     ),
@@ -212,6 +224,12 @@ CASES: tuple[HarnessCase, ...] = (
         ],
         wire=_wire_aider,
         scrub_env=("OPENAI_API_BASE", "OPENAI_BASE_URL"),
+        # Known product gap: aider never sends a `tools` array, and the proxy's
+        # carrier-request gate (proxy_signal.py: is_carrier = bool(request.tools))
+        # only injects on tool-bearing turns — so injection never fires for
+        # aider. Flip back to True when the carrier gate learns to serve
+        # tool-less harnesses.
+        expect_injection=False,
         notes="Reads .aider.conf.yml from cwd — exercises the sentinel YAML carrier.",
     ),
     HarnessCase(
