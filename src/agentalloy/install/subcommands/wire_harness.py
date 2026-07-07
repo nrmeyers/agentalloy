@@ -919,8 +919,49 @@ def _wire_proxy_continue(
     port: int,
     root: Path,
 ) -> list[dict[str, Any]]:
-    """Wire Continue.dev to use the proxy as its API base."""
+    """Wire Continue.dev to use the proxy as its API base.
+
+    Two carriers, both repo-local:
+
+    - ``.continue/agents/agentalloy.yaml`` — the MODERN vector (config.yaml
+      schema; read by current extensions and drivable headless via
+      ``cn --config``). Carries the per-repo ``/proj/<token>/v1`` base.
+    - ``.continuerc.json`` — the legacy workspace config, kept because
+      Continue's YAML config path ignored ``.continuerc.json`` until a
+      Dec 2025 fix and older extensions only read the legacy format.
+    """
+    from agentalloy.api.proxy_context import encode_proj_token
+
     variant = "closed" if harness == "continue-closed" else "local"
+
+    # --- Modern carrier: .continue/agents/agentalloy.yaml ---
+    token = encode_proj_token(root)
+    agent_path = root / ".continue" / "agents" / "agentalloy.yaml"
+    agent_path.parent.mkdir(parents=True, exist_ok=True)
+    original_agent = _capture_original(agent_path)
+    agent_yaml = (
+        "name: agentalloy\n"
+        "version: 0.0.1\n"
+        "schema: v1\n"
+        "models:\n"
+        "  - name: AgentAlloy Proxy\n"
+        "    provider: openai\n"
+        "    model: agentalloy-proxy\n"
+        f"    apiBase: http://localhost:{port}/proj/{token}/v1\n"
+        "    apiKey: agentalloy\n"
+        "    roles:\n"
+        "      - chat\n"
+    )
+    install_state._atomic_write(agent_path, agent_yaml)  # pyright: ignore[reportPrivateUsage]
+    agent_record: dict[str, Any] = {
+        "path": str(agent_path),
+        "action": "wrote_new_file" if original_agent is None else "replaced_file",
+        "marker_key": "continue.agents.agentalloy",
+        "content_sha256": _sha256(agent_yaml),
+        **({"original_content": original_agent} if original_agent is not None else {}),
+    }
+
+    # --- Legacy carrier: .continuerc.json ---
     config_path = root / ".continuerc.json"
     config: dict[str, Any] = {}
     original_content = _capture_original(config_path)
@@ -961,13 +1002,14 @@ def _wire_proxy_continue(
     install_state._atomic_write(config_path, serialized)  # pyright: ignore[reportPrivateUsage]
 
     return [
+        agent_record,
         {
             "path": str(config_path),
             "action": "injected_block",
             "marker_key": "models.agentalloy-proxy",
             "content_sha256": _sha256(serialized),
             **({"original_content": original_content} if original_content is not None else {}),
-        }
+        },
     ]
 
 
@@ -1565,46 +1607,15 @@ def _wire_proxy_claude_code(port: int, root: Path) -> list[dict[str, Any]]:
 def _wire_proxy_cline(port: int, root: Path) -> list[dict[str, Any]]:
     """Wire Cline to use the AgentAlloy proxy.
 
-    Writes ``.cline/settings.json`` with proxy fields (``apiProvider``,
-    ``apiBaseUrl``, ``apiKey``, ``model``).  Overwrites those four keys;
-    preserves all other keys in the file.
+    Delegates to the provider registry's install_writer (openclaw pattern).
+    The old repo-local ``.cline/settings.json`` carrier was inert — Cline
+    reads the user-scoped ``~/.cline/data/settings/providers.json`` (schema
+    captured from a live ``cline auth``; see providers/cline/install.py).
     """
-    settings_path = root / ".cline" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-    original_content = _capture_original(settings_path)
-    proxy_url = f"http://localhost:{port}/v1"
-    proxy_fields = {
-        "apiProvider": "openai",
-        "apiBaseUrl": proxy_url,
-        "apiKey": "agentalloy",
-        "model": "agentalloy-proxy",
-    }
-
-    if settings_path.exists():
-        try:
-            settings = json.loads(settings_path.read_text())
-        except json.JSONDecodeError as exc:
-            print(f"ERROR: {settings_path} is not valid JSON", file=sys.stderr)
-            print("FIX:   Fix the JSON syntax or remove the file.", file=sys.stderr)
-            raise SystemExit(1) from exc
-    else:
-        settings = {}
-
-    settings.update(proxy_fields)
-    serialized = json.dumps(settings, indent=2) + "\n"
-    install_state._atomic_write(settings_path, serialized)  # pyright: ignore[reportPrivateUsage]
-
-    # Record as "injected_block" so uninstall knows to merge-remove proxy keys
-    # rather than delete the file outright (users may have their own settings).
-    return [
-        {
-            "path": str(settings_path),
-            "action": "injected_block",
-            "content_sha256": _sha256(serialized),
-            **({"original_content": original_content} if original_content is not None else {}),
-        }
-    ]
+    writer = REGISTRY["cline"].install_writer
+    assert writer is not None, "cline registers an install_writer"
+    records = writer(port, root, False)
+    return [r.to_dict() for r in records]
 
 
 def _wire_proxy_codex(port: int, root: Path) -> list[dict[str, Any]]:

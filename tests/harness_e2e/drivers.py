@@ -124,6 +124,20 @@ def _openclaw_env(port: int, root: Path) -> dict[str, str]:
     }
 
 
+def _wire_cline(port: int, root: Path) -> object:
+    # Sandbox rule: never touch the developer's real ~/.cline. Render the same
+    # providers.json the real wiring merges, into a --data-dir sandbox.
+    import json
+
+    from agentalloy.providers.cline.install import providers_json_path, render_providers
+
+    data_dir = root / ".cline-data"
+    path = providers_json_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(render_providers(port), indent=2))
+    return None
+
+
 def _wire_codex(port: int, root: Path) -> object:
     from agentalloy.providers.codex import install as codex_install
 
@@ -136,7 +150,33 @@ def _codex_env(port: int, root: Path) -> dict[str, str]:
     return {"CODEX_HOME": str(root / ".codex"), "OPENAI_API_KEY": "agentalloy-e2e"}
 
 
+def _wire_continue(port: int, root: Path) -> object:
+    from agentalloy.install.subcommands.wire_harness import (
+        _wire_proxy_continue,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    return _wire_proxy_continue("continue-local", port, root)
+
+
 CASES: tuple[HarnessCase, ...] = (
+    HarnessCase(
+        name="continue-local",
+        binary="cn",
+        env=lambda port, root: {},
+        argv=lambda root: [
+            "cn",
+            # The cn CLI does not auto-discover repo agents; the IDE extension
+            # does. Pointing --config at the exact carrier our wiring wrote
+            # still verifies the carrier end to end.
+            "--config",
+            str(root / ".continue" / "agents" / "agentalloy.yaml"),
+            "-p",
+            PROMPT,
+        ],
+        wire=_wire_continue,
+        scrub_env=("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE"),
+        notes="Modern .continue/agents/agentalloy.yaml carrier (per-repo /proj/<token>).",
+    ),
     HarnessCase(
         name="claude-code",
         binary="claude",
@@ -173,6 +213,21 @@ CASES: tuple[HarnessCase, ...] = (
         wire=_wire_aider,
         scrub_env=("OPENAI_API_BASE", "OPENAI_BASE_URL"),
         notes="Reads .aider.conf.yml from cwd — exercises the sentinel YAML carrier.",
+    ),
+    HarnessCase(
+        name="cline",
+        binary="cline",
+        env=lambda port, root: {},
+        argv=lambda root: [
+            "cline",
+            "--data-dir",
+            str(root / ".cline-data"),
+            "--auto-approve",
+            "false",
+            PROMPT,
+        ],
+        wire=_wire_cline,
+        notes="Sandboxed --data-dir with the rendered providers.json store (bare /v1).",
     ),
     HarnessCase(
         name="hermes-agent",

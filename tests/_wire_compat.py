@@ -35,6 +35,7 @@ _REGISTRY_PROVIDERS_USING_HOME = frozenset(
         "opencode",
         "codex",
         "openclaw",
+        "cline",  # user-scoped ~/.cline/data/settings/providers.json
         # REGISTRY providers don't match legacy proxy behavior
         "aider",
         "continue-closed",

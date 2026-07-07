@@ -2,9 +2,9 @@
 
 Registers the ``cline`` harness in REGISTRY with:
 - Protocol: OPENAI (Cline speaks the OpenAI Chat Completions API)
-- Capabilities: PROXY (proxy wiring via .cline/settings.json)
-- env_builder: returns empty dict (Cline uses file-based config)
-- install_writer: writes .cline/settings.json with proxy API fields
+- Capabilities: PROXY (proxy wiring via the user-scoped providers.json store)
+- env_builder: returns empty dict (Cline reads its user-scoped provider store)
+- install_writer: merges ~/.cline/data/settings/providers.json with proxy API fields
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from . import install
 def _env_builder(port: int) -> dict[str, str]:
     """Build environment dict for the cline subprocess.
 
-    Cline uses file-based config (.cline/settings.json) rather than env vars.
+    Cline reads its user-scoped providers.json store rather than env vars.
     Returns an empty dict.
     """
     return {}
@@ -34,7 +34,8 @@ def _env_builder(port: int) -> dict[str, str]:
 def _install_writer(port: int, root: Path, force: bool = False) -> list[WireRecord]:
     """Install persistent wiring for cline.
 
-    Writes .cline/settings.json with proxy API fields.
+    Merges the openai-compatible provider entry into
+    ~/.cline/data/settings/providers.json (the store cline auth writes).
     """
     return install.apply_persistent_config(port, root, force)
 

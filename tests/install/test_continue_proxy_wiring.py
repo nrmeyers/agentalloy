@@ -17,6 +17,25 @@ from agentalloy.providers import REGISTRY
 
 
 @pytest.mark.parametrize("harness", ["continue-closed", "continue-local"])
+def test_registry_install_writer_writes_modern_agent(tmp_path: Path, harness: str) -> None:
+    """The modern carrier: repo .continue/agents/agentalloy.yaml with the
+    per-repo tokenized base (verified live via `cn --config`)."""
+    from agentalloy.api.proxy_context import encode_proj_token
+
+    writer = REGISTRY[harness].install_writer
+    assert writer is not None
+    records = writer(6666, tmp_path, False)
+
+    agent_path = tmp_path / ".continue" / "agents" / "agentalloy.yaml"
+    assert str(agent_path) in {r.path for r in records}
+    content = agent_path.read_text()
+    token = encode_proj_token(tmp_path)
+    assert f"apiBase: http://localhost:6666/proj/{token}/v1" in content
+    assert "provider: openai" in content
+    assert "model: agentalloy-proxy" in content
+
+
+@pytest.mark.parametrize("harness", ["continue-closed", "continue-local"])
 def test_registry_install_writer_writes_continuerc(tmp_path: Path, harness: str) -> None:
     writer = REGISTRY[harness].install_writer
     assert writer is not None
@@ -25,7 +44,7 @@ def test_registry_install_writer_writes_continuerc(tmp_path: Path, harness: str)
 
     assert records, f"{harness} install_writer must not be a no-op stub"
     config_path = tmp_path / ".continuerc.json"
-    assert {r.path for r in records} == {str(config_path)}
+    assert str(config_path) in {r.path for r in records}
 
     config = json.loads(config_path.read_text())
     proxy_models = [m for m in config["models"] if m.get("agentalloy_proxy") is True]

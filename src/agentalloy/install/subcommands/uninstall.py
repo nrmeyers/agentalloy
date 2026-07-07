@@ -1019,6 +1019,7 @@ def uninstall(
         home / ".continue",
         home / ".agentalloy",
         home / ".openclaw",
+        home / ".cline",
     )
     # Set of harness target basenames / suffix-paths we ever write. Any
     # `path` in state that doesn't end in one of these is rejected even
@@ -1033,6 +1034,7 @@ def uninstall(
         ".windsurf/rules/agentalloy.md",
         ".github/copilot-instructions.md",
         ".continuerc.json",
+        ".continue/agents/agentalloy.yaml",  # continue modern workspace agent
         ".cursor/mcp.json",
         ".aider.conf.yml",
         ".agentalloy-aider-instructions.md",
@@ -1041,7 +1043,8 @@ def uninstall(
         ".hermes/.agentalloy-env",  # hermes HERMES_HOME activation env file
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
         "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
-        ".cline/settings.json",  # Cline proxy config
+        ".cline/settings.json",  # Cline legacy (inert, pre-rewrite) repo config
+        ".cline/data/settings/providers.json",  # Cline provider store (user-scoped)
         ".claude/settings.json",  # Claude Code hook wiring (merged hooks)
         "agentalloy-hook-claude-code.sh",  # ~/.agentalloy/hooks/ hook script
         ".openclaw/plugins.json",  # openclaw legacy (pre-rewrite) plugin config

@@ -309,51 +309,44 @@ class TestOpenHarnesses:
         assert SENTINEL_BEGIN in content
 
     def test_cline_proxy(self, tmp_path: Path) -> None:
-        """Proxy path writes .cline/settings.json with proxy API fields."""
+        """Proxy path merges the user-scoped providers.json store (the old
+        repo-local .cline/settings.json was inert — Cline never read it)."""
         result = wire_compat("cline", port=8000, root=tmp_path)
         assert result["harness"] == "cline"
         assert result["integration_vector"] == "proxy"
-        settings = tmp_path / ".cline" / "settings.json"
-        assert settings.exists()
-        from agentalloy.api.proxy_context import encode_proj_token
+        # The dead repo-local carrier must stay dead.
+        assert not (tmp_path / ".cline" / "settings.json").exists()
 
-        config = json.loads(settings.read_text())
-        assert config["apiProvider"] == "openai"
-        assert (
-            config["apiBaseUrl"] == f"http://localhost:8000/proj/{encode_proj_token(tmp_path)}/v1"
-        )
-        assert config["apiKey"] == "agentalloy"
-        assert config["model"] == "agentalloy-proxy"
+        store_path = Path.home() / ".cline" / "data" / "settings" / "providers.json"
+        assert store_path.exists()
+        store = json.loads(store_path.read_text())
+        entry = store["providers"]["openai-compatible"]["settings"]
+        assert entry["provider"] == "openai-compatible"
+        assert entry["baseUrl"] == "http://localhost:8000/v1"
+        assert entry["apiKey"] == "agentalloy"
+        assert entry["model"] == "agentalloy-proxy"
+        assert store["lastUsedProvider"] == "openai-compatible"
 
     def test_merges_existing_settings(self, tmp_path: Path) -> None:
-        """Cline proxy settings merge with existing settings without overwriting."""
-        # Create a pre-existing settings file with user-defined settings
-        existing_settings = {
-            "apiProvider": "anthropic",
-            "modelId": "claude-3-sonnet",
-            "someOtherSetting": "keep this",
-        }
-        settings_dir = tmp_path / ".cline"
-        settings_dir.mkdir()
-        (settings_dir / "settings.json").write_text(json.dumps(existing_settings, indent=2))
+        """Other providers in the store survive the merge."""
+        store_path = Path.home() / ".cline" / "data" / "settings" / "providers.json"
+        store_path.parent.mkdir(parents=True)
+        store_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "lastUsedProvider": "anthropic",
+                    "providers": {"anthropic": {"settings": {"apiKey": "keep-me"}}},
+                }
+            )
+        )
 
         wire_compat("cline", port=9999, root=tmp_path)
 
-        from agentalloy.api.proxy_context import encode_proj_token
-
-        config = json.loads((settings_dir / "settings.json").read_text())
-
-        # Verify proxy fields are present
-        assert config["apiProvider"] == "openai"
-        assert (
-            config["apiBaseUrl"] == f"http://localhost:9999/proj/{encode_proj_token(tmp_path)}/v1"
-        )
-        assert config["apiKey"] == "agentalloy"
-        assert config["model"] == "agentalloy-proxy"
-
-        # Verify existing settings are preserved
-        assert config["modelId"] == "claude-3-sonnet"
-        assert config["someOtherSetting"] == "keep this"
+        store = json.loads(store_path.read_text())
+        assert store["providers"]["anthropic"]["settings"]["apiKey"] == "keep-me"
+        assert "openai-compatible" in store["providers"]
+        assert store["lastUsedProvider"] == "openai-compatible"
 
     def test_aider(self, repo_root: Path) -> None:
         result = wire_compat("aider", port=8000, root=repo_root, legacy=True)

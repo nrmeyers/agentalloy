@@ -23,16 +23,20 @@ the service running (`curl -s localhost:47950/health`).
 
 Same four steps against `.windsurf/rules/agentalloy.md` / `.windsurfrules`.
 
-## cline (proxy via VS Code)
+## cline (proxy — CLI covered by the e2e matrix; this checks the IDE side)
 
-1. Wire; confirm `.cline/settings.json` carries `apiProvider: openai`,
-   `apiBaseUrl` → the proxy, `model`.
+The headless cline CLI is live-verified by the matrix against the same
+`~/.cline/data/settings/providers.json` store the extension reads. The manual
+check confirms the VS Code extension honors it too:
+
+1. Wire; confirm `~/.cline/data/settings/providers.json` carries the
+   `openai-compatible` provider (`baseUrl` → the proxy) and
+   `lastUsedProvider: openai-compatible`.
 2. Open VS Code + Cline in the wired repo; send one prompt.
 3. Confirm the turn completes AND the service telemetry shows a
    `proxy_composed`/`proxy_passthrough` row (`agentalloy status` or the web
-   UI) — that proves traffic actually flowed through the proxy.
-4. If Cline errors on the model name or ignores the settings file, that is a
-   wiring drift finding — file it; do not ship the claim.
+   UI) — that proves the extension used the store, not its cached
+   globalState provider.
 
 ## antigravity / gemini-cli (sidecar — GEMINI.md)
 
