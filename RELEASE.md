@@ -108,10 +108,13 @@ The invariant is NOT "main == last tag" — it is **"a tag's version tells the
 truth about shipped content"**: two tags with different versions always differ
 in what users actually run. Mechanically:
 
-- A merge **requires a version bump** (in the same PR or a follow-up bump PR
-  before the next tag) when its diff touches the **shipped surface**:
-  `src/`, `src/agentalloy/_packs/`, `frontend/`, `Containerfile*` /
+- A merge **requires a version bump** when its diff touches the **shipped
+  surface**: `src/`, `src/agentalloy/_packs/`, `frontend/`, `Containerfile*` /
   `container/`, or dependency pins in `pyproject.toml` / `uv.lock`.
+- The bump **rides the shipped-surface PR itself** — do not open a separate
+  `chore(release)` bump PR; merging the bumped PR IS cutting the release
+  (§5). When several shipped PRs deliberately accumulate before a release,
+  the final PR of the batch carries the bump.
 - Merges touching only CI workflows, docs, tests, or repo tooling do **not**
   bump. Main being ahead of the last tag by that class of change is not
   drift — it's the definition.
@@ -140,11 +143,12 @@ When you bump the version you MUST also:
 
 ## 5. Cutting a release
 
-The cut is **automated**: when a version-bump PR merges to main and that
-commit's CI goes green, `Release Cut` (`.github/workflows/release-cut.yml`)
-creates the GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed
-from the bump PR, generated notes) and dispatches `Container Build & Publish`
-on the new tag. Merging the bump PR IS cutting the release — nothing to run.
+The cut is **automated**: when a PR carrying a version bump (a shipped-surface
+PR with the bump riding along, per §4) merges to main and that commit's CI
+goes green, `Release Cut` (`.github/workflows/release-cut.yml`) creates the
+GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed from the
+bumping PR, generated notes) and dispatches `Container Build & Publish` on
+the new tag. Merging the bumped PR IS cutting the release — nothing to run.
 
 What the automation guarantees, and why it's shaped this way:
 
