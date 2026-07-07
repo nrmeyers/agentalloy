@@ -45,17 +45,15 @@ def vscode_user_dir() -> Path | None:
     Only the stable channel ("Code") is targeted; Insiders/VSCodium users can
     copy the provider group manually (documented in the harness catalog).
     """
-    base: Path | None
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / "Code" / "User"
     elif os.name == "nt":
-        appdata = os.environ.get("APPDATA", "")
-        base = Path(appdata) / "Code" / "User" if appdata else None
+        # An unset APPDATA yields a relative path that never exists — the
+        # is_dir() check below turns that into a clean skip.
+        base = Path(os.environ.get("APPDATA", "")) / "Code" / "User"
     else:
         base = Path.home() / ".config" / "Code" / "User"
-    if base is None or not base.is_dir():
-        return None
-    return base
+    return base if base.is_dir() else None
 
 
 def render_provider_group(port: int) -> dict[str, Any]:
