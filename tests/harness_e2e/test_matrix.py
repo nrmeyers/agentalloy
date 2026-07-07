@@ -49,6 +49,11 @@ def test_harness_roundtrip(
     for key in case.scrub_env:
         env.pop(key, None)
     env.update(case.env(proxy, work_repo))
+    # A shell syncs $PWD on cd; subprocess(cwd=...) does not, leaving pytest's
+    # own directory in it. opencode ≥1.17 trusts $PWD over the process cwd for
+    # project resolution — with the stale value it loads no repo opencode.json
+    # and dies with ProviderModelNotFoundError. Model the shell.
+    env["PWD"] = str(work_repo)
 
     before = len(upstream_stub.captured)
     result = subprocess.run(
