@@ -150,7 +150,11 @@ echo ">> Starting embed llama-server on 47951..."
 llama-server --embeddings --pooling mean --ubatch-size 2048 --host 127.0.0.1 --port 47951 -m "$EMBED_GGUF" &
 EMBED_PID=$!
 echo ">> Starting reranker llama-server on 47952..."
-llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &
+# CPU-optimal slot config (--parallel 1 -c 2048): the container llama build
+# is CPU-only, and fewer slots = MORE throughput on CPU (OpenMP contention
+# dominates multi-slot; measured warm single ~145ms vs ~600ms+ unpinned —
+# same data as install/presets/cpu.yaml + start_rerank_server).
+llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF" &
 RERANK_PID=$!
 
 echo ">> Waiting for llama-server health (47951 + 47952)..."

@@ -361,11 +361,16 @@ class TestEntrypointLlamaServers:
         assert "EMBED_PID=$!" in script
 
     def test_entrypoint_starts_reranker_server_no_embeddings(self):
-        """The reranker llama-server runs on 47952 in completions mode (NO --embeddings)."""
+        """The reranker llama-server runs on 47952 in completions mode (NO --embeddings),
+        with the CPU-optimal slot config (--parallel 1 -c 2048 — the container llama
+        build is CPU-only; multi-slot regresses CPU latency ~4x, per presets/cpu.yaml)."""
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert 'llama-server --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF"' in script
+        assert (
+            'llama-server --parallel 1 -c 2048 --host 127.0.0.1 --port 47952 -m "$RERANK_GGUF"'
+            in script
+        )
         assert "RERANK_PID=$!" in script
         # The reranker launch line must not carry --embeddings.
         rerank_line = next(
