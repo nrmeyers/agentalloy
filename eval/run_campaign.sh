@@ -25,7 +25,7 @@ declare -A ALIASES=(
 MODELS=("$@")
 [[ ${#MODELS[@]} -eq 0 ]] && MODELS=(35B 27B 12B LFM)
 
-curl -sf -m 5 "$AGENTALLOY_URL/compose" -X POST -H 'content-type: application/json' \
+curl -sf -m 30 "$AGENTALLOY_URL/compose" -X POST -H 'content-type: application/json' \
     -d '{"task":"preflight","phase":"build","k":1}' >/dev/null \
     || { echo "FATAL: agentalloy service not answering at $AGENTALLOY_URL"; exit 1; }
 
