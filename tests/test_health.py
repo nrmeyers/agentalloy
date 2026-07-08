@@ -82,9 +82,7 @@ def test_corpus_stamp_changes_when_active_set_changes(corpus_dir: Path) -> None:
                 author="test",
                 change_summary="initial",
                 raw_prose="stamp probe",
-                fragments=[
-                    FragmentRecord(sequence=1, fragment_type="execution", content="probe")
-                ],
+                fragments=[FragmentRecord(sequence=1, fragment_type="execution", content="probe")],
                 tier=None,
             ),
             force=False,
