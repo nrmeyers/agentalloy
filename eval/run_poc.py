@@ -94,12 +94,19 @@ def load_flat_prompt(task: Task) -> str:
     return "\n".join(parts)
 
 
+# The composed arm measures the shipped Tier-2 per-work-item shape, which is
+# legs="domain" (the proxy composes the system/workflow leg separately). The
+# pre-2026-07 protocol defaulted to legs="both" and measured a payload the
+# product never repeatedly ships (spec benchmark-fidelity-and-slot-leak AC2.1).
+COMPOSED_LEGS = "domain"
+
+
 def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, int, list[str]]:
     """Returns (assembled_text, result_type, compose_latency_ms, source_skills)."""
     start_ns = time.perf_counter_ns()
     resp = client.post(
         f"{AGENTALLOY_URL}/compose",
-        json={"task": task.spec, "phase": task.phase, "k": k},
+        json={"task": task.spec, "phase": task.phase, "k": k, "legs": COMPOSED_LEGS},
         timeout=httpx.Timeout(connect=5.0, read=600.0, write=10.0, pool=5.0),
     )
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
@@ -141,6 +148,84 @@ def preflight_lm_assist(client: httpx.Client) -> dict[str, Any]:
             f"and restart the service, then rerun."
         )
     return cfg
+
+
+def fetch_service_provenance(client: httpx.Client) -> dict[str, Any]:
+    """Service version + corpus stamp from /health for the run manifest (AC2.3).
+
+    Null-tolerant: a service predating the ``service`` block records nulls with
+    a warning rather than blocking the run."""
+    try:
+        resp = client.get(f"{AGENTALLOY_URL}/health", timeout=httpx.Timeout(10.0))
+        service = resp.json().get("service") if resp.status_code == 200 else None
+    except httpx.HTTPError as exc:
+        logger.warning("service provenance unavailable (/health failed: %s)", exc)
+        service = None
+    if not isinstance(service, dict):
+        logger.warning("service too old for provenance: /health has no 'service' block")
+        return {"service_version": None, "corpus_stamp": None}
+    return {
+        "service_version": service.get("version"),
+        "corpus_stamp": service.get("corpus_stamp"),
+    }
+
+
+def fetch_serving_backend(client: httpx.Client) -> dict[str, Any]:
+    """Identity of the agent-model endpoint (/v1/models) for the manifest (AC2.3)."""
+    try:
+        resp = client.get(f"{LM_STUDIO_URL}/v1/models", timeout=httpx.Timeout(10.0))
+        data = resp.json() if resp.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("serving backend identity unavailable (/v1/models failed: %s)", exc)
+        return {"url": LM_STUDIO_URL, "models": None}
+    models = data.get("data") if isinstance(data, dict) else None
+    ids = [m.get("id") for m in models if isinstance(m, dict)] if isinstance(models, list) else None
+    return {"url": LM_STUDIO_URL, "models": ids}
+
+
+def preflight_gold_skills(
+    client: httpx.Client, tasks: list[Task], *, require_live: bool
+) -> list[str]:
+    """AC2.4: every task's gold skills must be present in the live corpus
+    (``require_live``, composed arms) and not deprecated in pack source.
+    Returns violation strings (empty == clean).
+
+    Prevents silent oracle inflation: a gold skill missing from the live corpus
+    zeroes the composed arm while the flat arm still reads its prose from pack
+    source; a deprecated gold inflates flat against a corpus that (correctly)
+    no longer retrieves it."""
+    violations: list[str] = []
+
+    live_ids: set[Any] | None = None
+    if require_live:
+        try:
+            resp = client.get(f"{AGENTALLOY_URL}/diagnostics/runtime", timeout=httpx.Timeout(30.0))
+            if resp.status_code != 200:
+                return [f"/diagnostics/runtime returned {resp.status_code} — cannot verify corpus"]
+            live_ids = {
+                e.get("skill_id") for e in resp.json().get("store_state", []) if isinstance(e, dict)
+            }
+        except httpx.HTTPError as exc:
+            return [f"/diagnostics/runtime unreachable ({exc}) — cannot verify corpus"]
+
+    index = _pack_skill_index()
+    for task in tasks:
+        for skill_id in task.gold_skills:
+            if live_ids is not None and skill_id not in live_ids:
+                violations.append(f"{task.task_id}: gold skill {skill_id!r} not in the live corpus")
+            yaml_path = index.get(skill_id)
+            if yaml_path is None:
+                violations.append(
+                    f"{task.task_id}: gold skill {skill_id!r} missing from pack source"
+                )
+                continue
+            doc: Any = yaml.safe_load(yaml_path.read_text())
+            if isinstance(doc, dict) and doc.get("deprecated") is True:
+                violations.append(
+                    f"{task.task_id}: gold skill {skill_id!r} is deprecated in pack source "
+                    f"(superseded_by={doc.get('superseded_by')!r})"
+                )
+    return violations
 
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -220,12 +305,15 @@ def run_one(
     ) % (2**31)
     compose_result_type: str | None = None
     compose_latency_ms: int | None = None
+    source_skills: list[str] = []
     if condition in ("composed", "composed-lm"):
         # composed-lm is byte-identical to composed at the harness level — it
         # calls the same /compose. The difference is server-side (LM_ASSIST=
         # arbitrate); this arm only records that config in the manifest and
         # preflights it (see main()). The harness never toggles the env.
-        assembled, compose_result_type, compose_latency_ms, _ = call_compose(client, task, k)
+        assembled, compose_result_type, compose_latency_ms, source_skills = call_compose(
+            client, task, k
+        )
         if not assembled.strip():
             assembled = "(compose returned empty result — no domain fragments matched)"
         system_prompt = (
@@ -267,6 +355,9 @@ def run_one(
         "agent_latency_ms": agent_ms,
         "compose_latency_ms": compose_latency_ms,
         "compose_result_type": compose_result_type,
+        # AC2.5: which skills filled the slots — enables slot-composition
+        # audits on historical runs (was discarded pre-2026-07).
+        "source_skills": source_skills,
         "system_prompt_chars": len(system_prompt),
         "grades": grades,
         "score": score,
@@ -445,15 +536,37 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"composed-lm arm blocked: {exc}", file=sys.stderr)
                 return 1
 
+    # AC2.4: gold-skill preflight — abort before any model call on a corpus
+    # that would silently skew an arm. Live-corpus presence matters iff a
+    # composed arm runs; pack-source deprecation also guards the flat oracle.
+    # A none/external-only run has no gold-skill dependence and skips it.
+    # AC2.3: reproducibility provenance.
+    composed_arms = {"composed", "composed-lm"} & set(args.conditions)
+    with httpx.Client() as preflight_client:
+        if composed_arms or "flat" in args.conditions:
+            violations = preflight_gold_skills(
+                preflight_client, selected_tasks, require_live=bool(composed_arms)
+            )
+            if violations:
+                for v in violations:
+                    print(f"gold preflight violation: {v}", file=sys.stderr)
+                return 1
+        provenance = fetch_service_provenance(preflight_client)
+        serving_backend = fetch_serving_backend(preflight_client)
+
     manifest = {
         "started_at": timestamp,
         "label": args.label,
         "task_set": args.task_set,
         "k": args.k,
+        "legs": COMPOSED_LEGS,
         "agent_model": AGENT_MODEL,
         "agentalloy_url": AGENTALLOY_URL,
         "lm_studio_url": LM_STUDIO_URL,
         "diversity_selection": os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on"),
+        "agent_reasoning_effort": os.environ.get("AGENT_REASONING_EFFORT"),
+        "serving_backend": serving_backend,
+        **provenance,
         "tasks": [t.task_id for t in selected_tasks],
         "conditions": args.conditions,
         "runs_per_cell": args.n,
