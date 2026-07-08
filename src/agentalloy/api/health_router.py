@@ -9,6 +9,7 @@ script. ``/health`` answers "is the service up and dependencies healthy";
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from datetime import datetime
@@ -18,6 +19,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from agentalloy import __version__
 from agentalloy.embed_provider import EmbedClient
 from agentalloy.lm_client import LMClientError
 from agentalloy.storage.protocols import SkillStore, TelemetryStore
@@ -53,6 +55,18 @@ class LMAssistConfigView(BaseModel):
 ModuleStatus = Literal["enabled", "disabled", "unavailable"]
 
 
+class ServiceProvenance(BaseModel):
+    """Reproducibility provenance — recorded by benchmark manifests and audits.
+
+    ``corpus_stamp`` is a SHA-256 over the active ``(skill_id, version_id)``
+    pairs in ``skill_id`` order: it changes iff the active corpus changes
+    (ingest, version activation, deprecation) and is insensitive to row order
+    or connection details. ``None`` when the store is unreachable."""
+
+    version: str
+    corpus_stamp: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: OverallStatus
     dependencies: dict[str, DependencyStatus] | None = None
@@ -61,6 +75,7 @@ class HealthResponse(BaseModel):
     # create_app from the module toggles; "unavailable" means the toggle is on
     # but the module failed to import (missing [code-index] extra).
     modules: dict[str, ModuleStatus] | None = None
+    service: ServiceProvenance | None = None
 
 
 class HealthChecker:
@@ -83,10 +98,11 @@ class HealthChecker:
         self._upstream_summary = upstream_summary
 
     async def check(self) -> HealthResponse:
-        store_ok, tel_ok, embed_ok = await asyncio.gather(
+        store_ok, tel_ok, embed_ok, corpus_stamp = await asyncio.gather(
             asyncio.to_thread(self._probe_runtime_store),
             asyncio.to_thread(self._probe_telemetry_store),
             asyncio.to_thread(self._probe_embed_model),
+            asyncio.to_thread(self._corpus_stamp),
         )
 
         # NXS-777: reflect startup cache load result
@@ -162,7 +178,12 @@ class HealthChecker:
             timeout_ms=cfg.timeout_ms,
         )
 
-        return HealthResponse(status=overall, dependencies=deps, lm_assist=lm_view)
+        return HealthResponse(
+            status=overall,
+            dependencies=deps,
+            lm_assist=lm_view,
+            service=ServiceProvenance(version=__version__, corpus_stamp=corpus_stamp),
+        )
 
     def _probe_runtime_store(self) -> str | None:
         try:
@@ -170,6 +191,23 @@ class HealthChecker:
             return None
         except Exception as exc:
             return str(exc)
+
+    def _corpus_stamp(self) -> str | None:
+        """SHA-256 over the sorted active (skill_id, version_id) pairs, or None
+        when the store is unreachable. The probe must never break /health."""
+        try:
+            rows = self._store.execute(
+                "SELECT s.skill_id, s.current_version_id FROM skills s "
+                "JOIN skill_versions v ON v.version_id = s.current_version_id "
+                "WHERE v.status = 'active' AND s.deprecated = false "
+                "ORDER BY s.skill_id"
+            )
+            digest = hashlib.sha256()
+            for skill_id, version_id in rows:
+                digest.update(f"{skill_id}:{version_id}\n".encode())
+            return digest.hexdigest()
+        except Exception:
+            return None
 
     def _probe_telemetry_store(self) -> str | None:
         try:
@@ -218,7 +256,11 @@ async def health(request: Request) -> HealthResponse:
     checker: HealthChecker | None = getattr(request.app.state, "health_checker", None)
     modules: dict[str, ModuleStatus] | None = getattr(request.app.state, "module_status", None)
     if checker is None:
-        return HealthResponse(status="healthy", modules=modules)
+        # No checker (lifespan-less TestClient): version is still known; the
+        # corpus stamp requires a store, so it stays None.
+        return HealthResponse(
+            status="healthy", modules=modules, service=ServiceProvenance(version=__version__)
+        )
     response = await checker.check()
     response.modules = modules
     return response

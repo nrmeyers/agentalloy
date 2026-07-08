@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,6 +18,89 @@ def test_health_returns_200_healthy_without_lifespan(client: TestClient) -> None
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "healthy"
+
+
+# -------- service provenance block (build contract health-provenance-stamp) --------
+
+
+def test_health_service_block_without_checker(client: TestClient) -> None:
+    from agentalloy import __version__
+
+    body = client.get("/health").json()
+    assert body["service"]["version"] == __version__
+    assert body["service"]["corpus_stamp"] is None
+
+
+def test_health_service_block_with_real_store(app: FastAPI, corpus_dir: Path) -> None:
+    from agentalloy import __version__
+    from agentalloy.storage.skill_store import open_skill_store
+
+    store = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+    try:
+        app.state.health_checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
+        with TestClient(app) as c:
+            body = c.get("/health").json()
+    finally:
+        store.close()
+    assert body["service"]["version"] == __version__
+    stamp = body["service"]["corpus_stamp"]
+    assert isinstance(stamp, str) and len(stamp) == 64
+    int(stamp, 16)  # hex digest
+
+
+def test_corpus_stamp_stable_across_calls(corpus_dir: Path) -> None:
+    from agentalloy.storage.skill_store import open_skill_store
+
+    store = open_skill_store(str(corpus_dir / "agentalloy.duck"), read_only=True)
+    try:
+        checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
+        assert checker._corpus_stamp() == checker._corpus_stamp()  # pyright: ignore[reportPrivateUsage]
+    finally:
+        store.close()
+
+
+def test_corpus_stamp_changes_when_active_set_changes(corpus_dir: Path) -> None:
+    from agentalloy.ingest import FragmentRecord, ReviewRecord
+    from agentalloy.ingest import _insert as ingest_insert  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.storage.skill_store import open_skill_store
+
+    store = open_skill_store(str(corpus_dir / "agentalloy.duck"))
+    try:
+        checker = HealthChecker(store, MagicMock(), MagicMock(), "stub-embed")
+        before = checker._corpus_stamp()  # pyright: ignore[reportPrivateUsage]
+        ingest_insert(
+            store,
+            ReviewRecord(
+                skill_id="stamp-probe-skill",
+                canonical_name="Stamp Probe",
+                category="engineering",
+                skill_class="domain",
+                domain_tags=["testing"],
+                always_apply=False,
+                phase_scope=[],
+                category_scope=["framework"],
+                author="test",
+                change_summary="initial",
+                raw_prose="stamp probe",
+                fragments=[
+                    FragmentRecord(sequence=1, fragment_type="execution", content="probe")
+                ],
+                tier=None,
+            ),
+            force=False,
+        )
+        after = checker._corpus_stamp()  # pyright: ignore[reportPrivateUsage]
+    finally:
+        store.close()
+    assert before is not None and after is not None
+    assert before != after
+
+
+def test_corpus_stamp_none_when_store_unreachable() -> None:
+    broken = MagicMock()
+    broken.execute.side_effect = RuntimeError("db locked")
+    checker = HealthChecker(broken, MagicMock(), MagicMock(), "stub-embed")
+    assert checker._corpus_stamp() is None  # pyright: ignore[reportPrivateUsage]
 
 
 def _mock_checker(
