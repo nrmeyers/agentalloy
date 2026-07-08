@@ -60,19 +60,31 @@ _DEAD_RERANK_PORT = 60001  # old default; pointed at an unrelated local service
 # of truth). Named by hardware target only — see write_env.VALID_PRESETS.
 _HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
 
-# Expected Stage B posture per preset. v5.0.0: ALL presets ship LM_ASSIST=off —
-# fragment re-rank showed no lift on the eval set (2026-06-12, reproduced by a
-# blind judge during the v5 migration) and adds ~500ms/compose. v4.0.2 had set
-# it arbitrate to address n=2 / real-life skill-ranking issues the eval set
-# doesn't capture; off for now pending a cleaner fix. The intent reranker
-# (SIGNAL_INTENT_BACKEND=reranker) — the measured win — stays on, independently.
-# The dormant LM_ASSIST_{TIMEOUT_MS,MAX_CANDIDATES,DOC_CAP_CHARS} keys remain in
-# the presets so re-enabling is a one-line flip back to "arbitrate".
+# Expected Stage B posture per preset. v6.6.0: ALL presets ship
+# LM_ASSIST=arbitrate with an eviction threshold — the 2026-07-08 investigation
+# (nightly 28931694381) showed the LM judge is the only mechanism that both
+# fixes the free-text process-skill slot leak (domain benchmark 0.816 vs 0.803
+# deterministic) AND keeps process skills reachable (name probes 0.93+ vs 0.44
+# under windowed demotion, which is now the opt-in AGENTALLOY_PROCESS_DEMOTION
+# fallback). The earlier "no eval lift" reading (v5.0.0 off) measured arbitrate
+# WITHOUT eviction: keep_threshold=0.0 keeps every candidate scoring >= 0, so
+# the judge re-ordered but never dropped — 0.05 is the load-bearing change
+# (judge scores are near-binary: filler exactly 0.0, relevant 0.86+).
 _LM_ASSIST_BY_PRESET = {
-    "cpu": "off",
-    "nvidia": "off",
-    "radeon": "off",
-    "apple-silicon": "off",
+    "cpu": "arbitrate",
+    "nvidia": "arbitrate",
+    "radeon": "arbitrate",
+    "apple-silicon": "arbitrate",
+}
+
+# Per-hardware Stage B budget: CPU pays ~145ms/candidate at the --parallel 1
+# launcher config (16 candidates ~2.3s => 3s budget); GPU-class stays at 2s
+# (K=16 ~1s warm + cold-start headroom).
+_LM_ASSIST_TIMEOUT_BY_PRESET = {
+    "cpu": "3000",
+    "nvidia": "2000",
+    "radeon": "2000",
+    "apple-silicon": "2000",
 }
 
 # The .env.example template documents every knob; it's not a per-hardware source
@@ -145,12 +157,19 @@ def test_preset_lm_assist_posture(preset: str) -> None:
         f"(missing → silently falls back to the code default 'off')"
     )
     if expected == "arbitrate":
-        # v4.0.2: 2000ms budget across all arbitrate presets — gives cold-start
-        # (~1.2s GPU prompt-eval) + warmup-fallback recovery + CPU-headroom
-        # margin. Was 1500ms in v4.0.0/4.0.1 — bumped after measuring the
-        # budget was 70% unused on warm GPU and CPU needed more cushion.
-        assert defaults.get("LM_ASSIST_TIMEOUT_MS") == "2000", (
-            f"{preset}: arbitrate preset should set LM_ASSIST_TIMEOUT_MS=2000"
+        assert defaults.get("LM_ASSIST_TIMEOUT_MS") == _LM_ASSIST_TIMEOUT_BY_PRESET[preset], (
+            f"{preset}: LM_ASSIST_TIMEOUT_MS should be "
+            f"{_LM_ASSIST_TIMEOUT_BY_PRESET[preset]} for this hardware"
+        )
+        # The eviction gate: 0.0 keeps everything >= 0 (the pre-v6.6.0
+        # misconfiguration that made arbitrate a keep-all no-op).
+        assert defaults.get("LM_ASSIST_KEEP_THRESHOLD") == "0.05", (
+            f"{preset}: arbitrate preset must ship LM_ASSIST_KEEP_THRESHOLD=0.05"
+        )
+        # The judge must see past the fused head: golds sit as deep as fused
+        # rank ~11; probe reachability throttles below 16 (0.77 @ 8 vs 0.93+).
+        assert int(defaults.get("LM_ASSIST_MAX_CANDIDATES", "0")) >= 16, (
+            f"{preset}: arbitrate preset must ship LM_ASSIST_MAX_CANDIDATES>=16"
         )
 
 
@@ -503,26 +522,13 @@ def test_deepen_gate_fills_k_when_all_far() -> None:
 
 # ---------------------------------------------------------------------------
 # #9 (§C/§D Stage B viability) — Stage B fan-out / slot / doc-cap drift guards.
-# The reranker --parallel slot count, the client fan-out cap, and the GPU presets
-# must agree, and keep_threshold must stay gated-off (absent from every preset)
-# until the deferred P(yes) measurement sets it.
+# The reranker --parallel slot count and the client fan-out cap deliberately do
+# NOT match (CPU serializes at 1 slot to dodge OpenMP contention; GPU queues
+# over 2 slots). Candidates + keep_threshold posture is pinned per-preset in
+# test_preset_lm_assist_posture — the v6.6.0 measurement resolved the old
+# "keep_threshold stays absent until measured" D6 gate (scores are near-binary;
+# 0.05 evicts filler).
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("preset", _HW_PRESETS)
-def test_preset_lm_assist_max_candidates_is_8(preset: str) -> None:
-    # All arbitrate presets pin LM_ASSIST_MAX_CANDIDATES=8 (client-side fan-out).
-    # The reranker --parallel value is now hardware-conditional via
-    # start_rerank_server.rerank_launch_args (2 on GPU, 1 on CPU) — they do NOT
-    # need to match: on CPU the 8 client requests serialize at the server (1
-    # slot) and that's intentional (avoids OpenMP thread contention). On GPU
-    # the 8 client requests use 2 slots × 4-deep queueing.
-    defaults = write_env._load_preset(preset)
-    if _LM_ASSIST_BY_PRESET[preset] != "arbitrate":
-        return
-    assert defaults.get("LM_ASSIST_MAX_CANDIDATES") == "8", (
-        f"{preset}: arbitrate preset must set LM_ASSIST_MAX_CANDIDATES=8"
-    )
 
 
 @pytest.mark.parametrize("preset", _HW_PRESETS)
@@ -548,17 +554,6 @@ def test_preset_lm_assist_doc_cap_chars(preset: str) -> None:
         return
     assert defaults.get("LM_ASSIST_DOC_CAP_CHARS") == "2400", (
         f"{preset}: arbitrate preset must set LM_ASSIST_DOC_CAP_CHARS=2400"
-    )
-
-
-@pytest.mark.parametrize("preset", _HW_PRESETS)
-def test_preset_keep_threshold_absent(preset: str) -> None:
-    # D6: keep_threshold ships gated-off (inert code default). NO preset may carry
-    # LM_ASSIST_KEEP_THRESHOLD until a measured P(yes) value is set later — a preset
-    # value here would silently arm the filter ahead of the decision gate.
-    defaults = write_env._load_preset(preset)
-    assert "LM_ASSIST_KEEP_THRESHOLD" not in defaults, (
-        f"{preset}: LM_ASSIST_KEEP_THRESHOLD must stay ABSENT (measure-then-set, D6)"
     )
 
 

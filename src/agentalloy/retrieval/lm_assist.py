@@ -111,6 +111,10 @@ class LMAssistOutcome(StrEnum):
 
     DISABLED = "disabled"
     HIT = "hit"
+    # The judge scored every candidate <= keep_threshold: selection falls back
+    # to the deterministic path rather than composing empty. Distinguishable
+    # from HIT so empty-verdict rates are auditable in telemetry.
+    HIT_EMPTY_FALLBACK = "hit-empty-fallback"
     TIMEOUT = "timeout"
     ERROR = "error"
 

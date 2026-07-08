@@ -161,24 +161,28 @@ def _soft_tag_filter(
     return keep if keep else ranked
 
 
-# E7 — windowed process-class slot demotion (ships on; kill-switchable). The
-# generic quality skills (test-driven-development, verification-before-completion,
+# E7 — windowed process-class slot demotion (ships OFF as of v6.6.0; opt-in
+# fallback for LM-less deploys via AGENTALLOY_PROCESS_DEMOTION=on). The generic
+# quality skills (test-driven-development, verification-before-completion,
 # brainstorming, …) are skill_class="domain" with category_scope=[process]; they
 # win free-text slots on virtually every task and evict the gold skill at small k
 # (measured 2026-07-07: TDD on 18/18 domain tasks, gold evicted 3/18 at k=2).
-# When the fused ranking shows evidence of an on-domain alternative — >=1
-# non-process skill within the top-W skill window — every process-scope skill is
-# moved to the back of the line: its fragments go to the tail of the candidate
-# list (covers the RUNTIME_DIVERSITY_SELECTION=off top-k slice) and its skill_id
-# is folded into skill_granular_select's FAR last-resort tier (covers staged
-# selection, which otherwise round-robins tail siblings into first-pass slots).
-# On generic tasks the window is all-process, so the transform is a strict no-op.
+# When enabled: if the fused ranking shows evidence of an on-domain alternative —
+# >=1 non-process skill within the top-W skill window — every process-scope skill
+# is moved to the back of the line (fragments to the tail, skill_ids into
+# skill_granular_select's FAR last-resort tier). Why it no longer ships on:
+# position cannot distinguish "query ABOUT a process skill that a framework
+# skill happens to outrank" from "domain task with process filler" — at every
+# window the demotion strands process skills from free-text retrieval (nightly
+# 28931694381: name probes 0.44-0.88 vs 0.93+ floors across W=1..16). Stage B
+# arbitration (LM_ASSIST=arbitrate + keep_threshold, the v6.6.0 default) makes
+# that judgment semantically and supersedes this transform where an LM runs.
 _PROCESS_SCOPE = "process"
 _PROCESS_DEMOTION_WINDOW_FACTOR = 2  # W = factor * k distinct skills
 
 
 def _process_demotion_enabled() -> bool:
-    return _os.environ.get("AGENTALLOY_PROCESS_DEMOTION", "on").strip().lower() != "off"
+    return _os.environ.get("AGENTALLOY_PROCESS_DEMOTION", "off").strip().lower() == "on"
 
 
 def _process_demotion_window(k: int) -> int:
@@ -771,6 +775,13 @@ def retrieve_domain_candidates(
             k,
             len(ranked),
         )
+        # A HIT that keeps zero fragments means the judge scored every candidate
+        # at/below keep_threshold. Composing empty on a live request is worse
+        # than composing best-effort — fall back to the deterministic path and
+        # record the distinct outcome so empty-verdict rates stay auditable.
+        if lm_selected is not None and not lm_selected:
+            lm_outcome = LMAssistOutcome.HIT_EMPTY_FALLBACK
+            lm_selected = None
         if lm_selected is not None:
             # §D: route Stage B survivors through the SAME diversity selection as
             # the deterministic path. scores_by_id = the reranker yes-probabilities

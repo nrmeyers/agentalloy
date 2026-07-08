@@ -6,21 +6,25 @@ defaults:
   SIGNAL_INTENT_BACKEND: "reranker"
   SIGNAL_INTENT_RERANK_URL: "http://127.0.0.1:47952"
   SIGNAL_INTENT_RERANK_MODEL: "Qwen3-Reranker-0.6B-Q8_0.gguf"
-  # Stage B compose fragment re-ranker (lm_assist.py) — on for GPU presets,
-  # off for cpu (can't score real fragments inside the budget). 1500ms gives
-  # GPU headroom over the 600ms code default.
-  # v5.0.0: fragment re-rank off (no eval lift, +~500ms); intent reranker stays on.
-  LM_ASSIST: "off"
-  # 2s budget: ample headroom for cold-start (~1.2s) and warmup-fallback recovery;
-  # warm K=8 lands at ~485ms on GPU (--parallel 2 -c 4096 launcher config — see
-  # start_rerank_server.rerank_launch_args).
+  # Stage B compose fragment re-ranker (lm_assist.py). v6.6.0: arbitrate on ALL
+  # presets — the LM judge both fixes the free-text process-skill slot leak
+  # (domain 0.816 vs 0.803 deterministic) and keeps process skills reachable
+  # (name probes 0.93+ vs 0.44 under windowed demotion, now the opt-in
+  # AGENTALLOY_PROCESS_DEMOTION fallback). Fails open on timeout/error.
+  LM_ASSIST: "arbitrate"
+  # Evict fragments the judge scores <= threshold. Scores are near-binary
+  # (filler exactly 0.0, relevant 0.86+); 0.0 disables eviction entirely.
+  LM_ASSIST_KEEP_THRESHOLD: "0.05"
+  # 2s budget: warm K=8 ~485ms on GPU (--parallel 2 -c 4096 launcher config —
+  # see start_rerank_server.rerank_launch_args), K=16 ~1s; headroom for
+  # cold-start (~1.2s) and warmup-fallback recovery.
   LM_ASSIST_TIMEOUT_MS: "2000"
-  # Candidate fan-out == reranker --parallel slot count (start_rerank_server.py);
-  # bounds both scorer pools so Stage B + intent can't oversubscribe the slots.
-  LM_ASSIST_MAX_CANDIDATES: "8"
+  # The judge must see past the fused head: measured domain golds sit as deep
+  # as fused rank ~11; probe reachability throttles at cap 8 (0.77 vs 0.93+
+  # at 16). Requests beyond the --parallel slot count serialize at the server.
+  LM_ASSIST_MAX_CANDIDATES: "16"
   # Per-fragment char cap (~600 tok) — prefill bound that keeps fat-corpus outliers
-  # inside the Stage B budget. (keep_threshold is deliberately NOT set: it stays the
-  # inert code default, gated-off, pending a P(yes) measurement.)
+  # inside the Stage B budget.
   LM_ASSIST_DOC_CAP_CHARS: "2400"
   DEDUP_HARD_THRESHOLD: "0.92"
   DEDUP_SOFT_THRESHOLD: "0.80"

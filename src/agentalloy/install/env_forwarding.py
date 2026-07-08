@@ -66,6 +66,10 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # was chosen for.
         "LM_ASSIST",
         "LM_ASSIST_DOC_CAP_CHARS",
+        # Stage B eviction gate (v6.6.0 posture: presets ship 0.05; 0.0 turns
+        # eviction off). Missing from the allowlist pre-v6.6.0 — a host .env
+        # override silently never reached container deploys.
+        "LM_ASSIST_KEEP_THRESHOLD",
         "LM_ASSIST_MAX_CANDIDATES",
         "LM_ASSIST_TIMEOUT_MS",
         "LM_ASSIST_MODEL",
@@ -73,6 +77,11 @@ INTENT_KEYS: frozenset[str] = frozenset(
         "SIGNAL_INTENT_BACKEND",
         "SIGNAL_INTENT_RERANK_URL",
         "SIGNAL_INTENT_RERANK_MODEL",
+        # E7 windowed process demotion — the opt-in deterministic fallback for
+        # LM-less deploys (default off since v6.6.0). Behavior toggles read via
+        # os.environ by retrieval/domain.py.
+        "AGENTALLOY_PROCESS_DEMOTION",
+        "AGENTALLOY_PROCESS_DEMOTION_WINDOW",
     }
 )
 

@@ -18,6 +18,15 @@ from agentalloy.retrieval.domain import demote_process_skills, skill_granular_se
 
 _PACKS_DIR = Path(__file__).resolve().parents[1] / "src" / "agentalloy" / "_packs"
 
+
+@pytest.fixture(autouse=True)
+def _demotion_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """E7 ships OFF as of v6.6.0 (Stage B arbitration supersedes it); these
+    tests exercise the opt-in fallback behavior, so enable it explicitly.
+    Tests of the default/kill-switch override the env inside their bodies."""
+    monkeypatch.setenv("AGENTALLOY_PROCESS_DEMOTION", "on")
+
+
 # The measured leak set (2026-07-07 campaign) plus its peers from the core packs.
 _KNOWN_PROCESS_SKILLS = (
     "test-driven-development",
@@ -110,6 +119,15 @@ def test_none_category_scope_counts_as_non_process() -> None:
 
 def test_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTALLOY_PROCESS_DEMOTION", "off")
+    pool = [_frag("t1", "tdd", scope=_PROCESS), _frag("g1", "gold")]
+    reordered, demoted = demote_process_skills(pool, k=2)
+    assert reordered == pool
+    assert demoted == frozenset()
+
+
+def test_default_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # v6.6.0 posture: demotion is the opt-in LM-less fallback; unset env == off.
+    monkeypatch.delenv("AGENTALLOY_PROCESS_DEMOTION", raising=False)
     pool = [_frag("t1", "tdd", scope=_PROCESS), _frag("g1", "gold")]
     reordered, demoted = demote_process_skills(pool, k=2)
     assert reordered == pool

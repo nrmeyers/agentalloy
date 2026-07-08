@@ -46,6 +46,17 @@ def test_url_class_and_toggles_are_intent():
     assert set(MODULE_TOGGLES) <= INTENT_KEYS
 
 
+def test_stage_b_posture_keys_are_intent():
+    """v6.6.0 posture knobs must reach container deploys: the keep-threshold
+    gap meant a host .env override silently never forwarded (found while the
+    validated Stage B config had to be hand-injected via podman -e)."""
+    assert {
+        "LM_ASSIST_KEEP_THRESHOLD",
+        "AGENTALLOY_PROCESS_DEMOTION",
+        "AGENTALLOY_PROCESS_DEMOTION_WINDOW",
+    } <= INTENT_KEYS
+
+
 # ---------------------------------------------------------------------------
 # forwarded_env filtering
 # ---------------------------------------------------------------------------

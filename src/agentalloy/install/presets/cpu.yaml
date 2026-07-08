@@ -6,21 +6,28 @@ defaults:
   SIGNAL_INTENT_BACKEND: "reranker"
   SIGNAL_INTENT_RERANK_URL: "http://127.0.0.1:47952"
   SIGNAL_INTENT_RERANK_MODEL: "Qwen3-Reranker-0.6B-Q8_0.gguf"
-  # Stage B compose fragment re-ranker (lm_assist.py). Enabled on cpu in v4.0.2
-  # after a Jun 2026 measurement (Xeon W-2225, 4-thread inference, faithful
-  # build_prompt, /health-confirmed warm) showed CPU Stage B fits the budget
-  # WHEN the rerank server runs with --parallel 1 -c 2048: warm single ~145ms,
-  # batch-of-8 ~1170ms vs 2000ms budget. The launcher (start_rerank_server.py
-  # rerank_launch_args) selects the CPU-optimal slot config automatically. Slower
-  # CPUs may not hit the budget — Stage B fails open to the deterministic path
-  # v5.0.0: fragment re-rank off (no eval lift, +~500ms); intent reranker stays on.
-  LM_ASSIST: "off"
-  # 2s budget gives cold-start + slower-CPU headroom; warm steady-state is well
-  # under (single ~145ms, K=8 ~1170ms on Xeon-class CPU).
-  LM_ASSIST_TIMEOUT_MS: "2000"
-  # Same as GPU: 8-wide client fan-out. With --parallel 1 server, the 8 requests
-  # serialize at the server; per-request stays at full thread bandwidth.
-  LM_ASSIST_MAX_CANDIDATES: "8"
+  # Stage B compose fragment re-ranker (lm_assist.py). v6.6.0: arbitrate on ALL
+  # presets — the 2026-07-08 investigation (nightly 28931694381) showed the LM
+  # judge is the only mechanism that both fixes the free-text process-skill
+  # slot leak (domain 0.816 vs 0.803 deterministic) AND keeps process skills
+  # reachable (name probes 0.93+ vs 0.44 under windowed demotion, which is now
+  # the opt-in AGENTALLOY_PROCESS_DEMOTION fallback for LM-less deploys).
+  # Fails open to the deterministic path on timeout/error. CPU viability:
+  # rerank server runs --parallel 1 -c 2048 (start_rerank_server + container
+  # entrypoint), warm single ~145ms on Xeon-class CPU.
+  LM_ASSIST: "arbitrate"
+  # Evict fragments the judge scores <= threshold. Scores are near-binary:
+  # filler exactly 0.0, relevant 0.86+ — 0.05 is a robust separator. 0.0
+  # disables eviction entirely (keeps everything >= 0): the pre-v6.6.0
+  # misconfiguration that made arbitrate keep-everything.
+  LM_ASSIST_KEEP_THRESHOLD: "0.05"
+  # 3s budget: 16 candidates x ~145ms warm =~ 2.3s full batch; headroom for
+  # cold-start and slower CPUs, fails open beyond it.
+  LM_ASSIST_TIMEOUT_MS: "3000"
+  # The judge must see past the fused head: measured domain golds sit as deep
+  # as fused rank ~11, and probe reachability throttles at cap 8 (0.77 vs
+  # 0.93+ at 16).
+  LM_ASSIST_MAX_CANDIDATES: "16"
   # Same per-fragment char cap as GPU (~600 tok prefill bound).
   LM_ASSIST_DOC_CAP_CHARS: "2400"
   DEDUP_HARD_THRESHOLD: "0.92"

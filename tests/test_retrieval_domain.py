@@ -836,6 +836,41 @@ def test_lm_assist_hit_filters_to_kept_fragments(
     assert len(result.candidates) == 2
 
 
+def test_lm_assist_hit_with_zero_survivors_falls_back_deterministic(
+    populated: DuckDBSkillStore,
+    populated_vectors: FragmentStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An all-evicted verdict (every candidate <= keep_threshold) must never
+    compose empty: selection falls back to the deterministic path and the
+    outcome records the distinct hit-empty-fallback marker."""
+    from agentalloy.retrieval.lm_assist import (
+        LMAssistConfig,
+        LMAssistMode,
+        LMAssistOutcome,
+        ScoreResult,
+    )
+
+    baseline = _retrieve_design(populated, populated_vectors)  # Stage B disabled
+
+    class _EvictAll:
+        def score(self, task: str, documents: list[str]) -> ScoreResult:  # noqa: ARG002
+            return ScoreResult(LMAssistOutcome.HIT, [0.0] * len(documents))
+
+    monkeypatch.setattr(domain_module, "build_scorer_from_env", lambda: _EvictAll())
+    monkeypatch.setattr(
+        domain_module,
+        "load_config",
+        lambda: LMAssistConfig(LMAssistMode.ARBITRATE, "http://x", 300, 0.05, "m"),
+    )
+    result = _retrieve_design(populated, populated_vectors)
+    assert result.lm_assist_outcome == "hit-empty-fallback"
+    assert result.candidates, "fallback must not compose empty"
+    assert [f.fragment_id for f in result.candidates] == [
+        f.fragment_id for f in baseline.candidates
+    ]
+
+
 def test_lm_assist_hit_routes_survivors_through_skill_granular_select(
     populated: DuckDBSkillStore,
     populated_vectors: FragmentStore,
