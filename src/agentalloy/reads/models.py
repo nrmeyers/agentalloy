@@ -45,3 +45,7 @@ class ActiveFragment:
     phase_scope: tuple[str, ...] | None = None
     # Stage 0: the parent skill's one-line self-description (None-tolerant).
     description: str | None = None
+    # Authored Skill.category_scope (e.g. ("process",) or ("framework",));
+    # None when the corpus predates the projection or the author left it blank.
+    # Drives process-class slot demotion in retrieval/domain.py.
+    category_scope: tuple[str, ...] | None = None

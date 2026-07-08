@@ -40,7 +40,7 @@ _SKILL_COLS = (
 _FRAGMENT_COLS = (
     "f.fragment_id, f.fragment_type, f.sequence, f.content, "
     "s.skill_id, v.version_id, s.skill_class, s.category, s.domain_tags, "
-    "s.phase_scope, s.description"
+    "s.phase_scope, s.description, s.category_scope"
 )
 _ACTIVE_JOIN = "FROM skills s JOIN skill_versions v ON v.version_id = s.current_version_id"
 _FRAGMENT_JOIN = _ACTIVE_JOIN + " JOIN fragments f ON f.version_id = v.version_id"
@@ -268,6 +268,7 @@ def _row_to_active_skill(row: Any) -> ActiveSkill:
 
 def _row_to_active_fragment(row: Any) -> ActiveFragment:
     raw_scope = row[9] if len(row) > 9 else None
+    raw_cat_scope = row[11] if len(row) > 11 else None
     return ActiveFragment(
         fragment_id=cast("str", row[0]),
         fragment_type=cast("str", row[1]),
@@ -280,6 +281,7 @@ def _row_to_active_fragment(row: Any) -> ActiveFragment:
         domain_tags=list(row[8] or []),
         phase_scope=tuple(cast("list[str]", raw_scope)) if raw_scope else None,
         description=_optional_str(row[10]) if len(row) > 10 else None,
+        category_scope=tuple(cast("list[str]", raw_cat_scope)) if raw_cat_scope else None,
     )
 
 

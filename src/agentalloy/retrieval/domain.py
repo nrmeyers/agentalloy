@@ -161,6 +161,71 @@ def _soft_tag_filter(
     return keep if keep else ranked
 
 
+# E7 — windowed process-class slot demotion (ships on; kill-switchable). The
+# generic quality skills (test-driven-development, verification-before-completion,
+# brainstorming, …) are skill_class="domain" with category_scope=[process]; they
+# win free-text slots on virtually every task and evict the gold skill at small k
+# (measured 2026-07-07: TDD on 18/18 domain tasks, gold evicted 3/18 at k=2).
+# When the fused ranking shows evidence of an on-domain alternative — >=1
+# non-process skill within the top-W skill window — every process-scope skill is
+# moved to the back of the line: its fragments go to the tail of the candidate
+# list (covers the RUNTIME_DIVERSITY_SELECTION=off top-k slice) and its skill_id
+# is folded into skill_granular_select's FAR last-resort tier (covers staged
+# selection, which otherwise round-robins tail siblings into first-pass slots).
+# On generic tasks the window is all-process, so the transform is a strict no-op.
+_PROCESS_SCOPE = "process"
+_PROCESS_DEMOTION_WINDOW_FACTOR = 2  # W = factor * k distinct skills
+
+
+def _process_demotion_enabled() -> bool:
+    return _os.environ.get("AGENTALLOY_PROCESS_DEMOTION", "on").strip().lower() != "off"
+
+
+def _process_demotion_window(k: int) -> int:
+    """Window size W from ``AGENTALLOY_PROCESS_DEMOTION_WINDOW`` (default 2*k, min 1)."""
+    raw = _os.environ.get("AGENTALLOY_PROCESS_DEMOTION_WINDOW", "")
+    try:
+        if raw.strip():
+            return max(1, int(raw))
+    except ValueError:
+        pass
+    return max(1, _PROCESS_DEMOTION_WINDOW_FACTOR * k)
+
+
+def _is_process_scope(frag: ActiveFragment) -> bool:
+    return frag.category_scope is not None and _PROCESS_SCOPE in frag.category_scope
+
+
+def demote_process_skills(
+    ranked: list[ActiveFragment], k: int
+) -> tuple[list[ActiveFragment], frozenset[str]]:
+    """Move process-scope skills to the back of the line when a domain skill competes.
+
+    Deterministic pure transform. Fires only when >=1 non-process skill sits
+    within the top-W distinct skills of ``ranked`` (first-fragment order,
+    W = ``_process_demotion_window(k)``): then every process-scope fragment is
+    stably moved to the tail and the demoted skill_ids are returned for
+    ``skill_granular_select``'s FAR tier. Otherwise — generic-shaped pools, no
+    process skills at all, or the kill switch — returns the input unchanged
+    with an empty set.
+    """
+    if not ranked or not _process_demotion_enabled():
+        return ranked, frozenset()
+
+    skill_order = list(dict.fromkeys(f.skill_id for f in ranked))
+    process_ids = {f.skill_id for f in ranked if _is_process_scope(f)}
+    if not process_ids:
+        return ranked, frozenset()
+
+    window = skill_order[: _process_demotion_window(k)]
+    if all(sid in process_ids for sid in window):
+        return ranked, frozenset()
+
+    preferred = [f for f in ranked if f.skill_id not in process_ids]
+    demoted = [f for f in ranked if f.skill_id in process_ids]
+    return preferred + demoted, frozenset(process_ids)
+
+
 # E6 — phase/category pool gate (ships dormant; #14 activates). The benchmark
 # packs share category="engineering" with React, so the old per-phase map can't
 # separate them; the engine needs a product-category allowlist that excludes a
@@ -404,13 +469,20 @@ def _bm25_fallback_result(
     if _contract_tag_filter_enabled():
         ranked = _soft_tag_filter(ranked, contract_tags)
 
+    # E7: same process-class demotion as the dense path — the fallback leaks too.
+    ranked, demoted_skill_ids = demote_process_skills(ranked, k)
+
     eligible_count = len(ranked)
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
     if raw_scores or diversity_off:
         selected = ranked[:k]
     else:
         selected, _ = skill_granular_select(
-            ranked, k, scores_by_id=scores_by_id, deepen_band=_deepen_band()
+            ranked,
+            k,
+            scores_by_id=scores_by_id,
+            deepen_band=_deepen_band(),
+            demoted_skill_ids=demoted_skill_ids,
         )
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
     return EmbeddingErrorResult(
@@ -649,6 +721,10 @@ def retrieve_domain_candidates(
     if _contract_tag_filter_enabled():
         ranked = _soft_tag_filter(ranked, contract_tags)
 
+    # E7: windowed process-class demotion — reorder covers the top-k slice paths
+    # below; the demoted set folds into skill_granular_select's FAR tier.
+    ranked, demoted_skill_ids = demote_process_skills(ranked, k)
+
     eligible_count = len(ranked)
 
     # raw_scores=True: return pre-diversity order (for /retrieve observability).
@@ -704,10 +780,15 @@ def retrieve_domain_candidates(
                 k,
                 scores_by_id=(lm_detail.scores if lm_detail else None),
                 deepen_band=_deepen_band(),
+                demoted_skill_ids=demoted_skill_ids,
             )
         else:
             selected, skills_ranked = skill_granular_select(
-                ranked, k, scores_by_id=scores_by_id, deepen_band=_deepen_band()
+                ranked,
+                k,
+                scores_by_id=scores_by_id,
+                deepen_band=_deepen_band(),
+                demoted_skill_ids=demoted_skill_ids,
             )
 
         # Additive tail: re-append graph neighbors dropped by the k-cap so they
@@ -977,6 +1058,7 @@ def skill_granular_select(
     *,
     scores_by_id: dict[str, float] | None = None,
     deepen_band: float = 0.0,
+    demoted_skill_ids: frozenset[str] | set[str] | None = None,
 ) -> tuple[list[ActiveFragment], list[str]]:
     """Depth-guaranteed round-robin selection across skills.
 
@@ -1015,6 +1097,10 @@ def skill_granular_select(
             lookup; ``None`` (or omitted) disables the gate.
         deepen_band: fraction of the top skill's lead score a sibling must clear
             to count as NEAR; 0.0 == legacy (gate inert).
+        demoted_skill_ids: skills (E7 process-class demotion) forced into the
+            FAR last-resort tier regardless of band — they win slots only after
+            NEAR siblings are drained and the top skill is fully deepened.
+            ``None``/empty == legacy.
 
     Returns:
         (selected, skills_ranked) where ``skills_ranked`` is the ordered list
@@ -1071,6 +1157,18 @@ def skill_granular_select(
     siblings = skills_ranked[1:] if depth and len(skills_ranked) > 1 else skills_ranked
     near = [s for s in siblings if threshold == 0.0 or _lead(s) >= threshold]
     far = [s for s in siblings if threshold > 0.0 and _lead(s) < threshold]
+
+    # E7: demoted skills are FAR by fiat — last-resort backfill only. The demoted
+    # set never contains the top skill when it comes from demote_process_skills
+    # (the reorder puts a non-process skill at the head whenever the set is
+    # non-empty), so the depth guarantee is unaffected.
+    if demoted_skill_ids:
+        far = (
+            [s for s in far if s not in demoted_skill_ids]
+            + [s for s in near if s in demoted_skill_ids]
+            + [s for s in far if s in demoted_skill_ids]
+        )
+        near = [s for s in near if s not in demoted_skill_ids]
 
     # Stage 2: round-robin the remaining slots over the NEAR sibling skills — the
     # top skill already holds its depth slots, so the rest of the budget buys

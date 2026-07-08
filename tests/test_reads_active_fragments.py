@@ -86,6 +86,19 @@ def test_returns_fragments_with_full_context(store: DuckDBSkillStore) -> None:
         assert f.skill_class in {"domain", "system"}
 
 
+def test_fragments_carry_parent_skill_category_scope(store: DuckDBSkillStore) -> None:
+    # E7 demotion keys on category_scope; each fragment must mirror its parent
+    # skill's authored value (None-tolerant for pre-column corpora).
+    from agentalloy.reads import get_active_skills
+
+    scope_by_skill = {s.skill_id: s.category_scope for s in get_active_skills(store)}
+    fragments = get_active_fragments(store, skill_class="domain")
+    assert fragments
+    for f in fragments:
+        expected = scope_by_skill[f.skill_id]
+        assert f.category_scope == (tuple(expected) if expected else None)
+
+
 def test_skill_class_filter_domain_only(store: DuckDBSkillStore) -> None:
     fragments = get_active_fragments(store, skill_class="domain")
     for f in fragments:
