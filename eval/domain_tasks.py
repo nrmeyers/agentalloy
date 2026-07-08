@@ -1074,3 +1074,30 @@ DOMAIN_GRADERS: dict[str, object] = {
     "domain_17_airflow_task_hygiene": grade_domain_17_airflow_task_hygiene,
     "domain_18_redshift_table_design": grade_domain_18_redshift_table_design,
 }
+
+
+# Contract-fixture tags for the composed-contract arm (AC2.2): per task, the
+# first two domain_tags of its gold skill's pack YAML — mirroring the <=2
+# tag-focus posture real build contracts ship with. The checked-in fixtures in
+# eval/contracts/<task_id>.md carry these in frontmatter; a test pins the two
+# in sync. Regenerate fixtures from this map + task specs if either changes.
+DOMAIN_CONTRACT_TAGS: dict[str, list[str]] = {
+    "domain_1_webhook_signature": ["webhook-security", "hmac-signing"],
+    "domain_2_webhook_deduplication": ["idempotency", "deduplication"],
+    "domain_3_webhook_dlq": ["webhooks", "replay"],
+    "domain_4_webhook_versioning": ["webhooks", "versioning"],
+    "domain_5_temporal_workflow_determinism": ["temporal", "workflow"],
+    "domain_6_github_actions_oidc": ["oidc", "github-actions"],
+    "domain_7_dbt_incremental": ["dbt", "models"],
+    "domain_8_scd_type2": ["data-engineering", "scd"],
+    "domain_9_temporal_activity_timeouts": ["temporal", "activities"],
+    "domain_10_gha_concurrency": ["github-actions", "concurrency"],
+    "domain_11_gha_caching": ["caching", "artifacts"],
+    "domain_12_redis_streams_workers": ["redis", "streams"],
+    "domain_13_redis_optimistic_lock": ["redis", "transactions"],
+    "domain_14_snowflake_time_travel": ["time-travel", "streams"],
+    "domain_15_snowflake_warehouse_cost": ["virtual warehouses", "cost optimization"],
+    "domain_16_otel_trace_propagation": ["distributed tracing", "opentelemetry"],
+    "domain_17_airflow_task_hygiene": ["airflow", "best-practices"],
+    "domain_18_redshift_table_design": ["redshift", "table design"],
+}

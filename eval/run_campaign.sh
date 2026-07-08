@@ -42,7 +42,7 @@ for m in "${MODELS[@]}"; do
         --conditions none composed external
     echo "--- domain leg ($m) ---"
     uv run python -m eval.run_poc --n "$N" --task-set domain --label "domain-$m" \
-        --conditions none composed flat external
+        --conditions none composed composed-contract flat external
 done
 
 echo "=== campaign complete: $(date -Is)"
