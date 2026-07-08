@@ -25,9 +25,19 @@ declare -A ALIASES=(
 MODELS=("$@")
 [[ ${#MODELS[@]} -eq 0 ]] && MODELS=(35B 27B 12B LFM)
 
+# Liveness preflight + Stage B warm-up. The 30s budget tolerates arbitrate
+# latency (a cold reranker's first calls run seconds, not milliseconds); the
+# warm-up loop pages the judge in BEFORE any measured cell so cold-start can't
+# trip the breaker and silently mix mechanisms within an arm (2026-07-08).
 curl -sf -m 30 "$AGENTALLOY_URL/compose" -X POST -H 'content-type: application/json' \
     -d '{"task":"preflight","phase":"build","k":1}' >/dev/null \
     || { echo "FATAL: agentalloy service not answering at $AGENTALLOY_URL"; exit 1; }
+echo "--- warming Stage B (3 composes) ---"
+for i in 1 2 3; do
+    curl -sf -m 60 "$AGENTALLOY_URL/compose" -X POST -H 'content-type: application/json' \
+        -d '{"task":"warmup: verify webhook signatures and replay protection","phase":"build","k":4,"legs":"domain"}' \
+        >/dev/null || echo "warmup $i failed (continuing)"
+done
 
 for m in "${MODELS[@]}"; do
     alias="${ALIASES[$m]:?unknown model flag $m}"

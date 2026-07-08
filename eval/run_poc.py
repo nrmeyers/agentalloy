@@ -78,6 +78,7 @@ class RunResult:
     compose_result_type: str | None
     grades: dict[str, bool]
     score: float
+    lm_assist_outcome: str | None = None
 
 
 def load_flat_prompt(task: Task) -> str:
@@ -102,7 +103,9 @@ def load_flat_prompt(task: Task) -> str:
 COMPOSED_LEGS = "domain"
 
 
-def _post_compose(client: httpx.Client, payload: dict[str, Any]) -> tuple[str, str, int, list[str]]:
+def _post_compose(
+    client: httpx.Client, payload: dict[str, Any]
+) -> tuple[str, str, int, list[str], str | None]:
     start_ns = time.perf_counter_ns()
     resp = client.post(
         f"{AGENTALLOY_URL}/compose",
@@ -113,16 +116,24 @@ def _post_compose(client: httpx.Client, payload: dict[str, Any]) -> tuple[str, s
     if resp.status_code != 200:
         raise RuntimeError(f"/compose returned {resp.status_code}: {resp.text[:300]}")
     body = resp.json()
+    # Mechanism provenance: which path actually composed this cell. With
+    # arbitrate as the shipped posture, a tripped breaker silently degrades to
+    # the deterministic path — without this field a run mixes mechanisms with
+    # no trace in the artifacts (2026-07-08 campaign lesson).
+    lm_outcome = (body.get("telemetry") or {}).get("lm_assist_outcome")
     return (
         body.get("output", ""),
         body.get("result_type", "unknown"),
         elapsed_ms,
         body.get("source_skills", []),
+        lm_outcome,
     )
 
 
-def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, int, list[str]]:
-    """Returns (assembled_text, result_type, compose_latency_ms, source_skills)."""
+def call_compose(
+    client: httpx.Client, task: Task, k: int
+) -> tuple[str, str, int, list[str], str | None]:
+    """Returns (assembled_text, result_type, compose_latency_ms, source_skills, lm_outcome)."""
     return _post_compose(
         client, {"task": task.spec, "phase": task.phase, "k": k, "legs": COMPOSED_LEGS}
     )
@@ -130,7 +141,7 @@ def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, in
 
 def call_compose_from_contract(
     client: httpx.Client, task: Task, k: int
-) -> tuple[str, str, int, list[str]]:
+) -> tuple[str, str, int, list[str], str | None]:
     """AC2.2: the composed-contract arm — the design→contract centerpiece.
 
     Builds the request through the SHIPPED ``compose_request_from_contract``
@@ -333,6 +344,7 @@ def run_one(
     compose_result_type: str | None = None
     compose_latency_ms: int | None = None
     source_skills: list[str] = []
+    lm_assist_outcome: str | None = None
     if condition in ("composed", "composed-lm", "composed-contract"):
         # composed-lm is byte-identical to composed at the harness level — it
         # calls the same /compose. The difference is server-side (LM_ASSIST=
@@ -340,12 +352,12 @@ def run_one(
         # preflights it (see main()). The harness never toggles the env.
         # composed-contract routes through the shipped contract mapper instead.
         if condition == "composed-contract":
-            assembled, compose_result_type, compose_latency_ms, source_skills = (
+            assembled, compose_result_type, compose_latency_ms, source_skills, lm_assist_outcome = (
                 call_compose_from_contract(client, task, k)
             )
         else:
-            assembled, compose_result_type, compose_latency_ms, source_skills = call_compose(
-                client, task, k
+            assembled, compose_result_type, compose_latency_ms, source_skills, lm_assist_outcome = (
+                call_compose(client, task, k)
             )
         if not assembled.strip():
             assembled = "(compose returned empty result — no domain fragments matched)"
@@ -391,6 +403,11 @@ def run_one(
         # AC2.5: which skills filled the slots — enables slot-composition
         # audits on historical runs (was discarded pre-2026-07).
         "source_skills": source_skills,
+        # Mechanism provenance: "hit" = Stage B judge engaged; "disabled"/
+        # "timeout"/"error" = deterministic path. A composed arm mixing values
+        # is a breaker-tainted run and must not be published as either
+        # mechanism (2026-07-08 lesson).
+        "lm_assist_outcome": lm_assist_outcome,
         "system_prompt_chars": len(system_prompt),
         "grades": grades,
         "score": score,
@@ -418,6 +435,7 @@ def run_one(
         compose_result_type=compose_result_type,
         grades=grades,
         score=score,
+        lm_assist_outcome=lm_assist_outcome,
     )
 
 
@@ -426,11 +444,20 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
     for r in results:
         by_task.setdefault(r.task_id, {}).setdefault(r.condition, []).append(r)
 
-    summary: dict[str, Any] = {"by_task": {}, "totals": {}}
+    summary: dict[str, Any] = {"by_task": {}, "totals": {}, "lm_assist_outcomes": {}}
     totals: dict[str, dict[str, float]] = {
         cond: {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0}
         for cond in ("composed", "composed-lm", "composed-contract", "flat", "external", "none")
     }
+    # Mechanism-provenance rollup: per condition, how each compose actually ran.
+    # A composed arm with mixed values (e.g. hit + disabled) is breaker-tainted
+    # and must not be published under either mechanism label.
+    outcome_counts: dict[str, dict[str, int]] = {}
+    for r in results:
+        if r.lm_assist_outcome is not None:
+            cond_counts = outcome_counts.setdefault(r.condition, {})
+            cond_counts[r.lm_assist_outcome] = cond_counts.get(r.lm_assist_outcome, 0) + 1
+    summary["lm_assist_outcomes"] = outcome_counts
 
     for task_id, by_cond in by_task.items():
         task_summary: dict[str, Any] = {}
@@ -606,6 +633,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
         provenance = fetch_service_provenance(preflight_client)
         serving_backend = fetch_serving_backend(preflight_client)
+        # Mechanism provenance for EVERY run (arbitrate is the shipped posture,
+        # so the plain composed arm exercises Stage B too, not just composed-lm).
+        # Null-tolerant against older services; the composed-lm preflight above
+        # still enforces mode==arbitrate when that arm is requested.
+        if lm_assist_cfg is None:
+            try:
+                health = preflight_client.get(
+                    f"{AGENTALLOY_URL}/health", timeout=httpx.Timeout(10.0)
+                )
+                cfg = health.json().get("lm_assist") if health.status_code == 200 else None
+                lm_assist_cfg = cfg if isinstance(cfg, dict) else None
+            except httpx.HTTPError:
+                lm_assist_cfg = None
 
     manifest = {
         "started_at": timestamp,
@@ -624,8 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         "conditions": args.conditions,
         "runs_per_cell": args.n,
     }
-    if lm_assist_cfg is not None:
-        manifest["lm_assist"] = lm_assist_cfg
+    manifest["lm_assist"] = lm_assist_cfg
     if "external" in args.conditions:
         # Freeze the task→skill mapping + provenance so the arm is auditable.
         manifest["external_skills"] = external_skills.manifest_entry(
