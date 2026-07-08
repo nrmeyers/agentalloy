@@ -202,6 +202,8 @@ def _write_passthrough_trace(
         session_key=signal.session_key,
         session_source=signal.session_source,
         category="free-flow" if signal.free_mode else None,
+        contract_path=tel.contract_path if tel else None,
+        contract_tags=tel.contract_tags if tel else None,
     )
 
 

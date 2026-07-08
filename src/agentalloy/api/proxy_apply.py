@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +70,10 @@ class ProxyComposeTelemetry:
     - ``tokens_returned`` / ``tokens_flat_equivalent``: summed across both tiers.
     - ``lm_assist_*``: Stage B detail from the Tier 2 domain leg (Stage B never runs
       on the system leg).
+    - ``contract_path`` / ``contract_tags``: Tier-2 contract provenance, carried
+      from the ``compose_request_from_contract`` request so production rows are
+      auditable for contract-scoped vs free-text injection. Null/empty on every
+      free-text path by construction (those never build a contract request).
     """
 
     workflow_skill_ids: list[str]
@@ -90,6 +94,8 @@ class ProxyComposeTelemetry:
     # omitted — it's structurally 0 since generative assembly was removed.
     retrieval_latency_ms: int | None = None
     total_latency_ms: int | None = None
+    contract_path: str | None = None
+    contract_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -192,6 +198,7 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     tier2 = ""
     tier2_terminal = False
     tier2_result: ComposedResult | EmptyResult | None = None
+    domain_req: ComposeRequest | None = None
     if signal.announce_cursor and signal.current_contract:
         try:
             from agentalloy.api.compose_models import compose_request_from_contract
@@ -219,7 +226,7 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
         tier1_text=bool(tier1),
         cursor_terminal=tier2_terminal,
         cursor_text=bool(tier2),
-        telemetry=_merge_compose_telemetry(signal, tier1_result, tier2_result),
+        telemetry=_merge_compose_telemetry(signal, tier1_result, tier2_result, domain_req),
     )
 
 
@@ -282,10 +289,16 @@ def _merge_compose_telemetry(
     signal: SignalResult,
     tier1: ComposedResult | EmptyResult | None,
     tier2: ComposedResult | EmptyResult | None,
+    tier2_request: ComposeRequest | None = None,
 ) -> ProxyComposeTelemetry:
     """Fold the Tier 1 (system/header) and Tier 2 (domain) compose results into one
     provenance record. Stage B fields come from Tier 2 only — it never runs on the
-    system leg. Missing legs (passthrough) contribute nothing."""
+    system leg. Missing legs (passthrough) contribute nothing.
+
+    ``tier2_request`` carries the contract provenance (``contract_path`` /
+    ``contract_tags``) the request objects already hold but the results do not;
+    it is recorded only when the Tier-2 leg actually composed (``tier2`` set),
+    so a thrown compose never stamps contract fields on a row without skills."""
     t1 = tier1.telemetry if tier1 is not None else None
     t2 = tier2.telemetry if tier2 is not None else None
     workflow_ids = list(t1.workflow_skill_ids) if t1 else []
@@ -325,6 +338,14 @@ def _merge_compose_telemetry(
         lm_assist_scores=dict(t2.lm_assist_scores) if t2 else {},
         retrieval_latency_ms=retrieval_latency_ms,
         total_latency_ms=total_latency_ms,
+        contract_path=(
+            tier2_request.contract_path if tier2_request is not None and tier2 is not None else None
+        ),
+        contract_tags=(
+            list(tier2_request.contract_tags or [])
+            if tier2_request is not None and tier2 is not None
+            else []
+        ),
     )
 
 

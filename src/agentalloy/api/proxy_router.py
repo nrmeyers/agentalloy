@@ -421,6 +421,8 @@ async def _write_flow_telemetry(
         phase_gate_embed_failed=phase_gate_embed_failed,
         repo=repo,
         category=category,
+        contract_path=telemetry.contract_path if telemetry else None,
+        contract_tags=telemetry.contract_tags if telemetry else None,
     )
 
 
