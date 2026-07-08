@@ -557,6 +557,19 @@ def test_preset_lm_assist_doc_cap_chars(preset: str) -> None:
     )
 
 
+@pytest.mark.parametrize("preset", _HW_PRESETS)
+def test_preset_log_level_is_valid_uvicorn_level(preset: str) -> None:
+    # uvicorn rejects uppercase level names; a forwarded LOG_LEVEL=INFO
+    # crash-looped the container at v6.6.0. The entrypoint now lowercases
+    # defensively, but presets must ship valid values at the source.
+    defaults = write_env._load_preset(preset)
+    level = defaults.get("LOG_LEVEL")
+    if level is not None:
+        assert level in {"critical", "error", "warning", "info", "debug", "trace"}, (
+            f"{preset}: LOG_LEVEL {level!r} is not a valid (lowercase) uvicorn level"
+        )
+
+
 def test_rerank_launch_args_per_target() -> None:
     # Hardware-conditional rerank slot config (start_rerank_server.rerank_launch_args).
     # GPU and CPU have opposite optima: GPU benefits from multi-slot prefill
