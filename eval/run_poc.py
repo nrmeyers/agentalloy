@@ -43,6 +43,7 @@ logger = logging.getLogger("eval.run_poc")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKS_ROOT = REPO_ROOT / "src" / "agentalloy" / "_packs"
 RUNS_ROOT = REPO_ROOT / "eval" / "runs"
+CONTRACTS_ROOT = REPO_ROOT / "eval" / "contracts"
 
 AGENTALLOY_URL = os.environ.get("AGENTALLOY_URL", "http://localhost:47950")
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
@@ -101,12 +102,11 @@ def load_flat_prompt(task: Task) -> str:
 COMPOSED_LEGS = "domain"
 
 
-def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, int, list[str]]:
-    """Returns (assembled_text, result_type, compose_latency_ms, source_skills)."""
+def _post_compose(client: httpx.Client, payload: dict[str, Any]) -> tuple[str, str, int, list[str]]:
     start_ns = time.perf_counter_ns()
     resp = client.post(
         f"{AGENTALLOY_URL}/compose",
-        json={"task": task.spec, "phase": task.phase, "k": k, "legs": COMPOSED_LEGS},
+        json=payload,
         timeout=httpx.Timeout(connect=5.0, read=600.0, write=10.0, pool=5.0),
     )
     elapsed_ms = int((time.perf_counter_ns() - start_ns) // 1_000_000)
@@ -119,6 +119,33 @@ def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, in
         elapsed_ms,
         body.get("source_skills", []),
     )
+
+
+def call_compose(client: httpx.Client, task: Task, k: int) -> tuple[str, str, int, list[str]]:
+    """Returns (assembled_text, result_type, compose_latency_ms, source_skills)."""
+    return _post_compose(
+        client, {"task": task.spec, "phase": task.phase, "k": k, "legs": COMPOSED_LEGS}
+    )
+
+
+def call_compose_from_contract(
+    client: httpx.Client, task: Task, k: int
+) -> tuple[str, str, int, list[str]]:
+    """AC2.2: the composed-contract arm — the design→contract centerpiece.
+
+    Builds the request through the SHIPPED ``compose_request_from_contract``
+    over the checked-in fixture (``eval/contracts/<task_id>.md``), so the
+    benchmarked payload is byte-equivalent to what the proxy Tier-2 branch
+    sends for a real build contract (contract_tags steer BM25 + the soft tag
+    filter; contract_path lands in telemetry)."""
+    from agentalloy.api.compose_models import compose_request_from_contract
+    from agentalloy.contracts import parse_contract
+
+    path = CONTRACTS_ROOT / f"{task.task_id}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"contract fixture missing: {path}")
+    req = compose_request_from_contract(parse_contract(path), legs="domain", k=k)
+    return _post_compose(client, req.model_dump(mode="json"))
 
 
 def preflight_lm_assist(client: httpx.Client) -> dict[str, Any]:
@@ -306,14 +333,20 @@ def run_one(
     compose_result_type: str | None = None
     compose_latency_ms: int | None = None
     source_skills: list[str] = []
-    if condition in ("composed", "composed-lm"):
+    if condition in ("composed", "composed-lm", "composed-contract"):
         # composed-lm is byte-identical to composed at the harness level — it
         # calls the same /compose. The difference is server-side (LM_ASSIST=
         # arbitrate); this arm only records that config in the manifest and
         # preflights it (see main()). The harness never toggles the env.
-        assembled, compose_result_type, compose_latency_ms, source_skills = call_compose(
-            client, task, k
-        )
+        # composed-contract routes through the shipped contract mapper instead.
+        if condition == "composed-contract":
+            assembled, compose_result_type, compose_latency_ms, source_skills = (
+                call_compose_from_contract(client, task, k)
+            )
+        else:
+            assembled, compose_result_type, compose_latency_ms, source_skills = call_compose(
+                client, task, k
+            )
         if not assembled.strip():
             assembled = "(compose returned empty result — no domain fragments matched)"
         system_prompt = (
@@ -396,7 +429,7 @@ def aggregate(results: list[RunResult]) -> dict[str, Any]:
     summary: dict[str, Any] = {"by_task": {}, "totals": {}}
     totals: dict[str, dict[str, float]] = {
         cond: {"score": 0.0, "n": 0, "in_tok": 0, "out_tok": 0, "wall_ms": 0}
-        for cond in ("composed", "composed-lm", "flat", "external", "none")
+        for cond in ("composed", "composed-lm", "composed-contract", "flat", "external", "none")
     }
 
     for task_id, by_cond in by_task.items():
@@ -478,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
         "--conditions",
         nargs="+",
         default=["composed", "flat"],
-        choices=["composed", "composed-lm", "flat", "external", "none"],
+        choices=["composed", "composed-lm", "composed-contract", "flat", "external", "none"],
     )
     parser.add_argument(
         "--task-set",
@@ -541,7 +574,27 @@ def main(argv: list[str] | None = None) -> int:
     # composed arm runs; pack-source deprecation also guards the flat oracle.
     # A none/external-only run has no gold-skill dependence and skips it.
     # AC2.3: reproducibility provenance.
-    composed_arms = {"composed", "composed-lm"} & set(args.conditions)
+    composed_arms = {"composed", "composed-lm", "composed-contract"} & set(args.conditions)
+
+    # composed-contract preflight: every selected task needs a parseable fixture.
+    if "composed-contract" in args.conditions:
+        from agentalloy.contracts import ContractMalformed, parse_contract
+
+        fixture_problems: list[str] = []
+        for t in selected_tasks:
+            fixture = CONTRACTS_ROOT / f"{t.task_id}.md"
+            if not fixture.exists():
+                fixture_problems.append(f"missing contract fixture: {fixture}")
+                continue
+            try:
+                parse_contract(fixture)
+            except ContractMalformed as exc:
+                fixture_problems.append(f"malformed contract fixture {fixture}: {exc}")
+        if fixture_problems:
+            for p in fixture_problems:
+                print(f"composed-contract arm blocked: {p}", file=sys.stderr)
+            return 1
+
     with httpx.Client() as preflight_client:
         if composed_arms or "flat" in args.conditions:
             violations = preflight_gold_skills(
