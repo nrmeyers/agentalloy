@@ -34,17 +34,36 @@ SCHEMA_VERSION = 1
 _MIN_WORDS = 30
 
 _EXECUTION_KEYS = (
-    "approach", "solution", "what worked", "worked", "fix", "steps",
-    "execution", "implementation", "how i", "how we",
+    "approach",
+    "solution",
+    "what worked",
+    "worked",
+    "fix",
+    "steps",
+    "execution",
+    "implementation",
+    "how i",
+    "how we",
 )
 _VERIFICATION_KEYS = ("verification", "verify", "test", "confirm", "check", "how to verify")
 _RATIONALE_KEYS = (
-    "rationale", "why", "decision", "didn't", "did not", "tradeoff", "trade-off",
-    "pitfall", "gotcha", "root cause", "lesson",
+    "rationale",
+    "why",
+    "decision",
+    "didn't",
+    "did not",
+    "tradeoff",
+    "trade-off",
+    "pitfall",
+    "gotcha",
+    "root cause",
+    "lesson",
 )
 _PROBLEM_KEYS = ("problem", "context", "symptom", "background", "issue")
 
-_TAGS_RE = re.compile(r"^\s*(?:\*\*|_)?tags(?:\*\*|_)?\s*[:=]\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_TAGS_RE = re.compile(
+    r"^\s*(?:\*\*|_)?tags(?:\*\*|_)?\s*[:=]\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE
+)
 
 
 def _sanitize_skill_id(slug: str) -> str:
@@ -116,9 +135,13 @@ def _lesson_fragments(text: str, slug: str) -> list[dict[str, Any]]:
         "re-run the tests or commands the lesson relied on and check they still pass before "
         "trusting this again. If they do not, the lesson has drifted and needs re-verifying."
     )
-    rationale = _find_section(sections, _RATIONALE_KEYS) or _find_section(sections, _PROBLEM_KEYS) or (
-        "This lesson was captured because the problem recurred and cost time; the approach "
-        "above is the shortcut past it, and skipping it reintroduces the failure it documents."
+    rationale = (
+        _find_section(sections, _RATIONALE_KEYS)
+        or _find_section(sections, _PROBLEM_KEYS)
+        or (
+            "This lesson was captured because the problem recurred and cost time; the approach "
+            "above is the shortcut past it, and skipping it reintroduces the failure it documents."
+        )
     )
 
     frags = [
@@ -160,14 +183,20 @@ def generate_lesson_pack(lesson_path: Path, dest_root: Path) -> dict[str, Any]:
     """
     t0 = time.monotonic()
     if not lesson_path.is_file():
-        return {"schema_version": SCHEMA_VERSION, "action": "lesson_not_found",
-                "error": f"lesson file not found: {lesson_path}"}
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "lesson_not_found",
+            "error": f"lesson file not found: {lesson_path}",
+        }
 
     slug = lesson_path.stem
     text = lesson_path.read_text(encoding="utf-8")
     if not text.strip():
-        return {"schema_version": SCHEMA_VERSION, "action": "lesson_empty",
-                "error": f"lesson file is empty: {lesson_path}"}
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "lesson_empty",
+            "error": f"lesson file is empty: {lesson_path}",
+        }
 
     skill_id = _sanitize_skill_id(slug)
     pack_name = f"{slug}-lesson"

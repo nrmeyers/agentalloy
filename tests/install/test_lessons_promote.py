@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agentalloy.install.subcommands.lessons import add_parser, probe_lesson_duplicates, promote_lesson
+from agentalloy.install.subcommands.lessons import (
+    add_parser,
+    probe_lesson_duplicates,
+    promote_lesson,
+)
 
 LESSON = "# A lesson\n\n## Approach\n\nDo the thing that worked, carefully and in order, then confirm it.\n"
 
@@ -31,8 +35,9 @@ class _FakeStore:
         self._hits = hits
         self.closed = False
 
-    def search_similar(self, query_vec: Any, *, k: int = 20, categories: Any = None,
-                       fragment_types: Any = None) -> list[_Hit]:
+    def search_similar(
+        self, query_vec: Any, *, k: int = 20, categories: Any = None, fragment_types: Any = None
+    ) -> list[_Hit]:
         return list(self._hits)
 
     def close(self) -> None:
@@ -51,21 +56,29 @@ def _write_lesson(root: Path, slug: str) -> None:
 
 # --- the probe in isolation ------------------------------------------------
 
+
 def test_probe_flags_hard_hit():
     store = _FakeStore([_Hit("existing-f0", "existing-skill", distance=0.05)])  # sim 0.95 >= 0.92
-    hits = probe_lesson_duplicates(["frag a", "frag b"], embed=_embed, vector_store=store,
-                                   hard_similarity=0.92, soft_similarity=0.80)
+    hits = probe_lesson_duplicates(
+        ["frag a", "frag b"],
+        embed=_embed,
+        vector_store=store,
+        hard_similarity=0.92,
+        soft_similarity=0.80,
+    )
     assert hits and hits[0].skill_id == "existing-skill"
 
 
 def test_probe_ignores_soft_only():
     store = _FakeStore([_Hit("existing-f0", "existing-skill", distance=0.15)])  # sim 0.85 -> soft
-    hits = probe_lesson_duplicates(["frag a"], embed=_embed, vector_store=store,
-                                   hard_similarity=0.92, soft_similarity=0.80)
+    hits = probe_lesson_duplicates(
+        ["frag a"], embed=_embed, vector_store=store, hard_similarity=0.92, soft_similarity=0.80
+    )
     assert hits == []
 
 
 # --- promote flow: refuse vs install ---------------------------------------
+
 
 def test_ac5_hard_duplicate_refused_and_not_installed(tmp_path: Path):
     _write_lesson(tmp_path, "dup-lesson")
@@ -76,7 +89,8 @@ def test_ac5_hard_duplicate_refused_and_not_installed(tmp_path: Path):
         return {"ok": True}
 
     res = promote_lesson(
-        "dup-lesson", root=tmp_path,
+        "dup-lesson",
+        root=tmp_path,
         embed=_embed,
         vector_store=_FakeStore([_Hit("x-f0", "existing-skill", distance=0.02)]),
         install=_install,
@@ -95,7 +109,9 @@ def test_ac5_allow_duplicates_installs(tmp_path: Path):
         return {"ok": True}
 
     res = promote_lesson(
-        "dup-lesson", root=tmp_path, allow_duplicates=True,
+        "dup-lesson",
+        root=tmp_path,
+        allow_duplicates=True,
         embed=_embed,
         vector_store=_FakeStore([_Hit("x-f0", "existing-skill", distance=0.02)]),
         install=_install,
@@ -113,7 +129,8 @@ def test_unique_lesson_installs(tmp_path: Path):
         return {"ok": True}
 
     res = promote_lesson(
-        "fresh-lesson", root=tmp_path,
+        "fresh-lesson",
+        root=tmp_path,
         embed=_embed,
         vector_store=_FakeStore([]),  # nothing similar in the corpus
         install=_install,
@@ -123,8 +140,13 @@ def test_unique_lesson_installs(tmp_path: Path):
 
 
 def test_unknown_slug_reported(tmp_path: Path):
-    res = promote_lesson("does-not-exist", root=tmp_path, embed=_embed,
-                         vector_store=_FakeStore([]), install=lambda *a, **k: {})
+    res = promote_lesson(
+        "does-not-exist",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        install=lambda *a, **k: {},
+    )
     assert res["action"] == "lesson_not_found"
 
 
@@ -139,8 +161,10 @@ def test_no_corpus_skips_probe_and_installs(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("agentalloy.storage.open.open_fragments", _boom)
     res = promote_lesson(
-        "fresh-lesson", root=tmp_path,
-        embed=_embed, vector_store=None,  # None -> tries open_fragments (patched to fail) -> skip
+        "fresh-lesson",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=None,  # None -> tries open_fragments (patched to fail) -> skip
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
     )
     assert res["action"] == "promoted"
@@ -157,8 +181,10 @@ def test_probe_failure_fails_closed(tmp_path: Path):
         raise RuntimeError("embed server down")
 
     res = promote_lesson(
-        "err-lesson", root=tmp_path,
-        embed=_bad_embed, vector_store=_FakeStore([]),
+        "err-lesson",
+        root=tmp_path,
+        embed=_bad_embed,
+        vector_store=_FakeStore([]),
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
     )
     assert res["action"] == "dedup_probe_failed"
@@ -166,6 +192,7 @@ def test_probe_failure_fails_closed(tmp_path: Path):
 
 
 # --- CLI registration ------------------------------------------------------
+
 
 def test_promote_registered_and_parses():
     import argparse

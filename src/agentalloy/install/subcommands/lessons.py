@@ -185,9 +185,7 @@ def promote_lesson(
         from agentalloy.install.subcommands.install_pack import install_local_pack
 
         install_fn = install_local_pack
-    install_result = install_fn(
-        pack_dir, root=root, strict=True, allow_duplicates=allow_duplicates
-    )
+    install_result = install_fn(pack_dir, root=root, strict=True, allow_duplicates=allow_duplicates)
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -196,7 +194,8 @@ def promote_lesson(
         "skill_id": gen["skill_id"],
         "pack_dir": str(pack_dir),
         "domain_tags": gen.get("domain_tags"),
-        "soft_or_forced_duplicates": sorted({getattr(h, "skill_id", "?") for h in hard_hits}) or None,
+        "soft_or_forced_duplicates": sorted({getattr(h, "skill_id", "?") for h in hard_hits})
+        or None,
         "install": install_result,
     }
 
@@ -226,7 +225,7 @@ def add_parser(
     )
     add_json_flag(pr)
     pr.set_defaults(func=_run_promote)
-    p.set_defaults(func=lambda _args: (p.print_help() or 1))
+    p.set_defaults(func=lambda _args: p.print_help() or 1)
 
 
 def _render_human(result: dict[str, Any]) -> None:

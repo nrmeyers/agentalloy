@@ -375,7 +375,9 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     returns UNKNOWN (fail-open, never blocks) when no single work-item resolves,
     mirroring how Tier-2 composition stays silent on an ambiguous/absent work-item.
     """
-    from agentalloy.contracts import resolve_current_contract  # lazy: keep signals free of import cost
+    from agentalloy.contracts import (
+        resolve_current_contract,  # lazy: keep signals free of import cost
+    )
 
     phase = args.get("phase") or ctx.current_phase
     if phase is None:
