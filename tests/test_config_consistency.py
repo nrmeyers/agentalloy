@@ -60,26 +60,29 @@ _DEAD_RERANK_PORT = 60001  # old default; pointed at an unrelated local service
 # of truth). Named by hardware target only — see write_env.VALID_PRESETS.
 _HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
 
-# Expected Stage B posture per preset. v6.6.0: ALL presets ship
-# LM_ASSIST=arbitrate with an eviction threshold — the 2026-07-08 investigation
-# (nightly 28931694381) showed the LM judge is the only mechanism that both
-# fixes the free-text process-skill slot leak (domain benchmark 0.816 vs 0.803
-# deterministic) AND keeps process skills reachable (name probes 0.93+ vs 0.44
-# under windowed demotion, which is now the opt-in AGENTALLOY_PROCESS_DEMOTION
-# fallback). The earlier "no eval lift" reading (v5.0.0 off) measured arbitrate
-# WITHOUT eviction: keep_threshold=0.0 keeps every candidate scoring >= 0, so
-# the judge re-ordered but never dropped — 0.05 is the load-bearing change
-# (judge scores are near-binary: filler exactly 0.0, relevant 0.86+).
+# Expected Stage B posture per preset: GPU presets ship LM_ASSIST=arbitrate with
+# an eviction threshold; CPU ships off. arbitrate is the only mechanism that both
+# fixes the free-text process-skill slot leak (domain 0.816 vs 0.803 deterministic)
+# AND keeps process skills reachable (name probes 0.93+ vs 0.44 under windowed
+# demotion), and 0.05 eviction is load-bearing (scores near-binary: filler 0.0,
+# relevant 0.86+). BUT it only fits the budget on GPU. The 2026-07-09 measurement
+# on the shipped `--parallel 1` reranker: real distinct-doc scoring ~1800ms/cand,
+# and production telemetry isolates Stage B at ~6.6s median / ~11s p90 vs the
+# 203ms deterministic path — 2.3x the 3000ms CPU budget. The prior "CPU viable
+# ~145ms/cand, 2.3s/16" figure was a KV-cache-reuse artifact (re-scoring identical
+# inputs), not the varied-fragment production path — so cpu ships off. GPU
+# (Vulkan/Metal) stays arbitrate (~120ms/cand ≈ 1.9s/16 fits). The contract path
+# handles the filler deterministically, so CPU loses nothing.
 _LM_ASSIST_BY_PRESET = {
-    "cpu": "arbitrate",
+    "cpu": "off",
     "nvidia": "arbitrate",
     "radeon": "arbitrate",
     "apple-silicon": "arbitrate",
 }
 
-# Per-hardware Stage B budget: CPU pays ~145ms/candidate at the --parallel 1
-# launcher config (16 candidates ~2.3s => 3s budget); GPU-class stays at 2s
-# (K=16 ~1s warm + cold-start headroom).
+# Per-hardware Stage B budget (only meaningful for arbitrate presets): GPU-class
+# stays at 2s (K=16 ~1s warm + cold-start headroom). cpu retains a 3000ms entry
+# for documentation only — Stage B is off there (see above), so it is never read.
 _LM_ASSIST_TIMEOUT_BY_PRESET = {
     "cpu": "3000",
     "nvidia": "2000",
