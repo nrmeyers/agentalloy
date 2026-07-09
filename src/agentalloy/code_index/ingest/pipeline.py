@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from agentalloy.code_index.facade import ParsedEdge, ParsedSymbol, ParseResult, parse_repo
 from agentalloy.code_index.ingest.embed_text import (
@@ -51,7 +52,13 @@ from agentalloy.code_index.store import (
 )
 from agentalloy.config import Settings
 from agentalloy.embed_provider import EmbedClient
-from agentalloy.storage.protocols import CodeEdge, CodeIndexHandles, CodeSymbol, CodeVectorRow
+from agentalloy.storage.protocols import (
+    CodeEdge,
+    CodeGraphStore,
+    CodeIndexHandles,
+    CodeSymbol,
+    CodeVectorRow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +137,107 @@ def _markdown_symbol(chunk: MarkdownChunk, digest: str) -> CodeSymbol:
         source_code=chunk.body,
         content_hash=digest,
     )
+
+
+# --- decision linkage (Knowledge module) ------------------------------------
+
+# Decision sources: lifecycle docs that carry rationale. All docs/**/*.md are
+# already ingested as MarkdownDoc chunks; this allow-list selects which chunks
+# are decision-bearing. Both live approach.md shapes are covered. docs/ship and
+# docs/qa are process/PR narrative, not rationale, so they are excluded by
+# default (add here if a repo puts rationale there).
+_DECISION_SOURCE_GLOBS: tuple[str, ...] = (
+    "docs/solutions/*.md",
+    "docs/design/*/approach.md",
+    "docs/spec-contracts/*.design/approach.md",
+)
+
+_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+
+
+def _is_decision_source(doc_path: str) -> bool:
+    """True when ``doc_path`` matches a decision-source glob (DK5)."""
+    p = PurePosixPath(doc_path)
+    return any(p.match(g) for g in _DECISION_SOURCE_GLOBS)
+
+
+def _is_code_shaped(span: str) -> bool:
+    """True when ``span`` looks like a code identifier, not an English word.
+
+    Tier-2 name resolution (DK2) links a fenced span only if it carries a
+    namespace/path separator, an internal underscore, or internal CamelCase — so
+    a bare dictionary word (``run``/``build``) matching one symbol is rejected as
+    a coincidental false positive."""
+    if not span or " " in span:
+        return False
+    if any(sep in span for sep in (".", "::", "/", "_")):
+        return True
+    return any(c.isupper() for c in span[1:])
+
+
+def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> set[str]:
+    """Code fqns a decision body governs, via fenced-span resolution (DK2).
+
+    Tier 1: a span equal to a non-``MarkdownDoc`` symbol fqn. Tier 2: a
+    code-shaped span matching exactly one code symbol's short name. Ambiguous,
+    non-code-shaped, or unresolved spans are dropped; the result is always code
+    fqns, never a markdown chunk."""
+    governed: set[str] = set()
+    for raw in _INLINE_CODE_RE.findall(body):
+        span = raw.strip()
+        if not span:
+            continue
+        exact = graph.symbol(span)
+        if exact is not None:
+            if exact.kind != _MARKDOWN_KIND:
+                governed.add(span)
+            continue
+        if _is_code_shaped(span):
+            matches = graph.symbols_by_name(span)
+            if len(matches) == 1:
+                governed.add(matches[0][0])
+    return governed
+
+
+def _index_decisions(
+    graph: CodeGraphStore,
+    *,
+    changed: list[MarkdownChunk],
+    removed: list[str],
+    chunks: list[MarkdownChunk],
+) -> int:
+    """Overlay ``GOVERNS`` edges from decision chunks to the code they govern.
+
+    Doc-granular (DK6): every decision-source doc with >=1 chunk in ``changed`` or
+    ``removed`` has all its ``GOVERNS`` edges dropped and re-derived over its
+    *current* chunks — so an unchanged sibling's links survive a neighbour's
+    edit/removal (AC 3). A chunk becomes a decision iff it yields >=1 governed
+    symbol. Returns the number of ``GOVERNS`` edges written."""
+    affected: set[str] = {c.file_path for c in changed if _is_decision_source(c.file_path)}
+    for qn in removed:
+        doc = qn.rsplit("::", 1)[0]
+        if _is_decision_source(doc):
+            affected.add(doc)
+    if not affected:
+        return 0
+
+    by_doc: dict[str, list[MarkdownChunk]] = {}
+    for c in chunks:
+        if c.file_path in affected:
+            by_doc.setdefault(c.file_path, []).append(c)
+
+    written = 0
+    for doc in sorted(affected):
+        graph.delete_govern_edges_for_doc(doc)
+        edges = [
+            CodeEdge(src=c.qualified_name, dst=fqn, kind="GOVERNS", file_path=doc)
+            for c in by_doc.get(doc, [])
+            for fqn in sorted(_extract_governed_symbols(c.body, graph))
+        ]
+        if edges:
+            graph.upsert_edges(edges)
+            written += len(edges)
+    return written
 
 
 def _parse_full(repo_path: Path, cache_dir: Path) -> ParseResult:
@@ -359,7 +467,7 @@ async def run_index_job(
         if index_markdown:
             _check_cancel()
             _progress("markdown", 75.0)
-            markdown_embedded = await _index_markdown(
+            md = await _index_markdown(
                 settings,
                 embed_client,
                 jobs,
@@ -368,6 +476,16 @@ async def run_index_job(
                 handles=handles,
                 prior=prior,
                 full_rebuild=full_rebuild,
+            )
+            markdown_embedded = md.embedded
+            # decision phase: overlay GOVERNS edges from the just-indexed
+            # decision chunks to the code they govern (doc-granular, DK6).
+            await asyncio.to_thread(
+                _index_decisions,
+                graph,
+                changed=md.changed,
+                removed=md.removed,
+                chunks=md.chunks,
             )
 
         # --- fts phase ------------------------------------------------------------
@@ -416,6 +534,17 @@ async def run_index_job(
             lock.release()
 
 
+@dataclass(frozen=True)
+class _MarkdownResult:
+    """Outcome of the markdown phase — the embedded count plus the change sets
+    the decision phase needs (it acts on the same chunks, no re-walk)."""
+
+    embedded: int
+    changed: list[MarkdownChunk]
+    removed: list[str]
+    chunks: list[MarkdownChunk]
+
+
 async def _index_markdown(
     settings: Settings,
     embed_client: EmbedClient,
@@ -426,9 +555,9 @@ async def _index_markdown(
     handles: CodeIndexHandles,
     prior: dict[str, str],
     full_rebuild: bool,
-) -> int:
+) -> _MarkdownResult:
     """Embed + store changed markdown chunks; prune removed ones. Returns the
-    number of chunks embedded this run."""
+    embedded count and the change sets (for the decision phase)."""
     graph, vectors = handles.graph, handles.vectors
     chunks = await asyncio.to_thread(collect_markdown_chunks, repo_path)
     texts = {c.qualified_name: finalize_embed_text(compose_markdown_embed_text(c)) for c in chunks}
@@ -482,4 +611,4 @@ async def _index_markdown(
         )
 
     await asyncio.to_thread(_write)
-    return len(changed)
+    return _MarkdownResult(embedded=len(changed), changed=changed, removed=removed, chunks=chunks)
