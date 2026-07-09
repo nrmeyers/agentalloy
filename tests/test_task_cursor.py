@@ -75,16 +75,23 @@ def test_resolve_current_contract_single_item_phase(tmp_path: Path) -> None:
     assert path is not None and path.name == "the-feature.md"
 
 
-def test_resolve_current_contract_fanout_waits_for_cursor(tmp_path: Path) -> None:
-    # Build fans out into many per-task contracts; with no cursor the proxy must
-    # not guess which task is current — Tier 2 stays silent until `task next`.
+def test_resolve_current_contract_fanout_falls_back_to_newest(tmp_path: Path) -> None:
+    # ≥2 contracts, no cursor → the most-recently-touched contract is the active
+    # work-item (the silent-until-cursor rule left prod composes on the free-text
+    # path). An explicit cursor still overrides.
+    import os
+
     _seed(tmp_path, "build", ["01-cache", "02-api", "03-log"])
+    # Make 02-api unambiguously newest regardless of write order / mtime coarseness.
+    d = tmp_path / ".agentalloy" / "contracts" / "build"
+    for n, t in (("01-cache", 1000), ("03-log", 2000), ("02-api", 3000)):
+        os.utime(d / f"{n}.md", (t, t))
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid is None and path is None
-    # ...but an explicit cursor selects the work-item.
-    run_task_start("02-api", tmp_path)
+    assert cid == "build/02-api.md" and path is not None and path.name == "02-api.md"
+    # ...an explicit cursor overrides the mtime fallback.
+    run_task_start("01-cache", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "build/02-api.md"
+    assert cid == "build/01-cache.md"
 
 
 def test_resolve_current_contract_none_when_absent(tmp_path: Path) -> None:
