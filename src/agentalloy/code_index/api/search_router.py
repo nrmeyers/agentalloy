@@ -12,15 +12,26 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from agentalloy.code_index.api.deps import require_indexed_repo, with_handles
-from agentalloy.code_index.api.models import CallSiteView, CentralitySymbol, SymbolView
+from agentalloy.code_index.api.models import (
+    CallSiteView,
+    CentralitySymbol,
+    DecisionView,
+    SymbolView,
+)
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
 from agentalloy.code_index.retrieval.hybrid import SearchResult, lexical_search, semantic_search
 from agentalloy.storage.protocols import CodeIndexHandles
 
 router = APIRouter()
 
-_STRUCTURAL_QUERIES = ("callers", "callees", "transitive_callers", "counts_by_kind")
-_FQN_QUERIES = frozenset({"callers", "callees", "transitive_callers"})
+_STRUCTURAL_QUERIES = (
+    "callers",
+    "callees",
+    "transitive_callers",
+    "governing_decisions",
+    "counts_by_kind",
+)
+_FQN_QUERIES = frozenset({"callers", "callees", "transitive_callers", "governing_decisions"})
 
 
 @router.get(
@@ -146,6 +157,8 @@ async def search_structural(
         if query == "transitive_callers":
             sites = h.graph.transitive_callers(fqn, max_depth=depth)
             return [CallSiteView.from_call_site(s) for s in sites]
+        if query == "governing_decisions":
+            return [DecisionView.from_decision(d) for d in h.graph.governing_decisions(fqn)]
         return h.graph.counts_by_kind()
 
     results = await with_handles(state, repo, _run)
