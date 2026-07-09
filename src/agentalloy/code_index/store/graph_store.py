@@ -25,7 +25,7 @@ from typing import Any
 
 import duckdb
 
-from agentalloy.storage.protocols import CallSite, CodeEdge, CodeSymbol
+from agentalloy.storage.protocols import CallSite, CodeEdge, CodeSymbol, DecisionRow
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +318,61 @@ class DuckDBCodeGraphStore:
             )
             for r in rows
         ]
+
+    # -- decisions (Knowledge module) ------------------------------------------
+
+    def symbols_by_name(self, name: str) -> list[tuple[str, str]]:
+        """Code symbols with the given short ``name`` (``MarkdownDoc`` excluded).
+
+        The store's only other symbol getter is exact-PK :meth:`symbol`; this is
+        the by-name lookup the decision-linkage tier-2 resolver needs. ``name`` is
+        unindexed, so this is a scan — acceptable at per-repo scale."""
+        rows = self.conn.execute(
+            "SELECT qualified_name, kind FROM symbols "
+            "WHERE name = ? AND kind != 'MarkdownDoc' ORDER BY qualified_name",
+            [name],
+        ).fetchall()
+        return [(str(r[0]), str(r[1])) for r in rows]
+
+    def governing_decisions(self, fqn: str) -> list[DecisionRow]:
+        """Decisions that GOVERN ``fqn`` — the ``callers()`` shape with the
+        ``GOVERNS`` edge kind. Reads ``e.src`` (the decision chunk) and hydrates
+        its heading (``symbols.name``) and body (``symbols.source_code``). One hop,
+        not transitive: a decision about ``fqn`` does not govern its callees."""
+        rows = self.conn.execute(
+            """
+            SELECT e.src, s.file_path, s.start_line, s.name, s.source_code
+            FROM edges e
+            LEFT JOIN symbols s ON s.qualified_name = e.src
+            WHERE e.kind = 'GOVERNS' AND e.dst = ?
+            ORDER BY e.src
+            """,
+            [fqn],
+        ).fetchall()
+        return [
+            DecisionRow(
+                qualified_name=str(r[0]),
+                file_path=None if r[1] is None else str(r[1]),
+                start_line=_opt_int(r[2]),
+                heading="" if r[3] is None else str(r[3]),
+                snippet=None if r[4] is None else str(r[4]),
+            )
+            for r in rows
+        ]
+
+    def delete_govern_edges_for_doc(self, doc_path: str) -> int:
+        """Drop every ``GOVERNS`` edge rooted at ``doc_path`` (edges carry
+        ``file_path`` = the decision doc). Doc-granular, so re-derivation matches
+        the file-granularity of :meth:`delete_for_files`. Returns rows removed."""
+        n = self._scalar(
+            "SELECT count(*) FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
+            [doc_path],
+        )
+        self.conn.execute(
+            "DELETE FROM edges WHERE kind = 'GOVERNS' AND file_path = ?",
+            [doc_path],
+        )
+        return int(n or 0)
 
     def transitive_callers(self, fqn: str, *, max_depth: int = 4) -> list[CallSite]:
         """All symbols that (transitively) call ``fqn`` within ``max_depth`` hops.

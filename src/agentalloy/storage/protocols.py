@@ -220,6 +220,23 @@ class CallSite:
 
 
 @dataclass(frozen=True)
+class DecisionRow:
+    """One decision governing a queried symbol (Knowledge module).
+
+    The decision is a ``MarkdownDoc`` heading-chunk (``qualified_name`` =
+    ``path::anchor``); ``heading`` is the chunk's heading and ``snippet`` its
+    body. Distinct from :class:`CallSite` — a decision's ``start_line`` is a
+    heading offset, and the heading/snippet have no home in the call-site view.
+    """
+
+    qualified_name: str
+    file_path: str | None
+    start_line: int | None
+    heading: str
+    snippet: str | None
+
+
+@dataclass(frozen=True)
 class CodeSearchHit:
     """One vector/FTS search hit. ``score`` is higher-is-better (cosine
     similarity for the dense leg, BM25 for the sparse leg)."""
@@ -342,6 +359,9 @@ class CodeGraphStore(Protocol):
     def callers(self, fqn: str) -> list[CallSite]: ...
     def callees(self, fqn: str) -> list[CallSite]: ...
     def transitive_callers(self, fqn: str, *, max_depth: int = 4) -> list[CallSite]: ...
+    def symbols_by_name(self, name: str) -> list[tuple[str, str]]: ...
+    def governing_decisions(self, fqn: str) -> list[DecisionRow]: ...
+    def delete_govern_edges_for_doc(self, doc_path: str) -> int: ...
     def counts_by_kind(self) -> dict[str, int]: ...
     def list_files(
         self, *, prefix: str | None = None, limit: int = 100, offset: int = 0
