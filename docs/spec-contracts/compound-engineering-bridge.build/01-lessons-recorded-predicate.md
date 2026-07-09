@@ -27,8 +27,9 @@ First factor `_resolve_current_contract` down from `api/proxy_signal.py:164` int
 `signals` can reuse it without importing `api`. Then add a deterministic, DB-free
 predicate `lessons_recorded` to `signals/predicates.py`, registered in
 `PREDICATES`. It resolves the **active task slug** via that shared resolver
-against `ctx.current_phase` (cursor-first → sole-contract → newest-by-mtime for an
-uncursored fan-out, per PR #376 → `(None, None)` only when zero contracts), takes
+against `ctx.current_phase` (cursor-first → sole-contract → `(None, None)` for an
+uncursored fan-out; strict, no mtime guess — the cursor is seeded on phase entry so
+it is reliably set, per D6/Outcome B), takes
 `Path(...).stem` as the slug, and returns `MET` iff `docs/solutions/<slug>.md`
 exists, `NOT_MET` if not, and `UNKNOWN` when nothing resolves. Model it on
 `eval_approval_recorded`; reuse `_glob_files`; keep it side-effect-free. Honor the

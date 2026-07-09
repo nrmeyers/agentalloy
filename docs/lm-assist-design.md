@@ -13,8 +13,10 @@ follow what they measured (see "How we know it works"):
   synthetic card per skill; `agentalloy reembed --card-index` defaults to
   `both` at the CLI).
 - **Stage B — fragment re-ranker** shipped (#136) as `LM_ASSIST=arbitrate`,
-  using `qwen3-reranker-0.6b` — **default off** (measured no lift over
-  deterministic selection).
+  using `qwen3-reranker-0.6b`. The enum default is `off`, but the **posture is
+  hardware-split**: GPU presets ship `arbitrate`, CPU/container ship `off`
+  (CPU latency ~6.6s median ≈ 2.3x budget — see the header note; the earlier
+  "no eval-set lift" was the v5 rationale, before the CPU-latency data).
 - **Signals-layer intent backend** shipped (#142) and is now **the default**
   (`SIGNAL_INTENT_BACKEND=reranker`; `cosine` opts out and is the fail-open
   floor), reusing the Stage-B scorer — a measured win on the intent benchmark.
@@ -60,9 +62,11 @@ the deterministic path when the local model is unavailable. On any LM timeout,
 error, or disabled flag, compose degrades to deterministic composition
 byte-for-byte. Their defaults follow what they measured (see "How we know it
 works" below): the **intent backend ships on** (`reranker`, a benchmark win;
-`cosine` opts out and is the fail-open floor), while the **fragment re-ranker
-ships off** (it tied — and with a wider candidate pool, slightly trailed —
-deterministic selection on the domain set). Layer-4 idempotency is asserted
+`cosine` opts out and is the fail-open floor), while the **fragment re-ranker's
+posture is hardware-split** — `arbitrate` on GPU presets, `off` on CPU/container
+(CPU latency ~2.3x budget; see the header). On the eval set it tied — and with a
+wider candidate pool slightly trailed — deterministic selection, so it is not
+run where it cannot clear the latency budget. Layer-4 idempotency is asserted
 against the fail-open path; the LM path gets its own reproducibility story
 (temp 0, pinned model tag) but no contractual guarantee. The absolute "no LLM in
 the runtime path" claim was dropped 2026-06-12.
@@ -138,15 +142,20 @@ Selection is a **filter, then diversity routing** (not a fusion-order cap):
   survives (including ones the reranker scores exactly 0.0 for a task with no
   relevant corpus coverage). The win is the restored selection routing, not
   the filter. The real prod value is a deferred decision gate pending a P(yes)
-  measurement; the `LM_ASSIST_KEEP_THRESHOLD` knob ships but no preset sets it.
-  (0.05 would NOT be inert — a task whose candidates all score 0.0 would be
-  emptied. Live-test correction landed in v4.0.0.)
+  measurement. Now that GPU presets actively `arbitrate`, they set
+  `LM_ASSIST_KEEP_THRESHOLD=0.05` as a real eviction threshold (drop the frags
+  the reranker scores below it); the `off`/`cosine` path leaves it at the inert
+  0.0 code default. (0.05 is NOT inert — a task whose candidates all score 0.0
+  is emptied, which is the intended eviction under arbitrate. Live-test
+  correction landed in v4.0.0.)
 - Disabled / timeout / error / empty-survivor → deterministic depth+round-robin
   selection runs byte-for-byte as if Stage B never ran (fail-open floor).
 
-Concurrency & ops: the per-composition fan-out (`LM_ASSIST_MAX_CANDIDATES`)
-equals the reranker `--parallel` slot count (`-c 8192`), so a composition
-fans out as one wave. That single knob also sizes the scorer thread pool and
+Concurrency & ops: GPU presets fan out `LM_ASSIST_MAX_CANDIDATES=16` candidates
+across a hardware-sized reranker (`rerank_launch_args`: `--parallel 2 -c 4096`
+GPU, `--parallel 1 -c 2048` CPU when re-enabled), so a composition scores in a
+few waves rather than one — the old `K == --parallel` (`-c 8192`) coupling no
+longer holds. `LM_ASSIST_MAX_CANDIDATES` also sizes the scorer thread pool and
 bounds **both** `FragmentScorer` singletons (compose Stage B + signal
 intent), so the two consumers can't oversubscribe the slots. `/health` reports
 a `reranker` dependency (degraded — never unavailable — when the recent Stage B
@@ -174,16 +183,18 @@ then became the default once measured.)
 - **Model: `qwen3-reranker-0.6b`** — pair-scored via `/v1/completions`
   yes/no logprobs. (The earlier LFM2.5-350M vs `qwen3.5:0.8b` bake-off is
   obsolete; the reranker won.) Default served at `http://127.0.0.1:47952`.
-- Budget: hard 600 ms timeout (per-request reaped at 0.9x the batch budget),
-  then fail-open. Stage B scores up to `LM_ASSIST_MAX_CANDIDATES` (default 8)
-  fragments concurrently (~150–250 ms). The reranker llama-server runs with
-  `--parallel 8 -c 8192` so the fan-out lands as one wave.
-- Config: `LM_ASSIST=off|arbitrate` (default `off`), `LM_ASSIST_MODEL`
-  (default `qwen3-reranker-0.6b`), `LM_ASSIST_RERANK_URL`,
-  `LM_ASSIST_TIMEOUT_MS`, `LM_ASSIST_MAX_CANDIDATES` (default 8, ==
-  `--parallel`), `LM_ASSIST_DOC_CAP_CHARS` (default 2400),
-  `LM_ASSIST_KEEP_THRESHOLD` (inert/gated-off default **0.0** — measure-then-set,
-  no preset sets it). Signals backend: `SIGNAL_INTENT_BACKEND=cosine|reranker`,
+- Budget: hard `LM_ASSIST_TIMEOUT_MS` timeout (GPU presets **2000 ms**;
+  per-request reaped at 0.9x the batch budget), then fail-open. Stage B scores up
+  to `LM_ASSIST_MAX_CANDIDATES` (GPU presets **16**) fragments across the
+  hardware-sized slots (`rerank_launch_args`: `--parallel 2 -c 4096` GPU /
+  `--parallel 1 -c 2048` CPU).
+- Config: `LM_ASSIST=off|arbitrate` (enum default `off`; GPU presets set
+  `arbitrate`), `LM_ASSIST_MODEL` (default `qwen3-reranker-0.6b`),
+  `LM_ASSIST_RERANK_URL`, `LM_ASSIST_TIMEOUT_MS` (GPU presets 2000),
+  `LM_ASSIST_MAX_CANDIDATES` (code default 8; GPU presets 16),
+  `LM_ASSIST_DOC_CAP_CHARS` (default 2400), `LM_ASSIST_KEEP_THRESHOLD` (code
+  default **0.0**; arbitrate presets set **0.05** as the eviction threshold).
+  Signals backend: `SIGNAL_INTENT_BACKEND=cosine|reranker`,
   `SIGNAL_INTENT_RERANK_THRESHOLD`. Telemetry records the stage outcome
   (`hit|timeout|error|disabled`) per composition, and `/health` surfaces a
   `reranker` dependency (degraded when the recent window is timeout-dominant).
@@ -222,9 +233,9 @@ measured separately on 2026-06-12, and their shipped defaults follow the results
 
 ## Risks
 
-- **Determinism optics.** Mitigated by default-off, fail-open, and a
-  deterministic default path. The claim is "deterministic by default;
-  optional off-by-default LM-assist."
+- **Determinism optics.** Mitigated by fail-open, a deterministic default path,
+  and hardware-gated activation. The claim is "deterministic by default;
+  optional LM-assist — `arbitrate` on GPU, `off` on CPU/container."
 - **A second model to version.** The reranker tag is pinned and recorded
   in telemetry like the embed model.
 - **Latency creep.** Hard timeouts; per-stage flags.

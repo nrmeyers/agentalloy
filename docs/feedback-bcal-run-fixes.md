@@ -118,10 +118,12 @@ falls back to "single contract in `contracts/<phase>/`" when the cursor fails to
 resets the cursor on a phase change. The stale value persists across the transition.
 
 **Proposed change.** On phase transition (where the phase file is written / `phase set` lands),
-clear the cursor, or re-point it to the sole contract under `contracts/<newphase>/` when exactly one
-exists (the spec/design/qa/ship single-item case). Fan-out phases (build, ≥2 contracts) stay
-cursor-less until `task next`, matching current docstring semantics. Locate the phase-write seam
-(`signals/skill_loader._read_phase` writers / `phase set` handler) and reset there.
+seed the cursor to the new phase's first work-item by filename order (`contracts.first_workitem_id`)
+— for single-item phases (spec/design/qa/ship) that is the sole contract; for a build fan-out it is
+the `01-` task, which `task next` then advances. A phase with no contracts clears. Locate the
+phase-write seam (`skill_loader._write_phase_atomic` / `phase.run_phase_set`) and seed there.
+(Shipped as Outcome B; the earlier clear-on-transition sketch was superseded — see
+`compound-engineering-bridge` D6.)
 
 **Risk.** Medium — touches phase-transition state shared per-repo (see the per-repo phase-contention
 memory). Must not clobber a deliberately-set cursor mid-phase; only reset *on transition*.
@@ -207,9 +209,12 @@ contract whose related entries use the `contracts/`-relative shorthand.
 - **B4** — `_concretize_glob` now maps a terminal basename wildcard to `<slug>.<ext>`
   (`docs/qa/*.md` → `docs/qa/<slug>.md`); non-terminal wildcards still return None. Live-verified
   qa+spec now scaffold. Tests updated/added in `test_contract_init_scaffold.py`.
-- **B2** — phase transition drops `.agentalloy/cursor` via `_clear_state`, wired into BOTH the
-  proxy seam (`skill_loader._write_phase_atomic`) and the CLI seam (`phase.run_phase_set`); an
-  idempotent same-phase rewrite keeps the cursor. Tests in `test_task_cursor.py`.
+- **B2** — phase transition SEEDS `.agentalloy/cursor` to the new phase's first work-item by
+  filename order (`contracts.first_workitem_id`), wired into BOTH the proxy seam
+  (`skill_loader._write_phase_atomic`) and the CLI seam (`phase.run_phase_set`); a phase with no
+  contracts clears, and an idempotent same-phase rewrite keeps the cursor. Tests in
+  `test_task_cursor.py`. (Outcome B; the original clear-on-transition was superseded — see
+  `compound-engineering-bridge` D6.)
 - Pack bump: `sdd/pack.yaml` 1.0.21 → 1.0.22 (required by the pack-version guard; gate edits take
   effect from YAML at runtime, no re-embed needed for behavior).
 

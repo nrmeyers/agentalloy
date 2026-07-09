@@ -1,6 +1,6 @@
 # Proxy Architecture
 
-AgentAlloy's FastAPI service acts as an OpenAI- and Anthropic-compatible proxy — a gateway that sits between the harness and the LLM, evaluating each call through the signal layer and injecting composed skill context before forwarding to the upstream LLM. The composition path is deterministic by default (optional off-by-default LM-assist).
+AgentAlloy's FastAPI service acts as an OpenAI- and Anthropic-compatible proxy — a gateway that sits between the harness and the LLM, evaluating each call through the signal layer and injecting composed skill context before forwarding to the upstream LLM. The composition path is deterministic by default (optional LM-assist — `arbitrate` on GPU presets, off on CPU/container).
 
 ## Overview
 
@@ -13,7 +13,7 @@ The Anthropic surface is a single native passthrough (the bare `/v1/messages` An
 
 - **Native Anthropic passthrough** (`POST /proj/{token}/v1/messages`) — the primary Claude Code path. Composes and injects AgentAlloy context into the **last user message**, leaves the top-level `system` block byte-unchanged (so prompt caching survives), then forwards the request **verbatim** to a configurable Anthropic upstream and relays the response (raw SSE byte relay when streaming). **No Anthropic↔OpenAI translation.** See [Native Anthropic Passthrough](#native-anthropic-passthrough) below.
 
-AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST`, `off` by default in all presets; re-enable with `LM_ASSIST=arbitrate` if you want the local reranker scoring candidate fragments). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
+AgentAlloy's composition path is deterministic by default. Two small-local-model stages sit alongside it, both fail-open to the deterministic path when the model is unavailable: the **signals-layer intent backend** (`SIGNAL_INTENT_BACKEND`, default `reranker` — a measured win, so it ships on; `cosine` opts out and is the fail-open floor) and the **composition fragment re-ranker** (`LM_ASSIST`, hardware-split — GPU presets ship `arbitrate` (the local reranker scores candidate fragments), CPU and container ship `off` where it costs ~2.3x the latency budget; re-enable on CPU manually with `LM_ASSIST=arbitrate`). See BENCHMARKS.md and [lm-assist-design.md](lm-assist-design.md) for the numbers behind each default.
 
 ## Architecture
 
@@ -56,7 +56,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
                              │
    (Compose Engine is deterministic by default; an optional
     flag-gated LM re-ranker stage may run post-fusion —
-    `LM_ASSIST=arbitrate`, off by default, fail-open.)
+    `LM_ASSIST=arbitrate` on GPU presets, off on CPU/container, fail-open.)
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────┐
@@ -219,7 +219,7 @@ Uses the existing compose engine (deterministic by default):
 - Hybrid BM25 + dense retrieval from DuckDB/LanceDB
 - RRF fusion with phase-tuned leg weighting
 - Applicability filter (deterministic predicates)
-- Optional flag-gated LM fragment re-rank post-fusion (`LM_ASSIST=arbitrate`, off by default, fail-open)
+- Optional flag-gated LM fragment re-rank post-fusion (`LM_ASSIST=arbitrate` on GPU presets, off on CPU/container, fail-open)
 - Diversity selection (top-k with diversity constraint)
 - Assembly into prose output
 
