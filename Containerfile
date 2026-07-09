@@ -105,17 +105,26 @@ RUN uv sync --frozen --no-dev --extra code-index
 # on 47952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
 # the GGUFs the entrypoint downloads into /app/data/models.
 #
-# LM_ASSIST (Stage B fragment reranker) stays OFF in the container: the bundled
-# llama-server runs CPU-only (the entrypoint launches it without -ngl and there
-# is no GPU passthrough), so scoring the ~12 candidate fragments per compose
-# exceeds the latency budget, times out, and fails open. GPU *native* installs
-# enable it via their hardware preset (nvidia / radeon / apple-silicon).
+# LM_ASSIST (Stage B fragment reranker) ships `arbitrate` — the v6.6.0 posture on
+# ALL hardware presets including CPU (install/presets/cpu.yaml, guarded by
+# tests/test_config_consistency.py). The bundled reranker llama-server on 47952
+# (launched CPU-only by the entrypoint with the tuned `--parallel 1 -c 2048` args —
+# fewer slots beat more on CPU) serves both intent reranking and Stage B, and fails
+# open to the deterministic path when it is slow or down. The values below are the
+# CPU-preset set; a hardware preset's `.env`, forwarded at deploy, overrides them
+# (GPU presets use a 2000ms budget). This previously baked `LM_ASSIST=off`, which
+# misrepresented every real deployment — the forwarded preset has set `arbitrate`
+# since v6.6.0, so the image now matches what actually runs.
 ENV AGENTALLOY_WEB_DIST=/app/web-dist \
     DUCKDB_PATH=/app/data/agentalloy.duck \
     FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \
     TELEMETRY_DB_PATH=/app/data/telemetry.duck \
     LOG_LEVEL=INFO \
-    LM_ASSIST=off \
+    LM_ASSIST=arbitrate \
+    LM_ASSIST_KEEP_THRESHOLD=0.05 \
+    LM_ASSIST_MAX_CANDIDATES=16 \
+    LM_ASSIST_TIMEOUT_MS=3000 \
+    LM_ASSIST_DOC_CAP_CHARS=2400 \
     RUNTIME_EMBED_BASE_URL=http://localhost:47951 \
     RUNTIME_EMBEDDING_MODEL=nomic-embed-text-v1.5.Q8_0.gguf \
     SIGNAL_INTENT_BACKEND=reranker \
