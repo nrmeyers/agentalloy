@@ -240,15 +240,22 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
                 data[key] = existing[key]
 
     _write_phase(data, root)
-    # On a real transition, drop the work-item cursor so the new phase resolves its own
-    # incoming contract instead of inheriting the prior phase's terminal task slug (B2).
-    # Mirrors the proxy auto-advance path in skill_loader._write_phase_atomic.
+    # On a real transition, SEED the work-item cursor to the new phase's first work-item
+    # (filename order) so "which task is current" is reliably set — the single source of
+    # truth both the proxy and the codify gate read. A phase with no contracts clears it.
+    # Mirrors the proxy auto-advance path in skill_loader._write_phase_atomic (B2).
     if current != phase:
+        from agentalloy.contracts import first_workitem_id
         from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
             _clear_state,
+            _write_cursor_atomic,
         )
 
-        _clear_state(root, "cursor")
+        seed = first_workitem_id(root, phase)
+        if seed:
+            _write_cursor_atomic(root, seed)
+        else:
+            _clear_state(root, "cursor")
     return {**data, "blocked": False}
 
 

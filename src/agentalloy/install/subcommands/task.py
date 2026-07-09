@@ -34,13 +34,13 @@ def _ordered_contracts(root: Path, phase: str) -> list[Path]:
     """All contracts in ``.agentalloy/contracts/<phase>/`` ordered by filename.
 
     Filename order (not mtime) so the worklist is stable and design-controlled
-    via numeric prefixes — ``list_contracts_for_phase`` sorts newest-first, which
-    is wrong for sequential task iteration.
+    via numeric prefixes. Delegates to the shared
+    :func:`agentalloy.contracts.ordered_contracts_for_phase` — the single ordering
+    definition also used by phase-entry cursor seeding (``first_workitem_id``).
     """
-    contracts_dir = root / ".agentalloy" / "contracts" / phase
-    if not contracts_dir.is_dir():
-        return []
-    return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
+    from agentalloy.contracts import ordered_contracts_for_phase
+
+    return ordered_contracts_for_phase(root, phase)
 
 
 def _cursor_id(phase: str, contract: Path) -> str:

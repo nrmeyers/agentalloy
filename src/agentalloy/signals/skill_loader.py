@@ -156,15 +156,24 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
-    # On a real phase transition, drop the work-item cursor. Otherwise the new phase
-    # inherits the prior phase's terminal task slug (e.g. qa wakes pointing at the last
-    # build task `bcal-05-...` instead of the feature contract). Cleared cursor →
-    # `_resolve_current_contract` falls back to the sole contract under
-    # `contracts/<newphase>/` (single-item phases: spec/design/qa/ship) or stays silent
-    # until `task next` (build fan-out). An in-phase idempotent rewrite (prev == phase)
-    # leaves a deliberately-set cursor untouched. See B2 in docs/feedback-bcal-run-fixes.md.
+    # On a real phase transition, SEED the work-item cursor to the first work-item of
+    # the new phase (filename order — 01-, 02-, …) so "which task is current" is
+    # reliably set without waiting for the agent's first `agentalloy task next`. The
+    # cursor is the single source of truth both consumers read: the proxy (Tier 2
+    # compose) and the `lessons_recorded` codify gate — neither guesses. A phase with
+    # no contracts yet clears the cursor (nothing to seed); `task next` advances it as
+    # the agent works down the build fan-out. This replaces the old clear-to-none +
+    # newest-by-mtime fallback (mtime is fragile: git checkout/clone reset it). An
+    # in-phase idempotent rewrite (prev == phase) leaves a deliberately-set cursor
+    # untouched. See B2 in docs/feedback-bcal-run-fixes.md.
     if prev != phase:
-        _clear_state(project_root, "cursor")
+        from agentalloy.contracts import first_workitem_id
+
+        seed = first_workitem_id(project_root, phase)
+        if seed:
+            _write_cursor_atomic(project_root, seed)
+        else:
+            _clear_state(project_root, "cursor")
 
 
 # ---------------------------------------------------------------------------

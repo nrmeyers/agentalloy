@@ -588,27 +588,33 @@ class TestTier2Cadence:
         assert result.announce_cursor is True
         assert result.current_contract.endswith("build/02-api.md")
 
-    def test_tier2_fires_on_fanout_without_cursor(self, tmp_path: Path) -> None:
-        # The production condition: a phase holding ≥2 contracts with no cursor
-        # (contracts accumulate; the cursor is rarely managed). Pre-fix this went
-        # silent → every such compose fell to the free-text path (contract_tags in
-        # 0/11,162 telemetry rows). Now Tier 2 fires on the newest work-item so the
-        # compose stays tag-scoped. Drive the REAL builder (not a stubbed signal).
-        import os
-
+    def test_tier2_silent_on_uncursored_fanout(self, tmp_path: Path) -> None:
+        # Strict resolver (Outcome B): ≥2 contracts with NO cursor → Tier 2 stays
+        # silent rather than guess a mis-scoped work-item. This is the fail-safe
+        # floor; in normal flow the cursor is seeded on phase entry (next test).
+        # Drive the REAL builder (not a stubbed signal).
         _set_phase(tmp_path, "build")
         _seed_contract(tmp_path, "build", "01-cache")
         _seed_contract(tmp_path, "build", "02-api")
         _set_announced(tmp_path, "build")  # Tier 1 already announced → quiet
-        # 02-api is unambiguously newest regardless of write order / mtime coarseness.
-        d = tmp_path / ".agentalloy" / "contracts" / "build"
-        os.utime(d / "01-cache.md", (1000, 1000))
-        os.utime(d / "02-api.md", (3000, 3000))
         result = self._run(tmp_path)
         assert result.announce is False  # Tier 1 stays quiet
-        assert result.announce_cursor is True  # Tier 2 no longer silent
+        assert result.announce_cursor is False  # no cursor → silent, not a guess
+
+    def test_tier2_fires_on_seeded_cursor(self, tmp_path: Path) -> None:
+        # Phase entry seeds the cursor to the first work-item (01-, filename order);
+        # Tier 2 then fires on THAT seeded task — tag-scoped compose, no free-text
+        # fallback. `_set_state(..., "cursor", ...)` stands in for the on-entry seed.
+        _set_phase(tmp_path, "build")
+        _seed_contract(tmp_path, "build", "01-cache")
+        _seed_contract(tmp_path, "build", "02-api")
+        _set_announced(tmp_path, "build")  # Tier 1 already announced → quiet
+        _set_state(tmp_path, "cursor", "build/01-cache.md")  # seeded on entry
+        result = self._run(tmp_path)
+        assert result.announce is False  # Tier 1 stays quiet
+        assert result.announce_cursor is True  # Tier 2 fires on the seeded work-item
         assert result.current_contract is not None
-        assert result.current_contract.endswith("build/02-api.md")
+        assert result.current_contract.endswith("build/01-cache.md")
 
 
 def _gates_with_sections() -> dict[str, Any]:

@@ -372,8 +372,11 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     be MET forever by the first lesson ever written (the stale-file no-op), so it
     could not force *this* task to codify. Tying the check to the active work-item
     slug makes it order-independent and per-task. Deterministic and DB-free;
-    returns UNKNOWN (fail-open, never blocks) when no single work-item resolves,
-    mirroring how Tier-2 composition stays silent on an ambiguous/absent work-item.
+    returns UNKNOWN (fail-open, never blocks) when no single work-item resolves.
+    The cursor is seeded to the phase's first work-item on entry and advanced by
+    ``task next``, so the gate normally resolves a concrete slug; only a genuinely
+    uncursored fan-out (≥2 contracts, no cursor — rare) fails open, by design, so
+    the gate never blocks against a *guessed* task.
     """
     from agentalloy.contracts import (
         resolve_current_contract,  # lazy: keep signals free of import cost

@@ -340,6 +340,33 @@ def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
     return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
 
 
+def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
+    """Return contracts/<phase>/*.md in FILENAME order (``01-``, ``02-``, …).
+
+    The design phase numbers build work-items by filename prefix to fix the
+    worklist order, so this — not the mtime order of ``list_contracts_for_phase``
+    — is the correct sequence for "which task is first/next". The single ordering
+    definition shared by the ``task`` cursor commands and phase-entry seeding.
+    """
+    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    if not contracts_dir.is_dir():
+        return []
+    return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
+
+
+def first_workitem_id(project_root: Path, phase: str) -> str | None:
+    """The first work-item of ``phase`` (filename order) as a cursor id
+    (``<phase>/<file>.md``), or ``None`` when the phase has no contracts.
+
+    Used to seed ``.agentalloy/cursor`` on phase entry so the current work-item
+    is reliably set without waiting for the agent's first ``agentalloy task next``.
+    """
+    contracts = ordered_contracts_for_phase(project_root, phase)
+    if not contracts:
+        return None
+    return f"{phase}/{contracts[0].name}"
+
+
 @dataclass(frozen=True)
 class CodeIndexQuery:
     """Parameters for an in-process code-index search derived from a contract.
@@ -406,20 +433,25 @@ def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None
     contracts-relative posix path (e.g. ``build/01-cache.md``) and ``abs_path`` is
     the file to use. Resolution order:
 
-    1. An explicit ``.agentalloy/cursor`` (set by ``agentalloy task next``) that
-       resolves to a file contained under ``.agentalloy/contracts/``.
+    1. An explicit ``.agentalloy/cursor`` that resolves to a file under
+       ``.agentalloy/contracts/`` (set by phase-entry seeding — see
+       ``first_workitem_id`` — or advanced by ``agentalloy task next``).
     2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
        (the common single-item phase: spec/design/qa/ship).
-    3. ≥2 with no cursor → the newest by mtime (``list_contracts_for_phase`` sorts
-       newest-first). Deliberate fallback (PR #376): a tag-scoped compose of the
-       most-recent work-item beats a free-text fallback that leaks cross-domain
-       filler. An explicit cursor always wins above.
+    3. ≥2 with no cursor (an uncursored build fan-out) → ``(None, None)``: don't
+       guess. This is the fail-safe floor, not the normal path — the cursor is
+       seeded to the first work-item on phase entry (``_write_phase_atomic`` /
+       ``run_phase_set``) and advanced by ``task next``, so a live phase almost
+       always has a cursor. Both consumers depend on this strictness: the proxy
+       composes nothing (rather than a mis-scoped guess) and the
+       ``lessons_recorded`` gate fails open (UNKNOWN) rather than block against a
+       guessed slug.
     4. Zero contracts → ``(None, None)``.
 
-    This is the canonical resolver shared by the proxy (Tier 2 domain composition)
-    and the ``lessons_recorded`` gate predicate, so both agree on "which task is
-    current". Note it does NOT use ``latest_contract`` directly — it honors the
-    cursor first, and only falls back to newest-by-mtime for an uncursored fan-out.
+    The single source of truth is the cursor. This resolver never falls back to
+    ``latest_contract`` (newest by mtime): mtime is fragile — git checkout/clone
+    reset it — and, shared with a correctness gate, a newest-by-mtime guess could
+    satisfy or block the gate against the wrong task.
     """
     contracts_root = (project_root / ".agentalloy" / "contracts").resolve()
     cursor = _read_cursor_value(project_root)
@@ -431,11 +463,11 @@ def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None
         # stale/invalid cursor → fall through to the phase default
 
     in_phase = list_contracts_for_phase(project_root, phase)
-    if not in_phase:
+    if len(in_phase) != 1:
+        # 0 → nothing current; ≥2 with no cursor → fan-out, don't guess.
         return None, None
-    # 1 → that work-item; ≥2, no cursor → newest by mtime (list is newest-first).
-    current = in_phase[0].resolve()
-    return current.relative_to(contracts_root).as_posix(), current
+    only = in_phase[0].resolve()
+    return only.relative_to(contracts_root).as_posix(), only
 
 
 def latest_contract(project_root: Path, phase: str | None = None) -> Path | None:

@@ -171,23 +171,21 @@ def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path |
     Work-items for a phase live in ``.agentalloy/contracts/<phase>/`` and are
     authored by the *prior* phase (the cascade hand-off). Resolution:
 
-    1. An explicit ``.agentalloy/cursor`` (set by ``agentalloy task next``) wins,
-       when it resolves to a file under ``.agentalloy/contracts/``.
+    1. An explicit ``.agentalloy/cursor`` wins when it resolves to a file under
+       ``.agentalloy/contracts/``. The cursor is seeded to the phase's first
+       work-item on entry (``skill_loader._write_phase_atomic``) and advanced by
+       ``agentalloy task next`` — so a live phase almost always has one.
     2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
        (the common single-item phase: spec/design/qa/ship).
-    3. Two or more, no cursor → the most-recently-touched contract (newest mtime)
-       is the active work-item. This is a deliberate fallback, not a guess we
-       avoid: telemetry showed the old "stay silent until ``task next``" rule
-       left 11,161/11,162 composes on the free-text path (contracts accumulate
-       per phase and the cursor is rarely managed), which leaks ~35% cross-domain
-       process filler. A newest-mtime pick still scopes to the phase's domain
-       tags, so even a wrong-item pick excludes filler; an explicit cursor wins.
+    3. Two or more, no cursor → ``(None, None)``; Tier 2 stays silent rather than
+       guess a mis-scoped work-item. Seeding makes this fan-out floor rare; it is
+       a fail-safe, not the normal path.
     4. None → ``(None, None)``; Tier 2 stays silent.
 
     Thin wrapper over :func:`agentalloy.contracts.resolve_current_contract` — the
-    canonical resolver, shared with the ``lessons_recorded`` gate predicate so the
-    proxy and the gate always agree on which work-item is current. Kept here for
-    the existing call sites and to emit the stale-cursor diagnostic.
+    canonical cursor-strict resolver, shared with the ``lessons_recorded`` gate
+    predicate so the proxy and the gate always agree on which work-item is current.
+    Kept here for the existing call sites and to emit the stale-cursor diagnostic.
     """
     from agentalloy.contracts import resolve_current_contract
 
