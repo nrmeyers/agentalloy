@@ -625,7 +625,11 @@ def _build_entrypoint_script(packs: str) -> str:
             "",
             "# Start uvicorn AFTER bootstrap completes to avoid DuckDB single-writer lock conflicts.",
             'echo ">> Starting uvicorn..."',
-            'uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 --log-level "${LOG_LEVEL:-info}" &',
+            # uvicorn accepts lowercase level names only; forwarded host .env
+            # values may arrive uppercase (presets historically shipped "INFO"),
+            # and an invalid value crash-loops the container at startup.
+            "uv run uvicorn agentalloy.app:app --host 0.0.0.0 --port 47950 "
+            "--log-level \"$(echo \"${LOG_LEVEL:-info}\" | tr '[:upper:]' '[:lower:]')\" &",
             "UVICORN_PID=$!",
             "",
             "# Block on uvicorn — its exit is the container's exit.",

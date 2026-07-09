@@ -76,7 +76,7 @@ class _CaptureClient:
 def test_call_compose_from_contract_posts_contract_fields() -> None:
     client = _CaptureClient()
     task = DOMAIN_TASKS[0]
-    out, rtype, _ms, skills = run_poc.call_compose_from_contract(client, task, k=2)  # type: ignore[arg-type]
+    out, rtype, _ms, skills, _lm = run_poc.call_compose_from_contract(client, task, k=2)  # type: ignore[arg-type]
     assert out == "x" and rtype == "hit" and skills == ["s1"]
     payload = client.payloads[0]
     assert payload["contract_tags"] == DOMAIN_CONTRACT_TAGS[task.task_id]

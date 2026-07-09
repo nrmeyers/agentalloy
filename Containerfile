@@ -105,11 +105,16 @@ RUN uv sync --frozen --no-dev --extra code-index
 # on 47952 (SIGNAL_INTENT_RERANK_URL, completions mode). Model filenames match
 # the GGUFs the entrypoint downloads into /app/data/models.
 #
-# LM_ASSIST (Stage B fragment reranker) stays OFF in the container: the bundled
-# llama-server runs CPU-only (the entrypoint launches it without -ngl and there
-# is no GPU passthrough), so scoring the ~12 candidate fragments per compose
-# exceeds the latency budget, times out, and fails open. GPU *native* installs
-# enable it via their hardware preset (nvidia / radeon / apple-silicon).
+# LM_ASSIST (Stage B fragment reranker) is OFF in the container — the image is
+# CPU-only (no GPU passthrough) and CPU Stage B is not viable at the budget.
+# Measured 2026-07-09 on the shipped 47952 reranker (`--parallel 1 -c 2048`): real
+# distinct-doc scoring costs ~1800ms/candidate, and production telemetry isolates
+# Stage B at ~6.6s median / ~11s p90 added latency vs the 203ms deterministic path
+# — 2.3x the 3000ms budget, so it times out and fails open on real composes. (The
+# "~145ms warm" figure that once justified arbitrate here was a KV-cache-reuse
+# artifact, not the varied-fragment production path.) GPU *native* installs enable
+# it via their hardware preset (nvidia / radeon / apple-silicon), where it fits.
+# The forwarded preset (`.env`) now also ships off on CPU, so image ≡ deployment.
 ENV AGENTALLOY_WEB_DIST=/app/web-dist \
     DUCKDB_PATH=/app/data/agentalloy.duck \
     FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \

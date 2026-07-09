@@ -65,11 +65,24 @@ def test_no_workitem_is_unknown(tmp_path: Path):
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is UNKNOWN
 
 
-def test_ambiguous_fanout_is_unknown(tmp_path: Path):
+def test_fanout_without_cursor_resolves_newest(tmp_path: Path):
+    # ≥2 contracts, no cursor -> newest-by-mtime (PR #376 policy); the gate then
+    # checks THAT slug's lesson. Pin mtimes so "newest" is deterministic.
+    import os
+
     _qa_contract(tmp_path, "feat-x")
     _qa_contract(tmp_path, "feat-y")
-    # two contracts, no cursor -> refuse to guess -> UNKNOWN
-    assert eval_lessons_recorded({}, _ctx(tmp_path)) is UNKNOWN
+    qa = tmp_path / ".agentalloy" / "contracts" / "qa"
+    os.utime(qa / "feat-x.md", (1000, 1000))
+    os.utime(qa / "feat-y.md", (2000, 2000))  # feat-y is strictly newest
+    # newest (feat-y) has no lesson yet -> NOT_MET (not UNKNOWN)
+    assert eval_lessons_recorded({}, _ctx(tmp_path)) is NOT_MET
+    _write(tmp_path / "docs" / "solutions" / "feat-y.md", "# lesson")
+    assert eval_lessons_recorded({}, _ctx(tmp_path)) is MET
+    # a lesson for the OTHER (older) contract does NOT satisfy it (still slug-scoped)
+    (tmp_path / "docs" / "solutions" / "feat-y.md").unlink()
+    _write(tmp_path / "docs" / "solutions" / "feat-x.md", "# wrong lesson")
+    assert eval_lessons_recorded({}, _ctx(tmp_path)) is NOT_MET
 
 
 def test_cursor_selects_slug(tmp_path: Path):

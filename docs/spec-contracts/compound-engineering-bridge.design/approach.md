@@ -37,12 +37,15 @@ falsely reports `NOT_MET`. A slug-scoped existence check is order-independent.
 
 **Slug resolution (spike D1 — resolved).** The canonical resolver is
 `_resolve_current_contract(cwd, phase)` (`api/proxy_signal.py:164`):
-cursor-first (`.agentalloy/cursor`, written by `agentalloy task next`, ordered by
-filename), then the sole `contracts/<phase>/*.md` if exactly one exists, else
-`(None, None)` — it deliberately *refuses to guess* when several coexist with no
-cursor. `lessons_recorded` reuses it against `ctx.current_phase` and takes
-`Path(...).stem` as the slug; `(None, None)` → `UNKNOWN` (mirroring how Tier-2
-composition stays silent). `latest_contract` (mtime, `contracts.py:387`) is a
+cursor-first (`.agentalloy/cursor`, written by `agentalloy task next`), then the
+sole `contracts/<phase>/*.md` if exactly one exists, else — for an uncursored
+fan-out (≥2) — the newest by mtime (per PR #376: a tag-scoped compose of the
+most-recent work-item beats a filler-leaking free-text fallback), and `(None,
+None)` only when zero contracts exist. `lessons_recorded` reuses it against
+`ctx.current_phase` and takes `Path(...).stem` as the slug; `(None, None)` →
+`UNKNOWN`. (The codify gate lives on qa, a single-contract phase, so the fan-out
+branch never applies to it; and slug-scoping means AC 2 holds regardless of which
+contract is resolved.) `latest_contract` (mtime, `contracts.py:387`) is a
 footgun here — it ignores the cursor, disagrees with `task next`'s filename
 ordering, and can select a stale prior-cycle contract (nothing deletes old
 contracts; only the cursor is cleared on transition).

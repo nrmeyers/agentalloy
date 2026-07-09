@@ -59,10 +59,20 @@ _TASK = Task(
 
 def test_call_compose_sends_legs_domain() -> None:
     client = _FakeClient(
-        {"/compose": _Resp(body={"output": "x", "result_type": "hit", "source_skills": ["s1"]})}
+        {
+            "/compose": _Resp(
+                body={
+                    "output": "x",
+                    "result_type": "hit",
+                    "source_skills": ["s1"],
+                    "telemetry": {"lm_assist_outcome": "hit"},
+                }
+            )
+        }
     )
-    out, rtype, _ms, skills = run_poc.call_compose(client, _TASK, k=4)  # type: ignore[arg-type]
+    out, rtype, _ms, skills, lm_outcome = run_poc.call_compose(client, _TASK, k=4)  # type: ignore[arg-type]
     assert out == "x" and rtype == "hit" and skills == ["s1"]
+    assert lm_outcome == "hit"
     _url, payload = client.posts[0]
     assert payload["legs"] == "domain"
     assert payload["k"] == 4
@@ -150,7 +160,12 @@ def test_run_one_persists_source_skills(tmp_path: Path) -> None:
     client = _FakeClient(
         {
             "/compose": _Resp(
-                body={"output": "guidance", "result_type": "hit", "source_skills": ["s1", "s2"]}
+                body={
+                    "output": "guidance",
+                    "result_type": "hit",
+                    "source_skills": ["s1", "s2"],
+                    "telemetry": {"lm_assist_outcome": "hit"},
+                }
             ),
             "/chat/completions": _Resp(
                 body={
@@ -164,6 +179,9 @@ def test_run_one_persists_source_skills(tmp_path: Path) -> None:
     run_poc.run_one(client, _TASK, "composed", 0, tmp_path, k=4, graders=graders)  # type: ignore[arg-type]
     meta = json.loads((tmp_path / "probe_task" / "composed" / "run-0.meta.json").read_text())
     assert meta["source_skills"] == ["s1", "s2"]
+    # Mechanism provenance: the cell records which path composed it, so a
+    # breaker-tainted (mixed-mechanism) arm is detectable from artifacts alone.
+    assert meta["lm_assist_outcome"] == "hit"
 
 
 def test_run_one_source_skills_empty_for_none_arm(tmp_path: Path) -> None:
@@ -181,3 +199,29 @@ def test_run_one_source_skills_empty_for_none_arm(tmp_path: Path) -> None:
     run_poc.run_one(client, _TASK, "none", 0, tmp_path, k=4, graders=graders)  # type: ignore[arg-type]
     meta = json.loads((tmp_path / "probe_task" / "none" / "run-0.meta.json").read_text())
     assert meta["source_skills"] == []
+    assert meta["lm_assist_outcome"] is None
+
+
+def test_aggregate_rolls_up_lm_assist_outcomes() -> None:
+    def rr(cond: str, outcome: str | None) -> run_poc.RunResult:
+        return run_poc.RunResult(
+            task_id="t1",
+            condition=cond,
+            run_index=0,
+            output="",
+            input_tokens=1,
+            output_tokens=1,
+            agent_latency_ms=1,
+            compose_latency_ms=1,
+            compose_result_type="hit",
+            grades={"g": True},
+            score=1.0,
+            lm_assist_outcome=outcome,
+        )
+
+    summary = run_poc.aggregate(
+        [rr("composed", "hit"), rr("composed", "hit"), rr("composed", "disabled"), rr("none", None)]
+    )
+    # The mixed-mechanism signature is visible at a glance in the summary.
+    assert summary["lm_assist_outcomes"]["composed"] == {"hit": 2, "disabled": 1}
+    assert "none" not in summary["lm_assist_outcomes"]

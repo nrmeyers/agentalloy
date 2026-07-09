@@ -175,8 +175,13 @@ def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path |
        when it resolves to a file under ``.agentalloy/contracts/``.
     2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
        (the common single-item phase: spec/design/qa/ship).
-    3. Two or more, no cursor → a fan-out phase (build): don't guess which task is
-       current — stay silent until ``task next`` sets the cursor.
+    3. Two or more, no cursor → the most-recently-touched contract (newest mtime)
+       is the active work-item. This is a deliberate fallback, not a guess we
+       avoid: telemetry showed the old "stay silent until ``task next``" rule
+       left 11,161/11,162 composes on the free-text path (contracts accumulate
+       per phase and the cursor is rarely managed), which leaks ~35% cross-domain
+       process filler. A newest-mtime pick still scopes to the phase's domain
+       tags, so even a wrong-item pick excludes filler; an explicit cursor wins.
     4. None → ``(None, None)``; Tier 2 stays silent.
 
     Thin wrapper over :func:`agentalloy.contracts.resolve_current_contract` — the

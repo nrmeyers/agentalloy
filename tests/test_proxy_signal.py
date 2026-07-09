@@ -588,6 +588,28 @@ class TestTier2Cadence:
         assert result.announce_cursor is True
         assert result.current_contract.endswith("build/02-api.md")
 
+    def test_tier2_fires_on_fanout_without_cursor(self, tmp_path: Path) -> None:
+        # The production condition: a phase holding ≥2 contracts with no cursor
+        # (contracts accumulate; the cursor is rarely managed). Pre-fix this went
+        # silent → every such compose fell to the free-text path (contract_tags in
+        # 0/11,162 telemetry rows). Now Tier 2 fires on the newest work-item so the
+        # compose stays tag-scoped. Drive the REAL builder (not a stubbed signal).
+        import os
+
+        _set_phase(tmp_path, "build")
+        _seed_contract(tmp_path, "build", "01-cache")
+        _seed_contract(tmp_path, "build", "02-api")
+        _set_announced(tmp_path, "build")  # Tier 1 already announced → quiet
+        # 02-api is unambiguously newest regardless of write order / mtime coarseness.
+        d = tmp_path / ".agentalloy" / "contracts" / "build"
+        os.utime(d / "01-cache.md", (1000, 1000))
+        os.utime(d / "02-api.md", (3000, 3000))
+        result = self._run(tmp_path)
+        assert result.announce is False  # Tier 1 stays quiet
+        assert result.announce_cursor is True  # Tier 2 no longer silent
+        assert result.current_contract is not None
+        assert result.current_contract.endswith("build/02-api.md")
+
 
 def _gates_with_sections() -> dict[str, Any]:
     """An exit-gate spec mirroring the spec phase: a path glob + required sections."""

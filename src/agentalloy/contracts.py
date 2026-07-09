@@ -410,12 +410,16 @@ def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None
        resolves to a file contained under ``.agentalloy/contracts/``.
     2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
        (the common single-item phase: spec/design/qa/ship).
-    3. Zero, or ≥2 with no cursor (a build fan-out) → ``(None, None)``: don't guess.
+    3. ≥2 with no cursor → the newest by mtime (``list_contracts_for_phase`` sorts
+       newest-first). Deliberate fallback (PR #376): a tag-scoped compose of the
+       most-recent work-item beats a free-text fallback that leaks cross-domain
+       filler. An explicit cursor always wins above.
+    4. Zero contracts → ``(None, None)``.
 
     This is the canonical resolver shared by the proxy (Tier 2 domain composition)
-    and the ``lessons_recorded`` gate predicate — both must agree on "which task
-    is current", so neither may fall back to ``latest_contract`` (newest by mtime),
-    which ignores the cursor and can select a stale prior-cycle contract.
+    and the ``lessons_recorded`` gate predicate, so both agree on "which task is
+    current". Note it does NOT use ``latest_contract`` directly — it honors the
+    cursor first, and only falls back to newest-by-mtime for an uncursored fan-out.
     """
     contracts_root = (project_root / ".agentalloy" / "contracts").resolve()
     cursor = _read_cursor_value(project_root)
@@ -427,11 +431,11 @@ def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None
         # stale/invalid cursor → fall through to the phase default
 
     in_phase = list_contracts_for_phase(project_root, phase)
-    if len(in_phase) != 1:
-        # 0 → nothing current; ≥2 → fan-out, wait for the cursor.
+    if not in_phase:
         return None, None
-    only = in_phase[0].resolve()
-    return only.relative_to(contracts_root).as_posix(), only
+    # 1 → that work-item; ≥2, no cursor → newest by mtime (list is newest-first).
+    current = in_phase[0].resolve()
+    return current.relative_to(contracts_root).as_posix(), current
 
 
 def latest_contract(project_root: Path, phase: str | None = None) -> Path | None:

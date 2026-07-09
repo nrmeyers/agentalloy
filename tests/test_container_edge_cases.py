@@ -389,15 +389,21 @@ class TestEntrypointLlamaServers:
         assert "http://127.0.0.1:47952/health" in script
 
     def test_entrypoint_uvicorn_log_level_from_env(self):
-        """uvicorn's --log-level reads the container LOG_LEVEL env (default info).
+        """uvicorn's --log-level reads the container LOG_LEVEL env (default info),
+        normalized to lowercase.
 
-        Regression guard for TODO #8: the launch line hardcoded ``--log-level
-        info``, so a ``LOG_LEVEL=DEBUG`` request could never reach uvicorn.
+        Regression guards: TODO #8 (the launch line hardcoded ``--log-level
+        info``, so a ``LOG_LEVEL=DEBUG`` request could never reach uvicorn) and
+        the v6.6.0 crash-loop (presets shipped ``LOG_LEVEL: "INFO"``; env
+        forwarding delivered it verbatim and uvicorn rejects uppercase level
+        names, killing the container at startup).
         """
         from agentalloy.install.subcommands.container_runtime import _build_entrypoint_script
 
         script = _build_entrypoint_script("")
-        assert '--log-level "${LOG_LEVEL:-info}"' in script
+        assert (
+            "--log-level \"$(echo \"${LOG_LEVEL:-info}\" | tr '[:upper:]' '[:lower:]')\"" in script
+        )
         assert "--log-level info &" not in script
 
 
