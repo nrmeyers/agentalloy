@@ -360,6 +360,38 @@ class DuckDBCodeGraphStore:
             for r in rows
         ]
 
+    def decisions_for_files(self, file_paths: Sequence[str]) -> list[DecisionRow]:
+        """Decisions governing any symbol defined in ``file_paths`` — the
+        file-scoped analogue of :meth:`governing_decisions`. One indexed join
+        (`edges GOVERNS ⋈ symbols dst ON dst.file_path ∈ files`), `DISTINCT` so a
+        decision governing several touched files appears once."""
+        paths = list(file_paths)
+        if not paths:
+            return []
+        placeholders = ", ".join("?" for _ in paths)
+        rows = self.conn.execute(
+            f"""
+            SELECT DISTINCT e.src, d.file_path, d.start_line, d.name, d.source_code
+            FROM edges e
+            JOIN symbols code ON code.qualified_name = e.dst
+                             AND code.file_path IN ({placeholders})
+            LEFT JOIN symbols d ON d.qualified_name = e.src
+            WHERE e.kind = 'GOVERNS'
+            ORDER BY e.src
+            """,
+            paths,
+        ).fetchall()
+        return [
+            DecisionRow(
+                qualified_name=str(r[0]),
+                file_path=None if r[1] is None else str(r[1]),
+                start_line=_opt_int(r[2]),
+                heading="" if r[3] is None else str(r[3]),
+                snippet=None if r[4] is None else str(r[4]),
+            )
+            for r in rows
+        ]
+
     def delete_govern_edges_for_doc(self, doc_path: str) -> int:
         """Drop every ``GOVERNS`` edge rooted at ``doc_path`` (edges carry
         ``file_path`` = the decision doc). Doc-granular, so re-derivation matches
