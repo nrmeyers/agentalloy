@@ -328,9 +328,13 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     verdicts_path.parent.mkdir(parents=True, exist_ok=True)
+    import httpx
+
     client = LocalJudgeClient(url=url, model=model, timeout=args.timeout)
     started = time.monotonic()
     parse_errors = 0
+    transport_errors = 0
+    consecutive_transport = 0
     try:
         with verdicts_path.open("a") as fh:
             for i, (txt_path, meta) in enumerate(pending, start=1):
@@ -346,7 +350,27 @@ def cmd_run(args: argparse.Namespace) -> int:
                     )
                     record = _record(key, meta, run_dir, None, error="unknown_task_id")
                 else:
-                    verdict, raw = judge_once(client, spec, txt_path.read_text())
+                    # A single runaway thinking trace (ReadTimeout) or server
+                    # hiccup must not kill a multi-hour checkpointed pass. No
+                    # verdict row is written, so a later resume retries the
+                    # item. Only sustained failure (server down) aborts.
+                    try:
+                        verdict, raw = judge_once(client, spec, txt_path.read_text())
+                        consecutive_transport = 0
+                    except httpx.HTTPError as exc:
+                        transport_errors += 1
+                        consecutive_transport += 1
+                        print(
+                            f"warning: transport error on {key}: {exc!r} "
+                            f"({consecutive_transport} consecutive, "
+                            f"{transport_errors} total — item left for a future resume)",
+                            file=sys.stderr,
+                        )
+                        if consecutive_transport >= 5:
+                            raise RuntimeError(
+                                "5 consecutive transport errors — judge endpoint down?"
+                            ) from exc
+                        continue
                     if verdict is None:
                         parse_errors += 1
                         record = _record(
