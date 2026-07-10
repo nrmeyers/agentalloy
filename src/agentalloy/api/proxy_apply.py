@@ -33,6 +33,7 @@ from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyR
 from agentalloy.api.proxy_signal import SignalResult, commit_markers
 
 if TYPE_CHECKING:
+    from agentalloy.contracts import Contract
     from agentalloy.orchestration.compose import ComposeOrchestrator
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,42 @@ class _ComposedBlock:
     telemetry: ProxyComposeTelemetry
 
 
+def _compose_decision_push(
+    signal: SignalResult, phase: str, contract: Contract, composed_domain_text: str
+) -> str:
+    """Knowledge slice 2 — the just-in-time decision push (AC 6).
+
+    The governing-decision block for a design/build work-item, or ``""`` when it
+    does not apply. Fully gated and fail-closed: the code index is lazy-imported
+    only **after** the availability probe (which itself checks the module toggle),
+    so a disabled or unindexed repo composes byte-identically to before. Reads only
+    the code-index store; never touches the prompt-cached system block (the caller
+    folds this into the user-message text like the other tiers)."""
+    if phase not in ("design", "build"):
+        return ""
+    if not (contract.scope and contract.scope.touches):
+        return ""
+    if not code_index_gate.code_index_available(signal.repo):
+        return ""
+    if not signal.repo:
+        return ""
+
+    from agentalloy.api.knowledge_push import build_decision_block
+    from agentalloy.code_index.slug import repo_slug
+    from agentalloy.code_index.store import open_code_index
+
+    handles = open_code_index(None, repo_slug(Path(signal.repo)), role="reader")
+    try:
+        push = build_decision_block(contract, composed_domain_text, handles.graph)
+    finally:
+        handles.close()
+    if push is None:
+        return ""
+    if push.truncated:
+        logger.info("knowledge decision push truncated to %d decisions", push.count)
+    return push.text
+
+
 async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> _ComposedBlock:
     """Compose the prose block to inject.
 
@@ -199,28 +236,45 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     tier2_terminal = False
     tier2_result: ComposedResult | EmptyResult | None = None
     domain_req: ComposeRequest | None = None
+    decision_block = ""
     if signal.announce_cursor and signal.current_contract:
+        contract: Contract | None = None
         try:
-            from agentalloy.api.compose_models import compose_request_from_contract
             from agentalloy.contracts import parse_contract
 
             contract = parse_contract(Path(signal.current_contract))
-            domain_req = compose_request_from_contract(contract, legs="domain", k=_tier2_k())
-            tier2_result = await orchestrator.compose(
-                domain_req,
-                repo=signal.repo,
-                session_key=signal.session_key,
-                session_source=signal.session_source,
-                record_trace=False,
-            )
-            tier2 = "" if isinstance(tier2_result, EmptyResult) else tier2_result.output
-            tier2_terminal = True
         except Exception:
-            logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
-            tier2 = ""
-            tier2_terminal = False
+            logger.warning("Tier 2 contract parse failed -- passing through", exc_info=True)
 
-    text = "\n\n".join(p for p in (advisory_block, tier1, tier2) if p)
+        if contract is not None:
+            try:
+                from agentalloy.api.compose_models import compose_request_from_contract
+
+                domain_req = compose_request_from_contract(contract, legs="domain", k=_tier2_k())
+                tier2_result = await orchestrator.compose(
+                    domain_req,
+                    repo=signal.repo,
+                    session_key=signal.session_key,
+                    session_source=signal.session_source,
+                    record_trace=False,
+                )
+                tier2 = "" if isinstance(tier2_result, EmptyResult) else tier2_result.output
+                tier2_terminal = True
+            except Exception:
+                logger.warning("Tier 2 domain compose failed -- passing through", exc_info=True)
+                tier2 = ""
+                tier2_terminal = False
+
+            # Knowledge slice 2: the JIT decision push, in its own guard so neither
+            # it nor the domain leg can suppress the other. Dedups against the
+            # domain text just composed; additive (any gate miss -> "").
+            try:
+                decision_block = _compose_decision_push(signal, compose_phase, contract, tier2)
+            except Exception:
+                logger.warning("decision push failed -- passing through", exc_info=True)
+                decision_block = ""
+
+    text = "\n\n".join(p for p in (advisory_block, tier1, tier2, decision_block) if p)
     return _ComposedBlock(
         text=text,
         tier1_text=bool(tier1),
