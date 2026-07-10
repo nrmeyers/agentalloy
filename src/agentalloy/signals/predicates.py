@@ -566,19 +566,98 @@ def _count_task_items(content: str) -> int:
     return count
 
 
+def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
+    """The cursor'd work-item slug for ``phase`` — phase-strict.
+
+    Unlike the general :func:`agentalloy.contracts.resolve_current_contract` (which
+    honors the raw cursor even when it points into *another* phase — a hazard under
+    the concurrent-session phase contention noted elsewhere), this only accepts a
+    cursor resolving *into* ``contracts/<phase>/``. Falls back to the sole contract
+    in that phase dir, else ``None``. So a design→build gate always scopes to the
+    design work-item, never a sibling the cursor drifted to.
+    """
+    from agentalloy.contracts import list_contracts_for_phase  # lazy: signal import cost
+
+    contracts_root = (ctx.project_root / ".agentalloy" / "contracts").resolve()
+    phase_dir = (contracts_root / phase).resolve()
+    try:
+        raw = (ctx.project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
+    except OSError:
+        raw = ""
+    if raw:
+        candidate = (contracts_root / raw).resolve()
+        if candidate.is_file() and candidate.is_relative_to(phase_dir):
+            return candidate.stem
+    in_phase = list_contracts_for_phase(ctx.project_root, phase)
+    if len(in_phase) == 1:
+        return in_phase[0].stem
+    return None
+
+
+def _contract_work_item(content: str) -> str | None:
+    """The ``work_item`` frontmatter field (the parent design-item slug that
+    ``contract init --phase build`` stamps from the active design cursor), or
+    ``None`` when the field is absent or the file has no parseable frontmatter."""
+    import yaml as _yaml
+
+    if not content.startswith("---"):
+        return None
+    end = content.find("---", 3)
+    if end == -1:
+        return None
+    try:
+        fm: dict[str, Any] = _yaml.safe_load(content[3:end]) or {}
+    except Exception:
+        return None
+    wi = fm.get("work_item")
+    return wi if isinstance(wi, str) and wi else None
+
+
+def _item_build_contracts(project_root: Path, slug: str, contracts_glob: str) -> list[Path]:
+    """The build contracts attributed to design work-item ``slug``.
+
+    Attribution is the contract's ``work_item`` frontmatter (stamped at
+    ``contract init --phase build`` from the active design cursor). Build contracts
+    are flat and numerically ordered (``NN-<task>.md``), so the filename carries no
+    parent link — the field is the only per-item signal. Migration bridge: a repo
+    whose build contracts predate the field carries ``work_item`` on *none* of
+    them; to avoid a spurious block there, attribution falls back to **all** build
+    contracts when NONE declares a ``work_item`` (the old repo-global behavior).
+    Once any contract is stamped, only contracts stamped to *this* item count
+    (untagged legacy files are attributed to no item).
+    """
+    files = [p for p in _glob_files(project_root, contracts_glob) if p.is_file()]
+    any_tagged = False
+    mine: list[Path] = []
+    for p in files:
+        wi = _contract_work_item(_read_file(p) or "")
+        if wi is not None:
+            any_tagged = True
+            if wi == slug:
+                mine.append(p)
+    return mine if any_tagged else files
+
+
 def eval_build_contracts_cover_tasks(
     args: dict[str, Any], ctx: PredicateContext
 ) -> PredicateResult:
-    """MET when #build-contracts >= #tasks enumerated in tasks.md (floor 1).
+    """MET when #build-contracts >= #tasks for the CURSOR'D work-item (floor 1).
 
-    Deterministic and embed-free. Counts top-level list items under ``## Tasks``
-    across the ``tasks`` glob, clamps the task count to a floor of 1 (so it never
-    relaxes the existing >=1-contract gate and never blocks on an unparseable
-    tasks.md), and compares that to the number of build-contract files. Returns
-    UNKNOWN when no tasks.md exists or one is unreadable (a preceding
-    artifact_exists/contains node handles the missing-file case in all_of).
+    Deterministic and embed-free, and **cursor-scoped** (#378): both sides judge
+    the active design work-item, not the repo aggregate — so a fully-decomposed
+    item advances regardless of sibling items still mid-design. Resolves the design
+    slug (:func:`_resolve_workitem_slug`), counts top-level ``## Tasks`` items in
+    that item's ``docs/design/<slug>/tasks.md``, floor-clamps to 1 (never relaxes
+    the >=1-contract floor, never blocks on an unparseable tasks.md), and compares
+    to the item's own build contracts (:func:`_item_build_contracts`). Returns
+    UNKNOWN (fail-open) when no single work-item resolves, no tasks.md exists, or
+    one is unreadable — a preceding artifact node owns the missing-file case.
     """
-    tasks_glob = args.get("tasks", "docs/design/**/tasks.md")
+    phase = str(args.get("phase") or "design")
+    slug = _resolve_workitem_slug(ctx, phase)
+    if slug is None:
+        return PredicateResult.UNKNOWN
+    tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
     contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
     task_files = _glob_files(ctx.project_root, tasks_glob)
     if not task_files:
@@ -590,7 +669,7 @@ def eval_build_contracts_cover_tasks(
             return PredicateResult.UNKNOWN
         task_count += _count_task_items(content)
     task_count = max(1, task_count)
-    contract_count = len([p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()])
+    contract_count = len(_item_build_contracts(ctx.project_root, slug, contracts_glob))
     return PredicateResult.MET if contract_count >= task_count else PredicateResult.NOT_MET
 
 
@@ -625,10 +704,18 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
     more than ``max_tags`` (default 2) domain_tags. Embed-free and deterministic;
     UNKNOWN only when no contracts exist (a preceding artifact_exists node handles
     that in all_of).
+
+    Cursor-scoped (#378): judges only the active design work-item's own build
+    contracts (:func:`_item_build_contracts`), so a sibling item's wide-tag
+    contract never blocks this item's design→build. UNKNOWN (fail-open) when no
+    single work-item resolves, mirroring :func:`eval_build_contracts_cover_tasks`.
     """
     contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
     max_tags = args.get("max_tags", 2)
-    files = [p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()]
+    slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
+    if slug is None:
+        return PredicateResult.UNKNOWN
+    files = _item_build_contracts(ctx.project_root, slug, contracts_glob)
     if not files:
         return PredicateResult.UNKNOWN
     for f in files:

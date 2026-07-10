@@ -193,6 +193,14 @@ def _init(args: argparse.Namespace) -> int:
         .replace("{task_slug_title}", slug.replace("-", " ").title())
     )
 
+    # Build contracts are flat and numerically ordered (NN-<task>.md), so the
+    # filename carries no link to the design item they decompose. Stamp that link
+    # as `work_item:` from the active design cursor, so the design→build density /
+    # tag-focus gates (#378) can judge one item in isolation. Best-effort: omitted
+    # when no single design work-item resolves (the gates fall back to repo-global).
+    if phase == "build":
+        content = _inject_work_item(content, _active_design_slug(project_root))
+
     target.write_text(content, encoding="utf-8")
 
     # Scaffold the phase's exit-gate doc files (e.g. design's approach/tasks/test-plan)
@@ -209,6 +217,40 @@ def _init(args: argparse.Namespace) -> int:
     }
     write_result(result, args, human_fn=_render_init)
     return 0
+
+
+def _active_design_slug(project_root: Path) -> str | None:
+    """The active design work-item slug, for stamping onto a new build contract.
+
+    Reads the design cursor via the canonical resolver but accepts it only when it
+    resolves into ``contracts/design/`` (phase-strict — a cursor that has drifted to
+    another phase must not mislabel the build contract). ``None`` when no single
+    design work-item resolves; the caller then omits the ``work_item`` stamp.
+    """
+    from agentalloy.contracts import resolve_current_contract
+
+    _cid, path = resolve_current_contract(project_root, "design")
+    if path is None:
+        return None
+    design_dir = (project_root / ".agentalloy" / "contracts" / "design").resolve()
+    if not path.resolve().is_relative_to(design_dir):
+        return None
+    return path.stem
+
+
+def _inject_work_item(content: str, slug: str | None) -> str:
+    """Insert a ``work_item: <slug>`` line into a contract's YAML frontmatter,
+    right after ``task_slug:``. No-op when *slug* is None, the field is already
+    present, or the content has no ``task_slug:`` frontmatter line to anchor to."""
+    if slug is None or "\nwork_item:" in content or content.startswith("work_item:"):
+        return content
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith("task_slug:"):
+            indent = line[: len(line) - len(line.lstrip())]
+            lines.insert(i + 1, f"{indent}work_item: {slug}\n")
+            return "".join(lines)
+    return content
 
 
 def _concretize_glob(path_glob: str, slug: str) -> str | None:

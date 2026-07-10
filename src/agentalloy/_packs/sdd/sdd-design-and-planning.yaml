@@ -45,16 +45,20 @@ exit_gates:
     - artifact_exists:
         path: .agentalloy/contracts/build/*.md
     # §6 density floor (#12): ONE build contract PER TASK, not one whole-feature
-    # contract. Counts top-level items under `## Tasks` in tasks.md and requires at
-    # least that many build contracts. Floor-clamps to 1, so it never relaxes the
-    # artifact_exists check above and never blocks on an unparseable tasks.md.
+    # contract. Counts top-level items under `## Tasks` in the cursor'd item's
+    # tasks.md and requires at least that many of THAT item's build contracts.
+    # Cursor-scoped (#378): `{slug}` resolves to the active design work-item, and
+    # contracts are attributed by their `work_item:` frontmatter — so a
+    # fully-decomposed item advances regardless of sibling items still mid-design.
+    # Floor-clamps to 1; UNKNOWN (fail-open) when no single work-item resolves.
     - build_contracts_cover_tasks:
-        tasks: docs/design/**/tasks.md
+        tasks: docs/design/{slug}/tasks.md
         contracts: .agentalloy/contracts/build/*.md
     # Tag-focus hard gate (#12b): each build contract must center ONE dominant tech
     # surface — ≤2 domain_tags. At the build retrieval cap a 7-surface basket
     # starves most surfaces. NOT_MET names the offender + its tag count; --force
     # bypasses it (no separate pre-check — the normal forward-gate carve-out).
+    # Cursor-scoped (#378): only the active item's own build contracts are judged.
     - build_contract_tag_focus:
         contracts: .agentalloy/contracts/build/*.md
     # Human-in-the-loop checkpoint (#10): design→build requires a recorded approval.
@@ -95,7 +99,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier injection hand-off: design now emits one build contract per task (§6) with the task's technology domain_tags + a self-contained task body that becomes build's retrieval prompt — so build walks them with `task next` and the matching skills front-load automatically; keeps the read-only approach→slices→test-cases design fanned into the per-slug docs/design folder gated on all three load-bearing files"
+change_summary: "cursor-scope the design→build density + tag-focus gates to the active work-item (#378): `init` stamps build contracts with `work_item:` from the design cursor so a fully-decomposed item advances regardless of sibling items still mid-design; two-tier injection hand-off: design emits one build contract per task (§6) with the task's technology domain_tags + a self-contained task body that becomes build's retrieval prompt — so build walks them with `task next` and the matching skills front-load automatically; keeps the read-only approach→slices→test-cases design fanned into the per-slug docs/design folder gated on all three load-bearing files"
 raw_prose: |
   # SDD — Design
 
@@ -178,6 +182,10 @@ raw_prose: |
   is the cheap place to do it, with the whole plan in front of you:
 
       agentalloy contract init --phase build --slug <NN-task-slug>   # NN = 01, 02, … sets order
+
+  `init` stamps each build contract with `work_item:` (this design item's slug,
+  from the active design cursor) so the density and tag-focus gates judge *your*
+  item alone — sibling items still mid-design never block yours, and vice versa.
 
   In each, fill `domain_tags` with that task's *technology surface* — **one
   dominant surface plus at most one adjacent**, so **MUST: ≤2 `domain_tags` per

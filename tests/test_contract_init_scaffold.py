@@ -9,7 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentalloy.install.subcommands.contract import _concretize_glob, _scaffold_phase_docs
+from agentalloy.install.subcommands.contract import (
+    _active_design_slug,
+    _concretize_glob,
+    _inject_work_item,
+    _scaffold_phase_docs,
+)
 
 
 class TestConcretizeGlob:
@@ -72,3 +77,49 @@ class TestScaffoldPhaseDocs:
         created = _scaffold_phase_docs("design", "feat", tmp_path)
         assert (base / "approach.md").read_text() == "KEEP ME\n"
         assert "docs/design/feat/approach.md" not in created
+
+
+class TestWorkItemStamp:
+    """The #378 build-contract → design-item link stamped by `contract init`."""
+
+    def _seed_design(self, tmp_path: Path, slug: str) -> None:
+        d = tmp_path / ".agentalloy" / "contracts" / "design"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
+
+    def test_active_design_slug_from_sole_contract(self, tmp_path: Path) -> None:
+        self._seed_design(tmp_path, "knowledge-module")
+        assert _active_design_slug(tmp_path) == "knowledge-module"
+
+    def test_active_design_slug_none_when_ambiguous(self, tmp_path: Path) -> None:
+        # Two design items, no cursor → can't attribute → None (caller omits stamp).
+        self._seed_design(tmp_path, "a")
+        self._seed_design(tmp_path, "b")
+        assert _active_design_slug(tmp_path) is None
+
+    def test_active_design_slug_honors_cursor(self, tmp_path: Path) -> None:
+        self._seed_design(tmp_path, "a")
+        self._seed_design(tmp_path, "b")
+        (tmp_path / ".agentalloy" / "cursor").write_text("design/b.md")
+        assert _active_design_slug(tmp_path) == "b"
+
+    def test_active_design_slug_rejects_cross_phase_cursor(self, tmp_path: Path) -> None:
+        # A cursor drifted to another phase must not mislabel the build contract.
+        self._seed_design(tmp_path, "a")
+        self._seed_design(tmp_path, "b")
+        ship = tmp_path / ".agentalloy" / "contracts" / "ship"
+        ship.mkdir(parents=True)
+        (ship / "other.md").write_text("---\nphase: ship\n---\n\n# other\n")
+        (tmp_path / ".agentalloy" / "cursor").write_text("ship/other.md")
+        assert _active_design_slug(tmp_path) is None  # not under contracts/design/
+
+    def test_inject_adds_work_item_after_task_slug(self) -> None:
+        content = "---\nphase: build\ntask_slug: 01-store\nroute: full\n---\n\n# x\n"
+        out = _inject_work_item(content, "knowledge-module")
+        assert "task_slug: 01-store\nwork_item: knowledge-module\nroute: full" in out
+
+    def test_inject_noop_when_slug_none_or_already_present(self) -> None:
+        content = "---\nphase: build\ntask_slug: 01-store\n---\n\n# x\n"
+        assert _inject_work_item(content, None) == content
+        stamped = _inject_work_item(content, "km")
+        assert _inject_work_item(stamped, "other") == stamped  # idempotent, no second line

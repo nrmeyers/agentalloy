@@ -97,17 +97,28 @@ def _build_approval_advisory(ctx: PredicateContext) -> str:
 
 
 def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
-    """Advisory for ``build_contracts_cover_tasks`` NOT_MET (the §6 density floor)."""
-    from agentalloy.signals.predicates import _count_task_items  # noqa: PLC0415
+    """Advisory for ``build_contracts_cover_tasks`` NOT_MET (the §6 density floor).
 
-    tasks_glob: str = args.get("tasks", "docs/design/**/tasks.md")
+    Cursor-scoped (#378) to match the predicate: counts against the active design
+    work-item's tasks.md and its own build contracts, so the numbers reported are
+    the same ones the gate judged (never the repo aggregate)."""
+    from agentalloy.signals.predicates import (  # noqa: PLC0415
+        _count_task_items,
+        _item_build_contracts,
+        _resolve_workitem_slug,
+    )
+
+    slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
+    if slug is None:
+        return None
+    tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
     contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
     try:
         tasks = 0
         for f in _glob_files(ctx.project_root, tasks_glob):
             tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)
-        contracts = len([p for p in _glob_files(ctx.project_root, contracts_glob) if p.is_file()])
+        contracts = len(_item_build_contracts(ctx.project_root, slug, contracts_glob))
     except Exception:
         return None
     return (
@@ -119,16 +130,24 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
 
 
 def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> str | None:
-    """Advisory for ``build_contract_tag_focus`` NOT_MET — name the over-tagged contracts."""
-    from agentalloy.signals.predicates import _contract_domain_tags  # noqa: PLC0415
+    """Advisory for ``build_contract_tag_focus`` NOT_MET — name the over-tagged contracts.
+
+    Cursor-scoped (#378): names only the active work-item's offenders, matching the
+    predicate, so a sibling item's wide-tag contract is neither judged nor named."""
+    from agentalloy.signals.predicates import (  # noqa: PLC0415
+        _contract_domain_tags,
+        _item_build_contracts,
+        _resolve_workitem_slug,
+    )
 
     contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
     max_tags: int = args.get("max_tags", 2)
+    slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
+    if slug is None:
+        return None
     try:
         offenders: list[str] = []
-        for p in _glob_files(ctx.project_root, contracts_glob):
-            if not p.is_file():
-                continue
+        for p in _item_build_contracts(ctx.project_root, slug, contracts_glob):
             tags = _contract_domain_tags(_read_file(p) or "")
             if tags is not None and len(tags) > max_tags:
                 offenders.append(f"{p.name} ({len(tags)} tags)")

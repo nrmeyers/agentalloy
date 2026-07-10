@@ -607,62 +607,147 @@ def _write_tasks(tmp_path: Path, *, slug: str, items: int) -> None:
     (d / "tasks.md").write_text(f"# {slug}\n\n## Tasks\n\n{body}\n")
 
 
-def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None:
+def _seed_design(tmp_path: Path, slug: str) -> None:
+    """A design-phase contract so the gate resolves ``slug`` as the work-item."""
+    d = tmp_path / ".agentalloy" / "contracts" / "design"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
+
+
+def _set_cursor(tmp_path: Path, rel: str) -> None:
+    (tmp_path / ".agentalloy").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".agentalloy" / "cursor").write_text(rel)
+
+
+def _write_build_contract(
+    tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "feat"
+) -> None:
     bc = tmp_path / ".agentalloy" / "contracts" / "build"
     bc.mkdir(parents=True, exist_ok=True)
     tag_str = "[" + ", ".join(tags) + "]"
-    (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
+    wi = f"work_item: {work_item}\n" if work_item is not None else ""
+    (bc / name).write_text(f"---\nphase: build\n{wi}domain_tags: {tag_str}\n---\n\n# {name}\n")
+
+
+# The gate scopes to the cursor'd DESIGN work-item; every case seeds one.
+def _design_ctx(tmp_path: Path) -> PredicateContext:
+    return _ctx(tmp_path, current_phase="design")
 
 
 def test_cover_tasks_met(tmp_path: Path) -> None:
-    # 3 tasks, 3 build contracts → covered → MET.
+    # 3 tasks, 3 of this item's build contracts → covered → MET.
+    _seed_design(tmp_path, "feat")
     _write_tasks(tmp_path, slug="feat", items=3)
     for i in range(3):
-        _write_build_contract(tmp_path, name=f"0{i}-t.md", tags=["react"])
-    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == MET
+        _write_build_contract(tmp_path, name=f"0{i}-t.md", tags=["react"], work_item="feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == MET
 
 
 def test_cover_tasks_not_met_monolith(tmp_path: Path) -> None:
     # 8 tasks, 1 whole-feature contract → the bug case → NOT_MET.
+    _seed_design(tmp_path, "feat")
     _write_tasks(tmp_path, slug="feat", items=8)
-    _write_build_contract(tmp_path, name="01-all.md", tags=["react"])
-    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == NOT_MET
+    _write_build_contract(tmp_path, name="01-all.md", tags=["react"], work_item="feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == NOT_MET
 
 
 def test_cover_tasks_no_tasks_file_unknown(tmp_path: Path) -> None:
-    # No tasks.md anywhere → UNKNOWN (the preceding artifact_exists node owns this).
-    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == UNKNOWN
+    # Item resolves but no tasks.md → UNKNOWN (a preceding artifact_exists node owns this).
+    _seed_design(tmp_path, "feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == UNKNOWN
+
+
+def test_cover_tasks_unresolved_workitem_unknown(tmp_path: Path) -> None:
+    # No single design work-item resolves (no design contract) → UNKNOWN (fail-open).
+    _write_tasks(tmp_path, slug="feat", items=3)
+    _write_build_contract(tmp_path, name="01-t.md", tags=["react"], work_item="feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == UNKNOWN
 
 
 def test_cover_tasks_unparseable_clamps_to_one(tmp_path: Path) -> None:
     # `## Tasks` heading but no list items (0) → floor-clamped to 1; 1 contract → MET.
+    _seed_design(tmp_path, "feat")
     d = tmp_path / "docs" / "design" / "feat"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("# feat\n\n## Tasks\n\nprose only, no list items.\n")
-    _write_build_contract(tmp_path, name="01-t.md", tags=["react"])
-    assert eval_build_contracts_cover_tasks({}, _ctx(tmp_path)) == MET
+    _write_build_contract(tmp_path, name="01-t.md", tags=["react"], work_item="feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == MET
+
+
+def test_cover_tasks_cursor_scoped_ignores_siblings(tmp_path: Path) -> None:
+    # #378 regression: two in-flight design items. `feat` is fully decomposed
+    # (3 tasks, 3 own contracts); sibling `sib` has 9 tasks and 0 contracts.
+    # The gate judges only the cursor'd `feat` → MET, not blocked by sib's 9 tasks.
+    _seed_design(tmp_path, "feat")
+    _seed_design(tmp_path, "sib")
+    _set_cursor(tmp_path, "design/feat.md")
+    _write_tasks(tmp_path, slug="feat", items=3)
+    _write_tasks(tmp_path, slug="sib", items=9)
+    for i in range(3):
+        _write_build_contract(tmp_path, name=f"0{i}-f.md", tags=["react"], work_item="feat")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == MET
+
+
+def test_cover_tasks_fallback_repo_global_when_untagged(tmp_path: Path) -> None:
+    # Migration bridge: build contracts predate `work_item:` → attribution falls
+    # back to counting all of them (old repo-global behavior), so a pre-field repo
+    # is neither spuriously blocked nor cross-item masked beyond the legacy norm.
+    _seed_design(tmp_path, "feat")
+    _write_tasks(tmp_path, slug="feat", items=3)
+    for i in range(3):
+        _write_build_contract(tmp_path, name=f"0{i}-t.md", tags=["react"], work_item=None)
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == MET
+
+
+def test_cover_tasks_tagged_siblings_dont_count(tmp_path: Path) -> None:
+    # Once ANY contract is tagged, untagged/other-item ones don't count for `feat`:
+    # feat has 3 tasks but only 1 of its own contract (+2 stamped to `sib`) → NOT_MET.
+    _seed_design(tmp_path, "feat")
+    _write_tasks(tmp_path, slug="feat", items=3)
+    _write_build_contract(tmp_path, name="01-f.md", tags=["react"], work_item="feat")
+    _write_build_contract(tmp_path, name="02-s.md", tags=["react"], work_item="sib")
+    _write_build_contract(tmp_path, name="03-s.md", tags=["react"], work_item="sib")
+    assert eval_build_contracts_cover_tasks({}, _design_ctx(tmp_path)) == NOT_MET
 
 
 def test_tag_focus_met_all_within_two(tmp_path: Path) -> None:
-    _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
-    _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
-    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == MET
+    _seed_design(tmp_path, "feat")
+    _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"], work_item="feat")
+    _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"], work_item="feat")
+    assert eval_build_contract_tag_focus({}, _design_ctx(tmp_path)) == MET
 
 
 def test_tag_focus_not_met_names_offender(tmp_path: Path) -> None:
     # A 3-tag contract violates the ≤2 rule → NOT_MET; the advisory (gates.py) names it.
-    _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
-    _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
-    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == NOT_MET
+    _seed_design(tmp_path, "feat")
+    _write_build_contract(tmp_path, name="01-ok.md", tags=["react"], work_item="feat")
+    _write_build_contract(
+        tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"], work_item="feat"
+    )
+    assert eval_build_contract_tag_focus({}, _design_ctx(tmp_path)) == NOT_MET
+
+
+def test_tag_focus_cursor_scoped_ignores_sibling_bad_contract(tmp_path: Path) -> None:
+    # #378: a SIBLING item's wide-tag contract must not block THIS item's exit.
+    _seed_design(tmp_path, "feat")
+    _seed_design(tmp_path, "sib")
+    _set_cursor(tmp_path, "design/feat.md")
+    _write_build_contract(tmp_path, name="01-f.md", tags=["react"], work_item="feat")
+    _write_build_contract(
+        tmp_path, name="02-s.md", tags=["a", "b", "c"], work_item="sib"
+    )  # sibling's offender
+    assert eval_build_contract_tag_focus({}, _design_ctx(tmp_path)) == MET
 
 
 def test_tag_focus_no_contracts_unknown(tmp_path: Path) -> None:
-    assert eval_build_contract_tag_focus({}, _ctx(tmp_path)) == UNKNOWN
+    _seed_design(tmp_path, "feat")
+    assert eval_build_contract_tag_focus({}, _design_ctx(tmp_path)) == UNKNOWN
 
 
 def test_new_predicates_registered(tmp_path: Path) -> None:
+    _seed_design(tmp_path, "feat")
     _write_tasks(tmp_path, slug="feat", items=1)
-    _write_build_contract(tmp_path, name="01-t.md", tags=["react"])
-    ctx = _ctx(tmp_path)
+    _write_build_contract(tmp_path, name="01-t.md", tags=["react"], work_item="feat")
+    ctx = _design_ctx(tmp_path)
     assert evaluate_predicate("build_contracts_cover_tasks", {}, ctx) == MET
     assert evaluate_predicate("build_contract_tag_focus", {}, ctx) == MET

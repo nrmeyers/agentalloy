@@ -315,12 +315,16 @@ def test_artifact_completeness_gate_returns_unknown(tmp_path: Path):
 
 
 def _seed_design_artifacts(tmp_path: Path) -> None:
-    """The three load-bearing design files, each with its required section."""
+    """The three load-bearing design files + the design contract that makes the
+    cursor-scoped density/tag-focus gates (#378) resolve ``01-task`` as the item."""
     d = tmp_path / "docs" / "design" / "01-task"
     d.mkdir(parents=True)
     (d / "approach.md").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
     (d / "tasks.md").write_text("# x\n\n## Tasks\n\n- t1\n", encoding="utf-8")
     (d / "test-plan.md").write_text("# x\n\n## Test Cases\n\n- AC-1\n", encoding="utf-8")
+    dc = tmp_path / ".agentalloy" / "contracts" / "design"
+    dc.mkdir(parents=True, exist_ok=True)
+    (dc / "01-task.md").write_text("---\nphase: design\ntask_slug: 01-task\n---\n\n# 01-task\n")
 
 
 def test_design_gate_blocks_without_build_contract(tmp_path: Path):
@@ -498,7 +502,14 @@ def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None
     (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
 
 
+def _seed_design_contract(tmp_path: Path, slug: str) -> None:
+    dc = tmp_path / ".agentalloy" / "contracts" / "design"
+    dc.mkdir(parents=True, exist_ok=True)
+    (dc / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
+
+
 def test_coverage_advisory_reports_counts(tmp_path: Path):
+    _seed_design_contract(tmp_path, "feat")
     d = tmp_path / "docs" / "design" / "feat"
     d.mkdir(parents=True)
     (d / "tasks.md").write_text("# feat\n\n## Tasks\n\n- a\n- b\n- c\n")
@@ -518,6 +529,7 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
 
 
 def test_tag_focus_advisory_names_offender(tmp_path: Path):
+    _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
     _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
     spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
@@ -530,6 +542,7 @@ def test_tag_focus_advisory_names_offender(tmp_path: Path):
 
 
 def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
+    _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
     _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
     spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
