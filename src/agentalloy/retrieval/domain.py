@@ -161,28 +161,40 @@ def _soft_tag_filter(
     return keep if keep else ranked
 
 
-# E7 — windowed process-class slot demotion (ships OFF as of v6.6.0; opt-in
-# fallback for LM-less deploys via AGENTALLOY_PROCESS_DEMOTION=on). The generic
-# quality skills (test-driven-development, verification-before-completion,
+# E7v2 — aboutness-gated process-class slot demotion. The generic quality
+# skills (test-driven-development, verification-before-completion,
 # brainstorming, …) are skill_class="domain" with category_scope=[process]; they
 # win free-text slots on virtually every task and evict the gold skill at small k
-# (measured 2026-07-07: TDD on 18/18 domain tasks, gold evicted 3/18 at k=2).
-# When enabled: if the fused ranking shows evidence of an on-domain alternative —
-# >=1 non-process skill within the top-W skill window — every process-scope skill
-# is moved to the back of the line (fragments to the tail, skill_ids into
-# skill_granular_select's FAR last-resort tier). Why it no longer ships on:
-# position cannot distinguish "query ABOUT a process skill that a framework
-# skill happens to outrank" from "domain task with process filler" — at every
-# window the demotion strands process skills from free-text retrieval (nightly
-# 28931694381: name probes 0.44-0.88 vs 0.93+ floors across W=1..16). Stage B
-# arbitration (LM_ASSIST=arbitrate + keep_threshold, the v6.6.0 default) makes
-# that judgment semantically and supersedes this transform where an LM runs.
+# (measured 2026-07-07 and again 2026-07-10: TDD on 18/18 domain tasks, gold
+# evicted 3/18 at k=2). When active: if the fused ranking shows evidence of an
+# on-domain alternative — >=1 non-process skill within the top-W skill window —
+# every process-scope skill is moved to the back of the line (fragments to the
+# tail, skill_ids into skill_granular_select's FAR last-resort tier), EXCEPT
+# skills in ``about_exempt``: the v1 transform demoted on fused position alone,
+# which cannot distinguish "query ABOUT a process skill that a framework skill
+# happens to outrank" from "domain task with process filler" (nightly
+# 28931694381: name probes 0.44-0.88 vs 0.93+ floors across W=1..16, which is
+# why v1 was flipped default-off in v6.6.0). The discriminating evidence is the
+# dense leg's distinct-skill prefix: about-queries rank their subject skill (and
+# often its process peers) ahead of every domain skill semantically, while on
+# domain tasks a domain skill always leads the dense leg (measured 2026-07-10:
+# 85/90 own-probe prefixes vs 0/18 domain-task prefixes; the lexical leg is
+# anti-signal for this — see _about_exempt_skills). Call sites compute the
+# exemption from the dense leg and skip demotion entirely when it is absent
+# (BM25-only fallback, empty bounded query) — without dense evidence the two
+# cases are indistinguishable, and probe safety wins on a degraded request.
+# Posture: default "auto" = active iff Stage B arbitration
+# (LM_ASSIST=arbitrate) is NOT running, so LM-less deploys (the CPU container)
+# are covered deterministically while GPU presets keep the semantic judgment.
 _PROCESS_SCOPE = "process"
 _PROCESS_DEMOTION_WINDOW_FACTOR = 2  # W = factor * k distinct skills
 
 
 def _process_demotion_enabled() -> bool:
-    return _os.environ.get("AGENTALLOY_PROCESS_DEMOTION", "off").strip().lower() == "on"
+    mode = _os.environ.get("AGENTALLOY_PROCESS_DEMOTION", "auto").strip().lower()
+    if mode == "auto":
+        return _os.environ.get("LM_ASSIST", "off").strip().lower() != "arbitrate"
+    return mode == "on"
 
 
 def _process_demotion_window(k: int) -> int:
@@ -200,8 +212,53 @@ def _is_process_scope(frag: ActiveFragment) -> bool:
     return frag.category_scope is not None and _PROCESS_SCOPE in frag.category_scope
 
 
+# The aboutness prefix tolerates this many non-process skills before it ends.
+# 1, not 0: a topic probe's dense leg is occasionally led by ONE adjacent
+# framework skill ranked just above the subject (measured 2026-07-10 pristine
+# corpus: ui-design-accessibility-fundamentals / -loading-patterns topic probes
+# sit at dense rank 2 behind a single frontend skill — 0 tolerance strands
+# them and fails the design-phase probe floor). Domain tasks are unaffected:
+# their process filler sits behind >=2 domain skills (measured shallowest
+# process rank 3 across all 18 domain tasks), so the prefix still ends first.
+_ABOUT_PREFIX_INTERLOPERS = 1
+
+
+def _about_exempt_skills(
+    dense_fragment_ids: list[str], by_id: dict[str, ActiveFragment]
+) -> frozenset[str]:
+    """Process skills the query is *about*: the dense leg's process prefix.
+
+    Walks the dense leg's distinct-skill order and collects process-scope
+    skills until more than ``_ABOUT_PREFIX_INTERLOPERS`` non-process skills
+    have passed (fragments missing from the hydrated pool don't count).
+    Rank-relative, no tuned thresholds: a query genuinely about a process
+    skill ranks it — and often its process peers — near the dense top
+    (measured on every process skill's name+topic probes), while on domain
+    tasks the dense top is domain skills and process filler sits at rank 3+
+    (measured 18/18; the lexical leg is the OPPOSITE — test-vocabulary-heavy
+    domain specs hand TDD the BM25 lead, and most process skills don't even
+    make their own probe's BM25 top-50 — which is why BM25 plays no part
+    here).
+    """
+    exempt: set[str] = set()
+    seen: set[str] = set()
+    interlopers = 0
+    for fid in dense_fragment_ids:
+        frag = by_id.get(fid)
+        if frag is None or frag.skill_id in seen:
+            continue
+        seen.add(frag.skill_id)
+        if _is_process_scope(frag):
+            exempt.add(frag.skill_id)
+        else:
+            interlopers += 1
+            if interlopers > _ABOUT_PREFIX_INTERLOPERS:
+                break
+    return frozenset(exempt)
+
+
 def demote_process_skills(
-    ranked: list[ActiveFragment], k: int
+    ranked: list[ActiveFragment], k: int, about_exempt: frozenset[str] = frozenset()
 ) -> tuple[list[ActiveFragment], frozenset[str]]:
     """Move process-scope skills to the back of the line when a domain skill competes.
 
@@ -212,12 +269,20 @@ def demote_process_skills(
     ``skill_granular_select``'s FAR tier. Otherwise — generic-shaped pools, no
     process skills at all, or the kill switch — returns the input unchanged
     with an empty set.
+
+    Skills in ``about_exempt`` (the query is demonstrably about them — BM25-leg
+    leaders, see ``_about_exempt_skills``) are treated as non-process
+    throughout: they keep their fused position, never join the demoted set,
+    and count as competition for the window condition. ``frozenset()``
+    reproduces the v1 transform exactly.
     """
     if not ranked or not _process_demotion_enabled():
         return ranked, frozenset()
 
     skill_order = list(dict.fromkeys(f.skill_id for f in ranked))
-    process_ids = {f.skill_id for f in ranked if _is_process_scope(f)}
+    process_ids = {
+        f.skill_id for f in ranked if _is_process_scope(f) and f.skill_id not in about_exempt
+    }
     if not process_ids:
         return ranked, frozenset()
 
@@ -473,8 +538,13 @@ def _bm25_fallback_result(
     if _contract_tag_filter_enabled():
         ranked = _soft_tag_filter(ranked, contract_tags)
 
-    # E7: same process-class demotion as the dense path — the fallback leaks too.
-    ranked, demoted_skill_ids = demote_process_skills(ranked, k)
+    # E7v2: NO demotion on the BM25-only fallback. Aboutness is read from the
+    # dense leg (the lexical leg is anti-signal: domain specs heavy in test
+    # vocabulary hand TDD the lexical lead, while most process skills don't
+    # make their own probe's BM25 top-50), so without a dense leg the
+    # about/filler cases are indistinguishable — leaving the leak is safer
+    # than stranding process skills on an already-degraded request.
+    demoted_skill_ids: frozenset[str] = frozenset()
 
     eligible_count = len(ranked)
     diversity_off = _os.environ.get("RUNTIME_DIVERSITY_SELECTION", "on").lower() == "off"
@@ -725,9 +795,18 @@ def retrieve_domain_candidates(
     if _contract_tag_filter_enabled():
         ranked = _soft_tag_filter(ranked, contract_tags)
 
-    # E7: windowed process-class demotion — reorder covers the top-k slice paths
-    # below; the demoted set folds into skill_granular_select's FAR tier.
-    ranked, demoted_skill_ids = demote_process_skills(ranked, k)
+    # E7v2: aboutness-gated process-class demotion — reorder covers the top-k
+    # slice paths below; the demoted set folds into skill_granular_select's FAR
+    # tier. The dense leg's process prefix is exempt (the query is about those
+    # skills); without dense evidence aboutness is unknowable, so no demotion.
+    if dense_hits:
+        ranked, demoted_skill_ids = demote_process_skills(
+            ranked,
+            k,
+            about_exempt=_about_exempt_skills([h.fragment_id for h in dense_hits], by_id),
+        )
+    else:
+        demoted_skill_ids = frozenset()
 
     eligible_count = len(ranked)
 

@@ -14,10 +14,13 @@ defaults:
   # out and fail open. The earlier "~145ms warm / ~2.3s per 16 = viable" reading
   # was a KV-cache-reuse artifact (re-scoring identical inputs), NOT the varied-
   # fragment production path. GPU presets keep `arbitrate` (Vulkan ~120ms/candidate
-  # ≈ 1.9s/16 fits). The contract path (tag-scoped compose) already evicts the
-  # process-skill filler deterministically at 203ms, so CPU loses nothing here.
-  # The knobs below are inert while off — they document what a manual re-enable
-  # on a fast CPU (with a raised budget) would use.
+  # ≈ 1.9s/16 fits). Free-text slot-leak coverage comes from E7v2 aboutness-gated
+  # process demotion instead: AGENTALLOY_PROCESS_DEMOTION defaults to `auto`,
+  # which activates it exactly because LM_ASSIST is off here (measured cost of
+  # running with NEITHER, 2026-07-10 on 6.6.3: gold-hit@k=2 15/18, TDD in a
+  # composed slot on 18/18 domain tasks). The contract path is leak-free either
+  # way. The knobs below are inert while off — they document what a manual
+  # re-enable on a fast CPU (with a raised budget) would use.
   LM_ASSIST: "off"
   LM_ASSIST_KEEP_THRESHOLD: "0.05"
   LM_ASSIST_TIMEOUT_MS: "3000"

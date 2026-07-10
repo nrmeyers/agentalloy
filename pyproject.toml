@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "6.6.5"
+version = "6.6.6"
 description = "AgentAlloy — just-in-time context engine for coding agents. Two context modules: phase-aware instruction composition from a curated 300+ skill corpus, and an optional per-repo code index (tree-sitter symbol graph + hybrid search). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"

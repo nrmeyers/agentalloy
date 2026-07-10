@@ -42,7 +42,7 @@ from agentalloy.contracts import Contract, ContractScope
 from agentalloy.install import state as install_state
 from agentalloy.install.subcommands import write_env
 from agentalloy.reads.models import ActiveFragment
-from agentalloy.retrieval import lm_assist
+from agentalloy.retrieval import domain, lm_assist
 from agentalloy.retrieval.domain import (
     _contract_tag_filter_enabled,  # pyright: ignore[reportPrivateUsage]
     _deepen_band,  # pyright: ignore[reportPrivateUsage]
@@ -71,8 +71,9 @@ _HW_PRESETS = ("cpu", "nvidia", "radeon", "apple-silicon")
 # 203ms deterministic path — 2.3x the 3000ms CPU budget. The prior "CPU viable
 # ~145ms/cand, 2.3s/16" figure was a KV-cache-reuse artifact (re-scoring identical
 # inputs), not the varied-fragment production path — so cpu ships off. GPU
-# (Vulkan/Metal) stays arbitrate (~120ms/cand ≈ 1.9s/16 fits). The contract path
-# handles the filler deterministically, so CPU loses nothing.
+# (Vulkan/Metal) stays arbitrate (~120ms/cand ≈ 1.9s/16 fits). Free-text
+# coverage on LM-less deploys comes from E7v2 aboutness-gated demotion, whose
+# `auto` default activates exactly when arbitrate is absent (matrix below).
 _LM_ASSIST_BY_PRESET = {
     "cpu": "off",
     "nvidia": "arbitrate",
@@ -90,6 +91,20 @@ _LM_ASSIST_TIMEOUT_BY_PRESET = {
     "apple-silicon": "2000",
 }
 
+# Effective E7v2 process-demotion posture per preset under the `auto` default:
+# active exactly where Stage B arbitration is not (cpu — including the container
+# image, which ships LM_ASSIST=off), standing down where the LM makes the
+# process/filler judgment semantically (GPU presets). No preset sets
+# AGENTALLOY_PROCESS_DEMOTION explicitly — the coupling is the point: a future
+# LM_ASSIST posture change flips demotion coverage automatically instead of
+# repeating #377 (Stage B removed on CPU with no deterministic fallback armed).
+_PROCESS_DEMOTION_EFFECTIVE_BY_PRESET = {
+    "cpu": True,
+    "nvidia": False,
+    "radeon": False,
+    "apple-silicon": False,
+}
+
 # The .env.example template documents every knob; it's not a per-hardware source
 # of truth (its LM_ASSIST is a template default), but it must still never carry
 # the dead reranker port and must agree on the canonical port in reranker mode.
@@ -105,6 +120,26 @@ def test_hw_presets_match_write_env() -> None:
     # and reporting all-green coverage of nothing.
     assert set(_HW_PRESETS) == set(write_env.VALID_PRESETS)
     assert set(_LM_ASSIST_BY_PRESET) == set(_HW_PRESETS)
+    assert set(_PROCESS_DEMOTION_EFFECTIVE_BY_PRESET) == set(_HW_PRESETS)
+
+
+@pytest.mark.parametrize("preset", _HW_PRESETS)
+def test_preset_process_demotion_posture(preset: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    # E7v2 auto posture: evaluate _process_demotion_enabled() under exactly the
+    # env the preset renders. Presets must NOT pin AGENTALLOY_PROCESS_DEMOTION —
+    # the LM_ASSIST coupling (auto) is the mechanism under test.
+    defaults = write_env._load_preset(preset)
+    assert "AGENTALLOY_PROCESS_DEMOTION" not in defaults, (
+        f"{preset}: presets must not pin AGENTALLOY_PROCESS_DEMOTION; "
+        "the auto default derives it from LM_ASSIST"
+    )
+    monkeypatch.delenv("AGENTALLOY_PROCESS_DEMOTION", raising=False)
+    monkeypatch.setenv("LM_ASSIST", str(defaults.get("LM_ASSIST", "off")))
+    assert domain._process_demotion_enabled() == _PROCESS_DEMOTION_EFFECTIVE_BY_PRESET[preset], (
+        f"{preset}: effective process-demotion posture drifted from the matrix "
+        "(LM-less deploys need the deterministic fallback; arbitrate presets "
+        "must not double-transform)"
+    )
 
 
 def test_code_reranker_defaults_agree() -> None:

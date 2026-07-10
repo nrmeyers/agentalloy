@@ -14,16 +14,20 @@ import yaml
 
 from agentalloy.ingest import FragmentRecord, ReviewRecord
 from agentalloy.reads.models import ActiveFragment
-from agentalloy.retrieval.domain import demote_process_skills, skill_granular_select
+from agentalloy.retrieval.domain import (
+    _about_exempt_skills,
+    demote_process_skills,
+    skill_granular_select,
+)
 
 _PACKS_DIR = Path(__file__).resolve().parents[1] / "src" / "agentalloy" / "_packs"
 
 
 @pytest.fixture(autouse=True)
 def _demotion_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    """E7 ships OFF as of v6.6.0 (Stage B arbitration supersedes it); these
-    tests exercise the opt-in fallback behavior, so enable it explicitly.
-    Tests of the default/kill-switch override the env inside their bodies."""
+    """Pin the transform active regardless of the host env (default is `auto`,
+    which reads LM_ASSIST). Tests of the posture itself override inside their
+    bodies."""
     monkeypatch.setenv("AGENTALLOY_PROCESS_DEMOTION", "on")
 
 
@@ -125,13 +129,32 @@ def test_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert demoted == frozenset()
 
 
-def test_default_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    # v6.6.0 posture: demotion is the opt-in LM-less fallback; unset env == off.
+def test_default_auto_is_on_without_arbitration(monkeypatch: pytest.MonkeyPatch) -> None:
+    # v2 posture: unset == auto == active iff Stage B arbitration is not running.
     monkeypatch.delenv("AGENTALLOY_PROCESS_DEMOTION", raising=False)
+    monkeypatch.delenv("LM_ASSIST", raising=False)
+    pool = [_frag("t1", "tdd", scope=_PROCESS), _frag("g1", "gold")]
+    reordered, demoted = demote_process_skills(pool, k=2)
+    assert [f.fragment_id for f in reordered] == ["g1", "t1"]
+    assert demoted == {"tdd"}
+
+
+def test_default_auto_is_off_under_arbitration(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Stage B makes the process/filler judgment semantically; auto stands down.
+    monkeypatch.delenv("AGENTALLOY_PROCESS_DEMOTION", raising=False)
+    monkeypatch.setenv("LM_ASSIST", "arbitrate")
     pool = [_frag("t1", "tdd", scope=_PROCESS), _frag("g1", "gold")]
     reordered, demoted = demote_process_skills(pool, k=2)
     assert reordered == pool
     assert demoted == frozenset()
+
+
+def test_explicit_on_overrides_arbitration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENTALLOY_PROCESS_DEMOTION", "on")
+    monkeypatch.setenv("LM_ASSIST", "arbitrate")
+    pool = [_frag("t1", "tdd", scope=_PROCESS), _frag("g1", "gold")]
+    reordered, demoted = demote_process_skills(pool, k=2)
+    assert demoted == {"tdd"}
 
 
 def test_window_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,6 +185,72 @@ def test_determinism() -> None:
     second = demote_process_skills(list(pool), k=2)
     assert [f.fragment_id for f in first[0]] == [f.fragment_id for f in second[0]]
     assert first[1] == second[1]
+
+
+# -------- v2: aboutness exemption (build contract retrieval-process-demotion-v2) --------
+
+
+def test_exempt_skill_keeps_position_and_stays_out_of_far() -> None:
+    # Name-probe shape: the query is about TDD, but a framework skill sneaks
+    # into the window via dense noise — the v1 failure mode. Exempt TDD keeps
+    # its fused lead; the un-exempt process peer still demotes.
+    pool = [
+        _frag("t1", "tdd", scope=_PROCESS),
+        _frag("f1", "framework-noise"),
+        _frag("v1", "verification", scope=_PROCESS),
+    ]
+    reordered, demoted = demote_process_skills(pool, k=2, about_exempt=frozenset({"tdd"}))
+    assert [f.fragment_id for f in reordered] == ["t1", "f1", "v1"]
+    assert demoted == {"verification"}
+
+
+def test_exempt_skill_counts_as_window_competition() -> None:
+    # Window of [tdd(exempt), verification]: the exempt lead counts as an
+    # on-topic alternative, so the remaining process filler demotes even with
+    # no framework skill in the window.
+    pool = [
+        _frag("t1", "tdd", scope=_PROCESS),
+        _frag("v1", "verification", scope=_PROCESS),
+    ]
+    reordered, demoted = demote_process_skills(pool, k=1, about_exempt=frozenset({"tdd"}))
+    assert [f.fragment_id for f in reordered] == ["t1", "v1"]
+    assert demoted == {"verification"}
+
+
+def test_empty_exempt_set_is_v1_equivalent() -> None:
+    pool = [
+        _frag("t1", "tdd", scope=_PROCESS),
+        _frag("g1", "gold"),
+        _frag("v1", "verification", scope=_PROCESS),
+    ]
+    assert demote_process_skills(pool, k=2, about_exempt=frozenset()) == demote_process_skills(
+        pool, k=2
+    )
+
+
+def test_about_exempt_is_dense_process_prefix() -> None:
+    frags = {
+        "o1": _frag("o1", "oidc"),
+        "s1": _frag("s1", "secrets"),
+        "t1": _frag("t1", "tdd", scope=_PROCESS),
+        "v1": _frag("v1", "verification", scope=_PROCESS),
+    }
+    # Domain-shaped dense leg: process filler sits behind >=2 domain skills
+    # (measured shallowest rank 3 across all 18 domain tasks) -> no exemption.
+    assert _about_exempt_skills(["o1", "s1", "t1"], frags) == frozenset()
+    # About-shaped dense leg: process skills lead -> the process prefix is exempt.
+    assert _about_exempt_skills(["t1", "v1", "o1"], frags) == frozenset({"tdd", "verification"})
+    # ONE interloper is tolerated (_ABOUT_PREFIX_INTERLOPERS=1): topic probes
+    # occasionally rank a single adjacent framework skill just above the subject.
+    assert _about_exempt_skills(["o1", "t1", "s1", "v1"], frags) == frozenset({"tdd"})
+    assert _about_exempt_skills(["t1", "o1", "v1"], frags) == frozenset({"tdd", "verification"})
+
+
+def test_about_exempt_skips_unhydrated_fragments() -> None:
+    # Fragments filtered out of the hydrated pool must not end the prefix.
+    frags = {"t1": _frag("t1", "tdd", scope=_PROCESS)}
+    assert _about_exempt_skills(["ghost", "t1"], frags) == frozenset({"tdd"})
+    assert _about_exempt_skills([], frags) == frozenset()
 
 
 # -------- skill_granular_select: demoted == FAR last-resort --------
