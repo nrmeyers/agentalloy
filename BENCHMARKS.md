@@ -46,73 +46,79 @@ the domain packs — is distilled from vendor `llms.txt`/`llms.md` documentation
 and graders are in-house; the skill prose the retrieval pipeline selects from is
 not.
 
-### Domain tasks (v3 campaign, 2026-06-12/13)
+### Domain tasks (v6.6.8 campaign, 2026-07-10)
 
 The pre-registered domain set (`eval/domain_tasks.py`, 18 tasks × 5 seeded runs
 per condition) targets pack conventions — webhook signature/dedup/DLQ handling,
 Temporal determinism, GitHub Actions OIDC, dbt incremental models, SCD Type 2,
 Redis streams/locks, Snowflake/Redshift, OTel trace propagation. Conditions:
-**composed** (skills assembled per task by `/compose`), **flat** (an *oracle*
-arm — hand-injects exactly the task's gold skills, the ceiling automatic
-retrieval chases), **none** (bare system prompt). Graders are deterministic
-binary criteria, de-brittled in #141 to credit synonyms/paraphrase. Composition
-runs the shipped deterministic Stage-0 config (card-indexed corpus,
-`LM_ASSIST=off`, `RETRIEVAL_GRAPH_EXPAND=off`).
+**composed** (free-text `/compose`, `legs="domain"`, k=4 — the Tier-2
+per-work-item shape the proxy ships), **composed-contract** (payload built by
+`compose_request_from_contract` from per-task contract fixtures in
+`eval/contracts/` — byte-equivalent to the proxy's contract-scoped Tier-2
+branch, the product's centerpiece mode), **flat** (an *oracle* arm —
+hand-injects exactly the task's gold skills, the ceiling automatic retrieval
+chases), **none** (bare system prompt). Graders are deterministic binary
+criteria, de-brittled in #141 to credit synonyms/paraphrase.
 
-| Model | None | Composed | Flat (oracle) | Composed lift | % of oracle | Tokens vs flat |
-|-------|------|----------|---------------|---------------|-------------|----------------|
-| Qwen3.6-35B-A3B | 0.937 | **0.976** | 0.992 | +0.039 | 71% | −21% |
-| Qwen3.6-27B | 0.958 | **0.980** | 0.989 | +0.022 | 71% | −21% |
-| Gemma 4 12B IT | 0.925 | **0.945** | 0.964 | +0.020 | 51% | −32% |
-| LFM2.5-8B-A1B (coder) | 0.657 | **0.829** | 0.902 | +0.172 | 70% | −22% |
+Serving config is the shipped v6.6.8 container: deterministic Stage-0
+(`LM_ASSIST=off` on CPU), E7v2 aboutness-gated process demotion (`auto`
+default — active exactly where Stage B arbitration is not), deepen-gate
+`AGENTALLOY_DEEPEN_BAND=0.85` (a spare selection slot deepens the top skill
+instead of adding a 4th sibling). Run manifests record service version, corpus
+stamp, reasoning effort, and serving-backend identity; a gold-skill preflight
+aborts the run if any task's gold skills are missing or deprecated.
+
+| Model | None | Composed | Composed-contract | Flat (oracle) | Composed lift | % of oracle | Tokens vs flat |
+|-------|------|----------|-------------------|---------------|---------------|-------------|----------------|
+| Qwen3.6-35B-A3B | 0.937 | **0.994** | **0.995** | 0.992 | +0.057 | 104% | −61% |
+| Gemma 4 12B IT | 0.931 | **0.956** | 0.950 | 0.973 | +0.025 | 59% | −60% |
+| LFM2.5-8B-A1B (coder) | 0.663 | **0.814** | **0.837** | 0.887 | +0.151 | 67% | −60% |
 
 Findings, stated as measured:
 
-- **Composed beat the bare model on every architecture** (+0.020 to +0.172),
-  and the weaker the model, the bigger the lift. The LFM2.5 edge model gains
-  **+0.172** — on conventions a model doesn't ship with, injection is the
-  difference between guessing and knowing.
-- **Automatic retrieval captures ~51–71% of the perfect-knowledge oracle**
-  ((composed−none)/(flat−none)), landing within 0.009–0.073 of the hand-picked
-  flat arm at 21–32% fewer tokens. Selection is not the bottleneck on the strong
-  models; the residual gap is model capacity (widest on LFM, −0.073 below
-  oracle).
-- **Capacity still matters at the low end.** Composed LFM2.5 (0.829) does not
-  reach the bare 27B (0.958) on domain tasks; convention-heavy work rewards
-  parameters as well as context. (An earlier campaign's "edge model matches a
-  bare 27B" equivalence was a generic-task artifact that did not replicate at
-  v3 — see the generic set below.)
+- **Composed beat the bare model on every architecture** (+0.025 to +0.151),
+  and the weaker the model, the bigger the lift — on conventions a model
+  doesn't ship with, injection is the difference between guessing and knowing.
+- **On the 35B, curated retrieval now beats the perfect-knowledge oracle**:
+  composed 0.994 and contract 0.995 vs flat 0.992, at **61% fewer injected
+  tokens** (~810 vs ~2060). A focused ~800-token composition outperforms
+  dumping the full gold skills; the oracle is a ceiling only when selection is
+  the bottleneck, and here it no longer is.
+- **The contract path — the mode the SDD workflow actually drives — is the
+  best arm on LFM (+0.023 over free-text) and ties/beats free-text on 35B**,
+  with zero generic-skill slot filler across every model (audited per-run via
+  `source_skills`).
+- **Slot hygiene is measured, not asserted.** Under the pre-fix 6.6.3 config,
+  `test-driven-development` occupied a composed slot on 18/18 domain tasks and
+  evicted the gold skill on 3/18 at k=2; on v6.6.8, generic quality skills
+  hold **zero** domain slots and gold-hit@k=2 is 18/18 (`eval.gold_hit`).
+- **Capacity still matters at the low end.** Composed LFM2.5 (0.814) does not
+  reach the bare 35B (0.937) on domain tasks; convention-heavy work rewards
+  parameters as well as context.
 
-**Why the optional LM stages are off in this campaign.** The composed arm above
-runs the deterministic Stage-0 config on purpose: the two optional composition
-levers were measured on the LFM domain leg and neither beat it. The **fragment
-re-ranker** (`LM_ASSIST=arbitrate`) scored 0.827 in its as-shipped config —
-exactly tying the deterministic baseline (0.827) — and trailed slightly
-(0.809–0.817) once the candidate pool was widened; its canary task `domain_1`
-did not recover (0.76, dropping to 0.48 in the top-12 variant). **Graph
-expansion** (`RETRIEVAL_GRAPH_EXPAND=on`) also tied (0.827). Both stay off by
-default on that evidence.
-
-> **v4.0.0 update.** This campaign predates the Stage B viability work that
-> landed in v4.0.0 (doc-cap, slot sizing, shared pool bound, HIT-path rewrite to
-> route survivors through `skill_granular_select`, breaker exponential backoff,
-> `/health` reranker probe). **As of v4.0.2 Stage B is ON by default on EVERY
-> preset** — including CPU. The earlier "off on cpu" guidance was over-
-> conservative; a faithful measurement (Xeon W-2225, exact `build_prompt`,
-> `/health`-confirmed warm) showed CPU Stage B fits the 2000ms budget when the
-> rerank server runs with `--parallel 1 -c 2048` (warm K=8 ~1170ms). The
-> launcher (`start_rerank_server.rerank_launch_args`) selects per-target slot
-> config automatically. A re-run of this campaign against the current Stage B
-> on the LFM/domain leg is the natural next benchmark. The signals-layer intent backend, which *did* win its
-benchmark, is the one model-backed stage shipped on (see
+**Current optional-stage posture** (each measured, see PRs #377/#383/#386):
+**Stage B fragment re-ranking** (`LM_ASSIST=arbitrate`) ships on GPU presets
+only — production telemetry isolated CPU Stage B at ~6.6s median added latency
+(2.3× the 3000ms budget), so the CPU container ships `off`. Free-text slot
+hygiene on LM-less deploys comes from **E7v2 aboutness-gated process demotion**
+instead (deterministic; `auto` default couples it to the Stage B posture). The
+**deepen-gate** ships active at 0.85 since v6.6.8 (K-sweep: 0.842 vs 0.816 at
+band 0 on the LFM domain leg; k=3/k=2 rejected at 0.67–0.70 — small models
+convert gold-skill fragment *depth* to score, not sibling breadth). **Graph
+expansion** stays off (tied the baseline when measured). The signals-layer
+intent backend, which also won its benchmark, ships on (see
 [Intent Classification](#intent-classification-signals-layer)).
 
-#### Judge-validated fidelity (27B LLM-judge, 2026-06-13)
+#### Judge-validated fidelity (27B LLM-judge, 2026-06-13 campaign)
 
 To confirm the composed lift is real answer quality and not an artifact of the
-literal-substring graders, the LFM and 12B domain outputs were independently
-re-graded by a local LLM judge (qwen3.6-27b, scalar rubric) — 540 judgments,
-0 parse errors.
+literal-substring graders, the LFM and 12B domain outputs of the June v3
+campaign were independently re-graded by a local LLM judge (qwen3.6-27b,
+scalar rubric) — 540 judgments, 0 parse errors. (The v3 heuristic numbers it
+validated: LFM none 0.657 / composed 0.829 / flat 0.902; 12B 0.925 / 0.945 /
+0.964 — measured pre-protocol-fix under bare `/compose` on the June corpus,
+retained here as the judge's reference frame.)
 
 | Model | None | Composed | Flat | Composed−none (judge) | (heuristic) | % of oracle |
 |-------|------|----------|------|------------------------|-------------|-------------|
@@ -134,49 +140,53 @@ moderate at the item level; the load-bearing signal is the convergence on the
 ### Generic tasks (regression check)
 
 The generic set (`eval/tasks.py`) measures general software-engineering
-competence, where strong models sit near ceiling without help. At v3 only the
-LFM and 12B legs were rerun; the 35B/27B rows are the prior (v2) campaign. The
-set has no oracle (flat) arm, so only composed-vs-none is reported.
+competence, where strong models sit near ceiling without help. The set has no
+oracle (flat) arm, so only composed-vs-none is reported. All rows below are
+the 2026-07-10 v6.6.8 campaign.
 
-| Model | None | Composed | Composed−none | Source |
-|-------|------|----------|----------------|--------|
-| Qwen3.6-35B-A3B | 0.961 | 0.955 | −0.006 | v2 |
-| Qwen3.6-27B | 0.939 | 0.940 | +0.001 | v2 |
-| Gemma 4 12B IT | 0.868 | 0.892 | +0.024 | v3 |
-| LFM2.5-8B-A1B (coder) | 0.852 | 0.828 | −0.024 | v3 |
+| Model | None | Composed | Composed−none |
+|-------|------|----------|----------------|
+| Qwen3.6-35B-A3B | 0.961 | 0.950 | −0.011 |
+| Gemma 4 12B IT | 0.868 | 0.926 | +0.058 |
+| LFM2.5-8B-A1B (coder) | 0.824 | 0.860 | +0.036 |
 
 Findings, stated as measured:
 
-- **Near ceiling, as expected.** The strong models move ±0.006 — composition
-  neither helps nor hurts on general tasks they already handle.
-- **The edge model regresses slightly on generic tasks** (−0.024). The focused
-  skill prose that *disciplines* LFM2.5 on convention-heavy domain work is, on
-  already-simple generic tasks, context it doesn't need — a mild distractor.
-  This is precisely why the headline is the domain set, not this one.
-- **An earlier cross-class equivalence did not replicate.** A prior campaign
-  showed generic LFM2.5+composed (~0.85) ≈ bare 27B (~0.855); at v3 generic
-  LFM2.5 composed is 0.828 and bare 27B is 0.939. We retired the claim rather
-  than reframe it.
+- **The edge-model generic regression is fixed.** Pre-fix (6.6.3), generic
+  composed LFM2.5 scored *below* bare (−0.033): generic quality skills were
+  spending its context budget without paying rent. With demotion + the
+  deepen-gate, LFM2.5 gains +0.036 and Gemma 4 gains +0.058 on the same set.
+- **The strong model stays at ceiling** (−0.011, inside the noise band):
+  composition neither helps nor hurts on general tasks it already handles.
+- **A historical claim stays retired.** An early campaign showed generic
+  LFM2.5+composed ≈ bare 27B; that equivalence did not replicate at v3 and is
+  not re-claimed here.
 
 Caveats (both sets): heuristic binary graders measure surface criteria, not
-depth — the 27B judge pass above is the cross-check; n=5 per cell on domain;
-single host; quants differ per model. Treat deltas under ~0.05 as noise on the
-strong models.
+depth — the 27B judge pass above is the cross-check; n=5 per cell; single
+host; quants differ per model; `none`/`flat` rows replicate bit-identically
+across campaigns (deterministic serving, seeded sampling), so they are shared
+between same-seed campaigns. Treat deltas under ~0.05 as noise on the strong
+models. `domain_15` (snowflake_warehouse_cost) underperforms in *every* arm
+including flat-with-gold — a grader/fragment-selection oddity, tracked
+separately. Comparisons are only valid within one coherent corpus+query
+embedding build: serving a corpus embedded on one host while embedding queries
+on another shifts rankings at the margin (measured ~0.02 composed).
 
-Reproduce a leg:
+Reproduce (requires a running AgentAlloy service and an agent model behind any
+OpenAI-compatible endpoint — LM Studio, llama-server):
 
 ```bash
+./eval/run_campaign.sh LFM 35B 12B     # full campaign: generic + domain legs per model
+
+# or a single leg by hand:
 AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 5                  # composed + flat
-AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 5 --conditions none --label baseline
-AGENT_MODEL=<model-id> LM_STUDIO_URL=<http://host:port> \
-  uv run python -m eval.run_poc --n 5 --task-set domain --label domain \
-  --conditions composed flat none                      # domain set
+  uv run python -m eval.run_poc --n 5 --k 4 --task-set domain --label domain \
+  --conditions none composed composed-contract flat
 ```
 
-Requires a running AgentAlloy service and an agent model behind any
-OpenAI-compatible endpoint (LM Studio, llama-server).
+Compare two runs pairwise (identical seeds) with
+`uv run python -m eval.compare_runs <run-dir-A> <run-dir-B>`.
 
 ## Retrieval Recall (Layer 1)
 
