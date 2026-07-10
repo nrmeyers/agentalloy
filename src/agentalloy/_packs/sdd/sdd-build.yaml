@@ -118,6 +118,14 @@ raw_prose: |
   ceiling — but every planned case ends up a real, passing test. One concern per
   commit; the whole suite green at every step.
 
+  Two disciplines while you're in the code. **Derive, don't duplicate**: any
+  fact needed in two places (a limit, a column count, a week-start day) is
+  defined ONCE as a named constant and derived everywhere else — two copies
+  drift and silently disagree. **Test behavior, not existence**: for every test
+  ask what specific wrong output would fail it; existence and count assertions
+  stay green on broken code, so pin known inputs and assert the exact semantic
+  result.
+
   ## 4. Stay inside the scope you declared
 
   Work within the contract's `scope.touches`. Spreading wider than you planned is
@@ -129,7 +137,9 @@ raw_prose: |
 
   Every case in `test-plan.md` is a passing test (plus the edges you added), the
   full suite is green with no regressions, and the work lives under `src/` with
-  tests under `tests/`.
+  tests under `tests/`. Done also means **wired**: trace the feature from the
+  app's real entry point and confirm data flows end to end — green unit tests
+  prove the unit works, not that the running app uses it.
 
   Then seed **qa's work-item** — the contract review opens on:
 

@@ -109,6 +109,9 @@ raw_prose: |
 
   - **every acceptance criterion is met** — each AC-N has a test proving it, and
     the behavior is real, not faked to satisfy a test.
+  - **it's wired** — trace each feature from the app's real entry point and
+    confirm the data actually flows; a built-but-unwired feature is incomplete,
+    not partial credit.
   - **non-goals were respected** — nothing on the Out of Scope list got built.
   - **no drift** — the implementation matches the design's approach, or the
     divergence is deliberate and noted, not an accident.
@@ -119,7 +122,11 @@ raw_prose: |
   (**Critical** blocks merge; plain = required before ship; **Nit/Optional** =
   the author's call):
 
-  - **Correctness** — edge cases, error paths, off-by-ones, races.
+  - **Correctness** — edge cases, error paths, off-by-ones, races, the same
+    fact defined in two places (duplicated state drifts; it should be one
+    named constant, derived everywhere else).
+  - **Tests** — do they assert exact semantic results on pinned inputs, or
+    just existence/counts that stay green on broken code?
   - **Security** — input validated, secrets out of code, authz checked, queries
     parameterized, external data treated as untrusted.
   - **Readability** — clear names, straight control flow, no clever tricks, no
