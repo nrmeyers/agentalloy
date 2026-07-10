@@ -464,15 +464,16 @@ def test_pool_categories_dormant_by_default_and_on(monkeypatch: pytest.MonkeyPat
 
 
 def test_deepen_band_clamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    # E4 ships inert: unset → 0.0 (legacy breadth-first).
+    # E4 ships ACTIVE at 0.85 (2026-07-10 K sweep: 0.8417@763 vs 0.8156@776 at
+    # 0.0 on LFM domain composed; generic neutral). 0.0 is the kill switch.
     monkeypatch.delenv("AGENTALLOY_DEEPEN_BAND", raising=False)
-    assert _deepen_band() == 0.0
-    monkeypatch.setenv("AGENTALLOY_DEEPEN_BAND", "0.85")
     assert _deepen_band() == 0.85
+    monkeypatch.setenv("AGENTALLOY_DEEPEN_BAND", "0.0")
+    assert _deepen_band() == 0.0  # kill switch → legacy breadth-first
     monkeypatch.setenv("AGENTALLOY_DEEPEN_BAND", "2.0")
     assert _deepen_band() == 1.0  # clamped to [0, 1]
     monkeypatch.setenv("AGENTALLOY_DEEPEN_BAND", "nope")
-    assert _deepen_band() == 0.0
+    assert _deepen_band() == 0.85  # malformed → default
 
 
 def test_contract_tag_filter_enabled_default_on_kill_switch_off(

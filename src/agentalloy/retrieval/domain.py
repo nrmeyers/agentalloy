@@ -117,17 +117,21 @@ def _graph_expand_enabled() -> bool:
     return _os.environ.get("RETRIEVAL_GRAPH_EXPAND", "off").lower() == "on"
 
 
-# E4 — fused-score deepen-gate (ships inert). At 0.0 the gate is a strict no-op
-# (legacy breadth-first selection); 0.85 is the recommended value after the
-# post-#15 K sweep, at which a spare small-k slot deepens the top skill unless a
-# sibling's lead fragment scores within the band of the top skill's lead.
-_DEEPEN_BAND_DEFAULT = 0.0
+# E4 — fused-score deepen-gate. Ships ACTIVE at 0.85 as of the 2026-07-10 K
+# sweep (LFM domain composed, pristine corpus, paired seeds n=5): 0.85 scored
+# 0.8417 @ 763 tok vs 0.8156 @ 776 at 0.0 — a spare slot deepening the top
+# skill beats backfilling a 4th sibling, because small models convert the gold
+# skill's fragment DEPTH to score, not breadth (k=3/k=2 collapsed to 0.67-0.70,
+# near the no-skills baseline, at any band). Generic set is band-neutral
+# (0.808 vs 0.805). At 0.0 the gate is a strict no-op (legacy breadth-first
+# selection) — the kill switch.
+_DEEPEN_BAND_DEFAULT = 0.85
 
 
 def _deepen_band() -> float:
     """Deepen-band fraction from ``AGENTALLOY_DEEPEN_BAND`` (clamped to [0, 1]).
 
-    Malformed/empty falls back to ``_DEEPEN_BAND_DEFAULT`` (0.0 == legacy).
+    Malformed/empty falls back to ``_DEEPEN_BAND_DEFAULT``.
     """
     try:
         return max(
@@ -1173,9 +1177,10 @@ def skill_granular_select(
     top skill's lead) and FAR (below the band). Stages 2/3 spend the budget on
     NEAR siblings then the top skill's leftovers; only if the budget is still
     unfilled does Stage 4 admit FAR siblings as a last resort, so k is always
-    filled. ``deepen_band=0.0`` (the shipped default) collapses the threshold to
-    0.0 → FAR is empty, NEAR is all siblings → byte-for-byte identical to the
-    legacy breadth-first behavior.
+    filled. ``deepen_band=0.0`` (the kill switch; shipped default is 0.85 via
+    ``_DEEPEN_BAND_DEFAULT``) collapses the threshold to 0.0 → FAR is empty,
+    NEAR is all siblings → byte-for-byte identical to the legacy breadth-first
+    behavior.
 
     Within each skill's queue, prefer a ``fragment_type`` from
     ``_DIVERSITY_PRIORITY`` not yet represented in the globally selected set
