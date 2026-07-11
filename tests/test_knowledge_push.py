@@ -100,6 +100,27 @@ def test_push_present_for_governed_touch(store: DuckDBCodeGraphStore) -> None:
     assert "docs/design/x/approach.md" in push.text
 
 
+def test_snippet_leading_heading_not_duplicated(store: DuckDBCodeGraphStore) -> None:
+    # Real markdown chunks carry their own heading line in the body (UAT finding:
+    # "## Why token bucket" rendered twice). _render must drop the snippet's
+    # leading heading when it duplicates the one it just emitted.
+    store.upsert_symbols(
+        [
+            code_sym("pkg.a.foo", "pkg/a.py"),
+            decision_sym(
+                "docs/design/x/approach.md::why-foo",
+                "Why foo",
+                "## Why foo\n\nChose `pkg.a.foo`.",
+            ),
+        ]
+    )
+    store.upsert_edges([governs("docs/design/x/approach.md::why-foo", "pkg.a.foo")])
+    push = build_decision_block(contract(["pkg/a.py"]), "", store)
+    assert push is not None
+    assert push.text.count("Why foo") == 1
+    assert "Chose `pkg.a.foo`." in push.text
+
+
 def test_none_when_no_touches_or_no_decisions(store: DuckDBCodeGraphStore) -> None:
     _seed_one(store, "docs/design/x/approach.md::why-foo")
     assert build_decision_block(contract([]), "", store) is None  # no scope

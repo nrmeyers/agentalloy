@@ -82,15 +82,31 @@ def _resolve_touched_files(graph: CodeGraphStore, globs: list[str]) -> list[str]
     return matched
 
 
+def _strip_duplicate_heading(snippet: str, heading: str) -> str:
+    """Drop the snippet's leading heading line when it duplicates ``heading``.
+
+    Markdown chunks carry their own ``## Heading`` line in the body, and
+    :func:`_render` emits the heading itself — without this the decision heading
+    appears twice in the injected block (UAT finding)."""
+    body = snippet.strip()
+    first, _, rest = body.partition("\n")
+    if first.startswith("#") and first.lstrip("#").strip().casefold() == heading.strip().casefold():
+        return rest.strip()
+    return body
+
+
 def _render(decisions: list[DecisionRow]) -> str:
     lines = ["# Decisions governing this work", ""]
     for d in decisions:
         source = d.qualified_name.split("::", 1)[0]
-        lines.append(f"## {d.heading or d.qualified_name}")
+        heading = d.heading or d.qualified_name
+        lines.append(f"## {heading}")
         lines.append(f"_governing decision — {source}_")
         if d.snippet:
-            lines.append("")
-            lines.append(d.snippet.strip())
+            body = _strip_duplicate_heading(d.snippet, heading)
+            if body:
+                lines.append("")
+                lines.append(body)
         lines.append("")
     return "\n".join(lines).rstrip()
 
