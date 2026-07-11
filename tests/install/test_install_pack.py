@@ -440,8 +440,19 @@ class TestInstallLocalPackAutoRouteStrictForwarding:
     to `install_local_pack` unchanged — regression guard for the new kwargs
     threaded through by the quality-gate spec."""
 
-    def test_local_dir_branch_forwards_strict_and_allow_duplicates(self, tmp_path: Path) -> None:
+    def test_local_dir_branch_forwards_strict_and_allow_duplicates(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         (tmp_path / "pack.yaml").write_text("name: x\n")
+        # The local-dir branch now routes (write_host vs. the running service);
+        # force write_host so this stays hermetic and asserts the host forward.
+        from agentalloy.install import corpus_write_route as cwr
+
+        monkeypatch.setattr(
+            cwr, "decide_corpus_write_route", lambda: cwr.CorpusWriteRoute("write_host")
+        )
         with patch.object(ip, "install_local_pack", return_value={"action": "ingested"}) as m:
             ip.install_pack(str(tmp_path), root=tmp_path, strict=False, allow_duplicates=True)
-        m.assert_called_once_with(tmp_path, root=tmp_path, strict=False, allow_duplicates=True)
+        m.assert_called_once_with(
+            tmp_path, root=tmp_path, strict=False, allow_duplicates=True, run_reembed=True
+        )

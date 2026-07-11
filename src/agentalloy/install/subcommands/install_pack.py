@@ -980,7 +980,11 @@ def install_pack(
     # Branch: local directory? (Path-like and exists as a dir on disk.)
     candidate = Path(name_or_path)
     if candidate.is_dir() and (candidate / "pack.yaml").is_file():
-        return install_local_pack(
+        # Route the write: direct host install, or push to the running service
+        # (native/container) so an up service no longer blocks the install (#390).
+        from agentalloy.install.corpus_write_route import install_or_route
+
+        return install_or_route(
             candidate, root=root, strict=strict, allow_duplicates=allow_duplicates
         )
 

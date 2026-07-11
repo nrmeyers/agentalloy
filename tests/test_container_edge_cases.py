@@ -578,6 +578,31 @@ class TestRootlessPodman:
             finally:
                 entrypoint.unlink(missing_ok=True)
 
+    def test_run_injects_ingest_secret(self, tmp_path, monkeypatch):
+        """The corpus-ingest secret (T3) is passed into the container as
+        ``-e AGENTALLOY_INGEST_SECRET=<value>`` so the in-container service and
+        the host CLI converge on one value."""
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.delenv("AGENTALLOY_INGEST_SECRET", raising=False)
+        from agentalloy.install.ingest_secret import resolve_ingest_secret
+
+        with patch("agentalloy.install.subcommands.container_runtime.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            from agentalloy.install.subcommands.container_runtime import _run_container
+
+            entrypoint = tmp_path / "entrypoint.sh"
+            entrypoint.write_text("#!/bin/bash\necho test\n")
+            entrypoint.chmod(0o600)
+            assert _run_container("podman", entrypoint, "") == 0
+
+            secret = resolve_ingest_secret()  # minted by the run above
+            assert secret
+            call_args = mock_run.call_args[0][0]
+            assert f"AGENTALLOY_INGEST_SECRET={secret}" in call_args
+            # It rides in as an `-e` value, not baked into the image.
+            i = call_args.index(f"AGENTALLOY_INGEST_SECRET={secret}")
+            assert call_args[i - 1] == "-e"
+
     def test_docker_full_path_omits_replace_flag(self):
         """Docker invoked by resolved path (e.g. macOS /usr/local/bin/docker)
         must NOT get the Podman-only `--replace` flag, and must `rm -f` first.

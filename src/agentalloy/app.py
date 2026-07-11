@@ -16,6 +16,7 @@ from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
 from agentalloy.api.compose_models import ErrorResponse
 from agentalloy.api.compose_router import get_orchestrator
 from agentalloy.api.compose_router import router as compose_router
+from agentalloy.api.corpus_ingest_router import router as corpus_ingest_router
 from agentalloy.api.diagnostics_router import DiagnosticsChecker
 from agentalloy.api.diagnostics_router import router as diagnostics_router
 from agentalloy.api.health_router import HealthChecker, ReadinessChecker
@@ -353,6 +354,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
         app.include_router(compose_router)
         app.include_router(retrieve_router)
         app.include_router(skill_router)
+        app.include_router(corpus_ingest_router)
         app.include_router(proxy_router)
         app.include_router(passthrough_router)
         app.include_router(responses_router)

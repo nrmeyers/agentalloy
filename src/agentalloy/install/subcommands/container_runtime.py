@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agentalloy.install import env_forwarding
+from agentalloy.install.ingest_secret import SECRET_ENV, resolve_ingest_secret
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -729,6 +730,10 @@ def _run_container(
     int
         Exit code from the runtime command.
     """
+    # mint=True always yields a value; assert keeps the env dict str-typed and
+    # guarantees the container never boots with an empty ingest secret.
+    ingest_secret = resolve_ingest_secret(mint=True)
+    assert ingest_secret, "mint_ingest_secret must return a non-empty secret"
     env = {
         "AGENTALLOY_PACKS": packs,
         "DUCKDB_PATH": "/app/data/agentalloy.duck",
@@ -740,6 +745,11 @@ def _run_container(
         # flags "a background process modified <file>" to the user).
         "AGENTALLOY_RUNTIME_STATE_DIR": "/app/data/runtime-state",
         "LOG_LEVEL": os.environ.get("LOG_LEVEL", "info").lower(),
+        # Corpus-ingest auth (T3): the host mints the secret and injects it here
+        # so the in-container service and the host CLI converge on one value
+        # without the host reading inside the volume. Baked at create like the
+        # topology keys above — a rotate needs a recreate.
+        SECRET_ENV: ingest_secret,
     }
     # The host .env is the single source of truth for user intent (module
     # toggles, upstream config, tuning). Intent keys forward through the

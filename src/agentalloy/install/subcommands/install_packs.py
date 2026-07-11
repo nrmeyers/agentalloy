@@ -859,6 +859,14 @@ def _run_container_guard(
     named_results: list[tuple[str, dict[str, Any]]] = []
     reembed_rc: int = 0
     try:
+        # Deliberately NOT routed through /corpus/ingest-pack (#390): install-packs
+        # is the bulk-bootstrap path and already writes the corpus with the service
+        # up — this guard owns the stop→ingest→restart lifecycle. Unlike promote /
+        # install-pack (which just hit the lock and failed, hence #390), install-packs
+        # is not the pain point; routing it per-pack would add reembed-batching and
+        # container-guard regression surface on the highest-stakes path (a bug here
+        # breaks the whole corpus) to remove only a brief restart blip. See
+        # docs/followups.md if that blip ever becomes a real complaint.
         for pack_name in selected:  # P10-R2: bounded by len(selected)
             pack_dir = packs_root / pack_name
             print(f"  → {pack_name}", file=sys.stderr, flush=True)

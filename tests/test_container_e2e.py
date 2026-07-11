@@ -825,6 +825,10 @@ class TestGeneratedRunCommandEnvForwarding:
 
     def test_run_command_without_env_file_is_baked_only(self, monkeypatch, tmp_path):
         env, _ = self._generated_env(monkeypatch, tmp_path, None)
+        # The corpus-ingest secret (T3) is minted per install and injected here;
+        # assert its presence separately, then match the fixed baked keys.
+        secret = env.pop("AGENTALLOY_INGEST_SECRET", None)
+        assert secret, "the ingest secret must be baked into the container env"
         assert env == {
             "AGENTALLOY_PACKS": "all",
             "DUCKDB_PATH": "/app/data/agentalloy.duck",

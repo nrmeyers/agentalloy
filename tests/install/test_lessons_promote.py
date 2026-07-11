@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agentalloy.install.corpus_write_route import CorpusWriteRoute
 from agentalloy.install.subcommands.lessons import (
     add_parser,
     probe_lesson_duplicates,
     promote_lesson,
 )
+
+_WRITE_HOST = lambda: CorpusWriteRoute("write_host")  # noqa: E731 — test seam
 
 LESSON = "# A lesson\n\n## Approach\n\nDo the thing that worked, carefully and in order, then confirm it.\n"
 
@@ -94,7 +97,7 @@ def test_ac5_hard_duplicate_refused_and_not_installed(tmp_path: Path):
         embed=_embed,
         vector_store=_FakeStore([_Hit("x-f0", "existing-skill", distance=0.02)]),
         install=_install,
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "duplicate_refused"
     assert res["duplicates"] == ["existing-skill"]
@@ -116,7 +119,7 @@ def test_ac5_allow_duplicates_installs(tmp_path: Path):
         embed=_embed,
         vector_store=_FakeStore([_Hit("x-f0", "existing-skill", distance=0.02)]),
         install=_install,
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "promoted"
     assert len(installed) == 1
@@ -136,7 +139,7 @@ def test_unique_lesson_installs(tmp_path: Path):
         embed=_embed,
         vector_store=_FakeStore([]),  # nothing similar in the corpus
         install=_install,
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "promoted"
     assert len(installed) == 1
@@ -149,7 +152,7 @@ def test_unknown_slug_reported(tmp_path: Path):
         embed=_embed,
         vector_store=_FakeStore([]),
         install=lambda *a, **k: {},
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "lesson_not_found"
 
@@ -170,7 +173,7 @@ def test_no_corpus_skips_probe_and_installs(tmp_path: Path, monkeypatch):
         embed=_embed,
         vector_store=None,  # None -> tries open_fragments (patched to fail) -> skip
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "promoted"
     assert len(installed) == 1
@@ -191,7 +194,7 @@ def test_probe_failure_fails_closed(tmp_path: Path):
         embed=_bad_embed,
         vector_store=_FakeStore([]),
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "dedup_probe_failed"
     assert installed == []
@@ -221,7 +224,7 @@ def test_install_failure_propagates_not_promoted(tmp_path: Path):
             ],
             "remediation": "Batch install failed — rolled back all ingested skills.",
         },
-        write_blocker=lambda: None,
+        route_fn=_WRITE_HOST,
     )
     assert res["action"] == "install_failed"
     assert "Could not set lock" in res["error"]
@@ -240,33 +243,97 @@ def test_install_ok_actions_still_promote(tmp_path: Path):
             embed=_embed,
             vector_store=_FakeStore([]),
             install=lambda *a, **k: {"action": ok_action},  # noqa: B023
-            write_blocker=lambda: None,
+            route_fn=_WRITE_HOST,
         )
         assert res["action"] == "promoted", ok_action
 
 
-def test_write_blocker_blocks_before_probe_and_install(tmp_path: Path):
-    """A blocked corpus fails fast: the probe never embeds, the rail never runs,
-    and the result carries the reason + a hand-install remediation."""
+def test_blocked_route_blocks_before_probe_and_install(tmp_path: Path):
+    """A blocked route fails fast: the probe never embeds, the rail never runs,
+    and the result carries the reason + a hand-install remediation (AC-6)."""
     _write_lesson(tmp_path, "blocked-lesson")
     installed: list[Path] = []
 
     def _never_embed(_text: str) -> list[float]:
         raise AssertionError("probe must not run when the corpus is blocked")
 
+    reason = "the corpus is locked by the running AgentAlloy service."
     res = promote_lesson(
         "blocked-lesson",
         root=tmp_path,
         embed=_never_embed,
         vector_store=_FakeStore([]),
         install=lambda pack_dir, **_k: installed.append(pack_dir) or {"ok": True},
-        write_blocker=lambda: "the corpus is locked by the running AgentAlloy service.",
+        route_fn=lambda: CorpusWriteRoute("blocked", reason=reason),
     )
     assert res["action"] == "install_blocked"
     assert installed == []
     assert "locked" in res["error"]
     assert "install-pack" in res["remediation"]
     assert Path(res["pack_dir"]).is_dir()  # the generated pack survives for hand-install
+
+
+def test_via_service_pushes_and_promotes(tmp_path: Path):
+    """via_service: the host never probes; the pack is pushed and a good service
+    result promotes (AC-1)."""
+    _write_lesson(tmp_path, "svc-lesson")
+    pushed: list[Any] = []
+
+    def _never_embed(_text: str) -> list[float]:
+        raise AssertionError("host must not probe on the via_service path")
+
+    def _push(pack_dir, *, route, allow_duplicates, reembed):
+        pushed.append((pack_dir, route.port, reembed))
+        return {"action": "already_installed", "skills_ingested": 1}
+
+    res = promote_lesson(
+        "svc-lesson",
+        root=tmp_path,
+        embed=_never_embed,
+        vector_store=_FakeStore([_Hit("x", "would-dup", 0.0)]),  # ignored — no host probe
+        route_fn=lambda: CorpusWriteRoute("via_service", port=47950),
+        push_fn=_push,
+    )
+    assert res["action"] == "promoted"
+    assert pushed and pushed[0][1] == 47950 and pushed[0][2] is True
+
+
+def test_via_service_duplicate_surfaces(tmp_path: Path):
+    """The endpoint's duplicate verdict surfaces as duplicate_refused (AC-4/AC-10)."""
+    _write_lesson(tmp_path, "svc-dup")
+    res = promote_lesson(
+        "svc-dup",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        route_fn=lambda: CorpusWriteRoute("via_service", port=47950),
+        push_fn=lambda *a, **k: {
+            "action": "duplicate_refused",
+            "duplicates": ["existing-skill"],
+            "error": "duplicates existing corpus skill(s)",
+        },
+    )
+    assert res["action"] == "duplicate_refused"
+    assert res["duplicates"] == ["existing-skill"]
+    assert res["slug"] == "svc-dup"  # promote enriches the endpoint result
+
+
+def test_via_service_http_failure_maps_to_install_failed(tmp_path: Path):
+    """A transport/HTTP failure from the client maps to install_failed (AC-10)."""
+    _write_lesson(tmp_path, "svc-down")
+    res = promote_lesson(
+        "svc-down",
+        root=tmp_path,
+        embed=_embed,
+        vector_store=_FakeStore([]),
+        route_fn=lambda: CorpusWriteRoute("via_service", port=47950),
+        push_fn=lambda *a, **k: {
+            "action": "install_failed",
+            "error": "could not reach the ingest service",
+        },
+    )
+    assert res["action"] == "install_failed"
+    assert "ingest service" in res["error"]
 
 
 def test_default_blocker_detects_duck_lock(tmp_path: Path, monkeypatch):

@@ -495,10 +495,17 @@ class TestDeprecationPropagation:
 
 
 class TestInstallPackAutoRoute:
-    def test_directory_with_pack_yaml_routes_to_local(self, tmp_path: Path) -> None:
+    def test_directory_with_pack_yaml_routes_to_local(self, tmp_path: Path, monkeypatch) -> None:
         _write_skill_yaml(tmp_path, "good", fragments=2)
         _write_pack_manifest(
             tmp_path, "x", [{"skill_id": "good", "file": "good.yaml", "fragment_count": 2}]
+        )
+        # Force write_host so the local-dir branch installs directly rather than
+        # routing to a running service (keeps the test hermetic).
+        from agentalloy.install import corpus_write_route as cwr
+
+        monkeypatch.setattr(
+            cwr, "decide_corpus_write_route", lambda: cwr.CorpusWriteRoute("write_host")
         )
         with patch.object(
             ip, "install_local_pack", return_value={"action": "ingested", "pack": "x"}

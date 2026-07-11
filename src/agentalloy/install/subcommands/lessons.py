@@ -30,6 +30,8 @@ SCHEMA_VERSION = 1
 EmbedFn = Callable[[str], list[float]]
 InstallFn = Callable[..., dict[str, Any]]
 BlockerFn = Callable[[], "str | None"]
+RouteFn = Callable[[], Any]  # -> CorpusWriteRoute (lazy import to avoid a cycle)
+PushFn = Callable[..., dict[str, Any]]
 
 # install_local_pack actions that leave the corpus in a good state. Anything
 # else (ingested_with_errors, schema_invalid, …, or a future action we don't
@@ -155,16 +157,25 @@ def promote_lesson(
     embed: EmbedFn | None = None,
     vector_store: Any | None = None,
     install: InstallFn | None = None,
-    write_blocker: BlockerFn | None = None,
+    route_fn: RouteFn | None = None,
+    push_fn: PushFn | None = None,
 ) -> dict[str, Any]:
     """Promote ``docs/solutions/<slug>.md`` into the corpus. Returns a result dict.
 
-    The ``embed`` / ``vector_store`` / ``install`` / ``write_blocker`` seams are
-    injected in tests; in production they resolve to the real embed client, the
-    open fragment store, ``install_local_pack``, and the corpus-writability
-    preflight (:func:`_corpus_write_blocker`).
+    The ``embed`` / ``vector_store`` / ``install`` seams are injected in tests;
+    in production they resolve to the real embed client, the open fragment
+    store, and ``install_local_pack``. ``route_fn`` / ``push_fn`` select and
+    drive the corpus-write route (host-direct vs. the running service); they
+    default to :func:`decide_corpus_write_route` / :func:`push_pack_to_service`.
+    The host-side dedup probe runs only on the ``write_host`` path — on
+    ``via_service`` the endpoint owns the gate (and a container corpus can't be
+    probed from the host anyway).
     """
     from agentalloy.config import get_settings
+    from agentalloy.install.corpus_write_route import (
+        decide_corpus_write_route,
+        push_pack_to_service,
+    )
 
     lesson_path = root / "docs" / "solutions" / f"{slug}.md"
     if not lesson_path.is_file():
@@ -181,26 +192,43 @@ def promote_lesson(
     pack_dir = Path(gen["pack_dir"])
     fragment_texts: list[str] = gen["fragment_contents"]
 
-    # --- corpus-writability preflight (#390) -------------------------------
-    # Runs after generation (the pack on disk is still useful) but before the
-    # probe/install: when the corpus can't be written — service holds the DuckDB
-    # lock, or this is a container deployment whose corpus a host CLI can't
-    # reach — fail fast and say why, instead of "promoted" over a rolled-back
-    # ingest.
-    blocked = (write_blocker or _corpus_write_blocker)()
-    if blocked:
+    # --- corpus-write routing (#390) ---------------------------------------
+    # Runs after generation (the pack on disk is still useful). The route picks
+    # where the write goes: the running service (native or container), a direct
+    # host write, or — when neither is possible — an honest block.
+    route = (route_fn or decide_corpus_write_route)()
+    if route.mode == "blocked":
         return {
             "schema_version": SCHEMA_VERSION,
             "action": "install_blocked",
             "slug": slug,
             "skill_id": gen["skill_id"],
             "pack_dir": str(pack_dir),
-            "error": f"pack generated but NOT installed: {blocked}",
+            "error": f"pack generated but NOT installed: {route.reason}",
             "remediation": (
                 f"once the corpus is writable, install it with `agentalloy install-pack {pack_dir}`."
             ),
         }
 
+    if route.mode == "via_service":
+        # The service owns the dedup gate and the install; the host never probes
+        # (it can't reach a container corpus). Its dedup verdicts surface as-is;
+        # everything else runs through the shared finalizer.
+        install_result = (push_fn or push_pack_to_service)(
+            pack_dir, route=route, allow_duplicates=allow_duplicates, reembed=True
+        )
+        action = install_result.get("action")
+        if action in ("duplicate_refused", "dedup_probe_failed"):
+            install_result.setdefault("schema_version", SCHEMA_VERSION)
+            install_result.setdefault("slug", slug)
+            install_result.setdefault("skill_id", gen["skill_id"])
+            install_result.setdefault("pack_dir", str(pack_dir))
+            return install_result
+        return _finalize_promote(
+            install_result, slug=slug, gen=gen, pack_dir=pack_dir, hard_hits=[]
+        )
+
+    # else: write_host — the direct host-side probe + install below.
     settings = get_settings()
 
     # --- pre-ingest dedup probe -------------------------------------------
@@ -275,12 +303,28 @@ def promote_lesson(
 
         install_fn = install_local_pack
     install_result = install_fn(pack_dir, root=root, strict=True, allow_duplicates=allow_duplicates)
+    return _finalize_promote(
+        install_result, slug=slug, gen=gen, pack_dir=pack_dir, hard_hits=hard_hits
+    )
 
-    # Fail closed on the install leg (#390): "promoted" previously reported
-    # success even when the rail rolled everything back (e.g. the running
-    # service holds the corpus lock), leaving a skill that retrieval can never
-    # surface. Any action outside the known-good set is a failed install.
-    install_action = install_result.get("action") if isinstance(install_result, dict) else None
+
+def _finalize_promote(
+    install_result: dict[str, Any],
+    *,
+    slug: str,
+    gen: dict[str, Any],
+    pack_dir: Path,
+    hard_hits: list[Any],
+) -> dict[str, Any]:
+    """Map an install result (host-direct or service-mediated) to a promote result.
+
+    Fail closed on the install leg (#390): "promoted" previously reported
+    success even when the rail rolled everything back (e.g. the running service
+    held the corpus lock), leaving a skill retrieval can never surface. Any
+    action outside the known-good set is a failed install (AC-10 — same shape
+    whichever path produced the result).
+    """
+    install_action = install_result.get("action")
     if install_action is not None and install_action not in _INSTALL_OK_ACTIONS:
         return {
             "schema_version": SCHEMA_VERSION,
