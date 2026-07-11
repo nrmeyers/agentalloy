@@ -61,6 +61,11 @@ hand-injects exactly the task's gold skills, the ceiling automatic retrieval
 chases), **none** (bare system prompt). Graders are deterministic binary
 criteria, de-brittled in #141 to credit synonyms/paraphrase.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks/layer2-domain-dark.svg">
+  <img alt="Dot plot of domain-task scores for three models across four conditions: composed retrieval beats the bare model on every architecture, and on the 35B matches or beats the flat oracle at 61% fewer injected tokens" src="docs/assets/benchmarks/layer2-domain-light.svg">
+</picture>
+
 Serving config is the shipped v6.6.8 container: deterministic Stage-0
 (`LM_ASSIST=off` on CPU), E7v2 aboutness-gated process demotion (`auto`
 default — active exactly where Stage B arbitration is not), deepen-gate
