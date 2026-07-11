@@ -29,6 +29,13 @@ SCHEMA_VERSION = 1
 # a raw vector; a real store is a FragmentStore; a real install runs the rail.
 EmbedFn = Callable[[str], list[float]]
 InstallFn = Callable[..., dict[str, Any]]
+BlockerFn = Callable[[], "str | None"]
+
+# install_local_pack actions that leave the corpus in a good state. Anything
+# else (ingested_with_errors, schema_invalid, …, or a future action we don't
+# know) is treated as a failed install — fail closed, never report "promoted"
+# for a skill that isn't actually in the corpus (#390).
+_INSTALL_OK_ACTIONS = frozenset({"ingested", "already_installed", "version_unchanged"})
 
 
 def probe_lesson_duplicates(
@@ -64,6 +71,66 @@ def probe_lesson_duplicates(
     return hard_hits
 
 
+def _corpus_write_blocker() -> str | None:
+    """Why the corpus can't be written right now, or ``None`` when it can (#390).
+
+    Two conditions make the install rail pointless or impossible, and both used
+    to surface only as a buried ingest error (or not at all):
+
+    - **Corpus lock** — DuckDB is single-writer per file and even the service's
+      read-only handle excludes a CLI writer, so ingest can never succeed while
+      a service is holding the store. Detected by briefly opening it read-write.
+    - **Serving container** — the live corpus lives inside the container's data
+      volume (``agentalloy-data:/app/data``); a host-side promote writes a host
+      corpus the serving container never reads.
+
+    Checked in that order, against *reality* rather than configured state: the
+    lock probe catches whatever process actually holds the host corpus (e.g. a
+    from-source native run on a container-configured box), and the container
+    check only fires when a container deployment is configured AND something is
+    actually serving the port — a stopped container blocks nothing.
+    """
+    from agentalloy.config import get_settings
+
+    db = Path(get_settings().duckdb_path)
+    if db.is_file():
+        try:
+            import duckdb
+
+            duckdb.connect(str(db)).close()
+        except Exception as exc:
+            if "lock" in str(exc).lower():
+                return (
+                    f"the corpus ({db}) is locked by the running AgentAlloy service. "
+                    "Stop it (`agentalloy server-stop`), re-run the promote, then "
+                    "`agentalloy server-start`."
+                )
+            return f"the corpus at {db} could not be opened for writing: {exc}"
+
+    try:
+        from agentalloy.install.server_proc import port_reachable, resolve_deployment
+
+        target = resolve_deployment()
+        if target.deployment == "container" and port_reachable(target.port):
+            return (
+                "the serving AgentAlloy is a container — its live corpus lives inside "
+                "the container's data volume, which a host-side promote cannot reach "
+                "(service-mediated ingest is tracked in #390)."
+            )
+    except Exception:
+        pass  # unreadable install state -> assume native; the lock probe above governs
+
+    return None
+
+
+def _install_failure_error(install_result: dict[str, Any]) -> str:
+    """One-line failure summary from an install result (first ingest stderr wins)."""
+    for r in install_result.get("ingest_results") or []:
+        if isinstance(r, dict) and r.get("outcome") == "failed" and r.get("stderr_tail"):
+            return str(r["stderr_tail"]).strip().splitlines()[-1]
+    return str(install_result.get("error") or install_result.get("action") or "install failed")
+
+
 def _default_embed() -> EmbedFn:
     from agentalloy.config import get_settings
     from agentalloy.embed_provider import get_embed_client
@@ -88,12 +155,14 @@ def promote_lesson(
     embed: EmbedFn | None = None,
     vector_store: Any | None = None,
     install: InstallFn | None = None,
+    write_blocker: BlockerFn | None = None,
 ) -> dict[str, Any]:
     """Promote ``docs/solutions/<slug>.md`` into the corpus. Returns a result dict.
 
-    The ``embed`` / ``vector_store`` / ``install`` seams are injected in tests;
-    in production they resolve to the real embed client, the open fragment store,
-    and ``install_local_pack``.
+    The ``embed`` / ``vector_store`` / ``install`` / ``write_blocker`` seams are
+    injected in tests; in production they resolve to the real embed client, the
+    open fragment store, ``install_local_pack``, and the corpus-writability
+    preflight (:func:`_corpus_write_blocker`).
     """
     from agentalloy.config import get_settings
 
@@ -111,6 +180,26 @@ def promote_lesson(
         return gen
     pack_dir = Path(gen["pack_dir"])
     fragment_texts: list[str] = gen["fragment_contents"]
+
+    # --- corpus-writability preflight (#390) -------------------------------
+    # Runs after generation (the pack on disk is still useful) but before the
+    # probe/install: when the corpus can't be written — service holds the DuckDB
+    # lock, or this is a container deployment whose corpus a host CLI can't
+    # reach — fail fast and say why, instead of "promoted" over a rolled-back
+    # ingest.
+    blocked = (write_blocker or _corpus_write_blocker)()
+    if blocked:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "install_blocked",
+            "slug": slug,
+            "skill_id": gen["skill_id"],
+            "pack_dir": str(pack_dir),
+            "error": f"pack generated but NOT installed: {blocked}",
+            "remediation": (
+                f"once the corpus is writable, install it with `agentalloy install-pack {pack_dir}`."
+            ),
+        }
 
     settings = get_settings()
 
@@ -187,6 +276,29 @@ def promote_lesson(
         install_fn = install_local_pack
     install_result = install_fn(pack_dir, root=root, strict=True, allow_duplicates=allow_duplicates)
 
+    # Fail closed on the install leg (#390): "promoted" previously reported
+    # success even when the rail rolled everything back (e.g. the running
+    # service holds the corpus lock), leaving a skill that retrieval can never
+    # surface. Any action outside the known-good set is a failed install.
+    install_action = install_result.get("action") if isinstance(install_result, dict) else None
+    if install_action is not None and install_action not in _INSTALL_OK_ACTIONS:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "action": "install_failed",
+            "slug": slug,
+            "skill_id": gen["skill_id"],
+            "pack_dir": str(pack_dir),
+            "install": install_result,
+            "error": (
+                f"pack generated but the corpus install failed "
+                f"({install_action}): {_install_failure_error(install_result)}"
+            ),
+            "remediation": str(
+                install_result.get("remediation")
+                or f"fix the failure and re-run `agentalloy install-pack {pack_dir}`."
+            ),
+        }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "action": "promoted",
@@ -240,6 +352,10 @@ def _render_human(result: dict[str, Any]) -> None:
             print_rich(f"  [yellow]note[/yellow]: installed over near-duplicate(s) {forced}")
     elif action == "duplicate_refused":
         print_rich(f"  [red]refused[/red]: {result.get('error')}")
+    elif action in ("install_blocked", "install_failed"):
+        print_rich(f"  [red]not installed[/red]: {result.get('error')}")
+        if result.get("remediation"):
+            print_rich(f"  remediation: {result.get('remediation')}")
     else:
         print_rich(f"  [red]FAILED[/red]: {result.get('error', action)}")
     print_rich()
