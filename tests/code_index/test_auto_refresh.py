@@ -63,9 +63,7 @@ def _pin_staleness(monkeypatch: pytest.MonkeyPatch, stale_shas: set[str | None])
     monkeypatch.setattr("agentalloy.code_index.staleness.check_staleness", _fake)
 
 
-def test_kicks_incremental_for_stale_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_kicks_incremental_for_stale_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
     b.mkdir()
