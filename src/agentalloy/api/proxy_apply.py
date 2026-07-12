@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentalloy.api import code_index_gate
 from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyResult, Phase
-from agentalloy.api.proxy_signal import SignalResult, commit_markers
+from agentalloy.api.proxy_signal import CONFIRM_LABEL, SignalResult, commit_markers
 
 if TYPE_CHECKING:
     from agentalloy.contracts import Contract
@@ -197,6 +197,16 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
             "[agentalloy-eval]\n" + "\n".join(signal.advisories) + "\n[/agentalloy-eval]"
         )
 
+    # Phase-boundary confirm directives (phase-boundary-confirmation). Same
+    # injection seam as the gate advisories, but a distinct [agentalloy-confirm]
+    # label so the two don't muddy each other in telemetry. Persist-until-reset:
+    # re-emitted every qualifying turn since ship never self-advances.
+    confirm_block = ""
+    if signal.confirm_directives:
+        confirm_block = (
+            f"[{CONFIRM_LABEL}]\n" + "\n".join(signal.confirm_directives) + f"\n[/{CONFIRM_LABEL}]"
+        )
+
     # Tier 1: workflow prose (operating instructions) + system-only compose.
     # ``record_trace=False`` suppresses the orchestrator's own per-leg write — this
     # surface folds both legs into one consolidated trace row below.
@@ -274,7 +284,9 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
                 logger.warning("decision push failed -- passing through", exc_info=True)
                 decision_block = ""
 
-    text = "\n\n".join(p for p in (advisory_block, tier1, tier2, decision_block) if p)
+    text = "\n\n".join(
+        p for p in (advisory_block, confirm_block, tier1, tier2, decision_block) if p
+    )
     return _ComposedBlock(
         text=text,
         tier1_text=bool(tier1),

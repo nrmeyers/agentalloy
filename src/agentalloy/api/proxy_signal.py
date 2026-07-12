@@ -59,6 +59,12 @@ logger = logging.getLogger(__name__)
 _warned_missing_root: set[str] = set()
 
 
+# Label for phase-boundary confirmation directives — distinct from the
+# gate-advisory ``[agentalloy-eval]`` block so telemetry can tell them apart
+# (phase-boundary-confirmation T1). Reuses the advisory injection seam.
+CONFIRM_LABEL = "agentalloy-confirm"
+
+
 @dataclass
 class SignalResult:
     """Outcome of evaluating the signal layer for a proxy request."""
@@ -102,6 +108,12 @@ class SignalResult:
     # Human-facing gate advisories (e.g. "intent fired but the exit artifact is
     # missing"). Surfaced to the agent alongside composed skills.
     advisories: list[str] = field(default_factory=lambda: list[str]())
+
+    # Phase-boundary confirmation directives (phase-boundary-confirmation): a
+    # deterministic MUST-ask prompt at a lifecycle boundary — e.g. at ship
+    # completion, "ask the user whether to reset to intake". Injected via the
+    # advisory seam under the distinct CONFIRM_LABEL; never writes the phase file.
+    confirm_directives: list[str] = field(default_factory=lambda: list[str]())
 
     # Per-request attribution for telemetry: the resolved repo (str(cwd)) and the
     # session this request belongs to (key + how it was derived). The compose path
@@ -747,9 +759,24 @@ async def evaluate_signal(
     # real turn that follows).
     announce_cursor = is_carrier and contract_id is not None and _read_composed(cwd) != contract_id
 
+    # 7b. Phase-boundary confirm directives (phase-boundary-confirmation). Purely
+    #     deterministic (phase + on-disk delivery record + new-session detection);
+    #     no phase write. The ship-ask persists every ship turn (ship never
+    #     self-advances); the new-session confirm fires only while this session is
+    #     unoriented for the phase — i.e. it rides the SAME (phase, session) marker
+    #     as `announce` (announce is always True when `new_session` holds), so the
+    #     announce commit records the session and the confirm goes quiet next turn.
+    #     `not phase_changed` excludes the same-session-advanced-here case (that's a
+    #     phase entry, oriented via Tier 1, not a stale-phase resume to confirm).
+    new_session = bool(
+        is_carrier and session_key and session_key not in last_sessions and not phase_changed
+    )
+    confirm_directives = _boundary_confirm_directives(cwd, phase, new_session=new_session)
+
     # 8. Decide. Inject when this is a phase-entry turn (Tier 1), a new work-item
-    #    turn (Tier 2), OR the eval produced advisories. None → quiet passthrough.
-    if not (announce or announce_cursor or advisories):
+    #    turn (Tier 2), the eval produced advisories, OR a boundary confirm is due.
+    #    None → quiet passthrough.
+    if not (announce or announce_cursor or advisories or confirm_directives):
         # A quiet turn. When a clean transition fired this turn (phase written, no
         # advisory), carry the gate metadata so telemetry still records the eval
         # even though nothing is injected — the new phase announces next turn.
@@ -802,6 +829,7 @@ async def evaluate_signal(
         gates_unmet=gates_unmet,
         qwen_calls=qwen_calls,
         advisories=advisories,
+        confirm_directives=confirm_directives,
         phase_gate_embed_failed=phase_gate_embed_failed,
         repo=repo,
         session_key=session_key,
@@ -809,6 +837,57 @@ async def evaluate_signal(
         pending_announce=pending_announce,
         pending_composed=pending_composed,
     )
+
+
+def _boundary_confirm_directives(cwd: Path, phase: str | None, *, new_session: bool) -> list[str]:
+    """Deterministic phase-boundary confirm prompts (phase-boundary-confirmation).
+
+    Two boundaries, both pure reads (never write the phase file), returned as a
+    single coherent directive list — at most one prompt, never two conflicting
+    MUST blocks:
+
+    - **T1 ship completion** — once delivery has landed (``phase == "ship"`` and a
+      ``docs/ship/*.md`` record exists, the same artifact the ship exit-gate
+      checks), ask whether to reset to intake, instead of sitting idle until the
+      user raises it.
+    - **T2 new-session resume** — when a *new* session (its key not yet oriented
+      for this phase) resumes on a non-intake phase, confirm that phase is correct
+      before adopting it: the per-repo phase file is contended by concurrent
+      sessions, so a stale mid-``build`` resume is exactly worth confirming.
+
+    Precedence when both apply (a new session lands on ``ship`` with a delivery
+    record): a single combined prompt — confirm the phase, then ask about the
+    reset — never two blocks.
+    """
+    if phase is None or phase == INTAKE_PHASE:
+        return []
+
+    ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))
+
+    if new_session:
+        if ship_landed:
+            return [
+                "You are resuming a NEW session and the phase is `ship` with delivery "
+                "already recorded. First CONFIRM with the user that `ship` is the right "
+                "phase to be on; if it is, ASK whether they are ready to reset to intake "
+                "for the next work item (`agentalloy phase set intake`). Do NOT change "
+                "the phase on your own initiative — wait for their answer."
+            ]
+        return [
+            f"You are resuming a NEW session on phase `{phase}` (not intake). Before "
+            f"doing this phase's work, CONFIRM with the user that `{phase}` is the "
+            "correct phase to resume — the per-repo phase file can be left stale by a "
+            "prior or concurrent session. Do NOT change the phase on your own initiative."
+        ]
+
+    if ship_landed:
+        return [
+            "Delivery has landed (a docs/ship/ record exists). Before anything else, "
+            "ASK the user whether they are ready to reset to intake for the next work "
+            "item (`agentalloy phase set intake`). Do NOT reset on your own initiative "
+            "— wait for their answer."
+        ]
+    return []
 
 
 def commit_markers(

@@ -122,11 +122,15 @@ raw_prose: |
 
   Ship is terminal — unlike every other phase, it does **not** self-advance.
   Once the delivery record is written and the merge is healthy, the work is
-  done: **stay in `ship`** and tell the user it shipped. The one transition out
-  is back to the top, and it's the user's call, not yours — when they confirm
-  they're finished (or kick off something new), reset the lifecycle with
-  `agentalloy phase set intake` so the next session opens fresh. Never reset on
-  your own initiative; wait for their go-ahead.
+  done: **stay in `ship`** and tell the user it shipped. But do not then go
+  quiet and wait to be prompted — **the moment delivery lands, explicitly ask
+  the user whether they're ready to reset to intake for the next work item.**
+  Ask every time; a small model that "stays in ship" and skips the ask is the
+  exact failure this guards against. The one transition out is back to the top,
+  and it's the user's call, not yours: when they say go, reset the lifecycle with
+  `agentalloy phase set intake` so the next session opens fresh. **Never reset on
+  your own initiative** — a green CI run or a successful merge is not permission;
+  only the user's explicit yes is. Ask, then wait for the answer.
 
   ## Not this
 
