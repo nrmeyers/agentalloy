@@ -31,9 +31,9 @@ from agentalloy.install.subcommands.code import (
 
 
 def _run_why(args: argparse.Namespace) -> int:
-    slug = _resolve_repo_slug(args.repo)
-    params: dict[str, Any] = {"repo": slug, "query": "governing_decisions", "fqn": args.symbol}
     port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
+    params: dict[str, Any] = {"repo": slug, "query": "governing_decisions", "fqn": args.symbol}
     try:
         # via the code module so the _make_client seam stays monkeypatchable
         with code._make_client(port) as client:

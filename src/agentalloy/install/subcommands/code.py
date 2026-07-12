@@ -106,12 +106,53 @@ def _guard_module(client: httpx.Client) -> int | None:
     return None
 
 
-def _resolve_repo_slug(repo_arg: str | None) -> str:
-    """Slug for ``--repo PATH`` (default cwd). A non-path value is taken as a slug."""
+def _slug_from_registry(port: int, abspath: Path) -> str | None:
+    """The slug the running service already indexed for ``abspath``, or None.
+
+    Resolves the slug from the service registry (``GET /code/repos``) by matching
+    the resolved ``repo_path`` — so the CLI agrees with the indexer even when the
+    two derive slugs differently (e.g. the host derives a git-remote slug while the
+    container indexed a path-based one). Best-effort: returns None on any miss or
+    error (service down, module off, repo not yet indexed), and the caller falls
+    back to local derivation. Never raises.
+    """
+    try:
+        with _make_client(port) as client:
+            resp = client.get("/code/repos")
+            resp.raise_for_status()
+            rows = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rp, slug = row.get("repo_path"), row.get("slug")
+        if not isinstance(rp, str) or not isinstance(slug, str):
+            continue
+        try:
+            if Path(rp).expanduser().resolve() == abspath:
+                return slug
+        except OSError:
+            continue
+    return None
+
+
+def _resolve_repo_slug(repo_arg: str | None, port: int) -> str:
+    """Slug for ``--repo PATH`` (default cwd). A non-path value is taken as a slug.
+
+    For a path (or cwd) the registry is authoritative: prefer the slug the service
+    already holds for that path so the CLI reaches the existing index even when
+    local slug derivation diverges from the indexer's (the Bug B split). Falls back
+    to local ``repo_slug`` when the repo isn't registered or the service is
+    unreachable. An explicit ``--repo <slug>`` (non-path) short-circuits with no
+    network call.
+    """
     if repo_arg and not Path(repo_arg).expanduser().is_dir():
-        return repo_arg  # already a slug
+        return repo_arg  # already a slug — no network
     root = Path(repo_arg).expanduser().resolve() if repo_arg else Path.cwd().resolve()
-    return repo_slug(root)
+    return _slug_from_registry(port, root) or repo_slug(root)
 
 
 def _not_indexed_error(slug: str, detail: str) -> int:
@@ -282,9 +323,9 @@ def _run_status(args: argparse.Namespace) -> int:
 
 
 def _run_search(args: argparse.Namespace) -> int:
-    slug = _resolve_repo_slug(args.repo)
-    endpoint = "/code/search/lexical" if args.lexical else "/code/search/semantic"
     port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
+    endpoint = "/code/search/lexical" if args.lexical else "/code/search/semantic"
     try:
         with _make_client(port) as client:
             rc = _guard_module(client)
@@ -314,8 +355,8 @@ def _run_search(args: argparse.Namespace) -> int:
 
 
 def _run_symbol(args: argparse.Namespace) -> int:
-    slug = _resolve_repo_slug(args.repo)
     port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
     try:
         with _make_client(port) as client:
             rc = _guard_module(client)
@@ -342,11 +383,11 @@ def _run_symbol(args: argparse.Namespace) -> int:
 
 
 def _run_structural(args: argparse.Namespace, query: str) -> int:
-    slug = _resolve_repo_slug(args.repo)
+    port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
     params: dict[str, Any] = {"repo": slug, "query": query, "fqn": args.fqn}
     if query == "transitive_callers":
         params["depth"] = args.depth
-    port = _resolve_port(args)
     try:
         with _make_client(port) as client:
             rc = _guard_module(client)
@@ -383,8 +424,8 @@ def _run_callees(args: argparse.Namespace) -> int:
 
 
 def _run_bundle(args: argparse.Namespace) -> int:
-    slug = _resolve_repo_slug(args.repo)
     port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
     payload = {"repo": slug, "task": args.task, "budget_chars": args.budget}
     try:
         with _make_client(port) as client:
@@ -418,7 +459,8 @@ def _run_bundle(args: argparse.Namespace) -> int:
 
 
 def _run_remove(args: argparse.Namespace) -> int:
-    slug = _resolve_repo_slug(args.path)
+    port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.path, port)
     if not args.yes:
         if not sys.stdin.isatty():
             print(
@@ -432,7 +474,6 @@ def _run_remove(args: argparse.Namespace) -> int:
         if answer not in ("y", "yes"):
             print("Cancelled.")
             return 0
-    port = _resolve_port(args)
     try:
         with _make_client(port) as client:
             rc = _guard_module(client)
@@ -469,8 +510,8 @@ _WATCH_HOWTO = (
 
 def _run_watch_toggle(args: argparse.Namespace, *, enabled: bool) -> int:
     """``watch enable|disable [path]`` — flip per-repo enrollment via the service."""
-    slug = _resolve_repo_slug(getattr(args, "path", None))
     port = _resolve_port(args)
+    slug = _resolve_repo_slug(getattr(args, "path", None), port)
     try:
         with _make_client(port) as client:
             rc = _guard_module(client)

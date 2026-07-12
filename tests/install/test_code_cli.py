@@ -681,3 +681,83 @@ class TestStatusStaleness:
         args = _parse(["code", "status", "--port", "1"])
         assert args.func(args) == 0
         assert "watch=on" in capsys.readouterr().out
+
+
+class TestResolveSlug:
+    """`_resolve_repo_slug` — the service registry is authoritative for a path;
+    an explicit non-path slug short-circuits with zero network (Bug B)."""
+
+    def _repos_handler(self, rows: Any) -> Any:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/code/repos"
+            return httpx.Response(200, json=rows)
+
+        return handler
+
+    def _no_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Make _make_client explode so a network call fails the test."""
+
+        def _boom(port: int) -> httpx.Client:
+            raise AssertionError("network call made during slug resolution")
+
+        monkeypatch.setattr(code_mod, "_make_client", _boom)
+
+    def test_registry_slug_wins_over_local_derivation(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The service already indexed this path under a path-derived slug; the host
+        # would derive something else. The registry value must win (the Bug B split).
+        monkeypatch.setattr(code_mod, "repo_slug", lambda p: "host__rederived")
+        root = tmp_path.resolve()
+        rows = [{"repo_path": str(root), "slug": "svc_indexed"}]
+        _mock_client(monkeypatch, self._repos_handler(rows))
+        assert code_mod._resolve_repo_slug(str(root), 1) == "svc_indexed"
+
+    def test_cwd_uses_registry(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        # No --repo → cwd; still resolves via the registry.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(code_mod, "repo_slug", lambda p: "host__rederived")
+        rows = [{"repo_path": str(tmp_path.resolve()), "slug": "svc_indexed"}]
+        _mock_client(monkeypatch, self._repos_handler(rows))
+        assert code_mod._resolve_repo_slug(None, 1) == "svc_indexed"
+
+    def test_unindexed_falls_back_to_local(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Registry has no row for this path → local derivation.
+        monkeypatch.setattr(code_mod, "repo_slug", lambda p: "local__slug")
+        _mock_client(monkeypatch, self._repos_handler([]))
+        assert code_mod._resolve_repo_slug(str(tmp_path.resolve()), 1) == "local__slug"
+
+    def test_explicit_slug_short_circuits_zero_network(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A non-path --repo value is a slug; no registry lookup, no derivation.
+        self._no_network(monkeypatch)
+        monkeypatch.setattr(
+            code_mod, "repo_slug", lambda p: pytest.fail("repo_slug must not be called")
+        )
+        assert code_mod._resolve_repo_slug("org__repo", 1) == "org__repo"
+
+    def test_service_down_falls_back_to_local(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # /code/repos unreachable → best-effort None → local derivation (no crash).
+        def _down(port: int) -> httpx.Client:
+            def handler(request: httpx.Request) -> httpx.Response:
+                raise httpx.ConnectError("connection refused")
+
+            return httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+
+        monkeypatch.setattr(code_mod, "_make_client", _down)
+        monkeypatch.setattr(code_mod, "repo_slug", lambda p: "local__slug")
+        assert code_mod._resolve_repo_slug(str(tmp_path.resolve()), 1) == "local__slug"
+
+    def test_slug_from_registry_ignores_malformed_rows(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Non-list body / non-dict rows / missing keys must not crash; return None.
+        root = tmp_path.resolve()
+        rows = ["nope", {"repo_path": 42, "slug": "x"}, {"slug": "no_path"}]
+        _mock_client(monkeypatch, self._repos_handler(rows))
+        assert code_mod._slug_from_registry(1, root) is None
