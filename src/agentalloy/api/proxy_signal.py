@@ -173,7 +173,9 @@ def _extract_task_from_messages(request: ProxyRequest) -> str | None:
     return None
 
 
-def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path | None]:
+def _resolve_current_contract(
+    cwd: Path, phase: str, session_key: str | None = None
+) -> tuple[str | None, Path | None]:
     """Resolve the current work-item contract for Tier 2 domain composition.
 
     Returns ``(contract_id, abs_path)`` where ``contract_id`` is the cursor's
@@ -201,8 +203,8 @@ def _resolve_current_contract(cwd: Path, phase: str) -> tuple[str | None, Path |
     """
     from agentalloy.contracts import resolve_current_contract
 
-    cid, path = resolve_current_contract(cwd, phase)
-    if path is None and _read_cursor(cwd):
+    cid, path = resolve_current_contract(cwd, phase, session_key)
+    if path is None and _read_cursor(cwd, session_key):
         logger.warning("cursor is set but did not resolve to a contract file; used phase default")
     return cid, path
 
@@ -623,7 +625,7 @@ async def evaluate_signal(
     # Resolve the active work-item contract ONCE here (reused for the banner's <slug>
     # resolution and the Tier 2 cursor cadence further down). `phase` is the in-memory
     # phase for this turn; a later transition writes the phase file but leaves it unchanged.
-    contract_id, contract_path = _resolve_current_contract(cwd, phase)
+    contract_id, contract_path = _resolve_current_contract(cwd, phase, session_key)
     contract_slug = contract_path.stem if contract_path is not None else None
 
     # Per-turn banner cadence. The recency-anchor banner is emitted once every
@@ -676,6 +678,7 @@ async def evaluate_signal(
         project_root=cwd,
         phase=phase,
         prompt_text=task,
+        session_key=session_key,
         # Proxy has no file/tool events — only prompt text
     )
 

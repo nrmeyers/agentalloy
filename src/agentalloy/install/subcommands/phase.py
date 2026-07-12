@@ -247,15 +247,15 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     if current != phase:
         from agentalloy.contracts import first_workitem_id
         from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
-            _clear_state,
+            _clear_all_cursors,
             _write_cursor_atomic,
         )
 
+        # Clear stale scoped cursors, then seed the shared cursor for the new phase.
+        _clear_all_cursors(root)
         seed = first_workitem_id(root, phase)
         if seed:
             _write_cursor_atomic(root, seed)
-        else:
-            _clear_state(root, "cursor")
     return {**data, "blocked": False}
 
 

@@ -169,11 +169,13 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
     if prev != phase:
         from agentalloy.contracts import first_workitem_id
 
+        # Clear stale scoped cursors from the old phase, then seed the shared cursor
+        # (the universal per-phase default any session falls back to; per-session
+        # `task start`/`task next` layer scoped cursors on top — see cursor_state_name).
+        _clear_all_cursors(project_root)
         seed = first_workitem_id(project_root, phase)
         if seed:
             _write_cursor_atomic(project_root, seed)
-        else:
-            _clear_state(project_root, "cursor")
 
 
 # ---------------------------------------------------------------------------
@@ -315,19 +317,58 @@ def _write_announced_atomic(
     _write_state_atomic(project_root, "announced", value)
 
 
-def _read_cursor(project_root: Path) -> str | None:
-    """Read the current work-item cursor from ``.agentalloy/cursor``.
+def cli_session_key() -> str | None:
+    """The current session's id for cursor scoping, from the harness shell env.
 
-    The value is a contract id relative to ``.agentalloy/contracts/`` (e.g.
-    ``build/cache-write.md``). ``None`` means no explicit cursor — the proxy
+    Claude Code exports ``CLAUDE_CODE_SESSION_ID`` (the same UUID it sends the proxy
+    as ``x-claude-code-session-id``), so a CLI ``task``/``phase`` write scopes the
+    cursor to the exact key the proxy reads back. ``None`` when unset (other
+    harnesses, dev, tests) → the shared cursor, i.e. today's behavior.
+    """
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip() or None
+
+
+def _read_cursor(project_root: Path, session_key: str | None = None) -> str | None:
+    """Read the current work-item cursor, session-scoped when a key is given.
+
+    Reads the scoped file (``cursor.<hash>``) first, then falls back to the shared
+    ``cursor``. The value is a contract id relative to ``.agentalloy/contracts/``
+    (e.g. ``build/cache-write.md``). ``None`` means no explicit cursor — the proxy
     falls back to the phase's incoming contract.
     """
+    from agentalloy.contracts import cursor_state_name
+
+    name = cursor_state_name(session_key)
+    if name != "cursor":
+        scoped = _read_state(project_root, name)
+        if scoped is not None:
+            return scoped
     return _read_state(project_root, "cursor")
 
 
-def _write_cursor_atomic(project_root: Path, cursor: str) -> None:
-    """Atomically set the current work-item cursor (advanced by ``task next``)."""
-    _write_state_atomic(project_root, "cursor", cursor)
+def _write_cursor_atomic(project_root: Path, cursor: str, session_key: str | None = None) -> None:
+    """Atomically set the current work-item cursor (advanced by ``task next``).
+
+    Writes the session-scoped file when a key is known, else the shared one —
+    scoped-only, so a session never clobbers another's cursor (Bug C).
+    """
+    from agentalloy.contracts import cursor_state_name
+
+    _write_state_atomic(project_root, cursor_state_name(session_key), cursor)
+
+
+def _clear_all_cursors(project_root: Path) -> None:
+    """Remove the shared cursor AND every session-scoped ``cursor.<hash>``.
+
+    Used on a phase transition (including ``phase set intake``) so a stale
+    per-session cursor from the old phase cannot bleed its work-item into the new
+    one — the scoped file resolves by filename, not by phase. Never raises.
+    """
+    _clear_state(project_root, "cursor")
+    with contextlib.suppress(OSError):
+        for f in (project_root / ".agentalloy").glob("cursor.*"):
+            with contextlib.suppress(OSError):
+                f.unlink()
 
 
 def _read_composed(project_root: Path) -> str | None:
@@ -617,6 +658,7 @@ def _build_predicate_context(
     tool_name: str | None = None,
     tool_path: str | None = None,
     file_events: list[Path] | None = None,
+    session_key: str | None = None,
 ) -> PredicateContext:
     """Build a ``PredicateContext`` for gate evaluation."""
     from agentalloy.signals.predicates import PredicateContext
@@ -632,4 +674,5 @@ def _build_predicate_context(
         recent_tool_use=recent_tool_use,
         file_events_since=file_events or [],
         contracts_root=project_root / ".agentalloy" / "contracts",
+        session_key=session_key,
     )

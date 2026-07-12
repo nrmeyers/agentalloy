@@ -31,6 +31,7 @@ Format::
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -411,22 +412,52 @@ def code_index_query_params(contract: Contract, project_root: Path) -> CodeIndex
     )
 
 
-def _read_cursor_value(project_root: Path) -> str | None:
-    """Read the work-item cursor from ``.agentalloy/cursor`` (a contracts-relative id).
+def cursor_state_name(session_key: str | None) -> str:
+    """Backing filename for the work-item cursor, session-scoped when possible.
 
-    Mirrors ``skill_loader._read_cursor`` but lives here so this low-level module
-    can resolve the current work-item without importing the signals/api layers.
-    Returns ``None`` when absent or empty.
+    A repo has ONE ``.agentalloy/contracts`` tree but may be driven by several
+    concurrent sessions; a single shared ``.agentalloy/cursor`` lets one session's
+    ``task start`` clobber another's current work-item (Bug C). Scoping the cursor
+    file by the session key isolates them: ``cursor.<sha1(key)[:16]>`` when a key is
+    known, else the shared ``cursor`` (single-session, non-Claude-Code harnesses,
+    and every pre-scoping repo — the back-compat floor). The key is the same value
+    on both sides: the proxy's ``x-claude-code-session-id`` header and the CLI's
+    ``CLAUDE_CODE_SESSION_ID`` env var are the one session UUID, so a scoped write
+    by the CLI is read back by the proxy (and vice versa) across the container bind
+    mount. The cursor is deliberately NOT a relocated runtime-state key, so scoped
+    files stay in the repo tree where both sides see them."""
+    if not session_key:
+        return "cursor"
+    digest = hashlib.sha1(session_key.encode("utf-8")).hexdigest()[:16]  # noqa: S324 non-crypto id
+    return f"cursor.{digest}"
+
+
+def _read_cursor_value(project_root: Path, session_key: str | None = None) -> str | None:
+    """Read the work-item cursor (a contracts-relative id).
+
+    Reads the session-scoped file first (``cursor.<hash>``), then falls back to the
+    shared ``cursor`` — so a session that never scoped, and every pre-scoping repo,
+    resolve exactly as before. Mirrors ``skill_loader._read_cursor`` but lives here
+    so this low-level module can resolve the current work-item without importing the
+    signals/api layers. Returns ``None`` when absent or empty.
     """
-    try:
-        raw = (project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    value = raw.strip()
-    return value or None
+    names = [cursor_state_name(session_key)]
+    if names[0] != "cursor":
+        names.append("cursor")  # shared fallback
+    for name in names:
+        try:
+            raw = (project_root / ".agentalloy" / name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        value = raw.strip()
+        if value:
+            return value
+    return None
 
 
-def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None, Path | None]:
+def resolve_current_contract(
+    project_root: Path, phase: str, session_key: str | None = None
+) -> tuple[str | None, Path | None]:
     """Resolve the current work-item contract for ``phase``.
 
     Returns ``(contract_id, abs_path)`` where ``contract_id`` is the
@@ -454,7 +485,7 @@ def resolve_current_contract(project_root: Path, phase: str) -> tuple[str | None
     satisfy or block the gate against the wrong task.
     """
     contracts_root = (project_root / ".agentalloy" / "contracts").resolve()
-    cursor = _read_cursor_value(project_root)
+    cursor = _read_cursor_value(project_root, session_key)
     if cursor:
         candidate = (contracts_root / cursor).resolve()
         # Containment guard: a stale/hostile cursor must not read outside the tree.

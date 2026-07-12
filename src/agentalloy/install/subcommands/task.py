@@ -27,6 +27,7 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_cursor,
     _read_phase,
     _write_cursor_atomic,
+    cli_session_key,
 )
 
 
@@ -57,8 +58,9 @@ def run_task_next(root: Path) -> dict[str, object]:
     if not contracts:
         return {"ok": False, "message": f"No contracts under .agentalloy/contracts/{phase}/."}
 
+    session_key = cli_session_key()
     names = [c.name for c in contracts]
-    cursor = _read_cursor(root)
+    cursor = _read_cursor(root, session_key)
     current_name = cursor.split("/", 1)[-1] if cursor else None
     # No/unknown cursor → start at the first task.
     nxt = names.index(current_name) + 1 if current_name in names else 0
@@ -67,7 +69,7 @@ def run_task_next(root: Path) -> dict[str, object]:
         return {"ok": True, "done": True, "message": f"All {len(contracts)} tasks composed."}
 
     cid = _cursor_id(phase, contracts[nxt])
-    _write_cursor_atomic(root, cid)
+    _write_cursor_atomic(root, cid, session_key)
     return {"ok": True, "cursor": cid, "index": nxt + 1, "total": len(contracts)}
 
 
@@ -80,7 +82,7 @@ def run_task_start(slug: str, root: Path) -> dict[str, object]:
     for c in contracts:
         if slug in (c.stem, c.name):
             cid = _cursor_id(phase, c)
-            _write_cursor_atomic(root, cid)
+            _write_cursor_atomic(root, cid, cli_session_key())
             return {"ok": True, "cursor": cid}
     return {"ok": False, "message": f"No contract matching '{slug}' under contracts/{phase}/."}
 
@@ -94,7 +96,7 @@ def run_task_status(root: Path) -> dict[str, object]:
     return {
         "ok": True,
         "phase": phase,
-        "cursor": _read_cursor(root),
+        "cursor": _read_cursor(root, cli_session_key()),
         "worklist": [_cursor_id(phase, c) for c in contracts],
     }
 

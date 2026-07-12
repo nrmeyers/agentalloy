@@ -19,6 +19,10 @@ from agentalloy.install.subcommands.task import (
 )
 from agentalloy.signals.skill_loader import _read_cursor  # type: ignore[reportPrivateUsage]
 
+# NOTE: the shared-cursor path assumed here is kept hermetic by the autouse
+# `_no_ambient_session_id` fixture in tests/conftest.py (clears CLAUDE_CODE_SESSION_ID).
+# Session-scoping is covered in tests/test_cursor_session_scope.py.
+
 
 def _seed(root: Path, phase: str, names: list[str]) -> None:
     (root / ".agentalloy").mkdir(parents=True, exist_ok=True)

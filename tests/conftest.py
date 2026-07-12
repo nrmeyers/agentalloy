@@ -28,6 +28,19 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+
+@pytest.fixture(autouse=True)
+def _no_ambient_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear ``CLAUDE_CODE_SESSION_ID`` for every test.
+
+    The CLI cursor writers scope the work-item cursor by this env var when set
+    (Bug C session-scoping); the test process inherits it under Claude Code, which
+    would make shared-cursor tests read the wrong file. Clearing it makes the suite
+    hermetic and matches CI (where it's unset). Tests that exercise scoping set it
+    explicitly via ``monkeypatch.setenv``, which overrides this."""
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+
 from agentalloy.app import create_app
 from agentalloy.storage.fragment_store import LanceFragmentStore
 

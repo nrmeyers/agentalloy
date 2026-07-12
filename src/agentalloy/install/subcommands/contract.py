@@ -228,8 +228,11 @@ def _active_design_slug(project_root: Path) -> str | None:
     design work-item resolves; the caller then omits the ``work_item`` stamp.
     """
     from agentalloy.contracts import resolve_current_contract
+    from agentalloy.signals.skill_loader import (
+        cli_session_key,  # pyright: ignore[reportPrivateUsage]
+    )
 
-    _cid, path = resolve_current_contract(project_root, "design")
+    _cid, path = resolve_current_contract(project_root, "design", cli_session_key())
     if path is None:
         return None
     design_dir = (project_root / ".agentalloy" / "contracts" / "design").resolve()

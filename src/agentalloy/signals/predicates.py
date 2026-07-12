@@ -29,6 +29,9 @@ class PredicateContext:
     recent_tool_use: dict[str, Any] | None = None  # {tool, path, args}
     file_events_since: list[Path] = field(default_factory=lambda: cast(list[Path], []))
     contracts_root: Path | None = None  # .agentalloy/contracts/
+    # Session id for cursor scoping — so the lessons_recorded gate resolves the
+    # SAME work-item the proxy composed for this session (Bug C). None → shared cursor.
+    session_key: str | None = None
     # mutable cache for git state (use dict so we can mutate from frozen dataclass)
     _git_cache: dict[str, str | None] = field(
         default_factory=lambda: cast(dict[str, str | None], {})
@@ -385,7 +388,7 @@ def eval_lessons_recorded(args: dict[str, Any], ctx: PredicateContext) -> Predic
     phase = args.get("phase") or ctx.current_phase
     if phase is None:
         return PredicateResult.UNKNOWN
-    _cid, contract_path = resolve_current_contract(ctx.project_root, str(phase))
+    _cid, contract_path = resolve_current_contract(ctx.project_root, str(phase), ctx.session_key)
     if contract_path is None:
         return PredicateResult.UNKNOWN
     slug = contract_path.stem
