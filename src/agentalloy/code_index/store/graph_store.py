@@ -248,7 +248,31 @@ class DuckDBCodeGraphStore:
 
     # -- symbol lookup -------------------------------------------------------------
 
+    def _resolve_qn(self, fqn: str) -> str:
+        """Tolerant map from a possibly-abbreviated ``fqn`` to a stored
+        ``qualified_name``. An exact match wins (fast path). Otherwise, if exactly
+        ONE stored name ends with ``fqn`` on a dot boundary, return it — this
+        rescues a natural fqn (``agentalloy.api.proxy_signal.SignalResult``) when the
+        store holds a doubled-prefix name (``agentalloy.src.agentalloy.api.``
+        ``proxy_signal.SignalResult``). On 0 or ≥2 suffix matches the input is
+        returned unchanged, so an ambiguous abbreviation resolves to a miss rather
+        than a wrong pick. LIKE metacharacters in ``fqn`` (notably ``_``, which
+        identifiers contain) are escaped so ``proxy_signal`` cannot match
+        ``proxyXsignal``."""
+        hit = self.conn.execute(
+            "SELECT 1 FROM symbols WHERE qualified_name = ? LIMIT 1", [fqn]
+        ).fetchone()
+        if hit is not None:
+            return fqn
+        esc = fqn.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = self.conn.execute(
+            "SELECT qualified_name FROM symbols WHERE qualified_name LIKE ? ESCAPE '\\' LIMIT 2",
+            ["%." + esc],
+        ).fetchall()
+        return str(rows[0][0]) if len(rows) == 1 else fqn
+
     def symbol(self, qualified_name: str) -> CodeSymbol | None:
+        qualified_name = self._resolve_qn(qualified_name)
         rows = self.conn.execute(
             f"SELECT {_SYMBOL_COLS} FROM symbols WHERE qualified_name = ?",
             [qualified_name],
@@ -279,6 +303,7 @@ class DuckDBCodeGraphStore:
         """Symbols that CALL ``fqn``. ``line`` is the call-site line in the
         caller's file (edge ``line_start``); file resolved via the denormalized
         ``symbols.file_path`` with the edge's own file as fallback."""
+        fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
             SELECT e.src, COALESCE(s.file_path, NULLIF(e.file_path, '')), e.line_start
@@ -300,6 +325,7 @@ class DuckDBCodeGraphStore:
 
     def callees(self, fqn: str) -> list[CallSite]:
         """Symbols ``fqn`` CALLS. ``line`` is the callee's definition line."""
+        fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
             SELECT e.dst, s.file_path, s.start_line
@@ -339,6 +365,7 @@ class DuckDBCodeGraphStore:
         ``GOVERNS`` edge kind. Reads ``e.src`` (the decision chunk) and hydrates
         its heading (``symbols.name``) and body (``symbols.source_code``). One hop,
         not transitive: a decision about ``fqn`` does not govern its callees."""
+        fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
             SELECT e.src, s.file_path, s.start_line, s.name, s.source_code
@@ -416,6 +443,7 @@ class DuckDBCodeGraphStore:
         """
         if max_depth < 1:
             return []
+        fqn = self._resolve_qn(fqn)
         rows = self.conn.execute(
             """
             WITH RECURSIVE up(qn, depth) AS (

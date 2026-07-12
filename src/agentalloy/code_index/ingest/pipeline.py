@@ -187,8 +187,12 @@ def _extract_governed_symbols(body: str, graph: CodeGraphStore) -> set[str]:
         span = raw.strip()
         if not span:
             continue
+        # Tier 1 is an EXACT fqn identity, not a tolerant lookup: ``symbol`` may
+        # suffix-resolve an abbreviated span (Bug A), so require the resolved name
+        # to equal the span before treating it as a tier-1 hit. A fuzzy resolution
+        # falls through to the tier-2 short-name path below.
         exact = graph.symbol(span)
-        if exact is not None:
+        if exact is not None and exact.qualified_name == span:
             if exact.kind != _MARKDOWN_KIND:
                 governed.add(span)
             continue

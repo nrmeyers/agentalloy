@@ -233,3 +233,78 @@ def test_meta_kv(store: DuckDBCodeGraphStore) -> None:
     assert store.get_meta("head_sha") == "abc123"
     store.set_meta("head_sha", "def456")  # overwrite
     assert store.get_meta("head_sha") == "def456"
+
+
+# The store holds a DOUBLED-prefix qualified_name; natural fqns must still resolve.
+_DOUBLED = "agentalloy.src.agentalloy.api.proxy_signal.SignalResult"
+_NATURAL = "agentalloy.api.proxy_signal.SignalResult"
+
+
+class TestResolveQn:
+    """`_resolve_qn` — exact match wins; else a UNIQUE dot-boundary suffix rescues
+    a natural fqn against a doubled-prefix stored name (Bug A); ambiguity → miss."""
+
+    def test_exact_match_is_returned_unchanged(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols([sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/x.py")])
+        assert store._resolve_qn(_DOUBLED) == _DOUBLED  # pyright: ignore[reportPrivateUsage]
+
+    def test_natural_fqn_resolves_to_doubled(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols([sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/x.py")])
+        assert store._resolve_qn(_NATURAL) == _DOUBLED  # pyright: ignore[reportPrivateUsage]
+        # ...and the public getter that natural-fqn callers hit works end to end.
+        got = store.symbol(_NATURAL)
+        assert got is not None and got.qualified_name == _DOUBLED
+
+    def test_symbol_lookup_via_natural_fqn(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols([sym("mod.a", file_path="mod/a.py")])
+        # exact still works after the resolve prepend
+        assert store.symbol("mod.a") is not None
+
+    def test_governing_decisions_via_natural_fqn(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols(
+            [
+                sym(_DOUBLED, kind="Class", file_path="src/agentalloy/api/proxy_signal.py"),
+                sym(
+                    "docs/design/x/approach.md::why",
+                    kind="MarkdownDoc",
+                    name="Why",
+                    file_path="docs/design/x/approach.md",
+                    start_line=3,
+                    source_code=f"We shape `{_NATURAL}` this way.",
+                ),
+            ]
+        )
+        store.upsert_edges(
+            [CodeEdge(src="docs/design/x/approach.md::why", dst=_DOUBLED, kind="GOVERNS")]
+        )
+        got = store.governing_decisions(_NATURAL)  # natural fqn, doubled store
+        assert [d.qualified_name for d in got] == ["docs/design/x/approach.md::why"]
+
+    def test_ambiguous_suffix_is_a_miss_not_a_wrong_pick(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols(
+            [
+                sym("pkg.one.Thing", kind="Class", file_path="a.py"),
+                sym("pkg.two.Thing", kind="Class", file_path="b.py"),
+            ]
+        )
+        # Two names end with ".Thing" → unresolved (input unchanged) → symbol() miss.
+        assert store._resolve_qn("Thing") == "Thing"  # pyright: ignore[reportPrivateUsage]
+        assert store.symbol("Thing") is None
+
+    def test_underscore_is_escaped_not_a_wildcard(self, store: DuckDBCodeGraphStore) -> None:
+        # If `_` were an unescaped LIKE wildcard, "proxy_signal" would match BOTH
+        # (ambiguous → miss). Escaped, only the literal-underscore name matches.
+        store.upsert_symbols(
+            [
+                sym("a.b.proxy_signal", file_path="a.py"),
+                sym("zzz.proxyXsignal", file_path="b.py"),
+            ]
+        )
+        assert store._resolve_qn("proxy_signal") == "a.b.proxy_signal"  # pyright: ignore[reportPrivateUsage]
+
+    def test_unknown_fqn_does_not_crash(self, store: DuckDBCodeGraphStore) -> None:
+        store.upsert_symbols([sym("mod.a", file_path="mod/a.py")])
+        assert store._resolve_qn("no.such.symbol") == "no.such.symbol"  # pyright: ignore[reportPrivateUsage]
+        assert store.symbol("no.such.symbol") is None
+        assert store.governing_decisions("no.such.symbol") == []
+        assert store.callers("no.such.symbol") == []
