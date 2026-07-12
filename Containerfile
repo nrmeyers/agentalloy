@@ -120,6 +120,7 @@ ENV AGENTALLOY_WEB_DIST=/app/web-dist \
     DUCKDB_PATH=/app/data/agentalloy.duck \
     FRAGMENTS_LANCE_PATH=/app/data/fragments.lance \
     TELEMETRY_DB_PATH=/app/data/telemetry.duck \
+    CODE_INDEX_DATA_DIR=/app/data/code_index \
     LOG_LEVEL=INFO \
     LM_ASSIST=off \
     CODE_INDEX_REFRESH_SECONDS=300 \
