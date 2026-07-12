@@ -41,9 +41,10 @@ FROM python:3.12-slim AS base
 
 # Install uv (Astral) and minimal runtime deps. libgomp1 is the OpenMP runtime
 # that llama-server links against (the rest of its libs come from the llamacpp
-# stage below).
+# stage below). git is required by the code-index staleness/auto-refresh path
+# (it shells out to `git` for HEAD/rev-list on the mounted repos).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl zstd libgomp1 \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git zstd libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv is the project's package manager (matches host conventions)
@@ -121,6 +122,7 @@ ENV AGENTALLOY_WEB_DIST=/app/web-dist \
     TELEMETRY_DB_PATH=/app/data/telemetry.duck \
     LOG_LEVEL=INFO \
     LM_ASSIST=off \
+    CODE_INDEX_REFRESH_SECONDS=300 \
     RUNTIME_EMBED_BASE_URL=http://localhost:47951 \
     RUNTIME_EMBEDDING_MODEL=nomic-embed-text-v1.5.Q8_0.gguf \
     SIGNAL_INTENT_BACKEND=reranker \

@@ -136,6 +136,12 @@ class Settings(BaseSettings):
     code_index_data_dir: str = Field(default_factory=lambda: str(_user_code_index_dir()))
     # Watchdog-driven incremental reindex (off by default). Env: CODE_INDEX_WATCH.
     code_index_watch: bool = False
+    # Periodic staleness-driven incremental reindex, in seconds; 0 disables. A
+    # background lifespan task compares each registry repo's HEAD to its indexed
+    # sha and kicks a non-force job for the drifted ones, so the index self-heals
+    # between manual runs. Off in code/dev/tests; the container entrypoint opts in
+    # (300). Env: CODE_INDEX_REFRESH_SECONDS.
+    code_index_refresh_seconds: int = 0
 
     @field_validator("upstream_url")
     @classmethod

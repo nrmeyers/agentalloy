@@ -7,6 +7,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentalloy.code_index.api.state import CodeIndexState
 
 import httpx
 from fastapi import FastAPI, Request, status
@@ -64,6 +68,21 @@ async def _release_check_loop() -> None:
         with suppress(Exception):
             await asyncio.to_thread(release_check.refresh)
         await asyncio.sleep(release_check.CHECK_INTERVAL_SECONDS)
+
+
+async def _code_index_refresh_loop(state: CodeIndexState, interval: int) -> None:
+    """Periodically self-heal drifted code-index repos, off the request path.
+
+    Sleeps first so a briefly-lived app (TestClient / integration run) cancels the
+    task before the first tick. ``refresh_stale_repos`` is loop-bound (it schedules
+    incremental jobs via ``asyncio.create_task``) and swallows its own per-repo
+    errors; the outer ``suppress`` guards the scan itself. Propagates
+    ``CancelledError`` to stop.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        with suppress(Exception):
+            state.refresh_stale_repos()
 
 
 @asynccontextmanager
@@ -243,6 +262,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # whose HEAD moved since its last index. Off the request path; the
         # method swallows git/registry failures so startup never breaks.
         code_index_state.log_stale_repos()
+        # Auto-refresh (opt-in via CODE_INDEX_REFRESH_SECONDS>0): a periodic task
+        # kicks an incremental reindex for repos whose HEAD drifted, so the index
+        # self-heals between manual runs. Off by default; the container sets 300.
+        if settings.code_index_refresh_seconds > 0:
+            app.state.code_index_refresh_task = asyncio.create_task(
+                _code_index_refresh_loop(code_index_state, settings.code_index_refresh_seconds)
+            )
         _ci_provider = get_code_index_state
         app.dependency_overrides[_ci_provider] = lambda: code_index_state
         app.state.code_index_state = code_index_state
@@ -262,6 +288,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await task
+        refresh_task = getattr(app.state, "code_index_refresh_task", None)
+        if refresh_task is not None:
+            refresh_task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await refresh_task
         # Code-index shutdown: cancel + await running index tasks, stop
         # watches, close the jobs store (aclose does all three).
         if code_index_state is not None:

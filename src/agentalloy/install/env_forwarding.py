@@ -37,6 +37,8 @@ INTENT_KEYS: frozenset[str] = frozenset(
         "CODE_INDEX_ENABLED",
         # Behavioral toggle, meaningful in-container (watchdog reindex).
         "CODE_INDEX_WATCH",
+        # Auto-refresh cadence (seconds); the image bakes 300, a host value overrides.
+        "CODE_INDEX_REFRESH_SECONDS",
         # Operator intent; forwarded value wins over the renderer's old
         # process-env fallback.
         "LOG_LEVEL",

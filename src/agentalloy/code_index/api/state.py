@@ -166,6 +166,45 @@ class CodeIndexState:
                 repo.repo_path,
             )
 
+    def refresh_stale_repos(self) -> list[str]:
+        """Kick an INCREMENTAL reindex for every registry repo whose HEAD moved.
+
+        The staleness-driven analogue of :meth:`log_stale_repos`: instead of only
+        logging, it starts a non-force (incremental — per-symbol content-hash diff)
+        job so a drifted index self-heals without a manual ``agentalloy code index``.
+
+        Reuses the repo's REGISTRY slug (``repo.slug``), never re-deriving it: a
+        git-remote-vs-path slug drift would index into a fresh slug and orphan the
+        existing store (the git-slug-churn trap). Skips repos with an active job
+        (no double-run) and missing paths. Best-effort per repo — a git or pipeline
+        failure skips that repo and never breaks the loop. Returns the kicked slugs.
+        """
+        from agentalloy.code_index.staleness import check_staleness
+
+        try:
+            repos = self.jobs.list_repos()
+        except Exception:  # noqa: BLE001 — a registry read failure must not kill the loop
+            logger.debug("code_index auto-refresh skipped: registry read failed", exc_info=True)
+            return []
+        kicked: list[str] = []
+        for repo in repos:
+            try:
+                repo_path = Path(repo.repo_path)
+                if not repo_path.is_dir():
+                    continue
+                if not check_staleness(repo_path, repo.head_sha).stale:
+                    continue
+                if self.jobs.find_active(repo.slug) is not None:
+                    continue  # a job (manual, watch, or a prior tick) is already running
+                self.start_job(repo_path=repo_path, slug=repo.slug, force=False)
+                kicked.append(repo.slug)
+            except Exception:  # noqa: BLE001 — one bad repo must not stop the rest
+                logger.debug("code_index auto-refresh skipped slug=%s", repo.slug, exc_info=True)
+                continue
+        if kicked:
+            logger.info("code_index auto-refresh: kicked incremental reindex for %s", kicked)
+        return kicked
+
     async def aclose(self) -> None:
         """Stop watches, cancel + await running index tasks, close the store."""
         if self.watch is not None:
