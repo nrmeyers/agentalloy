@@ -34,9 +34,14 @@ Let `Δ = score(challenger) − score(reference)` on the primary endpoint.
   the honesty control: a design that only reports its favorable slice is marketing.
 
 **Non-inferiority margin: `δ = 0.03`** on the [0,1] deterministic-grader scale.
-Chosen before seeing API numbers, and matched to the noise floor we already
-measure: the v6.6.8 generic 35B delta of −0.011 is our empirical "indistinguishable
-from zero" band, so 0.03 is ~3× that — a real, defensible "as good as."
+Chosen before seeing API numbers, and deliberately conservative. The band that
+actually matters is the **domain-12B** seed spread — the same suite and model the
+primary test runs on — not a generic or 35B number. In v6.6.8 the domain-12B scores
+sit near ceiling (composed 0.956), so their across-seed spread is well under 0.01;
+`δ = 0.03` therefore sits comfortably above the empirical "indistinguishable from
+zero" band for this exact cell. We confirm the per-task seed SD at analysis time and
+log it in the manifest; if it turns out larger than assumed, δ is revisited as a
+deviation, not silently.
 
 ---
 
@@ -52,17 +57,16 @@ the system-prompt content and the serving endpoint differ.
 | `ref-sonnet` | `claude-sonnet-5` | Anthropic API | none (bare system prompt) | frontier reference |
 | `ref-opus` | `claude-opus-4-8` | Anthropic API | none (bare system prompt) | harder frontier reference |
 | `local-floor` | Gemma 4 12B IT | local | none (bare) | isolates the AgentAlloy lift from the base model |
-| `robustness-sonnet` | `claude-sonnet-5` | Anthropic API | AgentAlloy `composed` | does composed context *also* help a frontier model, or only small ones? |
 
 `local-floor` and `challenger` reuse the exact arms already in the v6.6.8 campaign
 (`none` and `composed` on Gemma 4 12B), so the small-model side needs no new
-plumbing — only the two API reference arms and the robustness arm are new.
+plumbing — only the two API reference arms (`ref-sonnet`, `ref-opus`) are new.
 
-`robustness-sonnet` is the honest counter-test: if composed context lifts Sonnet as
-much as it lifts Gemma, the story is "AgentAlloy helps everyone" (still true, weaker
-claim); if the lift is small on Sonnet and large on Gemma, the story is "AgentAlloy
-closes the gap *because* small models have more headroom to gain" — the stronger,
-more interesting claim. We do not know which in advance; that is the point.
+The `local-floor → challenger` delta isolates the AgentAlloy lift on the small model;
+the reference arms set the frontier bar. We deliberately do **not** test composed
+context on a frontier model here — the thesis is about closing the gap for small
+models, and whether stuffing context also helps Sonnet is a separate question we are
+not spending API budget on in this campaign.
 
 ---
 
@@ -73,12 +77,15 @@ more interesting claim. We do not know which in advance; that is the point.
   per `run_poc.run_one`). API arms cannot honor seeds (see §6) so they run **N=5
   independent samples per task** at `temperature=0.2` and are treated as a sample,
   not a reproduction.
-- **Generic suite (exploratory, H₃):** the generic task set, same structure.
-- **Total local cells:** 18 tasks × 6 local arm-runs isn't right — local arms are
-  `challenger`, `challenger-contract`, `local-floor` = 3 arms × 18 × 5 = 270 cells.
-  API arms = `ref-sonnet`, `ref-opus`, `robustness-sonnet` = 3 × 18 × 5 = 270 API
-  calls (×2 for the generic suite if we run it = 540 API calls total). At Sonnet/Opus
-  list pricing this is the low-tens-of-dollars range; see §8.
+- **Generic suite (exploratory, H₃):** the generic task set, same structure. This
+  runs **in the same campaign**, not as a conditional follow-up — deciding whether to
+  run it after seeing the domain result would be optional-stopping. It is registered
+  in and its expected loss (H₃) is frozen in §10.
+- **Cell counts.** Local arms = `challenger`, `challenger-contract`, `local-floor`
+  = 3 arms × 18 tasks × 5 seeds = **270 local cells**. API arms = `ref-sonnet`,
+  `ref-opus` = 2 × 18 × 5 = **180 API calls** for the domain suite, ×2 for the generic
+  suite = **360 API calls total**. At Sonnet/Opus list pricing this is the
+  low-tens-of-dollars range; see §8.
 
 ---
 
@@ -109,7 +116,7 @@ construction.
 
 Mitigation, registered up front:
 
-- The **27B judge is co-primary, not a tiebreaker.** We judge **all six arms**
+- The **27B judge is co-primary, not a tiebreaker.** We judge **all five arms**
   (not just the small-model ones) so the frontier arms get no free pass and the
   judge's own bias is applied symmetrically.
 - **Judge blind to arm:** artifacts are scored without the arm label in the prompt
@@ -164,7 +171,7 @@ Per-arm env matrix (illustrative):
 # challenger / local-floor / challenger-contract  (existing local path)
 LM_STUDIO_URL=http://<local>:<port>  AGENT_MODEL=gemma-4-12b-it  AGENT_REASONING_EFFORT=none
 
-# ref-sonnet / robustness-sonnet
+# ref-sonnet
 LM_STUDIO_URL=https://api.anthropic.com  AGENT_MODEL=claude-sonnet-5
 AGENT_API_KEY=$ANTHROPIC_API_KEY         AGENT_REASONING_EFFORT=
 
@@ -202,20 +209,26 @@ The second headline number, reported alongside quality:
 
 ## 9. Statistical plan
 
-- **Paired bootstrap.** Tasks are paired across arms (same 18 specs). Resample tasks
-  (not seeds) with replacement, 10,000 iterations; for each, compute mean
+- **Paired bootstrap. The resampling unit is the task — N = 18.** Each arm reduces
+  to one score per task (the mean over its 5 seeds/samples, which only shrinks
+  per-cell noise; the 5 does *not* set CI width). Resample the **18 paired task-means**
+  with replacement, 10,000 iterations; for each, compute mean
   `Δ = score(challenger) − score(reference)`; take the 2.5/97.5 percentiles as the
-  95% CI.
+  95% CI. All CI width in this design comes from the 18 tasks, not the seeds.
+- **Power check before spending API budget.** From the v6.6.8 per-task domain scores
+  we estimate the expected CI half-width at N=18 up front; if 18 paired tasks cannot
+  resolve `δ = 0.03` even under the null, that is known *before* the run and recorded
+  here — we do not discover an underpowered design after paying for it.
 - **Decision rule (per reference arm):**
   - CI lower bound `> −δ` → **non-inferiority holds** (the registered win).
   - CI lower bound `≤ −δ` and CI upper bound `< 0` → **inferior** (report the gap).
-  - CI straddles 0 with lower bound `≤ −δ` → **inconclusive at N=5** (report; do not
+  - CI straddles 0 with lower bound `≤ −δ` → **inconclusive at N=18** (report; do not
     spin as a tie).
 - Run the identical test on **both** the deterministic and judge endpoints; a
   reported tie requires both.
-- No optional stopping: N=5 seeds/samples is fixed in advance. If N proves too small
-  (CIs too wide to decide), that is a *reported outcome* ("underpowered at N=5"), and
-  any re-run at larger N is logged as a deviation.
+- No optional stopping: the 18 tasks and 5 seeds/samples are fixed in advance. If the
+  N=18 CIs are too wide to decide, that is a *reported outcome* ("underpowered at
+  N=18"), and any re-run at larger N is logged as a deviation.
 
 ---
 
@@ -227,9 +240,7 @@ Written before the run, to be scored honestly afterward:
 2. `challenger` is **inferior to `ref-opus`** on the domain suite (H₂ fails); gap
    ≤ ~0.05.
 3. `challenger` **loses the generic suite** to both frontier arms (H₃).
-4. `robustness-sonnet` gains **less** from composed context than `local-floor`→
-   `challenger` does — small model, bigger headroom.
-5. Deterministic and judge endpoints **agree on the domain tie** but the judge
+4. Deterministic and judge endpoints **agree on the domain tie** but the judge
    widens the Opus gap (grader saturation on near-solved tasks).
 
 A result that contradicts these is more interesting than one that confirms them;
@@ -243,9 +254,6 @@ either way the predictions are frozen here.
   "small + context competes with frontier" claim fails at 12B on this suite.
 - The domain tie exists on deterministic graders but **collapses under the judge**
   → the win was a grader-saturation artifact, not real parity.
-- `robustness-sonnet` shows composed context helps the frontier model just as much →
-  the lift is generic prompt-stuffing, not a small-model equalizer (weaker claim,
-  reported as such).
 
 ---
 
@@ -258,7 +266,7 @@ uv run python -m eval.run_poc --conditions composed,composed-contract,none \
     --model gemma-4-12b-it --seeds 5 --out eval/runs/<ts>-frontier
 
 # 2. API arms — preflight one task each, verify model-ID echo + cost, THEN fan out
-#    ref-sonnet, robustness-sonnet, ref-opus  (env per §7 matrix)
+#    ref-sonnet, ref-opus  (env per §7 matrix)
 
 # 3. judge ALL arms (co-primary), resumable, multi-hour
 uv run python -m eval.judge_local run eval/runs/<ts>-frontier
@@ -268,8 +276,12 @@ uv run python -m eval.judge_local report eval/runs/<ts>-frontier
 #    both endpoints are in and the deviations log is reconciled.
 ```
 
-Stamp the run manifest with: exact model IDs, run date, Anthropic served-build note,
-δ, N, and the git SHA of the harness + corpus.
+Stamp the run manifest with: exact API model IDs, run date, Anthropic served-build
+note, **the local model's GGUF filename + SHA-256 and the llama-server version/commit**
+(the local arm's "served build" — as un-reproducible across a re-quant or engine bump
+as the API build is across an Anthropic re-serve, so it is pinned the same way),
+δ, N, the measured domain-12B per-task seed SD (§1/§9), and the git SHA of the
+harness + corpus.
 
 ---
 
