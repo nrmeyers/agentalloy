@@ -1,0 +1,278 @@
+# Pre-registration: small model + AgentAlloy vs bare frontier APIs
+
+**Status:** PRE-REGISTERED — locked before any arm runs. Deviations go in the
+[Deviations log](#deviations-log) with a reason, never silently.
+
+**Thesis under test:** a small, locally-served model with just-in-time composed
+context is *non-inferior* to a bare frontier API model on domain coding tasks —
+i.e. the product's "small models with context compete with enterprise API models"
+claim, stated as a falsifiable hypothesis rather than a slogan.
+
+**One-liner result shape we are trying to earn:** "Gemma 4 12B + AgentAlloy scores
+within 0.03 of bare Sonnet on the 18-task domain suite, at $0 marginal cost per
+task and no data leaving the box."
+
+---
+
+## 1. Hypotheses
+
+We register a **non-inferiority** test, not a superiority test. The product wins if
+the small stack *ties* the frontier model — matching quality at a fraction of the
+cost and with local privacy is the whole thesis. Beating it is a bonus, not the
+bar.
+
+Let `Δ = score(challenger) − score(reference)` on the primary endpoint.
+
+- **Primary H₁ (non-inferiority vs Sonnet):** the challenger is non-inferior to
+  bare Sonnet if the lower bound of the 95% bootstrap CI on `Δ` exceeds `−δ`.
+- **Secondary H₂ (non-inferiority vs Opus):** same test against bare Opus. Opus is
+  the harder bar; we expect to *lose* non-inferiority here and will report the gap
+  honestly as "X% of Opus at 0% of the cost."
+- **Exploratory H₃ (generic tasks):** run the generic (non-domain) suite too. We
+  **expect to lose** it — AgentAlloy's corpus is domain skills, and generic tasks
+  are where composed context helps least. Registering the expected loss up front is
+  the honesty control: a design that only reports its favorable slice is marketing.
+
+**Non-inferiority margin: `δ = 0.03`** on the [0,1] deterministic-grader scale.
+Chosen before seeing API numbers, and matched to the noise floor we already
+measure: the v6.6.8 generic 35B delta of −0.011 is our empirical "indistinguishable
+from zero" band, so 0.03 is ~3× that — a real, defensible "as good as."
+
+---
+
+## 2. Arms
+
+All arms answer the *same* task specs and are graded by the *same* graders. Only
+the system-prompt content and the serving endpoint differ.
+
+| Arm | Model | Serving | Context injected | Role |
+|-----|-------|---------|------------------|------|
+| `challenger` | Gemma 4 12B IT | local llama-server (OpenAI-compat) | AgentAlloy `composed` (free-text, k=4) | the product stack |
+| `challenger-contract` | Gemma 4 12B IT | local | AgentAlloy `composed-contract` (SDD path) | the shipped centerpiece mode |
+| `ref-sonnet` | `claude-sonnet-5` | Anthropic API | none (bare system prompt) | frontier reference |
+| `ref-opus` | `claude-opus-4-8` | Anthropic API | none (bare system prompt) | harder frontier reference |
+| `local-floor` | Gemma 4 12B IT | local | none (bare) | isolates the AgentAlloy lift from the base model |
+| `robustness-sonnet` | `claude-sonnet-5` | Anthropic API | AgentAlloy `composed` | does composed context *also* help a frontier model, or only small ones? |
+
+`local-floor` and `challenger` reuse the exact arms already in the v6.6.8 campaign
+(`none` and `composed` on Gemma 4 12B), so the small-model side needs no new
+plumbing — only the two API reference arms and the robustness arm are new.
+
+`robustness-sonnet` is the honest counter-test: if composed context lifts Sonnet as
+much as it lifts Gemma, the story is "AgentAlloy helps everyone" (still true, weaker
+claim); if the lift is small on Sonnet and large on Gemma, the story is "AgentAlloy
+closes the gap *because* small models have more headroom to gain" — the stronger,
+more interesting claim. We do not know which in advance; that is the point.
+
+---
+
+## 3. Task suite
+
+- **Domain suite (primary):** the 18 domain tasks in `eval/domain_tasks.py`, ×5
+  seeds on local arms (deterministic seed = `sha256(task_id:condition:run_index)`
+  per `run_poc.run_one`). API arms cannot honor seeds (see §6) so they run **N=5
+  independent samples per task** at `temperature=0.2` and are treated as a sample,
+  not a reproduction.
+- **Generic suite (exploratory, H₃):** the generic task set, same structure.
+- **Total local cells:** 18 tasks × 6 local arm-runs isn't right — local arms are
+  `challenger`, `challenger-contract`, `local-floor` = 3 arms × 18 × 5 = 270 cells.
+  API arms = `ref-sonnet`, `ref-opus`, `robustness-sonnet` = 3 × 18 × 5 = 270 API
+  calls (×2 for the generic suite if we run it = 540 API calls total). At Sonnet/Opus
+  list pricing this is the low-tens-of-dollars range; see §8.
+
+---
+
+## 4. Endpoints (what we measure)
+
+1. **Deterministic grader score** (primary) — the binary criteria in
+   `eval/domain_tasks.py` / `eval/gold_hit.py`, de-brittled in #141 to credit
+   synonyms/paraphrase. Mean over tasks×seeds, per arm.
+2. **27B LLM-judge score** (co-primary — see §5) — pointwise rubric score from the
+   local Qwen3.6-27B judge (`eval/judge_local.py`, `JUDGE_MODEL=qwen3.6-27b`),
+   scoring the *same* `run-N.txt` artifacts against the shared rubric in
+   `eval/judge_common.py`.
+3. **Injected context tokens** (secondary) — prompt tokens attributable to skill
+   injection, from the `usage.prompt_tokens` the harness already records.
+4. **Cost per task** (secondary) — $0 marginal for local arms; API list price ×
+   measured token usage for the frontier arms (§8).
+5. **Wall-clock latency** (reported, not decisive) — `agent_ms` per cell.
+
+---
+
+## 5. Grader plan — deterministic *and* judge, both co-primary
+
+The deterministic graders are cheap, reproducible, and leak-resistant, but they
+have a **ceiling risk**: on near-solved tasks every arm scores ~0.99 and the graders
+lose resolution — they cannot tell "correct" from "correct and idiomatic." A
+non-inferiority test run only on a saturated grader would declare a tie by
+construction.
+
+Mitigation, registered up front:
+
+- The **27B judge is co-primary, not a tiebreaker.** We judge **all six arms**
+  (not just the small-model ones) so the frontier arms get no free pass and the
+  judge's own bias is applied symmetrically.
+- **Judge blind to arm:** artifacts are scored without the arm label in the prompt
+  (the harness already scores raw `run-N.txt`); the judge sees output + task +
+  rubric only.
+- A tie must hold on **both** endpoints to be reported as a tie. If deterministic
+  says tie and the judge says the frontier model is meaningfully better, we report
+  the split — that *is* the finding (graders saturated, quality gap real).
+- **Judge validation:** we already have pooled judge-vs-grader agreement from
+  v6.6.8 (+0.084, CI [+0.056, +0.114], 540 judgments) establishing the judge tracks
+  real quality; we cite it, and re-check agreement on this run's local arms.
+
+The judge runs sequentially on one GPU slot at 30–60 s/judgment (thinking trace) —
+a full pass is multi-hour and **must** checkpoint (`judge_local` appends every
+verdict; resumable).
+
+---
+
+## 6. Determinism, drift, and confounds
+
+The frontier arms break three invariants the local benchmark relies on. We name
+each and its mitigation rather than pretending the comparison is apples-to-apples.
+
+| Invariant (local) | Broken by API because | Mitigation |
+|---|---|---|
+| Deterministic seed reproduces a cell | Anthropic OpenAI-compat ignores `seed`; sampling is non-deterministic | Treat API cells as N=5 **samples**; report per-task variance; never claim reproduction |
+| Model is frozen | Frontier model IDs are served versions that can change | **Pin exact IDs** `claude-sonnet-5` / `claude-opus-4-8` **+ capture the run date** in the manifest; a re-run under a different served build is a *new* experiment |
+| Same decode settings across arms | API and llama-server differ in tokenizer, stop handling, `reasoning_effort` support | Hold `temperature=0.2`, `max_tokens=8192` on both; **omit `reasoning_effort`** on API arms (`AGENT_REASONING_EFFORT=""`) since the field is a local-template hint; document that decode parity is approximate |
+
+Model pins and the run date go in the run manifest at execution time (scripts can't
+call `Date.now()`-equivalents for us — the operator stamps it).
+
+---
+
+## 7. Plumbing — the run_poc patch
+
+`eval/run_poc.py` already sends OpenAI `/v1/chat/completions` to `LM_STUDIO_URL`
+with `AGENT_MODEL`. Two small, additive changes make it API-capable without
+touching the local path:
+
+1. **Auth header.** `call_agent`'s httpx client currently sends no `Authorization`.
+   Add an optional bearer read from env (e.g. `AGENT_API_KEY`); when unset, behavior
+   is byte-identical to today (local llama-server needs no key). For the Anthropic
+   OpenAI-compat surface, point `LM_STUDIO_URL=https://api.anthropic.com` and set
+   `AGENT_API_KEY=$ANTHROPIC_API_KEY`.
+2. **Effort omission.** Already supported: `AGENT_REASONING_EFFORT=""` omits the
+   field. Set it for the API arms.
+
+Per-arm env matrix (illustrative):
+
+```
+# challenger / local-floor / challenger-contract  (existing local path)
+LM_STUDIO_URL=http://<local>:<port>  AGENT_MODEL=gemma-4-12b-it  AGENT_REASONING_EFFORT=none
+
+# ref-sonnet / robustness-sonnet
+LM_STUDIO_URL=https://api.anthropic.com  AGENT_MODEL=claude-sonnet-5
+AGENT_API_KEY=$ANTHROPIC_API_KEY         AGENT_REASONING_EFFORT=
+
+# ref-opus
+LM_STUDIO_URL=https://api.anthropic.com  AGENT_MODEL=claude-opus-4-8
+AGENT_API_KEY=$ANTHROPIC_API_KEY         AGENT_REASONING_EFFORT=
+```
+
+If Anthropic's OpenAI-compat surface rejects any field the harness sends, the
+fallback is a thin litellm proxy in front of the same `LM_STUDIO_URL` seam — no
+harness change beyond the base URL. The auth-header patch is preferred (one arg,
+no new dependency).
+
+**Preflight guards to add before spending API budget:** assert `AGENT_API_KEY` is
+present for API arms; assert the served model ID echoed in the response matches the
+pinned ID; dry-run one task per API arm and eyeball the output before the full fan-out.
+
+---
+
+## 8. Cost axis
+
+The second headline number, reported alongside quality:
+
+- **Local arms:** $0 marginal per task (electricity aside); the model is already
+  resident. This is the product's structural advantage.
+- **API arms:** list price × measured `prompt_tokens` + `completion_tokens` per
+  cell, summed. Report **cost per task** and **total campaign cost**.
+- Headline framing when the frontier arm wins on quality but loses on cost:
+  "ref-opus scores +0.0X over the local stack at ~$Y/task vs $0 — the local stack
+  delivers Z% of Opus quality at 0% of the marginal cost, on-prem." Data
+  transparency: if we lose quality, we say so with the number, then contextualize
+  with cost — we do not bury the quality gap.
+
+---
+
+## 9. Statistical plan
+
+- **Paired bootstrap.** Tasks are paired across arms (same 18 specs). Resample tasks
+  (not seeds) with replacement, 10,000 iterations; for each, compute mean
+  `Δ = score(challenger) − score(reference)`; take the 2.5/97.5 percentiles as the
+  95% CI.
+- **Decision rule (per reference arm):**
+  - CI lower bound `> −δ` → **non-inferiority holds** (the registered win).
+  - CI lower bound `≤ −δ` and CI upper bound `< 0` → **inferior** (report the gap).
+  - CI straddles 0 with lower bound `≤ −δ` → **inconclusive at N=5** (report; do not
+    spin as a tie).
+- Run the identical test on **both** the deterministic and judge endpoints; a
+  reported tie requires both.
+- No optional stopping: N=5 seeds/samples is fixed in advance. If N proves too small
+  (CIs too wide to decide), that is a *reported outcome* ("underpowered at N=5"), and
+  any re-run at larger N is logged as a deviation.
+
+---
+
+## 10. Pre-registered predictions (so hindsight can't move them)
+
+Written before the run, to be scored honestly afterward:
+
+1. `challenger` is **non-inferior to `ref-sonnet`** on the domain suite (H₁ holds).
+2. `challenger` is **inferior to `ref-opus`** on the domain suite (H₂ fails); gap
+   ≤ ~0.05.
+3. `challenger` **loses the generic suite** to both frontier arms (H₃).
+4. `robustness-sonnet` gains **less** from composed context than `local-floor`→
+   `challenger` does — small model, bigger headroom.
+5. Deterministic and judge endpoints **agree on the domain tie** but the judge
+   widens the Opus gap (grader saturation on near-solved tasks).
+
+A result that contradicts these is more interesting than one that confirms them;
+either way the predictions are frozen here.
+
+---
+
+## 11. What would falsify the thesis
+
+- `challenger` inferior to `ref-sonnet` beyond `−δ` on **both** endpoints → the
+  "small + context competes with frontier" claim fails at 12B on this suite.
+- The domain tie exists on deterministic graders but **collapses under the judge**
+  → the win was a grader-saturation artifact, not real parity.
+- `robustness-sonnet` shows composed context helps the frontier model just as much →
+  the lift is generic prompt-stuffing, not a small-model equalizer (weaker claim,
+  reported as such).
+
+---
+
+## 12. Runbook
+
+```
+# 0. patch: add AGENT_API_KEY bearer to call_agent (§7), land + test locally
+# 1. local arms (reuse v6.6.8 config): challenger, challenger-contract, local-floor
+uv run python -m eval.run_poc --conditions composed,composed-contract,none \
+    --model gemma-4-12b-it --seeds 5 --out eval/runs/<ts>-frontier
+
+# 2. API arms — preflight one task each, verify model-ID echo + cost, THEN fan out
+#    ref-sonnet, robustness-sonnet, ref-opus  (env per §7 matrix)
+
+# 3. judge ALL arms (co-primary), resumable, multi-hour
+uv run python -m eval.judge_local run eval/runs/<ts>-frontier
+uv run python -m eval.judge_local report eval/runs/<ts>-frontier
+
+# 4. paired bootstrap + cost rollup; write results into BENCHMARKS.md only after
+#    both endpoints are in and the deviations log is reconciled.
+```
+
+Stamp the run manifest with: exact model IDs, run date, Anthropic served-build note,
+δ, N, and the git SHA of the harness + corpus.
+
+---
+
+## Deviations log
+
+_(empty — append every departure from this pre-registration with date + reason)_
