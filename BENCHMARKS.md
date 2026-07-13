@@ -63,7 +63,7 @@ criteria, de-brittled in #141 to credit synonyms/paraphrase.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmarks/layer2-domain-dark.svg">
-  <img alt="Dot plot of domain-task scores for three models across four conditions: composed retrieval beats the bare model on every architecture, and on the 35B matches or beats the flat oracle at 61% fewer injected tokens" src="docs/assets/benchmarks/layer2-domain-light.svg">
+  <img alt="Two panels. 'Does it work?' — bare model vs the same model with AgentAlloy on an 8B, 12B, and 35B model; retrieval lifts every one, most on the 8B (0.663 to 0.814). 'Is it worth it?' — on the 35B, AgentAlloy scores 0.994 at 810 injected tokens vs 0.992 at 2,060 tokens for pasting the full skills: the same score at 61% less context." src="docs/assets/benchmarks/layer2-domain-light.svg">
 </picture>
 
 Serving config is the shipped v6.6.8 container: deterministic Stage-0
