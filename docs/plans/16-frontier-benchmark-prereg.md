@@ -33,15 +33,15 @@ Let `Δ = score(challenger) − score(reference)` on the primary endpoint.
   are where composed context helps least. Registering the expected loss up front is
   the honesty control: a design that only reports its favorable slice is marketing.
 
-**Non-inferiority margin: `δ = 0.03`** on the [0,1] deterministic-grader scale.
-Chosen before seeing API numbers, and deliberately conservative. The band that
-actually matters is the **domain-12B** seed spread — the same suite and model the
-primary test runs on — not a generic or 35B number. In v6.6.8 the domain-12B scores
-sit near ceiling (composed 0.956), so their across-seed spread is well under 0.01;
-`δ = 0.03` therefore sits comfortably above the empirical "indistinguishable from
-zero" band for this exact cell. We confirm the per-task seed SD at analysis time and
-log it in the manifest; if it turns out larger than assumed, δ is revisited as a
-deviation, not silently.
+**Non-inferiority margin: `δ = 0.03`** on the [0,1] deterministic-grader scale, the
+same margin for every challenger model. Chosen before seeing API numbers, and
+deliberately conservative. The band that actually matters is each challenger's own
+domain seed spread on this suite — not a generic number. In v6.6.8 the domain scores
+sit near ceiling (Gemma 4 12B composed 0.956; the 35B higher still), so their
+across-seed spread is well under 0.01; `δ = 0.03` therefore sits comfortably above the
+empirical "indistinguishable from zero" band for these cells. We confirm the per-model
+per-task seed SD at analysis time and log it in the manifest; if any model's band
+turns out larger than assumed, δ is revisited as a deviation, not silently.
 
 ---
 
@@ -50,23 +50,45 @@ deviation, not silently.
 All arms answer the *same* task specs and are graded by the *same* graders. Only
 the system-prompt content and the serving endpoint differ.
 
+Arms split into a **local challenger side** (three models, each run through the same
+three local arms) and a **frontier reference side** (two bare API models, run once).
+
+**Challenger models (local, free to run).** Each is served by its own llama-server
+config and run through all three local arms below:
+
+| Model | Model ID (pinned at run time) | Role |
+|-------|-------------------------------|------|
+| Gemma 4 12B IT | `gemma-4-12b-it` | the v6.6.8 baseline challenger; the headline "12B ties Sonnet" claim |
+| Gemma 4 27B A4B | `gemma-4-27b-a4b` | mid MoE (≈4B active) — does more base capacity widen or close the gap under composition? |
+| Qwen3.6-35B-A3B | `qwen3.6-35b-a3b` | strong MoE (≈3B active); near-oracle on domain in v6.6.8 — the local upper bound |
+
+Model IDs are illustrative until the sibling session's llama configs land; the exact
+served IDs (and GGUF hashes, §12) are pinned in the manifest before the run.
+
+**Local arms** (applied to *every* challenger model):
+
+| Arm | Serving | Context injected | Role |
+|-----|---------|------------------|------|
+| `challenger` | local llama-server (OpenAI-compat) | AgentAlloy `composed` (free-text, k=4) | the product stack |
+| `challenger-contract` | local | AgentAlloy `composed-contract` (SDD path) | the shipped centerpiece mode |
+| `local-floor` | local | none (bare) | isolates the AgentAlloy lift from the base model |
+
+**Frontier reference arms** (run once, not per challenger model):
+
 | Arm | Model | Serving | Context injected | Role |
 |-----|-------|---------|------------------|------|
-| `challenger` | Gemma 4 12B IT | local llama-server (OpenAI-compat) | AgentAlloy `composed` (free-text, k=4) | the product stack |
-| `challenger-contract` | Gemma 4 12B IT | local | AgentAlloy `composed-contract` (SDD path) | the shipped centerpiece mode |
 | `ref-sonnet` | `claude-sonnet-5` | Anthropic API | none (bare system prompt) | frontier reference |
 | `ref-opus` | `claude-opus-4-8` | Anthropic API | none (bare system prompt) | harder frontier reference |
-| `local-floor` | Gemma 4 12B IT | local | none (bare) | isolates the AgentAlloy lift from the base model |
 
-`local-floor` and `challenger` reuse the exact arms already in the v6.6.8 campaign
-(`none` and `composed` on Gemma 4 12B), so the small-model side needs no new
-plumbing — only the two API reference arms (`ref-sonnet`, `ref-opus`) are new.
+For Gemma 4 12B, `local-floor` and `challenger` reuse the exact arms already in the
+v6.6.8 campaign (`none` and `composed`), so that model needs no new run — only the
+27B and 35B challenger models and the two API reference arms are new work.
 
-The `local-floor → challenger` delta isolates the AgentAlloy lift on the small model;
-the reference arms set the frontier bar. We deliberately do **not** test composed
-context on a frontier model here — the thesis is about closing the gap for small
-models, and whether stuffing context also helps Sonnet is a separate question we are
-not spending API budget on in this campaign.
+Each challenger model gets its own `local-floor → challenger` lift and its own
+non-inferiority test against the shared frontier bar. We deliberately do **not** test
+composed context on a frontier model here — the thesis is about closing the gap for
+small models, and whether stuffing context also helps Sonnet is a separate question
+we are not spending API budget on in this campaign.
 
 ---
 
@@ -81,11 +103,15 @@ not spending API budget on in this campaign.
   runs **in the same campaign**, not as a conditional follow-up — deciding whether to
   run it after seeing the domain result would be optional-stopping. It is registered
   in and its expected loss (H₃) is frozen in §10.
-- **Cell counts.** Local arms = `challenger`, `challenger-contract`, `local-floor`
-  = 3 arms × 18 tasks × 5 seeds = **270 local cells**. API arms = `ref-sonnet`,
-  `ref-opus` = 2 × 18 × 5 = **180 API calls** for the domain suite, ×2 for the generic
+- **Cell counts.** Local side = 3 challenger models × 3 local arms (`challenger`,
+  `challenger-contract`, `local-floor`) × 18 tasks × 5 seeds = **810 local cells**
+  per suite (Gemma 4 12B's 2 baseline arms already exist from v6.6.8, so ~750 are new).
+  Local cells are **free** — they cost GPU wall-clock, not tokens. API side is
+  unchanged by the extra local models: `ref-sonnet`, `ref-opus` = 2 × 18 × 5 =
+  **180 API calls** for the domain suite (the sole token cost), ×2 for the generic
   suite = **360 API calls total**. At Sonnet/Opus list pricing this is the
-  low-tens-of-dollars range; see §8.
+  low-tens-of-dollars range; see §8. Note the frontier bar is shared across all three
+  challenger models, so adding models multiplies only the free local side.
 
 ---
 
@@ -169,7 +195,10 @@ Per-arm env matrix (illustrative):
 
 ```
 # challenger / local-floor / challenger-contract  (existing local path)
-LM_STUDIO_URL=http://<local>:<port>  AGENT_MODEL=gemma-4-12b-it  AGENT_REASONING_EFFORT=none
+# repeat per challenger model — point LM_STUDIO_URL at that model's llama-server,
+# set AGENT_MODEL to its served ID:
+#   gemma-4-12b-it | gemma-4-27b-a4b | qwen3.6-35b-a3b
+LM_STUDIO_URL=http://<local>:<port>  AGENT_MODEL=<model-id>  AGENT_REASONING_EFFORT=none
 
 # ref-sonnet
 LM_STUDIO_URL=https://api.anthropic.com  AGENT_MODEL=claude-sonnet-5
@@ -216,9 +245,10 @@ The second headline number, reported alongside quality:
   `Δ = score(challenger) − score(reference)`; take the 2.5/97.5 percentiles as the
   95% CI. All CI width in this design comes from the 18 tasks, not the seeds.
 - **Power check before spending API budget.** From the v6.6.8 per-task domain scores
-  we estimate the expected CI half-width at N=18 up front; if 18 paired tasks cannot
-  resolve `δ = 0.03` even under the null, that is known *before* the run and recorded
-  here — we do not discover an underpowered design after paying for it.
+  we estimate the expected CI half-width at N=18 up front (per challenger model); if
+  18 paired tasks cannot resolve `δ = 0.03` even under the null, that is known *before*
+  the run and recorded here — we do not discover an underpowered design after paying
+  for it. The frontier arms are the only paid side, so this check gates API spend.
 - **Decision rule (per reference arm):**
   - CI lower bound `> −δ` → **non-inferiority holds** (the registered win).
   - CI lower bound `≤ −δ` and CI upper bound `< 0` → **inferior** (report the gap).
@@ -234,14 +264,20 @@ The second headline number, reported alongside quality:
 
 ## 10. Pre-registered predictions (so hindsight can't move them)
 
-Written before the run, to be scored honestly afterward:
+Written before the run, to be scored honestly afterward. Predictions 1–3 are stated
+for the **Gemma 4 12B** headline challenger; the per-model predictions for the 27B and
+35B challengers follow in prediction 5.
 
-1. `challenger` is **non-inferior to `ref-sonnet`** on the domain suite (H₁ holds).
-2. `challenger` is **inferior to `ref-opus`** on the domain suite (H₂ fails); gap
+1. `challenger` (12B) is **non-inferior to `ref-sonnet`** on the domain suite (H₁ holds).
+2. `challenger` (12B) is **inferior to `ref-opus`** on the domain suite (H₂ fails); gap
    ≤ ~0.05.
-3. `challenger` **loses the generic suite** to both frontier arms (H₃).
+3. `challenger` (12B) **loses the generic suite** to both frontier arms (H₃).
 4. Deterministic and judge endpoints **agree on the domain tie** but the judge
    widens the Opus gap (grader saturation on near-solved tasks).
+5. Non-inferiority vs `ref-sonnet` is **monotone in base capacity**: if the 12B ties
+   Sonnet, the 27B and 35B challengers do too, and the 35B additionally **closes the
+   Opus gap** more than the 12B does (its v6.6.8 domain score already edges the local
+   oracle).
 
 A result that contradicts these is more interesting than one that confirms them;
 either way the predictions are frozen here.
@@ -250,8 +286,10 @@ either way the predictions are frozen here.
 
 ## 11. What would falsify the thesis
 
-- `challenger` inferior to `ref-sonnet` beyond `−δ` on **both** endpoints → the
-  "small + context competes with frontier" claim fails at 12B on this suite.
+- The 12B `challenger` inferior to `ref-sonnet` beyond `−δ` on **both** endpoints →
+  the "small + context competes with frontier" claim fails at 12B on this suite. (If
+  the 12B fails but the 27B/35B tie, the claim survives only at larger local scale —
+  reported as such, not spun.)
 - The domain tie exists on deterministic graders but **collapses under the judge**
   → the win was a grader-saturation artifact, not real parity.
 
@@ -261,27 +299,36 @@ either way the predictions are frozen here.
 
 ```
 # 0. patch: add AGENT_API_KEY bearer to call_agent (§7), land + test locally
-# 1. local arms (reuse v6.6.8 config): challenger, challenger-contract, local-floor
-uv run python -m eval.run_poc --conditions composed,composed-contract,none \
-    --model gemma-4-12b-it --seeds 5 --out eval/runs/<ts>-frontier
 
-# 2. API arms — preflight one task each, verify model-ID echo + cost, THEN fan out
+# 1. local arms — one pass PER challenger model (free; sequential — one inference
+#    at a time so llama-server doesn't spill layers to CPU). Gemma 4 12B's `none` +
+#    `composed` already exist from v6.6.8; the 27B and 35B passes are new.
+#    Bring up each model's llama-server, then point the harness at it:
+for M in gemma-4-12b-it gemma-4-27b-a4b qwen3.6-35b-a3b; do
+  # (start / confirm the llama-server for $M, set LM_STUDIO_URL to its port)
+  uv run python -m eval.run_poc --conditions composed,composed-contract,none \
+      --model "$M" --seeds 5 --out "eval/runs/<ts>-frontier/$M"
+done
+
+# 2. API arms (run ONCE — shared frontier bar for all three challenger models):
+#    preflight one task each, verify model-ID echo + cost, THEN fan out.
 #    ref-sonnet, ref-opus  (env per §7 matrix)
 
-# 3. judge ALL arms (co-primary), resumable, multi-hour
+# 3. judge ALL arms across ALL models (co-primary), resumable, multi-hour
 uv run python -m eval.judge_local run eval/runs/<ts>-frontier
 uv run python -m eval.judge_local report eval/runs/<ts>-frontier
 
-# 4. paired bootstrap + cost rollup; write results into BENCHMARKS.md only after
-#    both endpoints are in and the deviations log is reconciled.
+# 4. paired bootstrap PER challenger model vs the shared reference arms, + cost
+#    rollup; write results into BENCHMARKS.md only after both endpoints are in and
+#    the deviations log is reconciled.
 ```
 
 Stamp the run manifest with: exact API model IDs, run date, Anthropic served-build
-note, **the local model's GGUF filename + SHA-256 and the llama-server version/commit**
-(the local arm's "served build" — as un-reproducible across a re-quant or engine bump
-as the API build is across an Anthropic re-serve, so it is pinned the same way),
-δ, N, the measured domain-12B per-task seed SD (§1/§9), and the git SHA of the
-harness + corpus.
+note, **per challenger model the GGUF filename + SHA-256 and the llama-server
+version/commit** (each local model's "served build" — as un-reproducible across a
+re-quant or engine bump as the API build is across an Anthropic re-serve, so pinned
+the same way), δ, N, the measured per-model per-task seed SD (§1/§9), and the git SHA
+of the harness + corpus.
 
 ---
 
