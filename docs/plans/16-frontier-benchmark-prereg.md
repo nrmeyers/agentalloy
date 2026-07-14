@@ -56,14 +56,16 @@ three local arms) and a **frontier reference side** (two bare API models, run on
 **Challenger models (local, free to run).** Each is served by its own llama-server
 config and run through all three local arms below:
 
-| Model | Model ID (pinned at run time) | Role |
-|-------|-------------------------------|------|
-| Gemma 4 12B IT | `gemma-4-12b-it` | the v6.6.8 baseline challenger; the headline "12B ties Sonnet" claim |
-| Gemma 4 27B A4B | `gemma-4-27b-a4b` | mid MoE (≈4B active) — does more base capacity widen or close the gap under composition? |
-| Qwen3.6-35B-A3B | `qwen3.6-35b-a3b` | strong MoE (≈3B active); near-oracle on domain in v6.6.8 — the local upper bound |
+| Model | Served alias (`--alias`) | Systemd unit | GGUF (main + MTP draft) | Role |
+|-------|---------------------------|--------------|--------------------------|------|
+| Gemma 4 12B IT (dense) | `gemma-4-12b-it` | `llama-gemma4.container` | `gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` + `mtp-gemma-4-12B-it-Q8_0.gguf` | the v6.6.8 baseline challenger; the headline "12B ties Sonnet" claim |
+| Gemma 4 26B-A4B IT (MoE, ≈3.8B active) | `gemma-4-26b-a4b-it` | `llama-gemma-26b-a4b.container` | `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf` + `mtp-gemma-4-26B-A4B-it-Q8_0.gguf` | mid MoE — does more base capacity widen or close the gap under composition? |
+| Qwen3.6-35B-A3B (MoE) | `qwen3.6-35B-A3B` | `llama-heavy.container` | `35B-A3B-IQ4_XS-MTP.gguf` | strong MoE; near-oracle on domain in v6.6.8 — the local upper bound |
 
-Model IDs are illustrative until the sibling session's llama configs land; the exact
-served IDs (and GGUF hashes, §12) are pinned in the manifest before the run.
+All three are `PREP ONLY`/live units on the **same** RTX 3090, publishing the **same**
+`192.168.4.26:60000` / `100.115.181.90:60000` — only one may be running at a time
+(`systemctl --user stop <other> && systemctl --user start <this-one>`; see §12).
+GGUF SHA-256 hashes are computed at manifest time (§12), not pinned here.
 
 **Local arms** (applied to *every* challenger model):
 
@@ -82,7 +84,7 @@ served IDs (and GGUF hashes, §12) are pinned in the manifest before the run.
 
 For Gemma 4 12B, `local-floor` and `challenger` reuse the exact arms already in the
 v6.6.8 campaign (`none` and `composed`), so that model needs no new run — only the
-27B and 35B challenger models and the two API reference arms are new work.
+26B-A4B and 35B challenger models and the two API reference arms are new work.
 
 Each challenger model gets its own `local-floor → challenger` lift and its own
 non-inferiority test against the shared frontier bar. We deliberately do **not** test
@@ -191,14 +193,14 @@ touching the local path:
 2. **Effort omission.** Already supported: `AGENT_REASONING_EFFORT=""` omits the
    field. Set it for the API arms.
 
-Per-arm env matrix (illustrative):
+Per-arm env matrix:
 
 ```
 # challenger / local-floor / challenger-contract  (existing local path)
-# repeat per challenger model — point LM_STUDIO_URL at that model's llama-server,
-# set AGENT_MODEL to its served ID:
-#   gemma-4-12b-it | gemma-4-27b-a4b | qwen3.6-35b-a3b
-LM_STUDIO_URL=http://<local>:<port>  AGENT_MODEL=<model-id>  AGENT_REASONING_EFFORT=none
+# All three challenger models share ONE endpoint (same 3090, same port) — only
+# one systemd unit is up at a time, swap it between passes (see §12):
+#   gemma-4-12b-it | gemma-4-26b-a4b-it | qwen3.6-35B-A3B
+LM_STUDIO_URL=http://192.168.4.26:60000  AGENT_MODEL=<served-alias>  AGENT_REASONING_EFFORT=none
 
 # ref-sonnet
 LM_STUDIO_URL=https://api.anthropic.com  AGENT_MODEL=claude-sonnet-5
@@ -265,7 +267,7 @@ The second headline number, reported alongside quality:
 ## 10. Pre-registered predictions (so hindsight can't move them)
 
 Written before the run, to be scored honestly afterward. Predictions 1–3 are stated
-for the **Gemma 4 12B** headline challenger; the per-model predictions for the 27B and
+for the **Gemma 4 12B** headline challenger; the per-model predictions for the 26B-A4B and
 35B challengers follow in prediction 5.
 
 1. `challenger` (12B) is **non-inferior to `ref-sonnet`** on the domain suite (H₁ holds).
@@ -275,7 +277,7 @@ for the **Gemma 4 12B** headline challenger; the per-model predictions for the 2
 4. Deterministic and judge endpoints **agree on the domain tie** but the judge
    widens the Opus gap (grader saturation on near-solved tasks).
 5. Non-inferiority vs `ref-sonnet` is **monotone in base capacity**: if the 12B ties
-   Sonnet, the 27B and 35B challengers do too, and the 35B additionally **closes the
+   Sonnet, the 26B-A4B and 35B challengers do too, and the 35B additionally **closes the
    Opus gap** more than the 12B does (its v6.6.8 domain score already edges the local
    oracle).
 
@@ -288,7 +290,7 @@ either way the predictions are frozen here.
 
 - The 12B `challenger` inferior to `ref-sonnet` beyond `−δ` on **both** endpoints →
   the "small + context competes with frontier" claim fails at 12B on this suite. (If
-  the 12B fails but the 27B/35B tie, the claim survives only at larger local scale —
+  the 12B fails but the 26B-A4B/35B tie, the claim survives only at larger local scale —
   reported as such, not spun.)
 - The domain tie exists on deterministic graders but **collapses under the judge**
   → the win was a grader-saturation artifact, not real parity.
@@ -300,14 +302,22 @@ either way the predictions are frozen here.
 ```
 # 0. patch: add AGENT_API_KEY bearer to call_agent (§7), land + test locally
 
-# 1. local arms — one pass PER challenger model (free; sequential — one inference
-#    at a time so llama-server doesn't spill layers to CPU). Gemma 4 12B's `none` +
-#    `composed` already exist from v6.6.8; the 27B and 35B passes are new.
-#    Bring up each model's llama-server, then point the harness at it:
-for M in gemma-4-12b-it gemma-4-27b-a4b qwen3.6-35b-a3b; do
-  # (start / confirm the llama-server for $M, set LM_STUDIO_URL to its port)
+# 1. local arms — one pass PER challenger model (free; sequential — the three
+#    units share one RTX 3090 + port 60000, so only one may be up at a time).
+#    Gemma 4 12B's `none` + `composed` already exist from v6.6.8; the 26B-A4B
+#    and 35B passes are new.
+declare -A UNIT=( [gemma-4-12b-it]=llama-gemma4
+                  [gemma-4-26b-a4b-it]=llama-gemma-26b-a4b
+                  [qwen3.6-35B-A3B]=llama-heavy )
+PREV=""
+for M in gemma-4-12b-it gemma-4-26b-a4b-it qwen3.6-35B-A3B; do
+  [ -n "$PREV" ] && systemctl --user stop "$PREV"
+  systemctl --user daemon-reload
+  systemctl --user start "${UNIT[$M]}"
+  # wait for /health on 192.168.4.26:60000 before proceeding
   uv run python -m eval.run_poc --conditions composed,composed-contract,none \
       --model "$M" --seeds 5 --out "eval/runs/<ts>-frontier/$M"
+  PREV="${UNIT[$M]}"
 done
 
 # 2. API arms (run ONCE — shared frontier bar for all three challenger models):
