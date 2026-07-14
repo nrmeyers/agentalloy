@@ -8,7 +8,9 @@ domain_tags:
   - custom-skill
   - corpus
   - skill-pack
-requires: []
+requires:
+  - sys-skill-authoring-rules
+  - sys-skill-review-verdict
 always_apply: false
 applies_to_phases:
   - add-skill

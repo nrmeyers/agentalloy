@@ -1,0 +1,131 @@
+skill_id: sys-skill-review-verdict
+canonical_name: Skill Review Verdict (R1–R9 evaluation → review.yaml)
+category: tooling
+skill_class: system
+always_apply: false
+phase_scope:
+- add-skill
+category_scope: null
+author: navistone
+change_summary: 'initial authoring 2026-07-14 — meta pack. Turns the R1–R9 authoring-rule
+  evaluation into the machine-checkable `review.yaml` verdict artifact that install-pack''s
+  Gate 1.5 enforces (docs/spec-contracts/install-pack-semantic-gate.spec.md). Producer
+  half of the semantic gate; the backend only checks its output. 2026-07-14: converted
+  from _packs/meta/sys-skill-review-verdict.md to a phase-scoped system skill (meta-skill-corpus-delivery,
+  DK4) — content unchanged.'
+raw_prose: |
+  You have finished (or independently reviewed) a skill draft and evaluated it against
+  the R1–R9 quality contract in `sys-skill-authoring-rules`. This skill turns that
+  evaluation into the **verdict artifact `review.yaml`** — the machine-checkable record
+  that install-pack's Gate 1.5 reads to prove a review actually ran, is fresh, and
+  approves the draft. Produce it *after* the draft is final and `validate-pack` passed.
+
+  **Name discipline — do not conflate two artifacts.** `review.yaml` here is the
+  **verdict**: skill_id, hash, approve/reject, per-rule check outcomes. It is **not**
+  the "review YAML" of `sys-skill-transform-contract`, which is that skill's name for
+  the *skill* YAML itself (the source→skill transform output). Different file, different
+  purpose. In your output and prose, `review.yaml` always means the verdict; never call
+  a skill YAML a "review YAML."
+
+  ## The trust boundary (why this matters, and its honest limit)
+
+  Gate 1.5 is deterministic — it never runs a model. It can prove your verdict is
+  **well-formed, fresh, and approving**; it **cannot** prove it is **honest**. A verdict
+  that blesses a hallucinated API passes the gate exactly like a real one. The gate's
+  guarantee is *process + auditability*; correctness rests on you doing the review
+  honestly, with the human `approve` step (web lane) as the backstop. Two consequences
+  you must respect:
+
+  - The gate accepts a `checks` map that is entirely `na`. It will **not** catch a
+    rubber-stamp. **You are the only thing that does.** Evaluate every rule for real.
+  - `reviewer.mode` is a field you write. Claiming `independent` when the same context
+    that authored the skill also reviewed it is dishonest and defeats the gate's only
+    independence signal. Only claim `independent` for a genuine fresh-context or
+    second-model pass.
+
+  ## The verdict schema (emit exactly this shape)
+
+  One `review.yaml` per pack directory, sibling of `pack.yaml`, with a per-skill entry:
+
+  ```yaml
+  schema_version: 1
+  reviews:
+    - skill_id: <the skill_id, matching pack.yaml>
+      target_hash: "sha256:<hex — see § Compute the hash>"
+      verdict: approve            # approve | revise | reject
+      blocking_issues: []         # MUST be empty when verdict is approve
+      checks:                     # every rule R1–R9 — see § Coverage bar
+        R1: na
+        R2: pass
+        R3: pass
+        R4: pass
+        R5: na
+        R6: pass
+        R7: pass
+        R8: pass
+        R9: na
+      reviewer:
+        model: "<your model id>"
+        harness: "<your harness, e.g. claude-code>"
+        mode: self                # self | independent — declare honestly
+      source_refs: []             # R1 grounding: docs you consulted (URLs/paths)
+      created_at: "<ISO 8601, e.g. 2026-07-14T00:00:00Z>"
+  ```
+
+  What Gate 1.5 enforces, per skill (so you know what a rejection means):
+
+  1. an entry exists for the `skill_id`;
+  2. `target_hash` matches the current skill bytes (freshness);
+  3. `verdict` is `approve`;
+  4. `blocking_issues` is empty;
+  5. `checks` is non-empty;
+  6. no check is `fail`;
+  7. *(only if independence is required)* `reviewer.mode` is `independent`.
+
+  A `revise`/`reject`, any `blocking_issues`, or any `fail` check blocks the install.
+  So if a rule genuinely fails, the honest move is another authoring round — not
+  downgrading the finding to make the gate pass.
+
+  ## Coverage bar (the part the gate can't check — do it properly)
+
+  Emit a `checks` entry for **every rule currently in `sys-skill-authoring-rules`**
+  (today R1–R9; re-read the rules doc rather than trusting this count — a future R10
+  must be covered too). Each entry is `pass | na | fail`, and you must be able to
+  defend it in one line:
+
+  - `pass` — the rule applies and the draft satisfies it.
+  - `na` — the rule does not apply to *this* draft, and you can say why. Legitimately
+    `na`: **R1** (tiered sourcing) when the skill cites no external framework docs;
+    **R5** (date-stamping) when the draft makes no version/threshold claim; **R9**
+    (deprecation) for a new, non-deprecating skill. `na` is a claim you defend, never a
+    default to skip work.
+  - `fail` — the rule applies and the draft violates it. Incompatible with
+    `verdict: approve`; fix the draft and re-review.
+
+  Record each rule's one-line justification in your working notes; put anything
+  blocking into `blocking_issues` (which forces a non-approve). A map that is all-`na`,
+  or that silently omits rules, is exactly the rubber-stamp the gate cannot see and you
+  must not emit.
+
+  ## Compute the hash (copy-paste — do not hand-compute)
+
+  `target_hash` binds the verdict to the *exact bytes* Gate 1 reads. Compute it
+  **after** the skill YAML is final and `validate-pack` has passed (validate is
+  read-only — it does not rewrite the file, so the bytes are stable). Hash the file
+  named in `pack.yaml`'s `skills[].file` — not a guess:
+
+  ```bash
+  printf 'sha256:%s\n' "$(sha256sum <pack-dir>/<skill-file>.yaml | cut -d' ' -f1)"
+  ```
+
+  Paste the output verbatim as `target_hash`. If you edit the skill after this, the
+  hash goes stale and Gate 1.5 blocks with "stale review" — recompute and re-review.
+
+  ## Not this
+
+  - Don't emit `approve` with a `fail` check or a non-empty `blocking_issues` — it
+    won't install, and lying to get it to would defeat the point.
+  - Don't claim `mode: independent` for a self-review.
+  - Don't hand-type or normalize the hash — use the one-liner on the final bytes.
+  - Don't call the skill YAML a "review YAML" — that name is taken by a different
+    artifact.

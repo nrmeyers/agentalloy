@@ -82,11 +82,19 @@ def test_all_exit_gate_predicates_are_known() -> None:
 
 
 def test_phase_scope_values_are_lifecycle() -> None:
-    """phase_scope only uses the canonical SDD lifecycle (no stale `review`)."""
-    lifecycle = {"intake", "spec", "design", "build", "qa", "ship"}
+    """phase_scope only uses the canonical SDD lifecycle (no stale `review`).
+
+    Sourced from ``ingest._VALID_PHASES`` — the authoritative set ``ingest._validate``
+    itself checks phase_scope against — rather than a hand-maintained duplicate.
+    A hardcoded local copy previously excluded ``sdd-fast``/``add-skill`` even
+    though both are canonical (see ``bootstrap.py``'s "Canonical SDD lifecycle"
+    comment), which is exactly the drift this guard exists to prevent.
+    """
+    from agentalloy.ingest import _VALID_PHASES  # pyright: ignore[reportPrivateUsage]
+
     offenders: list[str] = []
     for d in _load_skill_docs():
         for p in d.get("phase_scope") or []:
-            if p not in lifecycle:
+            if p not in _VALID_PHASES:
                 offenders.append(f"{d['skill_id']} ({d['__file']}): phase_scope '{p}'")
     assert not offenders, "non-lifecycle phase_scope values:\n  " + "\n  ".join(offenders)
