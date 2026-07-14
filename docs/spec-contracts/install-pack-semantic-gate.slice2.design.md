@@ -77,15 +77,15 @@ a rebuild + re-embed. **Build orientation proved otherwise.** Verified facts:
 
 So `sys-skill-review-verdict` is authored as a **structural peer** of the 5 working
 meta skills (same header shape; passes `bootstrap.parse_file` **and**
-`bootstrap._validate`, asserted in the fidelity test) and reaches the agent by
-**whatever path its siblings use** — no corpus rebuild required, no separate wheel
-bump beyond the unreleased 6.12.0 the `_packs/**` edits ride.
+`bootstrap._validate`, asserted in the fidelity test).
 
-**One open question (flagged, not silently resolved):** the exact delivery path from
-`_packs/meta/*.md` to a *running* add-skill agent — reference-doc read vs a
-bootstrap step in out-of-repo release tooling vs the separate `agentalloy-authoring`
-package — is **not determinable from this repo**. It does not block slice 2 (the
-producer is byte-for-pattern identical to its working siblings), but if the siblings
-turn out to need an explicit enumeration entry somewhere in release tooling, the new
-skill needs the same entry. Confirm the meta-skill delivery mechanism before relying
-on the producer in a live add-skill session.
+**CONFIRMED (2026-07-14, user): none of the 5 existing meta skills reach a running
+agent either.** The meta-skill bootstrap-into-corpus wiring was started at some
+point and never finished; the worktree for it no longer exists. This is a
+**pre-existing gap**, independent of and pre-dating this feature — `sdd-add-skill`'s
+reference to `sys-skill-authoring-rules` "in the corpus" has been dangling since it
+was written. See memory `meta-skill-delivery-gap` for the full audit trail. The new
+producer sits at exact parity with its siblings: correctly shaped, ready to ride
+along the moment that wiring lands, **not live today**. Finishing that wiring is a
+separate, feature-sized task — out of scope here and not started as part of this
+slice.
