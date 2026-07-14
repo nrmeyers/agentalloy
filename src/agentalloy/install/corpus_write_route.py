@@ -91,6 +91,7 @@ def install_or_route(
     root: Path | None = None,
     strict: bool = True,
     allow_duplicates: bool = False,
+    allow_unreviewed: bool = False,
     reembed: bool = True,
     route_fn: Callable[[], CorpusWriteRoute] | None = None,
     push_fn: Callable[..., dict[str, Any]] | None = None,
@@ -132,6 +133,7 @@ def install_or_route(
         root=root,
         strict=strict,
         allow_duplicates=allow_duplicates,
+        allow_unreviewed=allow_unreviewed,
         run_reembed=reembed,
     )
 

@@ -422,3 +422,32 @@ def validate_review_verdicts(
             skill_errors.append(SkillValidationError(skill_id=skill_id, file=fname, errors=errs))
 
     return PackValidationResult(ok=len(skill_errors) == 0, errors=skill_errors)
+
+
+def review_modes(pack_dir: Path) -> list[str]:
+    """Distinct ``reviewer.mode`` values declared in ``review.yaml`` — provenance
+    for the result contract (surfaced to the human approver / telemetry).
+
+    Best-effort and side-effect-free: returns ``[]`` on a missing or malformed
+    file rather than raising (the gate itself has already judged validity)."""
+    import yaml  # noqa: PLC0415
+
+    path = pack_dir / REVIEW_FILENAME
+    if not path.is_file():
+        return []
+    try:
+        data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — provenance only; never fail the caller
+        return []
+    if not isinstance(data, dict):
+        return []
+    reviews: Any = cast("dict[str, Any]", data).get("reviews")
+    if not isinstance(reviews, list):
+        return []
+    modes: set[str] = set()
+    for item in cast("list[Any]", reviews):
+        if isinstance(item, dict):
+            mode = ReviewVerdict.from_entry(cast("dict[str, Any]", item)).reviewer_mode
+            if mode:
+                modes.add(mode)
+    return sorted(modes)
