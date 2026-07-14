@@ -60,13 +60,32 @@ folder (`approach.md`, `tasks.md`, `test-plan.md`), resolving slice-2 decisions 
 Per-task build contracts (design→build hand-off) are in
 `install-pack-semantic-gate.slice2.build/`.
 
-## The honest scope boundary (what "done" costs)
+## The honest scope boundary (verified at build — corrected from the pre-build guess)
 
-Authoring the producer `.md` is a **corpus content change**, not a pure file drop.
-Meta `.md` skills are served corpus skills: `bootstrap.py` parses each via
-`skill_md/parser.py` and inserts it into the DuckDB store. So for
-`sys-skill-review-verdict` to be *retrievable* by the operator's agent, the shipped
-corpus must be **rebuilt + re-embedded**, and the wheel/image **version-bumped**
-(shipped-surface rule) — a ship step, done at release, not in this design. The
-build contracts author the source + the fidelity test; they do **not** perform the
-rebuild or flip the flag.
+The pre-build design guessed the producer was a *retrieval-corpus* change requiring
+a rebuild + re-embed. **Build orientation proved otherwise.** Verified facts:
+
+- `meta/` and `conventions/` have **no `pack.yaml`**; `_discover_packs` only finds
+  `*/pack.yaml`, and neither appears in `agentalloy install-packs --list`. The CI
+  corpus builder is `install-packs --packs all` (see `.github/workflows/corpus-nightly.yml`,
+  `container-build.yml`) — so **the 5 existing meta skills are NOT in the served
+  retrieval corpus**, and neither is the new one. No in-repo script bootstraps
+  `_packs/meta/*.md` into DuckDB.
+- Meta `.md` skills ship in the **wheel** as authoring/reference material, referenced
+  **by name** from retrieved workflow skills (e.g. `sdd-add-skill` names
+  `sys-skill-authoring-rules` and now `sys-skill-review-verdict`).
+
+So `sys-skill-review-verdict` is authored as a **structural peer** of the 5 working
+meta skills (same header shape; passes `bootstrap.parse_file` **and**
+`bootstrap._validate`, asserted in the fidelity test) and reaches the agent by
+**whatever path its siblings use** — no corpus rebuild required, no separate wheel
+bump beyond the unreleased 6.12.0 the `_packs/**` edits ride.
+
+**One open question (flagged, not silently resolved):** the exact delivery path from
+`_packs/meta/*.md` to a *running* add-skill agent — reference-doc read vs a
+bootstrap step in out-of-repo release tooling vs the separate `agentalloy-authoring`
+package — is **not determinable from this repo**. It does not block slice 2 (the
+producer is byte-for-pattern identical to its working siblings), but if the siblings
+turn out to need an explicit enumeration entry somewhere in release tooling, the new
+skill needs the same entry. Confirm the meta-skill delivery mechanism before relying
+on the producer in a live add-skill session.

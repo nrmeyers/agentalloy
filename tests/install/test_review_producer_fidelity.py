@@ -155,10 +155,14 @@ def test_producer_and_test_have_no_llm_or_network() -> None:
     assert "never call" in producer and "review YAML" in producer
 
 
-def test_producer_skill_parses_as_a_meta_skill() -> None:
-    """The new meta skill must parse via the bootstrap loader (well-formed header)."""
+def test_producer_skill_passes_the_bootstrap_gate() -> None:
+    """The new meta skill must clear the *actual* gate it faces at corpus-build
+    time — `bootstrap.parse_file` → `bootstrap._validate` → insert — not just parse.
+    This catches a prose-length/vocab/header defect now instead of at rebuild."""
+    from agentalloy.bootstrap import _validate
     from agentalloy.skill_md.parser import parse_file
 
     parsed = parse_file(_PRODUCER_DOC)
     assert parsed.skill_id == "sys-skill-review-verdict"
     assert parsed.category == "tooling"
+    assert _validate(parsed) == [], "producer fails bootstrap._validate — would break the rebuild"
