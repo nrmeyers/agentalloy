@@ -16,13 +16,9 @@ export interface ConfigData {
   log_level: string;
   dedup_hard_threshold: number;
   dedup_soft_threshold: number;
-  bounce_budget: number;
   sdd_fast_require_approval: boolean;
   profile_root: string;
   forced_profile: string | null;
-  authoring_model: string;
-  authoring_critic_model: string;
-  authoring_lm_base_url: string;
   // Read-only display fields
   duckdb_path: string;
   fragments_lance_path: string;

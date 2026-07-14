@@ -45,7 +45,6 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # Retrieval tuning — pure behavior, no host paths.
         "DEDUP_HARD_THRESHOLD",
         "DEDUP_SOFT_THRESHOLD",
-        "BOUNCE_BUDGET",
         # Workflow policy toggle.
         "SDD_FAST_REQUIRE_APPROVAL",
         # Proxy upstream config — same unreachable-on-container bug class as

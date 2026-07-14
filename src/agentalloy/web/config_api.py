@@ -41,7 +41,6 @@ _EDITABLE_ENV: dict[str, str] = {
     "log_level": "LOG_LEVEL",
     "dedup_hard_threshold": "DEDUP_HARD_THRESHOLD",
     "dedup_soft_threshold": "DEDUP_SOFT_THRESHOLD",
-    "bounce_budget": "BOUNCE_BUDGET",
     "sdd_fast_require_approval": "SDD_FAST_REQUIRE_APPROVAL",
     "profile_root": "PROFILE_ROOT",
     "forced_profile": "FORCED_PROFILE",
@@ -50,7 +49,7 @@ _EDITABLE_ENV: dict[str, str] = {
     "code_index_watch": "CODE_INDEX_WATCH",
 }
 _FLOAT_FIELDS = ("dedup_hard_threshold", "dedup_soft_threshold")
-_INT_FIELDS = ("bounce_budget",)
+_INT_FIELDS: tuple[str, ...] = ()
 _BOOL_FIELDS = (
     "sdd_fast_require_approval",
     "compose_enabled",
@@ -176,7 +175,6 @@ async def get_config() -> dict[str, Any]:
         "log_level": s.log_level,
         "dedup_hard_threshold": s.dedup_hard_threshold,
         "dedup_soft_threshold": s.dedup_soft_threshold,
-        "bounce_budget": s.bounce_budget,
         "sdd_fast_require_approval": s.sdd_fast_require_approval,
         "profile_root": s.profile_root,
         "forced_profile": s.forced_profile,

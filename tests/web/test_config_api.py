@@ -23,7 +23,6 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # monkeypatch teardown restores them for the rest of the worker.
     for var, val in (
         ("LOG_LEVEL", "INFO"),
-        ("BOUNCE_BUDGET", "3"),
         ("SDD_FAST_REQUIRE_APPROVAL", "0"),
     ):
         monkeypatch.setenv(var, val)
@@ -81,20 +80,19 @@ def test_put_validates_threshold_cross_field(client):
 def test_put_writes_env_and_reload_applies(client, tmp_path: Path):
     r = client.put(
         "/api/config",
-        json={"log_level": "DEBUG", "bounce_budget": 5, "sdd_fast_require_approval": True},
+        json={"log_level": "DEBUG", "sdd_fast_require_approval": True},
         headers=_CSRF,
     )
     assert r.status_code == 200
     env_file = _env_file(tmp_path)
     content = env_file.read_text()
     assert "LOG_LEVEL=DEBUG" in content
-    assert "BOUNCE_BUDGET=5" in content
     assert "SDD_FAST_REQUIRE_APPROVAL=1" in content
 
     r = client.post("/api/config/reload", headers=_CSRF)
     assert r.status_code == 200
     assert os.environ["LOG_LEVEL"] == "DEBUG"
-    assert client.get("/api/config").json()["bounce_budget"] == 5
+    assert client.get("/api/config").json()["sdd_fast_require_approval"] is True
 
 
 def test_put_preserves_unknown_env_lines(client, tmp_path: Path):

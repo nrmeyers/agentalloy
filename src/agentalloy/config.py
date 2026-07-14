@@ -72,7 +72,6 @@ class Settings(BaseSettings):
     embedding_provider: str = "openai_compat"
     dedup_hard_threshold: float = 0.92
     dedup_soft_threshold: float = 0.80
-    bounce_budget: int = 3
 
     # Human-approval gate on the sdd-fast lane (spec/design are always gated).
     # Bare-name env mapping ⇒ SDD_FAST_REQUIRE_APPROVAL. Default OFF: the fast
