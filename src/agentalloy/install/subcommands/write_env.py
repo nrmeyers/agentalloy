@@ -53,7 +53,6 @@ _KNOWN_KEYS = frozenset(
         "SIGNAL_INTENT_RERANK_MODEL",
         "DEDUP_HARD_THRESHOLD",
         "DEDUP_SOFT_THRESHOLD",
-        "BOUNCE_BUDGET",
         "LOG_LEVEL",
         "COMPOSE_ENABLED",
         "CODE_INDEX_ENABLED",

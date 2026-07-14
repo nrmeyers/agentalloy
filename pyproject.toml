@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "6.11.1"
+version = "6.12.0"
 description = "AgentAlloy — just-in-time context engine for coding agents. Two context modules: phase-aware instruction composition from a curated 300+ skill corpus, and an optional per-repo code index (tree-sitter symbol graph + hybrid search). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -112,12 +112,11 @@ indent-style = "space"
 
 [tool.pyright]
 include = ["src"]
-# Authoring subpackage is being redesigned — exclude from strict typecheck
-# until the new approach lands. See the navistone fork divergence note in
-# the 0875b29 merge commit (authoring kept here, removed on nrmeyers).
+# The retired authoring subpackage was removed (see agentalloy-authoring for
+# corpus authoring); the semantic install-pack gate is its runtime successor.
 # The vendored tree-sitter engine (see code_index/engine/VENDORED.md) keeps
 # upstream's looser typing; only the facade boundary is strict-checked.
-exclude = ["src/agentalloy/authoring/**", "src/agentalloy/code_index/engine/**", "tests/**"]
+exclude = ["src/agentalloy/code_index/engine/**", "tests/**"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

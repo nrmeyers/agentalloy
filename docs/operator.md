@@ -280,7 +280,6 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 - `SIGNAL_INTENT_RERANK_URL` — reranker llama-server URL
 - `SIGNAL_INTENT_RERANK_MODEL` — reranker model GGUF
 - `DEDUP_HARD_THRESHOLD` / `DEDUP_SOFT_THRESHOLD` — dedup cosine thresholds (defaults `0.92` / `0.80`)
-- `BOUNCE_BUDGET` — re-bounce budget (compose retry budget)
 - `PROFILE_ROOT` — per-profile datastores root
 - `LOG_LEVEL` — service log level
 - `COMPOSE_ENABLED` — the instruction-injector module (compose/retrieve/proxy; default on)

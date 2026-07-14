@@ -8,7 +8,7 @@
 **author:** navistone
 **change_summary:** initial authoring 2026-05-04 — meta pack, derived from fixtures/skill-authoring-guidelines.md (verified 2026-05-04). Captures R1–R8 quality contract for new skill source authoring.
 
-The eight rules below are the quality contract for writing a NEW skill source from scratch. Apply BEFORE the source-to-review-YAML transform contract (`sys-skill-transform-contract`). Each rule cites the shipped failure that produced it. Treat as a checklist — if a rule cannot be satisfied, drop the example or the claim, do not paper over it.
+The eight rules below are the quality contract for writing a NEW skill source from scratch. Each rule cites the shipped failure that produced it. Treat as a checklist — if a rule cannot be satisfied, drop the example or the claim, do not paper over it.
 
 Reviews informing these rules:
 
@@ -57,7 +57,6 @@ A short rationale fragment without the keywords a real query would use is under-
 3. Self-review verification fragments against R3 and rationale fragments against R8.
 4. Dispatch an independent critic with this rules document plus the latest review history.
 5. Single revision pass — line-level fixes only, resist redesigns.
-6. Hand off to `sys-skill-transform-contract` for source → review YAML.
 
 ## R9 — Deprecation workflow
 

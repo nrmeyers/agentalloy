@@ -876,8 +876,16 @@ def _run_container_guard(
             # run_reembed=False: this guard reembeds exactly once for the whole
             # run (below), not once per pack — install_local_pack's own default
             # (run_reembed=True) is for its standalone third-party caller.
+            # allow_unreviewed=True: the bundled corpus is curated, not agent-
+            # authored, and ships no review.yaml — it is exempt from the semantic
+            # review gate (Gate 1.5) even when AGENTALLOY_INSTALL_REQUIRE_REVIEW=1.
             r = install_local_pack(
-                pack_dir, root=root, no_restart=True, strict=False, run_reembed=False
+                pack_dir,
+                root=root,
+                no_restart=True,
+                strict=False,
+                allow_unreviewed=True,
+                run_reembed=False,
             )
             named_results.append((pack_name, r))
         # no_restart=True: reembed does NOT restart — this guard owns the lifecycle.

@@ -217,10 +217,10 @@ and build details.
    `Settings` (`config.py:50-151`): upstream (`upstream_url`, `upstream_model`,
    `upstream_api_key` masked, `anthropic_upstream_url`), embedding
    (`runtime_embed_base_url`, `runtime_embedding_model`, `embedding_provider`), runtime
-   (`log_level`, `dedup_hard_threshold`, `dedup_soft_threshold`, `bounce_budget`,
-   `sdd_fast_require_approval`), profile (`profile_root`, `forced_profile`),
-   authoring (`AUTHORING_*` via `AuthoringConfig`,
-   `config.py:17-34`), read-only paths (`duckdb_path`, `fragments_lance_path`,
+   (`log_level`, `dedup_hard_threshold`, `dedup_soft_threshold`,
+   `sdd_fast_require_approval`), profile (`profile_root`, `forced_profile`)
+   — the authoring config surface was removed with the authoring pipeline (see
+   the agentalloy-authoring package), read-only paths (`duckdb_path`, `fragments_lance_path`,
    `telemetry_db_path`). Show per-repo upstream overrides (`.agentalloy/upstream`)
    read-only with a pointer to the repos page.
 2. **Telemetry** — three tabs: Traces, Savings, and **Coverage v2**. The hook-era

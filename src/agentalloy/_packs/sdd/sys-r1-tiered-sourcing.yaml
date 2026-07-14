@@ -1,0 +1,50 @@
+skill_id: sys-r1-tiered-sourcing
+canonical_name: R1 Tiered Sourcing Procedure
+category: tooling
+skill_class: system
+always_apply: false
+phase_scope:
+- add-skill
+category_scope: null
+author: navistone
+change_summary: 'initial authoring 2026-05-04 — meta pack, defines registry-driven
+  R1 source-fetch procedure replacing ad-hoc web research. References fixtures/upstream/registry.yaml
+  + fixtures/upstream/curated/. 2026-07-14: converted from _packs/meta/sys-r1-tiered-sourcing.md
+  to a phase-scoped system skill (meta-skill-corpus-delivery, DK4, second pass) —
+  content unchanged.'
+raw_prose: |
+  R1 in `sys-skill-authoring-rules` requires fetching authoritative documentation before authoring against fast-moving APIs. This skill operationalizes R1 with a tiered registry. Do not do ad-hoc web research when a curated source exists — the registry is the single source of truth for sourcing decisions.
+
+  ## Step 1 — registry lookup
+
+  Before fetching anything, open `fixtures/upstream/registry.yaml` and find the vendor or language entry for the skill being authored. Each entry has a `tier:` field with one of three values.
+
+  If a vendor or language is not in `registry.yaml`, add it before authoring. Do not skip the registry step. Probing is mechanical: HEAD-check `https://<root>/llms.txt` and `https://<root>/llms-full.txt`. Both 200 → tier-1; only the index 200 → tier-2; neither 200 → tier-3 (record `fallback_root`).
+
+  ## Step 2 — fetch by tier
+
+  ### Tier-1 — `llms_url` and `llms_full_url` both present
+
+  Fetch `llms_full_url` via `ctx_fetch_and_index`. The full document is the R1 source. Slice the section relevant to the skill topic by heading. The `llms_url` index can help identify which heading to slice to. Tier-1 vendors as of 2026-05-04 include Anthropic, LaunchDarkly, Linear, Vercel, Supabase, Cloudflare, Hono, Drizzle, Prisma, Slack API, Expo, Vue, Fastify, NestJS, Temporal, dbt, Sentry (use `sentry.io` root, NOT `docs.sentry.io`), Docker, Turborepo, Vite, Vitest, Pydantic, Django, SQLAlchemy, Kotlin.
+
+  ### Tier-2 — `llms_url` only
+
+  Fetch `llms_url` first to get the curated URL index. Identify the two to five pages most relevant to the skill topic. Fetch those pages individually via `ctx_fetch_and_index`. The fetched pages are the R1 source. Tier-2 vendors as of 2026-05-04 include Stripe, GrowthBook, Resend, Svix, GitHub, Next.js, TanStack, MongoDB, Redis, React, PyTorch.
+
+  ### Tier-3 — neither index nor full content
+
+  Open `fixtures/upstream/curated/<language>.yaml` (e.g. `python.yaml`, `java.yaml`, `go.yaml`, `typescript.yaml`, `nodejs.yaml`, `rust.yaml`, `csharp.yaml`, `ruby.yaml`, `php.yaml`, `swift.yaml`). Find the relevant `topics.<topic>` section. Fetch the listed URLs via `ctx_fetch_and_index`. The fetched pages are the R1 source. If no curated file exists for the language yet, fall back to `fallback_root` in `registry.yaml` and fetch the relevant subtree directly.
+
+  All language stdlibs (Python, Java, Go, Rust, Node, TypeScript, C#, Ruby, PHP, Swift) are systematically tier-3 because standards organizations have not adopted llms.txt. The curated lists were HEAD-verified at authoring time (349 of 352 URLs survived as of 2026-05-04).
+
+  ## Step 3 — gotchas
+
+  - **Oracle `docs.oracle.com/javase` returns HTTP 200 but is an HTML soft-404.** Java SE is tier-3 — use `fallback_root` in the registry, not the index page.
+  - **Sentry has two roots.** `sentry.io` is the canonical llms-full source; `docs.sentry.io` is not the same content. The registry pins the correct root.
+  - **Vendor llms.txt files change without notice.** Re-probe before each authoring batch; sites add or move llms.txt frequently.
+
+  ## Verified
+
+  - Registry probed 2026-05-04 (57 vendors).
+  - Curated URL lists for 10 tier-3 languages HEAD-verified 2026-05-04 (349/352 URLs survived, 99.1%).
+  - Priority-3 languages (Elixir, Scala, Clojure, Haskell, OCaml, Zig) are deferred — no curated file yet; use the language's primary docs root via `fallback_root` until added.

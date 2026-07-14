@@ -338,6 +338,7 @@ class TestRunStrictAndDedupWiring:
             "manifest_url": None,
             "allow_lint_warnings": False,
             "allow_duplicates": False,
+            "allow_unreviewed": False,
             "json": True,  # avoid the human-readable renderer touching stdout
             "quiet": False,
         }
@@ -355,7 +356,11 @@ class TestRunStrictAndDedupWiring:
             rc = ip._run(self._args())  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
         m.assert_called_once_with(
-            "frontend", manifest_url=None, strict=True, allow_duplicates=False
+            "frontend",
+            manifest_url=None,
+            strict=True,
+            allow_duplicates=False,
+            allow_unreviewed=False,
         )
         assert rc == 0
 
@@ -370,7 +375,11 @@ class TestRunStrictAndDedupWiring:
             rc = ip._run(self._args(allow_lint_warnings=True))  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
         m.assert_called_once_with(
-            "frontend", manifest_url=None, strict=False, allow_duplicates=False
+            "frontend",
+            manifest_url=None,
+            strict=False,
+            allow_duplicates=False,
+            allow_unreviewed=False,
         )
         assert rc == 0
 
@@ -382,7 +391,13 @@ class TestRunStrictAndDedupWiring:
         ) as m:
             rc = ip._run(self._args(allow_duplicates=True))  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
-        m.assert_called_once_with("frontend", manifest_url=None, strict=True, allow_duplicates=True)
+        m.assert_called_once_with(
+            "frontend",
+            manifest_url=None,
+            strict=True,
+            allow_duplicates=True,
+            allow_unreviewed=False,
+        )
         assert rc == 0
 
     def test_nonzero_dedup_exit_code_is_a_failure(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -454,5 +469,10 @@ class TestInstallLocalPackAutoRouteStrictForwarding:
         with patch.object(ip, "install_local_pack", return_value={"action": "ingested"}) as m:
             ip.install_pack(str(tmp_path), root=tmp_path, strict=False, allow_duplicates=True)
         m.assert_called_once_with(
-            tmp_path, root=tmp_path, strict=False, allow_duplicates=True, run_reembed=True
+            tmp_path,
+            root=tmp_path,
+            strict=False,
+            allow_duplicates=True,
+            allow_unreviewed=False,
+            run_reembed=True,
         )

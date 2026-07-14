@@ -21,6 +21,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -44,7 +45,9 @@ from agentalloy.pack_validation import (
     check_version_gate,
     content_hash,
     expected_active_skill_ids,
+    review_modes,
     validate_pack_skills,
+    validate_review_verdicts,
 )
 from agentalloy.storage.open import open_fragments, open_skills
 from agentalloy.storage.skill_store import is_lock_held_error
@@ -602,6 +605,7 @@ def install_local_pack(
     no_restart: bool = False,
     strict: bool = True,
     allow_duplicates: bool = False,
+    allow_unreviewed: bool = False,
     run_reembed: bool = True,
 ) -> dict[str, Any]:
     """Install a pack from a local directory (containing pack.yaml + YAMLs).
@@ -642,6 +646,8 @@ def install_local_pack(
         raise TypeError(f"strict must be bool, got {type(strict).__name__}")
     if not isinstance(allow_duplicates, bool):
         raise TypeError(f"allow_duplicates must be bool, got {type(allow_duplicates).__name__}")
+    if not isinstance(allow_unreviewed, bool):
+        raise TypeError(f"allow_unreviewed must be bool, got {type(allow_unreviewed).__name__}")
     t0 = time.monotonic()
     pack_dir = pack_dir.resolve()
 
@@ -698,6 +704,47 @@ def install_local_pack(
             ),
             "duration_ms": int((time.monotonic() - t0) * 1000),
         }
+
+    # --- Gate 1.5: Semantic review gate ---
+    # A fresh, approving review.yaml verdict (authored upstream by the operator's
+    # coding agent) is required per skill. The gate is pure/deterministic — it
+    # validates the artifact, never calls an LLM.
+    #
+    # Ships DORMANT: enforced only when AGENTALLOY_INSTALL_REQUIRE_REVIEW=1. The
+    # verdict PRODUCER (the skill-review workflow) is a later slice; until it
+    # exists, default-on would break every install path that has no review.yaml
+    # (the bundled install-packs bootstrap, the web add-skill lane, the service
+    # ingest router). Off by default keeps them working; flip the flag on once a
+    # producer ships. --allow-unreviewed is the per-invocation override when the
+    # flag is on; AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW=1 rejects mode: self.
+    gate_1_5: dict[str, Any]
+    if os.environ.get("AGENTALLOY_INSTALL_REQUIRE_REVIEW") != "1":
+        gate_1_5 = {"status": "disabled", "modes": []}
+    elif allow_unreviewed:
+        gate_1_5 = {"status": "bypassed", "reason": "--allow-unreviewed", "modes": []}
+    else:
+        require_independent = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW") == "1"
+        review_result = validate_review_verdicts(
+            pack_dir, skills_entries, require_independent=require_independent
+        )
+        if not review_result.ok:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "action": "review_failed",
+                "pack": name,
+                "pack_dir": str(pack_dir),
+                "errors": [
+                    {"skill_id": e.skill_id, "file": e.file, "errors": e.errors}
+                    for e in review_result.errors
+                ],
+                "remediation": (
+                    "Each skill needs a fresh, approving review.yaml verdict. Re-run the "
+                    "skill-review workflow to (re)generate it, or pass --allow-unreviewed to "
+                    "install without a semantic review.\n" + review_result.format_errors()
+                ),
+                "duration_ms": int((time.monotonic() - t0) * 1000),
+            }
+        gate_1_5 = {"status": "passed", "modes": review_modes(pack_dir)}
 
     # --- Gate 2: Version gate ---
     state_for_version = install_state.load_state(root)
@@ -820,6 +867,7 @@ def install_local_pack(
             "action": "ingested_with_errors",
             "pack": name,
             "pack_dir": str(pack_dir),
+            "gate_1_5": gate_1_5,
             "skills_ingested": 0,
             "skills_already_present": duplicate_count,
             "skills_deprecated": deprecated_count,
@@ -930,6 +978,7 @@ def install_local_pack(
         "source": f"local:{pack_dir}",
         "version": manifest.get("version"),
         "skill_count": len(skills_entries),
+        "gate_1_5": gate_1_5,
         "skills_ingested": new_count,
         "skills_already_present": duplicate_count,
         "skills_deprecated": deprecated_count,
@@ -956,6 +1005,7 @@ def install_pack(
     *,
     strict: bool = True,
     allow_duplicates: bool = False,
+    allow_unreviewed: bool = False,
 ) -> dict[str, Any]:
     """Install a skill pack. Returns contract-shaped result.
 
@@ -985,7 +1035,11 @@ def install_pack(
         from agentalloy.install.corpus_write_route import install_or_route
 
         return install_or_route(
-            candidate, root=root, strict=strict, allow_duplicates=allow_duplicates
+            candidate,
+            root=root,
+            strict=strict,
+            allow_duplicates=allow_duplicates,
+            allow_unreviewed=allow_unreviewed,
         )
 
     # Otherwise: remote pack-by-name flow.
@@ -1344,6 +1398,15 @@ def add_parser(
             "warning. Vectors are always written; this only controls the exit code."
         ),
     )
+    p.add_argument(
+        "--allow-unreviewed",
+        action="store_true",
+        help=(
+            "Bypass the semantic review gate (Gate 1.5) for this install — install "
+            "without a review.yaml verdict. Only relevant when "
+            "AGENTALLOY_INSTALL_REQUIRE_REVIEW=1; the bypass is recorded in the result."
+        ),
+    )
     add_json_flag(p)
     p.set_defaults(func=_run)
 
@@ -1408,6 +1471,7 @@ def _run(args: argparse.Namespace) -> int:
         manifest_url=args.manifest_url,
         strict=not args.allow_lint_warnings,
         allow_duplicates=args.allow_duplicates,
+        allow_unreviewed=args.allow_unreviewed,
     )
     write_result(result, args, human_fn=_render_human)
     if result.get("ingest_failures", 0) > 0:

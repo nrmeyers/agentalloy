@@ -24,13 +24,9 @@ interface FormState {
   log_level: string;
   dedup_hard_threshold: number;
   dedup_soft_threshold: number;
-  bounce_budget: string;
   sdd_fast_require_approval: boolean;
   profile_root: string;
   forced_profile: string;
-  authoring_model: string;
-  authoring_critic_model: string;
-  authoring_lm_base_url: string;
 }
 
 function seedForm(config: ConfigData): FormState {
@@ -45,13 +41,9 @@ function seedForm(config: ConfigData): FormState {
     log_level: config.log_level,
     dedup_hard_threshold: config.dedup_hard_threshold,
     dedup_soft_threshold: config.dedup_soft_threshold,
-    bounce_budget: String(config.bounce_budget),
     sdd_fast_require_approval: config.sdd_fast_require_approval,
     profile_root: config.profile_root,
     forced_profile: config.forced_profile ?? '',
-    authoring_model: config.authoring_model,
-    authoring_critic_model: config.authoring_critic_model,
-    authoring_lm_base_url: config.authoring_lm_base_url,
   };
 }
 
@@ -93,10 +85,6 @@ function buildPartial(config: ConfigData, form: FormState): ConfigUpdate {
   if (form.dedup_soft_threshold !== config.dedup_soft_threshold) {
     partial.dedup_soft_threshold = form.dedup_soft_threshold;
   }
-  const bounce = Number(form.bounce_budget);
-  if (bounce !== config.bounce_budget) {
-    partial.bounce_budget = bounce;
-  }
   if (form.sdd_fast_require_approval !== config.sdd_fast_require_approval) {
     partial.sdd_fast_require_approval = form.sdd_fast_require_approval;
   }
@@ -105,15 +93,6 @@ function buildPartial(config: ConfigData, form: FormState): ConfigUpdate {
   }
   if (nullable(form.forced_profile) !== config.forced_profile) {
     partial.forced_profile = nullable(form.forced_profile);
-  }
-  if (form.authoring_model !== config.authoring_model) {
-    partial.authoring_model = form.authoring_model;
-  }
-  if (form.authoring_critic_model !== config.authoring_critic_model) {
-    partial.authoring_critic_model = form.authoring_critic_model;
-  }
-  if (form.authoring_lm_base_url !== config.authoring_lm_base_url) {
-    partial.authoring_lm_base_url = form.authoring_lm_base_url;
   }
   return partial;
 }
@@ -181,10 +160,6 @@ export function ConfigPage() {
 
   const validate = (): Record<string, string> => {
     const errs: Record<string, string> = {};
-    const bounce = Number(form.bounce_budget);
-    if (!Number.isInteger(bounce) || bounce < 1 || bounce > 10) {
-      errs.bounce_budget = 'Must be an integer between 1 and 10';
-    }
     if (form.dedup_hard_threshold < 0.5 || form.dedup_hard_threshold > 1.0) {
       errs.dedup_hard_threshold = 'Must be between 0.50 and 1.00';
     }
@@ -348,16 +323,6 @@ export function ConfigPage() {
             onChange={(v) => set('dedup_soft_threshold', v)}
           />
         </FormField>
-        <FormField label="Bounce Budget" hint="Min: 1, Max: 10" error={errors.bounce_budget}>
-          <input
-            type="number"
-            min={1}
-            max={10}
-            value={form.bounce_budget}
-            onChange={(e) => set('bounce_budget', e.target.value)}
-            className={inputClass}
-          />
-        </FormField>
         <FormField label="SDD Fast Require Approval">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input
@@ -378,25 +343,6 @@ export function ConfigPage() {
         </FormField>
         <FormField label="Forced Profile" hint="Empty = auto-resolve">
           <TextInput value={form.forced_profile} onChange={(v) => set('forced_profile', v)} />
-        </FormField>
-      </Card>
-
-      <Card>
-        <h2 className="text-lg font-semibold mb-4">Authoring</h2>
-        <FormField label="Model">
-          <TextInput value={form.authoring_model} onChange={(v) => set('authoring_model', v)} />
-        </FormField>
-        <FormField label="Critic Model">
-          <TextInput
-            value={form.authoring_critic_model}
-            onChange={(v) => set('authoring_critic_model', v)}
-          />
-        </FormField>
-        <FormField label="LM Base URL">
-          <TextInput
-            value={form.authoring_lm_base_url}
-            onChange={(v) => set('authoring_lm_base_url', v)}
-          />
         </FormField>
       </Card>
 

@@ -8,7 +8,15 @@ domain_tags:
   - custom-skill
   - corpus
   - skill-pack
-requires: []
+requires:
+  - sys-skill-authoring-rules
+  - sys-skill-review-verdict
+  - sys-r1-tiered-sourcing
+  - sys-skill-tagging-rules
+  - sys-fragment-types-and-sizing
+  - sys-skill-naming
+  - sys-skill-output-formatting
+  - sys-skill-writing-voice
 always_apply: false
 applies_to_phases:
   - add-skill
@@ -61,7 +69,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "add-skill lane workflow — guided custom-skill authoring (class choice → draft → R1-R9 self-critique → scaffold + validate → unconditional human approval → install), third intake route alongside full and fast"
+change_summary: "add-skill lane workflow — guided custom-skill authoring (class choice → draft → R1-R9 self-critique → scaffold + validate → unconditional human approval → install), third intake route alongside full and fast. 2026-07-14: step 3 now emits the review.yaml verdict per sys-skill-review-verdict, feeding install-pack's semantic Gate 1.5 when AGENTALLOY_INSTALL_REQUIRE_REVIEW is on. 2026-07-14: steps 2-3 now name sys-r1-tiered-sourcing, sys-skill-tagging-rules, sys-fragment-types-and-sizing, sys-skill-naming, sys-skill-output-formatting, sys-skill-writing-voice at their point of use — all 6 converted from unreachable meta/conventions markdown to phase-scoped system skills (requires: added for provenance) delivered alongside this workflow at add-skill phase entry."
 raw_prose: |
   # SDD — Add a Custom Skill (add-skill)
 
@@ -84,21 +92,36 @@ raw_prose: |
 
   ## 2. Draft it
 
-  Write the `raw_prose` first: concrete, imperative, self-contained. For a domain
-  skill, slice it into 3+ fragments across the six-type taxonomy — `execution`,
-  `verification`, and `rationale` at minimum (the scaffold enforces the same
-  floor). Every fragment must stand alone: a reader landing on it cold should know
-  what to do without the surrounding prose.
+  Write the `raw_prose` first: concrete, imperative, self-contained, in the
+  second-person directive voice per `sys-skill-writing-voice` (no hedging, no
+  throat-clearing) and formatted per `sys-skill-output-formatting` (labelled code
+  fences, ATX headings, dated citations). For a domain skill, slice it into 3+
+  fragments across the six-type taxonomy — `execution`, `verification`, and
+  `rationale` at minimum (the scaffold enforces the same floor); see
+  `sys-fragment-types-and-sizing` for all six types, the word-count band, and the
+  contiguity rule against `raw_prose`. Every fragment must stand alone: a reader
+  landing on it cold should know what to do without the surrounding prose. Name
+  the skill and choose `domain_tags` per `sys-skill-naming` and
+  `sys-skill-tagging-rules`.
 
-  ## 3. Self-critique against R1–R9
+  ## 3. Self-critique against R1–R9, then emit the verdict
 
   Check the draft against the authoring contract in the corpus's
   `sys-skill-authoring-rules` (the R1–R9 quality rules) — all nine, with an
   explicit verdict per rule. For a hand-authored, non-sourced skill some rules are
   legitimately **N/A** — say so per rule, don't silently skip: tiered sourcing is
-  N/A when the skill isn't derived from an external framework's docs; date-stamping
-  is N/A for claims with no version dependency. A rule that isn't N/A must pass, or
-  the draft goes another round.
+  N/A when the skill isn't derived from an external framework's docs (when it does
+  apply, follow the registry-driven procedure in `sys-r1-tiered-sourcing` rather
+  than ad-hoc web research); date-stamping is N/A for claims with no version
+  dependency. A rule that isn't N/A must pass, or the draft goes another round.
+
+  Then turn that evaluation into the **verdict artifact `review.yaml`** per
+  `sys-skill-review-verdict` — a per-rule `checks` map plus a hash of the final
+  skill bytes, written into the pack dir beside `pack.yaml`. This makes the
+  critique machine-checkable instead of prose-only: when the operator has the
+  semantic gate on (`AGENTALLOY_INSTALL_REQUIRE_REVIEW=1`), install-pack's Gate 1.5
+  requires this verdict. Emit it **after** validate-pack passes (step 4), so the
+  hash binds to the final bytes.
 
   ## 4. Scaffold and validate
 
@@ -117,6 +140,10 @@ raw_prose: |
   Don't reach for `--allow-lint-warnings` unless the user has explicitly accepted
   a specific warning.
 
+  Once validate reports zero errors, emit the **verdict `review.yaml`** (step 3,
+  per `sys-skill-review-verdict`) into the pack dir now — the draft bytes are
+  final, so the hash it binds to is stable.
+
   ## 5. Stop for human approval
 
   Present the final skill content — the actual prose and fragments, not a summary —
@@ -126,6 +153,11 @@ raw_prose: |
 
       agentalloy approve add-skill
       agentalloy install-pack .agentalloy/custom-skills/<pack-name>
+
+  When the operator has the semantic gate on (`AGENTALLOY_INSTALL_REQUIRE_REVIEW=1`),
+  install-pack blocks at Gate 1.5 without the `review.yaml` verdict from step 3;
+  `--allow-unreviewed` is the loud, recorded bypass — use it only if the operator
+  explicitly waives the review.
 
   Approval auto-advances the phase back to `intake` — don't run `phase set`
   yourself. If install's dedup gate reports a hard match, bring it back to the

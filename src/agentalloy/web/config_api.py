@@ -21,7 +21,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from agentalloy.config import AuthoringConfig, configure_logging, get_settings
+from agentalloy.config import configure_logging, get_settings
 
 router = APIRouter()
 
@@ -29,7 +29,7 @@ _MASK = "***"
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 # Editable field → env var written to the user-scoped .env. Bare names mirror
-# Settings' pydantic env mapping; AUTHORING_* mirrors AuthoringConfig's prefix.
+# Settings' pydantic env mapping.
 _EDITABLE_ENV: dict[str, str] = {
     "upstream_url": "UPSTREAM_URL",
     "upstream_model": "UPSTREAM_MODEL",
@@ -41,19 +41,15 @@ _EDITABLE_ENV: dict[str, str] = {
     "log_level": "LOG_LEVEL",
     "dedup_hard_threshold": "DEDUP_HARD_THRESHOLD",
     "dedup_soft_threshold": "DEDUP_SOFT_THRESHOLD",
-    "bounce_budget": "BOUNCE_BUDGET",
     "sdd_fast_require_approval": "SDD_FAST_REQUIRE_APPROVAL",
     "profile_root": "PROFILE_ROOT",
     "forced_profile": "FORCED_PROFILE",
     "compose_enabled": "COMPOSE_ENABLED",
     "code_index_enabled": "CODE_INDEX_ENABLED",
     "code_index_watch": "CODE_INDEX_WATCH",
-    "authoring_model": "AUTHORING_MODEL",
-    "authoring_critic_model": "AUTHORING_CRITIC_MODEL",
-    "authoring_lm_base_url": "AUTHORING_LM_BASE_URL",
 }
 _FLOAT_FIELDS = ("dedup_hard_threshold", "dedup_soft_threshold")
-_INT_FIELDS = ("bounce_budget",)
+_INT_FIELDS: tuple[str, ...] = ()
 _BOOL_FIELDS = (
     "sdd_fast_require_approval",
     "compose_enabled",
@@ -168,7 +164,6 @@ def _upsert_env_file(updates: dict[str, str | None]) -> str:
 @router.get("/api/config", summary="Current configuration (secrets masked)")
 async def get_config() -> dict[str, Any]:
     s = get_settings()
-    a = AuthoringConfig()
     return {
         "upstream_url": s.upstream_url or None,
         "upstream_model": s.upstream_model or None,
@@ -180,7 +175,6 @@ async def get_config() -> dict[str, Any]:
         "log_level": s.log_level,
         "dedup_hard_threshold": s.dedup_hard_threshold,
         "dedup_soft_threshold": s.dedup_soft_threshold,
-        "bounce_budget": s.bounce_budget,
         "sdd_fast_require_approval": s.sdd_fast_require_approval,
         "profile_root": s.profile_root,
         "forced_profile": s.forced_profile,
@@ -188,9 +182,6 @@ async def get_config() -> dict[str, Any]:
         "code_index_enabled": s.code_index_enabled,
         "code_index_watch": s.code_index_watch,
         "code_index_data_dir": s.code_index_data_dir,
-        "authoring_model": a.model,
-        "authoring_critic_model": a.critic_model,
-        "authoring_lm_base_url": a.lm_base_url,
         "duckdb_path": s.duckdb_path,
         "fragments_lance_path": s.fragments_lance_path,
         "telemetry_db_path": s.telemetry_db_path,
