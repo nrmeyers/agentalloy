@@ -28,9 +28,13 @@ Create `tests/install/test_meta_skill_delivery.py`:
 
 4. **Verbatim carryover**: for each of the two skills, read
    `_packs/meta/<skill_id>.md`, extract the body via `skill_md.parser.parse_file`
-   (its `raw_prose`), and assert it equals the delivered fragment's `content`
-   exactly. This is the regression guard against silent prose drift during any
-   future edit to either the YAML or the source `.md`.
+   (its `raw_prose`, which the parser `.strip()`s), and assert it equals the
+   delivered fragment's `content` **after `.strip()`ing both sides** — a YAML `|`
+   block scalar keeps a trailing newline the parser's `.strip()` already
+   discarded, so compare stripped-vs-stripped, not raw-vs-raw (a mismatch there is
+   whitespace noise, not real prose drift). This is the regression guard against
+   silent *content* drift during any future edit to either the YAML or the source
+   `.md`.
 
 5. **`requires` edges resolved**: query `skill_dependencies` (or the equivalent
    read helper) for `sdd-add-skill` and assert both targets are present with

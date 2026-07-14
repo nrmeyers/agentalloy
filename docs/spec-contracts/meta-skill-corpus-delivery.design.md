@@ -40,9 +40,16 @@ already proves. Closes spec AC 1, 3, 5 for these two skills specifically.
 
 Approach, task plan, and test cases live in the `meta-skill-corpus-delivery.design/`
 folder (`approach.md`, `tasks.md`, `test-plan.md`), resolving decisions as
-**DK1–DK6**. Acceptance is fixed by `meta-skill-corpus-delivery.spec.md` and is not
+**DK1–DK7**. Acceptance is fixed by `meta-skill-corpus-delivery.spec.md` and is not
 reopened here. Per-task build contracts (design→build hand-off) are in
 `meta-skill-corpus-delivery.build/`.
+
+**DK7 is the linchpin, verified end-to-end, not assumed:** the runtime `phase`
+value reaching `retrieve_system_fragments` actually equals `"add-skill"` — traced
+through `phase set add-skill` (already shipped in `sdd-intake.yaml`) →
+`run_phase_set` → `.agentalloy/phase` → `read_phase` → `req.phase` →
+`compose.py`'s call site, all verbatim, no translation. Without this the design's
+entire mechanism would be inert — see `approach.md` DK7 for the full chain.
 
 **Scope is deliberately narrow — see `approach.md`'s Scope boundary.** Of the 9
 meta/conventions skills the spec named, only these 2 have a confirmed live

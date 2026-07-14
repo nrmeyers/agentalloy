@@ -119,6 +119,38 @@ is ~900 words of directive prose with no reference-doc framing assumptions (no
 disambiguation, which is correct to keep). It reads correctly as a full injected
 guardrail. No edit needed.
 
+### DK7 — Phase-value linchpin, verified end-to-end (not assumed)
+
+The whole mechanism depends on the runtime `phase` value at the
+`retrieve_system_fragments` call site actually equaling the string `"add-skill"` —
+not just that `sdd-add-skill.yaml` declares `applies_to_phases: [add-skill]` (a
+different field, on the workflow-skill side, that does not by itself prove the
+retrieval-side value matches). Traced the full chain before committing to build:
+
+1. `"add-skill"` is a canonical, first-class phase —
+   `ingest._VALID_PHASES = {..., "add-skill"}` and `gates._PHASE_GRAPH["add-skill"]
+   = "intake"` (the post-approval phase-return target). Not invented for this
+   design.
+2. The literal command `agentalloy phase set add-skill` already exists in shipped
+   `sdd-intake.yaml` prose (`"phase set add-skill"` is one of intake's routing
+   options) — this is how a session actually enters the phase.
+3. `install/subcommands/phase.py::run_phase_set` validates against the same
+   `VALID_PHASES` set — `add-skill` is accepted, not rejected.
+4. `api/proxy_context.py::read_phase` → `signals/skill_loader._read_phase` reads
+   `.agentalloy/phase` and returns the **stripped string verbatim** — no
+   translation table, no renaming.
+5. `orchestration/compose.py` passes `phase=req.phase` straight into
+   `retrieve_system_fragments(phase=req.phase, category=None)` — `req.phase` is
+   the same verbatim string from step 4.
+
+Chain confirmed unbroken, end to end, by reading the actual code at each hop —
+not inferred from `applies_to_phases` alone (the trap: that field governs
+workflow-skill *retrieval* eligibility via the embedding/domain path, a different
+mechanism from the system-skill predicate this design relies on). `sys-ci`'s
+`phase_scope: [build, qa]` remains the closest working precedent, but `build`/`qa`
+being canonical didn't by itself prove `add-skill` behaves the same way — DK7 is
+that proof, not an inference from analogy.
+
 ## What stays untouched (boundary guards)
 
 - **No retrieval code changes.** `retrieval/system.py`, `applicability.py`,
