@@ -63,6 +63,12 @@ class IngestPackRequest(BaseModel):
         default=True,
         description="Run the post-ingest reembed. install-packs sends false on all but the last pack.",
     )
+    allow_unreviewed: bool = Field(
+        default=False,
+        description="Mirrors install-pack --allow-unreviewed — bypass Gate 1.5 for this pack, "
+        "recorded (not silent) in the result contract. The CLI computes this locally; the "
+        "service-mediated path must honor the same operator choice as the direct-write path.",
+    )
 
 
 def _disabled() -> bool:
@@ -158,6 +164,7 @@ def _run_ingest(app: Any, body: IngestPackRequest) -> dict[str, Any]:
                 no_restart=True,
                 strict=body.strict,
                 allow_duplicates=body.allow_duplicates,
+                allow_unreviewed=body.allow_unreviewed,
                 run_reembed=body.reembed,
             )
         refresh_runtime_cache(app)

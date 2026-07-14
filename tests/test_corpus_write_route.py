@@ -189,7 +189,7 @@ def test_push_forwards_strict(monkeypatch, pack_dir):
 def test_install_or_route_forwards_strict_to_service(monkeypatch, pack_dir):
     captured = {}
 
-    def fake_push(pack_dir, *, route, allow_duplicates, reembed, strict):
+    def fake_push(pack_dir, *, route, allow_duplicates, allow_unreviewed, reembed, strict):
         captured["strict"] = strict
         return {"action": "ingested"}
 
@@ -200,3 +200,23 @@ def test_install_or_route_forwards_strict_to_service(monkeypatch, pack_dir):
         push_fn=fake_push,
     )
     assert captured["strict"] is False
+
+
+def test_install_or_route_forwards_allow_unreviewed_to_service(monkeypatch, pack_dir):
+    """Regression: the CLI's --allow-unreviewed choice must reach the service path
+    the same as the direct-write path — previously silently dropped at the
+    via_service branch (an operator's explicit bypass would be ignored whenever a
+    service happened to be running)."""
+    captured = {}
+
+    def fake_push(pack_dir, *, route, allow_duplicates, allow_unreviewed, reembed, strict):
+        captured["allow_unreviewed"] = allow_unreviewed
+        return {"action": "ingested"}
+
+    mod.install_or_route(
+        pack_dir,
+        allow_unreviewed=True,
+        route_fn=lambda: CorpusWriteRoute("via_service", port=47950),
+        push_fn=fake_push,
+    )
+    assert captured["allow_unreviewed"] is True

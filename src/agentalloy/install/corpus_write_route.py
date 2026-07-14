@@ -121,6 +121,7 @@ def install_or_route(
             pack_dir,
             route=route,
             allow_duplicates=allow_duplicates,
+            allow_unreviewed=allow_unreviewed,
             reembed=reembed,
             strict=strict,
         )
@@ -157,6 +158,7 @@ def push_pack_to_service(
     *,
     route: CorpusWriteRoute,
     allow_duplicates: bool = False,
+    allow_unreviewed: bool = False,
     reembed: bool = True,
     strict: bool = True,
     post_fn: Callable[..., httpx.Response] | None = None,
@@ -176,6 +178,7 @@ def push_pack_to_service(
     payload = {
         "pack": _read_pack_files(pack_dir),
         "allow_duplicates": allow_duplicates,
+        "allow_unreviewed": allow_unreviewed,
         "reembed": reembed,
         "strict": strict,
     }

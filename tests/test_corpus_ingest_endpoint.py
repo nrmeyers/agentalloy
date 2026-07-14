@@ -125,6 +125,19 @@ def test_strict_flag_forwarded(client, released_flag):
     assert released_flag["kwargs"]["strict"] is False
 
 
+def test_allow_unreviewed_flag_forwarded(client, released_flag):
+    """Regression: install-pack --allow-unreviewed must reach install_local_pack
+    through the service-mediated path too, not just the direct-write path — the
+    operator's explicit Gate 1.5 bypass choice was previously silently dropped
+    whenever a service happened to be running."""
+    r = client.post("/corpus/ingest-pack", json=VALID_PACK, headers=GOOD_HEADERS)
+    assert released_flag["kwargs"]["allow_unreviewed"] is False  # default
+    body = dict(VALID_PACK, allow_unreviewed=True)
+    r = client.post("/corpus/ingest-pack", json=body, headers=GOOD_HEADERS)
+    assert r.status_code == 200
+    assert released_flag["kwargs"]["allow_unreviewed"] is True
+
+
 def test_hard_duplicate_refused_before_install(client, monkeypatch):
     class _Hit:
         skill_id = "existing-skill"
