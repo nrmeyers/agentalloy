@@ -24,7 +24,7 @@ For inline code, use single backticks for symbols (`hmac.compare_digest`), file 
 
 ## Tables
 
-Use GitHub-flavored markdown tables with explicit column alignment only when alignment carries meaning. Keep tables narrow — over six columns becomes unreadable in retrieval previews. Tables are usually `rationale` fragments, not `execution`, per the transform contract.
+Use GitHub-flavored markdown tables with explicit column alignment only when alignment carries meaning. Keep tables narrow — over six columns becomes unreadable in retrieval previews. Tables are usually `rationale` fragments, not `execution`.
 
 ## Lists
 
@@ -71,5 +71,4 @@ The conventional ordering for a domain skill source: rationale → setup → exe
 ## Verified
 
 - Code-fence labelling rules informed by `qwen3-embedding:0.6b` retrieval tests on labelled vs unlabelled blocks (verified 2026-04-29). Labelled blocks scored 12% higher on language-specific queries.
-- Table-as-rationale rule traces to the transform contract in `sys-skill-transform-contract` (verified 2026-05-04).
 - Citation date format matches R5 in `sys-skill-authoring-rules` (verified 2026-05-04).

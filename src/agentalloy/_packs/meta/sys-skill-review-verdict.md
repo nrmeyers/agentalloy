@@ -16,10 +16,10 @@ approves the draft. Produce it *after* the draft is final and `validate-pack` pa
 
 **Name discipline — do not conflate two artifacts.** `review.yaml` here is the
 **verdict**: skill_id, hash, approve/reject, per-rule check outcomes. It is **not**
-the "review YAML" of `sys-skill-transform-contract`, which is that skill's name for
-the *skill* YAML itself (the source→skill transform output). Different file, different
-purpose. In your output and prose, `review.yaml` always means the verdict; never call
-a skill YAML a "review YAML."
+the "review YAML" of the retired authoring pipeline — that older term named the
+*skill* YAML itself (a source-to-skill transform output), a different file for a
+different purpose. In your output and prose, `review.yaml` always means the
+verdict; never call a skill YAML a "review YAML."
 
 ## The trust boundary (why this matters, and its honest limit)
 
