@@ -20,13 +20,18 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 from agentalloy.install.subcommands.install_pack import _read_pack_manifest
-from agentalloy.pack_validation import PackValidationResult, validate_pack_skills
+from agentalloy.pack_validation import (
+    PackValidationResult,
+    validate_pack_skills,
+    validate_review_verdicts,
+)
 
 SCHEMA_VERSION = 1
 
@@ -61,7 +66,18 @@ def validate_pack(pack_dir: Path, *, strict: bool = True) -> dict[str, Any]:
         pack_dir, skills_entries, strict=strict
     )
 
-    ok = schema_result.ok and not manifest_errors
+    # Gate 1.5 (semantic review) is reported as a dry-run prediction of what
+    # install-pack would do under the SAME environment: always computed and shown,
+    # but only flips the pack to `invalid` when the gate is active
+    # (AGENTALLOY_INSTALL_REQUIRE_REVIEW=1). Pure/deterministic — zero side effects.
+    review_enabled = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_REVIEW") == "1"
+    require_independent = os.environ.get("AGENTALLOY_INSTALL_REQUIRE_INDEPENDENT_REVIEW") == "1"
+    review_result: PackValidationResult = validate_review_verdicts(
+        pack_dir, skills_entries, require_independent=require_independent
+    )
+    review_blocks = review_enabled and not review_result.ok
+
+    ok = schema_result.ok and not manifest_errors and not review_blocks
     return {
         "schema_version": SCHEMA_VERSION,
         "action": "valid" if ok else "invalid",
@@ -84,6 +100,19 @@ def validate_pack(pack_dir: Path, *, strict: bool = True) -> dict[str, Any]:
             for e in schema_result.errors
         ],
         "formatted_errors": schema_result.format_errors(),
+        "review": {
+            "enabled": review_enabled,
+            "ok": review_result.ok,
+            "status": (
+                "disabled" if not review_enabled else ("passed" if review_result.ok else "failed")
+            ),
+            "blocks": review_blocks,
+            "errors": [
+                {"skill_id": e.skill_id, "file": e.file, "errors": e.errors}
+                for e in review_result.errors
+            ],
+            "formatted_errors": review_result.format_errors(),
+        },
     }
 
 
@@ -98,8 +127,11 @@ def add_parser(
     p = subparsers.add_parser(
         "validate-pack",
         help=(
-            "Dry-run a local pack's schema + lint gate (install-pack's Gate 1) "
-            "with zero side effects — no ingestion, no network, no corpus mutation."
+            "Dry-run a local pack's install gates (schema+lint Gate 1 and the "
+            "semantic review Gate 1.5) with zero side effects — no ingestion, no "
+            "network, no corpus mutation. Predicts install-pack's outcome under the "
+            "current environment (Gate 1.5 blocks only when "
+            "AGENTALLOY_INSTALL_REQUIRE_REVIEW=1)."
         ),
     )
     p.add_argument(
@@ -146,6 +178,23 @@ def _render_human(result: dict[str, Any]) -> None:
             print_rich(f"  [green]PASS[/green] {sid} ({fname})")
 
     print_rich(f"\n  Passed: {passed}  Failed: {failed}  Total: {len(result.get('skills') or [])}")
+
+    review = result.get("review") or {}
+    status = review.get("status")
+    if status == "disabled":
+        print_rich(
+            "  Review gate (Gate 1.5): [dim]disabled[/dim] "
+            "(set AGENTALLOY_INSTALL_REQUIRE_REVIEW=1 to enforce)"
+        )
+    elif status == "passed":
+        print_rich("  Review gate (Gate 1.5): [green]passed[/green]")
+    elif status == "failed":
+        tag = "[red]FAIL[/red]" if review.get("blocks") else "[yellow]would fail[/yellow]"
+        print_rich(f"  Review gate (Gate 1.5): {tag}")
+        for msg in (review.get("formatted_errors") or "").splitlines():
+            if msg.strip():
+                print_rich(f"       {msg}")
+
     if result.get("ok"):
         print_rich("  [green]Pack is valid.[/green]\n")
     else:

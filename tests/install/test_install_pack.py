@@ -356,7 +356,11 @@ class TestRunStrictAndDedupWiring:
             rc = ip._run(self._args())  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
         m.assert_called_once_with(
-            "frontend", manifest_url=None, strict=True, allow_duplicates=False, allow_unreviewed=False
+            "frontend",
+            manifest_url=None,
+            strict=True,
+            allow_duplicates=False,
+            allow_unreviewed=False,
         )
         assert rc == 0
 
@@ -371,7 +375,11 @@ class TestRunStrictAndDedupWiring:
             rc = ip._run(self._args(allow_lint_warnings=True))  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
         m.assert_called_once_with(
-            "frontend", manifest_url=None, strict=False, allow_duplicates=False, allow_unreviewed=False
+            "frontend",
+            manifest_url=None,
+            strict=False,
+            allow_duplicates=False,
+            allow_unreviewed=False,
         )
         assert rc == 0
 
@@ -384,7 +392,11 @@ class TestRunStrictAndDedupWiring:
             rc = ip._run(self._args(allow_duplicates=True))  # pyright: ignore[reportPrivateUsage]
         capsys.readouterr()
         m.assert_called_once_with(
-            "frontend", manifest_url=None, strict=True, allow_duplicates=True, allow_unreviewed=False
+            "frontend",
+            manifest_url=None,
+            strict=True,
+            allow_duplicates=True,
+            allow_unreviewed=False,
         )
         assert rc == 0
 

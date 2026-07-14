@@ -320,7 +320,9 @@ def skill_file_sha256(pack_dir: Path, fname: str) -> str:
     return "sha256:" + hashlib.sha256((pack_dir / fname).read_bytes()).hexdigest()
 
 
-def _verdict_errors(v: ReviewVerdict, expected_hash: str, *, require_independent: bool) -> list[str]:
+def _verdict_errors(
+    v: ReviewVerdict, expected_hash: str, *, require_independent: bool
+) -> list[str]:
     errs: list[str] = []
     if v.target_hash != expected_hash:
         errs.append(

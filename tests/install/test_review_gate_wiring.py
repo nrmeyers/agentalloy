@@ -52,7 +52,13 @@ def _run_to_post_gate(tmp_path: Path, *, allow_unreviewed: bool = False) -> dict
     """Run install with a single failing ingest so it returns `ingested_with_errors`
     (which carries the gate_1_5 block) — used for pass/disabled/bypass assertions."""
     fake = [
-        {"yaml": "a.yaml", "exit_code": 2, "outcome": "failed", "stdout_tail": "", "stderr_tail": "x"}
+        {
+            "yaml": "a.yaml",
+            "exit_code": 2,
+            "outcome": "failed",
+            "stdout_tail": "",
+            "stderr_tail": "x",
+        }
     ]
     with (
         patch.object(ip, "_check_embedding_dim", return_value=None),
@@ -83,7 +89,9 @@ def test_gate_disabled_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 # --- enforcement (block cases return early, no ingest) ---------------------
 
 
-def test_missing_review_blocks_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_review_blocks_when_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv(REQUIRE, "1")
     _setup_pack(tmp_path)  # no review.yaml
     with patch.object(ip, "_check_embedding_dim", return_value=None):

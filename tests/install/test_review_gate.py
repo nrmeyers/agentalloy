@@ -177,7 +177,10 @@ def test_reviews_not_a_list_blocks(tmp_path: Path) -> None:
 def test_aggregates_per_skill_like_gate_one(tmp_path: Path) -> None:
     pack = _pack_with_skill(tmp_path)
     (pack / "second.yaml").write_bytes(b"skill_id: second\n")
-    entries = [{"skill_id": SKILL_ID, "file": SKILL_FILE}, {"skill_id": "second", "file": "second.yaml"}]
+    entries = [
+        {"skill_id": SKILL_ID, "file": SKILL_FILE},
+        {"skill_id": "second", "file": "second.yaml"},
+    ]
     # Only the first skill has a verdict.
     _write_review(pack, _good_verdict(pack))
     result = validate_review_verdicts(pack, entries)
