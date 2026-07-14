@@ -3,8 +3,10 @@
 **task_slug:** install-pack-semantic-gate
 **route:** full
 **related:** `docs/install-pack-quality-gate-spec.md` (the deterministic Gate 1
-this builds on), `docs/spec-contracts/compound-engineering-bridge.md` (the
-authoring workflow that can produce the verdict), `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md` (the R1–R8 contract the review evaluates).
+this builds on), `src/agentalloy/_packs/meta/sys-skill-authoring-rules.md` (the
+R1–R9 contract the review evaluates; also delivered as the phase-scoped system
+skill `src/agentalloy/_packs/sdd/sys-skill-authoring-rules.yaml`, per
+`docs/spec-contracts/meta-skill-corpus-delivery.spec.md`).
 
 ## Context
 
@@ -23,7 +25,7 @@ What guards a skill added today, via `install-pack` or the web add-skill lane:
    `install-pack-quality-gate-spec.md` hardens this layer — `--strict` lint,
    auto-reembed + cross-pack cosine dedup. Assume it as the foundation.)*
 2. **Human approval** — the web add-skill lane routes through `run_approve`.
-3. **Advisory R1–R8 prose** — the meta packs tell the author LLM *how* to write a
+3. **Advisory R1–R9 prose** — the meta packs tell the author LLM *how* to write a
    good skill, but nothing **enforces** that it did.
 
 The gap, stated honestly: the deterministic gates guarantee a skill is
@@ -69,7 +71,7 @@ authoring agent. Grounding shape (design owns the final schema):
 - `verdict` — `approve | revise | reject` (reuses the retired critic's vocabulary;
   maps cleanly onto routing).
 - `blocking_issues` — `list[str]`; MUST be empty when `verdict == approve`.
-- `checks` — structured record of which R1–R8 rules were evaluated and each
+- `checks` — structured record of which R1–R9 rules were evaluated and each
   outcome. Evidence the review *happened* rather than a bare stamp.
 - `reviewer` — provenance: model id + harness, and `mode: self | independent`
   (whether it was a fresh-context / second-model pass).
@@ -95,9 +97,10 @@ backend deterministic and local.
 
 `review.yaml` is produced *upstream, in the agent's context*, by a review
 skill/workflow that: reads the draft **cold**, fetches authoritative docs per R1
-(`sys-r1-tiered-sourcing` / `ctx_fetch_and_index`), evaluates R1–R8, and emits the
-verdict. This is where the operator's own model does the semantic work — reusing
-the compound-engineering-bridge authoring workflow rather than inventing a new one.
+(`sys-r1-tiered-sourcing` / `ctx_fetch_and_index`), evaluates R1–R9, and emits the
+verdict. This is where the operator's own model does the semantic work — built,
+per slice 2, as a producer meta skill (`sys-skill-review-verdict`) wired into
+the existing `sdd-add-skill` workflow rather than a new standalone ritual.
 The install-pack backend never reaches for it; it only checks its output.
 
 ### 4. Independence & the honesty backstop *(the honest limit)*
@@ -134,15 +137,21 @@ operator running the command." Named in AC 8 and the Design surface.
 
 ## Delivery slices
 
-- **Slice 1 — Verdict schema + Gate 1.5 + dry-run reporting + escape hatch.**
+- **Slice 1 BUILT — Verdict schema + Gate 1.5 + dry-run reporting + escape hatch.**
   `review.yaml` schema, the deterministic enforcement in `install_pack.py`, parity
   reporting in `validate_pack.py`, and `--allow-unreviewed` (mirrors
   `--allow-lint-warnings`/`--allow-duplicates`, bypass recorded in the result
   contract). Backend-only, deterministic. **User-observable** (install is blocked
   without a valid verdict). Closes AC 1–6, 9–10.
-- **Slice 2 — The review workflow.** The skill/workflow that produces `review.yaml`
-  in the agent's context (the R1–R8 cold pass, R1-grounded). Built on the
-  compound-engineering-bridge authoring workflow. Closes AC 7.
+- **Slice 2 BUILT — The review workflow.** A producer meta skill,
+  `sys-skill-review-verdict`, wired directly into `sdd-add-skill.yaml` step 3
+  (not the compound-engineering-bridge authoring workflow, which this slice
+  does not touch or reuse) — the agent evaluates the draft cold against the
+  R1–R9 contract in `sys-skill-authoring-rules` (R1-grounded via
+  `sys-r1-tiered-sourcing`) and emits `review.yaml`. Closes AC 7. Delivery
+  mechanism (getting the producer skill itself retrievable at `add-skill`
+  phase entry) is a separate, now-resolved gap — see
+  `docs/spec-contracts/meta-skill-corpus-delivery.spec.md`.
 - **Slice 3 *(optional)* — Class-scoped independence + web-lane surfacing.** Require
   `mode: independent` for `system`/`workflow`; surface the verdict in the add-skill
   UI alongside the human `approve`. Closes AC 8.
@@ -211,7 +220,7 @@ operator running the command." Named in AC 8 and the Design surface.
    Verifiable by a flag test asserting the contract field.
 7. **A review workflow produces a passing verdict.** Running the review
    workflow against a fixture draft emits a `review.yaml` that Gate 1.5 accepts, and
-   its `checks` cover R1–R8. Verifiable by a workflow test on a fixture.
+   its `checks` cover R1–R9. Verifiable by a workflow test on a fixture.
 8. **Human approval preserved where it exists; CLI backstop resolved.** The web
    add-skill lane still requires `run_approve` *in addition to* a valid verdict (the
    verdict is surfaced, not substituted for the human) — verifiable by a wizard-API
@@ -246,7 +255,7 @@ operator running the command." Named in AC 8 and the Design surface.
 - **Changing the deterministic Gate 1 / dedup / version gates** — those are the
   adjacent `install-pack-quality-gate-spec.md`'s scope; this gate composes with them.
 - **A new authoring ritual or UI** beyond the review workflow reusing the existing
-  meta packs + compound-engineering-bridge.
+  meta packs and the `sdd-add-skill` workflow.
 
 ## Design surface (hand-off to the design phase)
 
@@ -262,7 +271,7 @@ to constrain acceptance:
 - **Gate ordering.** Confirm `1 → 1.5 → 2 (version) → ingest → reembed/dedup`. Does
   a Gate 1.5 failure short-circuit before the version gate? *(Lean: yes — fail fast,
   aggregate with Gate 1.)*
-- **`checks` coverage strictness.** Require all R1–R8 keys evaluated (resists
+- **`checks` coverage strictness.** Require all R1–R9 keys evaluated (resists
   rubber-stamping) vs only require `verdict` + empty `blocking_issues` (looser but
   decoupled from an evolving rule vocabulary). Trade-off is rigidity vs coupling.
 - **Independence enforcement — is it worth it?** The backend can only trust the
