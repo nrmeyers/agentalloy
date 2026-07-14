@@ -351,28 +351,20 @@ in advance so running the minimal version is not a post-hoc deviation.
   per-cell mean estimate slightly but does not change the bootstrap's resolving
   power. We still report the within-task sample SD (now over 3 draws) to keep the
   "lucky draw" check intact.
-- **`ref-sonnet` only; `ref-opus` deferred.** Primary H₁ (non-inferiority vs
-  Sonnet) is the registered headline claim and the one this run is sized for.
-  Secondary H₂ (vs Opus) and prediction 5's Opus-gap-closing claim are **deferred**,
-  not abandoned — they run as a follow-on API pass if H₁ results warrant it, logged
-  as an addendum to this doc rather than a fresh pre-registration (same arms,
-  graders, δ, and task suite; only the reference model changes).
+- **Both `ref-sonnet` and `ref-opus` run.** Primary H₁ (non-inferiority vs Sonnet)
+  and secondary H₂ (vs Opus) both execute this pass — only the generic suite and
+  the sample count are cut, not the reference models.
 
-**Resulting API cost:** 18 domain tasks × 3 samples × 1 model (`ref-sonnet`) =
-**54 API calls**, once, shared across all three challenger models — down from the
-360-call full design. Local side (810 cells) is unchanged and free.
+**Resulting API cost:** 18 domain tasks × 3 samples × 2 models (`ref-sonnet`,
+`ref-opus`) = **108 API calls**, once, shared across all three challenger models —
+down from the 360-call full design. Local side (810 cells) is unchanged and free.
 
 **What this defers, explicitly:**
 
-- H₂ (Opus non-inferiority) — no Opus data this pass; report only H₁ + local H₃.
-- Prediction 5's Opus-gap-closing half — the monotone-in-capacity claim vs Sonnet
-  still gets tested; the "35B closes the Opus gap most" half is untested until the
-  addendum run.
-- §11 falsification bullet 1 still applies to H₁; the Opus-based falsification
-  check is on hold pending the addendum.
-
-If the addendum never runs, that absence is itself reported (H₂ untested at
-publication), not silently dropped.
+- The generic suite (H₃) on the API arms — scored only on local arms this pass
+  (still free, still registered, just not paid twice).
+- Nothing on H₁, H₂, or prediction 5 is deferred: both reference models run, so
+  the Opus-gap-closing claim is fully testable this pass.
 
 ---
 
