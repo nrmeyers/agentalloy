@@ -1,0 +1,57 @@
+skill_id: sys-fragment-types-and-sizing
+canonical_name: Fragment Types and Sizing
+category: tooling
+skill_class: system
+always_apply: false
+phase_scope:
+- add-skill
+category_scope: null
+author: navistone
+change_summary: 'initial authoring 2026-05-04 — meta pack, codifies the six fragment
+  types, the 80–800 word band, and self-containment rules used by the qwen3-embedding:0.6b
+  retriever. 2026-07-14: converted from _packs/meta/sys-fragment-types-and-sizing.md
+  to a phase-scoped system skill (meta-skill-corpus-delivery, DK4, second pass) —
+  content unchanged.'
+raw_prose: |
+  A skill's `raw_prose` is the indexed body. Fragments are retrieval-safe slices of that body, each tagged with a type. The retriever surfaces fragments — not whole skills — at compose time, so each fragment must be intelligible in isolation. This skill defines the six legal types, the 80–800 word band, and the contiguity rule against `raw_prose`.
+
+  ## Fragment types
+
+  Use only these six values for `fragment_type`:
+
+  - **`setup`** — prerequisites, environment, configuration, required context. Setup answers "what does the reader need before doing the thing?"
+  - **`execution`** — concrete steps or actions to perform. At least one execution fragment is required per domain skill. Execution fragments answer "what do I do?"
+  - **`verification`** — tests, checks, or completion criteria. Each verification item must be mechanically checkable per the R3 rule in `sys-skill-authoring-rules`. Verification fragments answer "how do I know I did it right?"
+  - **`example`** — code samples, worked examples, comparison snippets, BAD/GOOD blocks, before/after examples, sample payloads. Code blocks are usually `example`, not `execution`, unless the surrounding prose is itself a step-by-step command sequence.
+  - **`guardrail`** — constraints, forbidden actions, safety rules. Guardrails answer "what must I never do?" Where a domain skill has inline guardrail content embedded in execution fragments (e.g. "never use `===` for HMAC comparison"), promote it to a dedicated guardrail fragment.
+  - **`rationale`** — explanations of why, trade-offs, diagnostic mappings, "do X instead of Y" reasoning, conceptual distinctions. Mapping tables and "choose this instead of that" matrices are usually `rationale`, not `execution`. Rationale fragments answer "why does this approach exist?"
+
+  Anti-pattern fragments (e.g. `anti_pattern`) are not in the canonical type set. If a skill has anti-pattern content, surface it as a `guardrail` fragment or as a `rationale` fragment that explains why the anti-pattern fails.
+
+  ## Sizing band
+
+  Target fragments roughly 200 to 800 words. Floor: 80 words — below this `qwen3-embedding:0.6b` produces under-discriminative vectors and retrieval misfires on the obvious query. Ceiling: 800 words — split at semantic boundaries past this. Merge tiny fragments that are pure continuations of the same intent. The band is empirical, not aspirational — it tracks measured retrieval quality of the production embedder.
+
+  ## Self-containment
+
+  A fragment must make sense without "see above", "as noted earlier", or other cross-fragment dependency. The retriever may surface fragment 6 of 9 standalone — it must read coherently to a downstream agent that has not seen the surrounding fragments. When a fragment must reference a sibling, name the sibling explicitly ("see the bounded fan-out example") rather than gesturing ("see example below").
+
+  ## Contiguity against `raw_prose`
+
+  Each fragment's `content` must be a contiguous slice of `raw_prose` (modulo whitespace). If you extend fragments, extend `raw_prose` with the same wording in the same order. Drift between the two breaks BM25 and full-text retrieval against the canonical body, and will fail the contiguity lint that runs in QA.
+
+  The contiguity rule has a corollary: if `raw_prose` is short and dense (e.g. an abstract or one-paragraph overview), do not author long fragment bodies that paraphrase it — either inline the long content into `raw_prose` or do not surface it as a fragment.
+
+  ## One intent per fragment
+
+  Split mixed-purpose prose before emitting. A fragment that mixes setup with execution should become two fragments: one `setup`, one `execution`. The retriever filters by `fragment_type` for some queries (e.g. "give me only the verification checklist") — mixed types defeat that filter.
+
+  ## Sequence numbering
+
+  Number `sequence` starting at 1 with no gaps. The sequence reflects narrative order of `raw_prose`, not retrieval priority — the retriever ranks by embedding similarity, not by sequence.
+
+  ## Verified
+
+  - Fragment-type enumeration verified against `src/agentalloy/skill_md/parser.py` and `fixtures/skill-authoring-agent.md` (verified 2026-05-04).
+  - 80-word floor empirically established via `qwen3-embedding:0.6b` retrieval testing during corpus authoring (verified 2026-04-28). Below the floor, vectors lose discriminative power on shared-topic skills.
+  - 800-word ceiling chosen as a soft split boundary; fragments above 800 words remain ingest-valid but are flagged by the lint pass for review.

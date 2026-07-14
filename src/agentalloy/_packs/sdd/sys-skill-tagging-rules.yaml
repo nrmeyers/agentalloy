@@ -1,0 +1,57 @@
+skill_id: sys-skill-tagging-rules
+canonical_name: Skill Tagging Rules
+category: tooling
+skill_class: system
+always_apply: false
+phase_scope:
+- add-skill
+category_scope: null
+author: navistone
+change_summary: 'initial authoring 2026-05-04 — meta pack, codifies domain_tags rules
+  with the protocol-tier soft ceiling, the title-stem-overlap ban, and pairwise synonym
+  ban from the routing-reform v1 lint pass. 2026-07-14: converted from _packs/meta/sys-skill-tagging-rules.md
+  to a phase-scoped system skill (meta-skill-corpus-delivery, DK4, second pass) —
+  content unchanged.'
+raw_prose: |
+  `domain_tags` is the lexical retrieval surface for a skill. Tags drive routing, the v2 intake classifier, and BM25 fallback when embedding similarity is weak. Tags are not internal taxonomy — they are queryable terms a real user types. This skill codifies the tagging rules learned across the routing-reform v1 lint pass.
+
+  ## Tag count
+
+  Emit two to five `domain_tags` for most skills. The protocol tier has a soft ceiling of eight tags because protocol skills name multiple vendors (Stripe, GitHub, Slack) and primitives (signature-verification, idempotency, raw-body) that all carry retrieval weight. For language and framework skills, stay closer to the lower bound — language tier is precision-favored and over-tagging dilutes precision.
+
+  ## Retrieval orientation
+
+  Tags must reflect likely retrieval queries. Ask: "If a developer types this term into the intake, do they want this skill?" If the answer is no, drop the tag. Internal taxonomy terms (e.g. `cross-cutting`, `backend`, `infra`) are not retrieval queries — they belong in the `category` and `tier` fields, not in `domain_tags`.
+
+  ## Title-stem-overlap ban (R2 of the routing reform)
+
+  Do not duplicate `skill_id` or a slug of `canonical_name` as a tag unless the term is a genuine retrieval query in the source. A skill titled "Webhook Patterns" should not list `webhook` as a tag — the title already provides that lexical match, and the duplicate squeezes the tag budget. The ban applies stem-wise: `webhook` and `webhooks` count as the same stem.
+
+  ## Pairwise synonym ban (R3 of the routing reform)
+
+  Two tags on the same skill must not be synonyms or near-synonyms after stem reduction. `signing` and `signature-verification` is a violation; pick one. `auth` and `authentication` is a violation; pick one. `rfc-7519` and `jwt-rfc` is a violation; pick one. The lint pass scans pairwise across `domain_tags` and rejects synonym pairs.
+
+  ## Substitute the queryable primitive over the canonical name
+
+  Where a primitive is more queryable than the canonical RFC or spec name, prefer the primitive. `algorithm-confusion` is more queryable than `rfc-8725-section-3.1`. `compare-digest` is more queryable than `constant-time-comparison`. `raw-body` is more queryable than `body-bytes-preservation`. The canonical name belongs in `raw_prose` where it is indexed for full-text retrieval; the tag slot is for the term a developer actually types.
+
+  ## Versioned terms
+
+  Version anchors in tags are acceptable when the version is load-bearing for retrieval (`react-19`, `python-3.13`, `next-15`). Do not version-tag when the content is version-agnostic — `react` alone covers the general retrieval and `react-19` would only fire on version-specific queries.
+
+  ## Per-tier orientation
+
+  - **`foundation`** — recall-favored. Tags can be broad; this tier is meant to surface widely.
+  - **`language`, `framework`, `store`, `tooling`, `protocol`** — precision-favored. Tags should be specific and named-entity-shaped.
+  - **`cross-cutting`, `domain`** — recall-favored, but watch for synonym proliferation; a `cross-cutting` skill on auth and a `domain` skill on auth-flows must not share half their tags or routing collapses to "always pick both."
+
+  ## Examples (verified 2026-05-04 against shipped pilot skills)
+
+  - `webhook-patterns` (protocol): `stripe`, `github`, `slack`, `signature-verification`, `idempotency`, `raw-body`, `event-id`, `compare-digest` — eight tags, no title-stem overlap (`webhook` excluded), no synonym pairs.
+  - `jwt-validation-patterns` (protocol): `pyjwt`, `rfc-8725`, `algorithm-confusion`, `key-rotation`, `jwks`, `expiration`, `audience`, `issuer` — `rfc-8725` chosen over `rfc-7519` because BCP guidance is more directly actionable; `algorithm-confusion` chosen over `algorithm-list` because the attack name is more queryable.
+  - `python-async-patterns` (language): `create-task`, `gather`, `timeout`, `shield`, `exception-group`, `event-loop`, `structured-concurrency`, `run-in-executor` — eight tags at the language tier soft-ceiling, all queryable primitives, no `python` or `async` (title stems).
+
+  ## Verified
+
+  - Rules derived from routing-reform v1 lint pass, commit `8228e6a` (verified 2026-05-04).
+  - Pilot skill tag sets above are the live tags in `experiments/skill-tax/skills/*.yaml` (verified 2026-05-04).
