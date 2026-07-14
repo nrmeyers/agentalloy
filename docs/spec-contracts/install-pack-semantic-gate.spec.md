@@ -146,6 +146,49 @@ operator running the command." Named in AC 8 and the Design surface.
 - **Slice 3 *(optional)* — Class-scoped independence + web-lane surfacing.** Require
   `mode: independent` for `system`/`workflow`; surface the verdict in the add-skill
   UI alongside the human `approve`. Closes AC 8.
+- **Slice 4 *(new, decided 2026-07-14, NOT built)* — the accountability model for
+  lanes with no agent in the loop.** Slice 3 as originally scoped only *surfaces*
+  an existing verdict — it presupposes one was already produced, and does not
+  cover the two consumers that structurally cannot produce one at all:
+
+  - **Web add-skill lane** (`web/wizard_api.py::install`) — confirmed via code
+    read: a pure human-driven form (scaffold → write files → validate → install),
+    zero LLM/agent involvement anywhere in the flow. There is no agent to run
+    `sys-skill-review-verdict` in that context. **Decision:** the web UI keeps
+    allowing a skill to be added as typed — but a warning modal appears on the
+    edit/install action, telling the user the preferred method for instruction
+    modification is via their own LLM session (i.e. the CLI `add-skill` lane,
+    which produces a real verdict). If the user explicitly accepts the warning
+    and proceeds, Gate 1.5 is bypassed for that install and accountability for
+    the outcome shifts to the user's explicit choice — not silently, not by a
+    backend LLM call (Option B stays rejected).
+  - **Service `/corpus/ingest-pack`** — confirmed via code read
+    (`corpus_ingest_router.py`, `corpus_write_route.py`): secret-guarded
+    (`X-AgentAlloy-Ingest-Token`, constant-time compared), and its only callers
+    are the CLI's own `install-pack`/`install-packs` commands relaying a write to
+    a running service because that process holds the DB lock — never the web
+    wizard, never an arbitrary external caller. **Risk confirmed low** by the
+    user: same operator-vouched-for content and trust boundary as direct CLI
+    `install-pack` (DK6), just relayed through one more hop. The natural
+    resolution is the same treatment already given bundled bootstrap (a
+    permanent exemption, not a new category) — this direction is not yet
+    re-confirmed in those exact terms after the risk assessment, so treat it as
+    the strong lean, not a locked decision, until slice 4 design/build.
+
+  **What's already built, unrelated to this slice:** the CLI's own
+  `--allow-unreviewed` choice previously did not propagate through the
+  service-mediated path at all (a wiring bug, not a policy gap) — fixed
+  independently in `install/corpus_write_route.py` /
+  `api/corpus_ingest_router.py` (see the branch's fix commit). That fix makes an
+  *operator's own* bypass reach the service path; it does not by itself resolve
+  what the *web UI* or an *unattended service caller* should do, which is what
+  this slice covers.
+
+  **Nothing in this slice is built.** No warning modal, no wizard-side
+  `allow_unreviewed` wiring, no service-lane exemption. This is a recorded
+  product decision only — durable so it survives the session, not a
+  build-contract. Closes the "CLI-vs-web asymmetry" (§4) for the two lanes DK6
+  didn't cover.
 
 ## Acceptance Criteria
 
