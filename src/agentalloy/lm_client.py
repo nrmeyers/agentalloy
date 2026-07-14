@@ -165,10 +165,23 @@ class OpenAICompatClient:
             raise LMBadResponse(f"non-string content: {msg!r}")
         if not content.strip():
             finish: Any = first_dict.get("finish_reason")
-            raise LMBadResponse(
-                f"empty content (finish_reason={finish!r}); "
-                "likely max_tokens exhausted by reasoning_content — raise max_tokens"
-            )
+            # The failure signature depends on finish_reason — don't hardcode the
+            # max_tokens hypothesis. ``length`` genuinely means the budget ran out
+            # (often on reasoning_content); ``stop`` with empty content means the
+            # model self-terminated without emitting anything — commonly a
+            # structured-output (json_schema) mode the model or GGUF build can't
+            # satisfy, which succeeds in plain-text mode.
+            if finish == "length":
+                hint = "max_tokens exhausted (likely by reasoning_content) — raise max_tokens"
+            elif finish == "stop":
+                hint = (
+                    "model self-terminated with no content — if a response_format "
+                    "json_schema was requested, this model/build may not support it; "
+                    "retry in plain-text mode"
+                )
+            else:
+                hint = "model returned no content"
+            raise LMBadResponse(f"empty content (finish_reason={finish!r}); {hint}")
         return content
 
     def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
