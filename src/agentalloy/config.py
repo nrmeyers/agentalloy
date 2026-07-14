@@ -9,29 +9,9 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-__all__ = ["AuthoringConfig", "Settings", "configure_logging", "get_settings"]
+__all__ = ["Settings", "configure_logging", "get_settings"]
 
 logger = logging.getLogger(__name__)
-
-
-class AuthoringConfig(BaseSettings):
-    """Authoring pipeline configuration loaded from environment.
-
-    Env var prefix: ``AUTHORING_`` (e.g. ``AUTHORING_MODEL``).
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="AUTHORING_",
-        env_file=".env",
-        extra="ignore",
-    )
-
-    model: str = "qwen3-14b-instruct"
-    critic_model: str = "qwen3.6-27b"
-    lm_base_url: str = "http://localhost:11435"
-    lm_studio_base_url: str = "http://localhost:11434"
-    embed_base_url: str = "http://localhost:11436"
-    embedding_model: str = "nomic-embed-text-v1.5.Q8_0.gguf"
 
 
 def _user_corpus_dir() -> Path:
@@ -204,29 +184,6 @@ class Settings(BaseSettings):
         # disabled module should leave no trace on disk.
         if self.code_index_enabled:
             Path(self.code_index_data_dir).mkdir(parents=True, exist_ok=True)
-
-    def require_authoring_config(self) -> AuthoringConfig:
-        """Extract authoring config from environment.
-
-        Loads AuthoringConfig which reads AUTHORING_* env vars.
-        Raises RuntimeError if required fields are missing or empty.
-        """
-        ac = AuthoringConfig()
-        required = {
-            "model": ac.model,
-            "critic_model": ac.critic_model,
-            "lm_base_url": ac.lm_base_url,
-            "lm_studio_base_url": ac.lm_studio_base_url,
-            "embed_base_url": ac.embed_base_url,
-            "embedding_model": ac.embedding_model,
-        }
-        missing = [k for k, v in required.items() if not v]
-        if missing:
-            raise RuntimeError(
-                f"Authoring config incomplete — missing AUTHORING_ env vars for: "
-                f"{', '.join(missing)}. Source ~/.config/agentalloy/.env or set them manually."
-            )
-        return ac
 
 
 def configure_logging(level: str | None = None) -> None:

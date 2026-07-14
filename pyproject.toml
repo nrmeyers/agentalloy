@@ -112,12 +112,11 @@ indent-style = "space"
 
 [tool.pyright]
 include = ["src"]
-# Authoring subpackage is being redesigned — exclude from strict typecheck
-# until the new approach lands. See the navistone fork divergence note in
-# the 0875b29 merge commit (authoring kept here, removed on nrmeyers).
+# The retired authoring subpackage was removed (see agentalloy-authoring for
+# corpus authoring); the semantic install-pack gate is its runtime successor.
 # The vendored tree-sitter engine (see code_index/engine/VENDORED.md) keeps
 # upstream's looser typing; only the facade boundary is strict-checked.
-exclude = ["src/agentalloy/authoring/**", "src/agentalloy/code_index/engine/**", "tests/**"]
+exclude = ["src/agentalloy/code_index/engine/**", "tests/**"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
