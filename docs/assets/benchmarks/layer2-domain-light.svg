@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 740" width="860" height="740" role="img" aria-label="Two panels. Panel one: for an 8B, 12B, and 35B model, three bars each — bare model, with AgentAlloy, and the flat oracle (all gold skills pasted). AgentAlloy lifts every model over bare, most on the 8B (0.663 to 0.814); on the 35B it reaches the oracle (0.994 vs 0.992). Panel two: for all three models, AgentAlloy injects ~60% fewer tokens than pasting the full gold skills (around 800 tokens vs around 2,000). The 8B keeps 92% of the paste-everything score, the 12B 98%, and the 35B 100% — the same ~60% context cut every time, with near-oracle quality."><rect x="0" y="0" width="860" height="740" fill="#fcfcfb"/>
+<text x="24.0" y="40.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="21" fill="#0b0b0b" text-anchor="start" font-weight="700" opacity="1.0">Does it work?</text>
+<text x="200.0" y="40.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">Retrieval lifts every model.</text>
+<text x="24.0" y="62.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">bare model vs the same model with AgentAlloy · 18 domain tasks × 5 seeds, deterministic graders</text>
+<rect x="236" y="79" width="12" height="12" rx="2.5" fill="#a5a39d"/>
+<text x="254.0" y="88.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">bare model</text>
+<rect x="340" y="79" width="12" height="12" rx="2.5" fill="#2a78d6"/>
+<text x="358.0" y="88.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">with AgentAlloy</text>
+<rect x="478" y="79" width="12" height="12" rx="2.5" fill="#1baf7a"/>
+<text x="496.0" y="88.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">flat oracle (all skills pasted)</text>
+<line x1="720.0" y1="104" x2="720.0" y2="369" stroke="#e1e0d9" stroke-width="1"/>
+<text x="720.0" y="385.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11" fill="#898781" text-anchor="middle" font-weight="400" opacity="1.0">1.0</text>
+<text x="24.0" y="130.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">LFM2.5-8B-A1B</text>
+<text x="24.0" y="147.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">8B edge coder</text>
+<text x="24.0" y="167.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">+0.151 vs bare</text>
+<rect x="236.0" y="106.0" width="320.9" height="21" rx="4" fill="#a5a39d"/>
+<text x="564.9" y="121.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">0.663</text>
+<rect x="236.0" y="132.0" width="394.0" height="21" rx="4" fill="#2a78d6"/>
+<text x="638.0" y="147.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">0.814</text>
+<rect x="236.0" y="158.0" width="429.3" height="21" rx="4" fill="#1baf7a"/>
+<text x="673.3" y="173.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="500" opacity="1.0">0.887</text>
+<text x="24.0" y="225.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">Gemma 4 12B IT</text>
+<text x="24.0" y="242.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">12B mid</text>
+<text x="24.0" y="262.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">+0.025 vs bare</text>
+<rect x="236.0" y="201.0" width="450.6" height="21" rx="4" fill="#a5a39d"/>
+<text x="694.6" y="216.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">0.931</text>
+<rect x="236.0" y="227.0" width="462.7" height="21" rx="4" fill="#2a78d6"/>
+<text x="706.7" y="242.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">0.956</text>
+<rect x="236.0" y="253.0" width="470.9" height="21" rx="4" fill="#1baf7a"/>
+<text x="714.9" y="268.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="500" opacity="1.0">0.973</text>
+<text x="24.0" y="320.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">Qwen3.6-35B-A3B</text>
+<text x="24.0" y="337.5" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">35B strong</text>
+<text x="24.0" y="357.5" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">+0.057 vs bare</text>
+<rect x="236.0" y="296.0" width="453.5" height="21" rx="4" fill="#a5a39d"/>
+<text x="697.5" y="311.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">0.937</text>
+<rect x="236.0" y="322.0" width="481.1" height="21" rx="4" fill="#2a78d6"/>
+<text x="725.1" y="337.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">0.994</text>
+<rect x="236.0" y="348.0" width="480.1" height="21" rx="4" fill="#1baf7a"/>
+<text x="724.1" y="363.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="500" opacity="1.0">0.992</text>
+<line x1="24" y1="409" x2="836" y2="409" stroke="#e1e0d9" stroke-width="1"/>
+<text x="24.0" y="445.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="21" fill="#0b0b0b" text-anchor="start" font-weight="700" opacity="1.0">Is it worth it?</text>
+<text x="200.0" y="445.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="15" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">~60% less context, on every model.</text>
+<text x="24.0" y="467.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">tokens injected — pasting the full gold skills (oracle) vs AgentAlloy — and the domain score each buys</text>
+<rect x="236" y="482" width="12" height="12" rx="2.5" fill="#1baf7a"/>
+<text x="254.0" y="491.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">paste the full skills</text>
+<rect x="404" y="482" width="12" height="12" rx="2.5" fill="#2a78d6"/>
+<text x="422.0" y="491.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12.5" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">AgentAlloy</text>
+<text x="24.0" y="521.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">LFM2.5-8B-A1B</text>
+<text x="24.0" y="539.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">-61% tokens</text>
+<text x="24.0" y="556.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">92% of oracle score</text>
+<rect x="236.0" y="509.0" width="429.7" height="21" rx="4" fill="#1baf7a"/>
+<text x="673.7" y="524.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">2,042 tok · 0.887</text>
+<rect x="236.0" y="535.0" width="169.2" height="21" rx="4" fill="#2a78d6"/>
+<text x="413.2" y="550.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">804 tok · 0.814</text>
+<text x="24.0" y="592.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">Gemma 4 12B IT</text>
+<text x="24.0" y="610.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">-60% tokens</text>
+<text x="24.0" y="627.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">98% of oracle score</text>
+<rect x="236.0" y="580.0" width="448.2" height="21" rx="4" fill="#1baf7a"/>
+<text x="692.2" y="595.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">2,130 tok · 0.973</text>
+<rect x="236.0" y="606.0" width="178.0" height="21" rx="4" fill="#2a78d6"/>
+<text x="422.0" y="621.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">846 tok · 0.956</text>
+<text x="24.0" y="663.0" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="14" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">Qwen3.6-35B-A3B</text>
+<text x="24.0" y="681.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#006300" text-anchor="start" font-weight="650" opacity="1.0">-61% tokens</text>
+<text x="24.0" y="698.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="11.5" fill="#898781" text-anchor="start" font-weight="400" opacity="1.0">100% of oracle score</text>
+<rect x="236.0" y="651.0" width="433.7" height="21" rx="4" fill="#1baf7a"/>
+<text x="677.7" y="666.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#52514e" text-anchor="start" font-weight="400" opacity="1.0">2,061 tok · 0.992</text>
+<rect x="236.0" y="677.0" width="170.0" height="21" rx="4" fill="#2a78d6"/>
+<text x="414.0" y="692.0" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="12" fill="#0b0b0b" text-anchor="start" font-weight="650" opacity="1.0">808 tok · 0.994</text>
+</svg>
