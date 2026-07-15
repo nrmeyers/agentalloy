@@ -393,9 +393,14 @@ def _upgrade_native(
 
     # Detect extras BEFORE anything changes — --force replaces the installed
     # files, so this is the only point where the pre-upgrade env is intact.
-    extras = _detect_installed_extras(method)
-    if extras:
-        actions.append(f"preserving extras: {', '.join(extras)}")
+    # code-index is requested UNCONDITIONALLY (not just when previously
+    # installed): the module is now default-available post-upgrade regardless
+    # of whether CODE_INDEX_ENABLED is on, so turning it on later
+    # (`agentalloy code enable`) never hits "extra not installed" — this also
+    # self-heals an install that already lost the extra to a prior upgrade
+    # (the bug this whole mechanism exists to prevent going forward).
+    extras = sorted({"code-index", *_detect_installed_extras(method)})
+    actions.append(f"ensuring extras: {', '.join(extras)}")
 
     mode = _stop_service()
     actions.append(f"stopped service ({mode})")
@@ -594,7 +599,7 @@ def _upgrade_container(
     method = _detect_install_method()
     swapped = False
     if method != "source":
-        extras = _detect_installed_extras(method)
+        extras = sorted({"code-index", *_detect_installed_extras(method)})
         try:
             subprocess.run(_swap_command(method, ref, extras), check=True, timeout=1800)
             actions.append(f"upgraded CLI to {ref}")

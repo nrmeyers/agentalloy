@@ -204,6 +204,56 @@ def test_detect_installed_extras_pip_probes_current_interpreter():
         assert set(up._detect_installed_extras("pip")) == {"code-index", "rerank"}
 
 
+def test_native_always_requests_code_index_even_when_not_previously_installed():
+    """code-index is requested UNCONDITIONALLY, not just when detected.
+
+    The module is meant to be available post-upgrade regardless of whether
+    CODE_INDEX_ENABLED is on, so a later `agentalloy code enable` never hits
+    "extra not installed" — this also self-heals an install that already lost
+    the extra to a prior upgrade (the original bug).
+    """
+    swap_cmds: list[list[str]] = []
+
+    def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        swap_cmds.append(cmd)
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_detect_installed_extras", return_value=[]),  # nothing detected
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", side_effect=rec_run),
+    ):
+        actions, _ = up._upgrade_native("v2.3.0", {"installed_packs": ["core"]}, assume_yes=True)
+
+    assert any("agentalloy[code-index]" in c for cmd in swap_cmds for c in cmd)
+    assert any("ensuring extras: code-index" in a for a in actions)
+
+
+def test_native_unions_detected_extras_with_unconditional_code_index():
+    swap_cmds: list[list[str]] = []
+
+    def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        swap_cmds.append(cmd)
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_detect_installed_extras", return_value=["rerank"]),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)),
+        patch.object(up.subprocess, "run", side_effect=rec_run),
+    ):
+        up._upgrade_native("v2.3.0", {"installed_packs": ["core"]}, assume_yes=True)
+
+    assert any("agentalloy[code-index,rerank]" in c for cmd in swap_cmds for c in cmd)
+
+
 # --- orchestration: check / already-current ---------------------------------
 
 
