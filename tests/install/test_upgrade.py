@@ -254,6 +254,62 @@ def test_native_unions_detected_extras_with_unconditional_code_index():
     assert any("agentalloy[code-index,rerank]" in c for cmd in swap_cmds for c in cmd)
 
 
+# --- code-index enable reminder ---------------------------------------------
+
+
+def test_code_index_reminder_fires_when_key_absent():
+    assert up._code_index_enable_reminder({}) is not None
+
+
+def test_code_index_reminder_fires_when_explicitly_off():
+    assert up._code_index_enable_reminder({"CODE_INDEX_ENABLED": "0"}) is not None
+
+
+def test_code_index_reminder_mentions_the_enable_command():
+    reminder = up._code_index_enable_reminder({})
+    assert reminder is not None
+    assert "agentalloy code enable" in reminder
+
+
+def test_code_index_reminder_silent_when_enabled():
+    for value in ("1", "true", "True", "yes", "on"):
+        assert up._code_index_enable_reminder({"CODE_INDEX_ENABLED": value}) is None
+
+
+def test_module_notices_excludes_code_index_to_avoid_duplication():
+    """`_code_index_enable_reminder` supersedes the generic module-notice for
+    this one toggle — both firing would show two overlapping lines."""
+    with patch.object(up.install_state, "parse_env_file", return_value={}):
+        notices = up._module_notices()
+    assert not any("codebase indexer" in n for n in notices)
+
+
+def test_upgrade_summary_includes_code_index_reminder_when_off():
+    with (
+        patch.object(up, "_current_version", return_value="2.3.5"),
+        patch.object(up, "_latest_release_tag", return_value="v2.3.5"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_upgrade_native", return_value=(["did it"], [])),
+        patch.object(up.install_state, "parse_env_file", return_value={}),
+    ):
+        result = up.upgrade(force=True)
+
+    assert any("agentalloy code enable" in n for n in result["notices"])
+
+
+def test_upgrade_summary_omits_code_index_reminder_when_enabled():
+    with (
+        patch.object(up, "_current_version", return_value="2.3.5"),
+        patch.object(up, "_latest_release_tag", return_value="v2.3.5"),
+        patch.object(up.install_state, "load_state", return_value={"deployment": "native"}),
+        patch.object(up, "_upgrade_native", return_value=(["did it"], [])),
+        patch.object(up.install_state, "parse_env_file", return_value={"CODE_INDEX_ENABLED": "1"}),
+    ):
+        result = up.upgrade(force=True)
+
+    assert not any("agentalloy code enable" in n for n in result["notices"])
+
+
 # --- orchestration: check / already-current ---------------------------------
 
 
