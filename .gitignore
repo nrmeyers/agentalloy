@@ -92,8 +92,10 @@ experiments/
 memory/
 .claude/settings.local.json
 
-# SDD workflow internal artifacts (specs, designs, test plans, reviews).
-# The lifecycle writes the spec phase to docs/spec/<slug> (singular); the old
+.agentalloy/*
+!.agentalloy/
+!.agentalloy/contracts/
+
 # docs/specs/ pattern never matched it, so generated specs leaked as untracked-
 # but-committable files. Keep the singular form.
 docs/spec/
