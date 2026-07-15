@@ -822,13 +822,37 @@ def _module_notices() -> list[str]:
     module exists — the exact silence the v6.1.x code-index rollout shipped.
     Toggle present (either value) → the user has decided; no notice. Module
     default-on → already running; nothing to announce.
+
+    ``CODE_INDEX_ENABLED`` is excluded here — ``_code_index_enable_reminder``
+    covers it with a strictly broader condition (any off state, not just an
+    absent key) and the more relevant ``agentalloy code enable`` hint; keeping
+    both would duplicate the line whenever the key happens to be absent.
     """
     env_values = install_state.parse_env_file()
     return [
         f"this version ships the {info.module} module (currently off) — {info.enable_hint}"
         for key, info in sorted(env_forwarding.MODULE_TOGGLES.items())
-        if key not in env_values and not info.default_enabled
+        if key != "CODE_INDEX_ENABLED" and key not in env_values and not info.default_enabled
     ]
+
+
+def _code_index_enable_reminder(env_values: dict[str, str]) -> str | None:
+    """One-line reminder that `agentalloy code enable` is available, when off.
+
+    Unlike `_module_notices` (fires once, only for a stale ``.env`` that
+    predates the module entirely), this fires on EVERY upgrade while the
+    module is off, explicit opt-out or not — every upgrade now unconditionally
+    installs the code-index deps (see `_upgrade_native`), so there is always a
+    working one-command path to turn it on; the reminder just keeps that path
+    visible. ``None`` when already enabled — never nag a user who's already on.
+    """
+    value = (env_values.get("CODE_INDEX_ENABLED") or "").strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return None
+    return (
+        "code-index is off — run `agentalloy code enable` (then `agentalloy "
+        "server-restart`) to turn on codebase search & call graphs."
+    )
 
 
 def upgrade(
@@ -912,7 +936,11 @@ def upgrade(
     # Announce default-off modules the user's .env predates — one line each,
     # never a prompt. The container recreate above already honors a toggle
     # that IS in the .env (env_forwarding); this covers the one that isn't.
-    summary["notices"] = _module_notices()
+    notices = _module_notices()
+    code_index_reminder = _code_index_enable_reminder(install_state.parse_env_file())
+    if code_index_reminder:
+        notices.append(code_index_reminder)
+    summary["notices"] = notices
     # Read the post-swap version from the new binary; the in-process __version__ is
     # frozen at the pre-upgrade value (module imported before the swap).
     summary["new_version"] = _installed_version_via_cli() or _current_version()

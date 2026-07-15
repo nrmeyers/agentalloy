@@ -156,9 +156,11 @@ MODULE_TOGGLES: dict[str, ModuleToggle] = {
     ),
     "CODE_INDEX_ENABLED": ModuleToggle(
         module="codebase indexer",
-        enable_hint=(
-            "add CODE_INDEX_ENABLED=1 to ~/.config/agentalloy/.env, then `agentalloy upgrade`"
-        ),
+        # Not surfaced by upgrade's own notice (see _code_index_enable_reminder,
+        # which supersedes it with a broader condition + this exact hint) — kept
+        # here for `doctor`'s drift check, which reads default_enabled/health_key
+        # only, but stays accurate for any other future consumer.
+        enable_hint="run `agentalloy code enable` (then `agentalloy server-restart`)",
         default_enabled=False,
         health_key="code_index",
     ),
