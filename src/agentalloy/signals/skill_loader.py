@@ -35,6 +35,7 @@ __all__ = [
     "_read_cursor",
     "_read_lifecycle_mode",
     "_read_phase",
+    "_read_transitioned_by",
     "_write_announced_atomic",
     "_write_composed_atomic",
     "_write_cursor_atomic",
@@ -126,7 +127,20 @@ def read_flow_state(project_root: Path) -> tuple[str, str | None]:
     return "workflow", None
 
 
-def _write_phase_atomic(project_root: Path, phase: str) -> None:
+def _read_transitioned_by(project_root: Path) -> str | None:
+    """Read the session key (if any) that caused the current phase's last transition.
+
+    ``None`` means "don't know" — no session-aware writer recorded an actor for
+    this phase (a bare CLI ``phase set`` run outside a tracked Claude Code
+    session, a pre-existing repo predating this field, or nothing has
+    transitioned yet). Callers must treat ``None`` as ambiguous, not as
+    evidence the current session caused the transition — see
+    ``_write_phase_atomic``.
+    """
+    return _read_phase_data(project_root).get("transitioned_by") or None
+
+
+def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | None = None) -> None:
     """Atomically write *phase* to ``.agentalloy/phase``.
 
     Uses a temp file + ``os.replace`` so concurrent writers never leave
@@ -134,6 +148,15 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
     free-flow fields (``mode``, ``free_since``) are preserved from the existing
     file so an auto-transition never silently drops the repo out of (or into)
     free-flow — only ``agentalloy flow free/resume`` touches them.
+
+    ``session_key`` records *who* caused a real transition (``prev != phase``)
+    as ``transitioned_by`` — the session key of the proxy request (or CLI
+    invocation) whose action moved the phase, when known. On an idempotent
+    rewrite (``prev == phase``) the prior ``transitioned_by`` is preserved
+    unchanged, matching ``mode``/``free_since``. This lets a *different*
+    session's next turn recognize "the phase changed since I last looked, and
+    it wasn't me" (see ``_boundary_confirm_directives``'s "swept" case) instead
+    of silently reorienting to a phase transition it had no part in.
     """
     phase_file = project_root / ".agentalloy" / "phase"
     phase_file.parent.mkdir(parents=True, exist_ok=True)
@@ -145,6 +168,9 @@ def _write_phase_atomic(project_root: Path, phase: str) -> None:
         if value:
             # Quote ISO timestamps so YAML parsers read them back as strings.
             lines.append(f'{key}: "{value}"' if "T" in value else f"{key}: {value}")
+    transitioned_by = session_key if prev != phase else prev_data.get("transitioned_by")
+    if transitioned_by:
+        lines.append(f"transitioned_by: {transitioned_by}")
     # Unique tmp per writer: the watcher and the async proxy both call this with
     # no shared lock, so a fixed tmp name lets two writers race on the same file
     # and defeat the os.replace atomicity. A per-writer tmp keeps it atomic.

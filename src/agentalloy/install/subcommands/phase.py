@@ -239,6 +239,22 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
             if key in existing:
                 data[key] = existing[key]
 
+    # Record who caused a real transition, mirroring the proxy's
+    # `skill_loader._write_phase_atomic` — lets a *different* session's next
+    # turn recognize the phase changed out from under it (see
+    # `proxy_signal._boundary_confirm_directives`'s "swept" case). An idempotent
+    # `phase set` to the same phase preserves the prior actor unchanged. No
+    # `CLAUDE_CODE_SESSION_ID` (a bare terminal invocation, not run from within a
+    # tracked session) records nothing — ambiguous, not attributable.
+    from agentalloy.signals.skill_loader import cli_session_key  # noqa: PLC0415
+
+    if current != phase:
+        actor = cli_session_key()
+        if actor:
+            data["transitioned_by"] = actor
+    elif existing and existing.get("transitioned_by"):
+        data["transitioned_by"] = existing["transitioned_by"]
+
     _write_phase(data, root)
     # On a real transition, SEED the work-item cursor to the new phase's first work-item
     # (filename order) so "which task is current" is reliably set — the single source of

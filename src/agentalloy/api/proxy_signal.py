@@ -43,6 +43,7 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _read_lifecycle_mode,
     _read_phase,
     _read_state,
+    _read_transitioned_by,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
@@ -559,8 +560,15 @@ async def evaluate_signal(
         logger.debug("composition deferred for %s: lifecycle_mode=%s", cwd, mode)
         return SignalResult(should_compose=False)
 
-    # 1. Read phase file (sync, instant)
+    # 1. Read phase file (sync, instant). `transitioned_by` is read in the same
+    # breath — the session key (if any) that caused *this* phase value, so a
+    # later comparison against this turn's own `session_key` can tell whether
+    # a different concurrent session moved the phase (see
+    # `_boundary_confirm_directives`'s "swept" case). Captured before this
+    # turn's own potential transition further down, so it reflects "who set
+    # the phase as of the start of this turn", never this turn's own write.
     phase = _read_phase(cwd)
+    transitioned_by = _read_transitioned_by(cwd) if phase else None
     if not phase:
         # A missing `.agentalloy/` here (lifecycle is active — we passed the
         # mode!="full" guard above) is the signature of a project root that
@@ -732,7 +740,7 @@ async def evaluate_signal(
             )
             if mutate and decision.should_transition and decision.to_phase:
                 try:
-                    _write_phase_atomic(cwd, decision.to_phase)
+                    _write_phase_atomic(cwd, decision.to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
                 except OSError as e:
                     logger.warning("Failed to write phase file: %s", e)
@@ -774,7 +782,16 @@ async def evaluate_signal(
     new_session = bool(
         is_carrier and session_key and session_key not in last_sessions and not phase_changed
     )
-    confirm_directives = _boundary_confirm_directives(cwd, phase, new_session=new_session)
+    confirm_directives = _boundary_confirm_directives(
+        cwd,
+        phase,
+        new_session=new_session,
+        # Same carrier gate as `new_session`/`announce`: a background tool-less
+        # request must not fire or burn any marker (orientation-carrier-request-race).
+        phase_changed=phase_changed and is_carrier,
+        transitioned_by=transitioned_by,
+        session_key=session_key,
+    )
 
     # 8. Decide. Inject when this is a phase-entry turn (Tier 1), a new work-item
     #    turn (Tier 2), the eval produced advisories, OR a boundary confirm is due.
@@ -842,10 +859,18 @@ async def evaluate_signal(
     )
 
 
-def _boundary_confirm_directives(cwd: Path, phase: str | None, *, new_session: bool) -> list[str]:
+def _boundary_confirm_directives(
+    cwd: Path,
+    phase: str | None,
+    *,
+    new_session: bool,
+    phase_changed: bool = False,
+    transitioned_by: str | None = None,
+    session_key: str | None = None,
+) -> list[str]:
     """Deterministic phase-boundary confirm prompts (phase-boundary-confirmation).
 
-    Two boundaries, both pure reads (never write the phase file), returned as a
+    Three boundaries, all pure reads (never write the phase file), returned as a
     single coherent directive list — at most one prompt, never two conflicting
     MUST blocks:
 
@@ -857,15 +882,33 @@ def _boundary_confirm_directives(cwd: Path, phase: str | None, *, new_session: b
       for this phase) resumes on a non-intake phase, confirm that phase is correct
       before adopting it: the per-repo phase file is contended by concurrent
       sessions, so a stale mid-``build`` resume is exactly worth confirming.
+    - **T3 swept by another session** — an *already-oriented* session observes the
+      phase changed (``phase_changed``) since it last looked, AND the recorded
+      ``transitioned_by`` names a *different* known session. Ordinary self-driven
+      advancement (this session's own turn passed the exit gate) is excluded: at
+      the moment `phase_changed` is computed, a same-turn transition hasn't
+      "aged" into an observed jump yet (that shows up as `new_session`/quiet Tier
+      1 orientation instead) — this only fires on the FIRST subsequent turn where
+      a jump is visible and attributable to someone else. `transitioned_by` is
+      ``None`` (ambiguous — e.g. a bare CLI ``phase set`` outside a tracked
+      session) doesn't fire this; only a concrete, different session id does, to
+      keep false positives near zero. Like `new_session`, this must not fire on
+      a background tool-less request — the caller passes ``phase_changed=False``
+      for a non-carrier turn (same gate as `new_session`'s own `is_carrier` check).
 
-    Precedence when both apply (a new session lands on ``ship`` with a delivery
-    record): a single combined prompt — confirm the phase, then ask about the
-    reset — never two blocks.
+    `new_session` and the swept case are mutually exclusive by construction
+    (`new_session` requires `not phase_changed`), so there's no ordering conflict
+    between them. Precedence when either combines with ship-landed: a single
+    combined prompt — confirm the phase, then ask about the reset — never two
+    blocks.
     """
     if phase is None or phase == INTAKE_PHASE:
         return []
 
     ship_landed = phase == "ship" and any((cwd / "docs" / "ship").glob("*.md"))
+    swept = bool(
+        phase_changed and session_key and transitioned_by and transitioned_by != session_key
+    )
 
     if new_session:
         if ship_landed:
@@ -881,6 +924,24 @@ def _boundary_confirm_directives(cwd: Path, phase: str | None, *, new_session: b
             f"doing this phase's work, CONFIRM with the user that `{phase}` is the "
             "correct phase to resume — the per-repo phase file can be left stale by a "
             "prior or concurrent session. Do NOT change the phase on your own initiative."
+        ]
+
+    if swept:
+        if ship_landed:
+            return [
+                "The phase changed to `ship` since your last turn here — a different "
+                "concurrent session on this repo advanced it, not this one — and "
+                "delivery is already recorded (a docs/ship/ record exists). First "
+                "CONFIRM with the user that `ship` is the right phase to be on; if it "
+                "is, ASK whether they are ready to reset to intake for the next work "
+                "item (`agentalloy phase set intake`). Do NOT change the phase on your "
+                "own initiative — wait for their answer."
+            ]
+        return [
+            f"The phase changed to `{phase}` since your last turn here — a different "
+            "concurrent session on this repo advanced it, not this one. CONFIRM with "
+            f"the user that `{phase}` is the correct phase to continue on before doing "
+            "this phase's work. Do NOT change the phase on your own initiative."
         ]
 
     if ship_landed:
