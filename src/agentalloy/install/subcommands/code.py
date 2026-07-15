@@ -10,6 +10,7 @@ Thin HTTP clients against the local agentalloy service:
     agentalloy code callees <fqn> [--repo]
     agentalloy code bundle <task> [--repo] [--budget N]
     agentalloy code remove [path] [--yes]
+    agentalloy code enable|disable                      CODE_INDEX_ENABLED master switch
     agentalloy code watch enable|disable [path]         Per-repo watch enrollment
     agentalloy code watch status|start|stop             Master switch + enrollment report
 
@@ -494,6 +495,63 @@ def _run_remove(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# enable/disable — the CODE_INDEX_ENABLED master switch as a single command.
+#
+# Deliberately NOT `write-env` (which re-renders a whole preset template and
+# refuses a hand-edited .env without --force): this is a surgical one-line
+# patch, safe to run on any .env regardless of provenance, so it can never
+# clobber unrelated settings. `agentalloy upgrade` (v6.13.0+) always installs
+# the code-index extra, so this toggle no longer has an "extra not installed"
+# failure mode to worry about — just flip it and restart.
+# ---------------------------------------------------------------------------
+
+
+def _patch_env_key(key: str, value: str) -> Path:
+    """Set ``key=value`` in the user-scoped ``.env``, all other lines untouched.
+
+    Replaces an existing (uncommented) ``key=...``/``export key=...`` line in
+    place; appends a new line if absent. Creates the file (and its parent
+    directory) if it doesn't exist yet.
+    """
+    path = install_state.env_path()
+    lines = path.read_text().splitlines() if path.exists() else []
+    new_line = f"{key}={value}"
+    for i, raw in enumerate(lines):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        existing_key = stripped.split("=", 1)[0].strip()
+        if existing_key.startswith("export "):
+            existing_key = existing_key[len("export ") :].strip()
+        if existing_key == key:
+            lines[i] = new_line
+            break
+    else:
+        lines.append(new_line)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    install_state._atomic_write(path, "\n".join(lines) + "\n")  # pyright: ignore[reportPrivateUsage]
+    return path
+
+
+def _run_module_toggle(*, enabled: bool) -> int:
+    path = _patch_env_key("CODE_INDEX_ENABLED", "1" if enabled else "0")
+    state_word = "enabled" if enabled else "disabled"
+    print(f"CODE_INDEX_ENABLED={'1' if enabled else '0'} written to {path}.")
+    print(f"Code-index module {state_word}. Run `agentalloy server-restart` to apply.")
+    return 0
+
+
+def _run_enable(args: argparse.Namespace) -> int:
+    del args
+    return _run_module_toggle(enabled=True)
+
+
+def _run_disable(args: argparse.Namespace) -> int:
+    del args
+    return _run_module_toggle(enabled=False)
+
+
+# ---------------------------------------------------------------------------
 # watch — master switch is env-driven (honest howto); per-repo enrollment is a
 # live service call (POST /code/repos/{slug}/watch) so it reacts immediately.
 # ---------------------------------------------------------------------------
@@ -678,6 +736,15 @@ def add_parser(
     remove_p.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     _add_common(remove_p)
     remove_p.set_defaults(func=_run_remove)
+
+    enable_module_p = sub.add_parser(
+        "enable", help="Turn the code-index module on (CODE_INDEX_ENABLED=1)."
+    )
+    enable_module_p.set_defaults(func=_run_enable)
+    disable_module_p = sub.add_parser(
+        "disable", help="Turn the code-index module off (CODE_INDEX_ENABLED=0)."
+    )
+    disable_module_p.set_defaults(func=_run_disable)
 
     watch_p = sub.add_parser(
         "watch", help="Per-repo watch enrollment + the CODE_INDEX_WATCH master switch."

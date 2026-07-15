@@ -442,6 +442,97 @@ class TestRemove:
         assert "Removed index" in capsys.readouterr().out
 
 
+class TestModuleToggle:
+    """`agentalloy code enable|disable` — the CODE_INDEX_ENABLED master switch
+    as a single command. Deliberately NOT `write-env` (full-preset re-render,
+    refuses a hand-edited .env without --force) — a surgical one-line patch
+    instead, safe regardless of the .env's provenance."""
+
+    def test_enable_creates_env_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        env_file = tmp_path / "config" / "agentalloy" / ".env"
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "enable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == "CODE_INDEX_ENABLED=1\n"
+        out = capsys.readouterr().out
+        assert "enabled" in out
+        assert "server-restart" in out
+
+    def test_disable_writes_zero(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        env_file = tmp_path / ".env"
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "disable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == "CODE_INDEX_ENABLED=0\n"
+        assert "disabled" in capsys.readouterr().out
+
+    def test_enable_replaces_existing_value_in_place(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("CODE_INDEX_ENABLED=0\nLOG_LEVEL=debug\n")
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "enable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == "CODE_INDEX_ENABLED=1\nLOG_LEVEL=debug\n"
+
+    def test_enable_preserves_comments_and_other_keys(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "# my custom notes\nUPSTREAM_URL=http://localhost:8080/v1\n"
+            "CODE_INDEX_ENABLED=0\nLOG_LEVEL=debug\n"
+        )
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "enable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == (
+            "# my custom notes\nUPSTREAM_URL=http://localhost:8080/v1\n"
+            "CODE_INDEX_ENABLED=1\nLOG_LEVEL=debug\n"
+        )
+
+    def test_disable_appends_when_key_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("LOG_LEVEL=debug\n")
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "disable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == "LOG_LEVEL=debug\nCODE_INDEX_ENABLED=0\n"
+
+    def test_enable_ignores_commented_out_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A commented-out CODE_INDEX_ENABLED must not be mistaken for a live
+        value — the real key gets appended, the comment survives untouched."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("# CODE_INDEX_ENABLED=0\nLOG_LEVEL=debug\n")
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        args = _parse(["code", "enable"])
+        assert args.func(args) == 0
+        assert env_file.read_text() == (
+            "# CODE_INDEX_ENABLED=0\nLOG_LEVEL=debug\nCODE_INDEX_ENABLED=1\n"
+        )
+
+    def test_enable_then_disable_round_trips(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = tmp_path / ".env"
+        monkeypatch.setattr("agentalloy.install.state.env_path", lambda: env_file)
+        enable_args = _parse(["code", "enable"])
+        assert enable_args.func(enable_args) == 0
+        assert env_file.read_text() == "CODE_INDEX_ENABLED=1\n"
+        disable_args = _parse(["code", "disable"])
+        assert disable_args.func(disable_args) == 0
+        assert env_file.read_text() == "CODE_INDEX_ENABLED=0\n"
+
+
 class TestWatch:
     def test_watch_start_is_honest(self, capsys: pytest.CaptureFixture[str]) -> None:
         args = _parse(["code", "watch", "start"])
