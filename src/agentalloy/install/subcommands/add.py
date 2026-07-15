@@ -196,6 +196,13 @@ def adopt_and_wire(
             result["stale_phase_cleared"] = True
     _git_exclude_agentalloy(root)  # ensure .agentalloy/ (upstream + phase) stays uncommitted
 
+    # Auto-wire future worktrees of this repo (a post-checkout hook, shared
+    # across worktrees — installing once from any checkout covers all of
+    # them). Best-effort: never blocks wiring on failure.
+    from agentalloy.install.git_hooks import install_post_checkout_hook
+
+    install_post_checkout_hook(root)
+
     # Code-index harness block (second sentinel pair) — written only when the
     # service reports the module enabled; cleans up stale/legacy blocks otherwise.
     from agentalloy.install import code_index_wiring
