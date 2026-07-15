@@ -118,7 +118,65 @@ def _detect_install_method() -> str:
     return "pip"
 
 
-def _swap_command(method: str, ref: str) -> list[str]:
+# Optional-extra -> a module that only importable when that extra is
+# installed. Probed against the *currently installed* interpreter before a
+# swap so `upgrade` can re-request the same extras — `uv tool install --force`
+# (and plain `pip install --upgrade`) install bare `agentalloy` with no memory
+# of which extras a prior install had, so an upgrade silently dropped
+# tree-sitter/onnxruntime even when the user had deliberately enabled
+# code-index/rerank, degrading the module to "unavailable" post-upgrade.
+_EXTRA_PROBE_MODULES: dict[str, str] = {
+    "code-index": "tree_sitter",
+    "rerank": "onnxruntime",
+}
+
+
+def _current_tool_python() -> Path | None:
+    """Path to the currently-installed ``uv tool``'s own interpreter, or ``None``."""
+    try:
+        out = subprocess.run(
+            ["uv", "tool", "dir"], capture_output=True, text=True, timeout=15, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    python = Path(out.stdout.strip()) / "agentalloy" / "bin" / "python"
+    return python if python.exists() else None
+
+
+def _detect_installed_extras(method: str) -> list[str]:
+    """Which optional extras are importable in the *currently installed* env.
+
+    ``uv-tool``: probes the tool's own venv interpreter (found via
+    ``uv tool dir``) — checked BEFORE the swap, since ``--force`` replaces
+    those files. ``pip``: probes this running process's own interpreter (the
+    upgrade command itself runs inside that same env). ``source`` is never
+    swapped, so it returns ``[]`` without probing. Never raises — a probe
+    failure is treated as "extra absent" rather than aborting the upgrade.
+    """
+    if method == "source":
+        return []
+    python = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
+    if python is None or not python.exists():
+        return []
+    found: list[str] = []
+    for extra, module in _EXTRA_PROBE_MODULES.items():
+        try:
+            probe = subprocess.run(
+                [str(python), "-c", f"import {module}"],
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if probe.returncode == 0:
+            found.append(extra)
+    return found
+
+
+def _swap_command(method: str, ref: str, extras: list[str] | None = None) -> list[str]:
     """Build the package re-install command for ``method`` at git ``ref``.
 
     Prefers ``uv tool install`` whenever ``uv`` is on PATH — this is safe even
@@ -126,10 +184,21 @@ def _swap_command(method: str, ref: str) -> list[str]:
     probe (which can misclassify a uv-tool install as "pip" on any hiccup,
     then shell `python -m pip` into a venv that ships no pip). Falls back to
     pip only when ``uv`` truly isn't available.
+
+    ``extras`` (from :func:`_detect_installed_extras`, probed before the swap)
+    are appended as ``agentalloy[extra1,extra2]`` so a prior install's
+    code-index/rerank dependencies survive the reinstall instead of silently
+    disappearing. No-extras behavior is byte-for-byte unchanged from before
+    extras support existed.
     """
     target = f"git+{_GIT_URL}@{ref}"
+    package = f"agentalloy[{','.join(sorted(extras))}]" if extras else "agentalloy"
     if method != "source" and shutil.which("uv"):
-        return ["uv", "tool", "install", "--force", "--from", target, "agentalloy"]
+        return ["uv", "tool", "install", "--force", "--from", target, package]
+    if extras:
+        # PEP 508 direct-URL-with-extras syntax; the plain bare-URL form (no
+        # package name) can't carry extras.
+        return [sys.executable, "-m", "pip", "install", "--upgrade", f"{package} @ {target}"]
     return [sys.executable, "-m", "pip", "install", "--upgrade", target]
 
 
@@ -322,10 +391,16 @@ def _upgrade_native(
         )
         return actions, warnings
 
+    # Detect extras BEFORE anything changes — --force replaces the installed
+    # files, so this is the only point where the pre-upgrade env is intact.
+    extras = _detect_installed_extras(method)
+    if extras:
+        actions.append(f"preserving extras: {', '.join(extras)}")
+
     mode = _stop_service()
     actions.append(f"stopped service ({mode})")
 
-    swap = _swap_command(method, ref)
+    swap = _swap_command(method, ref, extras)
     print_rich(f"  [dim]-> {' '.join(swap)}[/dim]")
     try:
         with progress_activity(f"installing {ref} via {method}", enabled=show_progress):
@@ -519,8 +594,9 @@ def _upgrade_container(
     method = _detect_install_method()
     swapped = False
     if method != "source":
+        extras = _detect_installed_extras(method)
         try:
-            subprocess.run(_swap_command(method, ref), check=True, timeout=1800)
+            subprocess.run(_swap_command(method, ref, extras), check=True, timeout=1800)
             actions.append(f"upgraded CLI to {ref}")
             swapped = True
         except (subprocess.SubprocessError, OSError) as exc:

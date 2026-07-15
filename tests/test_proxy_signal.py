@@ -315,7 +315,7 @@ class TestEvaluateSignal:
         ):
             result = asyncio.run(evaluate_signal(_req("deploy now"), tmp_path, session_id=SESSION))
         assert result.should_compose is False  # nothing to inject this turn
-        mock_write.assert_called_once_with(tmp_path, "qa")
+        mock_write.assert_called_once_with(tmp_path, "qa", session_key=SESSION)
         assert result.gates_met == ["test_passed", "lint_clean"]  # carried for telemetry
         assert result.qwen_calls == 1
 

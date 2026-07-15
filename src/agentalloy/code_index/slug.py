@@ -3,7 +3,7 @@
 This IS the canonical implementation now: the code-index module stores each
 repo's per-slug data directory (``repos/{slug}/``) under the slug derived
 here, and every consumer (ingest pipeline, ``/code`` routers, unwire cleanup)
-must produce the *identical* string. Adopted from codebase-indexer's
+must produce the *identical* string. Originally adopted from codebase-indexer's
 ``app/services/slug.py`` (``parse_github_remote`` / ``canonical_slug_for_path``
 / ``derive_slug``) plus ``app/config.py:slugify_repo``; agentalloy no longer
 mirrors an external system of record.
@@ -11,8 +11,15 @@ mirrors an external system of record.
 The canonical rule is:
 
   1. Exactly one remote, named ``origin`` (refuse to guess when 0 or >1).
-  2. ``origin`` is a github.com URL → ``{org}__{repo}``.
-  3. Otherwise fall back to the directory basename.
+  2. ``origin`` is a recognized git host URL (github.com, or any other host —
+     GitLab, Bitbucket, self-hosted) → a canonical, path-independent slug.
+     github.com keeps its original ``{org}__{repo}`` form (no host prefix) so
+     existing indexes aren't stranded; every other host gets ``{host}__{org}__{repo}``
+     so two different hosts with an identically-named org/repo don't collide.
+  3. Otherwise (no git dir, zero/multiple remotes, unparseable URL) fall back
+     to the directory basename — this is what left every worktree of a
+     non-GitHub repo re-indexing from scratch, since a worktree's basename
+     differs from the main checkout's.
 
 Then ``slugify_repo`` enforces a filesystem-safe charset on the result.
 """
@@ -26,22 +33,19 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Mirror of codebase-indexer app/services/slug.py:_GITHUB_URL_RE.
-# https://github.com/<org>/<repo>(.git)?  — also the trailing-slash form.
-# git@github.com:<org>/<repo>(.git)?
-# ssh://git@github.com/<org>/<repo>(.git)?
-_GITHUB_URL_RE = re.compile(
+# Matches any of the three common git remote URL shapes, capturing the host
+# and the org/repo path so non-GitHub hosts (GitLab, Bitbucket, self-hosted)
+# can be slugged canonically instead of falling back to the basename:
+#   scheme://[user@]host[:port]/<path>(.git)?      e.g. https://gitlab.com/org/repo.git
+#   git@host:<path>(.git)?                          e.g. git@gitlab.com:org/repo.git
+#   ssh://git@host[:port]/<path>(.git)?             e.g. ssh://git@gitlab.com/org/repo.git
+_GIT_URL_RE = re.compile(
     r"""^
     (?:
-        (?:https?://)(?:[^@/]+@)?github\.com/
+        (?:[A-Za-z][A-Za-z0-9+.-]*://)(?:[^@/]+@)?(?P<host_a>[A-Za-z0-9.-]+)(?::\d+)?/(?P<path_a>.+)
         |
-        git@github\.com:
-        |
-        ssh://git@github\.com/
+        (?:[^@/]+@)?(?P<host_b>[A-Za-z0-9.-]+):(?P<path_b>.+)
     )
-    (?P<org>[A-Za-z0-9][A-Za-z0-9._-]*)/
-    (?P<repo>[A-Za-z0-9][A-Za-z0-9._-]*?)
-    (?:\.git)?/?
     $""",
     re.VERBOSE,
 )
@@ -60,10 +64,51 @@ def slugify_repo(name: str) -> str:
     return s or "repo"
 
 
+_GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
+
+
+def parse_git_remote(url: str) -> tuple[str, str, str] | None:
+    """Parse any git remote URL into ``(host, org, repo)``; None if unparseable.
+
+    Generalizes the old GitHub-only parsing to arbitrary hosts (GitLab,
+    Bitbucket, self-hosted) so ``canonical_slug_for_path`` can key non-GitHub
+    repos by host identity instead of falling back to the directory basename.
+    The basename fallback is what stranded every worktree of a non-GitHub repo
+    with its own from-scratch code index, since a worktree's basename differs
+    from the main checkout's.
+
+    ``org`` may itself contain ``/`` for nested groups (GitLab subgroups) —
+    everything but the final path segment (``repo``).
+
+    >>> parse_git_remote("git@github.com:navistone/TheForge.git")
+    ('github.com', 'navistone', 'TheForge')
+    >>> parse_git_remote("https://gitlab.com/team/backend/repo.git")
+    ('gitlab.com', 'team/backend', 'repo')
+    """
+    if not isinstance(url, str):
+        return None
+    candidate = url.strip()
+    if not candidate:
+        return None
+    match = _GIT_URL_RE.match(candidate)
+    if not match:
+        return None
+    host = match.group("host_a") or match.group("host_b")
+    path = match.group("path_a") or match.group("path_b")
+    if not host or not path:
+        return None
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    org, repo = "/".join(parts[:-1]), parts[-1]
+    return (host.lower(), org, repo)
+
+
 def parse_github_remote(url: str) -> tuple[str, str] | None:
     """Parse a GitHub remote URL into ``(org, repo)``; None for non-GitHub.
-
-    Mirror of codebase-indexer ``slug.parse_github_remote``.
 
     >>> parse_github_remote("git@github.com:navistone/TheForge.git")
     ('navistone', 'TheForge')
@@ -72,28 +117,29 @@ def parse_github_remote(url: str) -> tuple[str, str] | None:
     >>> parse_github_remote("https://gitlab.com/foo/bar.git") is None
     True
     """
-    if not isinstance(url, str):
+    parsed = parse_git_remote(url)
+    if parsed is None:
         return None
-    candidate = url.strip()
-    if not candidate:
-        return None
-    match = _GITHUB_URL_RE.match(candidate)
-    if not match:
-        return None
-    org = match.group("org")
-    repo = match.group("repo")
-    if not org or not repo:
+    host, org, repo = parsed
+    if host not in _GITHUB_HOSTS or "/" in org:
         return None
     return (org, repo)
 
 
 def canonical_slug_for_path(local_path: Path) -> str | None:
-    """Return ``{org}__{repo}`` when ``local_path`` has a single GitHub origin.
+    """Return a canonical, worktree-path-independent slug for *local_path*'s origin.
 
-    Mirror of codebase-indexer ``slug.canonical_slug_for_path``. Refuses to
-    guess when there are zero or multiple remotes (an ``origin`` fork plus an
-    ``upstream`` would otherwise route the slug to the wrong project), and
-    returns None for non-GitHub hosts so the caller falls back to the basename.
+    Refuses to guess when there are zero or multiple remotes (an ``origin``
+    fork plus an ``upstream`` would otherwise route the slug to the wrong
+    project) or when the origin URL doesn't parse as a git remote — those
+    cases fall back to the directory basename.
+
+    github.com origins keep the original ``{org}__{repo}`` form (no host
+    prefix) so existing indexes aren't stranded. Every other parseable host
+    (GitLab, Bitbucket, self-hosted) gets ``{host}__{org}__{repo}`` — still
+    canonical and independent of the checkout's directory name, just
+    host-qualified so two hosts with an identically-named org/repo don't
+    collide.
     """
     path = Path(local_path)
     if not path.is_dir():
@@ -127,11 +173,13 @@ def canonical_slug_for_path(local_path: Path) -> str | None:
         logger.debug("code_index.slug: git probe failed for %s — %s", path, exc)
         return None
 
-    parsed = parse_github_remote(url)
+    parsed = parse_git_remote(url)
     if parsed is None:
         return None
-    org, repo = parsed
-    return slugify_repo(f"{org}__{repo}")
+    host, org, repo = parsed
+    if host in _GITHUB_HOSTS:
+        return slugify_repo(f"{org}__{repo}")
+    return slugify_repo(f"{host}__{org}__{repo}")
 
 
 def derive_slug(local_path: Path, fallback_basename: str) -> str:

@@ -839,6 +839,13 @@ def _unwire_repo_local(
             except OSError:
                 pass
 
+    # The post-checkout auto-wire-worktree hook is repo-shared (installed once,
+    # covers every worktree) — same "only tear down when no other harness
+    # remains" rule as the lifecycle state above.
+    from agentalloy.install.git_hooks import uninstall_post_checkout_hook
+
+    uninstall_post_checkout_hook(repo_root)
+
     # Leave no empty husk: drop .agentalloy/ once its env + lifecycle files are
     # gone, but only if genuinely empty — a non-empty rmdir raises OSError, which
     # preserves user work (e.g. .agentalloy/contracts/) untouched.

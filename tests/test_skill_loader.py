@@ -178,6 +178,41 @@ def test_write_phase_atomic_no_tmp_file_left(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# _write_phase_atomic / _read_transitioned_by — transition attribution
+# ---------------------------------------------------------------------------
+
+
+def test_transitioned_by_recorded_on_real_transition(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_transitioned_by, _write_phase_atomic
+
+    _write_phase_atomic(tmp_path, "spec", session_key="sess-a")
+    _write_phase_atomic(tmp_path, "design", session_key="sess-b")
+    assert _read_transitioned_by(tmp_path) == "sess-b"
+
+
+def test_transitioned_by_none_when_session_key_unknown(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_transitioned_by, _write_phase_atomic
+
+    _write_phase_atomic(tmp_path, "design")  # e.g. a bare CLI phase set, no session
+    assert _read_transitioned_by(tmp_path) is None
+
+
+def test_transitioned_by_preserved_on_idempotent_rewrite(tmp_path: Path) -> None:
+    """Rewriting the SAME phase must not clobber who caused the last real transition."""
+    from agentalloy.signals.skill_loader import _read_transitioned_by, _write_phase_atomic
+
+    _write_phase_atomic(tmp_path, "design", session_key="sess-a")
+    _write_phase_atomic(tmp_path, "design", session_key="sess-b")  # idempotent — no-op actor
+    assert _read_transitioned_by(tmp_path) == "sess-a"
+
+
+def test_transitioned_by_absent_with_no_session_history() -> None:
+    from agentalloy.signals.skill_loader import _read_transitioned_by
+
+    assert _read_transitioned_by(Path("/no/such/repo/xyz")) is None
+
+
+# ---------------------------------------------------------------------------
 # _load_workflow_skill_for_phase — packs fallback
 # ---------------------------------------------------------------------------
 

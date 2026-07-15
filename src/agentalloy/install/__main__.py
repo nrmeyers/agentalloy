@@ -21,6 +21,7 @@ import sys
 from agentalloy.install.subcommands import (
     add,
     approve,
+    auto_wire_worktree,
     cleanup,
     code,
     compose,
@@ -115,6 +116,7 @@ _SUBCOMMANDS = [
     cleanup,
     # Underlying step subcommands (still available for power-users + the
     # runbook LLM that drives them individually).
+    auto_wire_worktree,  # internal — invoked by the post-checkout hook only
     detect,
     recommend_host_targets,
     recommend_models,

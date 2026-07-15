@@ -104,6 +104,43 @@ class TestPhaseSet:
         assert (repo_root / ".agentalloy").is_dir()
 
 
+class TestPhaseSetTransitionedBy:
+    """Mirrors the proxy's `skill_loader._write_phase_atomic` attribution — lets
+    a different session's next turn recognize the phase moved out from under it
+    (see `proxy_signal._boundary_confirm_directives`'s swept case)."""
+
+    _SESSION = "11111111-aaaa-4aaa-8aaa-111111111111"
+
+    def test_records_session_on_real_transition(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", self._SESSION)
+        run_phase_set("build", root=repo_root)
+        from agentalloy.signals.skill_loader import _read_transitioned_by
+
+        assert _read_transitioned_by(repo_root) == self._SESSION
+
+    def test_no_session_env_records_nothing(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        run_phase_set("build", root=repo_root)
+        from agentalloy.signals.skill_loader import _read_transitioned_by
+
+        assert _read_transitioned_by(repo_root) is None
+
+    def test_idempotent_set_preserves_prior_actor(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", self._SESSION)
+        run_phase_set("build", root=repo_root)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "22222222-bbbb-4bbb-8bbb-222222222222")
+        run_phase_set("build", root=repo_root)  # same phase — not a real transition
+        from agentalloy.signals.skill_loader import _read_transitioned_by
+
+        assert _read_transitioned_by(repo_root) == self._SESSION
+
+
 class TestPhaseClear:
     def test_removes_phase_file(self, repo_root: Path) -> None:
         run_phase_set("build", root=repo_root)

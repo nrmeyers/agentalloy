@@ -106,6 +106,104 @@ def test_swap_command_never_uses_uv_for_source():
         ]
 
 
+# --- extras preservation across upgrade -------------------------------------
+# Regression: `uv tool install --force`/`pip install --upgrade` install bare
+# `agentalloy` with no memory of previously-installed extras, so an upgrade
+# silently dropped tree-sitter/onnxruntime even when the user had deliberately
+# enabled code-index/rerank — degrading the module to "unavailable" post-upgrade
+# with no indication why.
+
+
+def test_swap_command_appends_extras_for_uv_tool():
+    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+        assert up._swap_command("uv-tool", "v2.3.0", ["code-index"]) == [
+            "uv",
+            "tool",
+            "install",
+            "--force",
+            "--from",
+            f"git+{up._GIT_URL}@v2.3.0",
+            "agentalloy[code-index]",
+        ]
+
+
+def test_swap_command_sorts_and_joins_multiple_extras():
+    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+        assert up._swap_command("uv-tool", "v2.3.0", ["rerank", "code-index"]) == [
+            "uv",
+            "tool",
+            "install",
+            "--force",
+            "--from",
+            f"git+{up._GIT_URL}@v2.3.0",
+            "agentalloy[code-index,rerank]",
+        ]
+
+
+def test_swap_command_appends_extras_for_pip_fallback():
+    with patch.object(up.shutil, "which", return_value=None):
+        assert up._swap_command("pip", "v2.3.0", ["code-index"]) == [
+            up.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
+        ]
+
+
+def test_swap_command_no_extras_is_byte_for_byte_unchanged():
+    """Empty list must produce the exact original (pre-extras-support) command."""
+    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+        assert up._swap_command("uv-tool", "v2.3.0", []) == up._swap_command("uv-tool", "v2.3.0")
+    with patch.object(up.shutil, "which", return_value=None):
+        assert up._swap_command("pip", "v2.3.0", []) == up._swap_command("pip", "v2.3.0")
+
+
+def test_detect_installed_extras_source_never_probes():
+    with patch.object(up.subprocess, "run") as mock_run:
+        assert up._detect_installed_extras("source") == []
+        mock_run.assert_not_called()
+
+
+def test_detect_installed_extras_uv_tool_finds_importable_modules():
+    def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if cmd[:3] == ["uv", "tool", "dir"]:
+            return _proc(0, stdout="/home/u/.local/share/uv/tools\n")
+        # tree_sitter "importable", onnxruntime not.
+        module = cmd[-1].removeprefix("import ")
+        return _proc(0 if module == "tree_sitter" else 1)
+
+    with (
+        patch.object(up.subprocess, "run", side_effect=rec_run),
+        patch.object(up.Path, "exists", return_value=True),
+    ):
+        assert up._detect_installed_extras("uv-tool") == ["code-index"]
+
+
+def test_detect_installed_extras_none_importable_returns_empty():
+    with (
+        patch.object(up.subprocess, "run", return_value=_proc(1)),
+        patch.object(up.Path, "exists", return_value=True),
+    ):
+        assert up._detect_installed_extras("uv-tool") == []
+
+
+def test_detect_installed_extras_missing_tool_dir_returns_empty():
+    """`uv tool dir` unresolvable (uv missing/broken) -> no probing possible."""
+    with patch.object(up.subprocess, "run", return_value=_proc(1)):
+        assert up._detect_installed_extras("uv-tool") == []
+
+
+def test_detect_installed_extras_pip_probes_current_interpreter():
+    def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        module = cmd[-1].removeprefix("import ")
+        return _proc(0 if module in ("tree_sitter", "onnxruntime") else 1)
+
+    with patch.object(up.subprocess, "run", side_effect=rec_run):
+        assert set(up._detect_installed_extras("pip")) == {"code-index", "rerank"}
+
+
 # --- orchestration: check / already-current ---------------------------------
 
 
@@ -190,6 +288,9 @@ def test_native_ordering_uv_tool():
 
     with (
         patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        # Extras detection has its own dedicated tests; keep this one focused
+        # on step ORDERING, not the extra subprocess calls probing adds.
+        patch.object(up, "_detect_installed_extras", return_value=[]),
         patch.object(up, "_stop_service", side_effect=lambda: calls.append("stop") or "systemd"),
         patch.object(up, "_start_inference_servers", side_effect=lambda: calls.append("inference")),
         patch.object(up, "_start_service", side_effect=lambda: calls.append("start")),
