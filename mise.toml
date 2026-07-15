@@ -1,0 +1,4 @@
+# <!-- BEGIN agentalloy install -->
+[env]
+HERMES_HOME = "{{config_root}}/.hermes"
+# <!-- END agentalloy install -->

@@ -125,6 +125,7 @@ def adopt_and_wire(
     upstream_model: str | None = None,
     key_env: str | None = None,
     lifecycle_mode: str | None = None,
+    assume_index: bool = False,
 ) -> tuple[Upstream | None, dict[str, Any], str | None]:
     """Adopt *harness*'s upstream and wire interception at *root* (repo scope).
 
@@ -199,7 +200,7 @@ def adopt_and_wire(
     # service reports the module enabled; cleans up stale/legacy blocks otherwise.
     from agentalloy.install import code_index_wiring
 
-    code_index_wiring.maybe_wire(root, port)
+    code_index_wiring.maybe_wire(root, port, assume_yes=assume_index)
     return upstream, result, phase_seeded
 
 
