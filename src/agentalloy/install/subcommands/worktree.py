@@ -143,6 +143,7 @@ def _run(args: argparse.Namespace) -> int:
         upstream_url=args.upstream_url,
         upstream_model=args.upstream_model,
         key_env=args.key_env,
+        assume_index=True,
     )
 
     _render(harness, args.branch, target, upstream, result, phase_seeded)
