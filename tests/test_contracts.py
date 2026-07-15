@@ -429,16 +429,17 @@ class TestCodeIndexQueryParams:
 
         assert params.path_globs == []
 
-    def test_non_github_remote_falls_back_to_basename(self, tmp_path: Path) -> None:
+    def test_non_github_remote_yields_host_qualified_slug(self, tmp_path: Path) -> None:
         from agentalloy.contracts import code_index_query_params
 
         contract = self._contract(tmp_path)
         _init_git_origin(tmp_path, "https://gitlab.com/myorg/myrepo.git")
 
-        # Non-GitHub host → directory basename, same as the slug rule the
-        # code-index module keys its indexes by off GitHub.
+        # Non-GitHub host → host-qualified canonical slug (worktree-path
+        # independent), same as the slug rule the code-index module keys its
+        # indexes by.
         params = code_index_query_params(contract, tmp_path)
-        assert params.repo == tmp_path.name
+        assert params.repo == "gitlab.com__myorg__myrepo"
 
     def test_no_git_falls_back_to_dir_name(self, tmp_path: Path) -> None:
         from unittest.mock import patch

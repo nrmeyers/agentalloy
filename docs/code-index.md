@@ -79,9 +79,13 @@ code_index/
   repos/{slug}/cache/            # engine hash/stat sidecar caches
 ```
 
-`{slug}` is canonical (`code_index/slug.py`): a repo whose single `origin`
-remote is a github.com URL slugs to `{org}__{repo}`; anything else falls back
-to the directory basename (filesystem-safe charset enforced).
+`{slug}` is canonical (`code_index/slug.py`) and worktree-path-independent: a
+repo with a single `origin` remote slugs to `{org}__{repo}` for github.com, or
+`{host}__{org}__{repo}` for any other host (GitLab, Bitbucket, self-hosted) —
+so a git worktree of the same repo shares its slug (and cache) with the main
+checkout instead of re-indexing from scratch under its own directory-basename
+key. Zero/multiple remotes or an unparseable origin URL fall back to the
+directory basename (filesystem-safe charset enforced).
 
 ## Incremental indexing
 
