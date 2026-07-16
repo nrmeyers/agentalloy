@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Instructions tell your agent how to work here. The code index tells it what's actually here.<br/>AgentAlloy composes the first into your agent's context — and teaches it to query the second.</b>
+  <b>Instructions tell your agent how to work here. The code index tells it what's actually here. Knowledge tells it why.<br/>AgentAlloy composes the first into your agent's context, teaches it to query the second — and now pushes the third without being asked.</b>
 </p>
 
 <p align="center">
@@ -18,7 +18,11 @@
   <img src="https://img.shields.io/badge/packs-35+-orange" alt="35+ packs" />
   &nbsp;
   <img src="https://img.shields.io/badge/skills-300+-orange" alt="300+ skills" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/v7.0-Knowledge%20module-brightgreen" alt="v7.0: Knowledge module" />
 </p>
+
+> 🆕 **v7.0 — the Knowledge module is live.** AgentAlloy now has a third context leg: the decisions behind your code, and *why* they were made. Ask on demand (`agentalloy knowledge why <symbol>`), or let it push — when a task touches code governed by a past decision, the rationale lands in context automatically, no query needed. Jump to [Knowledge module (decisions)](#knowledge-module-decisions).
 
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
@@ -26,7 +30,7 @@ Coding agents don't fail for lack of intelligence — they fail for lack of **co
 
 - **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 300+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
 - **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs ("what breaks if I change this?") and budgeted context bundles. The agent **queries it**; nothing is pushed. The composed instructions teach the agent when to ask: check blast radius at design, pull a grounded bundle at build, map regression scope at qa.
-- **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index — no separate store, no new process, no separate toggle: a deterministic `_index_decisions` pass links each decision (an existing lifecycle doc: `docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand (`agentalloy knowledge why <symbol>`) or let it push: at design/build, when a work-item's scope touches governed code, the governing decision's rationale is composed into context without asking. Riding on the code index means enabling one enables both — see [Code index (optional)](#code-index-optional).
+- **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index — no separate store, no new process, no separate toggle: a deterministic `_index_decisions` pass links each decision (an existing lifecycle doc: `docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand (`agentalloy knowledge why <symbol>`) or let it push: at design/build, when a work-item's scope touches governed code, the governing decision's rationale is composed into context without asking. See [Knowledge module (decisions)](#knowledge-module-decisions).
 
 It attaches as a **local proxy**: your harness points its base URL at AgentAlloy and every request flows through with the right instructions composed in — for Claude Code, wiring sets a single env var and your own credentials pass through untouched. Smaller models get leverage they don't have alone; larger models get your actual house rules — and a way to interrogate your actual codebase and its history of decisions — instead of their best guess. **Compound engineering** feeds Knowledge's capture side: the qa phase codifies each task's lesson to `docs/solutions/<slug>.md` behind a deterministic gate, and `agentalloy lessons promote <slug>` turns a recurring lesson into an injected skill, dedup-gated so the corpus stays sharp.
 
@@ -56,6 +60,7 @@ One question away, because the injected guidance taught the agent to ask:
 - [What makes the composition different](#what-makes-the-composition-different)
 - [How it works: phases, contracts, signal layer](#how-it-works-phases-contracts-signal-layer)
 - [Code index (optional)](#code-index-optional)
+- [Knowledge module (decisions)](#knowledge-module-decisions)
 - [How to use it](#how-to-use-it)
 - [Profiles](#profiles-user-scoped-skill-contexts)
 - [Harness support](#harness-support)
@@ -174,11 +179,28 @@ agentalloy code callers <fqn>              # call sites (--depth N for transitiv
 agentalloy code bundle "<task>"            # budgeted context bundle for a task
 agentalloy code status                     # indexed repos + active jobs + staleness
 agentalloy code watch enable               # per-repo file-watch enrollment (CODE_INDEX_WATCH is the master switch)
-agentalloy knowledge why <fqn>              # decisions governing a symbol — the Knowledge module's pull side
 agentalloy config status                   # current module toggles from .env
 ```
 
-Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. When the module is enabled, `agentalloy add` writes a small code-index block into the repo's agent instructions and offers to index an unindexed repo on the spot (adding a repo never enables the module itself — that's the service-side `CODE_INDEX_ENABLED` switch); `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, storage layout, and the [Knowledge layer (decisions)](docs/code-index.md#knowledge-layer-decisions) section — the JIT decision push at design/build, dedup against promoted lesson skills, and the fail-closed guarantee when the module is off.
+Indexes are per-repo under `~/.local/share/agentalloy/code_index/` (DuckDB symbol graph + LanceDB vectors) and reuse the same local embed server as the skill corpus. When the module is enabled, `agentalloy add` writes a small code-index block into the repo's agent instructions and offers to index an unindexed repo on the spot (adding a repo never enables the module itself — that's the service-side `CODE_INDEX_ENABLED` switch); `code status` flags repos whose index is behind `git HEAD` (nothing auto-reindexes — enroll in watch for that). See [docs/code-index.md](docs/code-index.md) for the endpoint table, CLI reference, and storage layout.
+
+---
+
+## Knowledge module (decisions)
+
+The third context leg: not just *what's there* (Code) but ***why it's that way***. A typed decision layer riding on the same code index — no separate store, no new process, and (see above) no separate toggle: enabling `code-index` enables Knowledge too.
+
+**How a decision gets there.** Nothing new to author. AgentAlloy's own SDD lifecycle already writes the "why" as it runs — a task's lesson (`docs/solutions/<slug>.md`, gated at qa) and the design phase's `approach.md`. A deterministic `_index_decisions` pass links each decision (a heading-chunk of one of those docs) to the code symbols it names — no LLM, no schema migration, incremental with the rest of the index.
+
+```bash
+agentalloy knowledge why <fqn>              # decisions governing a symbol — pull it on demand
+```
+
+**And it doesn't wait to be asked.** At design/build, when a work-item's `scope.touches` covers code a decision governs, that decision's rationale is composed into context on the cursor-entry turn — automatically, once per work-item, no query required. Two guarantees: a `superseded` decision never surfaces (stale rationale is worse than none), and if the decision's already been promoted to a domain skill (`agentalloy lessons promote`), Knowledge defers to it instead of double-injecting.
+
+**Fail-closed.** Module off, repo unindexed, or nothing in scope governed — composition is byte-identical to Knowledge not existing. It's additive, never a new failure mode.
+
+Full mechanism (the JIT push, dedup rules, incremental re-link on doc changes, the query API): [docs/code-index.md § Knowledge layer (decisions)](docs/code-index.md#knowledge-layer-decisions).
 
 ---
 
