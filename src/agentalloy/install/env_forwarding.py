@@ -35,6 +35,10 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # Module toggles — the reason this module exists (see MODULE_TOGGLES).
         "COMPOSE_ENABLED",
         "CODE_INDEX_ENABLED",
+        # Module toggle, same class as the two above — pure behavior, no host
+        # paths. Not yet in MODULE_TOGGLES (no doctor/upgrade drift-check wired
+        # up for it yet); add there when that lands.
+        "KNOWLEDGE_GRAPH_ENABLED",
         # Behavioral toggle, meaningful in-container (watchdog reindex).
         "CODE_INDEX_WATCH",
         # Auto-refresh cadence (seconds); the image bakes 300, a host value overrides.

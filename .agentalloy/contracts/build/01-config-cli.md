@@ -52,8 +52,15 @@ Approach + task order live in docs/design/knowledge-management-production/
 
 ## Status
 
-Shipped: the `config` subcommand group (`status`/`enable`/`disable`), the
-`knowledge_graph_enabled` Settings field, and its `INTENT_KEYS`
-classification. Remaining before this task closes: a dedicated
-`tests/test_config.py` for the subcommand (currently only covered
-transitively via `test_env_forwarding.py`).
+Done. Shipped: the `config` subcommand group (`status`/`enable`/`disable`,
+now actually wired into `install/__main__.py`'s `_SUBCOMMANDS` — an earlier
+pass had imported the module but never registered it, so `agentalloy config`
+silently failed to parse), the `knowledge_graph_enabled` Settings field
+(de-duplicated — an earlier pass declared it twice), its `INTENT_KEYS`
+classification, and `tests/install/test_config.py` (9 cases: status,
+enable/disable, idempotency, comment/unrelated-key preservation, `.env`
+permissions, and a regression guard on the CLI-wiring bug). The `.env` write
+path was also moved off an ad-hoc full-file regeneration (which discarded
+comments/ordering) onto the shared, comment-preserving
+`install.state.upsert_env_file` the web `/api/config` endpoint already used
+— both surfaces now share one implementation.
