@@ -394,7 +394,7 @@ def _prompt_modules() -> str:
         "Which modules do you want?",
         [
             ("injector", "Instruction injector (skill compose/proxy)   [default]"),
-            ("code-index", "Codebase indexer (code search & call graphs)"),
+            ("code-index", "Codebase indexer (code search, call graphs & decision graph)"),
             ("both", "Both"),
         ],
         default_index=1,

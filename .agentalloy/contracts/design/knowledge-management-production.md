@@ -26,9 +26,11 @@ created_at: 2026-07-15T22:36:17Z
 
 ## Scope in a sentence
 
-Three independent pieces of install/config UX wired onto the existing
-`code-index` module-toggle pattern: a wizard option, a config subcommand
-group, and an upgrade reminder. No engine changes.
+Three pieces of install/config UX for surfacing the Knowledge module, all
+wired onto the *existing* `code-index` toggle rather than a new one (revised
+mid-flight — see approach.md — after confirming Knowledge has no separable
+runtime gate): a config subcommand group, an updated wizard label, and an
+updated upgrade reminder. No engine changes.
 
 ## Design
 
