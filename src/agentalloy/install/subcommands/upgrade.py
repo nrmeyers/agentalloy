@@ -851,7 +851,8 @@ def _code_index_enable_reminder(env_values: dict[str, str]) -> str | None:
         return None
     return (
         "code-index is off — run `agentalloy code enable` (then `agentalloy "
-        "server-restart`) to turn on codebase search & call graphs."
+        "server-restart`) to turn on codebase search, call graphs & the "
+        "decision graph (`agentalloy knowledge why`)."
     )
 
 

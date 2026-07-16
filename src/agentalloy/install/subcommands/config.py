@@ -7,6 +7,11 @@ Toggles are targeted KEY=VALUE upserts into the user-scoped ``.env``
 (``install.state.upsert_env_file``) — comments, ordering, and unrelated keys
 are preserved verbatim, matching the same helper the web UI's ``/api/config``
 uses, not a full-file regeneration.
+
+There is no separate ``knowledge-graph`` feature here: the Knowledge module
+(decision-graph linkage, ``agentalloy knowledge why``) rides the same router
+and store as ``code-index`` with no independent runtime toggle, so
+``code-index`` covers both.
 """
 
 from __future__ import annotations
@@ -21,7 +26,6 @@ from agentalloy.install.output import add_json_flag, print_rich, write_result
 # This matches the mapping used in src/agentalloy/config.py
 # and src/agentalloy/install/subcommands/write_env.py
 _FEATURE_TO_ENV = {
-    "knowledge-graph": "KNOWLEDGE_GRAPH_ENABLED",
     "code-index": "CODE_INDEX_ENABLED",
 }
 
