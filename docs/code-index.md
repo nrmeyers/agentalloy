@@ -6,7 +6,11 @@ served under `/code/*` on the main service port (47950). No separate process,
 no separate port — the routers register on the same FastAPI app as compose.
 
 - **Toggle**: `CODE_INDEX_ENABLED=1` (default off). The setup wizard's module
-  selection writes `COMPOSE_ENABLED` / `CODE_INDEX_ENABLED` into the user `.env`.
+  selection writes `COMPOSE_ENABLED` / `CODE_INDEX_ENABLED` into the user `.env`;
+  post-install, `agentalloy config enable|disable|status code-index` flips it
+  without a reinstall (targeted `.env` upsert — comments/other keys untouched).
+  This is the only toggle for the module — the Knowledge layer below has no
+  separate switch.
 - **Dependencies**: behind the `[code-index]` extra (`uv tool install
   'agentalloy[code-index]'`) — tree-sitter + per-language grammars. The core
   wheel stays lean; with the toggle on but the extra missing, the service
