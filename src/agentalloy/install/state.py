@@ -81,6 +81,39 @@ def parse_env_file(path: Path | None = None) -> dict[str, str]:
     return parsed
 
 
+def upsert_env_file(updates: dict[str, str | None], path: Path | None = None) -> Path:
+    """Apply KEY=VALUE upserts (``None`` deletes) to a ``.env`` file, atomically.
+
+    Unknown lines and comments are preserved verbatim — this is a targeted
+    edit, not a full regeneration, so it composes with ``write-env``'s
+    sentinel-guarded rewrites and any hand edits. Path defaults to
+    ``env_path()``. Written with mode ``0o600`` since a ``.env`` may hold
+    secrets (e.g. ``UPSTREAM_API_KEY``).
+    """
+    p = path if path is not None else env_path()
+    lines: list[str] = p.read_text().splitlines() if p.exists() else []
+
+    remaining = dict(updates)
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        key = stripped.partition("=")[0].strip() if "=" in stripped else None
+        if key is not None and not stripped.startswith("#") and key in remaining:
+            value = remaining.pop(key)
+            if value is not None:
+                out.append(f"{key}={value}")
+            # None -> drop the line (unset)
+        else:
+            out.append(line)
+    for key, value in remaining.items():
+        if value is not None:
+            out.append(f"{key}={value}")
+
+    content = "\n".join(out) + "\n"
+    _atomic_write(p, content, mode=0o600)
+    return p
+
+
 def load_env_into_environ(path: Path | None = None) -> list[str]:
     """Parse a .env file and inject its keys into ``os.environ``.
 
