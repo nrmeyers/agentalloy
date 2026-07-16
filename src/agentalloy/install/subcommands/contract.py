@@ -181,16 +181,18 @@ def _init(args: argparse.Namespace) -> int:
         )
 
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    title = slug.replace("-", " ").title()
     content = (
         template.replace("{{phase}}", phase)
         .replace("{{task_slug}}", slug)
         .replace("{{created_at}}", now)
         .replace("{{route}}", route)
+        .replace("{{task_slug_title}}", title)
         .replace("{phase}", phase)
         .replace("{task_slug}", slug)
         .replace("{created_at}", now)
         .replace("{route}", route)
-        .replace("{task_slug_title}", slug.replace("-", " ").title())
+        .replace("{task_slug_title}", title)
     )
 
     # Build contracts are flat and numerically ordered (NN-<task>.md), so the
