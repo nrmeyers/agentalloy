@@ -283,9 +283,11 @@ User-scope configuration lives under `~/.config/agentalloy/` (the `.env` sourced
 - `PROFILE_ROOT` — per-profile datastores root
 - `LOG_LEVEL` — service log level
 - `COMPOSE_ENABLED` — the instruction-injector module (compose/retrieve/proxy; default on)
-- `CODE_INDEX_ENABLED` — the code-index module (`/code/*`; default off; needs the `[code-index]` extra)
+- `CODE_INDEX_ENABLED` — the code-index module (`/code/*`; default off; needs the `[code-index]` extra). Also covers the Knowledge module (decision-graph linkage, `agentalloy knowledge why`) — it rides the same router/store with no independent toggle.
 - `CODE_INDEX_DATA_DIR` — per-repo index data root (default `~/.local/share/agentalloy/code_index`)
 - `CODE_INDEX_WATCH` — file-watch master switch (per-repo enrollment via `agentalloy code watch enable`)
+
+`write-env` renders the full `.env` from a hardware preset; to flip a single module toggle afterward without a full re-render, use `agentalloy config status|enable|disable <feature>` (a targeted `.env` upsert via `install.state.upsert_env_file` — comments and other keys are preserved verbatim). Currently manages `code-index` only; `COMPOSE_ENABLED` is not yet exposed there.
 
 Embedding dimension is not a config key — it is a fixed code constant (`EMBEDDING_DIM = 768` in `storage/vector_store.py`); switching it requires a re-embed, not an env change. Upstream LLM forwarding uses the bare env vars `UPSTREAM_URL` / `UPSTREAM_MODEL` / `UPSTREAM_API_KEY` as the **global fallback**; a per-repo upstream captured by `agentalloy add` (written to that repo's `.agentalloy/upstream`) **overrides** them for requests from that repo (see Environment Variables below).
 
