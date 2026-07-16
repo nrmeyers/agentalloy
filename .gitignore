@@ -103,6 +103,7 @@ docs/design/
 docs/tests/
 docs/qa/
 docs/ship/
+docs/fast/
 
 # Per-session scratch handoff notes (regenerable; never part of the repo).
 HANDOFF.md

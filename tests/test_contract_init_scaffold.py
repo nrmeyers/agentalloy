@@ -7,14 +7,59 @@ file with its required `## Section` headings, never overwriting).
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
+import pytest
+
+from agentalloy.install.subcommands import contract as contract_cmd
 from agentalloy.install.subcommands.contract import (
     _active_design_slug,
     _concretize_glob,
     _inject_work_item,
     _scaffold_phase_docs,
 )
+
+
+class TestInitTemplateSubstitution:
+    """Regression guard: `{{task_slug_title}}` must fully resolve.
+
+    sdd-fast.yaml and sdd-add-skill.yaml's contract_template use the
+    double-brace `{{task_slug_title}}` token, matching every other token's
+    double-brace convention in these templates ({{phase}}, {{task_slug}},
+    ...). `_init`'s replace chain only had a single-brace `{task_slug_title}`
+    substitution, so the double braces never fully resolved — every
+    sdd-fast/add-skill contract's heading rendered as a literal
+    "# {Knowledge Dogfooding}" (stray braces), not "# Knowledge Dogfooding".
+    """
+
+    def _init_and_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str) -> str:
+        (tmp_path / "pyproject.toml").write_text("")
+        monkeypatch.chdir(tmp_path)
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        contract_cmd.add_parser(sub)
+        args = parser.parse_args(
+            ["contract", "init", "--phase", phase, "--slug", "my-cool-task", "--route", "fast"]
+        )
+        args.func(args)
+        return (tmp_path / ".agentalloy" / "contracts" / phase / "my-cool-task.md").read_text()
+
+    def test_sdd_fast_heading_has_no_stray_braces(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = self._init_and_read(tmp_path, monkeypatch, "sdd-fast")
+        assert "# My Cool Task" in content
+        assert "{" not in content.split("---", 2)[2]  # body, past the frontmatter
+        assert "}" not in content.split("---", 2)[2]
+
+    def test_add_skill_heading_has_no_stray_braces(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = self._init_and_read(tmp_path, monkeypatch, "add-skill")
+        assert "# My Cool Task" in content
+        assert "{" not in content.split("---", 2)[2]
+        assert "}" not in content.split("---", 2)[2]
 
 
 class TestConcretizeGlob:
