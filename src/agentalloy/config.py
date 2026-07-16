@@ -106,9 +106,10 @@ class Settings(BaseSettings):
     # process: the instruction injector (compose/retrieve/proxy — the original
     # surface) and the codebase indexer (/code/*). Routers for a disabled
     # module are never registered; a disabled code_index module never imports
-    # tree-sitter. Env: COMPOSE_ENABLED, CODE_INDEX_ENABLED.
+    # tree-sitter. Env: COMPOSE_ENABLED, CODE_INDEX_ENABLED, KNOWLEDGE_GRAPH_ENABLED.
     compose_enabled: bool = True
     code_index_enabled: bool = False
+    knowledge_graph_enabled: bool = False
     # Per-repo index data (graph.duck + vectors.lance per slug, jobs.sqlite)
     # lives outside corpus/ — corpus is the global skill store, code_index is
     # per-repo derived data that is rebuilt, never migrated. Env: CODE_INDEX_DATA_DIR.

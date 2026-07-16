@@ -126,39 +126,13 @@ def _coerce(field: str, value: Any) -> str | None:
 def _upsert_env_file(updates: dict[str, str | None]) -> str:
     """Apply KEY=VALUE upserts (None deletes) to the user-scoped .env, atomically.
 
-    Unknown lines and comments are preserved verbatim — this is a targeted edit,
-    not a regeneration, so it composes with ``write-env``'s sentinel-guarded
-    full rewrites and any hand edits.
+    Thin wrapper over ``install.state.upsert_env_file`` — the CLI's
+    ``agentalloy config`` subcommand shares the same targeted-edit logic so
+    comments/unknown lines are preserved identically by both surfaces.
     """
     from agentalloy.install import state as install_state
 
-    env_path = _env_file_path()
-    lines: list[str] = []
-    if env_path.exists():
-        lines = env_path.read_text().splitlines()
-    else:
-        lines = ["# Written by the agentalloy web UI (/api/config)"]
-
-    remaining = dict(updates)
-    out: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        key = stripped.partition("=")[0].strip() if "=" in stripped else None
-        if key is not None and not stripped.startswith("#") and key in remaining:
-            value = remaining.pop(key)
-            if value is not None:
-                out.append(f"{key}={value}")
-            # None → drop the line (unset)
-        else:
-            out.append(line)
-    for key, value in remaining.items():
-        if value is not None:
-            out.append(f"{key}={value}")
-
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    content = "\n".join(out) + "\n"
-    install_state._atomic_write(env_path, content, mode=0o600)  # pyright: ignore[reportPrivateUsage]
-    return str(env_path)
+    return str(install_state.upsert_env_file(updates, _env_file_path()))
 
 
 @router.get("/api/config", summary="Current configuration (secrets masked)")
