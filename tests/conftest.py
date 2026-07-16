@@ -41,6 +41,27 @@ def _no_ambient_session_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_project_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Point ``resolve_working_dir``'s cwd fallback at an empty tmp dir.
+
+    ``resolve_working_dir`` falls back to ``Path.cwd()`` when a request carries
+    no ``metadata.cwd`` and ``AGENTALLOY_PROJECT_DIR`` is unset. On a dogfooded
+    checkout (this repo wires itself to the agentalloy proxy — see CLAUDE.md)
+    the real process cwd has a live ``.agentalloy/upstream`` pointing at a real,
+    reachable LLM, so any proxy test that forgets to pass ``metadata.cwd``
+    silently hits that real upstream instead of its mock — a 200 from the real
+    model where the test expected a 503 or a specific canned response. Setting
+    the env var to a fresh empty directory here makes that fallback hermetic
+    for every test; tests that explicitly set ``metadata.cwd`` (or a `/proj/`
+    token) are unaffected — those take precedence over the env var.
+    """
+    empty_dir = tmp_path_factory.mktemp("no-ambient-project-dir")
+    monkeypatch.setenv("AGENTALLOY_PROJECT_DIR", str(empty_dir))
+
+
 from agentalloy.app import create_app
 from agentalloy.storage.fragment_store import LanceFragmentStore
 

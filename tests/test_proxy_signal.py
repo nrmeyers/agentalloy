@@ -118,6 +118,44 @@ def _advisory(messages: list[str], qwen: int = 1) -> MagicMock:
     return d
 
 
+class TestExtractTaskFromMessages:
+    """Regression guard: the task prompt must track the CURRENT turn.
+
+    A chat-completions request resends the full history every call, so
+    scanning forward and returning on the first user message pins
+    ``recent_prompt_text`` (and therefore signal-keyword phase transitions) to
+    the session's opening line for its entire lifetime.
+    """
+
+    def test_uses_latest_user_message_not_first(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")
+        request = ProxyRequest(
+            model="gpt-4",
+            messages=[
+                ProxyMessage(role="user", content="hi"),
+                ProxyMessage(role="assistant", content="Hello! How can I help?"),
+                ProxyMessage(role="user", content="ready to scope"),
+            ],
+        )
+        result = asyncio.run(evaluate_signal(request, tmp_path))
+        assert result.task == "ready to scope"
+
+    def test_flattens_block_content_of_latest_message(self, tmp_path: Path) -> None:
+        _set_phase(tmp_path, "build")
+        request = ProxyRequest(
+            model="gpt-4",
+            messages=[
+                ProxyMessage(role="user", content="hi"),
+                ProxyMessage(
+                    role="user",
+                    content=[{"type": "text", "text": "start spec"}],
+                ),
+            ],
+        )
+        result = asyncio.run(evaluate_signal(request, tmp_path))
+        assert result.task == "start spec"
+
+
 class TestEvaluateSignal:
     def test_no_phase_file_returns_passthrough(self, tmp_path: Path) -> None:
         result = asyncio.run(evaluate_signal(_req("hello"), tmp_path))

@@ -41,7 +41,7 @@ htmlcov/
 .tox/
 .nox/
 
-build/
+/build/
 dist/
 *.egg-info/
 *.egg

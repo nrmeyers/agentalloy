@@ -156,13 +156,22 @@ class SignalResult:
 
 
 def _extract_task_from_messages(request: ProxyRequest) -> str | None:
-    """Extract the first user message text as the task prompt.
+    """Extract the latest user message text as the task prompt.
+
+    Chat-completions requests resend the full conversation history on every
+    call, so the *first* user message is only ever the session's opening line
+    (e.g. "hi") — scanning forward and returning on the first match pins the
+    signal-keyword trigger (``recent_prompt_text`` in
+    ``signals/prefilter.check_prefilter``) to that opening line for the rest of
+    the session, silently disabling keyword-driven phase transitions. Scan in
+    reverse instead, mirroring ``proxy_injection._last_user_index``, so this
+    always reflects the current turn.
 
     ``ProxyMessage.content`` may be a plain string or a list of
     Anthropic-style content blocks. Flatten the block form to text so the
     return type stays ``str | None`` as annotated.
     """
-    for msg in request.messages:
+    for msg in reversed(request.messages):
         if msg.role != "user" or not msg.content:
             continue
         if isinstance(msg.content, str):
