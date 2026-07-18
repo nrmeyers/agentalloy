@@ -1,0 +1,20 @@
+bug:                                                                -> Image pulled successfully
+error: Package requirement (`git+https://github.com/nrmeyers/agentalloy.git@v7.0.0`) provided with `--from` conflicts with install request (`agentalloy[code-index]`)
+  Mounting projects root /home/nmeyers (rw) so the proxy can read .agentalloy/ phase state.
+  Tip: set AGENTALLOY_PROJECTS_ROOT to narrow the exposed tree (e.g. ~/dev) instead of all of $HOME.
+Error: rootlessport listen tcp 0.0.0.0:47950: bind: address already in use
+  Port bind failed — another container may be publishing port 47950.
+  Run `podman ps -a` and remove conflicting containers, then re-run setup.
+
+  Upgrade
+
+  Current:  6.13.2
+  Latest:   v7.0.0
+  Mode:     container
+
+  Actions                                                        ✓ pulled ghcr.io/nrmeyers/agentalloy:7.0.0
+
+  Warnings
+  ! CLI upgrade failed (Command '['uv', 'tool', 'install', '--force', '--from', 'git+https://github.com/nrmeyers/agentalloy.git@v7.0.0', 'agentalloy']' returned non-zero exit status 2.); continuing with image recreate                                     ! container recreate failed
+                                                                 Now on: 6.13.2                                               
+nmeyers@ai-server:~$                                           [0] 0:bash*

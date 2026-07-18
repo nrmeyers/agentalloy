@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "f615df9a41a0",
+  "strategy": "manual-commit",
+  "branch": "fix/upgrade-uv-extras-conflict",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/agentalloy/install/subcommands/upgrade.py",
+    "tests/install/test_upgrade.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f6/15df9a41a0/0/metadata.json",
+      "transcript": "/f6/15df9a41a0/0/full.jsonl",
+      "compact_transcript": "/f6/15df9a41a0/0/transcript.jsonl",
+      "content_hash": "/f6/15df9a41a0/0/content_hash.txt",
+      "prompt": "/f6/15df9a41a0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 11669,
+    "cache_creation_tokens": 63504,
+    "cache_read_tokens": 1014481,
+    "output_tokens": 7807,
+    "api_call_count": 20
+  }
+}
