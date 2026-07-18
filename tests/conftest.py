@@ -16,6 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
 del _REPO_ROOT
 
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -151,6 +152,15 @@ def _isolated_ambient_tmpdir(tmp_path_factory: pytest.TempPathFactory) -> Iterat
     podman's ``$TMPDIR/containers-user-$UID`` storage, leaked ``mkdtemp``
     dirs — otherwise fall back to the repo working directory when /tmp
     isn't writable (sandboxed runners), leaving residue in the checkout.
+
+    Rootless podman writes subuid-mapped overlay files under here, which
+    the invoking user can't unlink directly. Left alone, pytest's own tmp
+    dir rotation renames the stale numbered dir to ``garbage-<uuid>``, the
+    rmtree fails with PermissionError, and the renamed directory orphans
+    permanently (this is how ``/tmp/pytest-of-*/garbage-*`` accumulated to
+    226G — see 2026-07-18 cleanup). Tear down through the podman user
+    namespace, where the subuid mapping resolves back to normal ownership,
+    so the directory is already gone before pytest tries to rm it.
     """
     tmp = tmp_path_factory.mktemp("ambient-tmp")
     old = os.environ.get("TMPDIR")
@@ -162,6 +172,9 @@ def _isolated_ambient_tmpdir(tmp_path_factory: pytest.TempPathFactory) -> Iterat
     else:
         os.environ["TMPDIR"] = old
     tempfile.tempdir = None
+    podman = shutil.which("podman")
+    if podman is not None:
+        subprocess.run([podman, "unshare", "rm", "-rf", str(tmp)], check=False)
 
 
 # Processes that predate the pytest session are not ours to kill — a
