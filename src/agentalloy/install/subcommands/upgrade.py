@@ -194,7 +194,13 @@ def _swap_command(method: str, ref: str, extras: list[str] | None = None) -> lis
     target = f"git+{_GIT_URL}@{ref}"
     package = f"agentalloy[{','.join(sorted(extras))}]" if extras else "agentalloy"
     if method != "source" and shutil.which("uv"):
-        return ["uv", "tool", "install", "--force", "--from", target, package]
+        # Extras must ride on the ``--from`` spec (PEP 508 direct reference),
+        # NOT the trailing package arg: ``uv tool install --from <bare-git-url>
+        # agentalloy[extra]`` errors with "requirement provided with --from
+        # conflicts with install request" because the ``--from`` source carries
+        # no extras. The trailing arg stays the bare package name.
+        from_spec = f"{package} @ {target}" if extras else target
+        return ["uv", "tool", "install", "--force", "--from", from_spec, "agentalloy"]
     if extras:
         # PEP 508 direct-URL-with-extras syntax; the plain bare-URL form (no
         # package name) can't carry extras.
