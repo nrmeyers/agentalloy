@@ -109,16 +109,14 @@ def run(args: argparse.Namespace) -> int:
 
     # Guard: code-index can only be enabled when the [code-index] extra is
     # installed — otherwise the service starts with modules.code_index=unavailable.
-    if args.config_subcommand == "enable" and feature_name == "code-index" and not _verify_code_index_importable():
-        print(
-            "  [red]Cannot enable code-index: the [code-index] extra is not installed.[/red]"
-        )
-        print(
-            "  [yellow]Install it with: uv tool install 'agentalloy[code-index]'[/yellow]"
-        )
-        print(
-            "  [yellow]Then re-run: agentalloy config enable code-index[/yellow]"
-        )
+    if (
+        args.config_subcommand == "enable"
+        and feature_name == "code-index"
+        and not _verify_code_index_importable()
+    ):
+        print("  [red]Cannot enable code-index: the [code-index] extra is not installed.[/red]")
+        print("  [yellow]Install it with: uv tool install 'agentalloy[code-index]'[/yellow]")
+        print("  [yellow]Then re-run: agentalloy config enable code-index[/yellow]")
         return 1
 
     changed = env_vars.get(env_var) != new_value
