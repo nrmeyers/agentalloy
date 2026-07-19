@@ -534,6 +534,27 @@ def _patch_env_key(key: str, value: str) -> Path:
 
 
 def _run_module_toggle(*, enabled: bool) -> int:
+    # Guard: code-index can only be enabled when the [code-index] extra is
+    # installed — otherwise the service starts with modules.code_index=unavailable.
+    if enabled:
+        import importlib
+
+        try:
+            importlib.import_module("agentalloy.code_index.api")
+        except ImportError:
+            print(
+                "  [red]Cannot enable code-index: the [code-index] extra is not installed.[/red]",
+                file=sys.stderr,
+            )
+            print(
+                "  [yellow]Install it with: uv tool install 'agentalloy[code-index]'[/yellow]",
+                file=sys.stderr,
+            )
+            print(
+                "  [yellow]Then re-run: agentalloy code enable[/yellow]",
+                file=sys.stderr,
+            )
+            return 1
     path = _patch_env_key("CODE_INDEX_ENABLED", "1" if enabled else "0")
     state_word = "enabled" if enabled else "disabled"
     print(f"CODE_INDEX_ENABLED={'1' if enabled else '0'} written to {path}.")
