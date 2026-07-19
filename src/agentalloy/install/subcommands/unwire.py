@@ -58,6 +58,15 @@ def add_parser(
         "to unwire this harness across every recorded repo.",
     )
     p.add_argument(
+        "--scan",
+        action="store_true",
+        help="Also remove UNRECORDED on-disk carriers for the harness(es) in scope "
+        "(state reset, or wiring committed into the repo). Removes only self-marking "
+        "carriers (AgentAlloy .agentalloy-env files and sentinel-bounded [env]/.envrc "
+        "blocks); it WARNS about — never guesses at — ambiguous config files like "
+        ".hermes/config.yaml that may be a redirected copy of your own config.",
+    )
+    p.add_argument(
         "--yes",
         action="store_true",
         dest="assume_yes",
@@ -207,6 +216,131 @@ def _maybe_remove_code_index(
     return {"slug": slug, "removed": bool(removed)}
 
 
+# ---------------------------------------------------------------------------
+# --scan: record-independent removal of UNRECORDED on-disk carriers.
+#
+# The normal unwire path is record-driven — it reverses exactly what
+# install-state.json recorded. When the record and reality drift apart (state
+# reset, or wiring git-committed into the repo and re-cloned), the walk finds
+# nothing and unwire is a silent no-op. --scan closes that gap, but only for
+# carriers that unambiguously belong to AgentAlloy:
+#   * dedicated `.agentalloy-env` files (the name is the trust anchor);
+#   * sentinel-bounded `[env]` / `.envrc` blocks (the sentinel is the anchor).
+# Ambiguous files (a `.hermes/config.yaml` that may be a copy of the user's own
+# config with only the endpoint redirected) are WARNED about, never deleted:
+# without a record we can't tell "AgentAlloy created this" from "AgentAlloy
+# edited yours", and guessing either resurrects wiring or destroys user data.
+# For hermes, removing the activation carriers is enough to functionally
+# de-wire it — with HERMES_HOME no longer set, new sessions use the global
+# home and the repo-local config.yaml goes inert.
+# ---------------------------------------------------------------------------
+
+# Whole-file carriers AgentAlloy owns outright — the dedicated name (or a
+# per-tool rules path we alone write) is the trust anchor, so --scan deletes
+# them without a record.
+_SCAN_DEDICATED_FILES: dict[str, tuple[str, ...]] = {
+    "hermes-agent": (".hermes/.agentalloy-env",),
+    "opencode": (".opencode/.agentalloy-env",),
+    "copilot-cli": (".copilot/.agentalloy-env",),
+    "codex": (".codex/.agentalloy-env",),
+    "aider": (".agentalloy-aider-instructions.md",),
+    "cursor": (".cursor/rules/agentalloy.mdc",),
+    "windsurf": (".windsurf/rules/agentalloy.md",),
+}
+
+# Shared files where AgentAlloy injects a sentinel-bounded block. --scan strips
+# the block (deleting the file only if nothing else survives). Every carrier
+# here — the mise/.envrc activation blocks AND the markdown-injection
+# instruction files — shares the same `<!-- BEGIN agentalloy install -->`
+# sentinel, so `_remove_sentinel_block` is the single, uniform trust anchor.
+_SCAN_SENTINEL_FILES: dict[str, tuple[str, ...]] = {
+    "hermes-agent": ("mise.toml", ".mise.toml", ".envrc"),
+    "aider": (".aider.conf.yml",),
+    "claude-code": ("CLAUDE.md",),
+    "antigravity": ("GEMINI.md",),
+    "gemini-cli": ("GEMINI.md",),
+    "github-copilot": (".github/copilot-instructions.md",),
+    "cline": (".clinerules",),
+    "cursor": (".cursorrules",),
+    "windsurf": (".windsurfrules",),
+}
+
+# (relative_path, substring that proves the file points at the AgentAlloy proxy)
+_SCAN_AMBIGUOUS_CONFIGS: dict[str, tuple[tuple[str, str], ...]] = {
+    "hermes-agent": ((".hermes/config.yaml", "/proj/"),),
+    "opencode": (("opencode.json", "/proj/"),),
+    "codex": ((".codex/config.toml", "/proj/"),),
+    "continue-closed": ((".continuerc.json", "agentalloy"),),
+    "continue-local": ((".continuerc.json", "agentalloy"),),
+}
+
+
+def _scan_carriers(
+    root: Path, harness: str | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """Remove unrecorded self-marking carriers under *root*; warn on ambiguous ones.
+
+    Scoped to a single harness when *harness* is set, else every harness with a
+    scannable carrier. Repo-local only — every path is resolved under *root*, so
+    a scan never reaches user-scope or another repo. Idempotent: absent files
+    and already-clean files are no-ops. Returns ``(removed, modified, warnings)``.
+    """
+    from agentalloy.install.subcommands.uninstall_proxy import _remove_sentinel_block
+
+    removed: list[dict[str, Any]] = []
+    modified: list[dict[str, Any]] = []
+    warns: list[str] = []
+    names = (
+        [harness]
+        if harness is not None
+        else sorted(
+            set(_SCAN_DEDICATED_FILES) | set(_SCAN_SENTINEL_FILES) | set(_SCAN_AMBIGUOUS_CONFIGS)
+        )
+    )
+    for name in names:
+        for rel in _SCAN_DEDICATED_FILES.get(name, ()):
+            path = root / rel
+            if path.is_file():
+                try:
+                    path.unlink()
+                    removed.append({"path": str(path), "action": "scan_removed_carrier"})
+                except OSError as exc:
+                    warns.append(f"scan: could not remove {path}: {exc}")
+        for rel in _SCAN_SENTINEL_FILES.get(name, ()):
+            path = root / rel
+            if not path.is_file():
+                continue
+            content = path.read_text()
+            cleaned = _remove_sentinel_block(content)
+            if cleaned == content:
+                continue  # no AgentAlloy block present
+            if cleaned.strip():
+                path.write_text(cleaned)
+                modified.append({"path": str(path), "action": "scan_removed_sentinel_block"})
+            else:
+                try:
+                    path.unlink()
+                    removed.append({"path": str(path), "action": "scan_deleted_empty_file"})
+                except OSError as exc:
+                    warns.append(f"scan: could not remove {path}: {exc}")
+        for rel, marker in _SCAN_AMBIGUOUS_CONFIGS.get(name, ()):
+            path = root / rel
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text()
+            except OSError:
+                continue
+            if marker in text and "agentalloy" in text.lower():
+                warns.append(
+                    f"scan: {path} still points at the AgentAlloy proxy but may be a "
+                    f"redirected copy of your own config — left in place. Remove it or "
+                    f"restore the model endpoint by hand. (With the activation carriers "
+                    f"removed, new sessions already bypass it.)"
+                )
+    return removed, modified, warns
+
+
 def _run(args: argparse.Namespace) -> int:
     # `unwire` is per-repo by default: remove sentinels for entries belonging to the
     # cwd-derived repo, leave the user-scope state and `.env` untouched. `--all`
@@ -214,12 +348,18 @@ def _run(args: argparse.Namespace) -> int:
     # configs. `remove_user_state=False` and `remove_env=False` skip the user-scope
     # teardown branches in `uninstall()` in both modes; the sentinel work is the same
     # as a full uninstall otherwise.
+    harness = getattr(args, "harness", None)
+    all_repos = getattr(args, "all_repos", False)
+    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+
+    scan_root = _repo_root()
+
     result = uninstall(
         remove_data=False,
         force=args.force,
         remove_user_state=False,
         remove_env=False,
-        all_repos=getattr(args, "all_repos", False),
+        all_repos=all_repos,
         # `unwire` is sentinel-only: keep services running, keep models,
         # keep all user-scope state. The new explicit kwargs preserve
         # this behavior independently of how the meta-uninstall defaults
@@ -230,13 +370,13 @@ def _run(args: argparse.Namespace) -> int:
         # When set, scope the teardown to a single harness: leave any other wired
         # harness and the repo's shared lifecycle state (.agentalloy/phase, config)
         # in place. None == today's behavior (every harness in scope).
-        harness=getattr(args, "harness", None),
+        harness=harness,
     )
 
     # Code-index cleanup for THIS repo (cwd). Skipped for a harness-scoped
     # unwire — the repo stays wired for the remaining harness, so its index
     # is still in use.
-    if getattr(args, "harness", None) is None:
+    if harness is None:
         ci = _maybe_remove_code_index(
             Path.cwd().resolve(),
             assume_yes=bool(getattr(args, "assume_yes", False)),
@@ -252,6 +392,37 @@ def _run(args: argparse.Namespace) -> int:
                     "(remove later with `agentalloy code remove`).",
                     file=sys.stderr,
                 )
+
+    # --scan: sweep unrecorded on-disk carriers the record walk can't see.
+    scan_requested = bool(getattr(args, "scan", False))
+    if scan_requested:
+        sc_removed, sc_modified, sc_warns = _scan_carriers(scan_root, harness)
+        result.setdefault("files_removed", []).extend(sc_removed)
+        result.setdefault("files_modified", []).extend(sc_modified)
+        result.setdefault("warnings", []).extend(sc_warns)
+
+    # Drift guard: gate on what was ACTUALLY removed, not on record presence —
+    # `_unwire_repo_local` (inside uninstall) surgically strips some unrecorded
+    # carriers (claude-code settings.local.json, aider, cline) regardless of
+    # records, so "had no record" does not imply "removed nothing". A truly
+    # empty result for a harness the user explicitly named is the silent no-op
+    # that made `unwire --harness hermes-agent` look like it worked when it
+    # hadn't; say so instead of rendering a dim "no changes".
+    removed_anything = bool(result.get("files_removed") or result.get("files_modified"))
+    if harness is not None and not removed_anything:
+        where = "any recorded repo" if all_repos else str(scan_root)
+        if scan_requested:
+            result.setdefault("warnings", []).append(
+                f"No recorded or on-disk {harness!r} wiring found for {where}; "
+                f"nothing to remove."
+            )
+        else:
+            result.setdefault("warnings", []).append(
+                f"No recorded {harness!r} wiring for {where}; nothing was removed. "
+                f"If this repo still behaves as wired, its carriers exist on disk but "
+                f"were never recorded (state reset, or wiring committed into the repo). "
+                f"Re-run with --scan to remove the unrecorded carriers."
+            )
 
     write_result(result, args, human_fn=lambda r: render_lifecycle_result(r, "Unwire"))
     return 0
