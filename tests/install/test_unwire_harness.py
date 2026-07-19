@@ -45,8 +45,28 @@ def _wire(harness: object, **over: object) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
-def _unwire(harness: str | None = None, *, all_repos: bool = False) -> argparse.Namespace:
-    return argparse.Namespace(force=False, json=True, harness=harness, all_repos=all_repos)
+def _unwire(
+    harness: str | None = None, *, all_repos: bool = False, scan: bool = False
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        force=False, json=True, harness=harness, all_repos=all_repos, scan=scan
+    )
+
+
+def _seed_unrecorded_hermes(repo: Path) -> None:
+    """Write hermes carriers directly, WITHOUT a state record — the record/reality
+    drift (state reset, or wiring git-committed and re-cloned) that makes the
+    record-driven unwire a silent no-op."""
+    (repo / ".hermes").mkdir(exist_ok=True)
+    (repo / ".hermes" / ".agentalloy-env").write_text('export HERMES_HOME="$PWD/.hermes"\n')
+    (repo / ".hermes" / "config.yaml").write_text(
+        "model:\n  default: agentalloy-proxy\n  provider: custom\n"
+        "  base_url: http://localhost:47950/proj/ABC/v1\ntoolsets:\n  - hermes-cli\n"
+    )
+    (repo / "mise.toml").write_text(
+        "# <!-- BEGIN agentalloy install -->\n[env]\n"
+        'HERMES_HOME = "{{config_root}}/.hermes"\n# <!-- END agentalloy install -->\n'
+    )
 
 
 def _block_present(p: Path) -> bool:
@@ -168,6 +188,98 @@ class TestUnwireSingleHarness:
 
         unwire._run(_unwire("hermes-agent"))  # remove the proxy-only harness
         assert contract.exists(), "user contracts are never touched by unwire"
+
+
+# ---------------------------------------------------------------------------
+# record/reality drift: unrecorded on-disk wiring + the --scan escape hatch
+# ---------------------------------------------------------------------------
+
+
+class TestUnrecordedDrift:
+    def test_unwire_without_record_warns_and_removes_nothing(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.chdir(repo_root)
+        _seed_unrecorded_hermes(repo_root)
+        capsys.readouterr()
+
+        rc = unwire._run(_unwire("hermes-agent"))
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+
+        # Nothing removed (there was no record to drive the walk)...
+        assert not out.get("files_removed")
+        assert not out.get("files_modified")
+        # ...but it is no longer silent: the drift is explained and --scan pointed to.
+        assert any(
+            "nothing was removed" in w and "--scan" in w for w in out.get("warnings") or []
+        ), out.get("warnings")
+        # Carriers are untouched without --scan.
+        assert (repo_root / ".hermes" / ".agentalloy-env").exists()
+        assert (repo_root / "mise.toml").exists()
+
+    def test_scan_removes_self_marking_carriers_but_warns_on_config(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.chdir(repo_root)
+        _seed_unrecorded_hermes(repo_root)
+        capsys.readouterr()
+
+        rc = unwire._run(_unwire("hermes-agent", scan=True))
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+
+        # Self-marking carriers are gone: the dedicated env file and the now-empty
+        # sentinel-only mise.toml.
+        assert not (repo_root / ".hermes" / ".agentalloy-env").exists()
+        assert not (repo_root / "mise.toml").exists()
+        # The ambiguous config (maybe a redirected copy of the user's own) is NEVER
+        # guessed at — left in place with a warning.
+        assert (repo_root / ".hermes" / "config.yaml").exists()
+        assert any("config.yaml" in w for w in out.get("warnings") or []), out.get("warnings")
+
+    def test_surgical_removal_suppresses_the_drift_warning(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # claude-code's proxy carrier is stripped by the surgical sweep in
+        # uninstall() even with NO record — so a drifted claude-code repo does
+        # remove something. The warning must key off actual removals, not record
+        # presence, or the JSON would both list a removal and say "nothing removed".
+        monkeypatch.chdir(repo_root)
+        settings = repo_root / ".claude" / "settings.local.json"
+        settings.parent.mkdir()
+        settings.write_text(
+            json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://localhost:47950/proj/ABC/v1"}})
+        )
+        capsys.readouterr()
+
+        rc = unwire._run(_unwire("claude-code"))
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out.get("files_removed"), "surgical sweep must have removed the proxy carrier"
+        assert not any("nothing was removed" in w for w in out.get("warnings") or []), (
+            "must not claim nothing removed when it did"
+        )
+
+    def test_scan_only_strips_sentinel_block_preserving_user_mise(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.chdir(repo_root)
+        # A mise.toml with the user's own content plus our sentinel block.
+        (repo_root / ".hermes").mkdir()
+        (repo_root / ".hermes" / ".agentalloy-env").write_text("export HERMES_HOME=x\n")
+        (repo_root / "mise.toml").write_text(
+            "[tools]\nnode = '24'\n\n"
+            "# <!-- BEGIN agentalloy install -->\n[env]\n"
+            'HERMES_HOME = "{{config_root}}/.hermes"\n# <!-- END agentalloy install -->\n'
+        )
+        capsys.readouterr()
+
+        unwire._run(_unwire("hermes-agent", scan=True))
+        assert (repo_root / "mise.toml").exists(), "user content keeps the file alive"
+        text = (repo_root / "mise.toml").read_text()
+        assert "node = '24'" in text
+        assert "agentalloy" not in text and "HERMES_HOME" not in text
 
 
 # ---------------------------------------------------------------------------
