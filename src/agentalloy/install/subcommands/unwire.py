@@ -285,7 +285,9 @@ def _scan_carriers(
     a scan never reaches user-scope or another repo. Idempotent: absent files
     and already-clean files are no-ops. Returns ``(removed, modified, warnings)``.
     """
-    from agentalloy.install.subcommands.uninstall_proxy import _remove_sentinel_block
+    from agentalloy.install.subcommands.uninstall_proxy import (
+        _remove_sentinel_block,  # pyright: ignore[reportPrivateUsage]
+    )
 
     removed: list[dict[str, Any]] = []
     modified: list[dict[str, Any]] = []
