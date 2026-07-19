@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -61,7 +62,11 @@ def test_target_image_preserves_full_variant():
 
 
 def test_swap_command_prefers_uv_when_on_path():
-    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+    with (
+        patch.object(up.shutil, "which", return_value="/usr/bin/uv"),
+        patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
+        patch.object(up.Path, "exists", return_value=True),
+    ):
         assert up._swap_command("pip", "v2.3.0") == [
             "uv",
             "tool",
@@ -77,6 +82,8 @@ def test_swap_command_prefers_uv_when_on_path():
             "install",
             "--force",
             "--from",
+            "--python",
+            "/fake/tool/python",
             f"git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
@@ -115,26 +122,38 @@ def test_swap_command_never_uses_uv_for_source():
 
 
 def test_swap_command_appends_extras_for_uv_tool():
-    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+    with (
+        patch.object(up.shutil, "which", return_value="/usr/bin/uv"),
+        patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
+        patch.object(up.Path, "exists", return_value=True),
+    ):
         assert up._swap_command("uv-tool", "v2.3.0", ["code-index"]) == [
             "uv",
             "tool",
             "install",
             "--force",
             "--from",
+            "--python",
+            "/fake/tool/python",
             f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
 
 
 def test_swap_command_sorts_and_joins_multiple_extras():
-    with patch.object(up.shutil, "which", return_value="/usr/bin/uv"):
+    with (
+        patch.object(up.shutil, "which", return_value="/usr/bin/uv"),
+        patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
+        patch.object(up.Path, "exists", return_value=True),
+    ):
         assert up._swap_command("uv-tool", "v2.3.0", ["rerank", "code-index"]) == [
             "uv",
             "tool",
             "install",
             "--force",
             "--from",
+            "--python",
+            "/fake/tool/python",
             f"agentalloy[code-index,rerank] @ git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
