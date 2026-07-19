@@ -1,0 +1,64 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "a632dd409a3a",
+  "session_id": "6840991a-b6f8-46d7-8afd-7c3a722244fe",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-19T21:26:22.92551684Z",
+  "branch": "fix/code-status-surface-failed-jobs",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "0b73b208c5c4",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 13034,
+    "cache_creation_tokens": 155100,
+    "cache_read_tokens": 6697766,
+    "output_tokens": 38387,
+    "api_call_count": 58
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 88,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".agentalloy/README.md": 20,
+        ".agentalloy/approved/design": 3,
+        ".agentalloy/claude-code-env.sh": 3,
+        ".agentalloy/config": 1,
+        ".agentalloy/cursor": 1,
+        ".agentalloy/free-reminded": 1,
+        ".agentalloy/linkvault-test-prompts.md": 55,
+        ".agentalloy/phase": 4
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 91,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".agentalloy/README.md": 20,
+        ".agentalloy/announced": 1,
+        ".agentalloy/approved/design": 3,
+        ".agentalloy/banner-turns": 1,
+        ".agentalloy/claude-code-env.sh": 3,
+        ".agentalloy/composed": 1,
+        ".agentalloy/config": 1,
+        ".agentalloy/cursor": 1,
+        ".agentalloy/free-reminded": 1,
+        ".agentalloy/linkvault-test-prompts.md": 55,
+        ".agentalloy/phase": 4
+      }
+    }
+  ]
+}

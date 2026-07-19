@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "a632dd409a3a",
+  "strategy": "manual-commit",
+  "branch": "fix/code-status-surface-failed-jobs",
+  "checkpoints_count": 2,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/a6/32dd409a3a/0/metadata.json",
+      "transcript": "/a6/32dd409a3a/0/full.jsonl",
+      "compact_transcript": "/a6/32dd409a3a/0/transcript.jsonl",
+      "content_hash": "/a6/32dd409a3a/0/content_hash.txt",
+      "prompt": "/a6/32dd409a3a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 13034,
+    "cache_creation_tokens": 155100,
+    "cache_read_tokens": 6697766,
+    "output_tokens": 38387,
+    "api_call_count": 58
+  }
+}
