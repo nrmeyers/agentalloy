@@ -413,8 +413,7 @@ def _run(args: argparse.Namespace) -> int:
         where = "any recorded repo" if all_repos else str(scan_root)
         if scan_requested:
             result.setdefault("warnings", []).append(
-                f"No recorded or on-disk {harness!r} wiring found for {where}; "
-                f"nothing to remove."
+                f"No recorded or on-disk {harness!r} wiring found for {where}; nothing to remove."
             )
         else:
             result.setdefault("warnings", []).append(

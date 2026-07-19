@@ -257,9 +257,9 @@ class TestUnrecordedDrift:
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         assert out.get("files_removed"), "surgical sweep must have removed the proxy carrier"
-        assert not any(
-            "nothing was removed" in w for w in out.get("warnings") or []
-        ), "must not claim nothing removed when it did"
+        assert not any("nothing was removed" in w for w in out.get("warnings") or []), (
+            "must not claim nothing removed when it did"
+        )
 
     def test_scan_only_strips_sentinel_block_preserving_user_mise(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
