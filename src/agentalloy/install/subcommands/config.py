@@ -17,10 +17,21 @@ and store as ``code-index`` with no independent runtime toggle, so
 from __future__ import annotations
 
 import argparse
+import importlib
 from typing import Any
 
 from agentalloy.install import state as install_state
 from agentalloy.install.output import add_json_flag, print_rich, write_result
+
+
+def _verify_code_index_importable() -> bool:
+    """True when the code-index module's API surface imports cleanly."""
+    try:
+        importlib.import_module("agentalloy.code_index.api")
+    except ImportError:
+        return False
+    return True
+
 
 # Mapping of feature names to their environment variable names.
 # This matches the mapping used in src/agentalloy/config.py
@@ -95,6 +106,21 @@ def run(args: argparse.Namespace) -> int:
     feature_name: str = args.feature
     env_var = _FEATURE_TO_ENV[feature_name]
     new_value = "True" if args.config_subcommand == "enable" else "False"
+
+    # Guard: code-index can only be enabled when the [code-index] extra is
+    # installed — otherwise the service starts with modules.code_index=unavailable.
+    if args.config_subcommand == "enable" and feature_name == "code-index":
+        if not _verify_code_index_importable():
+            print(
+                "  [red]Cannot enable code-index: the [code-index] extra is not installed.[/red]"
+            )
+            print(
+                "  [yellow]Install it with: uv tool install 'agentalloy[code-index]'[/yellow]"
+            )
+            print(
+                "  [yellow]Then re-run: agentalloy config enable code-index[/yellow]"
+            )
+            return 1
 
     changed = env_vars.get(env_var) != new_value
     if changed:
