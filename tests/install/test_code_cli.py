@@ -174,7 +174,85 @@ class TestStatus:
         args = _parse(["code", "status", "--port", "47950", "--json"])
         assert args.func(args) == 0
         payload = json.loads(capsys.readouterr().out)
-        assert set(payload) == {"repos", "active_jobs"}
+        assert set(payload) == {"repos", "active_jobs", "recent_failures"}
+
+    def test_status_surfaces_latest_failed_job(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A repo whose latest attempt failed shows a Recent failures line with
+        the error — instead of the failure being silently discarded."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            if request.url.path == "/code/repos":
+                return httpx.Response(200, json=[])
+            if request.url.path == "/code/index/jobs":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "id": "jf",
+                            "slug": "org__repo",
+                            "state": "failed",
+                            "phase": "markdown",
+                            "progress": 75.0,
+                            "error": "LMUnavailable: [Errno 111] Connection refused",
+                        },
+                        {
+                            "id": "jok",
+                            "slug": "other__repo",
+                            "state": "done",
+                            "phase": None,
+                            "progress": 100.0,
+                        },
+                    ],
+                )
+            raise AssertionError(f"unexpected path {request.url.path}")
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "status", "--port", "47950"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "Recent failures (1)" in out
+        assert "org__repo" in out
+        assert "Connection refused" in out
+        # A slug whose latest attempt succeeded is not reported as a failure.
+        assert "other__repo" not in out.split("Recent failures")[1]
+
+    def test_status_failure_shadowed_by_later_success(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """An older failure must not surface once a newer run for the same slug
+        succeeded (jobs arrive newest-first)."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            if request.url.path == "/code/repos":
+                return httpx.Response(200, json=[])
+            if request.url.path == "/code/index/jobs":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {"id": "jok", "slug": "org__repo", "state": "done", "progress": 100.0},
+                        {
+                            "id": "jf",
+                            "slug": "org__repo",
+                            "state": "failed",
+                            "phase": "markdown",
+                            "progress": 75.0,
+                            "error": "boom",
+                        },
+                    ],
+                )
+            raise AssertionError(f"unexpected path {request.url.path}")
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "status", "--port", "47950"])
+        assert args.func(args) == 0
+        out = capsys.readouterr().out
+        assert "Recent failures" not in out
 
 
 class TestSearch:

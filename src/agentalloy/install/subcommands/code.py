@@ -296,8 +296,25 @@ def _run_status(args: argparse.Namespace) -> int:
         return _service_down_error(port, exc)
 
     active = [j for j in jobs if j.get("state") in ("queued", "running")]
+    active_slugs = {j.get("slug") for j in active}
+
+    # Latest terminal attempt per slug (jobs arrive newest-first) — surfaced
+    # only when it failed. A stale failure never shadows a later success, and a
+    # slug with a re-run already in flight is left to the active section. Without
+    # this, a failed job (with its error) was fetched and silently discarded, so
+    # a repo that never finished indexing looked identical to one never tried.
+    recent_failures: list[dict[str, Any]] = []
+    seen_slugs: set[Any] = set()
+    for j in jobs:
+        slug = j.get("slug")
+        if j.get("state") in ("queued", "running") or slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
+        if slug not in active_slugs and j.get("state") in ("failed", "interrupted"):
+            recent_failures.append(j)
+
     if args.json:
-        _print_json({"repos": repos, "active_jobs": active})
+        _print_json({"repos": repos, "active_jobs": active, "recent_failures": recent_failures})
         return 0
 
     print(f"Indexed repos ({len(repos)}):")
@@ -320,6 +337,16 @@ def _run_status(args: argparse.Namespace) -> int:
             f"  {j.get('id')}  {j.get('slug')}  [{j.get('phase') or j.get('state')}] "
             f"{float(j.get('progress') or 0.0):.1f}%"
         )
+    if recent_failures:
+        print(f"Recent failures ({len(recent_failures)}):")
+        for j in recent_failures:
+            err = (j.get("error") or "").strip().splitlines()
+            first = err[0] if err else "(no error recorded)"
+            print(
+                f"  {j.get('slug')}  [{j.get('state')} @ {j.get('phase') or '?'} "
+                f"{float(j.get('progress') or 0.0):.0f}%]  {first}"
+            )
+            print(f"    re-run: `agentalloy code index --force`  (job {j.get('id')})")
     return 0
 
 
