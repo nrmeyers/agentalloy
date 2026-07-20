@@ -7,8 +7,7 @@
   "files_touched": [
     ".github/workflows/version-bump.yml",
     "RELEASE.md",
-    "scripts/version_bump.py",
-    "tests/test_version_bump.py"
+    "scripts/version_bump.py"
   ],
   "sessions": [
     {
@@ -16,14 +15,14 @@
       "transcript": "/4c/47680bc405/0/full.jsonl",
       "compact_transcript": "/4c/47680bc405/0/transcript.jsonl",
       "content_hash": "/4c/47680bc405/0/content_hash.txt",
-      "prompt": "/4c/47680bc405/0/prompt.txt"
+      "prompt": ""
     }
   ],
   "token_usage": {
-    "input_tokens": 8650,
-    "cache_creation_tokens": 129654,
-    "cache_read_tokens": 5505322,
-    "output_tokens": 42334,
-    "api_call_count": 57
+    "input_tokens": 283,
+    "cache_creation_tokens": 11118,
+    "cache_read_tokens": 784055,
+    "output_tokens": 4877,
+    "api_call_count": 5
   }
 }
