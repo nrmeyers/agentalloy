@@ -80,6 +80,33 @@ class TestEnableDisable:
         mode = install_state.env_path().stat().st_mode & 0o777
         assert mode == 0o600
 
+    def test_enable_installs_extra_on_demand_when_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Enabling code-index without the extra installs it on demand (opting
+        in *is* the request), then flips the flag — no manual command."""
+        monkeypatch.setattr(config_cmd, "_verify_code_index_importable", lambda: False)
+        calls: list[str] = []
+        monkeypatch.setattr(
+            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+            lambda **_: (calls.append("x"), ("installed", "v9.9.9"))[1],
+        )
+        assert config_cmd.run(_run("enable", "code-index")) == 0
+        assert calls == ["x"]
+        assert install_state.parse_env_file()["CODE_INDEX_ENABLED"] == "True"
+
+    def test_enable_aborts_without_flipping_flag_when_install_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(config_cmd, "_verify_code_index_importable", lambda: False)
+        monkeypatch.setattr(
+            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+            lambda **_: ("failed", "No solution found"),
+        )
+        assert config_cmd.run(_run("enable", "code-index")) == 1
+        # flag must NOT be flipped on a failed install
+        assert install_state.parse_env_file().get("CODE_INDEX_ENABLED") != "True"
+
     def test_no_knowledge_graph_feature(self) -> None:
         """Regression guard: knowledge-graph is not a separate toggle.
 

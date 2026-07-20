@@ -218,6 +218,89 @@ def _swap_command(method: str, ref: str, extras: list[str] | None = None) -> lis
     return [sys.executable, "-m", "pip", "install", "--upgrade", target]
 
 
+def _code_index_opted_in() -> bool:
+    """True when the persisted env has ``CODE_INDEX_ENABLED`` truthy — i.e. the
+    user has added the code indexer.
+
+    This is the single source of "did the user opt into code-index", so the
+    extra is folded into the effective base install *only for those users*
+    (never stripped by a managed reinstall) rather than pulling the tree-sitter
+    grammars into every injector-only install. Never raises → treated as opted
+    out on any read failure.
+    """
+    try:
+        env = install_state.parse_env_file(install_state.env_path())
+    except (OSError, ValueError):
+        return False
+    return str(env.get("CODE_INDEX_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _code_index_importable(python: Path) -> bool:
+    """True when ``agentalloy.code_index.api`` imports under ``python`` (a fresh
+    subprocess). Used before/after an extra install: ``--force`` may have just
+    swapped the *running* interpreter's package tree, so an in-process import is
+    not a trustworthy signal — a subprocess against the tool's own interpreter
+    is. Never raises.
+    """
+    try:
+        probe = subprocess.run(
+            [str(python), "-c", "import agentalloy.code_index.api"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def ensure_code_index_extra(*, show_progress: bool = True) -> tuple[str, str]:
+    """Ensure the ``[code-index]`` extra is present in the running install.
+
+    Reinstalls ``agentalloy`` at the current version with the code-index extra
+    (union'd with any already-installed extras, so a prior ``rerank`` survives)
+    via the same ``uv tool install --force`` swap :func:`upgrade` uses. This lets
+    the setup wizard honour a ``code-index``/``both`` module choice by actually
+    installing the extra instead of telling the user to run a manual command.
+
+    Returns ``(status, detail)`` where ``status`` is one of:
+
+    - ``"already"``   — the extra was already importable; nothing changed.
+    - ``"installed"`` — the extra was installed and now imports.
+    - ``"source"``    — a source/editable checkout; caller must not swap it.
+    - ``"failed"``    — the swap ran but the extra still isn't importable
+      (``detail`` carries the reason).
+
+    Never raises.
+    """
+    method = _detect_install_method()
+    if method == "source":
+        return "source", "source/editable checkout"
+    tool_py = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
+    if tool_py is not None and tool_py.exists() and _code_index_importable(tool_py):
+        return "already", ""
+    extras = sorted({"code-index", *_detect_installed_extras(method)})
+    ref = f"v{_current_version()}"
+    swap = _swap_command(method, ref, extras)
+    try:
+        with progress_activity(
+            f"installing [code-index] extra via {method}", enabled=show_progress
+        ):
+            subprocess.run(swap, check=True, timeout=1800, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        tail = (exc.stderr or exc.stdout or "").strip().splitlines()[-3:]
+        detail = " / ".join(line.strip() for line in tail) if tail else f"exit {exc.returncode}"
+        return "failed", detail
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "failed", str(exc)
+    # Verify against a freshly-resolved tool interpreter — the swap replaced the
+    # files probed above.
+    verify_py = _current_tool_python() if method == "uv-tool" else Path(sys.executable)
+    if verify_py is not None and verify_py.exists() and _code_index_importable(verify_py):
+        return "installed", ref
+    return "failed", "extra still not importable after install"
+
+
 # ---------------------------------------------------------------------------
 # Service control (native)
 # ---------------------------------------------------------------------------
@@ -409,14 +492,19 @@ def _upgrade_native(
 
     # Detect extras BEFORE anything changes — --force replaces the installed
     # files, so this is the only point where the pre-upgrade env is intact.
-    # code-index is requested UNCONDITIONALLY (not just when previously
-    # installed): the module is now default-available post-upgrade regardless
-    # of whether CODE_INDEX_ENABLED is on, so turning it on later
-    # (`agentalloy code enable`) never hits "extra not installed" — this also
-    # self-heals an install that already lost the extra to a prior upgrade
-    # (the bug this whole mechanism exists to prevent going forward).
-    extras = sorted({"code-index", *_detect_installed_extras(method)})
-    actions.append(f"ensuring extras: {', '.join(extras)}")
+    # code-index is (re)requested only when the user opted into it
+    # (CODE_INDEX_ENABLED truthy — see _code_index_opted_in): this folds the
+    # extra into the effective base install for code-index users, so an upgrade
+    # never strips it even if a prior bare reinstall already did — while leaving
+    # injector-only installs free of the tree-sitter grammars. Other
+    # already-installed extras (e.g. rerank) are always preserved. Turning the
+    # module on later goes through `agentalloy code enable`, which installs the
+    # extra on demand, so a not-yet-opted-in user never hits "extra not installed".
+    wanted = set(_detect_installed_extras(method))
+    if _code_index_opted_in():
+        wanted.add("code-index")
+    extras = sorted(wanted)
+    actions.append(f"ensuring extras: {', '.join(extras) or '(none)'}")
 
     mode = _stop_service()
     actions.append(f"stopped service ({mode})")

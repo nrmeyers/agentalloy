@@ -527,9 +527,10 @@ def _run_remove(args: argparse.Namespace) -> int:
 # Deliberately NOT `write-env` (which re-renders a whole preset template and
 # refuses a hand-edited .env without --force): this is a surgical one-line
 # patch, safe to run on any .env regardless of provenance, so it can never
-# clobber unrelated settings. `agentalloy upgrade` (v6.13.0+) always installs
-# the code-index extra, so this toggle no longer has an "extra not installed"
-# failure mode to worry about — just flip it and restart.
+# clobber unrelated settings. Enabling *is* opting into code-index, so when the
+# [code-index] extra isn't installed yet this toggle installs it on demand
+# rather than refusing — from there `agentalloy upgrade` keeps it (the extra is
+# folded into base only for opted-in users; see upgrade._code_index_opted_in).
 # ---------------------------------------------------------------------------
 
 
@@ -561,27 +562,40 @@ def _patch_env_key(key: str, value: str) -> Path:
 
 
 def _run_module_toggle(*, enabled: bool) -> int:
-    # Guard: code-index can only be enabled when the [code-index] extra is
-    # installed — otherwise the service starts with modules.code_index=unavailable.
+    # Enabling code-index requires the [code-index] extra — otherwise the service
+    # starts with modules.code_index=unavailable. Enabling *is* opting in, so
+    # install the extra on demand rather than refusing; only abort if it can't
+    # be provided (source checkout, or a failed install).
     if enabled:
         import importlib
 
         try:
             importlib.import_module("agentalloy.code_index.api")
         except ImportError:
-            print(
-                "  [red]Cannot enable code-index: the [code-index] extra is not installed.[/red]",
-                file=sys.stderr,
-            )
-            print(
-                "  [yellow]Install it with: uv tool install 'agentalloy[code-index]'[/yellow]",
-                file=sys.stderr,
-            )
-            print(
-                "  [yellow]Then re-run: agentalloy code enable[/yellow]",
-                file=sys.stderr,
-            )
-            return 1
+            from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
+
+            print("Installing the [code-index] extra…", file=sys.stderr)
+            status, detail = ensure_code_index_extra()
+            if status not in ("installed", "already"):
+                if status == "source":
+                    print(
+                        "  [red]Cannot enable code-index: source/editable checkout — add the "
+                        "extra with `uv sync --extra code-index`, then re-run.[/red]",
+                        file=sys.stderr,
+                    )
+                else:
+                    suffix = f": {detail}" if detail else ""
+                    print(
+                        f"  [red]Cannot enable code-index: installing the [code-index] extra "
+                        f"failed{suffix}.[/red]",
+                        file=sys.stderr,
+                    )
+                    print(
+                        "  [yellow]Install it manually with: uv tool install "
+                        "'agentalloy[code-index]', then re-run: agentalloy code enable[/yellow]",
+                        file=sys.stderr,
+                    )
+                return 1
     path = _patch_env_key("CODE_INDEX_ENABLED", "1" if enabled else "0")
     state_word = "enabled" if enabled else "disabled"
     print(f"CODE_INDEX_ENABLED={'1' if enabled else '0'} written to {path}.")

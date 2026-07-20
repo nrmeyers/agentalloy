@@ -526,9 +526,11 @@ def _check_code_index(env: dict[str, str], port: int) -> dict[str, Any]:
             "passed": False,
             "duration_ms": int((time.monotonic() - t0) * 1000),
             "error": "code-index module failed to load ([code-index] extra missing)",
+            "repairable": "code_index_extra",
             "remediation": (
-                "Install the extra: `uv tool install 'agentalloy[code-index]'`, "
-                "then restart the service."
+                "Install the extra: `agentalloy code enable` (or `uv tool install "
+                "'agentalloy[code-index]'`), then restart the service. "
+                "`agentalloy doctor --repair` does this automatically."
             ),
         }
     if state != "enabled":
@@ -1225,6 +1227,36 @@ def _repair(result: dict[str, Any]) -> int:
                 rc = 1
         except Exception as exc:  # noqa: BLE001
             print_rich(f"[red]  reembed error: {exc}[/red]")
+            rc = 1
+
+    # Step 3b: heal a missing [code-index] extra (module opted in via
+    # CODE_INDEX_ENABLED but the extra absent — e.g. stripped by a bare
+    # reinstall). Install it on demand, then restart so the service loads it.
+    ci_check = checks_by_name.get("code_index", {})
+    if not ci_check.get("passed", True) and ci_check.get("repairable") == "code_index_extra":
+        print_rich("[yellow]→ Installing the [code-index] extra…[/yellow]")
+        from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
+
+        status, detail = ensure_code_index_extra(show_progress=False)
+        if status in ("installed", "already"):
+            print_rich("[green]  [code-index] extra OK[/green]")
+            print_rich("[yellow]→ Restarting service to load the module…[/yellow]")
+            import subprocess
+
+            restart_rc = subprocess.run(  # noqa: S603
+                [sys.executable, "-m", "agentalloy.install", "server-restart"],
+                check=False,
+            ).returncode
+            if restart_rc != 0:
+                print_rich(f"[red]  server-restart exited {restart_rc}[/red]")
+                rc = 1
+        elif status == "source":
+            print_rich(
+                "[yellow]  Source/editable checkout — run `uv sync --extra code-index`.[/yellow]"
+            )
+            rc = 1
+        else:
+            print_rich(f"[red]  [code-index] extra install failed: {detail}[/red]")
             rc = 1
 
     # Step 4: re-diagnose and print after-picture

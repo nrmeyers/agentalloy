@@ -930,3 +930,63 @@ class TestResolveSlug:
         rows = ["nope", {"repo_path": 42, "slug": "x"}, {"slug": "no_path"}]
         _mock_client(monkeypatch, self._repos_handler(rows))
         assert code_mod._slug_from_registry(1, root) is None
+
+
+class TestEnableInstallsExtraOnDemand:
+    """`agentalloy code enable` installs the [code-index] extra on demand when
+    it's missing (opting in *is* the request), rather than refusing."""
+
+    def _force_missing_extra(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import importlib
+
+        real = importlib.import_module
+
+        def _boom(name: str, *a: Any, **k: Any) -> Any:
+            if name == "agentalloy.code_index.api":
+                raise ImportError("No module named 'tree_sitter'")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(importlib, "import_module", _boom)
+
+    def test_enable_installs_then_flips_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._force_missing_extra(monkeypatch)
+        patched: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            code_mod, "_patch_env_key", lambda k, v: patched.append((k, v)) or Path("/tmp/.env")
+        )
+        monkeypatch.setattr(
+            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+            lambda **_: ("installed", "v9.9.9"),
+        )
+        assert code_mod._run_module_toggle(enabled=True) == 0
+        assert ("CODE_INDEX_ENABLED", "1") in patched
+
+    def test_enable_aborts_without_flipping_when_install_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._force_missing_extra(monkeypatch)
+        patched: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            code_mod, "_patch_env_key", lambda k, v: patched.append((k, v)) or Path("/tmp/.env")
+        )
+        monkeypatch.setattr(
+            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+            lambda **_: ("failed", "No solution found"),
+        )
+        assert code_mod._run_module_toggle(enabled=True) == 1
+        assert patched == []  # flag never flipped on failure
+
+    def test_disable_never_touches_the_extra(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        patched: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            code_mod, "_patch_env_key", lambda k, v: patched.append((k, v)) or Path("/tmp/.env")
+        )
+
+        def _fail(**_: Any) -> Any:
+            raise AssertionError("disable must not install the extra")
+
+        monkeypatch.setattr(
+            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra", _fail
+        )
+        assert code_mod._run_module_toggle(enabled=False) == 0
+        assert ("CODE_INDEX_ENABLED", "0") in patched

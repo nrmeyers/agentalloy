@@ -223,13 +223,11 @@ def test_detect_installed_extras_pip_probes_current_interpreter():
         assert set(up._detect_installed_extras("pip")) == {"code-index", "rerank"}
 
 
-def test_native_always_requests_code_index_even_when_not_previously_installed():
-    """code-index is requested UNCONDITIONALLY, not just when detected.
+def _run_native_extras(*, opted_in: bool, detected: list[str]) -> tuple[list[str], list[list[str]]]:
+    """Drive ``_upgrade_native`` with the extras-relevant seams patched.
 
-    The module is meant to be available post-upgrade regardless of whether
-    CODE_INDEX_ENABLED is on, so a later `agentalloy code enable` never hits
-    "extra not installed" — this also self-heals an install that already lost
-    the extra to a prior upgrade (the original bug).
+    Returns ``(actions, swap_cmds)`` for assertions on which extras the swap
+    requested.
     """
     swap_cmds: list[list[str]] = []
 
@@ -239,7 +237,8 @@ def test_native_always_requests_code_index_even_when_not_previously_installed():
 
     with (
         patch.object(up, "_detect_install_method", return_value="uv-tool"),
-        patch.object(up, "_detect_installed_extras", return_value=[]),  # nothing detected
+        patch.object(up, "_detect_installed_extras", return_value=detected),
+        patch.object(up, "_code_index_opted_in", return_value=opted_in),
         patch.object(up, "_stop_service", return_value="systemd"),
         patch.object(up, "_start_inference_servers"),
         patch.object(up, "_start_service"),
@@ -247,29 +246,34 @@ def test_native_always_requests_code_index_even_when_not_previously_installed():
         patch.object(up.subprocess, "run", side_effect=rec_run),
     ):
         actions, _ = up._upgrade_native("v2.3.0", {"installed_packs": ["core"]}, assume_yes=True)
+    return actions, swap_cmds
 
+
+def test_native_requests_code_index_when_opted_in_even_if_not_installed():
+    """Opted in (CODE_INDEX_ENABLED on) → code-index is folded into base and
+    re-requested even when the current env has it stripped — self-healing a
+    prior bare reinstall that lost the extra."""
+    actions, swap_cmds = _run_native_extras(opted_in=True, detected=[])
     assert any("agentalloy[code-index]" in c for cmd in swap_cmds for c in cmd)
     assert any("ensuring extras: code-index" in a for a in actions)
 
 
-def test_native_unions_detected_extras_with_unconditional_code_index():
-    swap_cmds: list[list[str]] = []
+def test_native_omits_code_index_when_not_opted_in():
+    """Not opted in → injector-only installs never pull the tree-sitter grammars."""
+    actions, swap_cmds = _run_native_extras(opted_in=False, detected=[])
+    assert not any("code-index" in c for cmd in swap_cmds for c in cmd)
+    assert any("ensuring extras: (none)" in a for a in actions)
 
-    def rec_run(cmd: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
-        swap_cmds.append(cmd)
-        return _proc(0)
 
-    with (
-        patch.object(up, "_detect_install_method", return_value="uv-tool"),
-        patch.object(up, "_detect_installed_extras", return_value=["rerank"]),
-        patch.object(up, "_stop_service", return_value="systemd"),
-        patch.object(up, "_start_inference_servers"),
-        patch.object(up, "_start_service"),
-        patch.object(up, "_run_cli", return_value=_proc(0)),
-        patch.object(up.subprocess, "run", side_effect=rec_run),
-    ):
-        up._upgrade_native("v2.3.0", {"installed_packs": ["core"]}, assume_yes=True)
+def test_native_preserves_other_extras_when_not_opted_in():
+    """Not opted into code-index, but a detected rerank extra still survives."""
+    _actions, swap_cmds = _run_native_extras(opted_in=False, detected=["rerank"])
+    assert any("agentalloy[rerank]" in c for cmd in swap_cmds for c in cmd)
+    assert not any("code-index" in c for cmd in swap_cmds for c in cmd)
 
+
+def test_native_unions_detected_extras_with_code_index_when_opted_in():
+    _actions, swap_cmds = _run_native_extras(opted_in=True, detected=["rerank"])
     assert any("agentalloy[code-index,rerank]" in c for cmd in swap_cmds for c in cmd)
 
 
@@ -1086,3 +1090,70 @@ def test_dismiss_writes_dismissed_version(tmp_path, monkeypatch):
     code = up._dismiss(_ns(dismiss=True, quiet=True, json=False))
     assert code == 0
     assert rc.read_cache()["dismissed_version"] == "v3.9.0"
+
+
+# --- ensure_code_index_extra (used by the setup wizard) ---------------------
+
+
+def test_ensure_code_index_extra_source_never_swaps(monkeypatch):
+    monkeypatch.setattr(up, "_detect_install_method", lambda: "source")
+    called = MagicMock()
+    monkeypatch.setattr(up.subprocess, "run", called)
+    status, _ = up.ensure_code_index_extra()
+    assert status == "source"
+    called.assert_not_called()
+
+
+def test_ensure_code_index_extra_already_present_skips_install(monkeypatch, tmp_path):
+    py = tmp_path / "python"
+    py.write_text("")
+    monkeypatch.setattr(up, "_detect_install_method", lambda: "uv-tool")
+    monkeypatch.setattr(up, "_current_tool_python", lambda: py)
+    monkeypatch.setattr(up, "_code_index_importable", lambda p: True)
+    called = MagicMock()
+    monkeypatch.setattr(up.subprocess, "run", called)
+    status, detail = up.ensure_code_index_extra()
+    assert status == "already"
+    assert detail == ""
+    called.assert_not_called()
+
+
+def test_ensure_code_index_extra_installs_and_verifies(monkeypatch, tmp_path):
+    py = tmp_path / "python"
+    py.write_text("")
+    monkeypatch.setattr(up, "_detect_install_method", lambda: "uv-tool")
+    monkeypatch.setattr(up, "_current_tool_python", lambda: py)
+    monkeypatch.setattr(up, "_detect_installed_extras", lambda method: ["rerank"])
+    monkeypatch.setattr(up, "_current_version", lambda: "7.0.6")
+    # absent before the swap, present after — a single flag flip.
+    importable = {"v": False}
+    monkeypatch.setattr(up, "_code_index_importable", lambda p: importable["v"])
+
+    def _run(cmd, **kwargs):
+        # extras must be union'd (rerank preserved) and ride the --from spec.
+        assert "agentalloy[code-index,rerank] @ git+" in " ".join(cmd)
+        importable["v"] = True
+        return _proc(0)
+
+    monkeypatch.setattr(up.subprocess, "run", _run)
+    status, ref = up.ensure_code_index_extra(show_progress=False)
+    assert status == "installed"
+    assert ref == "v7.0.6"
+
+
+def test_ensure_code_index_extra_reports_failure(monkeypatch, tmp_path):
+    py = tmp_path / "python"
+    py.write_text("")
+    monkeypatch.setattr(up, "_detect_install_method", lambda: "uv-tool")
+    monkeypatch.setattr(up, "_current_tool_python", lambda: py)
+    monkeypatch.setattr(up, "_detect_installed_extras", lambda method: [])
+    monkeypatch.setattr(up, "_current_version", lambda: "7.0.6")
+    monkeypatch.setattr(up, "_code_index_importable", lambda p: False)
+
+    def _run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, stderr="No solution found")
+
+    monkeypatch.setattr(up.subprocess, "run", _run)
+    status, detail = up.ensure_code_index_extra(show_progress=False)
+    assert status == "failed"
+    assert "No solution found" in detail
