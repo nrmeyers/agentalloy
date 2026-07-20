@@ -1,0 +1,86 @@
+name: Version Bump
+
+# Derives the SemVer bump automatically from the PR's Conventional-Commit title
+# and writes pyproject.toml + uv.lock onto the PR branch, so the version bump is
+# no longer a per-session human/LLM decision (RELEASE.md §4). Tier: feat! /
+# BREAKING CHANGE → major, feat → minor, everything else touching the shipped
+# surface → patch; docs/CI/test-only PRs don't bump. scripts/version_bump.py
+# owns the (unit-tested) logic; this workflow is the I/O + push shell.
+#
+# TWO INVARIANTS this workflow depends on:
+# - The bump commit MUST be pushed with a NON-default token (secret BUMP_TOKEN,
+#   a fine-grained PAT with contents+PR write). GITHUB_TOKEN-pushed commits do
+#   NOT trigger workflows (GitHub anti-recursion — the same rule release-cut.yml
+#   documents for tags). A GITHUB_TOKEN push would leave the bumped SHA with no
+#   check runs and deadlock auto-merge on the required checks.
+# - This job (`version-bump`) is a REQUIRED status check. Because it only goes
+#   green on the fully-bumped SHA (idempotent no-op once bumped), auto-merge can
+#   never fire on the un-bumped commit.
+#
+# Idempotent: if the branch already carries a bump (a human/LLM did it, or this
+# job's own push re-triggered the run), the script emits nothing and the job is
+# a clean green no-op. release-cut.yml is untouched — it still cuts the tag when
+# the untagged version lands on main and CI is green.
+#
+# The FIRST computed tier wins. A later `synchronize` (new commit) that adds
+# shipped code to a previously docs-only PR is picked up (still un-bumped, so it
+# computes fresh). But a bare TITLE edit after the bump commit already landed is
+# a no-op (idempotency stops it) — so `edited` is deliberately NOT a trigger; to
+# change the tier, drop the bump commit from the branch and let it recompute.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: version-bump-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # the bump commit is pushed with BUMP_TOKEN, not GITHUB_TOKEN
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head branch
+        uses: actions/checkout@v4
+        with:
+          # head_ref = the PR's source branch (not the detached merge ref), so
+          # we can commit + push back to it. fetch-depth 0: the script reads the
+          # base commit's pyproject and the base..HEAD diff.
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.BUMP_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Compute and apply version bump
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          next=$(uv run python scripts/version_bump.py \
+            --title "$PR_TITLE" --base-sha "$BASE_SHA")
+
+          if [ -z "$next" ]; then
+            echo "No version bump warranted (no shipped-surface change, or already bumped)."
+            exit 0
+          fi
+
+          echo "Deriving bump → v$next"
+          # Exactly one top-level `version = "..."` line in pyproject.toml.
+          sed -i -E "s/^version = \"[^\"]+\"/version = \"$next\"/" pyproject.toml
+          uv lock
+
+          git config user.name "agentalloy-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "chore: bump version to $next" \
+            -m "Automated bump derived from the PR title's Conventional-Commit type." \
+            -m "Co-Authored-By: agentalloy-release-bot <release-bot@users.noreply.github.com>"
+          git push origin "HEAD:${{ github.head_ref }}"

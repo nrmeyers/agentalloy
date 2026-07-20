@@ -62,9 +62,11 @@ Conventional Commits with a scope: `type(scope): subject`.
 
 ### CI gates (required checks, enforced by branch protection)
 
-Four required checks on `main`: **`quality`**, **`container-tests`**,
-**`pipx-smoke`**, **`web-build`** (`.github/workflows/ci.yml`). A PR cannot
-merge red.
+Five required checks on `main`: **`quality`**, **`container-tests`**,
+**`pipx-smoke`**, **`web-build`** (`.github/workflows/ci.yml`), and
+**`version-bump`** (`.github/workflows/version-bump.yml`, §4 — derives the
+version bump; required so auto-merge can't fire on an un-bumped SHA). A PR
+cannot merge red.
 
 - `quality`: `uv sync --frozen --extra code-index` → ruff check → ruff format
   --check (formatting is checked **separately** from lint; run `uv run ruff
@@ -95,60 +97,76 @@ harness-wiring catalog.
 
 ## 4. Versioning (SemVer)
 
-Version lives in `pyproject.toml` (`[project] version`). Bump per
-[SemVer](https://semver.org/), where every tier refers to **shipped code
-only**: **patch** = bug fix to shipped behavior, **minor** =
+Version lives in `pyproject.toml` (`[project] version`). Every tier refers to
+**shipped code only**: **patch** = bug fix to shipped behavior, **minor** =
 backward-compatible feature, **major** = breaking change. Changes outside the
 shipped surface (CI, docs, tests, tooling) have no SemVer tier — they don't
-version at all (see below).
+version at all.
 
-### When a bump is required: shipped-surface lockstep
+### The bump is automatic — you do not choose the tier or edit `pyproject`
 
-The invariant is NOT "main == last tag" — it is **"a tag's version tells the
-truth about shipped content"**: two tags with different versions always differ
-in what users actually run. Mechanically:
+`Version Bump` (`.github/workflows/version-bump.yml`) derives and applies the
+bump on every PR. You never open a `chore(release)` PR and never hand-edit the
+version. Two deterministic gates (`scripts/version_bump.py`, unit-tested in
+`tests/test_version_bump.py`):
 
-- A merge **requires a version bump** when its diff touches the **shipped
-  surface**: `src/`, `src/agentalloy/_packs/`, `frontend/`, `Containerfile*` /
-  `container/`, or dependency pins in `pyproject.toml` / `uv.lock`.
-- The bump **rides the shipped-surface PR itself** — do not open a separate
-  `chore(release)` bump PR; merging the bumped PR IS cutting the release
-  (§5). When several shipped PRs deliberately accumulate before a release,
-  the final PR of the batch carries the bump.
-- Merges touching only CI workflows, docs, tests, or repo tooling do **not**
-  bump. Main being ahead of the last tag by that class of change is not
-  drift — it's the definition.
-- Never cut a release tag while unversioned shipped-surface changes sit on
-  `main`; bump first.
+- **Whether to bump — shipped-surface path gate.** A bump happens only when the
+  PR's diff touches the **shipped surface**: `src/` (incl. `src/agentalloy/_packs/`),
+  `frontend/`, `Containerfile*` / `container/`, or dependency pins in
+  `pyproject.toml` / `uv.lock`. PRs touching only CI, docs, tests, or tooling do
+  **not** bump — main being ahead of the last tag by that class of change is not
+  drift, it's the definition.
+- **Which tier — from the PR title's Conventional-Commit type.** `feat!` or a
+  `BREAKING CHANGE` marker → **major**; `feat` → **minor**; **everything else**
+  touching shipped code (`fix`, `perf`, `refactor`, `chore`, …) → **patch**. So
+  the only lever you touch is the PR title — get the type right and the version
+  follows.
 
-Rationale: upgrades are not free for users (multi-GB container pull, upgrade
-paths with real failure modes), and the release-check nudges every install.
-Don't spend that on housekeeping — release when shipped value has accumulated.
-The test for "internal change" is just: *does the wheel or image change?* —
-answerable from the diff paths. (v6.1.1 predates this rule: it shipped a
-byte-identical wheel for CI-only changes; harmless, but the nudge was wasted.)
+When it fires, the workflow rewrites `pyproject.toml`, regenerates `uv.lock`,
+and commits both to your PR branch (`chore: bump version to X.Y.Z`). CI re-runs
+on that commit; merging the PR IS cutting the release (§5). The bump commit is
+squashed away on merge, so `main` reads `type(scope): subject (#N)` as always.
 
-When you bump the version you MUST also:
+The invariant this upholds: **"a tag's version tells the truth about shipped
+content"** — two tags with different versions always differ in what users run.
+"else → patch" honors it (any shipped-surface change versions), while `feat`
+and `feat!`/`BREAKING` still escalate. Rationale for gating on shipped surface:
+upgrades aren't free for users (multi-GB container pull, real upgrade failure
+modes) and the release-check nudges every install — don't spend that on
+housekeeping. The test for "internal change" is just: *does the wheel or image
+change?*
 
-- **Regenerate and commit `uv.lock`** in the same change — the lock pins
-  `agentalloy`'s own version, so a `pyproject`-only bump leaves them drifted. CI
-  uses `uv sync --frozen` (uses the lock as-is) and will **not** catch the drift;
-  it only bites a `uv sync --locked` run or a merge. Verify with `uv lock --check`
-  (output `Resolved N packages` = clean).
+Notes and escapes:
 
-- **Bump the touched pack's `version`** if you edited any `src/agentalloy/_packs/<pack>/`
-  content (e.g. `pack.yaml`). Pack propagation is version-gated by design (preserves
-  the SkillVersion rollback chain), and a CI guard fails the PR on a content edit
-  without a version bump.
+- **`BUMP_TOKEN` is required infra.** The bump commit is pushed with the
+  fine-grained PAT in repo secret `BUMP_TOKEN` (Contents + Pull requests: write),
+  not `GITHUB_TOKEN` — the default token's pushes don't trigger workflows
+  (GitHub anti-recursion, same rule as tags in §5), which would leave the bumped
+  commit with no checks and deadlock auto-merge. If bumps stop happening, check
+  that secret first.
+- **`version-bump` is a required status check.** It only goes green on the
+  fully-bumped SHA, so auto-merge can't fire on an un-bumped commit.
+- **A manual bump still works.** If you (or a tool) already bumped `pyproject` on
+  the branch, the workflow is a clean no-op (it compares against the PR base).
+- **First tier wins.** Once the bump commit has landed on the branch, editing the
+  PR title does **not** re-derive the version (idempotency stops it). If you got
+  the type wrong, drop the bump commit (`git rebase`/reset the branch) and let it
+  recompute — or hand-set `pyproject` to the version you want. Adding shipped code
+  later via a new commit is fine: an un-bumped PR always computes fresh.
+- **Touched-pack version.** If you edited any `src/agentalloy/_packs/<pack>/`
+  content, still bump that pack's own `version` — pack propagation is
+  version-gated by design (SkillVersion rollback chain), and the `quality` job's
+  pack guard fails the PR on a content edit without it. This is separate from the
+  project version and is **not** automated.
 
 ## 5. Cutting a release
 
-The cut is **automated**: when a PR carrying a version bump (a shipped-surface
-PR with the bump riding along, per §4) merges to main and that commit's CI
-goes green, `Release Cut` (`.github/workflows/release-cut.yml`) creates the
-GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed from the
-bumping PR, generated notes) and dispatches `Container Build & Publish` on
-the new tag. Merging the bumped PR IS cutting the release — nothing to run.
+The cut is **automated**: when a PR carrying a version bump (auto-derived and
+committed to the branch by `Version Bump`, per §4) merges to main and that
+commit's CI goes green, `Release Cut` (`.github/workflows/release-cut.yml`)
+creates the GitHub release `v<X.Y.Z>` (tag on the merge commit, title themed
+from the bumping PR, generated notes) and dispatches `Container Build & Publish`
+on the new tag. Merging the bumped PR IS cutting the release — nothing to run.
 
 What the automation guarantees, and why it's shaped this way:
 
@@ -162,8 +180,8 @@ What the automation guarantees, and why it's shaped this way:
   because tags created with `GITHUB_TOKEN` do not fire `on: push: tags`
   workflows.
 - Non-bump merges and re-runs are no-ops (version already tagged); a red CI
-  run cuts nothing. The version bump itself stays a human decision in the PR
-  (§4) — only the cut is mechanized.
+  run cuts nothing. The version bump itself is derived automatically on the PR
+  (§4); both the bump and the cut are mechanized.
 - Release title/notes are editable after the fact (`gh release edit`); the
   automation never touches an existing release or tag.
 
@@ -187,8 +205,9 @@ build itself; don't also dispatch it.
 
 - [ ] Branch off `main`, one logical change.
 - [ ] Conventional-Commit messages + `Co-Authored-By` trailer.
-- [ ] Version bumped in `pyproject.toml` (if releasing); `uv.lock` regenerated
-      (`uv lock --check` clean); touched pack `version` bumped.
+- [ ] PR title's Conventional-Commit type is correct — it drives the automatic
+      version bump (§4). `Version Bump` writes `pyproject.toml` + `uv.lock` on the
+      branch; you don't hand-bump. Touched pack `version` still bumped by hand.
 - [ ] Local gate green: ruff check + ruff format --check + pyright + pytest.
 - [ ] PR opened against `main`, required checks green, squash-merged with
       authorization (`gh pr merge --auto --squash`).
