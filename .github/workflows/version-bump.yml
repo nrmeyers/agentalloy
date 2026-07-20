@@ -51,7 +51,12 @@ jobs:
           # base commit's pyproject and the base..HEAD diff.
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-          token: ${{ secrets.BUMP_TOKEN }}
+          # Prefer BUMP_TOKEN so the bump commit's push triggers CI. Fall back
+          # to github.token when the secret is unset (an unset secret is an
+          # empty string, which actions/checkout rejects outright) — that keeps
+          # no-bump PRs green; a shipped PR that actually needs a bump fails
+          # loudly below instead of silently pushing a CI-dead commit.
+          token: ${{ secrets.BUMP_TOKEN || github.token }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -62,6 +67,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
         run: |
           set -euo pipefail
           next=$(uv run python scripts/version_bump.py \
@@ -70,6 +76,14 @@ jobs:
           if [ -z "$next" ]; then
             echo "No version bump warranted (no shipped-surface change, or already bumped)."
             exit 0
+          fi
+
+          # A bump is needed. It MUST be pushed with BUMP_TOKEN — a github.token
+          # push wouldn't retrigger CI and would deadlock auto-merge. Fail with
+          # a clear message rather than push a CI-dead commit.
+          if [ -z "$BUMP_TOKEN" ]; then
+            echo "::error::Version bump to $next is required, but the BUMP_TOKEN secret is not set. Add a fine-grained PAT (Contents + Pull requests: write) as BUMP_TOKEN — see RELEASE.md §4."
+            exit 1
           fi
 
           echo "Deriving bump → v$next"
