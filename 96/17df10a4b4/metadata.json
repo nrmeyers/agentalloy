@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "9617df10a4b4",
+  "strategy": "manual-commit",
+  "branch": "docs/pr-template",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/pull_request_template.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/96/17df10a4b4/0/metadata.json",
+      "transcript": "/96/17df10a4b4/0/full.jsonl",
+      "compact_transcript": "/96/17df10a4b4/0/transcript.jsonl",
+      "content_hash": "/96/17df10a4b4/0/content_hash.txt",
+      "prompt": "/96/17df10a4b4/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 701,
+    "cache_creation_tokens": 13194,
+    "cache_read_tokens": 2094484,
+    "output_tokens": 11031,
+    "api_call_count": 13
+  }
+}

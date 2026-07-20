@@ -1,0 +1,14 @@
+<task-notification>
+<task-id>blbspaibd</task-id>
+<summary>Monitor event: "PR #435 bump commit + checks"</summary>
+<event>BUMP COMMIT PRESENT: chore: bump version to 7.0.8</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+how do future session other harnesses know about the PR title procedure?
+
+---
+
+don't do the agents.md. Do the pull_request_template
