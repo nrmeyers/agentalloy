@@ -874,3 +874,59 @@ class TestContainerDoctor:
             rc = _repair_container(result, self._ST)
         assert rc == 1
         mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Repair: code-index extra heal
+# ---------------------------------------------------------------------------
+
+
+class TestRepairCodeIndexExtra:
+    def _result(self) -> dict[str, Any]:
+        return {
+            "all_checks_passed": False,
+            "checks": [
+                {
+                    "name": "code_index",
+                    "passed": False,
+                    "error": "code-index module failed to load ([code-index] extra missing)",
+                    "repairable": "code_index_extra",
+                }
+            ],
+        }
+
+    def test_repair_installs_extra_and_restarts(self) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+                return_value=("installed", "v9.9.9"),
+            ) as ensure,
+            patch("subprocess.run") as mock_run,
+            patch(
+                "agentalloy.install.subcommands.doctor.run_doctor",
+                return_value={"all_checks_passed": True, "checks": []},
+            ),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            rc = _repair(self._result())
+        ensure.assert_called_once()
+        # server-restart shelled out after the extra install
+        assert any("server-restart" in " ".join(c.args[0]) for c in mock_run.call_args_list)
+        assert rc == 0
+
+    def test_repair_reports_failure_when_extra_install_fails(self) -> None:
+        with (
+            patch(
+                "agentalloy.install.subcommands.upgrade.ensure_code_index_extra",
+                return_value=("failed", "No solution found"),
+            ),
+            patch("subprocess.run") as mock_run,
+            patch(
+                "agentalloy.install.subcommands.doctor.run_doctor",
+                return_value={"all_checks_passed": False, "checks": []},
+            ),
+        ):
+            rc = _repair(self._result())
+        # a failed extra install must NOT restart the service
+        assert not any("server-restart" in " ".join(c.args[0]) for c in mock_run.call_args_list)
+        assert rc == 1

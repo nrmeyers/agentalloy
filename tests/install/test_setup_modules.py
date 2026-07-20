@@ -78,3 +78,46 @@ class TestImportCheck:
 
         monkeypatch.setattr(importlib, "import_module", _boom)
         assert simple_setup._verify_code_index_importable() is False  # pyright: ignore[reportPrivateUsage]
+
+
+class TestEnsureCodeIndexModule:
+    def test_injector_is_a_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Never touches the extra machinery for an injector-only choice.
+        from agentalloy.install.subcommands import upgrade
+
+        boom = lambda **k: pytest.fail("must not attempt install")  # noqa: E731
+        monkeypatch.setattr(upgrade, "ensure_code_index_extra", boom)
+        assert simple_setup._ensure_code_index_module("injector") == "injector"  # pyright: ignore[reportPrivateUsage]
+
+    def test_already_importable_skips_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import upgrade
+
+        monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: True)
+        boom = lambda **k: pytest.fail("must not install when already importable")  # noqa: E731
+        monkeypatch.setattr(upgrade, "ensure_code_index_extra", boom)
+        assert simple_setup._ensure_code_index_module("both") == "both"  # pyright: ignore[reportPrivateUsage]
+
+    def test_installs_extra_and_keeps_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import upgrade
+
+        monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)
+        monkeypatch.setattr(upgrade, "ensure_code_index_extra", lambda **k: ("installed", "v7.0.6"))
+        assert simple_setup._ensure_code_index_module("both") == "both"  # pyright: ignore[reportPrivateUsage]
+
+    def test_install_failure_downgrades_to_injector(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import upgrade
+
+        monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)
+        monkeypatch.setattr(
+            upgrade, "ensure_code_index_extra", lambda **k: ("failed", "No solution found")
+        )
+        assert simple_setup._ensure_code_index_module("code-index") == "injector"  # pyright: ignore[reportPrivateUsage]
+
+    def test_source_checkout_downgrades_to_injector(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from agentalloy.install.subcommands import upgrade
+
+        monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)
+        monkeypatch.setattr(
+            upgrade, "ensure_code_index_extra", lambda **k: ("source", "source/editable checkout")
+        )
+        assert simple_setup._ensure_code_index_module("both") == "injector"  # pyright: ignore[reportPrivateUsage]

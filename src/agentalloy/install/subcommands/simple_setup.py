@@ -423,6 +423,43 @@ def _verify_code_index_importable() -> bool:
     return True
 
 
+def _ensure_code_index_module(modules: str) -> str:
+    """Make a ``code-index``/``both`` choice actually work.
+
+    When the user picks a code-index-bearing module but the ``[code-index]``
+    extra isn't installed, install it on the fly (the same ``uv tool install``
+    swap ``agentalloy upgrade`` uses) rather than telling them to run a manual
+    command — choosing the module *is* the request to install it. Only fall back
+    to ``injector`` when the extra genuinely can't be provided (a source
+    checkout, or an install that failed). Returns the (possibly downgraded)
+    module selection.
+    """
+    if modules not in ("code-index", "both") or _verify_code_index_importable():
+        return modules
+
+    from agentalloy.install.subcommands.upgrade import ensure_code_index_extra
+
+    _print("  [dim]The [code-index] extra isn't installed yet — installing it now…[/dim]")
+    status, detail = ensure_code_index_extra()
+    if status in ("already", "installed"):
+        _print("  [green]code-index extra ready.[/green]")
+        return modules
+
+    if status == "source":
+        _print(
+            "  [yellow]Running from a source/editable checkout — add the extra with "
+            "`uv sync --extra code-index`, then re-run setup.[/yellow]"
+        )
+    else:
+        suffix = f": {detail}" if detail else ""
+        _print(f"  [yellow]Could not install the [code-index] extra{suffix}.[/yellow]")
+        _print(
+            "  [yellow]Install it manually with: uv tool install 'agentalloy[code-index]'.[/yellow]"
+        )
+    _print("  [yellow]Continuing with the code-index module off.[/yellow]")
+    return "injector"
+
+
 def _prompt_hardware(default: str) -> str:
     options = [
         ("cpu", _HW_LABELS["cpu"]),
@@ -1843,21 +1880,7 @@ def run_setup(cfg: SetupConfig) -> int:
     if cfg.modules not in _VALID_MODULES:
         _print(f"  [red]Invalid modules: {cfg.modules}. Use injector, code-index, or both.[/red]")
         return 1
-    if cfg.modules in ("code-index", "both") and not _verify_code_index_importable():
-        # Friendlier flow: continue with the module off rather than aborting —
-        # the rest of the install is still valid, and the user can enable the
-        # module later without redoing setup.
-        _print(
-            "  [yellow]The code-index module is not importable — the [code-index] extra "
-            "is missing.[/yellow]"
-        )
-        _print(
-            "  [yellow]Install it with: uv tool install 'agentalloy[code-index]' — then "
-            "re-run setup or set CODE_INDEX_ENABLED=1 via "
-            "`agentalloy write-env --overrides ...`.[/yellow]"
-        )
-        _print("  [yellow]Continuing with the code-index module off.[/yellow]")
-        cfg.modules = "injector"
+    cfg.modules = _ensure_code_index_module(cfg.modules)
     _print(f"  Modules: {cfg.modules}")
 
     # 6. Packs — skill packs feed the injector's corpus; a code-index-only
