@@ -928,7 +928,5 @@ class TestRepairCodeIndexExtra:
         ):
             rc = _repair(self._result())
         # a failed extra install must NOT restart the service
-        assert not any(
-            "server-restart" in " ".join(c.args[0]) for c in mock_run.call_args_list
-        )
+        assert not any("server-restart" in " ".join(c.args[0]) for c in mock_run.call_args_list)
         assert rc == 1

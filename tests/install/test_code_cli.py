@@ -985,8 +985,6 @@ class TestEnableInstallsExtraOnDemand:
         def _fail(**_: Any) -> Any:
             raise AssertionError("disable must not install the extra")
 
-        monkeypatch.setattr(
-            "agentalloy.install.subcommands.upgrade.ensure_code_index_extra", _fail
-        )
+        monkeypatch.setattr("agentalloy.install.subcommands.upgrade.ensure_code_index_extra", _fail)
         assert code_mod._run_module_toggle(enabled=False) == 0
         assert ("CODE_INDEX_ENABLED", "0") in patched

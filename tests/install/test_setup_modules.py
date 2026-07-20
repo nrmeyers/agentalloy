@@ -101,14 +101,10 @@ class TestEnsureCodeIndexModule:
         from agentalloy.install.subcommands import upgrade
 
         monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)
-        monkeypatch.setattr(
-            upgrade, "ensure_code_index_extra", lambda **k: ("installed", "v7.0.6")
-        )
+        monkeypatch.setattr(upgrade, "ensure_code_index_extra", lambda **k: ("installed", "v7.0.6"))
         assert simple_setup._ensure_code_index_module("both") == "both"  # pyright: ignore[reportPrivateUsage]
 
-    def test_install_failure_downgrades_to_injector(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_install_failure_downgrades_to_injector(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agentalloy.install.subcommands import upgrade
 
         monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)
@@ -117,9 +113,7 @@ class TestEnsureCodeIndexModule:
         )
         assert simple_setup._ensure_code_index_module("code-index") == "injector"  # pyright: ignore[reportPrivateUsage]
 
-    def test_source_checkout_downgrades_to_injector(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_source_checkout_downgrades_to_injector(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from agentalloy.install.subcommands import upgrade
 
         monkeypatch.setattr(simple_setup, "_verify_code_index_importable", lambda: False)

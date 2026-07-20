@@ -454,8 +454,7 @@ def _ensure_code_index_module(modules: str) -> str:
         suffix = f": {detail}" if detail else ""
         _print(f"  [yellow]Could not install the [code-index] extra{suffix}.[/yellow]")
         _print(
-            "  [yellow]Install it manually with: uv tool install "
-            "'agentalloy[code-index]'.[/yellow]"
+            "  [yellow]Install it manually with: uv tool install 'agentalloy[code-index]'.[/yellow]"
         )
     _print("  [yellow]Continuing with the code-index module off.[/yellow]")
     return "injector"
