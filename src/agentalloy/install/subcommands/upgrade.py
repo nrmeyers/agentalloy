@@ -203,13 +203,13 @@ def _swap_command(method: str, ref: str, extras: list[str] | None = None) -> lis
         # Pass --python so uv resolves against the tool's own interpreter
         # (which satisfies the package's Python version constraint) rather
         # than the system default Python (which may be too old).
-        cmd = ["uv", "tool", "install", "--force", "--from"]
+        from_spec = f"{package} @ {target}" if extras else target
+        cmd = ["uv", "tool", "install", "--force", "--from", from_spec]
         if method == "uv-tool":
             py = _current_tool_python()
             if py is not None and py.exists():
                 cmd.extend(["--python", str(py)])
-        from_spec = f"{package} @ {target}" if extras else target
-        cmd.extend([from_spec, "agentalloy"])
+        cmd.append("agentalloy")
         return cmd
     if extras:
         # PEP 508 direct-URL-with-extras syntax; the plain bare-URL form (no

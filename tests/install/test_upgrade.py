@@ -82,9 +82,9 @@ def test_swap_command_prefers_uv_when_on_path():
             "install",
             "--force",
             "--from",
+            f"git+{up._GIT_URL}@v2.3.0",
             "--python",
             "/fake/tool/python",
-            f"git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
 
@@ -133,9 +133,9 @@ def test_swap_command_appends_extras_for_uv_tool():
             "install",
             "--force",
             "--from",
+            f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
             "--python",
             "/fake/tool/python",
-            f"agentalloy[code-index] @ git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
 
@@ -152,9 +152,9 @@ def test_swap_command_sorts_and_joins_multiple_extras():
             "install",
             "--force",
             "--from",
+            f"agentalloy[code-index,rerank] @ git+{up._GIT_URL}@v2.3.0",
             "--python",
             "/fake/tool/python",
-            f"agentalloy[code-index,rerank] @ git+{up._GIT_URL}@v2.3.0",
             "agentalloy",
         ]
 
