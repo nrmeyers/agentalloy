@@ -1,0 +1,13 @@
+pull main
+
+---
+
+switch to free flow.
+
+---
+
+i sre on gitbu  that we are at 7.0.7. version bumps used to be automatic, but now it feels like we've diverted or something. the UV lock used to trip us up a lot but here it is again and it's not synced. I'm really confused. can you get this figured out?
+
+---
+
+I don't want to do stand-alone chore commits. and honestly, I don't want to have to re-explain when we need a major minor or patch version bump. I just want that to happen automatically regardless of which session or which llm I'm using.

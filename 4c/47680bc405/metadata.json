@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "4c47680bc405",
+  "strategy": "manual-commit",
+  "branch": "ci/auto-version-bump",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".github/workflows/version-bump.yml",
+    "RELEASE.md",
+    "scripts/version_bump.py",
+    "tests/test_version_bump.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4c/47680bc405/0/metadata.json",
+      "transcript": "/4c/47680bc405/0/full.jsonl",
+      "compact_transcript": "/4c/47680bc405/0/transcript.jsonl",
+      "content_hash": "/4c/47680bc405/0/content_hash.txt",
+      "prompt": "/4c/47680bc405/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8650,
+    "cache_creation_tokens": 129654,
+    "cache_read_tokens": 5505322,
+    "output_tokens": 42334,
+    "api_call_count": 57
+  }
+}
