@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "e3c0f50fc257",
+  "strategy": "manual-commit",
+  "branch": "test/version-bump-dryrun",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/agentalloy/__init__.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e3/c0f50fc257/0/metadata.json",
+      "transcript": "/e3/c0f50fc257/0/full.jsonl",
+      "compact_transcript": "/e3/c0f50fc257/0/transcript.jsonl",
+      "content_hash": "/e3/c0f50fc257/0/content_hash.txt",
+      "prompt": "/e3/c0f50fc257/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 562,
+    "cache_creation_tokens": 4310,
+    "cache_read_tokens": 1201394,
+    "output_tokens": 4845,
+    "api_call_count": 8
+  }
+}

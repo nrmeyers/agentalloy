@@ -1,0 +1,18 @@
+<task-notification>
+<task-id>bk9of59dn</task-id>
+<summary>Monitor event: "PR #434 required checks conclude"</summary>
+<event>container-tests: pass
+pipx-smoke: pass
+quality: pass
+version-bump: pass
+web-build: pass</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+---
+
+arm it auto. Yes, scope the PAT.
+
+---
+
+bump token set.
