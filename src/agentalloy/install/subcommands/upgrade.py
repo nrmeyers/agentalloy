@@ -983,10 +983,7 @@ def _has_legacy_contracts(contracts_dir: Path) -> bool:
 
     # Flat files in archive/
     archive_dir = contracts_dir / "archive"
-    if archive_dir.is_dir() and list(archive_dir.glob("*.md")):
-        return True
-
-    return False
+    return archive_dir.is_dir() and list(archive_dir.glob("*.md"))
 
 
 def _contracts_tree_migration_notice() -> str | None:
