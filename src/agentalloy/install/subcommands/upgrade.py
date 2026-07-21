@@ -960,6 +960,90 @@ def _code_index_enable_reminder(env_values: dict[str, str]) -> str | None:
     )
 
 
+def _has_legacy_contracts(contracts_dir: Path) -> bool:
+    """Return True if *contracts_dir* still has the old flat structure.
+
+    Checks for:
+      - Flat ``*.md`` files directly in ``contracts/``
+      - Old phase subdirs (``intake``, ``spec``, ``design``, ``build``,
+        ``_superseded``) that should have been migrated
+      - Flat ``*.md`` files inside ``archive/`` (should be in ``archive/<phase>/``)
+    """
+    if not contracts_dir.is_dir():
+        return False
+
+    # Flat files in contracts root
+    if list(contracts_dir.glob("*.md")):
+        return True
+
+    # Old subdirectories
+    for d in ("intake", "spec", "design", "build", "_superseded"):
+        if (contracts_dir / d).is_dir():
+            return True
+
+    # Flat files in archive/
+    archive_dir = contracts_dir / "archive"
+    if archive_dir.is_dir() and list(archive_dir.glob("*.md")):
+        return True
+
+    return False
+
+
+def _contracts_tree_migration_notice() -> str | None:
+    """Detect old flat contracts structure across all registered repos.
+
+    After the contracts-tree feature ships, new contracts go to
+    ``contracts/active/<phase>/`` while old contracts stay in the flat
+    structure (``contracts/*.md``, ``contracts/intake/``, ``contracts/spec/``,
+    ``contracts/archive/``, ``contracts/_superseded/``).  This creates a
+    confusing split where some contracts are in the new structure and others
+    scattered in old locations.
+
+    Scans every repo registered in ``install-state.json`` (via
+    ``harness_files_written.repo_root``) for the old structure.  Returns a
+    multi-line notice listing all affected repos, or ``None`` when none are
+    found.
+    """
+    try:
+        state = install_state.load_state()
+    except (OSError, SystemExit, json.JSONDecodeError):
+        return None
+
+    # Collect unique repo roots from harness_files_written entries.
+    repo_roots: list[str] = []
+    seen: set[str] = set()
+    for entry in state.get("harness_files_written", []):
+        root = entry.get("repo_root")
+        if root and root not in seen:
+            seen.add(root)
+            repo_roots.append(root)
+
+    affected: list[str] = []
+    for root_str in repo_roots:
+        try:
+            root = Path(root_str)
+        except Exception:
+            continue
+        contracts_dir = root / ".agentalloy" / "contracts"
+        if _has_legacy_contracts(contracts_dir):
+            affected.append(root_str)
+
+    if not affected:
+        return None
+
+    lines = [
+        "contracts directory uses the legacy flat structure — run "
+        "`agentalloy contracts migrate` to organize them into the new "
+        "tree structure (contracts/active/<phase>/, contracts/archive/<phase>/).",
+        "",
+        "Affected repos:",
+    ]
+    for r in affected:
+        lines.append(f"  - {r}")
+
+    return "\n".join(lines)
+
+
 def upgrade(
     *,
     ref: str | None = None,
