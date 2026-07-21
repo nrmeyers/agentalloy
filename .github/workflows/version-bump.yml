@@ -98,3 +98,13 @@ jobs:
             -m "Automated bump derived from the PR title's Conventional-Commit type." \
             -m "Co-Authored-By: agentalloy-release-bot <release-bot@users.noreply.github.com>"
           git push origin "HEAD:${{ github.head_ref }}"
+
+          # Fail THIS run so the stale (un-bumped) SHA never shows a green
+          # version-bump — otherwise a merge fired on the pre-bump commit races
+          # (and beats) the push above, landing an un-versioned squash on main
+          # (this is exactly how PR #437 shipped 7.0.7 for a feat that derived
+          # 7.1.0). The push retriggers the workflow on the bumped SHA, where the
+          # idempotency guard finds version != base and exits 0 — so the bumped
+          # commit is the ONLY one that goes green, and merge can only fire there.
+          echo "::error::Pushed bump commit (v$next). Failing this run so the un-bumped SHA stays red; the bumped SHA's re-run will go green."
+          exit 1
