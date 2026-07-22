@@ -333,8 +333,8 @@ def validate_contract(contract: Contract, project_root: Path) -> list[str]:
 
 
 def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return all .agentalloy/contracts/<phase>/*.md sorted newest-first by mtime."""
-    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    """Return all .agentalloy/contracts/active/<phase>/*.md sorted newest-first by mtime."""
+    contracts_dir = active_dir(project_root, phase)
     if not contracts_dir.is_dir():
         return []
     files = [f for f in contracts_dir.glob("*.md") if f.is_file()]
@@ -349,7 +349,7 @@ def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
     — is the correct sequence for "which task is first/next". The single ordering
     definition shared by the ``task`` cursor commands and phase-entry seeding.
     """
-    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    contracts_dir = active_dir(project_root, phase)
     if not contracts_dir.is_dir():
         return []
     return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
@@ -357,15 +357,18 @@ def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
 
 def first_workitem_id(project_root: Path, phase: str) -> str | None:
     """The first work-item of ``phase`` (filename order) as a cursor id
-    (``<phase>/<file>.md``), or ``None`` when the phase has no contracts.
+    (``active/<phase>/<file>.md``), or ``None`` when the phase has no contracts.
 
     Used to seed ``.agentalloy/cursor`` on phase entry so the current work-item
     is reliably set without waiting for the agent's first ``agentalloy task next``.
+    The id is contracts-root-relative, so it now carries the ``active/`` prefix
+    to resolve against the tree layout (``resolve_current_contract`` joins it to
+    ``.agentalloy/contracts/``).
     """
     contracts = ordered_contracts_for_phase(project_root, phase)
     if not contracts:
         return None
-    return f"{phase}/{contracts[0].name}"
+    return f"active/{phase}/{contracts[0].name}"
 
 
 # ---------------------------------------------------------------------------
@@ -645,13 +648,13 @@ def latest_contract(project_root: Path, phase: str | None = None) -> Path | None
         files = list_contracts_for_phase(project_root, phase)
         return files[0] if files else None
 
-    # No phase filter — scan all phases
-    contracts_root = project_root / ".agentalloy" / "contracts"
-    if not contracts_root.is_dir():
+    # No phase filter — scan all live phases under the active tree.
+    active_root = contracts_root(project_root) / "active"
+    if not active_root.is_dir():
         return None
 
     all_files: list[Path] = []
-    for phase_dir in contracts_root.iterdir():
+    for phase_dir in active_root.iterdir():
         if phase_dir.is_dir():
             all_files.extend(f for f in phase_dir.glob("*.md") if f.is_file())
 
