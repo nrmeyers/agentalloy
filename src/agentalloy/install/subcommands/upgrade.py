@@ -983,7 +983,7 @@ def _has_legacy_contracts(contracts_dir: Path) -> bool:
 
     # Flat files in archive/
     archive_dir = contracts_dir / "archive"
-    return archive_dir.is_dir() and list(archive_dir.glob("*.md"))
+    return archive_dir.is_dir() and bool(list(archive_dir.glob("*.md")))
 
 
 def _contracts_tree_migration_notice() -> str | None:
@@ -1126,6 +1126,12 @@ def upgrade(
     code_index_reminder = _code_index_enable_reminder(install_state.parse_env_file())
     if code_index_reminder:
         notices.append(code_index_reminder)
+    # Flag any registered repo still on the legacy flat contracts layout so the
+    # user knows to run `agentalloy contracts migrate` (the #437 detector was
+    # shipped but never wired into the notice list until now).
+    contracts_notice = _contracts_tree_migration_notice()
+    if contracts_notice:
+        notices.append(contracts_notice)
     summary["notices"] = notices
     # Read the post-swap version from the new binary; the in-process __version__ is
     # frozen at the pre-upgrade value (module imported before the swap).
