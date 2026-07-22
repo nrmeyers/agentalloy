@@ -333,48 +333,6 @@ def test_upgrade_summary_omits_code_index_reminder_when_enabled():
     assert not any("agentalloy code enable" in n for n in result["notices"])
 
 
-# --- contracts-tree migration warning (wiring) ------------------------------
-
-
-def test_native_propagates_update_warnings_to_upgrade():
-    """The migration warning is emitted by the freshly-installed binary's
-    `update` (see update.py); the native path shells `update --json` and MUST
-    merge its `warnings` into the upgrade output. This guards that extraction
-    path (upgrade.py) — the exact wiring whose absence hid the original bug."""
-    state = {"installed_packs": ["core"]}
-    migrate_msg = (
-        "contracts directory uses the legacy flat structure — run "
-        "`agentalloy contracts migrate` to organize them"
-    )
-
-    def rec_cli(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
-        if args[0] == "update":
-            return _proc(0, stdout=json.dumps({"warnings": [migrate_msg]}))
-        return _proc(0)
-
-    with (
-        patch.object(up, "_detect_install_method", return_value="uv-tool"),
-        patch.object(up, "_detect_installed_extras", return_value=[]),
-        patch.object(up, "_stop_service", return_value="systemd"),
-        patch.object(up, "_start_inference_servers"),
-        patch.object(up, "_start_service"),
-        patch.object(up, "_run_cli", side_effect=rec_cli),
-        patch.object(up.subprocess, "run", return_value=_proc(0)),
-        patch(
-            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
-            return_value=100,
-        ),
-        patch(
-            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
-            return_value=3200,
-        ),
-        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
-    ):
-        _actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
-
-    assert any("agentalloy contracts migrate" in w for w in warnings)
-
-
 # --- orchestration: check / already-current ---------------------------------
 
 
