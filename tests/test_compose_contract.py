@@ -53,7 +53,7 @@ def test_resolved_contract_tags_from_path(tmp_path: Path):
 
     # Must live under a project's .agentalloy/contracts/<phase>/ directory
     # to pass the path-containment guard.
-    contract_dir = tmp_path / ".agentalloy" / "contracts" / "build"
+    contract_dir = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     f = _write_contract(contract_dir / "c.md", domain_tags=["NestJS", "JWT"])
     req = ComposeRequest(task="do thing", phase="build", contract_path=str(f))
     assert req.resolved_contract_tags == ["NestJS", "JWT"]

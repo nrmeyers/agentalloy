@@ -27,7 +27,7 @@ from agentalloy.signals.skill_loader import _read_cursor  # type: ignore[reportP
 def _seed(root: Path, phase: str, names: list[str]) -> None:
     (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
     (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\n")
-    d = root / ".agentalloy" / "contracts" / phase
+    d = root / ".agentalloy" / "contracts" / "active" / phase
     d.mkdir(parents=True, exist_ok=True)
     for n in names:
         (d / f"{n}.md").write_text(
@@ -38,20 +38,20 @@ def _seed(root: Path, phase: str, names: list[str]) -> None:
 def test_task_next_walks_in_filename_order(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["02-api", "01-cache", "03-log"])
     # First next → first by filename (01-cache), not by seed/mtime order.
-    assert run_task_next(tmp_path)["cursor"] == "build/01-cache.md"
-    assert _read_cursor(tmp_path) == "build/01-cache.md"
-    assert run_task_next(tmp_path)["cursor"] == "build/02-api.md"
-    assert run_task_next(tmp_path)["cursor"] == "build/03-log.md"
+    assert run_task_next(tmp_path)["cursor"] == "active/build/01-cache.md"
+    assert _read_cursor(tmp_path) == "active/build/01-cache.md"
+    assert run_task_next(tmp_path)["cursor"] == "active/build/02-api.md"
+    assert run_task_next(tmp_path)["cursor"] == "active/build/03-log.md"
     # Past the end → done, cursor unchanged.
     done = run_task_next(tmp_path)
     assert done.get("done") is True
-    assert _read_cursor(tmp_path) == "build/03-log.md"
+    assert _read_cursor(tmp_path) == "active/build/03-log.md"
 
 
 def test_task_start_points_cursor_by_slug(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["01-cache", "02-api"])
-    assert run_task_start("02-api", tmp_path)["cursor"] == "build/02-api.md"
-    assert _read_cursor(tmp_path) == "build/02-api.md"
+    assert run_task_start("02-api", tmp_path)["cursor"] == "active/build/02-api.md"
+    assert _read_cursor(tmp_path) == "active/build/02-api.md"
     assert run_task_start("nope", tmp_path)["ok"] is False
 
 
@@ -59,15 +59,15 @@ def test_task_status_lists_worklist(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["01-cache", "02-api"])
     run_task_start("01-cache", tmp_path)
     status = run_task_status(tmp_path)
-    assert status["worklist"] == ["build/01-cache.md", "build/02-api.md"]
-    assert status["cursor"] == "build/01-cache.md"
+    assert status["worklist"] == ["active/build/01-cache.md", "active/build/02-api.md"]
+    assert status["cursor"] == "active/build/01-cache.md"
 
 
 def test_resolve_current_contract_uses_cursor(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["01-cache", "02-api"])
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "build/02-api.md"
+    assert cid == "active/build/02-api.md"
     assert path is not None and path.name == "02-api.md"
 
 
@@ -75,7 +75,7 @@ def test_resolve_current_contract_single_item_phase(tmp_path: Path) -> None:
     # Exactly one contract (the single-item incoming work-item) → compose it.
     _seed(tmp_path, "spec", ["the-feature"])
     cid, path = _resolve_current_contract(tmp_path, "spec")
-    assert cid == "spec/the-feature.md"
+    assert cid == "active/spec/the-feature.md"
     assert path is not None and path.name == "the-feature.md"
 
 
@@ -89,7 +89,7 @@ def test_resolve_current_contract_fanout_is_strict_none(tmp_path: Path) -> None:
     # ...an explicit cursor resolves the pointed-at work-item.
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "build/02-api.md" and path is not None and path.name == "02-api.md"
+    assert cid == "active/build/02-api.md" and path is not None and path.name == "02-api.md"
 
 
 def test_resolve_current_contract_none_when_absent(tmp_path: Path) -> None:
@@ -107,7 +107,7 @@ def test_resolve_current_contract_none_when_absent(tmp_path: Path) -> None:
 
 
 def _seed_qa_contract(root: Path, slug: str) -> None:
-    qa = root / ".agentalloy" / "contracts" / "qa"
+    qa = root / ".agentalloy" / "contracts" / "active" / "qa"
     qa.mkdir(parents=True, exist_ok=True)
     (qa / f"{slug}.md").write_text(
         f"---\nphase: qa\ntask_slug: {slug}\ndomain_tags: [pytest]\n---\n# {slug}\nbody\n"
@@ -123,14 +123,14 @@ def test_phase_transition_seeds_cursor_proxy_path(tmp_path: Path) -> None:
 
     _seed(tmp_path, "build", ["01-cache", "02-date-tests"])
     run_task_start("02-date-tests", tmp_path)
-    assert _read_cursor(tmp_path) == "build/02-date-tests.md"
+    assert _read_cursor(tmp_path) == "active/build/02-date-tests.md"
     _seed_qa_contract(tmp_path, "the-feature")
 
     _write_phase_atomic(tmp_path, "qa")
 
-    assert _read_cursor(tmp_path) == "qa/the-feature.md"  # seeded, not the stale build slug
+    assert _read_cursor(tmp_path) == "active/qa/the-feature.md"  # seeded, not the stale build slug
     cid, path = _resolve_current_contract(tmp_path, "qa")
-    assert cid == "qa/the-feature.md"
+    assert cid == "active/qa/the-feature.md"
     assert path is not None and path.name == "the-feature.md"
 
 
@@ -144,7 +144,7 @@ def test_phase_transition_seeds_first_build_task(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["02-api", "01-cache", "03-log"])
     (tmp_path / ".agentalloy" / "phase").write_text("phase: design\n")  # enter build from elsewhere
     _write_phase_atomic(tmp_path, "build")
-    assert _read_cursor(tmp_path) == "build/01-cache.md"
+    assert _read_cursor(tmp_path) == "active/build/01-cache.md"
 
 
 def test_phase_transition_no_contracts_clears_cursor(tmp_path: Path) -> None:
@@ -168,7 +168,7 @@ def test_phase_idempotent_rewrite_keeps_cursor(tmp_path: Path) -> None:
     _seed(tmp_path, "build", ["01-cache", "02-api"])
     run_task_start("02-api", tmp_path)
     _write_phase_atomic(tmp_path, "build")
-    assert _read_cursor(tmp_path) == "build/02-api.md"
+    assert _read_cursor(tmp_path) == "active/build/02-api.md"
 
 
 def test_phase_set_cli_clears_cursor(tmp_path: Path) -> None:

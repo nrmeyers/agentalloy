@@ -43,7 +43,9 @@ class TestInitTemplateSubstitution:
             ["contract", "init", "--phase", phase, "--slug", "my-cool-task", "--route", "fast"]
         )
         args.func(args)
-        return (tmp_path / ".agentalloy" / "contracts" / phase / "my-cool-task.md").read_text()
+        return (
+            tmp_path / ".agentalloy" / "contracts" / "active" / phase / "my-cool-task.md"
+        ).read_text()
 
     def test_sdd_fast_heading_has_no_stray_braces(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -128,7 +130,7 @@ class TestWorkItemStamp:
     """The #378 build-contract → design-item link stamped by `contract init`."""
 
     def _seed_design(self, tmp_path: Path, slug: str) -> None:
-        d = tmp_path / ".agentalloy" / "contracts" / "design"
+        d = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
 
@@ -145,18 +147,18 @@ class TestWorkItemStamp:
     def test_active_design_slug_honors_cursor(self, tmp_path: Path) -> None:
         self._seed_design(tmp_path, "a")
         self._seed_design(tmp_path, "b")
-        (tmp_path / ".agentalloy" / "cursor").write_text("design/b.md")
+        (tmp_path / ".agentalloy" / "cursor").write_text("active/design/b.md")
         assert _active_design_slug(tmp_path) == "b"
 
     def test_active_design_slug_rejects_cross_phase_cursor(self, tmp_path: Path) -> None:
         # A cursor drifted to another phase must not mislabel the build contract.
         self._seed_design(tmp_path, "a")
         self._seed_design(tmp_path, "b")
-        ship = tmp_path / ".agentalloy" / "contracts" / "ship"
+        ship = tmp_path / ".agentalloy" / "contracts" / "active" / "ship"
         ship.mkdir(parents=True)
         (ship / "other.md").write_text("---\nphase: ship\n---\n\n# other\n")
-        (tmp_path / ".agentalloy" / "cursor").write_text("ship/other.md")
-        assert _active_design_slug(tmp_path) is None  # not under contracts/design/
+        (tmp_path / ".agentalloy" / "cursor").write_text("active/ship/other.md")
+        assert _active_design_slug(tmp_path) is None  # not under contracts/active/design/
 
     def test_inject_adds_work_item_after_task_slug(self) -> None:
         content = "---\nphase: build\ntask_slug: 01-store\nroute: full\n---\n\n# x\n"

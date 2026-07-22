@@ -554,7 +554,7 @@ class TestMissingProjectRootWarning:
 
 
 def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
-    d = tmp_path / ".agentalloy" / "contracts" / phase
+    d = tmp_path / ".agentalloy" / "contracts" / "active" / phase
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{name}.md").write_text(
         f"---\nphase: {phase}\ntask_slug: {name}\ndomain_tags: [pytest]\n---\n# {name}\nbody\n"
@@ -592,12 +592,12 @@ class TestTier2Cadence:
         assert result.announce is True  # Tier 1
         assert result.announce_cursor is True  # Tier 2
         assert result.current_contract is not None
-        assert result.current_contract.endswith("build/01-cache.md")
+        assert result.current_contract.endswith("active/build/01-cache.md")
         # Tier 2 cadence is recorded as a pending marker; evaluate_signal no longer
         # writes `.agentalloy/composed` — the injection path commits it post-delivery.
         from agentalloy.signals.skill_loader import _read_composed
 
-        assert result.pending_composed == "build/01-cache.md"
+        assert result.pending_composed == "active/build/01-cache.md"
         assert _read_composed(tmp_path) is None
 
     def test_tier2_quiet_after_compose(self, tmp_path: Path) -> None:
@@ -605,7 +605,7 @@ class TestTier2Cadence:
         _set_phase(tmp_path, "build")
         _seed_contract(tmp_path, "build", "01-cache")
         _set_announced(tmp_path, "build")
-        _set_state(tmp_path, "composed", "build/01-cache.md")
+        _set_state(tmp_path, "composed", "active/build/01-cache.md")
         result = self._run(tmp_path)
         assert result.should_compose is False
         assert result.announce is False
@@ -618,13 +618,13 @@ class TestTier2Cadence:
         _seed_contract(tmp_path, "build", "01-cache")
         _seed_contract(tmp_path, "build", "02-api")
         _set_announced(tmp_path, "build")
-        _set_state(tmp_path, "composed", "build/01-cache.md")
-        _set_state(tmp_path, "cursor", "build/02-api.md")
+        _set_state(tmp_path, "composed", "active/build/01-cache.md")
+        _set_state(tmp_path, "cursor", "active/build/02-api.md")
         result = self._run(tmp_path)
         assert result.should_compose is True
         assert result.announce is False
         assert result.announce_cursor is True
-        assert result.current_contract.endswith("build/02-api.md")
+        assert result.current_contract.endswith("active/build/02-api.md")
 
     def test_tier2_silent_on_uncursored_fanout(self, tmp_path: Path) -> None:
         # Strict resolver (Outcome B): ≥2 contracts with NO cursor → Tier 2 stays
@@ -647,12 +647,12 @@ class TestTier2Cadence:
         _seed_contract(tmp_path, "build", "01-cache")
         _seed_contract(tmp_path, "build", "02-api")
         _set_announced(tmp_path, "build")  # Tier 1 already announced → quiet
-        _set_state(tmp_path, "cursor", "build/01-cache.md")  # seeded on entry
+        _set_state(tmp_path, "cursor", "active/build/01-cache.md")  # seeded on entry
         result = self._run(tmp_path)
         assert result.announce is False  # Tier 1 stays quiet
         assert result.announce_cursor is True  # Tier 2 fires on the seeded work-item
         assert result.current_contract is not None
-        assert result.current_contract.endswith("build/01-cache.md")
+        assert result.current_contract.endswith("active/build/01-cache.md")
 
 
 def _gates_with_sections() -> dict[str, Any]:
@@ -686,7 +686,7 @@ def _design_gates() -> dict[str, Any]:
                     "sections": ["Test Cases"],
                 }
             },
-            {"artifact_exists": {"path": ".agentalloy/contracts/build/*.md"}},
+            {"artifact_exists": {"path": ".agentalloy/contracts/active/build/*.md"}},
         ]
     }
 
@@ -816,7 +816,7 @@ class TestBuildBanner:
         banner = build_banner("design", _design_gates(), tmp_path, slug="feat")
         assert "· 0 build contracts (need ≥1)" in banner
         # Satisfied once any build contract exists → the checkpoint line disappears.
-        bc = tmp_path / ".agentalloy" / "contracts" / "build"
+        bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
         bc.mkdir(parents=True)
         (bc / "01-task.md").write_text("x")
         banner2 = build_banner("design", _design_gates(), tmp_path, slug="feat")

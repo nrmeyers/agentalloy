@@ -481,7 +481,7 @@ def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> Predica
     count_min = args.get("count_min", 1)
     if phase is None or ctx.contracts_root is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / phase
+    contracts_dir = ctx.contracts_root / "active" / phase
     if not contracts_dir.exists():
         return PredicateResult.NOT_MET
     try:
@@ -503,7 +503,7 @@ def eval_contract_has_tags(args: dict[str, Any], ctx: PredicateContext) -> Predi
     any_of_tags = args.get("any_of", [])
     if phase is None or ctx.contracts_root is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / phase
+    contracts_dir = ctx.contracts_root / "active" / phase
     if not contracts_dir.exists():
         return PredicateResult.NOT_MET
     try:
@@ -582,7 +582,7 @@ def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
     from agentalloy.contracts import list_contracts_for_phase  # lazy: signal import cost
 
     contracts_root = (ctx.project_root / ".agentalloy" / "contracts").resolve()
-    phase_dir = (contracts_root / phase).resolve()
+    phase_dir = (contracts_root / "active" / phase).resolve()
     try:
         raw = (ctx.project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
     except OSError:

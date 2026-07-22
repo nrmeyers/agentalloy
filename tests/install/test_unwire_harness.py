@@ -181,7 +181,7 @@ class TestUnwireSingleHarness:
     ) -> None:
         monkeypatch.chdir(repo_root)
         wire._run(_wire(["claude-code", "hermes-agent"]))
-        contract = repo_root / ".agentalloy" / "contracts" / "spec" / "keep.md"
+        contract = repo_root / ".agentalloy" / "contracts" / "active" / "spec" / "keep.md"
         contract.parent.mkdir(parents=True)
         contract.write_text("# user's contract\n")
         capsys.readouterr()

@@ -438,9 +438,7 @@ def ensure_migrated(project_root: Path) -> int:
             new = cursor_after_migration(val, done, root)
             if new is not None and new != val:
                 _write_state_atomic(project_root, name, new)
-        logger.info(
-            "auto-migrated %d contract(s) into the tree layout under %s", len(done), root
-        )
+        logger.info("auto-migrated %d contract(s) into the tree layout under %s", len(done), root)
         if plan.collisions:
             logger.warning(
                 "contracts migration: %d file(s) left in place (destination "

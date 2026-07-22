@@ -89,7 +89,7 @@ raw_prose: |
   cases each task must pass), and `approach.md` (the how + decisions you're
   implementing against), plus `docs/spec/<slug>.md` (the acceptance behind it
   all). Design already wrote one build contract per task into
-  `.agentalloy/contracts/build/` — `agentalloy task status` lists them in order.
+  `.agentalloy/contracts/active/build/` — `agentalloy task status` lists them in order.
 
   ## 2. Pull the next task's skills, then work it
 
@@ -102,7 +102,7 @@ raw_prose: |
   line. You don't decide which skills you need — they arrive with the task. Then
   implement it test-first (§3). One `task next` per task; `agentalloy task status`
   shows where you are. (If the skills don't arrive: `agentalloy compose --contract
-  .agentalloy/contracts/build/<file>.md`.)
+  .agentalloy/contracts/active/build/<file>.md`.)
 
   ## 3. TDD: red → green → refactor, one case at a time
 

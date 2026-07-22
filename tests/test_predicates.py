@@ -369,7 +369,7 @@ def test_git_state_returns_unknown_on_failure(tmp_path: Path):
 
 
 def test_contract_exists_found(tmp_path: Path):
-    cd = tmp_path / ".agentalloy" / "contracts" / "build"
+    cd = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     cd.mkdir(parents=True)
     (cd / "task.md").write_text("---\nphase: build\ntask_slug: t\ndomain_tags: [A]\n---\n\nbody\n")
     ctx = _ctx(tmp_path, contracts_root=tmp_path / ".agentalloy" / "contracts")
@@ -384,7 +384,7 @@ def test_contract_exists_not_found(tmp_path: Path):
 def test_contract_has_tags(tmp_path: Path):
     import yaml
 
-    cd = tmp_path / ".agentalloy" / "contracts" / "build"
+    cd = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     cd.mkdir(parents=True)
     fm = {"phase": "build", "task_slug": "t", "domain_tags": ["NestJS", "JWT"]}
     (cd / "task.md").write_text(f"---\n{yaml.dump(fm)}---\n\nbody\n")
@@ -609,7 +609,7 @@ def _write_tasks(tmp_path: Path, *, slug: str, items: int) -> None:
 
 def _seed_design(tmp_path: Path, slug: str) -> None:
     """A design-phase contract so the gate resolves ``slug`` as the work-item."""
-    d = tmp_path / ".agentalloy" / "contracts" / "design"
+    d = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
 
@@ -622,7 +622,7 @@ def _set_cursor(tmp_path: Path, rel: str) -> None:
 def _write_build_contract(
     tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "feat"
 ) -> None:
-    bc = tmp_path / ".agentalloy" / "contracts" / "build"
+    bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     bc.mkdir(parents=True, exist_ok=True)
     tag_str = "[" + ", ".join(tags) + "]"
     wi = f"work_item: {work_item}\n" if work_item is not None else ""
@@ -680,7 +680,7 @@ def test_cover_tasks_cursor_scoped_ignores_siblings(tmp_path: Path) -> None:
     # The gate judges only the cursor'd `feat` → MET, not blocked by sib's 9 tasks.
     _seed_design(tmp_path, "feat")
     _seed_design(tmp_path, "sib")
-    _set_cursor(tmp_path, "design/feat.md")
+    _set_cursor(tmp_path, "active/design/feat.md")
     _write_tasks(tmp_path, slug="feat", items=3)
     _write_tasks(tmp_path, slug="sib", items=9)
     for i in range(3):
@@ -731,7 +731,7 @@ def test_tag_focus_cursor_scoped_ignores_sibling_bad_contract(tmp_path: Path) ->
     # #378: a SIBLING item's wide-tag contract must not block THIS item's exit.
     _seed_design(tmp_path, "feat")
     _seed_design(tmp_path, "sib")
-    _set_cursor(tmp_path, "design/feat.md")
+    _set_cursor(tmp_path, "active/design/feat.md")
     _write_build_contract(tmp_path, name="01-f.md", tags=["react"], work_item="feat")
     _write_build_contract(
         tmp_path, name="02-s.md", tags=["a", "b", "c"], work_item="sib"

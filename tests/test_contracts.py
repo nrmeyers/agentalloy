@@ -179,9 +179,9 @@ def test_list_contracts_for_phase_mtime_order(tmp_path: Path):
 
     from agentalloy.contracts import list_contracts_for_phase
 
-    _write_contract(tmp_path / ".agentalloy" / "contracts" / "build" / "old.md")
+    _write_contract(tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "old.md")
     time.sleep(0.01)
-    _write_contract(tmp_path / ".agentalloy" / "contracts" / "build" / "new.md")
+    _write_contract(tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "new.md")
 
     files = list_contracts_for_phase(tmp_path, "build")
     assert len(files) == 2
@@ -200,9 +200,9 @@ def test_latest_contract_no_phase_filter(tmp_path: Path):
 
     from agentalloy.contracts import latest_contract
 
-    _write_contract(tmp_path / ".agentalloy" / "contracts" / "build" / "build.md")
+    _write_contract(tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "build.md")
     time.sleep(0.01)
-    _write_contract(tmp_path / ".agentalloy" / "contracts" / "spec" / "spec.md")
+    _write_contract(tmp_path / ".agentalloy" / "contracts" / "active" / "spec" / "spec.md")
 
     latest = latest_contract(tmp_path)
     assert latest is not None
@@ -217,7 +217,7 @@ def test_latest_contract_no_phase_filter(tmp_path: Path):
 def test_safe_contract_path_accepts_valid_contract(tmp_path: Path):
     from agentalloy.contracts import safe_contract_path
 
-    f = _write_contract(tmp_path / ".agentalloy" / "contracts" / "build" / "task.md")
+    f = _write_contract(tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "task.md")
     safe, project = safe_contract_path(str(f))
     assert safe is not None
     assert project is not None
@@ -237,7 +237,9 @@ def test_safe_contract_path_rejects_path_outside_agentalloy(tmp_path: Path):
 def test_safe_contract_path_rejects_nonexistent_path(tmp_path: Path):
     from agentalloy.contracts import safe_contract_path
 
-    safe, _ = safe_contract_path(str(tmp_path / ".agentalloy" / "contracts" / "build" / "nope.md"))
+    safe, _ = safe_contract_path(
+        str(tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "nope.md")
+    )
     assert safe is None
 
 
@@ -248,7 +250,17 @@ def test_safe_contract_path_rejects_escape_via_parent(tmp_path: Path):
     # Write a sibling outside contracts/, then try to reach it via .. from inside.
     outside = tmp_path / "outside.md"
     outside.write_text("---\nphase: build\n---\nbody\n")
-    sneaky = tmp_path / ".agentalloy" / "contracts" / "build" / ".." / ".." / ".." / "outside.md"
+    sneaky = (
+        tmp_path
+        / ".agentalloy"
+        / "contracts"
+        / "active"
+        / "build"
+        / ".."
+        / ".."
+        / ".."
+        / "outside.md"
+    )
     safe, _ = safe_contract_path(str(sneaky))
     assert safe is None
 
@@ -260,7 +272,9 @@ def test_safe_contract_path_rejects_path_outside_pinned_root(tmp_path: Path):
 
     other_project = tmp_path / "other"
     other_project.mkdir()
-    f = _write_contract(other_project / ".agentalloy" / "contracts" / "build" / "task.md")
+    f = _write_contract(
+        other_project / ".agentalloy" / "contracts" / "active" / "build" / "task.md"
+    )
 
     safe, _ = safe_contract_path(str(f), project_root=tmp_path / "this-project")
     assert safe is None
@@ -301,11 +315,11 @@ class TestContractRoute:
 class TestIntakeRouteHint:
     """_intake_route_hint is authoritative on the intake contract's ``route`` field:
     ``fast`` → sdd-fast lane, ``full`` → full lane (spec). When no intake contract is
-    readable it falls back to the prior-authors-next cascade (contracts/sdd-fast/)."""
+    readable it falls back to the prior-authors-next cascade (contracts/active/sdd-fast/)."""
 
     def _write_intake(self, tmp_path: Path, route: str) -> None:
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "intake" / "t.md",
+            tmp_path / ".agentalloy" / "contracts" / "active" / "intake" / "t.md",
             phase="intake",
             extra_fields={"route": route},
         )
@@ -333,12 +347,12 @@ class TestIntakeRouteHint:
 
     def test_full_route_field_wins_over_stray_fast_folder(self, tmp_path: Path) -> None:
         """The field is authoritative: route: full → full lane even if a stray
-        contracts/sdd-fast/ work-item exists (inverse-disagreement guard)."""
+        contracts/active/sdd-fast/ work-item exists (inverse-disagreement guard)."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
         self._write_intake(tmp_path, "full")
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "sdd-fast" / "stray.md",
+            tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "stray.md",
             phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
@@ -350,7 +364,7 @@ class TestIntakeRouteHint:
         from agentalloy.signals.skill_loader import _intake_route_hint
 
         _write_contract(
-            tmp_path / ".agentalloy" / "contracts" / "sdd-fast" / "t.md",
+            tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "t.md",
             phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
@@ -361,7 +375,7 @@ class TestIntakeRouteHint:
         presence (here: none) → full lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
 
-        bad = tmp_path / ".agentalloy" / "contracts" / "intake" / "bad.md"
+        bad = tmp_path / ".agentalloy" / "contracts" / "active" / "intake" / "bad.md"
         bad.parent.mkdir(parents=True, exist_ok=True)
         bad.write_text("no frontmatter here\n", encoding="utf-8")
         assert _intake_route_hint(tmp_path) is None

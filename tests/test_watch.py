@@ -202,7 +202,7 @@ def test_contract_write_triggers_compose(tmp_path: Path):
     )
     handler = _AgentAlloyHandler(config, mock_regen)
 
-    contract_path = tmp_path / ".agentalloy" / "contracts" / "build" / "task.md"
+    contract_path = tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "task.md"
     contract_path.parent.mkdir(parents=True)
     contract_path.write_text("---\nphase: build\ntask_slug: t\ndomain_tags: [A]\n---\n\nbody\n")
 

@@ -73,7 +73,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: qa reads its incoming work-item from contracts/qa/ (build authored) and, on a clean report, seeds ship's work-item in contracts/ship/ with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (docs/qa/<slug>.md) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until docs/solutions/<slug>.md records this task's lesson (a stale prior-task lesson can't satisfy it), with docs/solutions/ asserted as a prose invariant. MIGRATION: a pre-existing enabled profile override for this skill that lacks the docs/solutions/ token is dropped at runtime (shipped prose served, warning logged) until its author re-adds the token."
+change_summary: "two-tier cascade: qa reads its incoming work-item from contracts/active/qa/ (build authored) and, on a clean report, seeds ship's work-item in contracts/active/ship/ with the delivery-surface domain_tags + a reversibility-minded body that becomes ship's retrieval prompt; keeps the full quality bar → spec/non-goals/drift → severity-labelled review (docs/qa/<slug>.md) and route-by-cause remediation. Adds the compound-engineering codify gate: a slug-scoped lessons_recorded exit-gate leaf blocks qa→ship until docs/solutions/<slug>.md records this task's lesson (a stale prior-task lesson can't satisfy it), with docs/solutions/ asserted as a prose invariant. MIGRATION: a pre-existing enabled profile override for this skill that lacks the docs/solutions/ token is dropped at runtime (shipped prose served, warning logged) until its author re-adds the token."
 raw_prose: |
   # SDD — QA (Verify and Review)
 
@@ -90,7 +90,7 @@ raw_prose: |
 
   ## 1. Run the full bar
 
-  Read your work-item contract first (`.agentalloy/contracts/qa/<slug>.md`, which
+  Read your work-item contract first (`.agentalloy/contracts/active/qa/<slug>.md`, which
   build authored — the proxy front-loaded the verification skills for it on
   entry). Then run everything — the **CI** system skill names the exact commands
   — and record the real results, not "should pass":
