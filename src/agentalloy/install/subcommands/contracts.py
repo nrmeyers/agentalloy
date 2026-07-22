@@ -117,6 +117,81 @@ def _render_migrate(result: dict[str, Any]) -> None:
     print_rich()
 
 
+def _run_archive(args: argparse.Namespace) -> int:
+    from agentalloy.contracts import (
+        apply_contracts_migration,
+        contracts_root,
+        cursor_after_migration,
+        plan_archive,
+    )
+    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
+        _clear_state,
+        _read_state,
+    )
+
+    project_root = _repo_root()
+    root = contracts_root(project_root)
+    phase: str | None = getattr(args, "phase", None)
+    slug: str | None = getattr(args, "slug", None)
+    dry_run: bool = getattr(args, "dry_run", False)
+
+    plan = plan_archive(project_root, phase=phase, slug=slug)
+
+    def rel(p: Path) -> str:
+        try:
+            return p.relative_to(root).as_posix()
+        except ValueError:
+            return str(p)
+
+    payload: dict[str, Any] = {
+        "contracts_root": str(root),
+        "dry_run": dry_run,
+        "moves": [{"from": rel(m.src), "to": rel(m.dst)} for m in plan.moves],
+        "collisions": [{"from": rel(s), "to": rel(d)} for s, d in plan.collisions],
+        "archived": 0,
+    }
+
+    if not dry_run and plan.moves:
+        done = apply_contracts_migration(plan)
+        payload["archived"] = len(done)
+        # A cursor pointing at a now-archived work-item is stale — clear it
+        # (archived contracts are not live and readers don't scan archive/).
+        names = ["cursor"]
+        for f in (project_root / ".agentalloy").glob("cursor.*"):
+            names.append(f.name)
+        for name in names:
+            val = _read_state(project_root, name)
+            if val and cursor_after_migration(val, done, root) != val:
+                _clear_state(project_root, name)
+
+    write_result(payload, args, human_fn=_render_archive)
+    return 1 if payload["collisions"] else 0
+
+
+def _render_archive(result: dict[str, Any]) -> None:
+    moves = result.get("moves") or []
+    collisions = result.get("collisions") or []
+    dry_run = result.get("dry_run")
+
+    print_rich("\n  [bold]Contracts archive[/bold]")
+    if dry_run:
+        print_rich("  [yellow]dry-run — nothing was moved[/yellow]")
+    if not moves and not collisions:
+        print_rich("  [green]No live contracts matched — nothing to archive.[/green]\n")
+        return
+    if moves:
+        verb = "Would archive" if dry_run else "Archived"
+        print_rich(f"\n  [bold]{verb} {len(moves)}[/bold]")
+        for m in moves:
+            print_rich(f"  [green]→[/green] {m['from']}  ⇒  {m['to']}")
+    if collisions:
+        print_rich(f"\n  [bold]Collisions ({len(collisions)}) — left in place[/bold]")
+        for c in collisions:
+            print_rich(f"  [red]![/red] {c['from']}  ⇏  {c['to']} (destination occupied)")
+    print_rich()
+
+
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
@@ -135,5 +210,19 @@ def add_parser(
         help="Show what would move without touching any files.",
     )
     mig.set_defaults(func=_run_migrate)
+
+    arch = sub.add_parser(
+        "archive",
+        help="Move live contracts from active/<phase>/ to archive/<phase>/.",
+    )
+    add_json_flag(arch)
+    arch.add_argument("--phase", default=None, help="Restrict to one phase (default: all).")
+    arch.add_argument(
+        "--slug", default=None, help="Restrict to contracts whose filename stem matches."
+    )
+    arch.add_argument(
+        "--dry-run", action="store_true", help="Show what would archive without moving files."
+    )
+    arch.set_defaults(func=_run_archive)
 
     p.set_defaults(func=lambda _a: (p.print_help(), 0)[1])

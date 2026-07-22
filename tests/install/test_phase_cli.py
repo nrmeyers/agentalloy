@@ -326,3 +326,35 @@ class TestApprovalGate:
         assert result["blocked"] is True
         assert result.get("reason") != "approval"
         assert any("docs/spec" in a for a in result["advisories"])
+
+
+class TestShipResetAutoArchive:
+    def _active(self, root: Path, phase: str, name: str) -> Path:
+        p = root / ".agentalloy" / "contracts" / "active" / phase / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"---\nphase: {phase}\ntask_slug: {p.stem}\ndomain_tags: [x]\n---\nbody\n")
+        return p
+
+    def test_ship_to_intake_reset_archives_live_contracts(self, repo_root: Path) -> None:
+        run_phase_set("ship", root=repo_root, force=True)
+        self._active(repo_root, "build", "01.md")
+        self._active(repo_root, "ship", "s.md")
+
+        run_phase_set("intake", root=repo_root)  # user-confirmed reset
+
+        c = repo_root / ".agentalloy" / "contracts"
+        # Live cycle swept into archive/<phase>/ …
+        assert (c / "archive" / "build" / "01.md").is_file()
+        assert (c / "archive" / "ship" / "s.md").is_file()
+        # … and no longer live.
+        assert not (c / "active" / "build" / "01.md").exists()
+        assert not (c / "active" / "ship" / "s.md").exists()
+
+    def test_non_ship_transition_does_not_archive(self, repo_root: Path) -> None:
+        run_phase_set("build", root=repo_root, force=True)
+        self._active(repo_root, "build", "01.md")
+
+        run_phase_set("qa", root=repo_root, force=True)
+
+        # A normal forward transition leaves live contracts in place.
+        assert (repo_root / ".agentalloy" / "contracts" / "active" / "build" / "01.md").is_file()

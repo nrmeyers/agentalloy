@@ -260,6 +260,14 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     # (filename order) so "which task is current" is reliably set — the single source of
     # truth both the proxy and the codify gate read. A phase with no contracts clears it.
     # Mirrors the proxy auto-advance path in skill_loader._write_phase_atomic (B2).
+    # Auto-archive on ship: the user-confirmed ship→intake reset ends a work
+    # cycle, so sweep the just-completed cycle's live contracts into
+    # archive/<phase>/ before the next cycle starts writing into active/.
+    if current == "ship" and phase == "intake":
+        from agentalloy.contracts import apply_contracts_migration, plan_archive
+
+        apply_contracts_migration(plan_archive(root))
+
     if current != phase:
         from agentalloy.contracts import first_workitem_id
         from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
