@@ -555,6 +555,47 @@ def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: 
     return cursor
 
 
+def plan_archive(
+    project_root: Path, *, phase: str | None = None, slug: str | None = None
+) -> MigrationPlan:
+    """Plan moving live contracts from ``active/<phase>/`` to ``archive/<phase>/``.
+
+    Pure. ``phase=None`` archives every live phase; a ``phase`` restricts to that
+    phase's dir; a ``slug`` restricts to files whose stem equals it (across the
+    selected phase(s)). A destination already occupied by a different file
+    becomes a collision (never overwritten), mirroring the migration planner.
+    """
+    root = contracts_root(project_root)
+    active_root = root / "active"
+    moves: list[ContractMove] = []
+    collisions: list[tuple[Path, Path]] = []
+    claimed: dict[Path, Path] = {}
+
+    if not active_root.is_dir():
+        return MigrationPlan(moves, collisions, [])
+
+    phase_dirs = (
+        [active_root / phase] if phase else [d for d in active_root.iterdir() if d.is_dir()]
+    )
+    for pdir in sorted(phase_dirs):
+        if not pdir.is_dir():
+            continue
+        ph = pdir.name
+        for src in sorted(pdir.glob("*.md")):
+            if not src.is_file():
+                continue
+            if slug is not None and src.stem != slug:
+                continue
+            dst = archive_dir(project_root, ph) / src.name
+            if dst in claimed or (dst.exists() and dst.resolve() != src.resolve()):
+                collisions.append((src, dst))
+                continue
+            claimed[dst] = src
+            moves.append(ContractMove(src=src, dst=dst, archived=True))
+
+    return MigrationPlan(moves=moves, collisions=collisions, unreadable=[])
+
+
 @dataclass(frozen=True)
 class CodeIndexQuery:
     """Parameters for an in-process code-index search derived from a contract.

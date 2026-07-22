@@ -665,3 +665,60 @@ class TestMigrationExecutor:
         root = contracts_root(tmp_path)
         assert cursor_after_migration(None, [], root) is None
         assert cursor_after_migration("build/other.md", [], root) == "build/other.md"
+
+
+class TestArchivePlanner:
+    def _active(self, tmp_path: Path, phase: str, name: str) -> Path:
+        return _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / "active" / phase / name,
+            phase=phase,
+            task_slug=Path(name).stem,
+        )
+
+    def test_archive_all_live_phases(self, tmp_path: Path):
+        from agentalloy.contracts import archive_dir, plan_archive
+
+        self._active(tmp_path, "build", "01.md")
+        self._active(tmp_path, "ship", "s.md")
+        plan = plan_archive(tmp_path)
+
+        dsts = {m.dst for m in plan.moves}
+        assert dsts == {
+            archive_dir(tmp_path, "build") / "01.md",
+            archive_dir(tmp_path, "ship") / "s.md",
+        }
+        assert all(m.archived for m in plan.moves)
+
+    def test_archive_restricted_to_phase(self, tmp_path: Path):
+        from agentalloy.contracts import archive_dir, plan_archive
+
+        self._active(tmp_path, "build", "01.md")
+        self._active(tmp_path, "ship", "s.md")
+        plan = plan_archive(tmp_path, phase="ship")
+
+        assert [m.dst for m in plan.moves] == [archive_dir(tmp_path, "ship") / "s.md"]
+
+    def test_archive_restricted_to_slug(self, tmp_path: Path):
+        from agentalloy.contracts import plan_archive
+
+        self._active(tmp_path, "build", "keep-me.md")
+        self._active(tmp_path, "build", "other.md")
+        plan = plan_archive(tmp_path, slug="keep-me")
+
+        assert [m.src.name for m in plan.moves] == ["keep-me.md"]
+
+    def test_archive_collision_when_dst_occupied(self, tmp_path: Path):
+        from agentalloy.contracts import archive_dir, plan_archive
+
+        self._active(tmp_path, "build", "dup.md")
+        occ = archive_dir(tmp_path, "build") / "dup.md"
+        occ.parent.mkdir(parents=True, exist_ok=True)
+        occ.write_text("different")
+        plan = plan_archive(tmp_path)
+
+        assert not plan.moves and len(plan.collisions) == 1
+
+    def test_archive_empty_when_no_active(self, tmp_path: Path):
+        from agentalloy.contracts import plan_archive
+
+        assert plan_archive(tmp_path).is_empty
