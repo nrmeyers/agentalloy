@@ -481,7 +481,7 @@ def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> Predica
     count_min = args.get("count_min", 1)
     if phase is None or ctx.contracts_root is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / phase
+    contracts_dir = ctx.contracts_root / "active" / phase
     if not contracts_dir.exists():
         return PredicateResult.NOT_MET
     try:
@@ -503,7 +503,7 @@ def eval_contract_has_tags(args: dict[str, Any], ctx: PredicateContext) -> Predi
     any_of_tags = args.get("any_of", [])
     if phase is None or ctx.contracts_root is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / phase
+    contracts_dir = ctx.contracts_root / "active" / phase
     if not contracts_dir.exists():
         return PredicateResult.NOT_MET
     try:
@@ -582,7 +582,7 @@ def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
     from agentalloy.contracts import list_contracts_for_phase  # lazy: signal import cost
 
     contracts_root = (ctx.project_root / ".agentalloy" / "contracts").resolve()
-    phase_dir = (contracts_root / phase).resolve()
+    phase_dir = (contracts_root / "active" / phase).resolve()
     try:
         raw = (ctx.project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
     except OSError:
@@ -661,7 +661,7 @@ def eval_build_contracts_cover_tasks(
     if slug is None:
         return PredicateResult.UNKNOWN
     tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     task_files = _glob_files(ctx.project_root, tasks_glob)
     if not task_files:
         return PredicateResult.UNKNOWN
@@ -713,7 +713,7 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
     contract never blocks this item's design→build. UNKNOWN (fail-open) when no
     single work-item resolves, mirroring :func:`eval_build_contracts_cover_tasks`.
     """
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     max_tags = args.get("max_tags", 2)
     slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
     if slug is None:

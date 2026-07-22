@@ -55,8 +55,8 @@ def test_repos_lists_wired_state(client, tmp_path: Path, monkeypatch: pytest.Mon
     repo = _make_repo(tmp_path, "r1", phase="build")
     (repo / ".agentalloy" / "config").write_text("lifecycle_mode: full\n")
     (repo / ".agentalloy" / "upstream").write_text("url: http://localhost:1234/v1\nmodel: qwen3\n")
-    (repo / ".agentalloy" / "contracts" / "build").mkdir(parents=True)
-    (repo / ".agentalloy" / "contracts" / "build" / "t.md").write_text("x")
+    (repo / ".agentalloy" / "contracts" / "active" / "build").mkdir(parents=True)
+    (repo / ".agentalloy" / "contracts" / "active" / "build" / "t.md").write_text("x")
     _wire(monkeypatch, repo)
 
     body = client.get("/api/repos").json()

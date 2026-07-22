@@ -31,7 +31,9 @@ def _write(p: Path, text: str = "x") -> None:
 
 
 def _qa_contract(root: Path, slug: str) -> None:
-    _write(root / ".agentalloy" / "contracts" / "qa" / f"{slug}.md", "---\nphase: qa\n---\n")
+    _write(
+        root / ".agentalloy" / "contracts" / "active" / "qa" / f"{slug}.md", "---\nphase: qa\n---\n"
+    )
 
 
 def _ctx(root: Path, phase: str | None = "qa") -> PredicateContext:
@@ -95,12 +97,12 @@ def test_phase_entry_seeds_gate_scope(tmp_path: Path):
 def test_cursor_selects_slug(tmp_path: Path):
     _qa_contract(tmp_path, "feat-x")
     _qa_contract(tmp_path, "feat-y")
-    _write(tmp_path / ".agentalloy" / "cursor", "qa/feat-y.md")
+    _write(tmp_path / ".agentalloy" / "cursor", "active/qa/feat-y.md")
     _write(tmp_path / "docs" / "solutions" / "feat-y.md", "# lesson")
     # cursor pins feat-y; its lesson exists -> MET even though feat-x has none
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is MET
     # repoint the cursor to feat-x, whose lesson is absent -> NOT_MET
-    _write(tmp_path / ".agentalloy" / "cursor", "qa/feat-x.md")
+    _write(tmp_path / ".agentalloy" / "cursor", "active/qa/feat-x.md")
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is NOT_MET
 
 

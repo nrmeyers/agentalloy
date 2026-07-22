@@ -26,7 +26,10 @@ class TestNormalizeGatePath:
         ("glob", "expected"),
         [
             ("docs/design/**/approach.md", "approach.md"),  # filename behind wildcard dir
-            (".agentalloy/contracts/build/*.md", ".agentalloy/contracts/build/"),  # dir prefix
+            (
+                ".agentalloy/contracts/active/build/*.md",
+                ".agentalloy/contracts/active/build/",
+            ),  # dir prefix
             ("src/**", "src/"),
             ("tests/**/*.py", "tests/"),
             ("**/*.md", None),  # no literal anchor
@@ -51,7 +54,7 @@ class TestDeriveInvariants:
         assert "approach.md" in inv
         assert "tasks.md" in inv
         assert "test-plan.md" in inv
-        assert ".agentalloy/contracts/build/" in inv
+        assert ".agentalloy/contracts/active/build/" in inv
 
     def test_shipped_prose_satisfies_its_own_invariants(self) -> None:
         # A shipped skill must never violate its own linter, or every

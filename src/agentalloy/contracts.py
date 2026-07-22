@@ -33,6 +33,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -333,8 +334,8 @@ def validate_contract(contract: Contract, project_root: Path) -> list[str]:
 
 
 def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return all .agentalloy/contracts/<phase>/*.md sorted newest-first by mtime."""
-    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    """Return all .agentalloy/contracts/active/<phase>/*.md sorted newest-first by mtime."""
+    contracts_dir = active_dir(project_root, phase)
     if not contracts_dir.is_dir():
         return []
     files = [f for f in contracts_dir.glob("*.md") if f.is_file()]
@@ -349,7 +350,7 @@ def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
     — is the correct sequence for "which task is first/next". The single ordering
     definition shared by the ``task`` cursor commands and phase-entry seeding.
     """
-    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    contracts_dir = active_dir(project_root, phase)
     if not contracts_dir.is_dir():
         return []
     return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
@@ -357,15 +358,18 @@ def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
 
 def first_workitem_id(project_root: Path, phase: str) -> str | None:
     """The first work-item of ``phase`` (filename order) as a cursor id
-    (``<phase>/<file>.md``), or ``None`` when the phase has no contracts.
+    (``active/<phase>/<file>.md``), or ``None`` when the phase has no contracts.
 
     Used to seed ``.agentalloy/cursor`` on phase entry so the current work-item
     is reliably set without waiting for the agent's first ``agentalloy task next``.
+    The id is contracts-root-relative, so it now carries the ``active/`` prefix
+    to resolve against the tree layout (``resolve_current_contract`` joins it to
+    ``.agentalloy/contracts/``).
     """
     contracts = ordered_contracts_for_phase(project_root, phase)
     if not contracts:
         return None
-    return f"{phase}/{contracts[0].name}"
+    return f"active/{phase}/{contracts[0].name}"
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +508,51 @@ def plan_contracts_migration(project_root: Path) -> MigrationPlan:
         moves.append(ContractMove(src=src, dst=dst, archived=archived))
 
     return MigrationPlan(moves=moves, collisions=collisions, unreadable=unreadable)
+
+
+def apply_contracts_migration(plan: MigrationPlan) -> list[ContractMove]:
+    """Execute a plan's ``moves`` on disk, returning the moves performed.
+
+    Creates each destination's parent directory and relocates the file
+    (``shutil.move`` — tolerant of a cross-filesystem ``.agentalloy``). Only
+    ``moves`` are applied: collisions and unreadable files were deliberately
+    excluded by the planner, so nothing here can overwrite an existing file. A
+    caller that has already applied the plan sees the moves as no-ops guarded by
+    ``src.exists()`` (idempotent re-runs are safe).
+
+    Cursor rewriting is intentionally *not* done here — the cursor helpers live
+    in the signal layer (which imports this module); the migration entrypoint
+    that owns the cursor performs that step after calling this.
+    """
+    done: list[ContractMove] = []
+    for mv in plan.moves:
+        if not mv.src.exists():
+            continue  # already applied on a prior run
+        mv.dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(mv.src), str(mv.dst))
+        done.append(mv)
+    return done
+
+
+def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: Path) -> str | None:
+    """Return the cursor value rewritten to follow a migration, or unchanged.
+
+    The cursor is a contracts-root-relative posix id (e.g. ``build/01.md``).
+    When a move relocated exactly that file, the cursor becomes the move's new
+    contracts-relative id (e.g. ``active/build/01.md``); otherwise it is
+    returned as-is. Pure — the caller writes the result through its own cursor
+    helper. ``root`` is ``.agentalloy/contracts`` so relatives can be computed.
+    """
+    if not cursor:
+        return cursor
+    for mv in moves:
+        try:
+            old_rel = mv.src.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if old_rel == cursor:
+            return mv.dst.relative_to(root).as_posix()
+    return cursor
 
 
 @dataclass(frozen=True)
@@ -645,13 +694,13 @@ def latest_contract(project_root: Path, phase: str | None = None) -> Path | None
         files = list_contracts_for_phase(project_root, phase)
         return files[0] if files else None
 
-    # No phase filter — scan all phases
-    contracts_root = project_root / ".agentalloy" / "contracts"
-    if not contracts_root.is_dir():
+    # No phase filter — scan all live phases under the active tree.
+    active_root = contracts_root(project_root) / "active"
+    if not active_root.is_dir():
         return None
 
     all_files: list[Path] = []
-    for phase_dir in contracts_root.iterdir():
+    for phase_dir in active_root.iterdir():
         if phase_dir.is_dir():
             all_files.extend(f for f in phase_dir.glob("*.md") if f.is_file())
 

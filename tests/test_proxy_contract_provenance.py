@@ -46,7 +46,7 @@ Implement the consumer-group worker loop.
 
 
 def _seed_contract(tmp_path: Path) -> Path:
-    path = tmp_path / ".agentalloy" / "contracts" / "build" / "provenance-probe.md"
+    path = tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "provenance-probe.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_CONTRACT_MD)
     return path

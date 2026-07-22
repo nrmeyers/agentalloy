@@ -322,7 +322,7 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
     (d / "approach.md").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
     (d / "tasks.md").write_text("# x\n\n## Tasks\n\n- t1\n", encoding="utf-8")
     (d / "test-plan.md").write_text("# x\n\n## Test Cases\n\n- AC-1\n", encoding="utf-8")
-    dc = tmp_path / ".agentalloy" / "contracts" / "design"
+    dc = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     dc.mkdir(parents=True, exist_ok=True)
     (dc / "01-task.md").write_text("---\nphase: design\ntask_slug: 01-task\n---\n\n# 01-task\n")
 
@@ -358,7 +358,7 @@ def test_design_gate_passes_with_build_contract(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)  # one task: `- t1`
-    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     contracts.mkdir(parents=True)
     (contracts / "01-task.md").write_text(
         "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
@@ -377,7 +377,7 @@ def test_design_gate_blocks_without_approval(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)
-    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     contracts.mkdir(parents=True)
     (contracts / "01-task.md").write_text(
         "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
@@ -395,7 +395,7 @@ def test_design_gate_blocks_on_over_tagged_contract(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)
-    contracts = tmp_path / ".agentalloy" / "contracts" / "build"
+    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     contracts.mkdir(parents=True)
     (contracts / "01-task.md").write_text(
         "---\nphase: build\ndomain_tags: [react, typescript, vite]\n---\n\n## Task\n\nx\n",
@@ -496,14 +496,14 @@ def test_decide_transition_awaiting_approval_advisory(tmp_path: Path):
 
 
 def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None:
-    bc = tmp_path / ".agentalloy" / "contracts" / "build"
+    bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     bc.mkdir(parents=True, exist_ok=True)
     tag_str = "[" + ", ".join(tags) + "]"
     (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
 
 
 def _seed_design_contract(tmp_path: Path, slug: str) -> None:
-    dc = tmp_path / ".agentalloy" / "contracts" / "design"
+    dc = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     dc.mkdir(parents=True, exist_ok=True)
     (dc / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
 
@@ -517,7 +517,7 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
     spec = {
         "build_contracts_cover_tasks": {
             "tasks": "docs/design/**/tasks.md",
-            "contracts": ".agentalloy/contracts/build/*.md",
+            "contracts": ".agentalloy/contracts/active/build/*.md",
         }
     }
     qwen_calls: list[int] = [0]
@@ -532,7 +532,7 @@ def test_tag_focus_advisory_names_offender(tmp_path: Path):
     _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-ok.md", tags=["react"])
     _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
-    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
+    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
     qwen_calls: list[int] = [0]
     result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
     assert result == NOT_MET
@@ -545,7 +545,7 @@ def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
     _seed_design_contract(tmp_path, "feat")
     _write_build_contract(tmp_path, name="01-date.md", tags=["calendar"])
     _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
-    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/build/*.md"}}
+    spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
     qwen_calls: list[int] = [0]
     result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
     assert result == MET

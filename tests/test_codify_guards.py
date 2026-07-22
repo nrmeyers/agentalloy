@@ -76,10 +76,10 @@ def test_ac7_off_mode_composes_nothing_even_at_qa(tmp_path: Path):
     from agentalloy.api.proxy_signal import evaluate_signal
 
     d = tmp_path / ".agentalloy"
-    (d / "contracts" / "qa").mkdir(parents=True)
+    (d / "contracts" / "active" / "qa").mkdir(parents=True)
     (d / "phase").write_text("phase: qa\n")
     (d / "config").write_text("lifecycle_mode: off\n")
-    (d / "contracts" / "qa" / "feat-x.md").write_text("---\nphase: qa\n---\n")
+    (d / "contracts" / "active" / "qa" / "feat-x.md").write_text("---\nphase: qa\n---\n")
     # No docs/solutions/feat-x.md — in full mode the codify gate would block, but
     # in off mode the whole workflow layer (gate + prose) must stay dark.
 

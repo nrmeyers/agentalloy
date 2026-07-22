@@ -18,8 +18,8 @@ SLUG = "feat-x"
 def _qa_ready(root: Path) -> None:
     """A repo whose qa exit artifact + work-item are in place — everything the
     qa->ship gate needs EXCEPT the codify lesson."""
-    (root / ".agentalloy" / "contracts" / "qa").mkdir(parents=True, exist_ok=True)
-    (root / ".agentalloy" / "contracts" / "qa" / f"{SLUG}.md").write_text(
+    (root / ".agentalloy" / "contracts" / "active" / "qa").mkdir(parents=True, exist_ok=True)
+    (root / ".agentalloy" / "contracts" / "active" / "qa" / f"{SLUG}.md").write_text(
         "---\nphase: qa\n---\n", encoding="utf-8"
     )
     (root / "docs" / "qa").mkdir(parents=True, exist_ok=True)

@@ -43,7 +43,7 @@ exit_gates:
     # walk them with `task next`. Without this floor, `phase set build` passes with
     # zero contracts and build has no worklist (the gap that motivated this gate).
     - artifact_exists:
-        path: .agentalloy/contracts/build/*.md
+        path: .agentalloy/contracts/active/build/*.md
     # §6 density floor (#12): ONE build contract PER TASK, not one whole-feature
     # contract. Counts top-level items under `## Tasks` in the cursor'd item's
     # tasks.md and requires at least that many of THAT item's build contracts.
@@ -53,14 +53,14 @@ exit_gates:
     # Floor-clamps to 1; UNKNOWN (fail-open) when no single work-item resolves.
     - build_contracts_cover_tasks:
         tasks: docs/design/{slug}/tasks.md
-        contracts: .agentalloy/contracts/build/*.md
+        contracts: .agentalloy/contracts/active/build/*.md
     # Tag-focus hard gate (#12b): each build contract must center ONE dominant tech
     # surface — ≤2 domain_tags. At the build retrieval cap a 7-surface basket
     # starves most surfaces. NOT_MET names the offender + its tag count; --force
     # bypasses it (no separate pre-check — the normal forward-gate carve-out).
     # Cursor-scoped (#378): only the active item's own build contracts are judged.
     - build_contract_tag_focus:
-        contracts: .agentalloy/contracts/build/*.md
+        contracts: .agentalloy/contracts/active/build/*.md
     # Human-in-the-loop checkpoint (#10): design→build requires a recorded approval.
     # `since` = the design docs (NOT the build contracts) so editing a contract
     # during build doesn't re-stale the approval. --force never bypasses this.
@@ -118,7 +118,7 @@ raw_prose: |
   ## 1. Start from the spec
 
   Read `docs/spec/<slug>.md` and your work-item contract
-  (`.agentalloy/contracts/design/<slug>.md`, which spec authored — the proxy
+  (`.agentalloy/contracts/active/design/<slug>.md`, which spec authored — the proxy
   already front-loaded its design skills on entry); acceptance and non-goals are
   fixed, you don't reopen them. Then read the code you'll touch: existing
   patterns, conventions, the seams you'll extend. Design fits the codebase you
@@ -223,7 +223,7 @@ raw_prose: |
   Then **verify the hand-off is complete**, PRESENT it, and STOP — do not
   advance yourself. Each task is a top-level list item under `## Tasks`; the design→build
   gate counts those items and refuses the jump until at least that many build
-  contracts exist under `.agentalloy/contracts/build/`, each carrying ≤2
+  contracts exist under `.agentalloy/contracts/active/build/`, each carrying ≤2
   `domain_tags`. The forward jump is a human checkpoint: present the design and the
   per-task contracts in full, and only once the user explicitly approves do you
   record it with `agentalloy approve design` (it advances you into build) — or,
@@ -233,7 +233,7 @@ raw_prose: |
   **stop and surface it** instead of presenting it as done. The phase guard refuses
   the jump until `approach.md`, `tasks.md`, and `test-plan.md` all exist with their
   required sections, one build contract per task exists under
-  `.agentalloy/contracts/build/` with ≤2 tags each, AND a human approval is
+  `.agentalloy/contracts/active/build/` with ≤2 tags each, AND a human approval is
   recorded — so a premature `phase set` just names what's missing, including a
   forgotten contract or an over-tagged one.
 

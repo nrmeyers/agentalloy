@@ -546,7 +546,7 @@ class TestUnwire:
         phase = repo_root / ".agentalloy" / "phase"
         config = repo_root / ".agentalloy" / "config"
         assert phase.exists() and config.exists(), "full wire seeds phase + config"
-        contract = repo_root / ".agentalloy" / "contracts" / "spec" / "keep.md"
+        contract = repo_root / ".agentalloy" / "contracts" / "active" / "spec" / "keep.md"
         contract.parent.mkdir(parents=True)
         contract.write_text("# user's contract\n")
 

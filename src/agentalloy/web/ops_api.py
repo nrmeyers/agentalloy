@@ -128,9 +128,9 @@ def _repo_info(root_str: str, harnesses: list[str]) -> RepoInfo:
     phase = _repo_phase(root_str)
     upstream = read_upstream(root)
     contracts: dict[str, int] = {}
-    contracts_dir = root / ".agentalloy" / "contracts"
-    if contracts_dir.is_dir():
-        for phase_dir in sorted(contracts_dir.iterdir()):
+    active_dir = root / ".agentalloy" / "contracts" / "active"
+    if active_dir.is_dir():
+        for phase_dir in sorted(active_dir.iterdir()):
             if phase_dir.is_dir():
                 n = len(list(phase_dir.glob("*.md")))
                 if n:

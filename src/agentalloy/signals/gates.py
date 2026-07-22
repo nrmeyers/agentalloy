@@ -112,7 +112,7 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     if slug is None:
         return None
     tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
-    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     try:
         tasks = 0
         for f in _glob_files(ctx.project_root, tasks_glob):
@@ -140,7 +140,7 @@ def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> st
         _resolve_workitem_slug,
     )
 
-    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     max_tags: int = args.get("max_tags", 2)
     slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
     if slug is None:

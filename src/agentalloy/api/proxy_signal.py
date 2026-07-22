@@ -212,6 +212,12 @@ def _resolve_current_contract(
     Kept here for the existing call sites and to emit the stale-cursor diagnostic.
     """
     from agentalloy.contracts import resolve_current_contract
+    from agentalloy.signals.skill_loader import ensure_migrated
+
+    # Auto-migrate a legacy flat-layout repo into the tree on first read (cheap
+    # no-op once migrated), so the tree-only resolver below never silently
+    # returns empty for a repo whose contracts predate the active/<phase> layout.
+    ensure_migrated(cwd)
 
     cid, path = resolve_current_contract(cwd, phase, session_key)
     if path is None and _read_cursor(cwd, session_key):

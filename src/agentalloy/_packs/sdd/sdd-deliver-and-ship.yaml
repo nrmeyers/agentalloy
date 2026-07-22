@@ -56,7 +56,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: ship reads its incoming work-item from contracts/ship/ (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
+change_summary: "two-tier cascade: ship reads its incoming work-item from contracts/active/ship/ (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
 raw_prose: |
   # SDD — Ship (Deliver)
 
@@ -72,7 +72,7 @@ raw_prose: |
 
   ## 1. Confirm you're shipping the verified state
 
-  Read your work-item contract (`.agentalloy/contracts/ship/<slug>.md`, which qa
+  Read your work-item contract (`.agentalloy/contracts/active/ship/<slug>.md`, which qa
   authored — the proxy front-loaded the delivery skills for it on entry). Ship
   rides on QA's report (`docs/qa/<slug>.md`) — don't re-run the review. Just
   confirm the commit you're shipping *is* the reviewed one: the suite is green at

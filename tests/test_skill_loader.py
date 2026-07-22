@@ -471,3 +471,44 @@ class TestRuntimeStateRelocation:
 
         assert _read_state(repo, "composed") is None
         assert not (repo / ".agentalloy" / "composed").exists()
+
+
+# ---------------------------------------------------------------------------
+# ensure_migrated — auto-migrate legacy flat contracts on first read
+# ---------------------------------------------------------------------------
+
+
+def _legacy_contract(root: Path, rel: str, phase: str) -> Path:
+    p = root / ".agentalloy" / "contracts" / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"---\nphase: {phase}\ntask_slug: {p.stem}\ndomain_tags: [x]\n---\nbody\n")
+    return p
+
+
+def test_ensure_migrated_moves_and_rewrites_cursor(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import ensure_migrated
+
+    _legacy_contract(tmp_path, "build/01-a.md", "build")
+    _legacy_contract(tmp_path, "flat.md", "spec")
+    (tmp_path / ".agentalloy" / "cursor").write_text("build/01-a.md")
+
+    moved = ensure_migrated(tmp_path)
+
+    assert moved == 2
+    assert (tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "01-a.md").is_file()
+    assert (tmp_path / ".agentalloy" / "contracts" / "active" / "spec" / "flat.md").is_file()
+    # Cursor followed the move into the tree.
+    assert (tmp_path / ".agentalloy" / "cursor").read_text().strip() == "active/build/01-a.md"
+
+
+def test_ensure_migrated_noop_when_already_tree(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import ensure_migrated
+
+    _legacy_contract(tmp_path, "active/build/01-a.md", "build")  # already migrated
+    assert ensure_migrated(tmp_path) == 0
+
+
+def test_ensure_migrated_noop_when_no_contracts(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import ensure_migrated
+
+    assert ensure_migrated(tmp_path) == 0
