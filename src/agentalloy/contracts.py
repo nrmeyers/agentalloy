@@ -368,6 +368,144 @@ def first_workitem_id(project_root: Path, phase: str) -> str | None:
     return f"{phase}/{contracts[0].name}"
 
 
+# ---------------------------------------------------------------------------
+# Contracts tree layout (active/<phase>/ + archive/<phase>/)
+#
+# The tree strategy: live work-item contracts live under
+# ``.agentalloy/contracts/active/<phase>/``; completed / superseded ones under
+# ``.agentalloy/contracts/archive/<phase>/``. This replaces the legacy flat
+# layout (``contracts/*.md`` + per-phase ``contracts/<phase>/`` + flat
+# ``contracts/archive/*.md`` + ``contracts/_superseded/``).
+#
+# This module contributes only the *pure* path helpers and a side-effect-free
+# migration planner; the CLI command that executes a plan, the writer/reader
+# cutover, and the archive move live in later changes.
+# ---------------------------------------------------------------------------
+
+
+def contracts_root(project_root: Path) -> Path:
+    """The ``.agentalloy/contracts`` directory for *project_root*."""
+    return project_root / ".agentalloy" / "contracts"
+
+
+def active_dir(project_root: Path, phase: str) -> Path:
+    """Where live contracts for *phase* belong: ``contracts/active/<phase>/``."""
+    return contracts_root(project_root) / "active" / phase
+
+
+def archive_dir(project_root: Path, phase: str) -> Path:
+    """Where completed contracts for *phase* belong: ``contracts/archive/<phase>/``."""
+    return contracts_root(project_root) / "archive" / phase
+
+
+def _read_contract_phase(path: Path) -> str | None:
+    """Best-effort read of a contract's ``phase`` frontmatter field.
+
+    Returns the trimmed phase, or ``None`` when the file is unreadable, has no
+    frontmatter, or lacks a non-empty string ``phase``. Never raises — the
+    migration planner treats a ``None`` here as "cannot place this file".
+    """
+    try:
+        data, _ = _split_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, ContractMalformed):
+        return None
+    phase = data.get("phase")
+    if isinstance(phase, str) and phase.strip():
+        return phase.strip()
+    return None
+
+
+@dataclass(frozen=True)
+class ContractMove:
+    """A single planned relocation of a contract file into the tree."""
+
+    src: Path
+    dst: Path
+    archived: bool  # True → destination is archive/<phase>/, False → active/<phase>/
+
+
+@dataclass(frozen=True)
+class MigrationPlan:
+    """The side-effect-free result of planning a legacy → tree migration.
+
+    ``moves`` are safe to apply in order. ``collisions`` are source files whose
+    computed destination is already claimed (by another source in this plan or
+    an existing on-disk file) — reported, never silently overwritten.
+    ``unreadable`` are files whose ``phase`` could not be determined, so no
+    destination could be computed.
+    """
+
+    moves: list[ContractMove]
+    collisions: list[tuple[Path, Path]]  # (src, intended dst)
+    unreadable: list[Path]
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.moves or self.collisions or self.unreadable)
+
+
+def plan_contracts_migration(project_root: Path) -> MigrationPlan:
+    """Plan the move of a repo's legacy-layout contracts into the tree.
+
+    Pure: reads the filesystem but mutates nothing. Classification by source
+    location (destination phase always comes from the file's own frontmatter):
+
+      - ``active/**``                     → already migrated, skipped.
+      - ``archive/<phase>/**`` (nested)   → already migrated, skipped.
+      - ``archive/*.md`` (flat)           → ``archive/<phase>/`` (archived).
+      - ``_superseded/**``                → ``archive/<phase>/`` (archived).
+      - everything else (flat root,
+        legacy per-phase ``<phase>/*.md``) → ``active/<phase>/`` (live).
+
+    A file already sitting at its computed destination is skipped. A
+    destination claimed twice — or already occupied on disk by a different
+    file — becomes a collision rather than a move.
+    """
+    root = contracts_root(project_root)
+    moves: list[ContractMove] = []
+    collisions: list[tuple[Path, Path]] = []
+    unreadable: list[Path] = []
+    claimed: dict[Path, Path] = {}  # dst → first src that claimed it
+
+    if not root.is_dir():
+        return MigrationPlan(moves, collisions, unreadable)
+
+    for src in sorted(root.rglob("*.md")):
+        if not src.is_file():
+            continue
+        parts = src.relative_to(root).parts
+        top = parts[0]
+
+        # Already in the tree.
+        if top == "active":
+            continue
+        if top == "archive" and len(parts) >= 3:  # archive/<phase>/<file>.md
+            continue
+
+        phase = _read_contract_phase(src)
+        if phase is None:
+            unreadable.append(src)
+            continue
+
+        archived = top in ("archive", "_superseded")
+        base = archive_dir(project_root, phase) if archived else active_dir(project_root, phase)
+        dst = base / src.name
+
+        if dst == src:
+            continue  # already correctly placed
+
+        # Destination claimed by an earlier source, or occupied on disk by a
+        # different file → collision (never overwrite).
+        if dst in claimed or (dst.exists() and dst.resolve() != src.resolve()):
+            collisions.append((src, dst))
+            continue
+
+        claimed[dst] = src
+        moves.append(ContractMove(src=src, dst=dst, archived=archived))
+
+    return MigrationPlan(moves=moves, collisions=collisions, unreadable=unreadable)
+
+
 @dataclass(frozen=True)
 class CodeIndexQuery:
     """Parameters for an in-process code-index search derived from a contract.
