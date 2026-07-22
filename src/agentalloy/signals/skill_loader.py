@@ -383,6 +383,76 @@ def _write_cursor_atomic(project_root: Path, cursor: str, session_key: str | Non
     _write_state_atomic(project_root, cursor_state_name(session_key), cursor)
 
 
+def _has_legacy_contract_layout(contracts_root: Path) -> bool:
+    """Cheap check for any legacy flat-layout indicator (fast path for the auto
+    migrate). True when flat ``*.md`` sit in the contracts root, a legacy
+    per-phase dir exists, ``archive/`` holds flat ``*.md``, or ``_superseded/``
+    exists. Once migrated, all of these are gone and this returns False."""
+    if not contracts_root.is_dir():
+        return False
+    if any(contracts_root.glob("*.md")):
+        return True
+    for d in ("intake", "spec", "design", "build", "qa", "ship", "sdd-fast", "add-skill"):
+        if (contracts_root / d).is_dir():
+            return True
+    if (contracts_root / "_superseded").is_dir():
+        return True
+    archive = contracts_root / "archive"
+    return archive.is_dir() and any(archive.glob("*.md"))
+
+
+def ensure_migrated(project_root: Path) -> int:
+    """Auto-migrate legacy flat contracts into the tree on first read.
+
+    Idempotent and cheap: returns immediately when no legacy indicator is
+    present (the steady state after one migration). On the first read of an
+    unmigrated repo it relocates every placeable contract into
+    ``active/<phase>/`` + ``archive/<phase>/`` and rewrites any cursor that
+    pointed at a moved file. Best-effort — never raises into the signal path;
+    a failure just leaves the repo as-is (the reader then sees the old files as
+    before). Returns the number of files moved.
+    """
+    from agentalloy.contracts import (
+        apply_contracts_migration,
+        contracts_root,
+        cursor_after_migration,
+        plan_contracts_migration,
+    )
+
+    root = contracts_root(project_root)
+    if not _has_legacy_contract_layout(root):
+        return 0
+    try:
+        plan = plan_contracts_migration(project_root)
+        if not plan.moves:
+            return 0
+        done = apply_contracts_migration(plan)
+        if not done:
+            return 0
+        # Follow the moves: rewrite the shared cursor and every scoped cursor.
+        names = ["cursor"]
+        with contextlib.suppress(OSError):
+            names += [f.name for f in (project_root / ".agentalloy").glob("cursor.*")]
+        for name in names:
+            val = _read_state(project_root, name)
+            new = cursor_after_migration(val, done, root)
+            if new is not None and new != val:
+                _write_state_atomic(project_root, name, new)
+        logger.info(
+            "auto-migrated %d contract(s) into the tree layout under %s", len(done), root
+        )
+        if plan.collisions:
+            logger.warning(
+                "contracts migration: %d file(s) left in place (destination "
+                "already occupied) — run `agentalloy contracts migrate` to review",
+                len(plan.collisions),
+            )
+        return len(done)
+    except Exception:
+        logger.debug("auto-migrate skipped (non-fatal)", exc_info=True)
+        return 0
+
+
 def _clear_all_cursors(project_root: Path) -> None:
     """Remove the shared cursor AND every session-scoped ``cursor.<hash>``.
 
@@ -591,7 +661,9 @@ def _read_intake_route(project_root: Path) -> str | None:
     failure (no dir, no contract, malformed frontmatter, unreadable) returns
     ``None``. Never raises.
     """
-    intake_dir = project_root / ".agentalloy" / "contracts" / "intake"
+    from agentalloy.contracts import active_dir
+
+    intake_dir = active_dir(project_root, "intake")
     try:
         candidates = sorted(intake_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
@@ -628,7 +700,9 @@ def _intake_route_hint(project_root: Path) -> str | None:
         return None
 
     # No readable intake contract: fall back to directory-presence (cascade).
-    fast_dir = project_root / ".agentalloy" / "contracts" / "sdd-fast"
+    from agentalloy.contracts import active_dir
+
+    fast_dir = active_dir(project_root, "sdd-fast")
     try:
         if fast_dir.is_dir() and any(fast_dir.glob("*.md")):
             return "sdd-fast"

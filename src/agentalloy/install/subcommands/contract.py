@@ -147,7 +147,9 @@ def _init(args: argparse.Namespace) -> int:
     route: str = getattr(args, "route", "full")
     force: bool = getattr(args, "force", False)
 
-    contracts_dir = project_root / ".agentalloy" / "contracts" / phase
+    from agentalloy.contracts import active_dir
+
+    contracts_dir = active_dir(project_root, phase)
     contracts_dir.mkdir(parents=True, exist_ok=True)
     target = contracts_dir / f"{slug}.md"
 
@@ -229,7 +231,7 @@ def _active_design_slug(project_root: Path) -> str | None:
     another phase must not mislabel the build contract). ``None`` when no single
     design work-item resolves; the caller then omits the ``work_item`` stamp.
     """
-    from agentalloy.contracts import resolve_current_contract
+    from agentalloy.contracts import active_dir, resolve_current_contract
     from agentalloy.signals.skill_loader import (
         cli_session_key,  # pyright: ignore[reportPrivateUsage]
     )
@@ -237,7 +239,7 @@ def _active_design_slug(project_root: Path) -> str | None:
     _cid, path = resolve_current_contract(project_root, "design", cli_session_key())
     if path is None:
         return None
-    design_dir = (project_root / ".agentalloy" / "contracts" / "design").resolve()
+    design_dir = active_dir(project_root, "design").resolve()
     if not path.resolve().is_relative_to(design_dir):
         return None
     return path.stem

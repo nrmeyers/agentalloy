@@ -661,7 +661,7 @@ def eval_build_contracts_cover_tasks(
     if slug is None:
         return PredicateResult.UNKNOWN
     tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     task_files = _glob_files(ctx.project_root, tasks_glob)
     if not task_files:
         return PredicateResult.UNKNOWN
@@ -713,7 +713,7 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
     contract never blocks this item's design→build. UNKNOWN (fail-open) when no
     single work-item resolves, mirroring :func:`eval_build_contracts_cover_tasks`.
     """
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/build/*.md")
+    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
     max_tags = args.get("max_tags", 2)
     slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
     if slug is None:

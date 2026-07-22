@@ -45,8 +45,13 @@ def _ordered_contracts(root: Path, phase: str) -> list[Path]:
 
 
 def _cursor_id(phase: str, contract: Path) -> str:
-    """Contracts-relative posix id stored in ``.agentalloy/cursor``."""
-    return f"{phase}/{contract.name}"
+    """Contracts-relative posix id stored in ``.agentalloy/cursor``.
+
+    Carries the ``active/`` prefix so it resolves against the tree layout
+    (``.agentalloy/contracts/active/<phase>/``) — the single format shared with
+    ``first_workitem_id`` and ``resolve_current_contract``.
+    """
+    return f"active/{phase}/{contract.name}"
 
 
 def run_task_next(root: Path) -> dict[str, object]:
