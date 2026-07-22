@@ -451,3 +451,139 @@ class TestCodeIndexQueryParams:
             params = code_index_query_params(contract, tmp_path)
 
         assert params.repo == tmp_path.name
+
+
+# ---------------------------------------------------------------------------
+# Contracts tree layout + migration planner
+# ---------------------------------------------------------------------------
+
+
+class TestTreeLayoutHelpers:
+    def test_active_and_archive_dirs(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, archive_dir, contracts_root
+
+        assert contracts_root(tmp_path) == tmp_path / ".agentalloy" / "contracts"
+        assert active_dir(tmp_path, "build") == (
+            tmp_path / ".agentalloy" / "contracts" / "active" / "build"
+        )
+        assert archive_dir(tmp_path, "qa") == (
+            tmp_path / ".agentalloy" / "contracts" / "archive" / "qa"
+        )
+
+
+class TestMigrationPlanner:
+    def _c(self, tmp_path: Path, rel: str, *, phase: str = "build") -> Path:
+        """Write a contract at contracts/<rel> with the given frontmatter phase."""
+        return _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / rel, phase=phase, task_slug=Path(rel).stem
+        )
+
+    def test_no_contracts_dir_is_empty_plan(self, tmp_path: Path):
+        from agentalloy.contracts import plan_contracts_migration
+
+        plan = plan_contracts_migration(tmp_path)
+        assert plan.is_empty
+
+    def test_flat_root_file_goes_to_active_by_frontmatter_phase(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, plan_contracts_migration
+
+        src = self._c(tmp_path, "add-auth.md", phase="spec")
+        plan = plan_contracts_migration(tmp_path)
+
+        assert len(plan.moves) == 1
+        mv = plan.moves[0]
+        assert mv.src == src
+        assert mv.dst == active_dir(tmp_path, "spec") / "add-auth.md"
+        assert mv.archived is False
+        assert not plan.collisions and not plan.unreadable
+
+    def test_legacy_per_phase_dir_goes_to_active(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, plan_contracts_migration
+
+        src = self._c(tmp_path, "build/task.md", phase="build")
+        plan = plan_contracts_migration(tmp_path)
+
+        assert [m.dst for m in plan.moves] == [active_dir(tmp_path, "build") / "task.md"]
+        assert plan.moves[0].src == src
+
+    def test_flat_archive_file_goes_to_archive_phase(self, tmp_path: Path):
+        from agentalloy.contracts import archive_dir, plan_contracts_migration
+
+        self._c(tmp_path, "archive/old.md", phase="ship")
+        plan = plan_contracts_migration(tmp_path)
+
+        assert len(plan.moves) == 1
+        assert plan.moves[0].dst == archive_dir(tmp_path, "ship") / "old.md"
+        assert plan.moves[0].archived is True
+
+    def test_superseded_goes_to_archive(self, tmp_path: Path):
+        from agentalloy.contracts import archive_dir, plan_contracts_migration
+
+        self._c(tmp_path, "_superseded/dead.md", phase="design")
+        plan = plan_contracts_migration(tmp_path)
+
+        assert plan.moves[0].dst == archive_dir(tmp_path, "design") / "dead.md"
+        assert plan.moves[0].archived is True
+
+    def test_already_migrated_active_and_archive_are_skipped(self, tmp_path: Path):
+        from agentalloy.contracts import plan_contracts_migration
+
+        self._c(tmp_path, "active/build/live.md", phase="build")
+        self._c(tmp_path, "archive/qa/done.md", phase="qa")
+        plan = plan_contracts_migration(tmp_path)
+
+        assert plan.is_empty
+
+    def test_unreadable_phase_is_reported_not_moved(self, tmp_path: Path):
+        from agentalloy.contracts import plan_contracts_migration
+
+        # A markdown file with no valid frontmatter phase.
+        bad = tmp_path / ".agentalloy" / "contracts" / "junk.md"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_text("no frontmatter here\n", encoding="utf-8")
+
+        plan = plan_contracts_migration(tmp_path)
+        assert plan.unreadable == [bad]
+        assert not plan.moves
+
+    def test_collision_when_two_sources_target_same_dst(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, plan_contracts_migration
+
+        # Same filename, same frontmatter phase, two legacy locations → one dst.
+        self._c(tmp_path, "dup.md", phase="build")  # flat root
+        self._c(tmp_path, "build/dup.md", phase="build")  # legacy per-phase
+        plan = plan_contracts_migration(tmp_path)
+
+        dst = active_dir(tmp_path, "build") / "dup.md"
+        # Exactly one wins as a move; the other is a collision.
+        assert len(plan.moves) == 1 and plan.moves[0].dst == dst
+        assert len(plan.collisions) == 1 and plan.collisions[0][1] == dst
+
+    def test_collision_when_dst_already_occupied_on_disk(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, plan_contracts_migration
+
+        # Destination already holds a DIFFERENT file (a real prior contract).
+        self._c(tmp_path, "active/build/keep.md", phase="build")
+        src = self._c(tmp_path, "keep.md", phase="build")  # flat root, same name
+        plan = plan_contracts_migration(tmp_path)
+
+        dst = active_dir(tmp_path, "build") / "keep.md"
+        assert not plan.moves
+        assert plan.collisions == [(src, dst)]
+
+    def test_mixed_repo_plans_all_buckets(self, tmp_path: Path):
+        from agentalloy.contracts import active_dir, archive_dir, plan_contracts_migration
+
+        self._c(tmp_path, "intake-item.md", phase="intake")  # → active/intake
+        self._c(tmp_path, "spec/s.md", phase="spec")  # → active/spec
+        self._c(tmp_path, "archive/a.md", phase="ship")  # → archive/ship
+        self._c(tmp_path, "active/build/already.md", phase="build")  # skip
+        plan = plan_contracts_migration(tmp_path)
+
+        dsts = {m.dst for m in plan.moves}
+        assert dsts == {
+            active_dir(tmp_path, "intake") / "intake-item.md",
+            active_dir(tmp_path, "spec") / "s.md",
+            archive_dir(tmp_path, "ship") / "a.md",
+        }
+        assert not plan.collisions and not plan.unreadable
