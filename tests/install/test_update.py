@@ -251,3 +251,81 @@ class TestOutputSchema:
             "duration_ms",
         ):
             assert key in result
+
+
+class TestContractsMigrationWarning:
+    def test_has_legacy_false_for_new_tree(self, tmp_path: Path) -> None:
+        """Only the new active/<phase> + archive/<phase> tree → not legacy."""
+        contracts = tmp_path / ".agentalloy" / "contracts"
+        (contracts / "active" / "spec").mkdir(parents=True)
+        (contracts / "active" / "spec" / "c.md").write_text("x")
+        (contracts / "archive" / "design").mkdir(parents=True)
+        assert upd._has_legacy_contracts(contracts) is False
+
+    def test_has_legacy_missing_dir_is_false(self, tmp_path: Path) -> None:
+        assert upd._has_legacy_contracts(tmp_path / "nope") is False
+
+    def test_has_legacy_detects_flat_root_files(self, tmp_path: Path) -> None:
+        contracts = tmp_path / "contracts"
+        contracts.mkdir()
+        (contracts / "old.md").write_text("x")
+        assert upd._has_legacy_contracts(contracts) is True
+
+    def test_has_legacy_detects_old_phase_subdir(self, tmp_path: Path) -> None:
+        contracts = tmp_path / "contracts"
+        (contracts / "intake").mkdir(parents=True)
+        assert upd._has_legacy_contracts(contracts) is True
+
+    def test_has_legacy_detects_flat_archive_files(self, tmp_path: Path) -> None:
+        contracts = tmp_path / "contracts"
+        (contracts / "archive").mkdir(parents=True)
+        (contracts / "archive" / "old.md").write_text("x")
+        assert upd._has_legacy_contracts(contracts) is True
+
+    def test_warning_lists_only_affected_and_dedupes(self, tmp_path: Path) -> None:
+        legacy = tmp_path / "legacy-repo"
+        (legacy / ".agentalloy" / "contracts").mkdir(parents=True)
+        (legacy / ".agentalloy" / "contracts" / "flat.md").write_text("x")
+        clean = tmp_path / "clean-repo"
+        (clean / ".agentalloy" / "contracts" / "active" / "spec").mkdir(parents=True)
+
+        state = {
+            "harness_files_written": [
+                {"repo_root": str(legacy)},
+                {"repo_root": str(clean)},
+                {"repo_root": str(legacy)},  # duplicate → de-duped
+            ]
+        }
+        with patch.object(upd.install_state, "load_state", return_value=state):
+            warning = upd._contracts_tree_migration_warning()
+
+        assert warning is not None
+        assert "agentalloy contracts migrate" in warning
+        assert str(legacy) in warning
+        assert str(clean) not in warning
+        assert warning.count(str(legacy)) == 1  # de-duped
+
+    def test_warning_none_when_all_clean(self, tmp_path: Path) -> None:
+        clean = tmp_path / "clean-repo"
+        (clean / ".agentalloy" / "contracts" / "active" / "spec").mkdir(parents=True)
+        state = {"harness_files_written": [{"repo_root": str(clean)}]}
+        with patch.object(upd.install_state, "load_state", return_value=state):
+            assert upd._contracts_tree_migration_warning() is None
+
+    def test_update_surfaces_migration_warning(self, tmp_path: Path) -> None:
+        """End-to-end: a registered legacy repo makes `update()` emit the
+        migrate hint in its warnings — this is what `upgrade` shells post-swap
+        and merges, so it reaches anyone upgrading to this release."""
+        (tmp_path / "pyproject.toml").write_text("")
+        legacy = tmp_path / "legacy-repo"
+        (legacy / ".agentalloy" / "contracts").mkdir(parents=True)
+        (legacy / ".agentalloy" / "contracts" / "flat.md").write_text("x")
+
+        state = {
+            "harness_files_written": [{"repo_root": str(legacy)}],
+            "completed_steps": [],
+        }
+        with patch.object(upd.install_state, "load_state", return_value=state):
+            result = upd.update(root=tmp_path)
+
+        assert any("agentalloy contracts migrate" in w for w in result["warnings"])

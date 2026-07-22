@@ -21,6 +21,7 @@ is the responsibility of whichever PR bumps the schema.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -192,6 +193,95 @@ def _model_drift(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _has_legacy_contracts(contracts_dir: Path) -> bool:
+    """Return True if *contracts_dir* still has the old flat structure.
+
+    Checks for:
+      - Flat ``*.md`` files directly in ``contracts/``
+      - Old phase subdirs (``intake``, ``spec``, ``design``, ``build``,
+        ``_superseded``) that should have been migrated
+      - Flat ``*.md`` files inside ``archive/`` (should be in ``archive/<phase>/``)
+    """
+    if not contracts_dir.is_dir():
+        return False
+
+    # Flat files in contracts root
+    if list(contracts_dir.glob("*.md")):
+        return True
+
+    # Old subdirectories
+    for d in ("intake", "spec", "design", "build", "_superseded"):
+        if (contracts_dir / d).is_dir():
+            return True
+
+    # Flat files in archive/
+    archive_dir = contracts_dir / "archive"
+    return archive_dir.is_dir() and bool(list(archive_dir.glob("*.md")))
+
+
+def _contracts_tree_migration_warning() -> str | None:
+    """Detect old flat contracts structure across all registered repos.
+
+    After the contracts-tree feature ships, new contracts go to
+    ``contracts/active/<phase>/`` while old contracts stay in the flat
+    structure (``contracts/*.md``, ``contracts/intake/``, ``contracts/spec/``,
+    ``contracts/archive/``, ``contracts/_superseded/``).  This creates a
+    confusing split where some contracts are in the new structure and others
+    scattered in old locations.
+
+    Scans every repo registered in ``install-state.json`` (via
+    ``harness_files_written.repo_root``) for the old structure.  Returns a
+    multi-line warning listing all affected repos, or ``None`` when none are
+    found.
+
+    Lives in ``update`` (not ``upgrade``) on purpose: ``upgrade`` computes its
+    own notices *in-process with the pre-swap binary*, so a check placed there
+    can never fire on the upgrade that introduces it. The upgrade orchestrator
+    shells the freshly-installed binary's ``update`` (upgrade.py, native path)
+    and merges its ``warnings`` — so a scan here reaches anyone upgrading *to*
+    this release from any prior version, and also surfaces on a standalone
+    ``agentalloy update``.
+    """
+    try:
+        state = install_state.load_state()
+    except (OSError, SystemExit, json.JSONDecodeError):
+        return None
+
+    # Collect unique repo roots from harness_files_written entries.
+    repo_roots: list[str] = []
+    seen: set[str] = set()
+    for entry in state.get("harness_files_written", []):
+        root = entry.get("repo_root")
+        if root and root not in seen:
+            seen.add(root)
+            repo_roots.append(root)
+
+    affected: list[str] = []
+    for root_str in repo_roots:
+        try:
+            root = Path(root_str)
+        except Exception:
+            continue
+        contracts_dir = root / ".agentalloy" / "contracts"
+        if _has_legacy_contracts(contracts_dir):
+            affected.append(root_str)
+
+    if not affected:
+        return None
+
+    lines = [
+        "contracts directory uses the legacy flat structure — run "
+        "`agentalloy contracts migrate` to organize them into the new "
+        "tree structure (contracts/active/<phase>/, contracts/archive/<phase>/).",
+        "",
+        "Affected repos:",
+    ]
+    for r in affected:
+        lines.append(f"  - {r}")
+
+    return "\n".join(lines)
+
+
 def update(root: Path | None = None) -> dict[str, Any]:
     """Run the update flow. Returns a contract-shaped summary dict."""
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
@@ -277,6 +367,15 @@ def update(root: Path | None = None) -> dict[str, Any]:
             f"web UI bundle unavailable ({summary['web_ui']['error']}) — "
             "run `agentalloy pull-web` later, then restart the service."
         )
+
+    # 3.6 Contracts-tree migration. Cross-repo (scans all registered repos, not
+    # just *root*): surface any repo still on the legacy flat layout so the user
+    # migrates it. Emitted as a warning so `upgrade`'s post-swap `update --json`
+    # shell (which merges this list) carries it to anyone landing on this
+    # release from any prior version — see `_contracts_tree_migration_warning`.
+    contracts_warning = _contracts_tree_migration_warning()
+    if contracts_warning:
+        summary["warnings"].append(contracts_warning)
 
     # 4. Record the update step — but only if no migration failed. A failed
     #    migration recorded as "completed" would mask the problem on next
