@@ -333,94 +333,46 @@ def test_upgrade_summary_omits_code_index_reminder_when_enabled():
     assert not any("agentalloy code enable" in n for n in result["notices"])
 
 
-# --- contracts-tree migration notice ----------------------------------------
+# --- contracts-tree migration warning (wiring) ------------------------------
 
 
-def test_has_legacy_contracts_false_for_new_tree(tmp_path: Any):
-    """Only the new active/<phase> + archive/<phase> tree → not legacy."""
-    contracts = tmp_path / ".agentalloy" / "contracts"
-    (contracts / "active" / "spec").mkdir(parents=True)
-    (contracts / "active" / "spec" / "c.md").write_text("x")
-    (contracts / "archive" / "design").mkdir(parents=True)
-    assert up._has_legacy_contracts(contracts) is False
+def test_native_propagates_update_warnings_to_upgrade():
+    """The migration warning is emitted by the freshly-installed binary's
+    `update` (see update.py); the native path shells `update --json` and MUST
+    merge its `warnings` into the upgrade output. This guards that extraction
+    path (upgrade.py) — the exact wiring whose absence hid the original bug."""
+    state = {"installed_packs": ["core"]}
+    migrate_msg = (
+        "contracts directory uses the legacy flat structure — run "
+        "`agentalloy contracts migrate` to organize them"
+    )
 
+    def rec_cli(args: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        if args[0] == "update":
+            return _proc(0, stdout=json.dumps({"warnings": [migrate_msg]}))
+        return _proc(0)
 
-def test_has_legacy_contracts_missing_dir_is_false(tmp_path: Any):
-    assert up._has_legacy_contracts(tmp_path / "nope") is False
-
-
-def test_has_legacy_contracts_detects_flat_root_files(tmp_path: Any):
-    contracts = tmp_path / "contracts"
-    contracts.mkdir()
-    (contracts / "old.md").write_text("x")
-    assert up._has_legacy_contracts(contracts) is True
-
-
-def test_has_legacy_contracts_detects_old_phase_subdir(tmp_path: Any):
-    contracts = tmp_path / "contracts"
-    (contracts / "intake").mkdir(parents=True)
-    assert up._has_legacy_contracts(contracts) is True
-
-
-def test_has_legacy_contracts_detects_flat_archive_files(tmp_path: Any):
-    contracts = tmp_path / "contracts"
-    (contracts / "archive").mkdir(parents=True)
-    (contracts / "archive" / "old.md").write_text("x")
-    assert up._has_legacy_contracts(contracts) is True
-
-
-def test_migration_notice_lists_only_affected_repos(tmp_path: Any):
-    legacy = tmp_path / "legacy-repo"
-    (legacy / ".agentalloy" / "contracts").mkdir(parents=True)
-    (legacy / ".agentalloy" / "contracts" / "flat.md").write_text("x")
-    clean = tmp_path / "clean-repo"
-    (clean / ".agentalloy" / "contracts" / "active" / "spec").mkdir(parents=True)
-
-    state = {
-        "harness_files_written": [
-            {"repo_root": str(legacy)},
-            {"repo_root": str(clean)},
-            {"repo_root": str(legacy)},  # duplicate → de-duped
-        ]
-    }
-    with patch.object(up.install_state, "load_state", return_value=state):
-        notice = up._contracts_tree_migration_notice()
-
-    assert notice is not None
-    assert "agentalloy contracts migrate" in notice
-    assert str(legacy) in notice
-    assert str(clean) not in notice
-    assert notice.count(str(legacy)) == 1  # de-duped
-
-
-def test_migration_notice_none_when_all_clean(tmp_path: Any):
-    clean = tmp_path / "clean-repo"
-    (clean / ".agentalloy" / "contracts" / "active" / "spec").mkdir(parents=True)
-    state = {"harness_files_written": [{"repo_root": str(clean)}]}
-    with patch.object(up.install_state, "load_state", return_value=state):
-        assert up._contracts_tree_migration_notice() is None
-
-
-def test_upgrade_summary_includes_contracts_migration_notice(tmp_path: Any):
-    """The #437 detector must actually reach the upgrade notices list."""
-    legacy = tmp_path / "legacy-repo"
-    (legacy / ".agentalloy" / "contracts").mkdir(parents=True)
-    (legacy / ".agentalloy" / "contracts" / "flat.md").write_text("x")
-
-    state = {
-        "deployment": "native",
-        "harness_files_written": [{"repo_root": str(legacy)}],
-    }
     with (
-        patch.object(up, "_current_version", return_value="2.3.5"),
-        patch.object(up, "_latest_release_tag", return_value="v2.3.5"),
-        patch.object(up.install_state, "load_state", return_value=state),
-        patch.object(up, "_upgrade_native", return_value=(["did it"], [])),
-        patch.object(up.install_state, "parse_env_file", return_value={"CODE_INDEX_ENABLED": "1"}),
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_detect_installed_extras", return_value=[]),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", side_effect=rec_cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_skill_count",
+            return_value=100,
+        ),
+        patch(
+            "agentalloy.install.subcommands.seed_corpus.corpus_embedding_count",
+            return_value=3200,
+        ),
+        patch.object(up, "_drop_legacy_corpus_files", return_value=[]),
     ):
-        result = up.upgrade(force=True)
+        _actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
 
-    assert any("agentalloy contracts migrate" in n for n in result["notices"])
+    assert any("agentalloy contracts migrate" in w for w in warnings)
 
 
 # --- orchestration: check / already-current ---------------------------------
