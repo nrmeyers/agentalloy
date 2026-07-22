@@ -587,3 +587,67 @@ class TestMigrationPlanner:
             archive_dir(tmp_path, "ship") / "a.md",
         }
         assert not plan.collisions and not plan.unreadable
+
+
+class TestMigrationExecutor:
+    def _c(self, tmp_path: Path, rel: str, *, phase: str = "build") -> Path:
+        return _write_contract(
+            tmp_path / ".agentalloy" / "contracts" / rel, phase=phase, task_slug=Path(rel).stem
+        )
+
+    def test_apply_moves_files_and_is_idempotent(self, tmp_path: Path):
+        from agentalloy.contracts import (
+            active_dir,
+            apply_contracts_migration,
+            plan_contracts_migration,
+        )
+
+        src = self._c(tmp_path, "build/01.md", phase="build")
+        dst = active_dir(tmp_path, "build") / "01.md"
+
+        plan = plan_contracts_migration(tmp_path)
+        done = apply_contracts_migration(plan)
+
+        assert [m.dst for m in done] == [dst]
+        assert dst.is_file() and not src.exists()
+
+        # Re-applying the SAME (now-stale) plan is a safe no-op — src is gone.
+        assert apply_contracts_migration(plan) == []
+        # And a freshly planned repo has nothing left to do.
+        assert plan_contracts_migration(tmp_path).is_empty
+
+    def test_apply_never_touches_collisions(self, tmp_path: Path):
+        from agentalloy.contracts import (
+            active_dir,
+            apply_contracts_migration,
+            plan_contracts_migration,
+        )
+
+        self._c(tmp_path, "active/build/keep.md", phase="build")  # occupies dst
+        src = self._c(tmp_path, "keep.md", phase="build")  # collides
+        plan = plan_contracts_migration(tmp_path)
+        done = apply_contracts_migration(plan)
+
+        assert done == []
+        assert src.exists()  # collision left in place, not moved
+        assert (active_dir(tmp_path, "build") / "keep.md").is_file()
+
+    def test_cursor_rewritten_to_new_location(self, tmp_path: Path):
+        from agentalloy.contracts import (
+            contracts_root,
+            cursor_after_migration,
+            plan_contracts_migration,
+        )
+
+        self._c(tmp_path, "build/01.md", phase="build")
+        plan = plan_contracts_migration(tmp_path)
+        root = contracts_root(tmp_path)
+
+        assert cursor_after_migration("build/01.md", plan.moves, root) == "active/build/01.md"
+
+    def test_cursor_unchanged_when_not_moved_or_absent(self, tmp_path: Path):
+        from agentalloy.contracts import contracts_root, cursor_after_migration
+
+        root = contracts_root(tmp_path)
+        assert cursor_after_migration(None, [], root) is None
+        assert cursor_after_migration("build/other.md", [], root) == "build/other.md"

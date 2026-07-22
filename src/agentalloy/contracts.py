@@ -33,6 +33,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -507,6 +508,51 @@ def plan_contracts_migration(project_root: Path) -> MigrationPlan:
         moves.append(ContractMove(src=src, dst=dst, archived=archived))
 
     return MigrationPlan(moves=moves, collisions=collisions, unreadable=unreadable)
+
+
+def apply_contracts_migration(plan: MigrationPlan) -> list[ContractMove]:
+    """Execute a plan's ``moves`` on disk, returning the moves performed.
+
+    Creates each destination's parent directory and relocates the file
+    (``shutil.move`` — tolerant of a cross-filesystem ``.agentalloy``). Only
+    ``moves`` are applied: collisions and unreadable files were deliberately
+    excluded by the planner, so nothing here can overwrite an existing file. A
+    caller that has already applied the plan sees the moves as no-ops guarded by
+    ``src.exists()`` (idempotent re-runs are safe).
+
+    Cursor rewriting is intentionally *not* done here — the cursor helpers live
+    in the signal layer (which imports this module); the migration entrypoint
+    that owns the cursor performs that step after calling this.
+    """
+    done: list[ContractMove] = []
+    for mv in plan.moves:
+        if not mv.src.exists():
+            continue  # already applied on a prior run
+        mv.dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(mv.src), str(mv.dst))
+        done.append(mv)
+    return done
+
+
+def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: Path) -> str | None:
+    """Return the cursor value rewritten to follow a migration, or unchanged.
+
+    The cursor is a contracts-root-relative posix id (e.g. ``build/01.md``).
+    When a move relocated exactly that file, the cursor becomes the move's new
+    contracts-relative id (e.g. ``active/build/01.md``); otherwise it is
+    returned as-is. Pure — the caller writes the result through its own cursor
+    helper. ``root`` is ``.agentalloy/contracts`` so relatives can be computed.
+    """
+    if not cursor:
+        return cursor
+    for mv in moves:
+        try:
+            old_rel = mv.src.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if old_rel == cursor:
+            return mv.dst.relative_to(root).as_posix()
+    return cursor
 
 
 @dataclass(frozen=True)
