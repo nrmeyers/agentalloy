@@ -118,6 +118,12 @@ _HARNESS_REGISTRY: dict[str, dict[str, Any]] = {
         "dedicated": False,
         "vector": "system_prompt_snippet",
     },
+    "qwen-code": {
+        "target": None,  # handled by provider install_writer (~/.qwen/settings.json)
+        "template": None,
+        "dedicated": False,
+        "vector": "proxy",
+    },
     "aider": {
         "target": ".agentalloy-aider-instructions.md",
         "template": "aider.md",
@@ -916,6 +922,16 @@ def _wire_proxy(
         # install_writer instead.
         writer = REGISTRY["openclaw"].install_writer
         assert writer is not None, "openclaw registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
+    if harness == "qwen-code":
+        # qwen-code wires ~/.qwen/settings.json, not a repo instruction file —
+        # its legacy registry `target` is None, so the instruction fallback below
+        # crashed on `root / None`. Delegate to the provider registry's working
+        # install_writer instead.
+        writer = REGISTRY["qwen-code"].install_writer
+        assert writer is not None, "qwen-code registers an install_writer"
         records = writer(port, root, _force)
         return [r.to_dict() for r in records]
 
