@@ -94,7 +94,6 @@ memory/
 
 .agentalloy/*
 !.agentalloy/
-!.agentalloy/contracts/
 
 # docs/specs/ pattern never matched it, so generated specs leaked as untracked-
 # but-committable files. Keep the singular form.

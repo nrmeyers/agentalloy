@@ -360,6 +360,17 @@ class DuckDBCodeGraphStore:
         ).fetchall()
         return [(str(r[0]), str(r[1])) for r in rows]
 
+    def decision_qns(self) -> list[str]:
+        """All qualified names of MarkdownDoc symbols (decision chunks).
+
+        Mirrors ``symbols_by_name`` with the ``kind != 'MarkdownDoc'`` guard
+        inverted. Cheap: the ``idx_symbols_kind`` index on ``symbols(kind)``
+        makes this a sub-millisecond read at per-repo scale."""
+        rows = self.conn.execute(
+            "SELECT qualified_name FROM symbols WHERE kind = 'MarkdownDoc' ORDER BY qualified_name"
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
     def governing_decisions(self, fqn: str) -> list[DecisionRow]:
         """Decisions that GOVERN ``fqn`` — the ``callers()`` shape with the
         ``GOVERNS`` edge kind. Reads ``e.src`` (the decision chunk) and hydrates

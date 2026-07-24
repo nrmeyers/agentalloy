@@ -158,12 +158,17 @@ class LanceCodeVectorStore:
 
     # -- reads ---------------------------------------------------------------
 
-    def search_similar(self, query_vec: Sequence[float], *, k: int = 10) -> list[CodeSearchHit]:
+    def search_similar(
+        self, query_vec: Sequence[float], *, k: int = 10, where: str | None = None
+    ) -> list[CodeSearchHit]:
         """Top-k cosine similarity (``score`` = 1 - cosine distance).
 
         Row-count dispatch mirrors ``fragment_store``: below ``_ANN_MIN_ROWS``
         no ANN index exists and Lance brute-forces an exact scan; once
         ``optimize()`` has built the IVF_PQ index the search rides ANN.
+
+        When ``where`` is provided, it is pushed as a LanceDB ``prefilter`` so
+        the filter is applied *before* ANN search (not after).
         """
         if len(query_vec) != EMBEDDING_DIM:
             raise EmbeddingDimMismatch(
@@ -177,6 +182,8 @@ class LanceCodeVectorStore:
         search = self._table.search(q, vector_column_name="embedding").distance_type(  # pyright: ignore[reportAttributeAccessIssue]
             "cosine"
         )
+        if where:
+            search = search.where(where, prefilter=True)
         rows = search.limit(k).to_list()
         return [
             CodeSearchHit(
@@ -189,13 +196,22 @@ class LanceCodeVectorStore:
             for r in rows
         ]
 
-    def search_bm25(self, query: str, *, k: int = 10) -> list[tuple[str, float]]:
+    def search_bm25(
+        self, query: str, *, k: int = 10, where: str | None = None
+    ) -> list[tuple[str, float]]:
         """Native BM25 (Tantivy) over the ``text`` column. Returns [] if no
-        FTS index has been built yet (BM25 leg degrades gracefully)."""
+        FTS index has been built yet (BM25 leg degrades gracefully).
+
+        When ``where`` is provided, it is pushed as a LanceDB ``prefilter`` so
+        the filter is applied *before* BM25 search.
+        """
         if not query.strip():
             return []
         try:
-            rows = self._table.search(query, query_type="fts").limit(k).to_list()
+            search = self._table.search(query, query_type="fts").limit(k)
+            if where:
+                search = search.where(where, prefilter=True)
+            rows = search.to_list()
         except Exception:  # noqa: BLE001 — FTS index absent/unavailable; degrade to []
             return []
         return [(str(r["qualified_name"]), float(r["_score"])) for r in rows]

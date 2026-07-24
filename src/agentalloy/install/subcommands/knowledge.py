@@ -1,12 +1,10 @@
 """``agentalloy knowledge`` — CLI for the Knowledge module (decisions over code).
 
     agentalloy knowledge why <symbol> [--repo]    Decisions governing a symbol
+    agentalloy knowledge related "<query>" [--repo]  Related decision docs for a question
 
-A thin HTTP client of the local service's ``/code/search/structural`` route
-(``query=governing_decisions``). It is a **distinct namespace** from ``code`` —
-decisions are a typed overlay on the same store, so the query rail is shared, but
-the module boundary shows up where users meet it, on the command line (DK7). The
-shared HTTP/slug/error helpers are reused from the ``code`` subcommand rather than
+A thin HTTP client of the local service's ``/code/search/*`` routes. The shared
+HTTP/slug/error helpers are reused from the ``code`` subcommand rather than
 duplicated.
 """
 
@@ -61,6 +59,35 @@ def _run_why(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_related(args: argparse.Namespace) -> int:
+    port = _resolve_port(args)
+    slug = _resolve_repo_slug(args.repo, port)
+    params: dict[str, Any] = {"repo": slug, "q": args.query}
+    try:
+        with code._make_client(port) as client:
+            rc = _guard_module(client)
+            if rc is not None:
+                return rc
+            resp = client.get("/code/search/related-decisions", params=params)
+            resp.raise_for_status()
+            results: list[dict[str, Any]] = resp.json()
+    except httpx.HTTPStatusError as exc:
+        return _http_error(exc, slug=slug)
+    except httpx.HTTPError as exc:
+        return _service_down_error(port, exc)
+
+    if args.json:
+        _print_json(results)
+        return 0
+    if not results:
+        print("(no related decisions)")
+        return 0
+    for d in results:
+        loc = f"{d.get('file_path')}:{d.get('start_line')}" if d.get("file_path") else "?"
+        print(f"  {d.get('qualified_name')}  {loc}  {d.get('snippet', '')[:80]}")
+    return 0
+
+
 def _run_knowledge(args: argparse.Namespace) -> int:
     """Bare ``agentalloy knowledge`` → usage."""
     print("Usage: agentalloy knowledge why <symbol> ...", file=sys.stderr)
@@ -83,3 +110,8 @@ def add_parser(
     why_p.add_argument("symbol", help="Fully-qualified symbol name.")
     _add_common(why_p, repo_flag=True)
     why_p.set_defaults(func=_run_why)
+
+    related_p = sub.add_parser("related", help="Related decision docs for a question.")
+    related_p.add_argument("query", help="Natural-language query or task description.")
+    _add_common(related_p, repo_flag=True)
+    related_p.set_defaults(func=_run_related)
