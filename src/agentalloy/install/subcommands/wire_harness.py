@@ -52,7 +52,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agentalloy.install import state as install_state
 from agentalloy.install.sentinel_utils import replace_marked_block
