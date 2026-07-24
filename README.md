@@ -15,20 +15,22 @@
   &nbsp;
   <img src="https://img.shields.io/badge/runtime-deterministic--by--default-success" alt="deterministic by default" />
   &nbsp;
-  <img src="https://img.shields.io/badge/packs-35+-orange" alt="35+ packs" />
+  <img src="https://img.shields.io/badge/packs-39-orange" alt="39 packs" />
   &nbsp;
-  <img src="https://img.shields.io/badge/skills-300+-orange" alt="300+ skills" />
+  <img src="https://img.shields.io/badge/skills-320+-orange" alt="320+ skills" />
   &nbsp;
-  <img src="https://img.shields.io/badge/v7.0-Knowledge%20module-brightgreen" alt="v7.0: Knowledge module" />
+  <img src="https://img.shields.io/badge/v7.6-Knowledge%20module-brightgreen" alt="v7.6: Knowledge module" />
 </p>
 
 > 🆕 **v7.0 — the Knowledge module is live.** AgentAlloy now has a third context leg: the decisions behind your code, and *why* they were made. Ask on demand (`agentalloy knowledge why <symbol>`), or let it push — when a task touches code governed by a past decision, the rationale lands in context automatically, no query needed. Jump to [Knowledge module (decisions)](#knowledge-module-decisions).
+
+> **v7.1–v7.6 — what's new since v7.0:** [Contracts tree migration](#contracts-tree-layout) · [version bump automation](#automatic-version-bumps) · [archive management](#contracts-tree-layout) · [qwen-code harness](#harness-support) · [related decisions search](#knowledge-module-decisions). See [full release history](https://github.com/nrmeyers/agentalloy/releases) for all 18 releases (v7.0.0–v7.6.0).
 
 Coding agents don't fail for lack of intelligence — they fail for lack of **context**: the rules of your shop, the skills your stack demands, and the ground truth of the code that's already there. `AGENTS.md`, `SKILL.md`, and giant static system prompts were a clever first attempt at supplying it — and they're already breaking. They load once at session start, then rot as the conversation drifts from the script; reloading them every turn just trades drift for token waste. The real problem is structural: over a single session, what your agent needs to know changes dozens of times, and static files can't keep up.
 
 **AgentAlloy** is a **just-in-time context engine**: one local service, three context modules.
 
-- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 300+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
+- **Instructions** — knows *how you work*. A signal layer watches for the moments that matter — a new task, a phase change, a meaningful file edit — and composes the governance rules, workflow guidance, and domain skills (from a curated 320+ skill corpus) that fit *this* moment. Nothing changed means nothing injected.
 - **Code** — knows *what's there*. A local code-intelligence service: your repos parsed into a symbol graph with hybrid semantic/lexical search — exact call graphs ("what breaks if I change this?") and budgeted context bundles. The agent **queries it**; nothing is pushed. The composed instructions teach the agent when to ask: check blast radius at design, pull a grounded bundle at build, map regression scope at qa.
 - **Knowledge** — knows *why it's that way*. A typed decision layer over the same code index — no separate store, no new process, no separate toggle: a deterministic `_index_decisions` pass links each decision (an existing lifecycle doc: `docs/solutions/*.md`, `approach.md`) to the code symbols it governs. Query it on demand (`agentalloy knowledge why <symbol>`) or let it push: at design/build, when a work-item's scope touches governed code, the governing decision's rationale is composed into context without asking. See [Knowledge module (decisions)](#knowledge-module-decisions).
 
@@ -230,7 +232,7 @@ This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **insta
 
 Harnesses fall into two categories:
 
-- **Proxy-wired** (Claude Code, Aider, Cline, Codex, Continue.dev, OpenClaw, OpenCode, Hermes Agent, Copilot CLI — **all nine live-verified** by the harness e2e matrix, real binaries end to end) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically. Codex rides the native [OpenAI Responses passthrough](docs/responses-surface.md) (`/proj/<token>/v1/responses`).
+- **Proxy-wired** (Claude Code, Aider, Cline, Codex, Continue.dev, OpenClaw, OpenCode, Hermes Agent, Copilot CLI, qwen-code — **all ten live-verified** by the harness e2e matrix, real binaries end to end) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically. Codex rides the native [OpenAI Responses passthrough](docs/responses-surface.md) (`/proj/<token>/v1/responses`).
 - **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
 - **Dual-carrier** (GitHub Copilot in VS Code, `github-copilot`) — BYOK "Custom Endpoint" proxy carrier (`chatLanguageModels.json`, agent-mode capable, pending manual verification) **plus** the instructions-file sidecar as ambient context and as the fallback when org policy disables BYOK.
 
@@ -276,7 +278,7 @@ For harnesses that speak the Model Context Protocol instead of taking a proxy, A
 
 ## Packs shipping in-tree
 
-The corpus is **packs** — opt-in groups of related skills. `main` ships **38+ packs / 320+ declared skills** organized across 9 tiers:
+The corpus is **packs** — opt-in groups of related skills. `main` ships **39 packs / 320+ declared skills** organized across 9 tiers:
 
 <table>
 <tr><th>Tier</th><th>Packs</th></tr>
