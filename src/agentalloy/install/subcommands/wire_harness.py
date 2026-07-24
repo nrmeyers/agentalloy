@@ -1579,9 +1579,7 @@ def _wire_proxy_qwen_code(port: int, root: Path, scope: str) -> list[dict[str, A
     return records
 
 
-def _write_qwen_mise_env(
-    root: Path, records: list[dict[str, Any]]
-) -> tuple[Path, bool] | None:
+def _write_qwen_mise_env(root: Path, records: list[dict[str, Any]]) -> tuple[Path, bool] | None:
     """Add ``QWEN_HOME`` to the repo's mise config ``[env]`` table.
 
     Mirrors ``_write_hermes_mise_env`` but targets ``QWEN_HOME="$PWD/.qwen"``.
