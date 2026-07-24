@@ -37,6 +37,8 @@ class _FakeOrch(ComposeOrchestrator):
 
     def __init__(self, output: str) -> None:  # noqa: D107 — deliberately no super().__init__
         self._output = output
+        self.settings = None
+        self.state = None
 
     async def compose(self, req: Any, **_kw: object) -> Any:
         if getattr(req, "legs", None) == "system":  # Tier 1 — unused here

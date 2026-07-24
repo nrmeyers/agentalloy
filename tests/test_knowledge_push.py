@@ -165,3 +165,168 @@ def test_caps_and_truncation(store: DuckDBCodeGraphStore) -> None:
     push = build_decision_block(contract(["pkg/a.py"]), "", store)
     assert push is not None
     assert push.count == knowledge_push._MAX_DECISIONS and push.truncated is True
+
+
+def test_phase2_related_decisions(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 2: related_decisions merges thematic decisions and sets related_count."""
+    # Seed a governed decision
+    _seed_one(store, "docs/design/x/approach.md::why-foo")
+
+    from agentalloy.code_index.retrieval.hybrid import SearchResult
+
+    related = [
+        SearchResult(
+            qualified_name="docs/solutions/bar.md::thematic-bar",
+            kind="MarkdownDoc",
+            file_path="docs/solutions/bar.md",
+            start_line=1,
+            end_line=10,
+            snippet="Chose bar for reason X.",
+            score=0.85,
+        ),
+    ]
+
+    # related_decisions is async; asyncio.run() needs a coroutine
+    async def _mock(*a, **kw):
+        return related
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["pkg/a.py"]),
+        "",
+        store,
+        state={},  # non-None triggers phase 2
+        slug="my-task",
+        task_title="Implement foo with bar",
+    )
+    assert push is not None
+    # Should include both the governed decision AND the related one
+    assert push.count == 2
+    assert push.related_count == 1
+    assert "Why foo" in push.text
+    assert "thematic-bar" in push.text  # heading derived from qualified_name anchor
+    assert "Chose `pkg.a.foo`." in push.text
+    assert "Chose bar for reason X." in push.text
+
+
+def test_phase2_no_related_when_params_missing(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 2 is skipped when any of state/slug/task_title is missing."""
+    _seed_one(store, "docs/design/x/approach.md::why-foo")
+
+    # Track that related_decisions is NOT called
+    called = []
+
+    async def _mock(*a, **kw):
+        called.append(1)
+        return []
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    # state=None -> phase 2 skipped
+    push = build_decision_block(contract(["pkg/a.py"]), "", store)
+    assert push is not None
+    assert push.count == 1
+    assert push.related_count == 0
+    assert len(called) == 0
+
+    # slug=None -> phase 2 skipped
+    push = build_decision_block(
+        contract(["pkg/a.py"]), "", store, state={}, slug=None, task_title="x"
+    )
+    assert push is not None
+    assert push.count == 1
+    assert len(called) == 0
+
+    # task_title=None -> phase 2 skipped
+    push = build_decision_block(
+        contract(["pkg/a.py"]), "", store, state={}, slug="x", task_title=None
+    )
+    assert push is not None
+    assert push.count == 1
+    assert len(called) == 0
+
+
+def test_phase2_related_dedup_keeps_governed(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When related_decisions returns a decision already in the governed set, it is deduped."""
+    _seed_one(store, "docs/design/x/approach.md::why-foo")
+
+    from agentalloy.code_index.retrieval.hybrid import SearchResult
+
+    related = [
+        SearchResult(
+            qualified_name="docs/design/x/approach.md::why-foo",
+            kind="MarkdownDoc",
+            file_path="docs/design/x/approach.md",
+            start_line=3,
+            end_line=9,
+            snippet="Chose `pkg.a.foo`.",
+            score=0.90,
+        ),
+    ]
+
+    async def _mock(*a, **kw):
+        return related
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["pkg/a.py"]),
+        "",
+        store,
+        state={},
+        slug="my-task",
+        task_title="Implement foo",
+    )
+    assert push is not None
+    # The governed decision is kept once; related_count should be 0 (deduped)
+    assert push.count == 1
+    assert push.related_count == 0
+
+
+def test_phase2_graceful_degradation_on_failure(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When related_decisions raises, the function falls back to governed-only."""
+    _seed_one(store, "docs/design/x/approach.md::why-foo")
+
+    async def _mock(*a, **kw):
+        raise RuntimeError("no index")
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["pkg/a.py"]),
+        "",
+        store,
+        state={},
+        slug="my-task",
+        task_title="Implement foo",
+    )
+    # Should still return the governed decision (graceful degradation)
+    assert push is not None
+    assert push.count == 1
+    assert push.related_count == 0
+    assert "Why foo" in push.text

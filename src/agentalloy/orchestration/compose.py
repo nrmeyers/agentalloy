@@ -14,6 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from agentalloy.api.compose_models import (
     ComposedResult,
@@ -44,6 +45,10 @@ from agentalloy.retrieval.system import SystemRetrievalResult, retrieve_system_f
 from agentalloy.runtime_state import RuntimeCache
 from agentalloy.storage.protocols import FragmentStore, SkillStore
 from agentalloy.telemetry import TelemetryRecord, TelemetryWriter
+
+if TYPE_CHECKING:
+    from agentalloy.code_index.api.state import CodeIndexState
+    from agentalloy.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +86,16 @@ class ComposeOrchestrator:
         telemetry: TelemetryWriter,
         *,
         embedding_model: str,
+        settings: Settings | None = None,
+        state: CodeIndexState | None = None,
     ) -> None:
         self._source: RuntimeCache | SkillStore = source
         self._lm = lm
         self._vector_store = vector_store
         self._telemetry = telemetry
         self._embedding_model = embedding_model
+        self.settings = settings
+        self.state = state
 
     @property
     def lm(self) -> EmbedClient:

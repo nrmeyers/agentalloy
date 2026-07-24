@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     # between manual runs. Off in code/dev/tests; the container entrypoint opts in
     # (300). Env: CODE_INDEX_REFRESH_SECONDS.
     code_index_refresh_seconds: int = 0
+    # JIT push phase 2: merge related (thematic) decisions via
+    # ``related_decisions(task_title)`` into the decision block.  Measured
+    # median overhead ≈ 4 ms (p95 ≈ 5 ms) — well within the 300 ms compose
+    # budget. Env: KNOWLEDGE_RELATED_ENABLED.
+    knowledge_related_enabled: bool = True
 
     @field_validator("upstream_url")
     @classmethod

@@ -13,8 +13,10 @@ the lazy-imported read-handle open/close, per the code-index import discipline.
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 from dataclasses import dataclass
+from typing import Any
 
 from agentalloy.contracts import Contract
 from agentalloy.install.lesson_pack import _sanitize_skill_id
@@ -36,6 +38,7 @@ class DecisionPush:
     text: str
     count: int
     truncated: bool
+    related_count: int = 0
 
 
 def _is_superseded(_decision: DecisionRow) -> bool:
@@ -112,16 +115,27 @@ def _render(decisions: list[DecisionRow]) -> str:
 
 
 def build_decision_block(
-    contract: Contract, composed_text: str, graph: CodeGraphStore
+    contract: Contract,
+    composed_text: str,
+    graph: CodeGraphStore,
+    state: Any = None,
+    slug: str | None = None,
+    task_title: str | None = None,
 ) -> DecisionPush | None:
     """Select + render the governing-decision block for a design/build work-item,
-    or None when nothing applies. Pure: the caller gates and supplies the graph."""
+    or None when nothing applies. Pure: the caller gates and supplies the graph.
+
+    Phase 2 (DK6): when *state*, *slug*, and *task_title* are provided, also
+    merge related (thematic) decisions via ``related_decisions(task_title)``.
+    """
     globs = list(contract.scope.touches) if contract.scope else []
     if not globs:
         return None
     files = _resolve_touched_files(graph, globs)
     if not files:
         return None
+
+    # Phase 1: GOVERNS path (existing)
     kept: list[DecisionRow] = []
     for d in graph.decisions_for_files(files):
         if _is_superseded(d):
@@ -129,10 +143,50 @@ def build_decision_block(
         if _covered_by_instructions(d, composed_text):
             continue
         kept.append(d)
-    if not kept:
+
+    # Phase 2: Thematic path (related_decisions)
+    all_decisions = list(kept)
+    related_count = 0
+    if state is not None and slug is not None and task_title is not None:
+        try:
+            from agentalloy.code_index.retrieval.hybrid import related_decisions
+
+            related_results = asyncio.run(related_decisions(state, slug, task_title, k=8))
+            {r.qualified_name for r in related_results}
+            kept_qns = {d.qualified_name for d in kept}
+            for r in related_results:
+                if r.qualified_name not in kept_qns:
+                    # Convert SearchResult to DecisionRow
+                    from agentalloy.storage.protocols import DecisionRow
+
+                    all_decisions.append(
+                        DecisionRow(
+                            qualified_name=r.qualified_name,
+                            heading=r.qualified_name.split("::")[-1]
+                            if "::" in r.qualified_name
+                            else r.qualified_name,
+                            snippet=r.snippet,
+                            file_path=r.qualified_name.split("::")[0]
+                            if "::" in r.qualified_name
+                            else None,
+                            start_line=None,
+                        )
+                    )
+                    related_count += 1
+        except Exception:
+            # Graceful degradation: if related_decisions fails, fall back to
+            # GOVERNS-only path. The feature is additive, not critical.
+            pass
+
+    if not all_decisions:
         return None
     # deterministic order (source path, then anchor) so the selection is stable
-    kept.sort(key=lambda d: (d.file_path or "", d.qualified_name))
-    truncated = len(kept) > _MAX_DECISIONS
-    kept = kept[:_MAX_DECISIONS]
-    return DecisionPush(text=_render(kept), count=len(kept), truncated=truncated)
+    all_decisions.sort(key=lambda d: (d.file_path or "", d.qualified_name))
+    truncated = len(all_decisions) > _MAX_DECISIONS
+    all_decisions = all_decisions[:_MAX_DECISIONS]
+    return DecisionPush(
+        text=_render(all_decisions),
+        count=len(all_decisions),
+        truncated=truncated,
+        related_count=related_count,
+    )

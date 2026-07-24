@@ -83,6 +83,9 @@ INTENT_KEYS: frozenset[str] = frozenset(
         # os.environ by retrieval/domain.py.
         "AGENTALLOY_PROCESS_DEMOTION",
         "AGENTALLOY_PROCESS_DEMOTION_WINDOW",
+        # JIT push phase 2: merge related (thematic) decisions into the
+        # decision block (default on — measured ~4 ms median overhead).
+        "KNOWLEDGE_RELATED_ENABLED",
     }
 )
 
