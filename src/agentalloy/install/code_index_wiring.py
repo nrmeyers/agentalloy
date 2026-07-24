@@ -77,13 +77,21 @@ def build_block(slug: str, port: int) -> str:
     return _BLOCK_TEMPLATE.format(slug=slug, port=port)
 
 
-def detect_target(root: Path) -> Path:
-    """The file the NEW block goes to — tool markers outrank shared CLAUDE.md."""
+def detect_target(root: Path, harness: str | None = None) -> Path | None:
+    """The file the NEW block goes to — tool markers outrank shared CLAUDE.md.
+
+    Returns ``None`` when no suitable target exists (e.g. the harness is not
+    ``claude-code`` and no harness-specific config file exists).
+    """
     if (root / ".cursor").is_dir() or (root / ".cursorrules").exists():
         return root / ".cursor/rules/agentalloy-code-index.mdc"
     for rel in ("GEMINI.md", ".clinerules", "CLAUDE.md", "AGENTS.md"):
         if (root / rel).exists():
             return root / rel
+    # Only default to CLAUDE.md when the harness is claude-code (or unknown).
+    # For other harnesses, don't create a Claude Code carrier file.
+    if harness is not None and harness != "claude-code":
+        return None
     return root / "CLAUDE.md"
 
 
@@ -211,13 +219,22 @@ def remove_code_index_blocks(root: Path) -> list[dict[str, Any]]:
     return actions
 
 
-def wire_code_index_block(root: Path, port: int) -> list[dict[str, Any]]:
+def wire_code_index_block(
+    root: Path, port: int, *, harness: str | None = None
+) -> list[dict[str, Any]]:
     """Write/refresh the code-index block, migrating any legacy block in place.
 
     A legacy codebase-indexer block found in a candidate file is replaced by
     the new block at that location (the user chose that file once already);
     otherwise the new block goes to the detected target. Idempotent: an
     existing new block is updated between its markers.
+
+    Args:
+        root: Repository root.
+        port: Proxy port (used for the block content).
+        harness: Harness registry key (e.g. ``"qwen-code"``). Used for
+            harness-aware target detection — prevents creating a CLAUDE.md
+            for non-claude-code harnesses.
     """
     root = Path(root)
     slug = repo_slug(root)
@@ -246,7 +263,12 @@ def wire_code_index_block(root: Path, port: int) -> list[dict[str, Any]]:
             target = path
             break
     if target is None:
-        target = legacy_home if legacy_home is not None else detect_target(root)
+        target = legacy_home if legacy_home is not None else detect_target(root, harness)
+
+    # If no target was found (harness-aware detection returned None), skip
+    # writing — the code-index block doesn't belong in a file we'd create.
+    if target is None:
+        return actions
 
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
     updated = replace_marked_block(existing, block, SENTINEL_BEGIN, SENTINEL_END)
@@ -262,7 +284,12 @@ def wire_code_index_block(root: Path, port: int) -> list[dict[str, Any]]:
 
 
 def maybe_wire(
-    root: Path, port: int, *, quiet: bool = False, assume_yes: bool = False
+    root: Path,
+    port: int,
+    *,
+    quiet: bool = False,
+    assume_yes: bool = False,
+    harness: str | None = None,
 ) -> list[dict[str, Any]]:
     """Wire (or clean up) the code-index block based on live module state.
 
@@ -272,13 +299,20 @@ def maybe_wire(
     - anything else       → remove our block AND a legacy block if present,
       but only when one exists (a repo that never had one stays untouched).
 
+    Args:
+        root: Repository root.
+        port: Proxy port.
+        quiet: Suppress status output.
+        assume_yes: Skip the TTY prompt for indexing.
+        harness: Harness registry key for harness-aware target detection.
+
     Best-effort: wiring already succeeded when this runs, so failures are
     reported as warnings, never raised.
     """
     try:
         status = service_module_status(port)
         if status == "enabled":
-            actions = wire_code_index_block(root, port)
+            actions = wire_code_index_block(root, port, harness=harness)
         else:
             actions = remove_code_index_blocks(root)
         if not quiet:

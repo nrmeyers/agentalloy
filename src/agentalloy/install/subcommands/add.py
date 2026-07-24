@@ -207,7 +207,7 @@ def adopt_and_wire(
     # service reports the module enabled; cleans up stale/legacy blocks otherwise.
     from agentalloy.install import code_index_wiring
 
-    code_index_wiring.maybe_wire(root, port, assume_yes=assume_index)
+    code_index_wiring.maybe_wire(root, port, assume_yes=assume_index, harness=harness)
     return upstream, result, phase_seeded
 
 
