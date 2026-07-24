@@ -925,6 +925,16 @@ def _wire_proxy(
         records = writer(port, root, _force)
         return [r.to_dict() for r in records]
 
+    if harness == "qwen-code":
+        # qwen-code wires ~/.qwen/settings.json, not a repo instruction file —
+        # its legacy registry `target` is None, so the instruction fallback below
+        # crashed on `root / None`. Delegate to the provider registry's working
+        # install_writer instead.
+        writer = REGISTRY["qwen-code"].install_writer
+        assert writer is not None, "qwen-code registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
 
