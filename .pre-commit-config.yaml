@@ -7,8 +7,8 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.9
     hooks:
-      # Auto-fix lint issues
+      # Auto-fix lint issues (including unsafe fixes like UP038 isinstance tuples)
       - id: ruff
-        args: [--fix]
+        args: [--fix, --unsafe-fixes]
       # Auto-format
       - id: ruff-format

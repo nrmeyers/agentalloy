@@ -79,12 +79,25 @@ cannot merge red.
   CLI surface (including that the `[code-index]` extra is genuinely optional).
 - `web-build`: the same tsc + vite build the release pipeline uses.
 
-Reproduce locally before pushing:
+Reproduce locally before pushing (recommended — one command):
+
+```
+scripts/local-ci.sh
+```
+
+Or run the checks individually:
 
 ```
 uv run ruff check . && uv run ruff format --check . && uv run pyright \
   && uv run pytest -m "not integration and not container"
 ```
+
+**Pre-commit hooks.** Install them once with `uv run pre-commit install` — they
+auto-fix lint issues and format on every commit, catching the formatting
+mistakes that previously leaked into PRs. The hooks are configured in
+`.pre-commit-config.yaml` (ruff auto-fix + ruff-format). After installing,
+every `git commit` will automatically run `ruff --fix` and `ruff format` on
+staged files.
 
 The `-m integration` suite (needs a live embed server on 47951) never runs on
 PRs — it runs nightly (`corpus-nightly.yml`, `integration-tests` job); failures
@@ -208,7 +221,9 @@ build itself; don't also dispatch it.
 - [ ] PR title's Conventional-Commit type is correct — it drives the automatic
       version bump (§4). `Version Bump` writes `pyproject.toml` + `uv.lock` on the
       branch; you don't hand-bump. Touched pack `version` still bumped by hand.
-- [ ] Local gate green: ruff check + ruff format --check + pyright + pytest.
+- [ ] Pre-commit hooks installed (`uv run pre-commit install`) — they auto-format
+      on every commit, preventing formatting leaks into PRs.
+- [ ] Local gate green: `scripts/local-ci.sh` (or the individual commands below).
 - [ ] PR opened against `main`, required checks green, squash-merged with
       authorization (`gh pr merge --auto --squash`).
 - [ ] If the PR bumped the version: `Release Cut` created `v<X.Y.Z>` after CI
@@ -218,6 +233,11 @@ build itself; don't also dispatch it.
 
 These have bitten releases before; surface them up-front when planning a tag.
 
+- **pre-commit hooks not installed.** If `.git/hooks/pre-commit` doesn't exist,
+  the `.pre-commit-config.yaml` hooks never run — formatting and lint issues
+  leak into PRs and fail CI. Always run `uv run pre-commit install` before
+  committing. The hooks auto-fix (`ruff --fix`) and auto-format (`ruff format`)
+  on every commit, so issues are caught at commit time, not in CI.
 - **Merging a squash-based stacked-PR train.** Each PR targets its
   predecessor's branch; after the predecessor squash-merges, retarget the next
   PR at `main` — GitHub does NOT retarget for you here. A plain `git rebase

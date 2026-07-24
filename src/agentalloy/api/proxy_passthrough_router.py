@@ -107,7 +107,7 @@ def _proxy_request_from_anthropic(payload: dict[str, Any]) -> ProxyRequest:
             content = m.get("content")
             usable = cast(
                 "str | list[dict[str, Any]] | None",
-                content if isinstance(content, (str, list)) else None,
+                content if isinstance(content, str | list) else None,
             )
             messages.append(ProxyMessage(role=role, content=usable))
     model = payload.get("model")

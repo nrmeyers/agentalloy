@@ -334,6 +334,16 @@ uv sync && uv run pytest                                          # deps + unit 
 uv run ruff check . && uv run ruff format --check . && uv run pyright   # lint + format + types
 ```
 
+**Pre-commit hooks.** Install once with `uv run pre-commit install` — they
+auto-fix lint issues and format on every commit, preventing formatting leaks
+into PRs.
+
+**Local CI.** Run the full quality gate locally before pushing:
+
+```bash
+scripts/local-ci.sh
+```
+
 Integration tests (`uv run pytest -m integration`) need a running nomic-embed llama-server. Branching, CI gates, and where the tests live: [RELEASE.md](RELEASE.md).
 
 ---
