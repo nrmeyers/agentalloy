@@ -258,3 +258,34 @@ async def lexical_search(
             handles.close()
 
     return await asyncio.to_thread(_search)
+
+
+async def related_decisions(
+    state: CodeIndexState, slug: str, query: str, *, k: int = 8
+) -> list[SearchResult]:
+    """Hybrid search constrained to decision-doc chunks (MarkdownDoc kind).
+
+    Constrains both dense and BM25 legs to the decision-doc qn set so the full
+    ``_FETCH_K`` candidate budget is spent on decisions. PageRank fusion is
+    dropped — decision docs aren't in the call graph, so ``norm_pr`` is all-zero
+    for them.
+    """
+    query_vec = await asyncio.to_thread(_embed_query, state, query)
+
+    def _search() -> list[SearchResult]:
+        handles = open_code_index(state.settings, slug, role="service")
+        try:
+            qns = handles.graph.decision_qns()
+            if not qns:
+                return []
+            where = "qualified_name IN (" + ",".join(f"'{qn}'" for qn in qns) + ")"
+            dense = handles.vectors.search_similar(query_vec, k=_FETCH_K, where=where)
+            bm25 = handles.vectors.search_bm25(query, k=_FETCH_K, where=where)
+            ranked = _rrf_fuse([d.qualified_name for d in dense], [qn for qn, _ in bm25])
+            return _hydrate(
+                handles.graph, ranked, k=k, dense_by_qn={d.qualified_name: d for d in dense}
+            )
+        finally:
+            handles.close()
+
+    return await asyncio.to_thread(_search)

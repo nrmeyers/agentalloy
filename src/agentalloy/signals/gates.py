@@ -321,6 +321,9 @@ def _near_miss_candidates(root: Path, strict_glob: str) -> list[str]:
 
     Empty for directory-style globs (``src/**``, ``tests/**``) where "wrong path"
     isn't meaningful, and when no literal directory token can be derived.
+
+    Excludes ``archive/`` and ``_superseded/`` directories — those are
+    historical contracts, not "wrote it somewhere wrong" candidates.
     """
     parts = [p for p in strict_glob.split("/") if p]
     if not parts:
@@ -342,6 +345,17 @@ def _near_miss_candidates(root: Path, strict_glob: str) -> list[str]:
     candidates: list[str] = []
     for p in _glob_files(root, f"**/*{token}*.{ext}"):
         if p.resolve() in strict_matches:
+            continue
+        # Exclude archive/_superseded directories — historical, not "wrong path"
+        rel = p.relative_to(root)
+        parts = rel.parts
+        if any(part == "archive" or part.startswith("_") for part in parts):
+            continue
+        # Exclude directories that are clearly not plausible "wrong location"
+        # for the expected deliverable. A file in eval/tests/fixtures is never
+        # a misplaced spec/design/build contract.
+        excluded_dirs = {"eval", "tests", "fixtures", "docs/fast", "docs/eval", "docs/design"}
+        if any(part in excluded_dirs for part in parts):
             continue
         try:
             candidates.append(str(p.relative_to(root)))

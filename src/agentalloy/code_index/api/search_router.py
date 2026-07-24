@@ -19,7 +19,12 @@ from agentalloy.code_index.api.models import (
     SymbolView,
 )
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
-from agentalloy.code_index.retrieval.hybrid import SearchResult, lexical_search, semantic_search
+from agentalloy.code_index.retrieval.hybrid import (
+    SearchResult,
+    lexical_search,
+    related_decisions,
+    semantic_search,
+)
 from agentalloy.storage.protocols import CodeIndexHandles
 
 router = APIRouter()
@@ -62,6 +67,22 @@ async def search_lexical(
 ) -> list[SearchResult]:
     require_indexed_repo(state, repo)
     return await lexical_search(state, repo, q, k=k)
+
+
+@router.get(
+    "/search/related-decisions",
+    response_model=list[SearchResult],
+    summary="Hybrid search constrained to decision-doc chunks",
+)
+async def search_related_decisions(
+    repo: str = Query(description="Indexed repo slug"),
+    q: str = Query(min_length=1, description="Natural-language query"),
+    k: int = Query(default=8, ge=1, le=100),
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> list[SearchResult]:
+    """Semantic search over decision docs only."""
+    require_indexed_repo(state, repo)
+    return await related_decisions(state, repo, q, k=k)
 
 
 @router.get(
