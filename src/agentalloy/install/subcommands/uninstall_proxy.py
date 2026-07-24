@@ -342,24 +342,81 @@ def _unwire_claude_code_hooks_settings_json() -> list[dict[str, Any]]:
 
 
 def _unwire_proxy_qwen_code(root: Path) -> list[Path]:
-    """Remove AgentAlloy proxy URL from ~/.qwen/settings.json.
+    """Remove AgentAlloy proxy URL from repo-local and user-level Qwen Code settings.
 
-    Only removes baseUrl entries pointing at the AgentAlloy proxy
-    (localhost or /proj/ URLs), preserving all other settings.
+    Phase 1 — repo-local ``.qwen/settings.json``: strip proxy entries.
+    If the file only contained proxy wiring (no other meaningful settings),
+    delete it outright.
+
+    Phase 2 — repo-local ``.qwen/.agentalloy-env``: remove the carrier file.
+
+    Phase 3 — user-level ``~/.qwen/settings.json``: strip proxy entries,
+    preserving all other user settings.
     """
+    removed: list[Path] = []
+
+    # ── Phase 1: repo-local .qwen/settings.json ──────────────────────────
+    local_settings = root / ".qwen" / "settings.json"
+    if local_settings.exists():
+        try:
+            raw = local_settings.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (json.JSONDecodeError, OSError):
+            data = None
+
+        if isinstance(data, dict):
+            data = cast("dict[str, Any]", data)
+            was_cleaned = _clean_proxy_from_qwen_data(data)
+            if not was_cleaned:
+                # No proxy entries found — nothing to do with this file
+                pass
+            elif not data:
+                # Only proxy wiring was present — delete the file
+                local_settings.unlink()
+                removed.append(local_settings)
+            else:
+                local_settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                removed.append(local_settings)
+        else:
+            # Garbled JSON or non-dict — nuke it
+            local_settings.unlink()
+            removed.append(local_settings)
+
+    # ── Phase 2: repo-local .qwen/.agentalloy-env ────────────────────────
+    env_path = root / ".qwen" / ".agentalloy-env"
+    if env_path.exists():
+        env_path.unlink()
+        removed.append(env_path)
+
+    # ── Phase 3: user-level ~/.qwen/settings.json ────────────────────────
     settings_path = Path.home() / ".qwen" / "settings.json"
-    if not settings_path.exists():
-        return []
-    try:
-        raw = settings_path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (json.JSONDecodeError, OSError):
-        return []
+    if settings_path.exists():
+        try:
+            raw = settings_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (json.JSONDecodeError, OSError):
+            return removed
 
-    if not isinstance(data, dict):
-        return []
+        if not isinstance(data, dict):
+            return removed
 
-    data = cast("dict[str, Any]", data)
+        data = cast("dict[str, Any]", data)
+        if _clean_proxy_from_qwen_data(data):
+            settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            print(
+                f"[AgentAlloy] Removed proxy wiring from {settings_path}. "
+                "You may need to reconfigure your default model in Qwen Code.",
+                file=sys.stderr,
+            )
+            removed.append(settings_path)
+    return removed
+
+
+def _clean_proxy_from_qwen_data(data: dict[str, Any]) -> bool:
+    """Mutate *data* in-place, stripping AgentAlloy proxy entries.
+
+    Returns ``True`` if anything was removed, ``False`` otherwise.
+    """
     removed_any = False
 
     # Clean modelProviders.openai[] entries
@@ -367,7 +424,6 @@ def _unwire_proxy_qwen_code(root: Path) -> list[Path]:
         providers = cast("dict[str, Any]", data["modelProviders"])
         openai_providers = providers.get("openai")
         if isinstance(openai_providers, list):
-            # Filter out entries that point at the proxy
             original_len = len(openai_providers)
             openai_providers = [
                 e
@@ -398,12 +454,4 @@ def _unwire_proxy_qwen_code(root: Path) -> list[Path]:
             del data["model"]
             removed_any = True
 
-    if removed_any:
-        settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        print(
-            f"[AgentAlloy] Removed proxy wiring from {settings_path}. "
-            "You may need to reconfigure your default model in Qwen Code.",
-            file=sys.stderr,
-        )
-        return [settings_path]
-    return []
+    return removed_any

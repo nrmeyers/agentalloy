@@ -1052,6 +1052,8 @@ def uninstall(
         ".opencode/system-prompt.md",
         ".hermes/config.yaml",  # hermes per-repo proxy carrier (HERMES_HOME)
         ".hermes/.agentalloy-env",  # hermes HERMES_HOME activation env file
+        ".qwen/settings.json",  # qwen-code repo-local workspace settings (QWEN_HOME)
+        ".qwen/.agentalloy-env",  # qwen-code QWEN_HOME activation env file
         "mcp_servers.json",  # ~/.claude/mcp_servers.json
         "claude-code-env.sh",  # ~/.agentalloy/claude-code-env.sh
         ".cline/settings.json",  # Cline legacy (inert, pre-rewrite) repo config
