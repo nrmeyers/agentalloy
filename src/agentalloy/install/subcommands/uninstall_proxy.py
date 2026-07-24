@@ -370,7 +370,8 @@ def _unwire_proxy_qwen_code(root: Path) -> list[Path]:
             # Filter out entries that point at the proxy
             original_len = len(openai_providers)
             openai_providers = [
-                e for e in openai_providers
+                e
+                for e in openai_providers
                 if isinstance(e, dict)
                 and not (
                     isinstance(e.get("baseUrl"), str)
