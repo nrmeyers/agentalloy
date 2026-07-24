@@ -36,7 +36,10 @@ jobs:
         run: uv sync --frozen --extra code-index
 
       - name: Lint
-        run: uv run ruff check .
+        # --fix mirrors pre-commit's ruff hook (which also uses --fix) so CI
+        # does not fail on I001 / other auto-fixable issues that pre-commit
+        # would resolve locally.
+        run: uv run ruff check --fix .
 
       - name: Format check
         run: uv run ruff format --check .
