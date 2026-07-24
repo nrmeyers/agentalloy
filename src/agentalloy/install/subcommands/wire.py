@@ -734,8 +734,16 @@ def _run(args: argparse.Namespace) -> int:
     # up an existing (or legacy codebase-indexer) block instead. Best-effort.
     from agentalloy.install import code_index_wiring
 
+    # Pass claude-code if any wired harness is claude-code (so CLAUDE.md is
+    # a valid fallback target); otherwise pass None to avoid creating a
+    # Claude Code carrier for non-claude-code harnesses.
+    _ci_harness = "claude-code" if "claude-code" in harnesses else None
     ci_actions = code_index_wiring.maybe_wire(
-        cwd, port, quiet=True, assume_yes=bool(getattr(args, "assume_yes", False))
+        cwd,
+        port,
+        quiet=True,
+        assume_yes=bool(getattr(args, "assume_yes", False)),
+        harness=_ci_harness,
     )
     if ci_actions:
         result["code_index_wiring"] = ci_actions
