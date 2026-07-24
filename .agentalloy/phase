@@ -1,0 +1,5 @@
+phase: ship
+transitioned_by: aceb9ba
+qa_result: PASS
+qa_notes: Phase 2 JIT push — all tests pass (4274), ruff clean, phase 1+2 complete. Feature flag knowledge_related_enabled=True by default. Thematic decisions merged alongside GOVERNS in compose path. Dedup by qualified_name. Graceful fallback on related_decisions failure.
+qa_date: 2026-07-24
