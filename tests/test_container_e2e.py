@@ -56,7 +56,7 @@ _REAL_SUBPROCESS_POPEN = subprocess.Popen
 
 def _argv_program(args: object) -> str:
     """Best-effort basename of the program a subprocess call would execute."""
-    if isinstance(args, (list, tuple)) and args:
+    if isinstance(args, list | tuple) and args:
         head = str(args[0])
     else:
         head = str(args).split()[0] if str(args).split() else ""

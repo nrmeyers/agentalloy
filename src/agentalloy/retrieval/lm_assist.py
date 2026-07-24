@@ -245,7 +245,7 @@ def _parse_completion_logprobs(data: Any) -> dict[str, float]:
                 if isinstance(entry, dict):
                     tok = cast("dict[str, Any]", entry).get("token")
                     lp = cast("dict[str, Any]", entry).get("logprob")
-                    if isinstance(tok, str) and isinstance(lp, (int, float)):
+                    if isinstance(tok, str) and isinstance(lp, int | float):
                         out[tok] = float(lp)
             if out:
                 return out

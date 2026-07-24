@@ -257,7 +257,7 @@ class HttpReranker:
             item_dict = cast(dict[str, Any], item)
             idx = item_dict.get("index")
             raw = item_dict.get("relevance_score")
-            if not isinstance(idx, int) or not isinstance(raw, (int, float)):
+            if not isinstance(idx, int) or not isinstance(raw, int | float):
                 raise ValueError(f"rerank result malformed: {item!r}")
             if 0 <= idx < len(scores):
                 scores[idx] = float(raw)
