@@ -936,6 +936,18 @@ def _wire_proxy(
         records = writer(port, root, _force)
         return [r.to_dict() for r in records]
 
+    if harness == "windsurf":
+        # windsurf is a MARKDOWN_ONLY sidecar harness — delegates to the
+        # provider's install_writer (YAML-frontmatter + sdd-instructions body)
+        # rather than the generic proxy-instruction template used by
+        # _wire_proxy_instruction.  Explicit handler prevents falling through
+        # to the fallback path, keeping the code path consistent with other
+        # sidecar harnesses (cursor, github-copilot, etc.).
+        writer = REGISTRY["windsurf"].install_writer
+        assert writer is not None, "windsurf registers an install_writer"
+        records = writer(port, root, _force)
+        return [r.to_dict() for r in records]
+
     # All other harnesses: write a proxy instruction block
     return _wire_proxy_instruction(harness, port, root, scope)
 
