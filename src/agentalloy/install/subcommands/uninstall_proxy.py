@@ -339,3 +339,70 @@ def _unwire_claude_code_hooks_settings_json() -> list[dict[str, Any]]:
         settings_path.write_text(json.dumps(data, indent=2) + "\n")
 
     return removed
+
+
+def _unwire_proxy_qwen_code(root: Path) -> list[Path]:
+    """Remove AgentAlloy proxy URL from ~/.qwen/settings.json.
+
+    Only removes baseUrl entries pointing at the AgentAlloy proxy
+    (localhost or /proj/ URLs), preserving all other settings.
+    """
+    settings_path = Path.home() / ".qwen" / "settings.json"
+    if not settings_path.exists():
+        return []
+    try:
+        raw = settings_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    if not isinstance(data, dict):
+        return []
+
+    data = cast("dict[str, Any]", data)
+    removed_any = False
+
+    # Clean modelProviders.openai[] entries
+    if "modelProviders" in data and isinstance(data["modelProviders"], dict):
+        providers = cast("dict[str, Any]", data["modelProviders"])
+        openai_providers = providers.get("openai")
+        if isinstance(openai_providers, list):
+            # Filter out entries that point at the proxy
+            original_len = len(openai_providers)
+            openai_providers = [
+                e for e in openai_providers
+                if isinstance(e, dict)
+                and not (
+                    isinstance(e.get("baseUrl"), str)
+                    and ("localhost" in e["baseUrl"] or "/proj/" in e["baseUrl"])
+                )
+            ]
+            providers["openai"] = openai_providers
+            if len(openai_providers) == 0:
+                del providers["openai"]
+                removed_any = True
+            elif len(openai_providers) < original_len:
+                removed_any = True
+
+    # Clean model.baseUrl
+    if "model" in data and isinstance(data["model"], dict):
+        model = cast("dict[str, Any]", data["model"])
+        if "baseUrl" in model:
+            url = model["baseUrl"]
+            if isinstance(url, str) and ("localhost" in url or "/proj/" in url):
+                del model["baseUrl"]
+                removed_any = True
+        # Clean up empty model dict
+        if not model:
+            del data["model"]
+            removed_any = True
+
+    if removed_any:
+        settings_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        print(
+            f"[AgentAlloy] Removed proxy wiring from {settings_path}. "
+            "You may need to reconfigure your default model in Qwen Code.",
+            file=sys.stderr,
+        )
+        return [settings_path]
+    return []

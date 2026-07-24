@@ -476,11 +476,11 @@ class TestEdgeCases:
     def test_all_valid_harnesses_accepted(self, repo_root: Path) -> None:
         """Smoke test: every registered harness produces a result without error.
 
-        ``mcp-only`` and harnesses without legacy support (codex, openclaw)
-        are excluded from the legacy path test.
+        ``mcp-only`` and harnesses without legacy support (codex, openclaw,
+        qwen-code) are excluded from the legacy path test.
         """
         # Harnesses that do not support the legacy (markdown-injection) path
-        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli"}
+        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli", "qwen-code"}
         for harness in VALID_HARNESSES:
             # Reset state for each
             state_file = repo_root / ".agentalloy" / "install-state.json"
@@ -660,7 +660,7 @@ class TestIntakeActivationMarkers:
         """
         instruction_extensions = {".md", ".mdc"}
         # Harnesses that do not support legacy markdown injection
-        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli"}
+        legacy_excluded = {"mcp-only", "codex", "openclaw", "copilot-cli", "qwen-code"}
         for harness in VALID_HARNESSES:
             state_file = repo_root / ".agentalloy" / "install-state.json"
             if state_file.exists():

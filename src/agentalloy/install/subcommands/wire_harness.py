@@ -118,6 +118,12 @@ _HARNESS_REGISTRY: dict[str, dict[str, Any]] = {
         "dedicated": False,
         "vector": "system_prompt_snippet",
     },
+    "qwen-code": {
+        "target": None,  # handled by provider install_writer (~/.qwen/settings.json)
+        "template": None,
+        "dedicated": False,
+        "vector": "proxy",
+    },
     "aider": {
         "target": ".agentalloy-aider-instructions.md",
         "template": "aider.md",
