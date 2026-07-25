@@ -19,6 +19,11 @@ from agentalloy.contracts import Contract, ContractScope
 from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 
+def _mock_orch() -> object:
+    """Minimal mock orchestrator — _compose_decision_push only touches .settings and .state."""
+    return SimpleNamespace(settings=None, state=None)
+
+
 def _contract(touches: list[str], phase: str = "design") -> Contract:
     return Contract(
         path=Path("c.md"),
@@ -105,7 +110,7 @@ def test_push_fires_at_design_when_available(
     store = _seeded_store(tmp_path)
     _wire(monkeypatch, store, available=True)
     signal = SimpleNamespace(repo="/repo")
-    out = _compose_decision_push(signal, "design", _contract(["pkg/a.py"]), "")
+    out = _compose_decision_push(signal, "design", _contract(["pkg/a.py"]), "", _mock_orch())
     assert "# Decisions governing this work" in out and "Why foo" in out
     store.close()
 
@@ -113,14 +118,14 @@ def test_push_fires_at_design_when_available(
 def test_no_push_wrong_phase(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = _wire(monkeypatch, _seeded_store(tmp_path), available=True)
     signal = SimpleNamespace(repo="/repo")
-    assert _compose_decision_push(signal, "spec", _contract(["pkg/a.py"]), "") == ""
+    assert _compose_decision_push(signal, "spec", _contract(["pkg/a.py"]), "", _mock_orch()) == ""
     assert calls["open"] == 0  # never opened the index off design/build
 
 
 def test_no_push_empty_scope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = _wire(monkeypatch, _seeded_store(tmp_path), available=True)
     signal = SimpleNamespace(repo="/repo")
-    assert _compose_decision_push(signal, "design", _contract([]), "") == ""
+    assert _compose_decision_push(signal, "design", _contract([]), "", _mock_orch()) == ""
     assert calls["open"] == 0
 
 
@@ -130,5 +135,5 @@ def test_no_push_when_unavailable_and_index_never_opened(
     calls = _wire(monkeypatch, None, available=False)
     signal = SimpleNamespace(repo="/repo")
     # graceful degrade: unavailable -> "" AND no code-index open attempted
-    assert _compose_decision_push(signal, "design", _contract(["pkg/a.py"]), "") == ""
+    assert _compose_decision_push(signal, "design", _contract(["pkg/a.py"]), "", _mock_orch()) == ""
     assert calls["open"] == 0

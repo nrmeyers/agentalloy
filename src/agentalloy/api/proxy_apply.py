@@ -127,7 +127,11 @@ class _ComposedBlock:
 
 
 def _compose_decision_push(
-    signal: SignalResult, phase: str, contract: Contract, composed_domain_text: str
+    signal: SignalResult,
+    phase: str,
+    contract: Contract,
+    composed_domain_text: str,
+    orchestrator: ComposeOrchestrator,
 ) -> str:
     """Knowledge slice 2 — the just-in-time decision push (AC 6).
 
@@ -150,9 +154,25 @@ def _compose_decision_push(
     from agentalloy.code_index.slug import repo_slug
     from agentalloy.code_index.store import open_code_index
 
-    handles = open_code_index(None, repo_slug(Path(signal.repo)), role="reader")
+    settings = orchestrator.settings
+    state = orchestrator.state
+    slug = repo_slug(Path(signal.repo))
+
+    handles = open_code_index(settings, slug, role="reader")
     try:
-        push = build_decision_block(contract, composed_domain_text, handles.graph)
+        task_title = (
+            (contract.body or contract.task_slug).strip().split("\n")[0].lstrip("# ").strip()
+        )
+        # Phase 2 flag: skip related_decisions when disabled
+        related_enabled = settings.knowledge_related_enabled if settings else True
+        push = build_decision_block(
+            contract,
+            composed_domain_text,
+            handles.graph,
+            state=state if related_enabled else None,
+            slug=slug if related_enabled else None,
+            task_title=task_title if related_enabled else None,
+        )
     finally:
         handles.close()
     if push is None:
@@ -279,7 +299,9 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
             # it nor the domain leg can suppress the other. Dedups against the
             # domain text just composed; additive (any gate miss -> "").
             try:
-                decision_block = _compose_decision_push(signal, compose_phase, contract, tier2)
+                decision_block = _compose_decision_push(
+                    signal, compose_phase, contract, tier2, orchestrator
+                )
             except Exception:
                 logger.warning("decision push failed -- passing through", exc_info=True)
                 decision_block = ""

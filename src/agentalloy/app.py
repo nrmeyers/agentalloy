@@ -144,6 +144,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         vector_store,
         telemetry,
         embedding_model=settings.runtime_embedding_model,
+        settings=settings,
     )
     retrieve_orch = RetrieveOrchestrator(
         source,
@@ -251,6 +252,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         code_index_state = CodeIndexState(
             settings=settings, embed_client=embed_client, jobs=ci_jobs
         )
+        # Wire the code-index state onto the orchestrator so the proxy
+        # push path can reach it (settings is already wired).
+        orchestrator.state = code_index_state
         # Retire active job rows orphaned by a previous (now-dead) process.
         ci_jobs.sweep_interrupted(code_index_state.worker_token)
         if settings.code_index_watch:
