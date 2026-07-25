@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentalloy.api.state_client import StateClient, StateClientError
+
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
 # "spec" (see signals.gates._PHASE_GRAPH).
@@ -76,7 +78,11 @@ def _now_iso() -> str:
 
 
 def run_phase_get(root: Path | None = None) -> dict[str, Any]:
-    """Get the current phase from the lock file."""
+    """Get the current phase from the lock file.
+
+    Routes through the state service when it is running; falls back to
+    direct file reads when the service is down.
+    """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
@@ -186,10 +192,27 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     approval-gated phase (spec/design, plus sdd-fast when enabled) without a
     recorded approval marker is refused with ``reason="approval"`` even under
     ``force``. Backward, bail, and reset transitions are never gated.
+
+    When the phase state service is running, the write is routed through the
+    service's HTTP API; otherwise the file-mirror path is used directly.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
+
+    # -- Service routing: try the HTTP client first, fall back to file mirror --
+    client = StateClient()
+    if client.is_running():
+        try:
+            return client.set_phase(phase)
+        except StateClientError as exc:
+            # Service responded but errored — fall through to file mirror.
+            print(
+                f"Warning: state service returned {exc.status}: {exc.message}; "
+                f"falling back to file-mirror write.",
+                file=sys.stderr,
+            )
+    # Service is down or the call failed — write directly to the file mirror.
 
     if phase not in VALID_PHASES:
         print(

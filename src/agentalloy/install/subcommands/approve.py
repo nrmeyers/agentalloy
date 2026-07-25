@@ -23,6 +23,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentalloy.api.state_client import StateClient, StateClientError
+
 _APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
 _EXIT_ARTIFACT_GLOB = {
     "spec": "docs/spec/*.md",
@@ -65,6 +67,9 @@ def run_approve(
     Returns ``{"ok": False, "error": ...}`` on refusal, else ``{"ok": True, ...,
     "advanced": <run_phase_set result>}`` (which itself may carry ``blocked`` if a
     downstream artifact-completeness gate still isn't met).
+
+    When the phase state service is running, the approval is routed through
+    the service's HTTP API; otherwise the file-mirror path is used directly.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
     from agentalloy.install.subcommands.phase import (  # noqa: PLC0415
@@ -77,6 +82,23 @@ def run_approve(
     from agentalloy.signals.predicates import approval_marker_path  # noqa: PLC0415
 
     root = root or _repo_root()
+
+    # -- Service routing: try the HTTP client first, fall back to file mirror --
+    client = StateClient()
+    if client.is_running():
+        try:
+            result = client.approve(phase)
+            # Service handled it — return its result directly.
+            return result
+        except StateClientError as exc:
+            # Service responded but errored — fall through to file mirror.
+            print(
+                f"Warning: state service returned {exc.status}: {exc.message}; "
+                f"falling back to file-mirror write.",
+                file=sys.stderr,
+            )
+    # Service is down or the call failed — write directly to the file mirror.
+
     existing = _read_phase(root)
     current = existing.get("phase") if existing else None
     if current != phase:

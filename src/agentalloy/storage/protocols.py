@@ -20,6 +20,8 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 EMBEDDING_DIM = 768
@@ -414,6 +416,56 @@ class CodeIndexHandles:
 
 
 @dataclass
+class LeaseConflict:
+    owner: str
+    lease_expires_at: datetime
+    message: str
+
+
+@dataclass
+class StateWriteResult:
+    success: bool
+    kind: str
+    value: str
+    owner: str | None
+    lease_expires_at: datetime | None
+    conflict: LeaseConflict | None
+
+
+@dataclass
+class LeaseResult:
+    acquired: bool
+    owner: str | None
+    lease_expires_at: datetime | None
+    conflict: LeaseConflict | None
+
+
+@runtime_checkable
+class StateStore(Protocol):
+    """SDD state store — session-aware replacement for per-repo files."""
+
+    def read(self, kind: str, session_key: str | None = None) -> str | None: ...
+    def write(
+        self,
+        kind: str,
+        value: str,
+        *,
+        session_key: str | None = None,
+        owner: str | None = None,
+    ) -> StateWriteResult: ...
+    def acquire_lease(
+        self,
+        kind: str,
+        session_key: str,
+        duration: timedelta = timedelta(minutes=5),
+    ) -> LeaseResult: ...
+    def release_lease(self, kind: str, session_key: str) -> None: ...
+    def import_from_files(self, agentalloy_dir: Path) -> dict[str, str]: ...
+    def mirror_to_files(self, kind: str, value: str, agentalloy_dir: Path) -> bool: ...
+    def close(self) -> None: ...
+
+
+@dataclass
 class Stores:
     """Bundle returned by ``open_stores``. Callers request only what they need."""
 
@@ -441,6 +493,10 @@ __all__ = [
     "FragmentStore",
     "SkillStore",
     "TelemetryStore",
+    "StateStore",
+    "StateWriteResult",
+    "LeaseResult",
+    "LeaseConflict",
     "Stores",
     "CodeSymbol",
     "CodeEdge",

@@ -200,15 +200,20 @@ def _swap_command(method: str, ref: str, extras: list[str] | None = None) -> lis
         # conflicts with install request" because the ``--from`` source carries
         # no extras. The trailing arg stays the bare package name.
         #
-        # Pass --python so uv resolves against the tool's own interpreter
-        # (which satisfies the package's Python version constraint) rather
-        # than the system default Python (which may be too old).
+        # Always pass --python so uv resolves against a known-good interpreter
+        # rather than picking the first available Python (which may be too old
+        # for the package's requires-python constraint).
+        #   uv-tool: use the tool's own interpreter.
+        #   pip:    use the currently-running interpreter (sys.executable).
         from_spec = f"{package} @ {target}" if extras else target
         cmd = ["uv", "tool", "install", "--force", "--from", from_spec]
         if method == "uv-tool":
             py = _current_tool_python()
             if py is not None and py.exists():
                 cmd.extend(["--python", str(py)])
+        else:
+            # pip (or any non-uv-tool) install — use this process's interpreter
+            cmd.extend(["--python", sys.executable])
         cmd.append("agentalloy")
         return cmd
     if extras:
@@ -1017,11 +1022,13 @@ def upgrade(
     summary["deployment"] = deployment
 
     # Interactive preflight: show what's changing + a confirm gate before any
-    # swap. Skipped under --json/--quiet (interactive=False) and --yes
-    # (assume_yes); short-circuits so the card only renders when it will prompt.
+    # swap. Skipped under --json/--quiet (interactive=False), --yes
+    # (assume_yes), and --force; short-circuits so the card only renders when
+    # it will prompt.
     declined = (
         interactive
         and not assume_yes
+        and not force
         and not _preflight_confirm(current, target_ref, ref, deployment)
     )
     if declined:

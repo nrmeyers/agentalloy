@@ -5,6 +5,8 @@
 - DuckDB ``agentalloy.duck``: skill metadata (folded out of the legacy graph engine) + corpus_meta.
   -> ``skill_store.DuckDBSkillStore``
 - DuckDB ``telemetry.duck``: composition traces.  -> ``telemetry_store.DuckDBTelemetryStore``
+- DuckDB ``<repo-slug>.duck``: SDD lifecycle runtime state (phase, cursor,
+  cadence markers).  -> ``state_store.DuckDBStateStore``
 
 Shared DTOs / constants / Protocols live in ``protocols``. Use ``open_stores``
 (or the per-engine openers) to construct handles.
@@ -26,8 +28,12 @@ from agentalloy.storage.protocols import (
     EmbeddingDimMismatch,
     FragmentEmbedding,
     FragmentStore,
+    LeaseConflict,
+    LeaseResult,
     SimilarityHit,
     SkillStore,
+    StateStore,
+    StateWriteResult,
     Stores,
     TelemetryStore,
     VectorStoreError,
@@ -39,6 +45,11 @@ from agentalloy.storage.skill_store import (
     is_lock_held_error,
     open_skill_store,
 )
+from agentalloy.storage.state_store import (
+    DuckDBStateStore,
+    StateStoreError,
+    open_state_store,
+)
 from agentalloy.storage.telemetry_store import DuckDBTelemetryStore, open_telemetry_store
 
 __all__ = [
@@ -48,22 +59,28 @@ __all__ = [
     "VectorStoreError",
     "LockHeldError",
     "is_lock_held_error",
+    "StateStoreError",
     "l2_normalize",
     # DTOs
     "FragmentEmbedding",
     "SimilarityHit",
     "BM25Hit",
     "CompositionTrace",
+    "StateWriteResult",
+    "LeaseResult",
+    "LeaseConflict",
     # protocols + bundle
     "FragmentStore",
     "SkillStore",
     "TelemetryStore",
+    "StateStore",
     "Stores",
     # concrete stores
     "LanceFragmentStore",
     "FRAGMENTS_SCHEMA",
     "DuckDBSkillStore",
     "DuckDBTelemetryStore",
+    "DuckDBStateStore",
     # factories
     "open_stores",
     "open_fragments",
@@ -71,4 +88,5 @@ __all__ = [
     "open_telemetry",
     "open_skill_store",
     "open_telemetry_store",
+    "open_state_store",
 ]

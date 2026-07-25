@@ -90,11 +90,14 @@ class GatedEmbedClient(FakeEmbedClient):
 
 
 def write_fixture_repo(root: Path) -> None:
-    """A tiny two-module python repo (functions calling each other) + a README."""
+    """A tiny two-module python repo (functions calling each other) + a README + .agentalloy/."""
     (root / "pkg").mkdir(parents=True, exist_ok=True)
     (root / "pkg" / "util.py").write_text(PY_UTIL)
     (root / "pkg" / "main.py").write_text(PY_MAIN)
     (root / "README.md").write_text(README)
+    # Create the .agentalloy/ directory so signal-layer tests can write
+    # phase, cursor, announced, etc. files without FileNotFoundError.
+    (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture
