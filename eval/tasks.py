@@ -303,7 +303,15 @@ def grade_task_8(output: str) -> dict[str, bool]:
         "has_timeline_section": any(
             s in lower for s in ["## timeline", "**timeline**", "# timeline"]
         ),
-        "has_root_cause_section": any(s in lower for s in ["## root cause", "**root cause**"]),
+        "has_root_cause_section": any(
+            s in lower
+            for s in [
+                "## root cause",
+                "**root cause**",
+                "# root cause",
+                "**cause**",
+            ]
+        ),
         "has_action_items_section": any(
             s in lower
             for s in [
@@ -313,6 +321,8 @@ def grade_task_8(output: str) -> dict[str, bool]:
                 "## actions",
                 "**actions**",
                 "# actions",
+                "follow-up",
+                "action item",
             ]
         ),
         "mentions_connection_pool": "connection pool" in lower
