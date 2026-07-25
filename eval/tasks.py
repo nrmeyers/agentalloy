@@ -303,15 +303,22 @@ def grade_task_8(output: str) -> dict[str, bool]:
         "has_timeline_section": any(
             s in lower for s in ["## timeline", "**timeline**", "# timeline"]
         ),
-        "has_root_cause_section": any(s in lower for s in ["root cause", "## cause", "**cause**"]),
+        "has_root_cause_section": any(s in lower for s in ["## root cause", "**root cause**"]),
         "has_action_items_section": any(
             s in lower
-            for s in ["action item", "## actions", "**actions**", "follow-up", "follow up"]
+            for s in [
+                "## action items",
+                "**action items**",
+                "# action items",
+                "## actions",
+                "**actions**",
+                "# actions",
+            ]
         ),
         "mentions_connection_pool": "connection pool" in lower
         or "pool exhaust" in lower
         or "pool size" in lower,
-        "under_600_words": word_count <= 600,
+        "under_600_words": word_count > 0 and word_count <= 600,
     }
 
 
@@ -321,13 +328,12 @@ def grade_task_9(output: str) -> dict[str, bool]:
         "covers_retry_budget": any(
             w in lower for w in ["retry budget", "max retries", "max attempts", "retry limit"]
         ),
-        "covers_backoff": any(w in lower for w in ["exponential", "jitter", "backoff"]),
+        "covers_backoff": any(w in lower for w in ["exponential", "backoff"]),
         "covers_idempotency_key": "idempotency" in lower
         and any(w in lower for w in ["key", "header", "token"]),
         "covers_give_up": any(
             w in lower
             for w in [
-                "give up",
                 "dead letter",
                 "abandon",
                 "stop retrying",
