@@ -20,9 +20,11 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
+from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.install.subcommands.phase import (  # pyright: ignore[reportPrivateUsage]
     _now_iso,
     _read_phase,
@@ -41,10 +43,28 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
     Idempotent — already-free returns ``changed=False`` with the original
     ``free_since``. Never touches the ``phase`` value. Affects every session in
     the repo (the phase file is per-repo shared state).
+
+    When the phase state service is running, the write is routed through the
+    service's HTTP API; otherwise the file-mirror path is used directly.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
+
+    # -- Service routing: try the HTTP client first, fall back to file mirror --
+    client = StateClient()
+    if client.is_running():
+        try:
+            phase = _read_phase(root) or _DEFAULT_PHASE
+            return client.set_phase(f"free-flow:{phase}")
+        except StateClientError as exc:
+            print(
+                f"Warning: state service returned {exc.status}: {exc.message}; "
+                f"falling back to file-mirror write.",
+                file=sys.stderr,
+            )
+
+    # Service is down or the call failed — write directly to the file mirror.
     data = _read_phase(root) or {}
     phase = data.get("phase") or _DEFAULT_PHASE
     if data.get("mode") == "free":
@@ -73,11 +93,29 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     free, it holds the free sentinel, which mismatches every real phase — so
     the next proxy request re-orients (intake included) as a first request.
     Affects every session in the repo.
+
+    When the phase state service is running, the write is routed through the
+    service's HTTP API; otherwise the file-mirror path is used directly.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
     from agentalloy.signals.skill_loader import _clear_state  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
+
+    # -- Service routing: try the HTTP client first, fall back to file mirror --
+    client = StateClient()
+    if client.is_running():
+        try:
+            phase = _read_phase(root) or _DEFAULT_PHASE
+            return client.set_phase(f"resume:{phase}")
+        except StateClientError as exc:
+            print(
+                f"Warning: state service returned {exc.status}: {exc.message}; "
+                f"falling back to file-mirror write.",
+                file=sys.stderr,
+            )
+
+    # Service is down or the call failed — write directly to the file mirror.
     data = _read_phase(root) or {}
     phase = data.get("phase") or _DEFAULT_PHASE
     if data.get("mode") != "free":
@@ -90,10 +128,30 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
 
 
 def run_flow_status(root: Path | None = None) -> dict[str, Any]:
-    """Current flow mode, phase, and (when free) since-when."""
+    """Current flow mode, phase, and (when free) since-when.
+
+    When the phase state service is running, the read is routed through the
+    service's HTTP API; otherwise the file-mirror path is used directly.
+    """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
+
+    # -- Service routing: try the HTTP client first, fall back to file mirror --
+    client = StateClient()
+    if client.is_running():
+        try:
+            raw = client.get_state("phase")
+            if raw is not None:
+                return {"phase": raw.strip(), "mode": "workflow"}
+        except StateClientError as exc:
+            print(
+                f"Warning: state service returned {exc.status}: {exc.message}; "
+                f"falling back to file-mirror read.",
+                file=sys.stderr,
+            )
+
+    # Service is down or the call failed — read directly from the file mirror.
     data = _read_phase(root) or {}
     mode = "free" if data.get("mode") == "free" else "workflow"
     return {

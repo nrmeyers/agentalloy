@@ -1,6 +1,6 @@
 [project]
 name = "agentalloy"
-version = "7.7.0"
+version = "7.8.0"
 description = "AgentAlloy — just-in-time context engine for coding agents. Three context modules: phase-aware instruction composition from a curated 300+ skill corpus, an optional per-repo code index (tree-sitter symbol graph + hybrid search), and a decision-graph Knowledge module (why the code is the way it is). Deterministic by default, fully local. Runtime only; see agentalloy-authoring for corpus authoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -101,6 +101,10 @@ ignore = ["E501", "N818", "SIM117", "N806"]
 # upstream's style to minimize the re-vendoring diff — relax the noisy
 # style-only rules; E/F correctness rules still apply.
 "src/agentalloy/code_index/engine/**" = ["SIM102", "SIM105", "SIM114", "SIM118", "B905", "N815", "N817"]
+# F811 false positives: pytest fixture parameter names shadow the fixture_repo
+# import from conftest (standard pytest re-export pattern).
+"tests/api/test_state.py" = ["F811"]
+"tests/signals/test_skill_loader.py" = ["F811"]
 
 [tool.ruff.lint.flake8-bugbear]
 # Depends/Query/Header/Body are the standard FastAPI default-argument idiom.

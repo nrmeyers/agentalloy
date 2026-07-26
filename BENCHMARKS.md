@@ -294,6 +294,31 @@ fail-open floor. The reranker needs a `qwen3-reranker-0.6b` server (default
 the default is safe but the lift is latent until the server is provisioned. Not
 yet field-validated.
 
+## State Store Latency
+
+Verifies that the DuckDB-backed state store path adds less than 5 ms of overhead
+per phase read compared to a direct file-backed read (AC-7).
+
+```bash
+uv run pytest tests/benchmarks/test_latency.py -v
+```
+
+| Metric | Value |
+|--------|-------|
+| File-backed read (avg) | 0.198 ms |
+| Store-backed read (avg) | 1.714 ms |
+| Overhead | 1.516 ms |
+| Budget | 5 ms |
+| Pass | Yes |
+
+The store-backed path is a thin DuckDB SQL query — well within the 5 ms budget
+even on cold I/O. The overhead scales with query complexity (multi-kind reads)
+but remains sub-5 ms for single-row lookups.
+
+**CI note.** This benchmark is self-contained: no external services, no agent
+model, no network. It runs in ~5 s under `pytest -v` and is safe to include in
+CI pipelines.
+
 ## Full Benchmark Suite
 
 To run the complete 5-layer benchmark:

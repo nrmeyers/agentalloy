@@ -66,6 +66,7 @@ def test_swap_command_prefers_uv_when_on_path():
         patch.object(up.shutil, "which", return_value="/usr/bin/uv"),
         patch.object(up, "_current_tool_python", return_value=Path("/fake/tool/python")),
         patch.object(up.Path, "exists", return_value=True),
+        patch.object(up.sys, "executable", "/home/user/.venv/bin/python"),
     ):
         assert up._swap_command("pip", "v2.3.0") == [
             "uv",
@@ -74,6 +75,8 @@ def test_swap_command_prefers_uv_when_on_path():
             "--force",
             "--from",
             f"git+{up._GIT_URL}@v2.3.0",
+            "--python",
+            "/home/user/.venv/bin/python",
             "agentalloy",
         ]
         assert up._swap_command("uv-tool", "v2.3.0") == [
