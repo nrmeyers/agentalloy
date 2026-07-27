@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "9f91e2ca29a2",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/9f/91e2ca29a2/0/metadata.json",
+      "transcript": "/9f/91e2ca29a2/0/full.jsonl",
+      "compact_transcript": "/9f/91e2ca29a2/0/transcript.jsonl",
+      "content_hash": "/9f/91e2ca29a2/0/content_hash.txt",
+      "prompt": "/9f/91e2ca29a2/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 88,
+    "cache_creation_tokens": 34188,
+    "cache_read_tokens": 5339531,
+    "output_tokens": 19322,
+    "api_call_count": 47
+  }
+}
