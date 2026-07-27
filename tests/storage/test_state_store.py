@@ -380,44 +380,12 @@ class TestLease:
 
 
 # ---------------------------------------------------------------------------
-# File mirror
+# File import (one-way: legacy .agentalloy files -> store)
 # ---------------------------------------------------------------------------
 
 
-class TestFileMirror:
-    """File-mirror import and export."""
-
-    def test_mirror_to_files_creates_file(self, tmp_path: Path) -> None:
-        """mirror_to_files writes a .agentalloy/<kind> file."""
-        ag_dir = tmp_path / ".agentalloy"
-        db = tmp_path / "test.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            ok = store.mirror_to_files("phase", "spec", ag_dir)
-            assert ok is True
-            phase_file = ag_dir / "phase"
-            assert phase_file.exists()
-            assert phase_file.read_text().strip() == "spec"
-
-    def test_mirror_to_approved_creates_phase_file(self, tmp_path: Path) -> None:
-        """approved kind writes to .agentalloy/approved/<phase>."""
-        ag_dir = tmp_path / ".agentalloy"
-        db = tmp_path / "test.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            ok = store.mirror_to_files("approved", "spec", ag_dir)
-            assert ok is True
-            approved_file = ag_dir / "approved" / "spec"
-            assert approved_file.exists()
-
-    def test_mirror_to_files_fails_gracefully(self, tmp_path: Path) -> None:
-        """mirror_to_files returns False on OS error."""
-        db = tmp_path / "test.duck"
-        # Pass a non-existent, non-writable path.
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            ok = store.mirror_to_files("phase", "spec", Path("/nonexistent/deeply/absent"))
-            assert ok is False
+class TestFileImport:
+    """One-way import of legacy .agentalloy files into the store."""
 
     def test_import_from_files_skips_existing(self, tmp_path: Path) -> None:
         """import_from_files skips kinds already in the store."""
@@ -444,17 +412,6 @@ class TestFileMirror:
             store.migrate()
             imported = store.import_from_files(tmp_path / "nonexistent")
             assert imported == {}
-
-    def test_round_trip_write_mirror_read(self, tmp_path: Path) -> None:
-        """Write to store → mirror to files → read from file mirror."""
-        ag_dir = tmp_path / ".agentalloy"
-        db = tmp_path / "test.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            store.write("phase", "design")
-            store.mirror_to_files("phase", "design", ag_dir)
-            # The file should reflect the store value.
-            assert (ag_dir / "phase").read_text().strip() == "design"
 
 
 # ---------------------------------------------------------------------------

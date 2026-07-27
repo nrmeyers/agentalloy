@@ -439,41 +439,6 @@ class DuckDBStateStore:
 
         return imported
 
-    def mirror_to_files(self, kind: str, value: str, agentalloy_dir: Path) -> bool:
-        """Write a value to the file mirror.  Returns False if the write fails.
-
-        Kept for backward compatibility with consumers that still read the
-        .agentalloy file mirror.  New code should use the store directly.
-        """
-        import os
-        import tempfile
-        from contextlib import suppress
-
-        try:
-            agentalloy_dir.mkdir(parents=True, exist_ok=True)
-
-            if kind == "approved":
-                # approved/<phase> — value is the phase name
-                approved_dir = agentalloy_dir / "approved"
-                approved_dir.mkdir(parents=True, exist_ok=True)
-                approved_file = approved_dir / value
-                approved_file.write_text("", encoding="utf-8")
-            else:
-                filepath = agentalloy_dir / kind
-                fd, tmp_path = tempfile.mkstemp(dir=str(agentalloy_dir), prefix=f".{kind}.")
-                try:
-                    with os.fdopen(fd, "w") as f:
-                        f.write(value)
-                    os.replace(tmp_path, str(filepath))
-                except Exception:
-                    with suppress(OSError):
-                        os.unlink(tmp_path)
-                    raise
-            return True
-        except OSError:
-            logger.warning("mirror_to_files failed for kind=%s", kind, exc_info=True)
-            return False
-
     # -- contract helpers ----------------------------------------------------
 
     @staticmethod
