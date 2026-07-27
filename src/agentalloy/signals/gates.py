@@ -112,13 +112,16 @@ def _build_contract_coverage_advisory(args: dict[str, Any], ctx: PredicateContex
     if slug is None:
         return None
     tasks_glob: str = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
-    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
+
+    # Legacy glob tolerance: pass through if present (traces deprecation)
+    contracts_glob: str | None = args.get("contracts")
+
     try:
         tasks = 0
         for f in _glob_files(ctx.project_root, tasks_glob):
             tasks += _count_task_items(_read_file(f) or "")
         tasks = max(1, tasks)
-        contracts = len(_item_build_contracts(ctx.project_root, slug, contracts_glob))
+        contracts = len(_item_build_contracts(ctx, slug, contracts_glob=contracts_glob))
     except Exception:
         return None
     return (
@@ -135,22 +138,23 @@ def _build_tag_focus_advisory(args: dict[str, Any], ctx: PredicateContext) -> st
     Cursor-scoped (#378): names only the active work-item's offenders, matching the
     predicate, so a sibling item's wide-tag contract is neither judged nor named."""
     from agentalloy.signals.predicates import (  # noqa: PLC0415
-        _contract_domain_tags,
         _item_build_contracts,
         _resolve_workitem_slug,
     )
 
-    contracts_glob: str = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
+    # Legacy glob tolerance: pass through if present (traces deprecation)
+    contracts_glob: str | None = args.get("contracts")
     max_tags: int = args.get("max_tags", 2)
     slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
     if slug is None:
         return None
     try:
         offenders: list[str] = []
-        for p in _item_build_contracts(ctx.project_root, slug, contracts_glob):
-            tags = _contract_domain_tags(_read_file(p) or "")
-            if tags is not None and len(tags) > max_tags:
-                offenders.append(f"{p.name} ({len(tags)} tags)")
+        for c in _item_build_contracts(ctx, slug, contracts_glob=contracts_glob):
+            tags = c.get("domain_tags") or []
+            if len(tags) > max_tags:
+                name = c.get("slug", c.get("contract_id", "unknown"))
+                offenders.append(f"{name} ({len(tags)} tags)")
     except Exception:
         return None
     if not offenders:

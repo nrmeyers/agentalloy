@@ -335,7 +335,7 @@ def test_build_predicate_context_basic(tmp_path: Path) -> None:
     assert ctx.current_phase == "build"
     assert ctx.recent_prompt_text == "hello"
     assert ctx.recent_tool_use is None
-    assert ctx.contracts_root == tmp_path / ".agentalloy" / "contracts"
+    assert hasattr(ctx, "store")  # store replaces contracts_root
 
 
 def test_build_predicate_context_with_tool(tmp_path: Path) -> None:

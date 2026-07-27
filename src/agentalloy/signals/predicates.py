@@ -6,13 +6,20 @@ They never raise; they return UNKNOWN on any IO or context failure.
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
+import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    pass
+
+logger = logging.getLogger(__name__)
 
 
 class PredicateResult(Enum):
@@ -28,7 +35,9 @@ class PredicateContext:
     recent_prompt_text: str | None = None
     recent_tool_use: dict[str, Any] | None = None  # {tool, path, args}
     file_events_since: list[Path] = field(default_factory=lambda: cast(list[Path], []))
-    contracts_root: Path | None = None  # .agentalloy/contracts/
+    # Store handle for querying contracts by phase/slug (in-process callers).
+    # When None, predicates fall back to filesystem resolution.
+    store: Any = None  # DuckDBStateStore | None (avoid runtime import)
     # Session id for cursor scoping — so the lessons_recorded gate resolves the
     # SAME work-item the proxy composed for this session (Bug C). None → shared cursor.
     session_key: str | None = None
@@ -42,13 +51,6 @@ class PredicateContext:
     # the embed server erroring is otherwise indistinguishable from an UNKNOWN
     # caused by "nothing to classify". See record_embed_failure / embed_failed.
     _diagnostics: dict[str, bool] = field(default_factory=lambda: cast(dict[str, bool], {}))
-
-    def __post_init__(self) -> None:
-        if self.contracts_root is None:
-            # Can't set on frozen dataclass directly; use object.__setattr__
-            object.__setattr__(
-                self, "contracts_root", self.project_root / ".agentalloy" / "contracts"
-            )
 
     def record_embed_failure(self) -> None:
         """Flag that a semantic predicate's embed call failed this evaluation.
@@ -86,6 +88,59 @@ def _read_file(path: Path) -> str | None:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
+
+
+def _derive_phase_from_glob(glob_pattern: str) -> str | None:
+    """Derive the phase name from a legacy contracts glob pattern.
+
+    Patterns like ``.agentalloy/contracts/active/build/*.md`` yield ``"build"``.
+    Returns ``None`` when the pattern doesn't match the expected shape.
+    """
+    parts = glob_pattern.split("/")
+    # Expect: .../active/<phase>/*.md
+    try:
+        idx = parts.index("active")
+        if idx + 1 < len(parts):
+            phase_candidate = parts[idx + 1]
+            # Strip glob chars from the phase component (shouldn't have any, but safe)
+            if phase_candidate and not any(c in phase_candidate for c in "*?[]"):
+                return phase_candidate
+    except ValueError:
+        pass
+    return None
+
+
+def _emit_legacy_glob_trace(glob_pattern: str) -> None:
+    """Emit a deprecation trace for a legacy ``contracts`` glob arg.
+
+    The trace confirms no corpus is still emitting globs before the tolerance
+    branch is removed next release. Includes the caller stack so the offending
+    gate YAML or caller is identifiable.
+    """
+    logger.warning(
+        "DEPRECATION: legacy 'contracts' glob arg '%s' used in predicate/gate evaluation. "
+        "Migrate gate args to 'phase'/'slug' keys. Caller:\n%s",
+        glob_pattern,
+        traceback.format_stack(limit=6)[-2].strip(),
+    )
+
+
+def _query_store_contracts(
+    ctx: PredicateContext, *, phase: str | None = None, slug: str | None = None
+) -> list[dict[str, Any]]:
+    """Query the store for contracts, falling back to filesystem if no store.
+
+    Returns a list of contract dicts from the store, or an empty list when the
+    store is unavailable. Each dict carries ``slug``, ``domain_tags``,
+    ``work_item``, ``phase``, etc. — the shape returned by
+    ``DuckDBStateStore.list_contracts``.
+    """
+    if ctx.store is None:
+        return []
+    try:
+        return ctx.store.list_contracts(phase=phase, slug=slug, status="active")
+    except Exception:
+        return []
 
 
 def eval_artifact_exists(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
@@ -477,55 +532,60 @@ def eval_git_state(args: dict[str, Any], ctx: PredicateContext) -> PredicateResu
 
 
 def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
-    phase = args.get("phase", ctx.current_phase)
     count_min = args.get("count_min", 1)
-    if phase is None or ctx.contracts_root is None:
+
+    # Legacy glob tolerance: if 'contracts' key present, derive phase and trace
+    if "contracts" in args:
+        glob_pattern = str(args["contracts"])
+        _emit_legacy_glob_trace(glob_pattern)
+        phase = _derive_phase_from_glob(glob_pattern)
+        if phase is None:
+            return PredicateResult.UNKNOWN
+    else:
+        phase = args.get("phase", ctx.current_phase)
+
+    if phase is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / "active" / phase
-    if not contracts_dir.exists():
+
+    # Query store
+    contracts = _query_store_contracts(ctx, phase=str(phase))
+    if not contracts and ctx.store is not None:
+        # Store exists but returned nothing → no contracts for this phase
         return PredicateResult.NOT_MET
-    try:
-        count = sum(1 for _ in contracts_dir.glob("*.md"))
-        return PredicateResult.MET if count >= count_min else PredicateResult.NOT_MET
-    except OSError:
-        return PredicateResult.UNKNOWN
+    return PredicateResult.MET if len(contracts) >= count_min else PredicateResult.NOT_MET
 
 
 def eval_contract_has_tags(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
-    """Check whether any contract in the phase directory has matching domain_tags.
+    """Check whether any contract in the phase has matching domain_tags.
 
-    Semantics: ANY contract file with ANY matching tag → MET.
-    Returns NOT_MET if no contract has any of the specified tags, UNKNOWN on IO failure.
+    Semantics: ANY contract with ANY matching tag → MET.
+    Returns NOT_MET if no contract has any of the specified tags, UNKNOWN on failure.
     """
-    import yaml as _yaml
-
-    phase = args.get("phase", ctx.current_phase)
     any_of_tags = args.get("any_of", [])
-    if phase is None or ctx.contracts_root is None:
+
+    # Legacy glob tolerance
+    if "contracts" in args:
+        glob_pattern = str(args["contracts"])
+        _emit_legacy_glob_trace(glob_pattern)
+        phase = _derive_phase_from_glob(glob_pattern)
+        if phase is None:
+            return PredicateResult.UNKNOWN
+    else:
+        phase = args.get("phase", ctx.current_phase)
+
+    if phase is None:
         return PredicateResult.UNKNOWN
-    contracts_dir = ctx.contracts_root / "active" / phase
-    if not contracts_dir.exists():
+
+    # Query store
+    contracts = _query_store_contracts(ctx, phase=str(phase))
+    if not contracts and ctx.store is not None:
         return PredicateResult.NOT_MET
-    try:
-        for contract_file in contracts_dir.glob("*.md"):
-            content = _read_file(contract_file)
-            if content is None:
-                continue
-            # Extract frontmatter
-            if not content.startswith("---"):
-                continue
-            end = content.find("---", 3)
-            if end == -1:
-                continue
-            try:
-                fm: dict[str, Any] = _yaml.safe_load(content[3:end]) or {}
-            except Exception:
-                continue
-            tags: list[Any] = fm.get("domain_tags") or []
-            if any(t in tags for t in any_of_tags):
-                return PredicateResult.MET
-    except OSError:
-        return PredicateResult.UNKNOWN
+
+    for contract in contracts:
+        tags: list[Any] = contract.get("domain_tags") or []
+        if any(t in tags for t in any_of_tags):
+            return PredicateResult.MET
+
     return PredicateResult.NOT_MET
 
 
@@ -572,28 +632,31 @@ def _count_task_items(content: str) -> int:
 def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
     """The cursor'd work-item slug for ``phase`` — phase-strict.
 
-    Unlike the general :func:`agentalloy.contracts.resolve_current_contract` (which
-    honors the raw cursor even when it points into *another* phase — a hazard under
-    the concurrent-session phase contention noted elsewhere), this only accepts a
-    cursor resolving *into* ``contracts/<phase>/``. Falls back to the sole contract
-    in that phase dir, else ``None``. So a design→build gate always scopes to the
-    design work-item, never a sibling the cursor drifted to.
+    Queries the store for active contracts in ``phase``. If a cursor is set and
+    points to a contract in this phase, returns that contract's slug. Falls back
+    to the sole contract in the phase, else ``None``. So a design→build gate
+    always scopes to the design work-item, never a sibling the cursor drifted to.
     """
-    from agentalloy.contracts import list_contracts_for_phase  # lazy: signal import cost
-
-    contracts_root = (ctx.project_root / ".agentalloy" / "contracts").resolve()
-    phase_dir = (contracts_root / "active" / phase).resolve()
+    # Read cursor value
     try:
         raw = (ctx.project_root / ".agentalloy" / "cursor").read_text(encoding="utf-8").strip()
     except OSError:
         raw = ""
+
+    # Query store for contracts in this phase
+    in_phase = _query_store_contracts(ctx, phase=phase)
+
     if raw:
-        candidate = (contracts_root / raw).resolve()
-        if candidate.is_file() and candidate.is_relative_to(phase_dir):
-            return candidate.stem
-    in_phase = list_contracts_for_phase(ctx.project_root, phase)
+        # Cursor points to a contract_id (e.g. "build/01-task.md" or just "01-task.md")
+        cursor_slug = Path(raw).stem
+        for c in in_phase:
+            if c.get("slug") == cursor_slug or c.get("contract_id") == raw:
+                return c.get("slug")
+
+    # Fall back to sole contract in phase
     if len(in_phase) == 1:
-        return in_phase[0].stem
+        return in_phase[0].get("slug")
+
     return None
 
 
@@ -616,29 +679,38 @@ def _contract_work_item(content: str) -> str | None:
     return wi if isinstance(wi, str) and wi else None
 
 
-def _item_build_contracts(project_root: Path, slug: str, contracts_glob: str) -> list[Path]:
+def _item_build_contracts(
+    ctx: PredicateContext, slug: str, *, contracts_glob: str | None = None
+) -> list[dict[str, Any]]:
     """The build contracts attributed to design work-item ``slug``.
 
-    Attribution is the contract's ``work_item`` frontmatter (stamped at
-    ``contract init --phase build`` from the active design cursor). Build contracts
-    are flat and numerically ordered (``NN-<task>.md``), so the filename carries no
-    parent link — the field is the only per-item signal. Migration bridge: a repo
-    whose build contracts predate the field carries ``work_item`` on *none* of
+    Attribution is the contract's ``work_item`` field. Build contracts are keyed
+    by contract_id, so the field is the only per-item signal. Migration bridge: a
+    repo whose build contracts predate the field carries ``work_item`` on *none* of
     them; to avoid a spurious block there, attribution falls back to **all** build
     contracts when NONE declares a ``work_item`` (the old repo-global behavior).
-    Once any contract is stamped, only contracts stamped to *this* item count
-    (untagged legacy files are attributed to no item).
+    Once any contract is stamped, only contracts stamped to *this* item count.
+
+    ``contracts_glob`` is retained for legacy gate YAML that still carries a
+    ``contracts`` key; when present it triggers a deprecation trace but is not
+    used for resolution (the store is authoritative).
     """
-    files = [p for p in _glob_files(project_root, contracts_glob) if p.is_file()]
+    # Legacy glob tolerance: emit trace if a glob arg is present
+    if contracts_glob is not None:
+        _emit_legacy_glob_trace(contracts_glob)
+
+    # Query store for build contracts
+    build_contracts = _query_store_contracts(ctx, phase="build")
+
     any_tagged = False
-    mine: list[Path] = []
-    for p in files:
-        wi = _contract_work_item(_read_file(p) or "")
+    mine: list[dict[str, Any]] = []
+    for c in build_contracts:
+        wi = c.get("work_item")
         if wi is not None:
             any_tagged = True
             if wi == slug:
-                mine.append(p)
-    return mine if any_tagged else files
+                mine.append(c)
+    return mine if any_tagged else build_contracts
 
 
 def eval_build_contracts_cover_tasks(
@@ -661,7 +733,10 @@ def eval_build_contracts_cover_tasks(
     if slug is None:
         return PredicateResult.UNKNOWN
     tasks_glob = args.get("tasks", "docs/design/{slug}/tasks.md").replace("{slug}", slug)
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
+
+    # Legacy glob tolerance: pass through if present (traces deprecation)
+    contracts_glob: str | None = args.get("contracts")
+
     task_files = _glob_files(ctx.project_root, tasks_glob)
     if not task_files:
         return PredicateResult.UNKNOWN
@@ -672,7 +747,7 @@ def eval_build_contracts_cover_tasks(
             return PredicateResult.UNKNOWN
         task_count += _count_task_items(content)
     task_count = max(1, task_count)
-    contract_count = len(_item_build_contracts(ctx.project_root, slug, contracts_glob))
+    contract_count = len(_item_build_contracts(ctx, slug, contracts_glob=contracts_glob))
     return PredicateResult.MET if contract_count >= task_count else PredicateResult.NOT_MET
 
 
@@ -713,21 +788,17 @@ def eval_build_contract_tag_focus(args: dict[str, Any], ctx: PredicateContext) -
     contract never blocks this item's design→build. UNKNOWN (fail-open) when no
     single work-item resolves, mirroring :func:`eval_build_contracts_cover_tasks`.
     """
-    contracts_glob = args.get("contracts", ".agentalloy/contracts/active/build/*.md")
+    # Legacy glob tolerance: pass through if present (traces deprecation)
+    contracts_glob: str | None = args.get("contracts")
     max_tags = args.get("max_tags", 2)
     slug = _resolve_workitem_slug(ctx, str(args.get("phase") or "design"))
     if slug is None:
         return PredicateResult.UNKNOWN
-    files = _item_build_contracts(ctx.project_root, slug, contracts_glob)
-    if not files:
+    contracts = _item_build_contracts(ctx, slug, contracts_glob=contracts_glob)
+    if not contracts:
         return PredicateResult.UNKNOWN
-    for f in files:
-        content = _read_file(f)
-        if content is None:
-            continue
-        tags = _contract_domain_tags(content)
-        if tags is None:
-            continue
+    for c in contracts:
+        tags: list[Any] = c.get("domain_tags") or []
         if len(tags) > max_tags:
             return PredicateResult.NOT_MET
     return PredicateResult.MET

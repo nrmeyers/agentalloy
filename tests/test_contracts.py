@@ -327,6 +327,23 @@ class TestIntakeRouteHint:
             phase="intake",
             extra_fields={"route": route},
         )
+        # Also write to the store at .agentalloy/state.db
+        from agentalloy.storage.state_store import DuckDBStateStore
+
+        db = tmp_path / ".agentalloy" / "state.db"
+        if not db.exists():
+            store = DuckDBStateStore(db)
+            store.open()
+            store.migrate()
+            store.close()
+        store = DuckDBStateStore(db)
+        store.open()
+        repo = store._repo()  # type: ignore[attr-defined]
+        store.execute(
+            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, route, status, updated_at)
+            VALUES ('{repo}', 'intake-t', 't', '[]', NULL, 'intake', '{route}', 'active', CURRENT_TIMESTAMP)"""
+        )
+        store.close()
 
     def test_fast_route_field_hints_sdd_fast(self, tmp_path: Path) -> None:
         """route: fast is honored from the field alone — no sdd-fast/ folder needed."""
@@ -366,12 +383,24 @@ class TestIntakeRouteHint:
         """Cascade fallback preserved: no intake contract + a sdd-fast/ work-item
         → fast lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
+        from agentalloy.storage.state_store import DuckDBStateStore
 
         _write_contract(
             tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "t.md",
             phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
+        # Also write to the store so the fallback can find it
+        db = tmp_path / ".agentalloy" / "state.db"
+        store = DuckDBStateStore(db)
+        store.open()
+        store.migrate()
+        repo = store._repo()  # type: ignore[attr-defined]
+        store.execute(
+            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+            VALUES ('{repo}', 'sddfast-t', 't', '[]', NULL, 'sdd-fast', 'active', CURRENT_TIMESTAMP)"""
+        )
+        store.close()
         assert _intake_route_hint(tmp_path) == "sdd-fast"
 
     def test_malformed_intake_contract_falls_back(self, tmp_path: Path) -> None:
