@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "ffa04efb51f4",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/agentalloy/code_index/api/bundle_router.py",
+    "src/agentalloy/code_index/api/deps.py",
+    "src/agentalloy/code_index/api/models.py",
+    "src/agentalloy/code_index/api/repos_router.py",
+    "src/agentalloy/code_index/api/search_router.py",
+    "src/agentalloy/code_index/api/state.py",
+    "src/agentalloy/code_index/api/symbols_router.py",
+    "src/agentalloy/code_index/ingest/pipeline.py",
+    "src/agentalloy/code_index/retrieval/bundle.py",
+    "src/agentalloy/code_index/retrieval/hybrid.py",
+    "src/agentalloy/code_index/store/__init__.py",
+    "src/agentalloy/code_index/store/jobs_store.py",
+    "src/agentalloy/code_index/store/open.py",
+    "src/agentalloy/install/subcommands/code.py",
+    "tests/code_index/conftest.py",
+    "tests/code_index/test_bundle_router.py",
+    "tests/code_index/test_decisions_route.py",
+    "tests/code_index/test_jobs_store.py",
+    "tests/code_index/test_pipeline.py",
+    "tests/code_index/test_search_router.py",
+    "tests/code_index/test_symbols_router.py",
+    "tests/install/test_code_cli.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ff/a04efb51f4/0/metadata.json",
+      "transcript": "/ff/a04efb51f4/0/full.jsonl",
+      "compact_transcript": "/ff/a04efb51f4/0/transcript.jsonl",
+      "content_hash": "/ff/a04efb51f4/0/content_hash.txt",
+      "prompt": "/ff/a04efb51f4/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10,
+    "cache_creation_tokens": 4217,
+    "cache_read_tokens": 760067,
+    "output_tokens": 1697,
+    "api_call_count": 5
+  }
+}
