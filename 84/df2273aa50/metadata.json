@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "84df2273aa50",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/agentalloy/api/state_client.py",
+    "src/agentalloy/api/state_models.py",
+    "src/agentalloy/api/state_router.py",
+    "src/agentalloy/contracts.py",
+    "src/agentalloy/install/subcommands/contract.py",
+    "src/agentalloy/storage/state_store.py",
+    "tests/test_contract_init_scaffold.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/84/df2273aa50/0/metadata.json",
+      "transcript": "/84/df2273aa50/0/full.jsonl",
+      "compact_transcript": "/84/df2273aa50/0/transcript.jsonl",
+      "content_hash": "/84/df2273aa50/0/content_hash.txt",
+      "prompt": "/84/df2273aa50/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 25,
+    "cache_creation_tokens": 8789,
+    "cache_read_tokens": 1354094,
+    "output_tokens": 4470,
+    "api_call_count": 13
+  }
+}
