@@ -88,8 +88,8 @@ raw_prose: |
   Read `docs/design/<slug>/tasks.md` (your worklist), `test-plan.md` (the unit
   cases each task must pass), and `approach.md` (the how + decisions you're
   implementing against), plus `docs/spec/<slug>.md` (the acceptance behind it
-  all). Design already wrote one build contract per task into
-  `.agentalloy/contracts/active/build/` — `agentalloy task status` lists them in order.
+  all). Design already wrote one build contract per task — `agentalloy task status`
+  lists them in order.
 
   ## 2. Pull the next task's skills, then work it
 
@@ -101,8 +101,8 @@ raw_prose: |
   domain skills matching that task **plus the task itself**, before you write a
   line. You don't decide which skills you need — they arrive with the task. Then
   implement it test-first (§3). One `task next` per task; `agentalloy task status`
-  shows where you are. (If the skills don't arrive: `agentalloy compose --contract
-  .agentalloy/contracts/active/build/<file>.md`.)
+  shows where you are. (If the skills don't arrive: `agentalloy compose --contract-id
+  <contract-id>`.)
 
   ## 3. TDD: red → green → refactor, one case at a time
 
@@ -151,7 +151,9 @@ raw_prose: |
   retrieval prompt, so review opens already primed with the right testing skills.
 
   Then advance yourself — don't wait to be told. With the suite green, run
-  `agentalloy phase set qa` and carry on into review. If anything's unresolved —
+  `agentalloy phase set qa` and carry on into review. Phase advance ends this
+  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
+  context. If anything's unresolved —
   a case you couldn't make pass, a regression you can't explain — **stop and
   surface it** instead of advancing; a red suite isn't done. The phase guard
   refuses the jump until code exists under `src/` and tests under `tests/`, so a

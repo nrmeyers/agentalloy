@@ -54,7 +54,10 @@ class TestDeriveInvariants:
         assert "approach.md" in inv
         assert "tasks.md" in inv
         assert "test-plan.md" in inv
-        assert ".agentalloy/contracts/active/build/" in inv
+        # After the contract-store rewrite, build contracts are no longer
+        # addressed by a filesystem path — the gate uses the store API instead.
+        assert "agentalloy phase set build" in inv
+        assert "agentalloy task next" in inv
 
     def test_shipped_prose_satisfies_its_own_invariants(self) -> None:
         # A shipped skill must never violate its own linter, or every

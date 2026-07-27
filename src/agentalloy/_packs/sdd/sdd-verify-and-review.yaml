@@ -90,7 +90,7 @@ raw_prose: |
 
   ## 1. Run the full bar
 
-  Read your work-item contract first (`.agentalloy/contracts/active/qa/<slug>.md`, which
+  Read your work-item contract first (`agentalloy contract show <slug>`, which
   build authored — the proxy front-loaded the verification skills for it on
   entry). Then run everything — the **CI** system skill names the exact commands
   — and record the real results, not "should pass":
@@ -163,7 +163,9 @@ raw_prose: |
   <slug>` so the signal layer front-loads it automatically next time.
 
   Advance yourself: `agentalloy phase set ship`, and go straight into delivery.
-  Don't wait to be told; a clean report *is* the signal. The phase guard refuses
+  Phase advance ends this session; the next phase begins in a fresh one, and
+  `agentalloy resume` rebuilds context. Don't wait to be told; a clean report
+  *is* the signal. The phase guard refuses
   the jump until `docs/qa/<slug>.md` exists with its `## Checks` and `## Review`
   sections **and** `docs/solutions/<slug>.md` records this task's lesson, so a
   premature `phase set` just names what's missing.

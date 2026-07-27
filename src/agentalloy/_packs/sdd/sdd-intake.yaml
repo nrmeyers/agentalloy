@@ -20,8 +20,8 @@ prose_invariants:
   - "agentalloy phase set sdd-fast"
   - "agentalloy phase set add-skill"
 exit_gates:
-  artifact_exists:
-    path: ".agentalloy/contracts/active/**/*.md"
+  contract_exists:
+    phase: spec
 signal_keywords:
   - scope is clear
   - ready to scope
@@ -68,7 +68,7 @@ raw_prose: |
   # SDD — Intake
 
   **You MUST NOT design, plan, or write code in this phase.** Intake produces exactly one
-  artifact — the contract under `.agentalloy/contracts/active/` — and nothing else. If you catch
+  artifact — the contract created by `agentalloy contract init` — and nothing else. If you catch
   yourself proposing a solution, STOP: that is spec/design work, and you have not earned it yet.
 
   You open every session. Before any work, settle two things: **what are we
@@ -78,8 +78,8 @@ raw_prose: |
 
   The injected session state (or `.agentalloy/phase`) tells you the current
   phase. If it names a phase other than `intake`, there's work in flight — say
-  where the user left off (the phase + the active contract in
-  `.agentalloy/contracts/active/`) and ask: **pick up there, or start something new?**
+  where the user left off (the phase + the active contract from `agentalloy contracts list`)
+  and ask: **pick up there, or start something new?**
 
   - *Resume* → step aside; that phase takes back over on the next turn. Don't
     re-interview.
@@ -128,8 +128,10 @@ raw_prose: |
   for the full lane, `agentalloy phase set sdd-fast` for the fast lane, or
   `agentalloy phase set add-skill` for custom-skill authoring. (The
   contract write also advances on the next turn, so the new phase opens either
-  way; running it yourself just keeps you moving now.) Stop here only if the route
-  itself is genuinely unclear — surface that and let the user make the call.
+  way; running it yourself just keeps you moving now.) Phase advance ends this
+  session; the next phase begins in a fresh one, and `agentalloy resume` rebuilds
+  context. Stop here only if the route itself is genuinely unclear — surface that
+  and let the user make the call.
 
   ## Not this
 
