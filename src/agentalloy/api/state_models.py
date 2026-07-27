@@ -204,7 +204,12 @@ class ContractListResponse(BaseModel):
 
 
 class PhaseAdvanceResponse(BaseModel):
-    """Response for POST /state/phase when a contract is included."""
+    """Response for POST /state/phase when a contract is included.
+
+    ``end_session_instruction`` is the deterministic end-of-phase directive
+    surfaced identically by CLI, web, and proxy (D9).  Present on every
+    successful phase advance.
+    """
 
     success: Literal[True] = True
     kind: str
@@ -213,6 +218,7 @@ class PhaseAdvanceResponse(BaseModel):
     lease_expires_at: str | None = None
     conflict: StateConflictInfo | None = None
     contract_id: str | None = None
+    end_session_instruction: str | None = None
 
 
 # ---------------------------------------------------------------------------

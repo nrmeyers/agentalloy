@@ -672,3 +672,168 @@ class TestTE2:
             assert "StateClient" not in source, (
                 f"{py_file.name} imports StateClient — in-process paths must use StateStore directly"
             )
+
+
+# ---------------------------------------------------------------------------
+# End session instruction in response
+# ---------------------------------------------------------------------------
+
+
+class TestEndSessionInstruction:
+    """Phase advance responses include end_session_instruction (D9)."""
+
+    def test_end_session_instruction_present_on_fast_path(self, state_client: TestClient) -> None:
+        """Fast path (no contract) returns end_session_instruction."""
+        resp = state_client.post("/state/phase", json={"value": "build"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["end_session_instruction"] is not None
+        assert "`build`" in body["end_session_instruction"]
+        assert "End this session" in body["end_session_instruction"]
+
+    def test_end_session_instruction_present_with_contract(self, full_client: TestClient) -> None:
+        """Transactional path (with contract) returns end_session_instruction."""
+        payload = {
+            "value": "spec",
+            "contract": {
+                "contract_id": "ctr-esi-1",
+                "phase": "spec",
+                "slug": "esi-slug",
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["end_session_instruction"] is not None
+        assert "`spec`" in body["end_session_instruction"]
+
+    def test_end_session_instruction_content(self, state_client: TestClient) -> None:
+        """Instruction mentions restart and next phase label."""
+        resp = state_client.post("/state/phase", json={"value": "design"})
+        assert resp.status_code == 200
+        instruction = resp.json()["end_session_instruction"]
+        assert "restart the harness" in instruction
+        assert "design" in instruction
+
+
+# ---------------------------------------------------------------------------
+# Posture rewrite with repo_root
+# ---------------------------------------------------------------------------
+
+
+class TestPostureRewrite:
+    """Posture rewrite fires when repo_root is provided on phase advance."""
+
+    def test_posture_rewrite_called_on_fast_path(
+        self, state_client: TestClient, tmp_path: Path
+    ) -> None:
+        """Fast path calls _rewrite_posture when repo_root is set."""
+        from unittest.mock import patch
+
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]) as mock_rewrite:
+            resp = state_client.post(
+                "/state/phase?repo_root=" + str(tmp_path),
+                json={"value": "build"},
+            )
+            assert resp.status_code == 200
+            mock_rewrite.assert_called_once_with(tmp_path, "build")
+
+    def test_posture_rewrite_called_with_contract(
+        self, full_client: TestClient, tmp_path: Path
+    ) -> None:
+        """Transactional path calls _rewrite_posture when repo_root is set."""
+        from unittest.mock import patch
+
+        payload = {
+            "value": "spec",
+            "contract": {
+                "contract_id": "ctr-pr-1",
+                "phase": "spec",
+                "slug": "pr-slug",
+            },
+        }
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]) as mock_rewrite:
+            resp = full_client.post(
+                "/state/phase?repo_root=" + str(tmp_path),
+                json=payload,
+            )
+            assert resp.status_code == 200
+            mock_rewrite.assert_called_once_with(tmp_path, "spec")
+
+    def test_no_posture_rewrite_without_repo_root(self, state_client: TestClient) -> None:
+        """Omitting repo_root skips posture rewrite."""
+        from unittest.mock import patch
+
+        with patch("agentalloy.api.state_router._rewrite_posture", return_value=[]) as mock_rewrite:
+            resp = state_client.post("/state/phase", json={"value": "build"})
+            assert resp.status_code == 200
+            mock_rewrite.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Posture rewrite soft-failing
+# ---------------------------------------------------------------------------
+
+
+class TestPostureRewriteSoftFail:
+    """Posture rewrite failures must not block phase advances."""
+
+    def test_rewrite_error_does_not_block_fast_path(
+        self, state_client: TestClient, tmp_path: Path
+    ) -> None:
+        """rewrite_enforcement_posture raising an exception still returns 200."""
+        from unittest.mock import patch
+
+        with patch(
+            "agentalloy.install.subcommands.wire_harness.rewrite_enforcement_posture",
+            side_effect=RuntimeError("disk full"),
+        ):
+            resp = state_client.post(
+                "/state/phase?repo_root=" + str(tmp_path),
+                json={"value": "build"},
+            )
+            assert resp.status_code == 200
+            assert resp.json()["value"] == "build"
+
+    def test_rewrite_error_does_not_block_transactional_path(
+        self, full_client: TestClient, tmp_path: Path
+    ) -> None:
+        """rewrite_enforcement_posture raising an exception still commits the
+        transaction."""
+        from unittest.mock import patch
+
+        payload = {
+            "value": "spec",
+            "contract": {
+                "contract_id": "ctr-sf-1",
+                "phase": "spec",
+                "slug": "sf-slug",
+            },
+        }
+        with patch(
+            "agentalloy.install.subcommands.wire_harness.rewrite_enforcement_posture",
+            side_effect=RuntimeError("permission denied"),
+        ):
+            resp = full_client.post(
+                "/state/phase?repo_root=" + str(tmp_path),
+                json=payload,
+            )
+            assert resp.status_code == 200
+            assert resp.json()["contract_id"] == "ctr-sf-1"
+
+    def test_rewrite_helper_swallows_exception(self, tmp_path: Path) -> None:
+        """The _rewrite_posture helper itself returns [] on error."""
+        from unittest.mock import patch
+
+        from agentalloy.api.state_router import _rewrite_posture
+
+        with patch.object(
+            __import__(
+                "agentalloy.install.subcommands.wire_harness",
+                fromlist=["rewrite_enforcement_posture"],
+            ),
+            "rewrite_enforcement_posture",
+            side_effect=ImportError("no module"),
+        ):
+            result = _rewrite_posture(tmp_path, "build")
+            assert result == []

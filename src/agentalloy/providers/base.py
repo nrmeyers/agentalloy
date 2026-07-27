@@ -216,8 +216,8 @@ def sdd_instructions_markdown(port: int) -> str:
         "If unreachable, ignore this block.\n\n"
         "**Open every session with intake.** Check `.agentalloy/phase`:\n"
         "- If it names a phase other than `intake`, work is in progress — tell the user where\n"
-        "  they left off (the phase + the active contract under `.agentalloy/contracts/`) and\n"
-        "  ask whether to resume there or start something new. Resume → continue in that phase.\n"
+        "  they left off (the phase + the active contract) and ask whether to resume there or\n"
+        "  start something new. Resume → continue in that phase.\n"
         "  New → `agentalloy phase set intake`, then run intake.\n"
         "- Otherwise run **intake**: a brief intent interview, decide **full SDD vs the fast\n"
         "  lane**, and write a contract — which hands off to the chosen route.\n\n"
@@ -229,3 +229,99 @@ def sdd_instructions_markdown(port: int) -> str:
         "```\n\n"
         "Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (`sdd-fast` = the fast lane).\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Enforcement posture (D1–D9)
+# ---------------------------------------------------------------------------
+
+# Phases that get deny rules on source/test writes.  Explicit allow-list —
+# not "deny unless build" — so QA (which edits src/tests) and unknown phases
+# stay open.  An unknown/unreadable phase fails open (writes nothing).
+DENIED_PHASES: frozenset[str] = frozenset({"intake", "spec", "design"})
+
+# Patterns denied by claude-code during pre-build phases.
+DENY_PATTERNS: tuple[str, ...] = (
+    "Write(src/**)",
+    "Edit(src/**)",
+    "Write(tests/**)",
+    "Edit(tests/**)",
+)
+
+# Codex writable_roots during pre-build phases (docs stay writable).
+CODEX_ALLOWED_ROOTS: tuple[str, ...] = ("docs/", ".agentalloy/")
+
+# Harnesses that support Tier A enforcement (harness-level permission config).
+TIER_A_HARNESSES: frozenset[str] = frozenset({"claude-code", "codex"})
+
+# Per-phase artifact labels for denial messages.
+_PHASE_ARTIFACT: dict[str, str] = {
+    "intake": "a contract",
+    "spec": "docs/spec/<slug>.md",
+    "design": "docs/design/<slug>/{approach,tasks,test-plan}.md",
+}
+
+
+def is_tier_a_enforced(harness: str) -> bool:
+    """Return True if *harness* supports Tier A (harness-level deny rules)."""
+    return harness in TIER_A_HARNESSES
+
+
+def build_claude_code_permissions(phase: str) -> dict[str, object]:
+    """Build the ``permissions`` block for ``.claude/settings.local.json``.
+
+    During denied phases returns ``{"deny": [...patterns]}``; during all other
+    phases returns ``{"deny": []}`` (posture present but unlocked).
+    """
+    if phase in DENIED_PHASES:
+        return {"deny": list(DENY_PATTERNS)}
+    return {"deny": []}
+
+
+def build_codex_workspace_write(phase: str) -> dict[str, object]:
+    """Build the ``workspace-write`` block for codex's ``config.toml``.
+
+    During denied phases narrows ``writable_roots`` to docs/.agentalloy;
+    during all other phases returns an empty dict (no restriction).
+    """
+    if phase in DENIED_PHASES:
+        return {"writable_roots": list(CODEX_ALLOWED_ROOTS)}
+    return {}
+
+
+def build_denial_message(phase: str, owed_artifacts: list[str] | None = None) -> str:
+    """Build the denial message shown when a write is blocked.
+
+    Names the current phase and the artifact that phase owes.
+    """
+    artifact = _PHASE_ARTIFACT.get(phase, "the phase's deliverable")
+    if owed_artifacts:
+        artifact = ", ".join(owed_artifacts)
+    return f"[AgentAlloy] Write denied in phase `{phase}` — complete {artifact} before advancing."
+
+
+def end_session_instruction(phase: str) -> str:
+    """Build the end-session instruction for a phase advance.
+
+    Identical string surfaced by CLI, web, and proxy responses.
+    """
+    next_phase = _next_phase_label(phase)
+    return (
+        f"Phase advanced to `{phase}`. "
+        f"End this session and restart the harness so the new posture takes effect. "
+        f"Next: {next_phase}."
+    )
+
+
+def _next_phase_label(phase: str) -> str:
+    """Human label for what to do after entering *phase*."""
+    labels: dict[str, str] = {
+        "intake": "run intake to capture the request",
+        "spec": "write the spec document",
+        "design": "produce the design artifacts",
+        "build": "work the design's tasks with tests",
+        "qa": "record the QA review document",
+        "ship": "write the ship summary and rollback plan",
+        "sdd-fast": "write the fast-lane document and pass tests",
+    }
+    return labels.get(phase, f"work in the {phase} phase")

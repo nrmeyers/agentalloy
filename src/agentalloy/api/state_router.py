@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -39,6 +40,7 @@ from agentalloy.api.state_models import (
     StateWriteRequest,
     StateWriteResponse,
 )
+from agentalloy.providers.base import end_session_instruction
 from agentalloy.storage.state_store import DuckDBStateStore
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,24 @@ def _contract_row_to_response(row: dict[str, Any]) -> ContractResponse:
         updated_at=str(row["updated_at"]),
         body=row.get("body"),
     )
+
+
+def _rewrite_posture(root: Path, phase: str) -> list[str]:
+    """Rewrite enforcement posture files for wired Tier A harnesses.
+
+    Thin wrapper around ``rewrite_enforcement_posture`` so the router can
+    call it from ``asyncio.to_thread``.  Soft: any failure is logged and
+    swallowed — a posture rewrite failure must not block the phase advance.
+    """
+    try:
+        from agentalloy.install.subcommands.wire_harness import (
+            rewrite_enforcement_posture as _rewrite,
+        )
+
+        return _rewrite(root, phase)
+    except Exception:
+        logger.debug("posture rewrite failed for %s phase=%s", root, phase, exc_info=True)
+        return []
 
 
 async def _trigger_compose_in_process(
@@ -281,6 +301,14 @@ async def read_state(
 async def write_phase(
     req: PhaseAdvanceRequest,
     request: Request,
+    repo_root: str | None = Query(
+        default=None,
+        description=(
+            "Absolute path to the repository root.  When provided the endpoint "
+            "rewrites the enforcement posture files for wired Tier A harnesses "
+            "after a successful phase advance."
+        ),
+    ),
     store: DuckDBStateStore = Depends(get_state_store),
 ) -> PhaseAdvanceResponse:
     """Advance the phase, optionally storing a contract in the same transaction.
@@ -290,16 +318,23 @@ async def write_phase(
     contract write fails, the phase advance is rolled back entirely.
 
     On success, compose is triggered in-process (the write *is* the trigger).
+    When ``repo_root`` is provided the enforcement posture is rewritten for
+    any wired Tier A harnesses (D1–D9).
     """
+    phase_value = req.value
+
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
-        result = await asyncio.to_thread(store.write, "phase", req.value, owner=req.owner)
+        result = await asyncio.to_thread(store.write, "phase", phase_value, owner=req.owner)
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
             raise HTTPException(
                 status_code=409,
                 detail=response.model_dump(),  # type: ignore[union-attr]
             )
+        # Posture rewrite after successful phase advance
+        if repo_root is not None:
+            await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
         return PhaseAdvanceResponse(
             kind=result.kind,
             value=result.value,
@@ -307,6 +342,7 @@ async def write_phase(
             lease_expires_at=(
                 result.lease_expires_at.isoformat() if result.lease_expires_at else None
             ),
+            end_session_instruction=end_session_instruction(phase_value),
         )
 
     # Transactional path: phase + contract in one BEGIN/COMMIT
@@ -314,7 +350,7 @@ async def write_phase(
     try:
         with store.transaction() as tx:
             # Write the phase
-            result = tx.write("phase", req.value, owner=req.owner)
+            result = tx.write("phase", phase_value, owner=req.owner)
             if result.conflict is not None:
                 raise HTTPException(
                     status_code=409,
@@ -339,7 +375,9 @@ async def write_phase(
                 success_criteria=contract.success_criteria,
                 body=contract.body,
             )
-        # Transaction committed — trigger compose in-process
+        # Transaction committed — posture rewrite + in-process compose
+        if repo_root is not None:
+            await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
         asyncio.create_task(_trigger_compose_in_process(store, contract_id, request))
     except HTTPException:
         raise
@@ -356,6 +394,7 @@ async def write_phase(
         owner=result.owner,
         lease_expires_at=(result.lease_expires_at.isoformat() if result.lease_expires_at else None),
         contract_id=contract_id,
+        end_session_instruction=end_session_instruction(phase_value),
     )
 
 

@@ -755,6 +755,19 @@ async def evaluate_signal(
                 try:
                     _write_phase_atomic(cwd, decision.to_phase, session_key=session_key)
                     logger.info("Phase transition: %s -> %s", phase, decision.to_phase)
+                    # Rewrite enforcement posture for wired Tier A harnesses (D1–D9)
+                    try:
+                        from agentalloy.install.subcommands.wire_harness import (
+                            rewrite_enforcement_posture,
+                        )
+
+                        rewrite_enforcement_posture(cwd, decision.to_phase)
+                    except Exception:
+                        logger.debug(
+                            "posture rewrite failed after transition to %s",
+                            decision.to_phase,
+                            exc_info=True,
+                        )
                 except OSError as e:
                     logger.warning("Failed to write phase file: %s", e)
 

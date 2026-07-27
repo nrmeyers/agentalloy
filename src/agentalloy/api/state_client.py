@@ -61,17 +61,36 @@ class StateClient:
 
     # -- write operations ------------------------------------------------
 
-    def set_phase(self, value: str) -> dict[str, Any]:
-        """Set the current phase via the service."""
-        return self._post("/state/phase", {"value": value})
+    def set_phase(self, value: str, *, repo_root: str | None = None) -> dict[str, Any]:
+        """Set the current phase via the service.
 
-    def set_phase_with_contract(self, value: str, contract: dict[str, Any]) -> dict[str, Any]:
+        When *repo_root* is provided, it is forwarded as a query parameter
+        so the server can rewrite the enforcement posture for wired Tier A
+        harnesses (D1–D9) as part of the phase advance.
+        """
+        body: dict[str, Any] = {"value": value}
+        path = "/state/phase"
+        if repo_root is not None:
+            path += f"?repo_root={urllib.parse.quote(repo_root)}"
+        return self._post(path, body)
+
+    def set_phase_with_contract(
+        self, value: str, contract: dict[str, Any], *, repo_root: str | None = None
+    ) -> dict[str, Any]:
         """Advance phase and store a contract in a single transaction.
 
         Both writes commit or roll back together.  Raises ``StateClientError``
         if the service rejects the payload or rolls back.
+
+        When *repo_root* is provided, it is forwarded as a query parameter
+        so the server can rewrite the enforcement posture for wired Tier A
+        harnesses (D1–D9) as part of the phase advance.
         """
-        return self._post("/state/phase", {"value": value, "contract": contract})
+        body: dict[str, Any] = {"value": value, "contract": contract}
+        path = "/state/phase"
+        if repo_root is not None:
+            path += f"?repo_root={urllib.parse.quote(repo_root)}"
+        return self._post(path, body)
 
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""

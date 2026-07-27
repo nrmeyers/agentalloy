@@ -1988,6 +1988,173 @@ def _wire_mcp_fallback(
 
 
 # ---------------------------------------------------------------------------
+# Enforcement posture (D1–D9)
+# ---------------------------------------------------------------------------
+
+
+def _read_phase_file(root: Path) -> str | None:
+    """Read the current phase from ``.agentalloy/phase``, or ``None``."""
+    phase_path = root / ".agentalloy" / "phase"
+    if phase_path.exists():
+        content = phase_path.read_text().strip()
+        if content:
+            return content
+    return None
+
+
+def _has_wire_record_for_harness(root: Path, harness: str) -> bool:
+    """Check if *root* has any WireRecord entries for *harness*.
+
+    Reads the user-scoped install state and checks if any
+    ``harness_files_written`` entry matches both the repo root and the harness.
+    """
+    try:
+        st = install_state.load_state(root)
+    except SystemExit:
+        return False
+    repo_str = str(root)
+    for entry in st.get("harness_files_written", []):
+        if entry.get("repo_root") == repo_str and entry.get("harness") == harness:
+            return True
+    return False
+
+
+def _has_any_wire_record(root: Path) -> bool:
+    """Check if *root* has any WireRecord entries at all."""
+    try:
+        st = install_state.load_state(root)
+    except SystemExit:
+        return False
+    repo_str = str(root)
+    return any(entry.get("repo_root") == repo_str for entry in st.get("harness_files_written", []))
+
+
+def _apply_claude_code_posture(root: Path, phase: str) -> bool:
+    """Rewrite ``.claude/settings.local.json`` with the enforcement posture.
+
+    Merges the ``permissions`` block into the existing settings, preserving
+    all other keys (``env``, MCP toggles, etc.).  During denied phases the
+    deny list is populated; during all other phases it is empty (unlocked).
+
+    Returns True if the file was written, False if it did not exist.
+    """
+    from agentalloy.providers.base import (
+        build_claude_code_permissions,
+    )
+
+    settings_path = root / ".claude" / "settings.local.json"
+    if not settings_path.exists():
+        return False
+
+    try:
+        data: dict[str, Any] = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    permissions = build_claude_code_permissions(phase)
+    data["permissions"] = permissions
+
+    try:
+        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
+            settings_path, json.dumps(data, indent=2) + "\n"
+        )
+        return True
+    except OSError:
+        return False
+
+
+def _apply_codex_posture(root: Path, phase: str) -> bool:
+    """Rewrite ``.codex/config.toml`` with the enforcement posture.
+
+    Merges the ``workspace-write`` block into the existing TOML config.
+    During denied phases narrows ``writable_roots`` to docs/.agentalloy;
+    during all other phases removes the restriction.
+
+    Returns True if the file was written, False if it did not exist.
+    """
+    import tomllib as _tomllib
+
+    import tomli_w
+
+    from agentalloy.providers.base import (
+        build_codex_workspace_write,
+    )
+
+    config_path = root / ".codex" / "config.toml"
+    if not config_path.exists():
+        return False
+
+    try:
+        data: dict[str, Any] = _tomllib.loads(config_path.read_text())
+    except (Exception, OSError):  # noqa: BLE001
+        return False
+
+    if not isinstance(data, dict):
+        return False
+
+    ww = build_codex_workspace_write(phase)
+    if ww:
+        data["workspace-write"] = ww
+    elif "workspace-write" in data:
+        del data["workspace-write"]
+
+    try:
+        install_state._atomic_write(  # pyright: ignore[reportPrivateUsage]
+            config_path, tomli_w.dumps(data)
+        )
+        return True
+    except OSError:
+        return False
+
+
+def rewrite_enforcement_posture(root: Path, phase: str) -> list[str]:
+    """Rewrite the enforcement posture files for all wired Tier A harnesses.
+
+    Called after a phase transition to update deny rules.  Only touches repos
+    that have a ``WireRecord`` — an unwired repo is never modified.
+
+    Args:
+        root: The repository root.
+        phase: The new phase value.
+
+    Returns:
+        List of harness names whose posture was successfully rewritten.
+    """
+    # Guard: unwired repos are never touched
+    if not _has_any_wire_record(root):
+        return []
+
+    rewritten: list[str] = []
+
+    if _has_wire_record_for_harness(root, "claude-code") and _apply_claude_code_posture(
+        root, phase
+    ):
+        rewritten.append("claude-code")
+
+    if _has_wire_record_for_harness(root, "codex") and _apply_codex_posture(root, phase):
+        rewritten.append("codex")
+
+    return rewritten
+
+
+def should_show_banner(root: Path) -> bool:
+    """Return True if the intake banner should be shown for this repo.
+
+    The banner is dropped only where Tier A enforcement is actually applied
+    (a wired repo with a claude-code or codex WireRecord).  Otherwise the
+    banner remains the only signal.
+    """
+    if not _has_any_wire_record(root):
+        return True
+    if _has_wire_record_for_harness(root, "claude-code"):
+        return False
+    return not _has_wire_record_for_harness(root, "codex")
+
+
+# ---------------------------------------------------------------------------
 # Result + state recording
 # ---------------------------------------------------------------------------
 
