@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "39dd862697ce",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "frontend/src/App.tsx",
+    "frontend/src/components/DataTable.tsx",
+    "frontend/src/components/Layout.tsx",
+    "frontend/src/components/StatusBadge.tsx",
+    "frontend/src/hooks/useContracts.ts",
+    "frontend/src/lib/api.ts",
+    "frontend/src/lib/types.ts",
+    "frontend/src/pages/ContractsPage.tsx",
+    "src/agentalloy/web/ops_api.py",
+    "tests/web/test_ops_api.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/39/dd862697ce/0/metadata.json",
+      "transcript": "/39/dd862697ce/0/full.jsonl",
+      "compact_transcript": "/39/dd862697ce/0/transcript.jsonl",
+      "content_hash": "/39/dd862697ce/0/content_hash.txt",
+      "prompt": "/39/dd862697ce/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 2440,
+    "cache_read_tokens": 454157,
+    "output_tokens": 1010,
+    "api_call_count": 4
+  }
+}
