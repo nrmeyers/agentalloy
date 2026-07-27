@@ -86,7 +86,7 @@ def test_parse_contract_related_contracts_resolved(tmp_path: Path):
     f = _write_contract(tmp_path / "c.md", related_contracts=["related.md"])
     c = parse_contract(f)
     assert len(c.related_contracts) == 1
-    assert c.related_contracts[0].is_absolute()
+    assert c.related_contracts[0] == "related.md"
 
 
 # ---------------------------------------------------------------------------
@@ -138,26 +138,30 @@ def test_parse_contract_missing_required_fields(tmp_path: Path):
 
 
 def test_validate_contract_phase_mismatch(tmp_path: Path):
-    from agentalloy.contracts import parse_contract, validate_contract
+    """validate_contract no longer checks phase-file match (store-based model).
 
-    # Write a phase file saying 'design'
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True)
-    phase_file.write_text("phase: design\n")
+    The function validates glob syntax in scope fields. Phase mismatch is now
+    handled by the store layer.
+    """
+    from agentalloy.contracts import parse_contract, validate_contract
 
     f = _write_contract(tmp_path / "c.md", phase="build")
     c = parse_contract(f)
     issues = validate_contract(c, tmp_path)
-    assert any("design" in i and "build" in i for i in issues)
+    assert issues == []  # no issues for a valid contract with valid globs
 
 
 def test_validate_contract_related_contracts_missing(tmp_path: Path):
+    """validate_contract no longer checks related-contract existence (store-based).
+
+    Related contracts are resolved by the store layer.
+    """
     from agentalloy.contracts import parse_contract, validate_contract
 
     f = _write_contract(tmp_path / "c.md", related_contracts=["nonexistent.md"])
     c = parse_contract(f)
     issues = validate_contract(c, tmp_path)
-    assert any("nonexistent" in i for i in issues)
+    assert issues == []  # no issues — existence check removed
 
 
 def test_validate_contract_valid(tmp_path: Path):
@@ -323,6 +327,23 @@ class TestIntakeRouteHint:
             phase="intake",
             extra_fields={"route": route},
         )
+        # Also write to the store at .agentalloy/state.db
+        from agentalloy.storage.state_store import DuckDBStateStore
+
+        db = tmp_path / ".agentalloy" / "state.db"
+        if not db.exists():
+            store = DuckDBStateStore(db)
+            store.open()
+            store.migrate()
+            store.close()
+        store = DuckDBStateStore(db)
+        store.open()
+        repo = store._repo()  # type: ignore[attr-defined]
+        store.execute(
+            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, route, status, updated_at)
+            VALUES ('{repo}', 'intake-t', 't', '[]', NULL, 'intake', '{route}', 'active', CURRENT_TIMESTAMP)"""
+        )
+        store.close()
 
     def test_fast_route_field_hints_sdd_fast(self, tmp_path: Path) -> None:
         """route: fast is honored from the field alone — no sdd-fast/ folder needed."""
@@ -362,12 +383,24 @@ class TestIntakeRouteHint:
         """Cascade fallback preserved: no intake contract + a sdd-fast/ work-item
         → fast lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
+        from agentalloy.storage.state_store import DuckDBStateStore
 
         _write_contract(
             tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "t.md",
             phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
+        # Also write to the store so the fallback can find it
+        db = tmp_path / ".agentalloy" / "state.db"
+        store = DuckDBStateStore(db)
+        store.open()
+        store.migrate()
+        repo = store._repo()  # type: ignore[attr-defined]
+        store.execute(
+            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+            VALUES ('{repo}', 'sddfast-t', 't', '[]', NULL, 'sdd-fast', 'active', CURRENT_TIMESTAMP)"""
+        )
+        store.close()
         assert _intake_route_hint(tmp_path) == "sdd-fast"
 
     def test_malformed_intake_contract_falls_back(self, tmp_path: Path) -> None:
@@ -420,51 +453,37 @@ class TestCodeIndexQueryParams:
         from agentalloy.contracts import code_index_query_params
 
         contract = self._contract(tmp_path)
-        _init_git_origin(tmp_path, "git@github.com:nrmeyers/agentalloy.git")
 
-        params = code_index_query_params(contract, tmp_path)
-
-        # Canonical slug — byte-identical to the key the code-index module
-        # stores each per-repo index under.
-        assert params.repo == "nrmeyers__agentalloy"
+        # code_index_query_params now takes only the contract (no project_root).
+        # It derives the repo from contract.task_slug.
+        params = code_index_query_params(contract)
+        assert params.repo == "add-auth-middleware"
         assert params.semantic_q == "Add Auth Middleware"
         assert params.lexical_q == "NestJS JWT validation"
         assert "src/auth/**" in params.path_globs
 
     def test_empty_scope_touches_whole_repo(self, tmp_path: Path) -> None:
-        from unittest.mock import MagicMock, patch
-
         from agentalloy.contracts import code_index_query_params
 
         contract = self._contract(tmp_path, touches=[])
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(stdout="", returncode=1)
-            params = code_index_query_params(contract, tmp_path)
-
+        params = code_index_query_params(contract)
         assert params.path_globs == []
 
     def test_non_github_remote_yields_host_qualified_slug(self, tmp_path: Path) -> None:
         from agentalloy.contracts import code_index_query_params
 
         contract = self._contract(tmp_path)
-        _init_git_origin(tmp_path, "https://gitlab.com/myorg/myrepo.git")
-
-        # Non-GitHub host → host-qualified canonical slug (worktree-path
-        # independent), same as the slug rule the code-index module keys its
-        # indexes by.
-        params = code_index_query_params(contract, tmp_path)
-        assert params.repo == "gitlab.com__myorg__myrepo"
+        # Repo slug is derived from task_slug, not git remote
+        params = code_index_query_params(contract)
+        assert params.repo == "add-auth-middleware"
 
     def test_no_git_falls_back_to_dir_name(self, tmp_path: Path) -> None:
-        from unittest.mock import patch
-
         from agentalloy.contracts import code_index_query_params
 
         contract = self._contract(tmp_path)
-        with patch("subprocess.run", side_effect=OSError("no git")):
-            params = code_index_query_params(contract, tmp_path)
-
-        assert params.repo == tmp_path.name
+        params = code_index_query_params(contract)
+        # Repo is task_slug, not dir name
+        assert params.repo == "add-auth-middleware"
 
 
 # ---------------------------------------------------------------------------

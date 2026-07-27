@@ -72,7 +72,7 @@ def _start_fake_service(
             body = health_handler
         elif "/state/phase" in path:
             body = phase_handler
-        elif "/state/approved" in path:
+        elif "/state/approve" in path:
             body = approved_handler
         elif "/state/cursor" in path:
             body = cursor_handler
@@ -184,7 +184,7 @@ class TestStateClientWrites:
             client = StateClient(base_url="http://127.0.0.1:19993")
             result = client.approve("spec")
             assert result == {"ok": True, "phase": "design"}
-            assert any("POST /state/approved" in r for r in log)
+            assert any("POST /state/approve" in r for r in log)
         finally:
             thread.join(timeout=2.0)
 
@@ -243,7 +243,9 @@ class TestPhaseSetRouting:
             ) as mock_post:
                 result = run_phase_set("build", root=tmp_path)
                 assert result == service_response
-                mock_post.assert_called_once_with("build")
+                # repo_root must be forwarded — the service skips the
+                # enforcement-posture rewrite without it.
+                mock_post.assert_called_once_with("build", repo_root=str(tmp_path))
 
     def test_clears_phase_file_on_set(self, tmp_path: Path) -> None:
         """phase clear still works when service is down (file-mirror path)."""

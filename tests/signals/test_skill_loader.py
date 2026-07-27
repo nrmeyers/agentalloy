@@ -47,11 +47,10 @@ class TestReadParity:
         file_phase = sl._read_phase(fixture_repo)
         assert file_phase == "spec"
 
-        # Store-backed read (mirror the file into the store first).
+        # Store-backed read.
         db = fixture_repo / "state.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
-            store.mirror_to_files("phase", "spec", fixture_repo / ".agentalloy")
             store.write("phase", "spec")
             assert store.read("phase") == file_phase
 
@@ -279,71 +278,6 @@ class TestConcurrentTransition:
         # File should still be readable.
         cursor = sl._read_cursor(fixture_repo)
         assert cursor is not None
-
-
-# ---------------------------------------------------------------------------
-# AC-6: Integration test (sidecar + statusline)
-# ---------------------------------------------------------------------------
-
-
-class TestMirrorCompatibility:
-    """AC-6: Sidecar and statusline consumers see store writes via file mirror."""
-
-    def test_sidecar_sees_store_write(self, fixture_repo: Path) -> None:
-        """After a store write + mirror, a sidecar watcher sees the update."""
-        from agentalloy.storage.state_store import DuckDBStateStore
-
-        ag_dir = fixture_repo / ".agentalloy"
-
-        # Write to the store.
-        db = fixture_repo / "state.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            store.write("phase", "design")
-            store.mirror_to_files("phase", "design", ag_dir)
-
-        # The sidecar reads the file mirror.
-        sidecar_phase = (ag_dir / "phase").read_text().strip()
-        assert sidecar_phase == "design"
-
-        # Clean up.
-        if db.exists():
-            db.unlink()
-
-    def test_statusline_sees_cursor_update(self, fixture_repo: Path) -> None:
-        """Statusline reads cursor from the file mirror after a store write."""
-        from agentalloy.storage.state_store import DuckDBStateStore
-
-        ag_dir = fixture_repo / ".agentalloy"
-
-        db = fixture_repo / "state.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            store.write("cursor", "task-42")
-            store.mirror_to_files("cursor", "task-42", ag_dir)
-
-        statusline_cursor = (ag_dir / "cursor").read_text().strip()
-        assert statusline_cursor == "task-42"
-
-        if db.exists():
-            db.unlink()
-
-    def test_approved_mirror_creates_phase_file(self, fixture_repo: Path) -> None:
-        """approved kind mirrors to .agentalloy/approved/<phase>."""
-        from agentalloy.storage.state_store import DuckDBStateStore
-
-        ag_dir = fixture_repo / ".agentalloy"
-
-        db = fixture_repo / "state.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            store.mirror_to_files("approved", "spec", ag_dir)
-
-        approved_file = ag_dir / "approved" / "spec"
-        assert approved_file.exists()
-
-        if db.exists():
-            db.unlink()
 
 
 # ---------------------------------------------------------------------------

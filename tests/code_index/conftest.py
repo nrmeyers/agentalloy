@@ -209,9 +209,10 @@ def seed_index(
     vectors: Sequence[CodeVectorRow] = (),
     centrality: dict[str, float] | None = None,
     fts: bool = False,
+    repo_path: str | None = None,
 ) -> None:
     """Write graph + vector fixtures directly into the per-slug stores."""
-    handles = open_code_index(settings, slug, role="service")
+    handles = open_code_index(settings, slug, role="service", repo_path=repo_path)
     try:
         handles.graph.upsert_symbols(symbols)
         handles.graph.upsert_edges(edges)

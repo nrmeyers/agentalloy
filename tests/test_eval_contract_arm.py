@@ -39,7 +39,7 @@ def test_fixtures_parse_and_match_the_tag_map() -> None:
 
 def test_contract_payload_matches_proxy_tier2_shape() -> None:
     """The arm's payload must be what compose_request_from_contract produces —
-    contract_tags + contract_path present, legs=domain, task = fixture body."""
+    contract_tags + contract_id present, legs=domain, task = fixture body."""
     from agentalloy.api.compose_models import compose_request_from_contract
 
     task = DOMAIN_TASKS[0]
@@ -49,7 +49,7 @@ def test_contract_payload_matches_proxy_tier2_shape() -> None:
     payload = req.model_dump(mode="json")
     assert payload["legs"] == "domain"
     assert payload["contract_tags"] == DOMAIN_CONTRACT_TAGS[task.task_id]
-    assert payload["contract_path"].endswith(f"{task.task_id}.md")
+    assert payload["contract_id"] is not None
     assert payload["task"].strip() == task.spec.strip()
     assert payload["phase"] == task.phase
 

@@ -34,6 +34,7 @@ from agentalloy.signals.predicates import (
     evaluate_predicate,
     section_completeness,
 )
+from agentalloy.storage.state_store import DuckDBStateStore
 
 MET = PredicateResult.MET
 NOT_MET = PredicateResult.NOT_MET
@@ -44,6 +45,15 @@ def _ctx(tmp_path: Path, **kwargs: Any) -> PredicateContext:
     defaults: dict[str, Any] = dict(project_root=tmp_path, current_phase="build")
     defaults.update(kwargs)
     return PredicateContext(**defaults)
+
+
+def _make_store(tmp_path: Path) -> DuckDBStateStore:
+    """Create a DuckDB store for testing contract predicates."""
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    store.migrate()
+    return store
 
 
 # ---------------------------------------------------------------------------
@@ -369,10 +379,14 @@ def test_git_state_returns_unknown_on_failure(tmp_path: Path):
 
 
 def test_contract_exists_found(tmp_path: Path):
-    cd = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    cd.mkdir(parents=True)
-    (cd / "task.md").write_text("---\nphase: build\ntask_slug: t\ndomain_tags: [A]\n---\n\nbody\n")
-    ctx = _ctx(tmp_path, contracts_root=tmp_path / ".agentalloy" / "contracts")
+    store = _make_store(tmp_path)
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'c-001', 'task', '["A"]', NULL, 'build', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
     assert eval_contract_exists({"phase": "build", "count_min": 1}, ctx) == MET
 
 
@@ -382,13 +396,14 @@ def test_contract_exists_not_found(tmp_path: Path):
 
 
 def test_contract_has_tags(tmp_path: Path):
-    import yaml
-
-    cd = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    cd.mkdir(parents=True)
-    fm = {"phase": "build", "task_slug": "t", "domain_tags": ["NestJS", "JWT"]}
-    (cd / "task.md").write_text(f"---\n{yaml.dump(fm)}---\n\nbody\n")
-    ctx = _ctx(tmp_path, contracts_root=tmp_path / ".agentalloy" / "contracts")
+    store = _make_store(tmp_path)
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'c-001', 'task', '["NestJS","JWT"]', NULL, 'build', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
+    ctx = _ctx(tmp_path, store=_get_store(tmp_path))
     assert eval_contract_has_tags({"phase": "build", "any_of": ["NestJS"]}, ctx) == MET
     assert eval_contract_has_tags({"phase": "build", "any_of": ["React"]}, ctx) == NOT_MET
 
@@ -607,31 +622,81 @@ def _write_tasks(tmp_path: Path, *, slug: str, items: int) -> None:
     (d / "tasks.md").write_text(f"# {slug}\n\n## Tasks\n\n{body}\n")
 
 
+def _get_store(tmp_path: Path) -> DuckDBStateStore | None:
+    """Get the store attached to tmp_path, if any."""
+    db = tmp_path / "test_state.db"
+    if db.exists():
+        return DuckDBStateStore(db, read_only=True).open()
+    return None
+
+
 def _seed_design(tmp_path: Path, slug: str) -> None:
-    """A design-phase contract so the gate resolves ``slug`` as the work-item."""
+    """A design-phase contract so the gate resolves ``slug`` as the work-item.
+
+    Writes to both the store (authoritative) and filesystem (for cursor resolution).
+    The contract slug matches the work_item so _resolve_workitem_slug -> _item_build_contracts works.
+    Creates the store if it doesn't exist yet.
+    """
+    # Filesystem: for cursor file
     d = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
 
+    # Store: authoritative source (create if needed)
+    db = tmp_path / "test_state.db"
+    if not db.exists():
+        _make_store(tmp_path).close()
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'design-{slug}', '{slug}', '[]', NULL, 'design', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
+
 
 def _set_cursor(tmp_path: Path, rel: str) -> None:
     (tmp_path / ".agentalloy").mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".agentalloy" / "cursor").write_text(rel)
+    # Store just the slug (stem of the filename) for cursor resolution
+    slug = Path(rel).stem
+    (tmp_path / ".agentalloy" / "cursor").write_text(slug)
 
 
 def _write_build_contract(
     tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "feat"
 ) -> None:
+    """Write a build contract to both filesystem and store.
+
+    The store is authoritative; filesystem is for backward compat.
+    """
+    # Filesystem: for backward compat
     bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     bc.mkdir(parents=True, exist_ok=True)
     tag_str = "[" + ", ".join(tags) + "]"
     wi = f"work_item: {work_item}\n" if work_item is not None else ""
     (bc / name).write_text(f"---\nphase: build\n{wi}domain_tags: {tag_str}\n---\n\n# {name}\n")
 
+    # Store: authoritative source
+    db = tmp_path / "test_state.db"
+    if db.exists():
+        store = DuckDBStateStore(db)
+        store.open()
+        repo = store._repo()  # type: ignore[attr-defined]
+        slug = Path(name).stem
+        tags_json = "[" + ", ".join(f'"{t}"' for t in tags) + "]"
+        wi_val = f"'{work_item}'" if work_item is not None else "NULL"
+        store.execute(
+            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+            VALUES ('{repo}', 'build-{slug}', '{slug}', '{tags_json}', {wi_val}, 'build', 'active', CURRENT_TIMESTAMP)"""
+        )
+        store.close()
+
 
 # The gate scopes to the cursor'd DESIGN work-item; every case seeds one.
 def _design_ctx(tmp_path: Path) -> PredicateContext:
-    return _ctx(tmp_path, current_phase="design")
+    store = _get_store(tmp_path)
+    return _ctx(tmp_path, current_phase="design", store=store)
 
 
 def test_cover_tasks_met(tmp_path: Path) -> None:

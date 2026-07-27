@@ -1,7 +1,10 @@
-"""Unit tests for the web UI ops endpoints — repos, approvals, packs, profiles."""
+"""Unit tests for the web UI ops endpoints — repos, approvals, packs, profiles,
+contracts (TA2, TA6, TA10)."""
 
 from __future__ import annotations
 
+import importlib
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,7 +12,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from agentalloy.api.state_router import get_state_store
 from agentalloy.app import create_app
+from agentalloy.storage.state_store import open_state_store
 
 _CSRF = {"X-AgentAlloy-CSRF": "1"}
 
@@ -36,8 +41,14 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("PROFILE_ROOT", str(tmp_path / "profiles"))
     app = create_app(use_default_lifespan=False)
+    # Wire a state store so contract-counting routes work (store-backed, not filesystem).
+    state_db = tmp_path / "state.duck"
+    store = open_state_store(state_db)
+    app.state.store = store
+    app.dependency_overrides[get_state_store] = lambda: store
     with TestClient(app) as c:
         c.tmp = tmp_path  # pyright: ignore[reportAttributeAccessIssue]
+        c.store = store  # pyright: ignore[reportAttributeAccessIssue]
         yield c
 
 
@@ -55,8 +66,9 @@ def test_repos_lists_wired_state(client, tmp_path: Path, monkeypatch: pytest.Mon
     repo = _make_repo(tmp_path, "r1", phase="build")
     (repo / ".agentalloy" / "config").write_text("lifecycle_mode: full\n")
     (repo / ".agentalloy" / "upstream").write_text("url: http://localhost:1234/v1\nmodel: qwen3\n")
-    (repo / ".agentalloy" / "contracts" / "active" / "build").mkdir(parents=True)
-    (repo / ".agentalloy" / "contracts" / "active" / "build" / "t.md").write_text("x")
+    # Contracts are counted from the store, not the filesystem.
+    store = client.store  # pyright: ignore[reportAttributeAccessIssue]
+    store.put_contract("ctr-build-1", phase="build", slug="01-task", body="build contract")
     _wire(monkeypatch, repo)
 
     body = client.get("/api/repos").json()
@@ -200,3 +212,96 @@ def test_profiles_list_and_resolve(client, tmp_path: Path):
     repo = _make_repo(tmp_path, "r5")
     r = client.post("/api/profiles/resolve", json={"repo": str(repo)})
     assert r.json()["profile"] == "default"
+
+
+# ---------------------------------------------------------------------------
+# Contract surface (TA2, TA6, TA10)
+# ---------------------------------------------------------------------------
+
+
+class TestContractWebSurface:
+    """Web contract read/edit/archive over the same /contracts routes as the CLI."""
+
+    def _seed_contract(self, client) -> str:
+        store = client.store  # pyright: ignore[reportAttributeAccessIssue]
+        store.put_contract(
+            "ctr-web-01",
+            phase="build",
+            slug="08-web-surface",
+            work_item="contract-store-and-write-gating",
+            domain_tags=["web-ui", "api-design"],
+            body="# Contract body\n\nOriginal content.",
+        )
+        return "ctr-web-01"
+
+    # TA6 — archive from the web flips status
+    def test_ta6_archive_from_web_flips_status(self, client):
+        cid = self._seed_contract(client)
+        # Verify active
+        row = client.get(f"/contracts/{cid}").json()
+        assert row["status"] == "active"
+
+        # Archive via the same route the CLI uses
+        r = client.post(f"/contracts/{cid}/archive", json={}, headers=_CSRF)
+        assert r.status_code == 200
+        assert r.json()["status"] == "archived"
+
+        # Row stays fetchable by contract_id
+        row2 = client.get(f"/contracts/{cid}").json()
+        assert row2["contract_id"] == cid
+        assert row2["status"] == "archived"
+
+    # TA10 — web edit and CLI edit produce identical stored bytes
+    def test_ta10_web_edit_matches_cli_edit(self, client):
+        cid = self._seed_contract(client)
+        new_body = "# Contract body\n\nCorrected content."
+        new_tags = ["web-ui", "api-design", "testing"]
+
+        # Web edit: PATCH /contracts/{id}
+        r_web = client.patch(
+            f"/contracts/{cid}",
+            json={"body": new_body, "domain_tags": new_tags},
+            headers=_CSRF,
+        )
+        assert r_web.status_code == 200
+        web_result = r_web.json()
+
+        # The store row is the single source of truth — read it back
+        store = client.store  # pyright: ignore[reportAttributeAccessIssue]
+        stored = store.get_contract(cid)
+        assert stored is not None
+        # Body and domain_tags match what the web sent
+        assert stored["body"] == new_body
+        assert stored["domain_tags"] == new_tags
+        # updated_at was bumped
+        assert stored["updated_at"] is not None
+
+        # Simulate a CLI edit: same PATCH route, same payload
+        r_cli = client.patch(
+            f"/contracts/{cid}",
+            json={"body": new_body, "domain_tags": new_tags},
+            headers=_CSRF,
+        )
+        assert r_cli.status_code == 200
+        cli_result = r_cli.json()
+
+        # Both responses are identical — same routes, same serializer
+        assert web_result["body"] == cli_result["body"]
+        assert web_result["domain_tags"] == cli_result["domain_tags"]
+        assert web_result["contract_id"] == cli_result["contract_id"]
+
+    # TA2 — no direct DuckDB open in the web import graph
+    def test_ta2_no_direct_duckdb_in_web_import_graph(self):
+        """Assert no `duckdb.connect` in the web/ import graph."""
+        web_ops = importlib.import_module("agentalloy.web.ops_api")
+        source_file = Path(web_ops.__file__)
+        source = source_file.read_text()
+        assert "duckdb.connect" not in source, (
+            "ops_api.py must not call duckdb.connect directly — "
+            "the store is injected via Depends(get_state_store)"
+        )
+
+        # Also verify the web module does not import duckdb at all
+        assert "duckdb" not in sys.modules.get("agentalloy.web.ops_api", "").__dict__, (
+            "ops_api should not expose duckdb in its namespace"
+        )

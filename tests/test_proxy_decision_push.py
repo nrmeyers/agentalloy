@@ -26,7 +26,7 @@ def _mock_orch() -> object:
 
 def _contract(touches: list[str], phase: str = "design") -> Contract:
     return Contract(
-        path=Path("c.md"),
+        contract_id="test-id",
         phase=phase,
         task_slug="t",
         domain_tags=[],
@@ -35,7 +35,6 @@ def _contract(touches: list[str], phase: str = "design") -> Contract:
         related_contracts=[],
         created_at=None,
         body="",
-        route="full",
     )
 
 

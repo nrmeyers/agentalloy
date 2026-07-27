@@ -654,24 +654,21 @@ def _load_workflow_prose_override(skill_id: str, cwd: Path) -> tuple[str | None,
 def _read_intake_route(project_root: Path) -> str | None:
     """The ``route`` field declared by the intake contract, or ``None``.
 
-    Reads the newest contract under ``.agentalloy/contracts/intake/`` and returns
-    its ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
-    failure (no dir, no contract, malformed frontmatter, unreadable) returns
-    ``None``. Never raises.
+    Queries the store for active intake contracts and returns the newest one's
+    ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
+    failure returns ``None``. Never raises.
     """
-    from agentalloy.contracts import active_dir
-
-    intake_dir = active_dir(project_root, "intake")
     try:
-        candidates = sorted(intake_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError:
-        return None
-    if not candidates:
-        return None
-    try:
-        from agentalloy.contracts import parse_contract
+        from agentalloy.storage.state_store import open_state_store
 
-        return parse_contract(candidates[0]).route
+        db_path = project_root / ".agentalloy" / "state.db"
+        store = open_state_store(db_path)
+        contracts = store.list_contracts(phase="intake", status="active")
+        if not contracts:
+            return None
+        # Return the most recently updated contract's route
+        newest = max(contracts, key=lambda c: c.get("updated_at", ""))
+        return newest.get("route")
     except Exception:
         return None
 
@@ -682,12 +679,12 @@ def _intake_route_hint(project_root: Path) -> str | None:
     Routing is authoritative on the intake contract's ``route`` field: ``fast``
     selects the compressed ``sdd-fast`` lane, ``full`` (the default) advances the
     linear graph intake → spec. The field is trusted directly — intake's exit gate
-    is route-agnostic (``contracts/**/*.md``), so the destination phase composes
-    against whatever work-item exists.
+    is route-agnostic, so the destination phase composes against whatever work-item
+    exists.
 
-    When no intake contract is readable, fall back to the prior-authors-next
-    cascade signal: the presence of a ``contracts/sdd-fast/`` work-item selects the
-    fast route. Best-effort; any read failure falls back to the default full route.
+    When no intake contract is readable, fall back to the store: the presence of
+    an active sdd-fast work-item selects the fast route. Best-effort; any read
+    failure falls back to the default full route.
     """
     route = _read_intake_route(project_root)
     if route == "fast":
@@ -697,15 +694,17 @@ def _intake_route_hint(project_root: Path) -> str | None:
     if route == "full":
         return None
 
-    # No readable intake contract: fall back to directory-presence (cascade).
-    from agentalloy.contracts import active_dir
-
-    fast_dir = active_dir(project_root, "sdd-fast")
+    # No readable intake contract: fall back to store-presence (cascade).
     try:
-        if fast_dir.is_dir() and any(fast_dir.glob("*.md")):
+        from agentalloy.storage.state_store import open_state_store
+
+        db_path = project_root / ".agentalloy" / "state.db"
+        store = open_state_store(db_path)
+        fast_contracts = store.list_contracts(phase="sdd-fast", status="active")
+        if fast_contracts:
             return "sdd-fast"
-    except OSError:
-        return None
+    except Exception:
+        pass
     return None
 
 
@@ -757,8 +756,14 @@ def _build_predicate_context(
     tool_path: str | None = None,
     file_events: list[Path] | None = None,
     session_key: str | None = None,
+    store: Any = None,
 ) -> PredicateContext:
-    """Build a ``PredicateContext`` for gate evaluation."""
+    """Build a ``PredicateContext`` for gate evaluation.
+
+    ``store`` is the in-process ``DuckDBStateStore`` handle. Pass it from callers
+    that hold the store directly (compose, proxy_signal). Out-of-process callers
+    (CLI, web UI) pass ``None`` and query the store over HTTP instead.
+    """
     from agentalloy.signals.predicates import PredicateContext
 
     recent_tool_use: dict[str, Any] | None = None
@@ -771,6 +776,6 @@ def _build_predicate_context(
         recent_prompt_text=prompt_text,
         recent_tool_use=recent_tool_use,
         file_events_since=file_events or [],
-        contracts_root=project_root / ".agentalloy" / "contracts",
+        store=store,
         session_key=session_key,
     )

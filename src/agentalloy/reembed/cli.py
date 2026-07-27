@@ -75,6 +75,7 @@ EXIT_DEDUP = 4
 
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _TRANSIENT_ERRORS = (LMTimeout, LMUnavailable)
+_EMBED_BATCH_SIZE = 32  # texts per /v1/embeddings call (matches code-index pipeline)
 
 # Shown when the corpus DB is held by another process. The usual holder is the
 # running agentalloy service (its read-only handle blocks writers for its whole
@@ -236,6 +237,43 @@ def _embed_with_retry(
             # Malformed response is not retry-able.
             raise
     raise last_exc if last_exc else LMClientError("embed failed after retries")
+
+
+def _batch_embed_with_retry(
+    embed_fn: Callable[[list[str]], list[list[float]]],
+    texts: list[str],
+    *,
+    delays: tuple[float, ...] = _RETRY_DELAYS,
+) -> list[list[float]]:
+    """Send ``texts`` to ``embed_fn`` in batches of ``_EMBED_BATCH_SIZE``.
+
+    Each batch is retried on transient failures. A single batch failure
+    halts the run — the caller's idempotent re-run picks up where we left off.
+    """
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), _EMBED_BATCH_SIZE):
+        batch = texts[start : start + _EMBED_BATCH_SIZE]
+        last_exc: LMClientError | None = None
+        for attempt, delay in enumerate([0.0, *delays]):
+            if delay > 0.0:
+                time.sleep(delay)
+            try:
+                vectors.extend(embed_fn(batch))
+                break
+            except _TRANSIENT_ERRORS as exc:
+                last_exc = exc
+                logger.warning(
+                    "embed transient failure (attempt %d, batch %d-%d): %s",
+                    attempt + 1,
+                    start,
+                    start + len(batch) - 1,
+                    exc,
+                )
+            except LMBadResponse:
+                raise
+        else:
+            raise last_exc if last_exc else LMClientError("embed failed after retries")
+    return vectors
 
 
 # ---------------------------------------------------------------------------
@@ -646,44 +684,83 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
         if fragments:
             embed_client: EmbedClient = get_embed_client(settings)
             try:
-
-                def _embed(text: str) -> list[float]:
+                # --- payload preparation (truncation logic) ------------------
+                def _prepare(text: str) -> str:
                     payload = f"search_document: {text}"
                     # nomic-embed-text-v1.5 serves at n_ctx_train=2048; inputs
                     # over that overflow the (u)batch. Truncate long fragments
                     # to 2040 tokens via llama-server's tokenizer; short ones
                     # (<1500 chars, <=~1500 tok worst case) skip the round-trip.
-                    if len(payload) > 1500:
+                    if len(payload) <= 1500:
+                        return payload
 
-                        def _ntok(s: str) -> int:
-                            resp = embed_client._post_json(  # type: ignore[attr-defined]
-                                "/tokenize", {"content": s}
-                            )
-                            return len(resp.get("tokens", []))
+                    def _ntok(s: str) -> int:
+                        resp = embed_client._post_json(  # type: ignore[attr-defined]
+                            "/tokenize", {"content": s}
+                        )
+                        return len(resp.get("tokens", []))
 
-                        try:
-                            for _ in range(6):
-                                n = _ntok(payload)
-                                if n <= 2040:
-                                    break
-                                payload = payload[: int(len(payload) * 2040 / max(n, 1) * 0.95)]
-                        except Exception:
-                            payload = payload[:4000]
-                    vectors = embed_client.embed(model=model_id, texts=[payload])
-                    return vectors[0]
+                    try:
+                        for _ in range(6):
+                            n = _ntok(payload)
+                            if n <= 2040:
+                                break
+                            payload = payload[: int(len(payload) * 2040 / max(n, 1) * 0.95)]
+                    except Exception:
+                        payload = payload[:4000]
+                    return payload
 
-                def _record(frag: FragmentNeedingEmbedding, vec: list[float]) -> None:
+                # --- batch embed (32 texts per call) -------------------------
+                def _embed_batch(texts: list[str]) -> list[list[float]]:
+                    return embed_client.embed(model=model_id, texts=texts)
+
+                # Collect indexed texts, then embed in batches.
+                indexed_texts: list[tuple[FragmentNeedingEmbedding, str]] = [
+                    (frag, _indexed_text(frag, card_mode)) for frag in fragments
+                ]
+                payloads = [_prepare(text) for _, text in indexed_texts]
+                all_vectors = _batch_embed_with_retry(_embed_batch, payloads)
+
+                # Distribute vectors back and insert into Lance.
+                now = int(time.time())
+                stats = ReembedStats(discovered=len(fragments))
+                progress_tty = sys.stderr.isatty()
+                for i, (frag, indexed) in enumerate(indexed_texts):
+                    vec = all_vectors[i]
+                    try:
+                        vs.insert_embeddings(
+                            [
+                                FragmentEmbedding(
+                                    fragment_id=frag.fragment_id,
+                                    embedding=vec,
+                                    skill_id=frag.skill_id,
+                                    category=frag.category,
+                                    fragment_type=frag.fragment_type,
+                                    embedded_at=now,
+                                    embedding_model=model_id,
+                                    prose=indexed,
+                                )
+                            ]
+                        )
+                    except Exception as exc:  # pyright: ignore[reportBroadExceptionCaught]
+                        stats.failed += 1
+                        stats.failures.append((frag.fragment_id, f"insert: {exc}"))
+                        logger.error("insert failed for %s: %s", frag.fragment_id, exc)
+                        raise
+
                     embedded_vecs[frag.fragment_id] = (frag.skill_id, vec)
-
-                stats = reembed_fragments(
-                    fragments,
-                    embed_fn=_embed,
-                    vector_store=vs,
-                    embedding_model=model_id,
-                    progress_tty=sys.stderr.isatty(),
-                    on_embedded=_record,
-                    card_index=card_mode,
-                )
+                    stats.embedded += 1
+                    if progress_tty:
+                        print(
+                            f"\r  embedded {stats.embedded}/{stats.discovered}",
+                            end="",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    elif stats.embedded % 10 == 0:
+                        logger.info("  embedded %d/%d", stats.embedded, stats.discovered)
+                if progress_tty:
+                    print(file=sys.stderr)
                 stats.log_summary()
 
                 # Stage 0 'cards'/'both': rebuild the synthetic card layer.
@@ -696,12 +773,30 @@ def main(argv: list[str] | None = None, *, result_sink: dict[str, Any] | None = 
                         store, vs, skill_id=args.skill_id, force=True
                     )
                     removed = vs.delete_cards(skill_id=args.skill_id)
-                    n_cards = insert_cards(
-                        all_frags,
-                        embed_fn=_embed,
-                        vector_store=vs,
-                        embedding_model=model_id,
-                    )
+                    reps = _distinct_skill_cards(all_frags)
+                    card_texts = [
+                        build_card_text(rep.canonical_name, rep.domain_tags, rep.description)
+                        for rep in reps
+                    ]
+                    card_vectors = _batch_embed_with_retry(_embed_batch, card_texts)
+                    card_now = int(time.time())
+                    n_cards = 0
+                    for rep, text, vec in zip(reps, card_texts, card_vectors, strict=True):
+                        vs.insert_embeddings(
+                            [
+                                FragmentEmbedding(
+                                    fragment_id=card_fragment_id(rep.skill_id),
+                                    embedding=vec,
+                                    skill_id=rep.skill_id,
+                                    category=rep.category,
+                                    fragment_type=CARD_FRAGMENT_TYPE,
+                                    embedded_at=card_now,
+                                    embedding_model=model_id,
+                                    prose=text,
+                                )
+                            ]
+                        )
+                        n_cards += 1
                     logger.info(
                         "card index: replaced %d card(s) with %d (mode=%s)",
                         removed,

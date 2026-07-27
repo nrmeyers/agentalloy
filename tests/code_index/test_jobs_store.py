@@ -146,16 +146,23 @@ def test_indexed_repos_registry(store: CodeIndexJobsStore) -> None:
     assert repo.data_dir == "/data/repos/org__x"
     assert repo.last_indexed_at is None and repo.head_sha is None
 
-    # Upsert updates paths but preserves created_at / last_indexed_at.
-    store.upsert_repo(slug="org__x", repo_path="/moved/x", data_dir="/data/repos/org__x")
-    moved = store.get_repo("org__x")
-    assert moved is not None
-    assert moved.repo_path == "/moved/x"
-    assert moved.created_at == repo.created_at
-    assert moved.last_indexed_at is None
+    # Upsert same (slug, repo_path) updates data_dir but preserves created_at.
+    store.upsert_repo(slug="org__x", repo_path="/src/x", data_dir="/data/repos/org__x_v2")
+    updated = store.get_repo("org__x")
+    assert updated is not None
+    assert updated.data_dir == "/data/repos/org__x_v2"
+    assert updated.created_at == repo.created_at
+    assert updated.last_indexed_at is None
 
-    assert store.mark_indexed("org__x", head_sha="abc123") is True
-    indexed = store.get_repo("org__x")
+    # Upsert different repo_path creates a second checkout entry.
+    store.upsert_repo(slug="org__x", repo_path="/moved/x", data_dir="/data/repos/org__x_moved")
+    repos = store.get_repos_by_slug("org__x")
+    assert len(repos) == 2
+    paths = {r.repo_path for r in repos}
+    assert paths == {"/src/x", "/moved/x"}
+
+    assert store.mark_indexed("org__x", head_sha="abc123", repo_path="/src/x") is True
+    indexed = store.get_repo("org__x", repo_path="/src/x")
     assert indexed is not None
     assert indexed.last_indexed_at is not None and indexed.head_sha == "abc123"
     assert store.mark_indexed("missing") is False
@@ -163,8 +170,8 @@ def test_indexed_repos_registry(store: CodeIndexJobsStore) -> None:
     store.upsert_repo(slug="org__y", repo_path="/src/y", data_dir="/data/repos/org__y")
     assert {r.slug for r in store.list_repos()} == {"org__x", "org__y"}
 
-    assert store.delete_repo("org__y") is True
-    assert store.delete_repo("org__y") is False
+    assert store.delete_repo("org__y") == 1
+    assert store.delete_repo("org__y") == 0
     assert store.get_repo("org__y") is None
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -535,9 +536,9 @@ class TestUnwire:
     def test_unwire_clears_repo_lifecycle_state(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """wire seeds .agentalloy/phase + config; unwire must remove them so a
-        later re-wire starts clean (the dogfood found a fresh wire inheriting a
-        stale `build` phase). Contracts are user work and are preserved."""
+        """wire seeds .agentalloy/phase + config; unwire removes phase but
+        preserves config (the wired-repo marker). Store rows are deleted via
+        the state store. Contracts are user work and are preserved."""
         from agentalloy.install.subcommands import unwire, wire
 
         (repo_root / "CLAUDE.md").write_text("# Project\n")  # auto-detect claude-code
@@ -550,10 +551,20 @@ class TestUnwire:
         contract.parent.mkdir(parents=True)
         contract.write_text("# user's contract\n")
 
-        rc = unwire._run(argparse.Namespace(force=False, json=True))
+        # Mock the store operations since we don't have a real DB in this test
+        mock_store = MagicMock()
+        mock_store.delete_repo_rows.return_value = 0
+        mock_settings = MagicMock()
+        mock_settings.duckdb_path = str(repo_root / "agentalloy.duck")
+
+        with (
+            patch("agentalloy.config.get_settings", return_value=mock_settings),
+            patch("agentalloy.storage.state_store.open_state_store", return_value=mock_store),
+        ):
+            rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
         assert not phase.exists(), "unwire must clear the stale phase"
-        assert not config.exists(), "unwire must clear the lifecycle config"
+        assert config.exists(), "unwire must preserve the wired-repo config"
         assert contract.exists(), "unwire must preserve user contracts"
 
 

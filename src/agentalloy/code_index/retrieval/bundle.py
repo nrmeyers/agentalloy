@@ -74,6 +74,8 @@ class Bundle(BaseModel):
     total_chars: int
     seed_count: int
     items: list[BundleItem]
+    indexed_head: str | None = None
+    """HEAD commit this index was built from (for staleness detection)."""
 
 
 def _is_test_path(qualified_name: str, file_path: str | None) -> bool:
@@ -84,13 +86,19 @@ def _is_test_path(qualified_name: str, file_path: str | None) -> bool:
 
 
 async def build_bundle(
-    state: CodeIndexState, slug: str, task: str, *, budget_chars: int = 24000
+    state: CodeIndexState,
+    slug: str,
+    task: str,
+    *,
+    budget_chars: int = 24000,
+    repo_path: str | None = None,
+    indexed_head: str | None = None,
 ) -> Bundle:
     """Assemble a budgeted context bundle for ``task`` (see module docstring)."""
-    seeds = await semantic_search(state, slug, task, k=_SEED_K)
+    seeds = await semantic_search(state, slug, task, k=_SEED_K, repo_path=repo_path)
 
     def _assemble() -> Bundle:
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo_path)
         try:
             graph = handles.graph
 
@@ -155,6 +163,7 @@ async def build_bundle(
                 total_chars=total,
                 seed_count=len(seeds),
                 items=items,
+                indexed_head=indexed_head,
             )
         finally:
             handles.close()

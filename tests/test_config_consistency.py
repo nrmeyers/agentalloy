@@ -433,7 +433,7 @@ def test_tier2_k_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_compose_request_from_contract_threads_k() -> None:
     contract = Contract(
-        path=Path("/x/.agentalloy/contracts/c.md"),
+        contract_id="test-contract-id",
         phase="build",
         task_slug="do-the-thing",
         domain_tags=["react"],

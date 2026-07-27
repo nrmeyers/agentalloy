@@ -20,6 +20,7 @@ SLUG = "demo"
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Iterator[TestClient]:
     monkeypatch.setenv("CODE_INDEX_ENABLED", "1")
+    repo_path = "/repo/demo"
     seed_index(
         settings,
         SLUG,
@@ -32,11 +33,12 @@ def client(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Iterator[Test
             calls_edge("pkg.util.caller", "pkg.util.helper"),
             calls_edge("pkg.main.main", "pkg.util.caller"),
         ],
+        repo_path=repo_path,
     )
     state = CodeIndexState(
         settings=settings, embed_client=FixedEmbedClient(axis_vec(0)), jobs=open_jobs(settings)
     )
-    state.jobs.upsert_repo(slug=SLUG, repo_path="/repo/demo", data_dir=settings.code_index_data_dir)
+    state.jobs.upsert_repo(slug=SLUG, repo_path=repo_path, data_dir=settings.code_index_data_dir)
     app = create_app(use_default_lifespan=False)
     app.dependency_overrides[get_code_index_state] = lambda: state
     with TestClient(app) as c:

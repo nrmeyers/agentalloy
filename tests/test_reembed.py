@@ -233,3 +233,94 @@ def test_non_lock_db_error_still_raises() -> None:
         mock_settings.return_value.runtime_embedding_model = "test-model"
         with pytest.raises(RuntimeError, match="corrupt"):
             reembed_main([])
+
+
+class TestBatchEmbedWithRetry:
+    """Tests for _batch_embed_with_retry — the new batched embed path."""
+
+    def test_single_batch_sends_all_texts(self) -> None:
+        """A batch smaller than EMBED_BATCH_SIZE sends one call."""
+        from agentalloy.reembed.cli import _batch_embed_with_retry
+
+        def fake_embed(texts):
+            return [[0.1 * i, 0.2 * i] for i in range(len(texts))]
+
+        texts = ["a", "b", "c"]
+        result = _batch_embed_with_retry(fake_embed, texts)
+        assert len(result) == 3
+        assert result[0] == [0.0, 0.0]
+        assert result[1] == [0.1, 0.2]
+        assert result[2] == [0.2, 0.4]
+
+    def test_multiple_batches(self) -> None:
+        """Texts exceeding EMBED_BATCH_SIZE are split into multiple calls."""
+        from agentalloy.reembed.cli import _EMBED_BATCH_SIZE, _batch_embed_with_retry
+
+        calls: list[list[str]] = []
+
+        def fake_embed(texts):
+            calls.append(texts)
+            return [[float(i)] for i in range(len(texts))]
+
+        # 40 texts → 2 batches (32 + 8)
+        texts = [f"t{i}" for i in range(40)]
+        result = _batch_embed_with_retry(fake_embed, texts)
+        assert len(result) == 40
+        assert len(calls) == 2
+        assert len(calls[0]) == _EMBED_BATCH_SIZE
+        assert len(calls[1]) == 8
+
+    def test_transient_retry_retries_batch(self) -> None:
+        """A transient error on a batch triggers retry with backoff."""
+        from agentalloy.lm_client import LMUnavailable
+        from agentalloy.reembed.cli import _batch_embed_with_retry
+
+        attempts = 0
+
+        def flaky_embed(texts):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise LMUnavailable("timeout")
+            return [[0.5] * 2 for _ in texts]
+
+        result = _batch_embed_with_retry(flaky_embed, ["x", "y"], delays=(0.01, 0.01, 0.01))
+        assert len(result) == 2
+        assert attempts == 2
+
+    def test_transient_failure_exhausts_retries(self) -> None:
+        """After all retries fail, the last transient error is re-raised."""
+        from agentalloy.lm_client import LMUnavailable
+        from agentalloy.reembed.cli import _batch_embed_with_retry
+
+        def always_fail(texts):
+            raise LMUnavailable("down")
+
+        with pytest.raises(LMUnavailable, match="down"):
+            _batch_embed_with_retry(always_fail, ["x"], delays=(0.01, 0.01, 0.01))
+
+    def test_bad_response_fails_fast(self) -> None:
+        """LMBadResponse is not retried — it raises immediately."""
+        from agentalloy.lm_client import LMBadResponse
+        from agentalloy.reembed.cli import _batch_embed_with_retry
+
+        attempts = 0
+
+        def bad_embed(texts):
+            nonlocal attempts
+            attempts += 1
+            raise LMBadResponse("malformed")
+
+        with pytest.raises(LMBadResponse, match="malformed"):
+            _batch_embed_with_retry(bad_embed, ["x"], delays=(0.01, 0.01, 0.01))
+        assert attempts == 1
+
+    def test_empty_texts_returns_empty(self) -> None:
+        """An empty input list returns an empty result without calling embed_fn."""
+        from agentalloy.reembed.cli import _batch_embed_with_retry
+
+        def should_not_call(texts):
+            raise AssertionError("should not be called")
+
+        result = _batch_embed_with_retry(should_not_call, [])
+        assert result == []

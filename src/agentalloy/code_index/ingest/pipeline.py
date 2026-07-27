@@ -369,7 +369,7 @@ async def run_index_job(
         # --- parse phase (CPU-bound: worker thread) ---------------------------
         _check_cancel()
         _progress("parse", 5.0)
-        paths = code_index_paths(settings, slug)
+        paths = code_index_paths(settings, slug, repo_path=str(repo_path))
         parsed = await asyncio.to_thread(_parse_full, repo_path, paths.cache_dir)
         hashes = {s.qualified_name: content_hash(s) for s in parsed.symbols}
         code_symbols = [_to_code_symbol(s, hashes[s.qualified_name]) for s in parsed.symbols]
@@ -381,7 +381,7 @@ async def run_index_job(
         _progress("graph", 20.0)
         await asyncio.to_thread(lock.acquire)
         locked = True
-        handles = open_code_index(settings, slug, role="service")
+        handles = open_code_index(settings, slug, role="service", repo_path=str(repo_path))
         graph, vectors = handles.graph, handles.vectors
 
         prior = {} if force else await asyncio.to_thread(graph.content_hashes)
@@ -505,7 +505,7 @@ async def run_index_job(
             data_dir=str(paths.repo_dir),
             head_sha=head_sha,
         )
-        jobs.mark_indexed(slug, head_sha=head_sha)
+        jobs.mark_indexed(slug, head_sha=head_sha, repo_path=str(repo_path))
         jobs.mark_done(
             job_id,
             symbol_count=len(code_symbols),

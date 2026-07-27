@@ -56,7 +56,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: ship reads its incoming work-item from contracts/active/ship/ (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
+change_summary: "two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
 raw_prose: |
   # SDD — Ship (Deliver)
 
@@ -72,7 +72,7 @@ raw_prose: |
 
   ## 1. Confirm you're shipping the verified state
 
-  Read your work-item contract (`.agentalloy/contracts/active/ship/<slug>.md`, which qa
+  Read your work-item contract (`agentalloy contract show <slug>`, which qa
   authored — the proxy front-loaded the delivery skills for it on entry). Ship
   rides on QA's report (`docs/qa/<slug>.md`) — don't re-run the review. Just
   confirm the commit you're shipping *is* the reviewed one: the suite is green at
@@ -128,7 +128,9 @@ raw_prose: |
   Ask every time; a small model that "stays in ship" and skips the ask is the
   exact failure this guards against. The one transition out is back to the top,
   and it's the user's call, not yours: when they say go, reset the lifecycle with
-  `agentalloy phase set intake` so the next session opens fresh. **Never reset on
+  `agentalloy phase set intake` so the next session opens fresh. Phase advance
+  ends this session; the next phase begins in a fresh one, and `agentalloy resume`
+  rebuilds context. **Never reset on
   your own initiative** — a green CI run or a successful merge is not permission;
   only the user's explicit yes is. Ask, then wait for the answer.
 

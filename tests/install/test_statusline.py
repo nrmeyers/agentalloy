@@ -2,28 +2,34 @@
 
 The status line is the *standing state* surface: Claude Code runs it once per
 turn and renders the active phase, so the phase stays visible without the proxy
-injecting anything. These cover the renderer (phase present / absent / walk-up)
-and the wire-time settings merge (claim-when-absent, respect a user's own line,
-single combined record with clean-room).
+injecting anything. These cover the renderer (phase present / absent / degraded
+badge) and the wire-time settings merge (claim-when-absent, respect a user's
+own line, single combined record with clean-room).
+
+The statusline now reads phase via StateClient over HTTP. When the service is
+down, it renders a ``[degraded]`` badge — never a stale or invented phase.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from agentalloy.install.subcommands.statusline import _find_phase, render_statusline
+from agentalloy.api.state_client import StateClient
+from agentalloy.install.subcommands.statusline import render_statusline
 from agentalloy.install.subcommands.wire import (
     _write_claude_settings,  # pyright: ignore[reportPrivateUsage]
 )
 
 
-def _phase(root: Path, phase: str) -> None:
+def _wire_repo(root: Path) -> None:
+    """Mark a directory as a wired repo (config file is the marker)."""
     d = root / ".agentalloy"
     d.mkdir(parents=True, exist_ok=True)
-    (d / "phase").write_text(f"phase: {phase}\nworkflow: sdd-{phase}\n")
+    (d / "config").write_text("harness: claude-code\n")
 
 
 class TestRenderStatusline:
@@ -32,30 +38,45 @@ class TestRenderStatusline:
         # appended — this asserts the bare phase line.
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
         monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
-        _phase(tmp_path, "build")
-        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
+        _wire_repo(tmp_path)
+
+        mock_client = patch.object(StateClient, "is_running", return_value=True)
+        mock_get_state = patch.object(StateClient, "get_state", return_value="build")
+
+        with mock_client, mock_get_state:
+            assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
 
     def test_badge_appended_when_update_available(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.install import release_check
 
-        _phase(tmp_path, "build")
+        _wire_repo(tmp_path)
         monkeypatch.setattr(
             release_check,
             "notice",
             lambda: {"current": "3.7.0", "latest": "v3.8.0", "bump_type": "minor"},
         )
-        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build  ↑3.8.0"
+
+        mock_client = patch.object(StateClient, "is_running", return_value=True)
+        mock_get_state = patch.object(StateClient, "get_state", return_value="build")
+
+        with mock_client, mock_get_state:
+            assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build  ↑3.8.0"
 
     def test_no_badge_when_up_to_date(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.install import release_check
 
-        _phase(tmp_path, "build")
+        _wire_repo(tmp_path)
         monkeypatch.setattr(release_check, "notice", lambda: None)
-        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
+
+        mock_client = patch.object(StateClient, "is_running", return_value=True)
+        mock_get_state = patch.object(StateClient, "get_state", return_value="build")
+
+        with mock_client, mock_get_state:
+            assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
 
     def test_badge_fail_silent_on_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -65,49 +86,45 @@ class TestRenderStatusline:
         def _boom() -> dict[str, str]:
             raise RuntimeError("kaboom")
 
-        _phase(tmp_path, "build")
+        _wire_repo(tmp_path)
         monkeypatch.setattr(release_check, "notice", _boom)
-        # The badge must never break the per-turn status line.
-        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
 
-    def test_free_badge_when_free_flow(
+        mock_client = patch.object(StateClient, "is_running", return_value=True)
+        mock_get_state = patch.object(StateClient, "get_state", return_value="build")
+
+        with mock_client, mock_get_state:
+            # The badge must never break the per-turn status line.
+            assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build"
+
+    def test_degraded_when_service_down(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
         monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
-        d = tmp_path / ".agentalloy"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "phase").write_text('phase: build\nmode: free\nfree_since: "2026-07-01T00:00:00Z"\n')
-        assert render_statusline(tmp_path) == "⚙ agentalloy ▸ build  ⏸FREE"
+        _wire_repo(tmp_path)
 
-    def test_no_free_badge_in_workflow_mode(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-        monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
-        _phase(tmp_path, "build")
-        assert "FREE" not in render_statusline(tmp_path)
+        with patch.object(StateClient, "is_running", return_value=False):
+            line = render_statusline(tmp_path)
+        assert "[degraded]" in line
 
-    def test_empty_when_no_phase(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Bound the walk-up at tmp_path so it can't reach a real ancestor phase.
+    def test_empty_when_not_wired(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Bound the walk-up at tmp_path so it can't reach a real ancestor.
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        # No .agentalloy/config → not a wired repo
         assert render_statusline(tmp_path) == ""
 
-    def test_walks_up_from_subdir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        _phase(tmp_path, "spec")
-        sub = tmp_path / "src" / "deep"
-        sub.mkdir(parents=True)
-        assert _find_phase(sub) == ("spec", None)
+    def test_empty_when_service_up_no_phase(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+        monkeypatch.delenv("AGENTALLOY_RELEASE_CHECK", raising=False)
+        _wire_repo(tmp_path)
 
-    def test_stops_at_home_boundary(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Phase lives ABOVE $HOME → not found (the walk stops at the home boundary).
-        monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
-        (tmp_path / "home").mkdir()
-        _phase(tmp_path, "qa")  # at tmp_path, above home
-        start = tmp_path / "home" / "proj"
-        start.mkdir()
-        assert _find_phase(start) == (None, None)
+        mock_client = patch.object(StateClient, "is_running", return_value=True)
+        mock_get_state = patch.object(StateClient, "get_state", return_value=None)
+
+        with mock_client, mock_get_state:
+            assert render_statusline(tmp_path) == ""
 
 
 class TestStatuslineSettingsWiring:

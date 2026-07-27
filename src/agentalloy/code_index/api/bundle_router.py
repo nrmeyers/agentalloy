@@ -31,5 +31,12 @@ async def context_bundle(
     req: BundleRequest,
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> Bundle:
-    require_indexed_repo(state, req.repo)
-    return await build_bundle(state, req.repo, req.task, budget_chars=req.budget_chars)
+    indexed = require_indexed_repo(state, req.repo)
+    return await build_bundle(
+        state,
+        req.repo,
+        req.task,
+        budget_chars=req.budget_chars,
+        repo_path=indexed.repo_path,
+        indexed_head=indexed.head_sha,
+    )

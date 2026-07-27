@@ -2,9 +2,12 @@ const statusStyles: Record<string, string> = {
   ok: 'bg-green-100 text-green-800',
   healthy: 'bg-green-100 text-green-800',
   ready: 'bg-green-100 text-green-800',
+  active: 'bg-green-100 text-green-800',
   degraded: 'bg-amber-100 text-amber-800',
   warning: 'bg-amber-100 text-amber-800',
   warming_up: 'bg-amber-100 text-amber-800',
+  archived: 'bg-gray-200 text-gray-600',
+  superseded: 'bg-purple-100 text-purple-800',
   unavailable: 'bg-red-100 text-red-800',
   error: 'bg-red-100 text-red-800',
 };

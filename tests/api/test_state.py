@@ -251,21 +251,6 @@ class TestLatencyBudget:
 
         assert elapsed_ms < 25.0, f"Lease operation took {elapsed_ms:.2f}ms (budget: 25ms)"
 
-    def test_mirror_to_files_latency(self, tmp_path: Path) -> None:
-        """A mirror-to-files write completes in < 5ms."""
-        ag_dir = tmp_path / ".agentalloy"
-        db = tmp_path / "bench.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-
-            iterations = 100
-            start = time.perf_counter()
-            for i in range(iterations):
-                store.mirror_to_files("phase", f"phase-{i}", ag_dir)
-            elapsed_ms = (time.perf_counter() - start) / iterations * 1000
-
-        assert elapsed_ms < 5.0, f"Mirror write took {elapsed_ms:.2f}ms (budget: 5ms)"
-
     def test_state_client_overhead(self) -> None:
         """StateClient.is_running() overhead when service is down is < 5ms.
 

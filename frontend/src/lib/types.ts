@@ -630,3 +630,42 @@ export interface ReadinessResponse {
   progress?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
+
+// ---------------------------------------------------------------------------
+// Contracts (/contracts/*)
+// ---------------------------------------------------------------------------
+
+export interface Contract {
+  contract_id: string;
+  phase: string;
+  slug: string;
+  work_item: string | null;
+  route: string | null;
+  domain_tags: string[] | null;
+  scope_touches: string[] | null;
+  scope_avoids: string[] | null;
+  success_criteria: string[] | null;
+  status: 'active' | 'archived' | 'superseded';
+  supersedes: string | null;
+  created_at: string;
+  updated_at: string;
+  body: string | null;
+}
+
+export interface ContractsListResponse {
+  contracts: Contract[];
+}
+
+export interface ContractPatchRequest {
+  body?: string;
+  domain_tags?: string[];
+  scope_touches?: string[];
+  scope_avoids?: string[];
+  success_criteria?: string[];
+}
+
+export interface ContractsListParams {
+  phase?: string;
+  slug?: string;
+  status?: string;
+}

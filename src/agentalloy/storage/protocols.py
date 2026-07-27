@@ -130,7 +130,7 @@ class CompositionTrace:
     response_size_chars: int | None = None
     prompt_version: str | None = None
     workflow_skill_ids: list[str] = field(default_factory=lambda: [])
-    contract_path: str | None = None
+    contract_id: str | None = None
     contract_tags: list[str] = field(default_factory=lambda: [])
     bm25_source: str = "rule-extracted"  # "rule-extracted" | "contract" | "union"
     event_type: str = "compose"  # "compose" | "proxy_request"
@@ -461,7 +461,6 @@ class StateStore(Protocol):
     ) -> LeaseResult: ...
     def release_lease(self, kind: str, session_key: str) -> None: ...
     def import_from_files(self, agentalloy_dir: Path) -> dict[str, str]: ...
-    def mirror_to_files(self, kind: str, value: str, agentalloy_dir: Path) -> bool: ...
     def close(self) -> None: ...
 
 

@@ -29,13 +29,14 @@ async def symbol_callers(
     depth: int = Query(default=1, ge=1, le=10),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[CallSiteView]:
-    require_indexed_repo(state, repo)
+    indexed = require_indexed_repo(state, repo)
     sites = await with_handles(
         state,
         repo,
         lambda h: (
             h.graph.callers(fqn) if depth == 1 else h.graph.transitive_callers(fqn, max_depth=depth)
         ),
+        repo_path=indexed.repo_path,
     )
     return [CallSiteView.from_call_site(s) for s in sites]
 
@@ -50,8 +51,10 @@ async def symbol_callees(
     repo: str = Query(description="Indexed repo slug"),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[CallSiteView]:
-    require_indexed_repo(state, repo)
-    sites = await with_handles(state, repo, lambda h: h.graph.callees(fqn))
+    indexed = require_indexed_repo(state, repo)
+    sites = await with_handles(
+        state, repo, lambda h: h.graph.callees(fqn), repo_path=indexed.repo_path
+    )
     return [CallSiteView.from_call_site(s) for s in sites]
 
 
@@ -65,8 +68,10 @@ async def symbol_detail(
     repo: str = Query(description="Indexed repo slug"),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> SymbolView:
-    require_indexed_repo(state, repo)
-    sym = await with_handles(state, repo, lambda h: h.graph.symbol(fqn))
+    indexed = require_indexed_repo(state, repo)
+    sym = await with_handles(
+        state, repo, lambda h: h.graph.symbol(fqn), repo_path=indexed.repo_path
+    )
     if sym is None:
         raise HTTPException(status_code=404, detail=f"no such symbol in {repo!r}: {fqn}")
     return SymbolView.from_symbol(sym)

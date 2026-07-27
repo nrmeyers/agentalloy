@@ -68,7 +68,8 @@ def test_resolve_current_contract_uses_cursor(tmp_path: Path) -> None:
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
     assert cid == "active/build/02-api.md"
-    assert path is not None and path.name == "02-api.md"
+    # Path component is deprecated — always None; consumers load from store via cid
+    assert path is None
 
 
 def test_resolve_current_contract_single_item_phase(tmp_path: Path) -> None:
@@ -76,7 +77,8 @@ def test_resolve_current_contract_single_item_phase(tmp_path: Path) -> None:
     _seed(tmp_path, "spec", ["the-feature"])
     cid, path = _resolve_current_contract(tmp_path, "spec")
     assert cid == "active/spec/the-feature.md"
-    assert path is not None and path.name == "the-feature.md"
+    # Path component is deprecated — always None; consumers load from store via cid
+    assert path is None
 
 
 def test_resolve_current_contract_fanout_is_strict_none(tmp_path: Path) -> None:
@@ -89,7 +91,9 @@ def test_resolve_current_contract_fanout_is_strict_none(tmp_path: Path) -> None:
     # ...an explicit cursor resolves the pointed-at work-item.
     run_task_start("02-api", tmp_path)
     cid, path = _resolve_current_contract(tmp_path, "build")
-    assert cid == "active/build/02-api.md" and path is not None and path.name == "02-api.md"
+    assert cid == "active/build/02-api.md"
+    # Path component is deprecated — always None
+    assert path is None
 
 
 def test_resolve_current_contract_none_when_absent(tmp_path: Path) -> None:
@@ -131,7 +135,8 @@ def test_phase_transition_seeds_cursor_proxy_path(tmp_path: Path) -> None:
     assert _read_cursor(tmp_path) == "active/qa/the-feature.md"  # seeded, not the stale build slug
     cid, path = _resolve_current_contract(tmp_path, "qa")
     assert cid == "active/qa/the-feature.md"
-    assert path is not None and path.name == "the-feature.md"
+    # Path component is deprecated — always None; consumers load from store via cid
+    assert path is None
 
 
 def test_phase_transition_seeds_first_build_task(tmp_path: Path) -> None:

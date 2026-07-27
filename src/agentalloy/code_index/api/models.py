@@ -61,18 +61,34 @@ class RepoView(BaseModel):
     slug: str
     repo_path: str
     last_indexed_at: int | None
-    head_sha: str | None
+    indexed_head: str | None
+    """HEAD commit the index was built from."""
+    current_head: str | None
+    """Current HEAD of the working tree (for staleness comparison)."""
+    is_stale: bool
     watch_enabled: bool
     symbol_count: int
     edge_count: int
 
     @classmethod
-    def from_repo(cls, repo: IndexedRepo, *, last_done: CodeIndexJob | None) -> RepoView:
+    def from_repo(
+        cls,
+        repo: IndexedRepo,
+        *,
+        last_done: CodeIndexJob | None,
+        current_head: str | None = None,
+    ) -> RepoView:
         return cls(
             slug=repo.slug,
             repo_path=repo.repo_path,
             last_indexed_at=repo.last_indexed_at,
-            head_sha=repo.head_sha,
+            indexed_head=repo.head_sha,
+            current_head=current_head,
+            is_stale=(
+                current_head is not None
+                and repo.head_sha is not None
+                and current_head != repo.head_sha
+            ),
             watch_enabled=repo.watch_enabled,
             symbol_count=last_done.symbol_count if last_done else 0,
             edge_count=last_done.edge_count if last_done else 0,
@@ -92,6 +108,51 @@ class WatchToggleView(BaseModel):
     watch_enabled: bool
     watching: bool  # an observer is running right now (master switch on + started)
     master_switch: bool  # CODE_INDEX_WATCH in the running service
+
+
+class MigrateLayoutRequest(BaseModel):
+    """POST /code/migrate-layout body."""
+
+    dry_run: bool = Field(
+        default=False, description="Classify every registry row but change nothing."
+    )
+    prune_missing: bool = Field(
+        default=True,
+        description=(
+            "Drop registry rows whose repo_path has been gone long enough to be a "
+            "deletion rather than a transient absence. Gated: the first sighting "
+            "only starts the clock."
+        ),
+    )
+
+
+class MigrateLayoutEntry(BaseModel):
+    """One registry row's classification and disposition."""
+
+    slug: str
+    repo_path: str
+    data_dir: str
+    verdict: str  # current | legacy | missing | unreachable | busy
+    action: str  # none | reindex | stamped | waiting | pruned | skipped
+    job_id: str | None = None
+
+
+class MigrateLayoutView(BaseModel):
+    """POST /code/migrate-layout response.
+
+    ``jobs`` are the force-index jobs enqueued for legacy-layout repos; a
+    caller that wants a completed migration must poll them to a terminal state.
+    """
+
+    dry_run: bool
+    total: int
+    current: int
+    legacy: int
+    pruned: int
+    unreachable: int = 0
+    busy: int
+    entries: list[MigrateLayoutEntry]
+    jobs: list[JobView]
 
 
 class CentralityEntry(BaseModel):

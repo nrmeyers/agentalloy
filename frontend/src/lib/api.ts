@@ -6,6 +6,10 @@ import type {
   ConfigData,
   ConfigUpdate,
   ConfigUpdateResult,
+  Contract,
+  ContractPatchRequest,
+  ContractsListParams,
+  ContractsListResponse,
   CorpusDiagnostics,
   CoverageResponse,
   DoctorResponse,
@@ -358,5 +362,34 @@ export function evaluateSignal(body: SignalEvaluateRequest): Promise<SignalVerdi
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+// --- Contracts ------------------------------------------------------------------
+
+export function getContracts(params: ContractsListParams): Promise<ContractsListResponse> {
+  return request<ContractsListResponse>(`/contracts${query({ ...params })}`);
+}
+
+export function getContract(contractId: string): Promise<Contract> {
+  return request<Contract>(`/contracts/${encodeURIComponent(contractId)}`);
+}
+
+/** In-place correction — bumps updated_at, does not fork revision chain. */
+export function patchContract(
+  contractId: string,
+  body: ContractPatchRequest,
+): Promise<Contract> {
+  return request<Contract>(`/contracts/${encodeURIComponent(contractId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Flip status to archived. 404 = not found or already archived. */
+export function archiveContract(contractId: string): Promise<Contract> {
+  return request<Contract>(`/contracts/${encodeURIComponent(contractId)}/archive`, {
+    method: 'POST',
   });
 }

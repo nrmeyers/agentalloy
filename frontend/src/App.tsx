@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout, ToastContainer } from './components';
 import { ApprovalsPage } from './pages/ApprovalsPage';
 import { ConfigPage } from './pages/ConfigPage';
+import { ContractsPage } from './pages/ContractsPage';
 import { DiagnosticsPage } from './pages/DiagnosticsPage';
 import { HealthPage } from './pages/HealthPage';
 import { OpsPage } from './pages/OpsPage';
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
+          <Route path="/contracts" element={<ContractsPage />} />
           <Route path="/ops" element={<OpsPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/skills/:skillId" element={<SkillDetailPage />} />

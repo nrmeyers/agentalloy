@@ -21,7 +21,7 @@ from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 def contract(touches: list[str]) -> Contract:
     return Contract(
-        path=Path("c.md"),
+        contract_id="test-id",
         phase="design",
         task_slug="t",
         domain_tags=[],
@@ -30,7 +30,6 @@ def contract(touches: list[str]) -> Contract:
         related_contracts=[],
         created_at=None,
         body="",
-        route="full",
     )
 
 
@@ -170,9 +169,23 @@ def test_caps_and_truncation(store: DuckDBCodeGraphStore) -> None:
 def test_phase2_related_decisions(
     store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Phase 2: related_decisions merges thematic decisions and sets related_count."""
-    # Seed a governed decision
+    """Phase 2: related_decisions merges thematic decisions that also have a
+    GOVERNS edge into a touched file (F3). Generic chunks without GOVERNS are
+    filtered out."""
+    # Seed a governed decision for pkg.a.foo
     _seed_one(store, "docs/design/x/approach.md::why-foo")
+    # Seed a second governed decision for pkg.a.bar (also in touched file)
+    store.upsert_symbols(
+        [
+            code_sym("pkg.a.bar", "pkg/a.py"),
+            decision_sym(
+                "docs/solutions/bar.md::thematic-bar",
+                "Thematic bar",
+                "Chose bar for reason X.",
+            ),
+        ]
+    )
+    store.upsert_edges([governs("docs/solutions/bar.md::thematic-bar", "pkg.a.bar")])
 
     from agentalloy.code_index.retrieval.hybrid import SearchResult
 
@@ -188,7 +201,6 @@ def test_phase2_related_decisions(
         ),
     ]
 
-    # related_decisions is async; asyncio.run() needs a coroutine
     async def _mock(*a, **kw):
         return related
 
@@ -207,11 +219,13 @@ def test_phase2_related_decisions(
         task_title="Implement foo with bar",
     )
     assert push is not None
-    # Should include both the governed decision AND the related one
+    # Both decisions have GOVERNS edges into touched files; both included via
+    # Phase 1 (GOVERNS path).  Phase 2 adds nothing new since both are already
+    # in kept_qns (F3: GOVERNS filter before fusion).
     assert push.count == 2
-    assert push.related_count == 1
+    assert push.related_count == 0  # Phase 2 adds nothing new (all in kept_qns)
     assert "Why foo" in push.text
-    assert "thematic-bar" in push.text  # heading derived from qualified_name anchor
+    assert "Thematic bar" in push.text
     assert "Chose `pkg.a.foo`." in push.text
     assert "Chose bar for reason X." in push.text
 
@@ -330,3 +344,211 @@ def test_phase2_graceful_degradation_on_failure(
     assert push.count == 1
     assert push.related_count == 0
     assert "Why foo" in push.text
+
+
+# ---------------------------------------------------------------------------
+# TF4 / TF5 — knowledge leg correctness (spec F3, F4)
+# ---------------------------------------------------------------------------
+
+
+def test_tf4_governed_returns_governs_decision_and_zero_generic(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TF4: A work-item whose scope.touches covers a governed file returns the
+    GOVERNS-linked decision and zero generic README/doc heading chunks.
+
+    The related_decisions mock returns both a governed decision and a generic
+    README chunk.  Only the governed one survives the GOVERNS filter."""
+    # Code symbol in the touched file
+    store.upsert_symbols(
+        [
+            code_sym("mymodule.process", "mymodule.py"),
+            # Governed decision
+            decision_sym(
+                "docs/design/architecture.md::event-driven",
+                "Event-driven processing",
+                "Chose event-driven architecture for `mymodule.process`.",
+            ),
+            # Generic README chunk (no GOVERNS edge) — should be excluded
+            decision_sym(
+                "README.md::overview",
+                "Overview",
+                "This project does many things.",
+            ),
+        ]
+    )
+    store.upsert_edges([governs("docs/design/architecture.md::event-driven", "mymodule.process")])
+    # Note: README.md::overview has NO GOVERNS edge
+
+    from agentalloy.code_index.retrieval.hybrid import SearchResult
+
+    # Mock related_decisions returning both a governed and a generic chunk
+    related = [
+        SearchResult(
+            qualified_name="docs/design/architecture.md::event-driven",
+            kind="MarkdownDoc",
+            file_path="docs/design/architecture.md",
+            start_line=1,
+            end_line=10,
+            snippet="Chose event-driven architecture.",
+            score=0.90,
+        ),
+        SearchResult(
+            qualified_name="README.md::overview",
+            kind="MarkdownDoc",
+            file_path="README.md",
+            start_line=1,
+            end_line=5,
+            snippet="This project does many things.",
+            score=0.85,
+        ),
+    ]
+
+    async def _mock(*a, **kw):
+        return related
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["mymodule.py"]),
+        "",
+        store,
+        state={},
+        slug="test-slug",
+        task_title="Event-driven processing",
+    )
+    assert push is not None
+    # Only the GOVERNS-linked decision appears; generic README chunk is excluded
+    assert push.count == 1
+    assert "Event-driven processing" in push.text
+    assert "README" not in push.text
+    assert "Overview" not in push.text
+    assert "This project does many things" not in push.text
+    # related_count is 0 because the governed decision is deduped (Phase 1
+    # already found it), and the generic chunk is filtered out
+    assert push.related_count == 0
+
+
+def test_tf5_ungoverned_returns_empty_knowledge_leg(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TF5: A work-item touching no governed file returns an empty knowledge leg
+    rather than generic prose.
+
+    The touched file has no GOVERNS edge from any decision. The related_decisions
+    mock returns generic chunks. All are filtered out."""
+    # Code symbol in the touched file — no decision governs it
+    store.upsert_symbols(
+        [
+            code_sym("utils.helpers.format", "utils/helpers.py"),
+            # Generic README chunk (no GOVERNS edge into any touched file)
+            decision_sym(
+                "README.md::getting-started",
+                "Getting Started",
+                "Install with pip and run the CLI.",
+            ),
+            # Generic docs chunk
+            decision_sym(
+                "docs/contributing.md::code-style",
+                "Code Style",
+                "Use black and ruff for formatting.",
+            ),
+        ]
+    )
+    # No GOVERNS edges at all
+
+    from agentalloy.code_index.retrieval.hybrid import SearchResult
+
+    # Mock related_decisions returning generic chunks
+    related = [
+        SearchResult(
+            qualified_name="README.md::getting-started",
+            kind="MarkdownDoc",
+            file_path="README.md",
+            start_line=1,
+            end_line=5,
+            snippet="Install with pip.",
+            score=0.90,
+        ),
+        SearchResult(
+            qualified_name="docs/contributing.md::code-style",
+            kind="MarkdownDoc",
+            file_path="docs/contributing.md",
+            start_line=1,
+            end_line=5,
+            snippet="Use black and ruff.",
+            score=0.85,
+        ),
+    ]
+
+    async def _mock(*a, **kw):
+        return related
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["utils/helpers.py"]),
+        "",
+        store,
+        state={},
+        slug="test-slug",
+        task_title="Refactor helpers",
+    )
+    # Correct empty case: no governed decisions → None (empty knowledge leg)
+    assert push is None
+
+
+def test_phase2_filters_non_governed_related(
+    store: DuckDBCodeGraphStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Phase 2 related_decisions results without a GOVERNS edge into a touched
+    file are excluded, even if thematically relevant."""
+    _seed_one(store, "docs/design/x/approach.md::why-foo")
+
+    from agentalloy.code_index.retrieval.hybrid import SearchResult
+
+    # Related results include a generic chunk with no GOVERNS edge
+    related = [
+        SearchResult(
+            qualified_name="README.md::project-goals",
+            kind="MarkdownDoc",
+            file_path="README.md",
+            start_line=1,
+            end_line=5,
+            snippet="This project aims to unify skill retrieval.",
+            score=0.95,
+        ),
+    ]
+
+    async def _mock(*a, **kw):
+        return related
+
+    monkeypatch.setattr(
+        "agentalloy.code_index.retrieval.hybrid.related_decisions",
+        _mock,
+        raising=False,
+    )
+
+    push = build_decision_block(
+        contract(["pkg/a.py"]),
+        "",
+        store,
+        state={},
+        slug="test-slug",
+        task_title="Implement foo",
+    )
+    assert push is not None
+    # Only the governed decision; generic README chunk filtered out
+    assert push.count == 1
+    assert push.related_count == 0
+    assert "Why foo" in push.text
+    assert "README" not in push.text
+    assert "project-goals" not in push.text

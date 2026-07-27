@@ -73,7 +73,7 @@ async def test_full_pipeline_first_run(settings: Settings, fixture_repo: Path) -
         assert repo.last_indexed_at is not None
         assert repo.head_sha is None
 
-        handles = open_code_index(settings, SLUG, role="reader")
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
         try:
             counts = handles.graph.counts_by_kind()
             assert counts.get("Function", 0) == 3
@@ -132,7 +132,7 @@ async def test_incremental_reembeds_only_changed_file(
         assert result.markdown_embedded == 0
 
         # Graph reflects the new source; the untouched file's symbols survive.
-        handles = open_code_index(settings, SLUG, role="reader")
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
         try:
             helper = handles.graph.symbol("demo.pkg.util.helper")
             assert helper is not None and helper.source_code is not None
@@ -159,7 +159,7 @@ async def test_force_takes_bulk_replace_path(settings: Settings, fixture_repo: P
         assert result.symbols_embedded == len(CODE_QNS)
         assert result.markdown_embedded == len(MD_QNS)
 
-        handles = open_code_index(settings, SLUG, role="reader")
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
         try:
             # bulk_replace rebuilt the dataset — no duplicate rows.
             assert handles.vectors.count() == len(CODE_QNS) + len(MD_QNS)
@@ -216,7 +216,7 @@ async def test_markdown_disabled(settings: Settings, fixture_repo: Path) -> None
         result = await run(settings, embed, jobs, fixture_repo, index_markdown=False)
         assert result.status == "done"
         assert result.markdown_embedded == 0
-        handles = open_code_index(settings, SLUG, role="reader")
+        handles = open_code_index(settings, SLUG, role="reader", repo_path=str(fixture_repo))
         try:
             assert handles.vectors.count() == len(CODE_QNS)
             assert "MarkdownDoc" not in handles.graph.counts_by_kind()

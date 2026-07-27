@@ -13,14 +13,17 @@ from agentalloy.signals.gates import (
     evaluate_node,
 )
 from agentalloy.signals.predicates import PredicateContext, PredicateResult
+from agentalloy.storage.state_store import DuckDBStateStore
 
 MET = PredicateResult.MET
 NOT_MET = PredicateResult.NOT_MET
 UNKNOWN = PredicateResult.UNKNOWN
 
 
-def _ctx(tmp_path: Path, phase: str = "build") -> PredicateContext:
-    return PredicateContext(project_root=tmp_path, current_phase=phase)
+def _ctx(
+    tmp_path: Path, phase: str = "build", store: DuckDBStateStore | None = None
+) -> PredicateContext:
+    return PredicateContext(project_root=tmp_path, current_phase=phase, store=store)
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +319,10 @@ def test_artifact_completeness_gate_returns_unknown(tmp_path: Path):
 
 def _seed_design_artifacts(tmp_path: Path) -> None:
     """The three load-bearing design files + the design contract that makes the
-    cursor-scoped density/tag-focus gates (#378) resolve ``01-task`` as the item."""
+    cursor-scoped density/tag-focus gates (#378) resolve ``01-task`` as the item.
+
+    Writes to both filesystem and store (authoritative).
+    """
     d = tmp_path / "docs" / "design" / "01-task"
     d.mkdir(parents=True)
     (d / "approach.md").write_text("# x\n\n## Approach\n\nhow\n", encoding="utf-8")
@@ -325,6 +331,56 @@ def _seed_design_artifacts(tmp_path: Path) -> None:
     dc = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     dc.mkdir(parents=True, exist_ok=True)
     (dc / "01-task.md").write_text("---\nphase: design\ntask_slug: 01-task\n---\n\n# 01-task\n")
+
+    # Store: create if needed and insert design contract
+    db = tmp_path / "test_state.db"
+    if not db.exists():
+        store = DuckDBStateStore(db)
+        store.open()
+        store.migrate()
+        store.close()
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'design-01-task', '01-task', '[]', NULL, 'design', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
+
+
+def _write_build_contract_to_store(
+    tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "01-task"
+) -> None:
+    """Write a build contract to both filesystem and store."""
+    # Filesystem
+    bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
+    bc.mkdir(parents=True, exist_ok=True)
+    tag_str = "[" + ", ".join(tags) + "]"
+    wi = f"work_item: {work_item}\n" if work_item is not None else ""
+    (bc / name).write_text(f"---\nphase: build\n{wi}domain_tags: {tag_str}\n---\n\n# {name}\n")
+
+    # Store
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    slug = Path(name).stem
+    tags_json = "[" + ", ".join(f'"{t}"' for t in tags) + "]"
+    wi_val = f"'{work_item}'" if work_item is not None else "NULL"
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'build-{slug}', '{slug}', '{tags_json}', {wi_val}, 'build', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
+
+
+def _get_store(tmp_path: Path) -> DuckDBStateStore | None:
+    """Get the store attached to tmp_path, if any."""
+    db = tmp_path / "test_state.db"
+    if db.exists():
+        return DuckDBStateStore(db, read_only=True).open()
+    return None
 
 
 def test_design_gate_blocks_without_build_contract(tmp_path: Path):
@@ -338,7 +394,7 @@ def test_design_gate_blocks_without_build_contract(tmp_path: Path):
     _seed_design_artifacts(tmp_path)
     gate = exit_gates_for_phase("design")
     assert gate is not None
-    ctx = _ctx(tmp_path, phase="design")
+    ctx = _ctx(tmp_path, phase="design", store=_get_store(tmp_path))
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == NOT_MET
 
@@ -358,16 +414,11 @@ def test_design_gate_passes_with_build_contract(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)  # one task: `- t1`
-    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    contracts.mkdir(parents=True)
-    (contracts / "01-task.md").write_text(
-        "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
-        encoding="utf-8",
-    )
+    _write_build_contract_to_store(tmp_path, name="01-task.md", tags=["react"])
     _approve_design(tmp_path)
     gate = exit_gates_for_phase("design")
     assert gate is not None
-    ctx = _ctx(tmp_path, phase="design")
+    ctx = _ctx(tmp_path, phase="design", store=_get_store(tmp_path))
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == MET
 
@@ -377,15 +428,10 @@ def test_design_gate_blocks_without_approval(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)
-    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    contracts.mkdir(parents=True)
-    (contracts / "01-task.md").write_text(
-        "---\nphase: build\ndomain_tags: [react]\n---\n\n## Task\n\nimplement\n",
-        encoding="utf-8",
-    )
+    _write_build_contract_to_store(tmp_path, name="01-task.md", tags=["react"])
     gate = exit_gates_for_phase("design")
     assert gate is not None
-    ctx = _ctx(tmp_path, phase="design")
+    ctx = _ctx(tmp_path, phase="design", store=_get_store(tmp_path))
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == NOT_MET
 
@@ -395,16 +441,13 @@ def test_design_gate_blocks_on_over_tagged_contract(tmp_path: Path):
     from agentalloy.signals.skill_loader import exit_gates_for_phase
 
     _seed_design_artifacts(tmp_path)
-    contracts = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    contracts.mkdir(parents=True)
-    (contracts / "01-task.md").write_text(
-        "---\nphase: build\ndomain_tags: [react, typescript, vite]\n---\n\n## Task\n\nx\n",
-        encoding="utf-8",
+    _write_build_contract_to_store(
+        tmp_path, name="01-task.md", tags=["react", "typescript", "vite"]
     )
     _approve_design(tmp_path)
     gate = exit_gates_for_phase("design")
     assert gate is not None
-    ctx = _ctx(tmp_path, phase="design")
+    ctx = _ctx(tmp_path, phase="design", store=_get_store(tmp_path))
     result, _ = evaluate_node(gate, ctx, None, [0])
     assert result == NOT_MET
 
@@ -495,17 +538,51 @@ def test_decide_transition_awaiting_approval_advisory(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def _write_build_contract(tmp_path: Path, *, name: str, tags: list[str]) -> None:
+def _write_build_contract(
+    tmp_path: Path, *, name: str, tags: list[str], work_item: str | None = "feat"
+) -> None:
+    """Write a build contract to both filesystem and store."""
     bc = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
     bc.mkdir(parents=True, exist_ok=True)
     tag_str = "[" + ", ".join(tags) + "]"
-    (bc / name).write_text(f"---\nphase: build\ndomain_tags: {tag_str}\n---\n\n# {name}\n")
+    wi = f"work_item: {work_item}\n" if work_item is not None else ""
+    (bc / name).write_text(f"---\nphase: build\n{wi}domain_tags: {tag_str}\n---\n\n# {name}\n")
+
+    # Store
+    db = tmp_path / "test_state.db"
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    slug = Path(name).stem
+    tags_json = "[" + ", ".join(f'"{t}"' for t in tags) + "]"
+    wi_val = f"'{work_item}'" if work_item is not None else "NULL"
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'build-{slug}', '{slug}', '{tags_json}', {wi_val}, 'build', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
 
 
 def _seed_design_contract(tmp_path: Path, slug: str) -> None:
     dc = tmp_path / ".agentalloy" / "contracts" / "active" / "design"
     dc.mkdir(parents=True, exist_ok=True)
     (dc / f"{slug}.md").write_text(f"---\nphase: design\ntask_slug: {slug}\n---\n\n# {slug}\n")
+
+    # Store: create if needed and insert design contract
+    db = tmp_path / "test_state.db"
+    if not db.exists():
+        store = DuckDBStateStore(db)
+        store.open()
+        store.migrate()
+        store.close()
+    store = DuckDBStateStore(db)
+    store.open()
+    repo = store._repo()  # type: ignore[attr-defined]
+    store.execute(
+        f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
+        VALUES ('{repo}', 'design-{slug}', '{slug}', '[]', NULL, 'design', 'active', CURRENT_TIMESTAMP)"""
+    )
+    store.close()
 
 
 def test_coverage_advisory_reports_counts(tmp_path: Path):
@@ -521,7 +598,9 @@ def test_coverage_advisory_reports_counts(tmp_path: Path):
         }
     }
     qwen_calls: list[int] = [0]
-    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    result, evals = evaluate_node(
+        spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
+    )
     assert result == NOT_MET
     assert evals[0].advisory is not None
     assert "1 build contract" in evals[0].advisory
@@ -534,10 +613,12 @@ def test_tag_focus_advisory_names_offender(tmp_path: Path):
     _write_build_contract(tmp_path, name="02-bad.md", tags=["react", "typescript", "vite"])
     spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
     qwen_calls: list[int] = [0]
-    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    result, evals = evaluate_node(
+        spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
+    )
     assert result == NOT_MET
     assert evals[0].advisory is not None
-    assert "02-bad.md" in evals[0].advisory
+    assert "02-bad" in evals[0].advisory  # slug without .md extension
     assert "3 tags" in evals[0].advisory
 
 
@@ -547,6 +628,8 @@ def test_tag_focus_all_within_two_met_no_advisory(tmp_path: Path):
     _write_build_contract(tmp_path, name="02-scaffold.md", tags=["vite", "react"])
     spec = {"build_contract_tag_focus": {"contracts": ".agentalloy/contracts/active/build/*.md"}}
     qwen_calls: list[int] = [0]
-    result, evals = evaluate_node(spec, _ctx(tmp_path, "design"), None, qwen_calls)
+    result, evals = evaluate_node(
+        spec, _ctx(tmp_path, "design", store=_get_store(tmp_path)), None, qwen_calls
+    )
     assert result == MET
     assert evals[0].advisory is None

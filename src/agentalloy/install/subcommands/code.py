@@ -10,6 +10,7 @@ Thin HTTP clients against the local agentalloy service:
     agentalloy code callees <fqn> [--repo]
     agentalloy code bundle <task> [--repo] [--budget N]
     agentalloy code remove [path] [--yes]
+    agentalloy code migrate-layout [--dry-run] [--wait]  Store-layout migration (all repos)
     agentalloy code enable|disable                      CODE_INDEX_ENABLED master switch
     agentalloy code watch enable|disable [path]         Per-repo watch enrollment
     agentalloy code watch status|start|stop             Master switch + enrollment report
@@ -256,14 +257,111 @@ def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
     return 1
 
 
-def _staleness_marker(repo: dict[str, Any]) -> str:
-    """`` [stale ...]`` suffix when the repo's HEAD moved since its index.
+def _run_migrate_layout(args: argparse.Namespace) -> int:
+    """Migrate every registered repo onto the per-checkout store layout.
 
-    Silent (empty string) for non-git repos, missing paths, or when the
-    comparison is impossible — a nudge, never an error.
+    This is the step ``agentalloy upgrade`` runs automatically — taking the
+    update *is* the consent, so there is no per-repo opt-in and no prompt.
+
+    Exits 0 when the module is off, the service is down, or the service is too
+    old to expose the endpoint: a maintenance step that has nothing to migrate
+    has not failed, and it must never be the thing that turns a good upgrade
+    into a warning.
+    """
+    port = _resolve_port(args)
+    quiet = bool(getattr(args, "quiet", False))
+    try:
+        with _make_client(port) as client:
+            state = _check_module(client)
+            if state != "enabled":
+                if not quiet:
+                    print(f"Code index not enabled (modules.code_index={state!r}); nothing to do.")
+                return 0
+            resp = client.post(
+                "/code/migrate-layout",
+                json={"dry_run": args.dry_run, "prune_missing": not args.keep_missing},
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            body: dict[str, Any] = resp.json()
+            if args.json:
+                _print_json(body)
+            else:
+                _print_migrate_summary(body, quiet=quiet)
+            jobs = body.get("jobs")
+            if args.dry_run or not args.wait or not isinstance(jobs, list):
+                return 0
+            failed = 0
+            for job in jobs:
+                if _wait_for_job(client, str(job.get("id")), as_json=args.json) != 0:
+                    failed += 1
+            if failed:
+                print(
+                    f"ERROR: {failed} of {len(jobs)} layout-migration reindex jobs did not "
+                    f"complete. The legacy store layout still reads fine — re-run "
+                    f"`agentalloy code migrate-layout --wait` to retry.",
+                    file=sys.stderr,
+                )
+                return 1
+            return 0
+    except httpx.HTTPStatusError as exc:
+        # A service predating this endpoint has nothing to migrate *yet* — the
+        # next upgrade, once it is running the new code, will do it. Never let
+        # that version skew read as a failed migration. 405, not just 404:
+        # verified live against 7.8.0, where the SPA catch-all claims the path
+        # and rejects the POST rather than 404ing.
+        if exc.response.status_code in (404, 405):
+            if not quiet:
+                print("Service does not expose /code/migrate-layout (older build); nothing to do.")
+            return 0
+        return _http_error(exc)
+    except httpx.HTTPError as exc:
+        if quiet:
+            return 0
+        return _service_down_error(port, exc)
+
+
+def _print_migrate_summary(body: dict[str, Any], *, quiet: bool) -> None:
+    total = body.get("total", 0)
+    legacy = body.get("legacy", 0)
+    pruned = body.get("pruned", 0)
+    unreachable = body.get("unreachable", 0)
+    busy = body.get("busy", 0)
+    if quiet and not legacy and not pruned and not unreachable:
+        return
+    prefix = "Would migrate" if body.get("dry_run") else "Code-index layout migration"
+    print(
+        f"{prefix}: {total} registered repos — {body.get('current', 0)} already current, "
+        f"{legacy} legacy, {pruned} pruned (gone long enough to be a deletion), "
+        f"{unreachable} unreachable (left alone), {busy} busy."
+    )
+    entries = body.get("entries")
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if entry.get("verdict") in ("legacy", "missing", "unreachable", "busy"):
+            print(f"  {entry.get('verdict'):8} {entry.get('action'):8} {entry.get('slug')}")
+
+
+def _staleness_marker(repo: dict[str, Any]) -> str:
+    """`` [stale]`` suffix when the repo's HEAD moved since its index.
+
+    Uses the server-side ``is_stale`` flag (computed from indexed_head vs
+    current_head). Falls back to a local staleness check for older servers
+    that don't provide the new fields. Silent for non-git repos, missing
+    paths, or when the comparison is impossible — a nudge, never an error.
     """
     repo_path = repo.get("repo_path")
-    head_sha = repo.get("head_sha")
+    # Prefer the server-side staleness flag (new API)
+    if repo.get("is_stale") is True:
+        indexed = repo.get("indexed_head", "?")[:7]
+        current = repo.get("current_head", "?")[:7]
+        return (
+            f"  [stale — indexed @{indexed}, current @{current}; "
+            f"run `agentalloy code index {repo_path}`]"
+        )
+    # Fallback: local check for older servers still using head_sha
+    head_sha = repo.get("indexed_head") or repo.get("head_sha")
     if not isinstance(repo_path, str) or not isinstance(head_sha, str):
         return ""
     verdict = check_staleness(Path(repo_path), head_sha)
@@ -798,6 +896,31 @@ def add_parser(
     remove_p.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     _add_common(remove_p)
     remove_p.set_defaults(func=_run_remove)
+
+    migrate_p = sub.add_parser(
+        "migrate-layout",
+        help="Migrate all registered repos to the per-checkout store layout (upgrade runs this).",
+    )
+    migrate_p.add_argument(
+        "--dry-run", action="store_true", help="Classify every repo but change nothing."
+    )
+    migrate_p.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block until every reindex job reaches a terminal state.",
+    )
+    migrate_p.add_argument(
+        "--keep-missing",
+        action="store_true",
+        help="Keep registry rows whose repo_path no longer exists (default: prune them).",
+    )
+    migrate_p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only when something was migrated; never report a down service as an error.",
+    )
+    _add_common(migrate_p)
+    migrate_p.set_defaults(func=_run_migrate_layout)
 
     enable_module_p = sub.add_parser(
         "enable", help="Turn the code-index module on (CODE_INDEX_ENABLED=1)."
