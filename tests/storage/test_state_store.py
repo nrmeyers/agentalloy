@@ -19,6 +19,144 @@ from agentalloy.storage.state_store import (
 )
 
 # ---------------------------------------------------------------------------
+# Transaction seam (TA4)
+# ---------------------------------------------------------------------------
+
+
+class TestTransaction:
+    """Transaction context manager: BEGIN/COMMIT, ROLLBACK on exception."""
+
+    def test_commit_on_success(self, tmp_path: Path) -> None:
+        """Writes inside transaction() are visible after COMMIT."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with store.transaction() as tx:
+                tx.write("phase", "build")
+            # After commit, the value is visible.
+            assert store.read("phase") == "build"
+
+    def test_rollback_on_exception_leaves_db_unchanged(self, tmp_path: Path) -> None:
+        """TA4 — an exception inside the block rolls back all writes."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # Seed a known phase value.
+            store.write("phase", "spec")
+            original_phase = store.read("phase")
+
+            with pytest.raises(ValueError, match="boom"):
+                with store.transaction() as tx:
+                    tx.write("phase", "build")
+                    tx.write("cursor", "task-99")
+                    raise ValueError("boom")
+
+            # Phase should be unchanged — rollback undid the write.
+            assert store.read("phase") == original_phase
+            # The cursor write should also be rolled back.
+            assert store.read("cursor") is None
+
+    def test_rollback_preserves_byte_identity(self, tmp_path: Path) -> None:
+        """An exception leaves the database file byte-identical to pre-block state."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.write("phase", "spec")
+            pre_bytes = db.read_bytes()
+
+            with pytest.raises(RuntimeError, match="fail"):
+                with store.transaction() as tx:
+                    tx.write("phase", "build")
+                    tx.write("cursor", "task-99")
+                    raise RuntimeError("fail")
+
+            # The DB file should be byte-identical (DuckDB rollback is in-place).
+            assert db.read_bytes() == pre_bytes
+            assert store.read("phase") == "spec"
+            assert store.read("cursor") is None
+
+    def test_exception_is_re_raised(self, tmp_path: Path) -> None:
+        """The original exception propagates after ROLLBACK."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with pytest.raises(ValueError, match="original"):
+                with store.transaction():
+                    raise ValueError("original")
+
+    def test_reentrant_call_raises(self, tmp_path: Path) -> None:
+        """A nested transaction() call raises RuntimeError."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with store.transaction():
+                with pytest.raises(RuntimeError, match="nested"):
+                    with store.transaction():
+                        pass
+
+    def test_readonly_refuses_transaction(self, tmp_path: Path) -> None:
+        """A read-only store refuses to begin a transaction."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+        store = DuckDBStateStore(db, read_only=True)
+        with store:
+            with pytest.raises(RuntimeError, match="read-only"):
+                with store.transaction():
+                    pass
+
+    def test_execute_works_inside_transaction(self, tmp_path: Path) -> None:
+        """execute() works inside a transaction block."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with store.transaction() as tx:
+                tx.execute(
+                    "INSERT INTO sdd_state (repo, kind, session_key, value, updated_at) "
+                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    (store._repo(), "phase", None, "build"),
+                )
+            assert store.read("phase") == "build"
+
+    def test_acquire_lease_works_inside_transaction(self, tmp_path: Path) -> None:
+        """acquire_lease() works inside a transaction block."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with store.transaction() as tx:
+                result = tx.acquire_lease("phase", "s1")
+                assert result.acquired is True
+            # Lease should persist after commit.
+            result2 = store.acquire_lease("phase", "s2")
+            assert result2.acquired is False  # s1 still holds it
+
+    def test_release_lease_works_inside_transaction(self, tmp_path: Path) -> None:
+        """release_lease() works inside a transaction block."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.acquire_lease("phase", "s1")
+            with store.transaction() as tx:
+                tx.release_lease("phase", "s1")
+            # Lease should be released after commit.
+            result = store.acquire_lease("phase", "s2")
+            assert result.acquired is True
+
+    def test_rollback_undoes_lease_acquisition(self, tmp_path: Path) -> None:
+        """A rolled-back lease acquisition does not persist."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with pytest.raises(ValueError):
+                with store.transaction() as tx:
+                    tx.acquire_lease("phase", "s1")
+                    raise ValueError("abort")
+            # s1's lease should not exist; s2 can acquire freely.
+            result = store.acquire_lease("phase", "s2")
+            assert result.acquired is True
+
+
+# ---------------------------------------------------------------------------
 # Schema lifecycle
 # ---------------------------------------------------------------------------
 

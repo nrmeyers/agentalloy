@@ -23,7 +23,8 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from contextlib import suppress
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -115,6 +116,7 @@ class DuckDBStateStore:
         self._db_path = str(db_path)
         self._read_only = read_only
         self._conn: duckdb.DuckDBPyConnection | None = None
+        self._in_transaction: bool = False
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -354,6 +356,35 @@ class DuckDBStateStore:
             "WHERE repo=? AND kind=? AND COALESCE(session_key, '')='' AND owner=?",
             (self._repo(), kind, session_key),
         )
+
+    # -- transaction ---------------------------------------------------------
+
+    @contextmanager
+    def transaction(self) -> Iterator[DuckDBStateStore]:
+        """Context manager that issues BEGIN/COMMIT (or ROLLBACK on exception).
+
+        Existing methods (``write``, ``execute``, ``acquire_lease``,
+        ``release_lease``) are reused unchanged inside the block.  DuckDB is
+        single-writer here so there is no isolation-level choice.
+
+        Re-entrant calls raise :class:`RuntimeError` — silent nesting is
+        explicitly rejected.
+        """
+        if self._in_transaction:
+            raise RuntimeError("nested transaction() calls are not supported")
+        if self._read_only:
+            raise RuntimeError("cannot begin transaction in read-only mode")
+
+        self._in_transaction = True
+        self.conn.execute("BEGIN")
+        try:
+            yield self
+            self.conn.execute("COMMIT")
+        except BaseException:
+            self.conn.execute("ROLLBACK")
+            raise
+        finally:
+            self._in_transaction = False
 
     # -- file mirror ---------------------------------------------------------
 
