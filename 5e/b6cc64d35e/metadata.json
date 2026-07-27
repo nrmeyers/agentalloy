@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "5eb6cc64d35e",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/agentalloy/_packs/sdd/pack.yaml",
+    "src/agentalloy/_packs/sdd/sdd-build.yaml",
+    "src/agentalloy/_packs/sdd/sdd-deliver-and-ship.yaml",
+    "src/agentalloy/_packs/sdd/sdd-design-and-planning.yaml",
+    "src/agentalloy/_packs/sdd/sdd-intake.yaml",
+    "src/agentalloy/_packs/sdd/sdd-spec-and-scoping.yaml",
+    "src/agentalloy/_packs/sdd/sdd-verify-and-review.yaml",
+    "tests/install/test_invariants.py",
+    "tests/test_sdd_pack_rewrite.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5e/b6cc64d35e/0/metadata.json",
+      "transcript": "/5e/b6cc64d35e/0/full.jsonl",
+      "compact_transcript": "/5e/b6cc64d35e/0/transcript.jsonl",
+      "content_hash": "/5e/b6cc64d35e/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
