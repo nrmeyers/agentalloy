@@ -182,38 +182,6 @@ def test_phase_change_triggers_regenerate(tmp_path: Path):
     assert "BUILD PROSE" in regen_calls[0][0]
 
 
-def test_contract_write_triggers_compose(tmp_path: Path):
-    """Writing a contract triggers compose and regeneration."""
-    from agentalloy.watch.watcher import (
-        WatchConfig,
-        _AgentAlloyHandler,  # pyright: ignore[reportPrivateUsage]
-    )
-
-    regen_calls: list[str] = []
-
-    def mock_regen(content: str, root: Path) -> None:
-        regen_calls.append(content)
-
-    config = WatchConfig(
-        project_root=tmp_path,
-        profile_name="default",
-        harness="cursor",
-        debounce_ms=50,
-    )
-    handler = _AgentAlloyHandler(config, mock_regen)
-
-    contract_path = tmp_path / ".agentalloy" / "contracts" / "active" / "build" / "task.md"
-    contract_path.parent.mkdir(parents=True)
-    contract_path.write_text("---\nphase: build\ntask_slug: t\ndomain_tags: [A]\n---\n\nbody\n")
-
-    with patch("agentalloy.watch.watcher._compose_from_contract", return_value="COMPOSED CONTENT"):
-        handler._schedule("created", str(contract_path))  # pyright: ignore[reportPrivateUsage]
-        time.sleep(0.2)
-
-    assert len(regen_calls) == 1
-    assert "COMPOSED CONTENT" in regen_calls[0]
-
-
 def test_debounce_coalesces_burst_writes(tmp_path: Path):
     """10 rapid writes → 1 regeneration call."""
     from agentalloy.watch.watcher import (

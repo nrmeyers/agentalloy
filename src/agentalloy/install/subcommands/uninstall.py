@@ -761,6 +761,7 @@ def _remove_uv_tool() -> dict[str, Any]:
 def _unwire_repo_local(
     repo_root: Path,
     handled_paths: set[str],
+    warnings: list[str] | None = None,
     *,
     harness: str | None = None,
     remove_lifecycle: bool = True,
@@ -821,14 +822,42 @@ def _unwire_repo_local(
             files_removed.extend(code_index_wiring.remove_code_index_blocks(repo_root))
 
     # Repo-local lifecycle state seeded by `wire`/`add` (.agentalloy/phase,
-    # config, upstream) is shared across every harness wired into this repo (one
+    # upstream) is shared across every harness wired into this repo (one
     # workflow machine per repo). Only tear it down when no other harness remains
-    # (remove_lifecycle). Contracts under .agentalloy/contracts/ are user work and
-    # are preserved.
+    # (remove_lifecycle). Contracts under .agentalloy/contracts/ are user work
+    # and are preserved. The config file is the wired-repo marker and is not
+    # removed — after a full lifecycle .agentalloy/ contains only config and
+    # claude-code-env.sh.
     if not remove_lifecycle:
         return proxy_removed, files_removed
 
-    for _name in ("phase", "config", "upstream", "README.md"):
+    # Drop store rows for this repo (state + contracts) instead of removing
+    # phase files — the store is the source of truth now.
+    try:
+        from agentalloy.config import get_settings  # noqa: PLC0415
+        from agentalloy.storage.state_store import (
+            open_state_store,  # noqa: PLC0415
+        )
+
+        settings = get_settings()
+        store = open_state_store(settings.duckdb_path, read_only=False)
+        try:
+            deleted = store.delete_repo_rows(str(repo_root))
+            if deleted:
+                files_removed.append(
+                    {
+                        "repo": str(repo_root),
+                        "action": "dropped_store_rows",
+                        "deleted_rows": deleted,
+                    }
+                )
+        finally:
+            store.close()
+    except Exception as exc:
+        if warnings is not None:
+            warnings.append(f"Failed to drop store rows for {repo_root}: {exc}")
+
+    for _name in ("phase", "upstream", "README.md"):
         _state_file = repo_root / ".agentalloy" / _name
         if _state_file.exists():
             try:
@@ -1302,7 +1331,11 @@ def uninstall(
                 harness_entries, _repo, exclude=harness
             )
             _pr, _fr = _unwire_repo_local(
-                _repo, handled_paths, harness=harness, remove_lifecycle=remove_lifecycle
+                _repo,
+                handled_paths,
+                warnings,
+                harness=harness,
+                remove_lifecycle=remove_lifecycle,
             )
             proxy_removed.extend(_pr)
             files_removed.extend(_fr)

@@ -3,11 +3,14 @@
 Sidecar harnesses are those whose LLM traffic cannot be intercepted by the
 AgentAlloy proxy (they ignore base-URL overrides or route to their own
 backends). The watcher keeps their static rules files in sync with the
-current project phase and contract state.
+current project phase.
 
 Watches:
   - .agentalloy/phase        → regenerate on change
-  - .agentalloy/contracts/** → regenerate when new contract written
+
+Contract watching has been removed — the service write is now the compose
+trigger. The ``_compose_from_contract`` shell-out and
+``.agentalloy/contracts/**`` watching path are deleted.
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ from __future__ import annotations
 import logging
 import os
 import signal
-import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -73,33 +75,6 @@ def _load_workflow_skill_prose(phase: str, profile_name: str) -> str:
     return ""
 
 
-def _compose_from_contract(contract_path: Path) -> str:
-    """Run agentalloy compose --contract and return output."""
-    try:
-        from agentalloy.install import state as install_state
-
-        st = install_state.load_state()
-        port = st.get("port", 47950)
-        result = subprocess.run(
-            [
-                "agentalloy",
-                "compose",
-                "--contract",
-                str(contract_path),
-                "--inject",
-                "--port",
-                str(port),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return result.stdout if result.returncode == 0 else ""
-    except Exception as exc:
-        _log.debug("compose failed: %s", exc)
-        return ""
-
-
 class _AgentAlloyHandler(FileSystemEventHandler):
     def __init__(
         self,
@@ -133,13 +108,10 @@ class _AgentAlloyHandler(FileSystemEventHandler):
 
         project_root = self._config.project_root
         phase_file = project_root / ".agentalloy" / "phase"
-        # Determine what changed
+
+        # Determine what changed — phase file changes only (contract watching
+        # removed; the service write is the compose trigger now).
         phase_changed = any("phase" in e for e in events)
-        contract_paths = [
-            Path(e.split(":", 1)[1])
-            for e in events
-            if ".agentalloy/contracts" in e and e.split(":", 1)[1].endswith(".md")
-        ]
 
         content_parts: list[str] = []
 
@@ -161,12 +133,6 @@ class _AgentAlloyHandler(FileSystemEventHandler):
                         content_parts.append(f"# Active Phase: {phase}\n\n{prose}")
             except Exception as exc:
                 _log.warning("phase reload failed: %s", exc)
-
-        for cp in contract_paths:
-            if cp.exists():
-                composed = _compose_from_contract(cp)
-                if composed:
-                    content_parts.append(composed)
 
         if content_parts:
             content = "\n\n---\n\n".join(content_parts)

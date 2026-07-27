@@ -163,17 +163,33 @@ class TestUnwireSingleHarness:
     def test_unwire_last_harness_removes_lifecycle(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
+        """Last harness out removes lifecycle state (phase, upstream) but preserves
+        the wired-repo config. Store rows are deleted via the state store."""
+        from unittest.mock import MagicMock, patch
+
         monkeypatch.chdir(repo_root)
         wire._run(_wire(["claude-code", "hermes-agent"]))
         capsys.readouterr()
 
-        unwire._run(_unwire("claude-code"))
-        unwire._run(_unwire("hermes-agent"))
+        # Mock the store operations since we don't have a real DB in this test
+        mock_store = MagicMock()
+        mock_store.delete_repo_rows.return_value = 0
+        mock_settings = MagicMock()
+        mock_settings.duckdb_path = str(repo_root / "agentalloy.duck")
 
-        # Last harness out: the repo-local hermes carrier + lifecycle state + husk go too.
+        with (
+            patch("agentalloy.config.get_settings", return_value=mock_settings),
+            patch("agentalloy.storage.state_store.open_state_store", return_value=mock_store),
+        ):
+            unwire._run(_unwire("claude-code"))
+            unwire._run(_unwire("hermes-agent"))
+
+        # Last harness out: the repo-local hermes carrier + lifecycle state go too.
         assert not (repo_root / ".hermes" / "config.yaml").exists()
         assert not (repo_root / ".agentalloy" / "phase").exists()
-        assert not (repo_root / ".agentalloy").exists()
+        # .agentalloy/ directory persists with config (wired-repo marker)
+        assert (repo_root / ".agentalloy").exists(), ".agentalloy/ should persist with config"
+        assert (repo_root / ".agentalloy" / "config").exists(), "config should be preserved"
         assert _wired_harnesses(repo_root) == set()
 
     def test_unwire_one_preserves_user_contracts(

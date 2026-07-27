@@ -2,9 +2,13 @@
 
 Claude Code invokes a configured ``statusLine.command`` once per turn, piping a
 JSON session object on stdin and rendering the command's first stdout line in
-the status bar. This command reads the repo's ``.agentalloy/phase`` and prints a
-compact ``agentalloy ▸ <phase>`` line, so the active SDD phase is *standing
-state* — visible every turn without the proxy injecting anything.
+the status bar. This command reads the phase via ``StateClient`` over HTTP and
+prints a compact ``agentalloy ▸ <phase>`` line, so the active SDD phase is
+*standing state* — visible every turn without the proxy injecting anything.
+
+When the service is down, renders a ``[degraded]`` badge instead of a stale or
+invented phase. A status glyph is a display surface, not a state mutation, so
+the fail-loud rule does not apply — but the badge must never show stale data.
 
 It is wired into ``.claude/settings.json`` by ``wire`` (full mode). It must be
 fast and must never fail loudly: any error prints nothing (an empty status line)
@@ -57,45 +61,48 @@ def _cwd_from_stdin() -> Path | None:
     return None
 
 
-def _find_phase(start: Path) -> tuple[str | None, str | None]:
-    """Walk up from *start* (stopping at $HOME / filesystem root) for the phase
-    file, returning ``(phase, mode)``.
+def _find_repo_root(start: Path) -> Path | None:
+    """Walk up from *start* for a ``.agentalloy/config`` file, returning the
+    repo root or None.
 
-    Claude Code usually runs the status-line command at the workspace root, but
-    a subdirectory cwd should still resolve the repo's phase. Mirrors the
-    ``.agentalloy/phase`` location used elsewhere; reads the flat ``key: value``
-    lines directly to avoid importing the YAML path on a hot per-turn command.
-    ``mode`` is the optional free-flow field (``"free"`` while workflow steering
-    is paused), or None.
+    Used to determine whether we're inside a wired repo. The config file
+    persists across the full lifecycle (unlike phase, which is store-only now).
     """
     home = Path.home().resolve()
     try:
         cur = start.resolve()
     except OSError:
-        return None, None
+        return None
     seen = 0
     while True:
-        phase_file = cur / ".agentalloy" / "phase"
-        if phase_file.is_file():
-            phase: str | None = None
-            mode: str | None = None
-            try:
-                for line in phase_file.read_text(encoding="utf-8").splitlines():
-                    if ":" not in line or line.strip().startswith("#"):
-                        continue
-                    key, _, value = line.partition(":")
-                    cleaned = value.strip().strip('"').strip("'") or None
-                    if key.strip() == "phase":
-                        phase = cleaned
-                    elif key.strip() == "mode":
-                        mode = cleaned
-            except OSError:
-                return None, None
-            return phase, mode
+        config_file = cur / ".agentalloy" / "config"
+        if config_file.is_file():
+            return cur
         if cur == home or cur.parent == cur or seen > 64:
-            return None, None
+            return None
         cur = cur.parent
         seen += 1
+
+
+def _get_phase_from_service() -> tuple[str | None, bool]:
+    """Read the current phase from the state service via StateClient.
+
+    Returns ``(phase, service_running)``. When the service is down, phase is
+    None and service_running is False — the caller renders a degraded badge
+    instead of a stale value.
+    """
+    try:
+        from agentalloy.api.state_client import (
+            StateClient,  # noqa: PLC0415 — keep import off cold paths
+        )
+
+        client = StateClient()
+        if not client.is_running():
+            return None, False
+        raw = client.get_state("phase")
+        return raw, True
+    except Exception:
+        return None, False
 
 
 def _release_badge() -> str:
@@ -118,15 +125,26 @@ def _release_badge() -> str:
 def render_statusline(root: Path | None) -> str:
     """The status-line string for *root* (cwd when None), or "" when inactive.
 
-    While the repo is in free-flow (``mode: free``) a ``FREE`` badge follows the
-    phase, matching the compact badge style of the release notice.
+    Reads phase via StateClient over HTTP. When the service is down and we're
+    inside a wired repo, renders a ``[degraded]`` badge — never a stale or
+    invented phase. Outside a wired repo, returns "".
     """
     start = root or _cwd_from_stdin() or Path(os.getcwd())
-    phase, mode = _find_phase(start)
+
+    # Check if we're inside a wired repo
+    repo_root = _find_repo_root(start)
+    if repo_root is None:
+        return ""
+
+    phase, service_running = _get_phase_from_service()
+
+    if not service_running:
+        return f"{_PREFIX} ▸ [degraded]"
+
     if not phase:
         return ""
-    free_badge = "  ⏸FREE" if mode == "free" else ""
-    return f"{_PREFIX} ▸ {phase}{free_badge}{_release_badge()}"
+
+    return f"{_PREFIX} ▸ {phase}{_release_badge()}"
 
 
 def add_parser(

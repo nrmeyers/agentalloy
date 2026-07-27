@@ -1,227 +1,126 @@
-"""``contracts`` subcommand group — tree-layout maintenance.
+"""``contracts`` subcommand group — store-backed contract operations.
 
-Operates on the whole ``.agentalloy/contracts/`` tree (plural), as opposed to
-the singular ``contract`` group (validate/show/init a single file). Ships:
+Operates on the whole contract collection (plural), as opposed to the singular
+``contract`` group (validate/show/init a single file). All operations route
+through ``StateClient`` over HTTP — service down means a non-zero exit naming
+the service, never a silent local write.
 
-    agentalloy contracts migrate [--dry-run]
+Ships:
 
-``migrate`` relocates a repo's legacy flat-layout contracts into the tree
-(``active/<phase>/`` for live work-items, ``archive/<phase>/`` for completed /
-superseded), placing each file by its own ``phase`` frontmatter. It is the
-explicit form of the auto-migration the proxy runs on first read
-(``skill_loader.ensure_migrated``); running it by hand gives a ``--dry-run``
-preview and surfaces collisions / unreadable files the silent path only logs.
+    agentalloy contracts archive [--phase <name>] [--slug <slug>] [--dry-run]
 """
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import sys
 from typing import Any
 
+from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 
-def _plan_payload(project_root: Path) -> dict[str, Any]:
-    from agentalloy.contracts import contracts_root, plan_contracts_migration
-
-    root = contracts_root(project_root)
-    plan = plan_contracts_migration(project_root)
-
-    def rel(p: Path) -> str:
-        try:
-            return p.relative_to(root).as_posix()
-        except ValueError:
-            return str(p)
-
-    return {
-        "contracts_root": str(root),
-        "moves": [
-            {"from": rel(m.src), "to": rel(m.dst), "archived": m.archived} for m in plan.moves
-        ],
-        "collisions": [{"from": rel(s), "to": rel(d)} for s, d in plan.collisions],
-        "unreadable": [rel(p) for p in plan.unreadable],
-    }
-
-
-def _run_migrate(args: argparse.Namespace) -> int:
-    from agentalloy.contracts import (
-        apply_contracts_migration,
-        contracts_root,
-        cursor_after_migration,
-        plan_contracts_migration,
-    )
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-    from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
-        _read_state,
-        _write_state_atomic,
-    )
-
-    project_root = _repo_root()
-    root = contracts_root(project_root)
-    dry_run: bool = getattr(args, "dry_run", False)
-
-    payload = _plan_payload(project_root)
-    payload["dry_run"] = dry_run
-
-    if not dry_run and payload["moves"]:
-        plan = plan_contracts_migration(project_root)
-        done = apply_contracts_migration(plan)
-        payload["migrated"] = len(done)
-        # Follow the moves: rewrite the shared cursor and every scoped cursor.
-        names = ["cursor"]
-        for f in (project_root / ".agentalloy").glob("cursor.*"):
-            names.append(f.name)
-        for name in names:
-            val = _read_state(project_root, name)
-            new = cursor_after_migration(val, done, root)
-            if new is not None and new != val:
-                _write_state_atomic(project_root, name, new)
-    else:
-        payload["migrated"] = 0
-
-    write_result(payload, args, human_fn=_render_migrate)
-    # Collisions are the only actionable failure — non-zero so scripts notice.
-    return 1 if payload["collisions"] else 0
-
-
-def _render_migrate(result: dict[str, Any]) -> None:
-    moves = result.get("moves") or []
-    collisions = result.get("collisions") or []
-    unreadable = result.get("unreadable") or []
-    dry_run = result.get("dry_run")
-
-    print_rich("\n  [bold]Contracts migration[/bold]")
-    print_rich(f"  Root: {result.get('contracts_root')}")
-    if dry_run:
-        print_rich("  [yellow]dry-run — nothing was moved[/yellow]")
-
-    if not moves and not collisions and not unreadable:
-        print_rich("  [green]Already on the tree layout — nothing to migrate.[/green]\n")
-        return
-
-    if moves:
-        verb = "Would move" if dry_run else "Moved"
-        print_rich(f"\n  [bold]{verb} {len(moves)}[/bold]")
-        for m in moves:
-            print_rich(f"  [green]→[/green] {m['from']}  ⇒  {m['to']}")
-    if collisions:
-        print_rich(f"\n  [bold]Collisions ({len(collisions)}) — left in place[/bold]")
-        for c in collisions:
-            print_rich(f"  [red]![/red] {c['from']}  ⇏  {c['to']} (destination occupied)")
-        print_rich("  Resolve by renaming/removing the occupying file, then re-run.")
-    if unreadable:
-        print_rich(f"\n  [bold]Unreadable ({len(unreadable)}) — skipped[/bold]")
-        for u in unreadable:
-            print_rich(f"  [yellow]?[/yellow] {u} (no readable `phase` frontmatter)")
-    print_rich()
+def _get_client() -> StateClient:
+    """Return a StateClient and verify the service is running."""
+    client = StateClient()
+    if not client.is_running():
+        print(
+            "Error: agentalloy service is not running. "
+            "Start the service or run `agentalloy start`.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return client
 
 
 def _run_archive(args: argparse.Namespace) -> int:
-    from agentalloy.contracts import (
-        apply_contracts_migration,
-        contracts_root,
-        cursor_after_migration,
-        plan_archive,
-    )
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-    from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
-        _clear_state,
-        _read_state,
-    )
+    """Archive active contracts through StateClient over HTTP.
 
-    project_root = _repo_root()
-    root = contracts_root(project_root)
+    Lists active contracts (optionally filtered by phase/slug), then flips
+    each to ``archived`` status via ``POST /contracts/{id}/archive``.
+    Service down means a non-zero exit naming the service — never a silent
+    local write.
+    """
+    client = _get_client()
     phase: str | None = getattr(args, "phase", None)
     slug: str | None = getattr(args, "slug", None)
     dry_run: bool = getattr(args, "dry_run", False)
 
-    plan = plan_archive(project_root, phase=phase, slug=slug)
+    try:
+        contracts = client.list_contracts(phase=phase, slug=slug, status="active")
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
 
-    def rel(p: Path) -> str:
-        try:
-            return p.relative_to(root).as_posix()
-        except ValueError:
-            return str(p)
+    archived_ids: list[str] = []
+    errors: list[str] = []
+
+    if not dry_run:
+        for contract in contracts:
+            cid = contract.get("contract_id")
+            if not cid:
+                continue
+            try:
+                client.archive_contract(cid)
+                archived_ids.append(cid)
+            except StateClientError as exc:
+                errors.append(f"{cid}: {exc.message}")
 
     payload: dict[str, Any] = {
-        "contracts_root": str(root),
         "dry_run": dry_run,
-        "moves": [{"from": rel(m.src), "to": rel(m.dst)} for m in plan.moves],
-        "collisions": [{"from": rel(s), "to": rel(d)} for s, d in plan.collisions],
-        "archived": 0,
+        "matched": len(contracts),
+        "archived": len(archived_ids),
+        "archived_ids": archived_ids,
+        "errors": errors,
     }
 
-    if not dry_run and plan.moves:
-        done = apply_contracts_migration(plan)
-        payload["archived"] = len(done)
-        # A cursor pointing at a now-archived work-item is stale — clear it
-        # (archived contracts are not live and readers don't scan archive/).
-        names = ["cursor"]
-        for f in (project_root / ".agentalloy").glob("cursor.*"):
-            names.append(f.name)
-        for name in names:
-            val = _read_state(project_root, name)
-            if val and cursor_after_migration(val, done, root) != val:
-                _clear_state(project_root, name)
-
     write_result(payload, args, human_fn=_render_archive)
-    return 1 if payload["collisions"] else 0
+    return 1 if errors else 0
 
 
 def _render_archive(result: dict[str, Any]) -> None:
-    moves = result.get("moves") or []
-    collisions = result.get("collisions") or []
     dry_run = result.get("dry_run")
+    matched = result.get("matched", 0)
+    archived = result.get("archived", 0)
+    archived_ids = result.get("archived_ids") or []
+    errors = result.get("errors") or []
 
     print_rich("\n  [bold]Contracts archive[/bold]")
     if dry_run:
-        print_rich("  [yellow]dry-run — nothing was moved[/yellow]")
-    if not moves and not collisions:
-        print_rich("  [green]No live contracts matched — nothing to archive.[/green]\n")
+        print_rich("  [yellow]dry-run — nothing was archived[/yellow]")
+        print_rich(f"  Would archive {matched} contract(s)")
+    if matched == 0:
+        print_rich("  [green]No active contracts matched — nothing to archive.[/green]\n")
         return
-    if moves:
-        verb = "Would archive" if dry_run else "Archived"
-        print_rich(f"\n  [bold]{verb} {len(moves)}[/bold]")
-        for m in moves:
-            print_rich(f"  [green]→[/green] {m['from']}  ⇒  {m['to']}")
-    if collisions:
-        print_rich(f"\n  [bold]Collisions ({len(collisions)}) — left in place[/bold]")
-        for c in collisions:
-            print_rich(f"  [red]![/red] {c['from']}  ⇏  {c['to']} (destination occupied)")
+    if not dry_run and archived:
+        print_rich(f"\n  [bold]Archived {archived}[/bold]")
+        for cid in archived_ids:
+            print_rich(f"  [green]→[/green] {cid}")
+    if errors:
+        print_rich(f"\n  [bold]Errors ({len(errors)})[/bold]")
+        for err in errors:
+            print_rich(f"  [red]![/red] {err}")
     print_rich()
 
 
 def add_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
 ) -> None:
-    p = subparsers.add_parser("contracts", help="Maintain the contracts tree layout.")
+    p = subparsers.add_parser("contracts", help="Manage the contract collection (store-backed).")
     add_json_flag(p)
     sub = p.add_subparsers(dest="contracts_cmd")
 
-    mig = sub.add_parser(
-        "migrate",
-        help="Move legacy flat contracts into the active/<phase> + archive/<phase> tree.",
-    )
-    add_json_flag(mig)
-    mig.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would move without touching any files.",
-    )
-    mig.set_defaults(func=_run_migrate)
-
     arch = sub.add_parser(
         "archive",
-        help="Move live contracts from active/<phase>/ to archive/<phase>/.",
+        help="Archive active contracts via the state service.",
     )
     add_json_flag(arch)
     arch.add_argument("--phase", default=None, help="Restrict to one phase (default: all).")
+    arch.add_argument("--slug", default=None, help="Restrict to contracts whose slug matches.")
     arch.add_argument(
-        "--slug", default=None, help="Restrict to contracts whose filename stem matches."
-    )
-    arch.add_argument(
-        "--dry-run", action="store_true", help="Show what would archive without moving files."
+        "--dry-run",
+        action="store_true",
+        help="Show what would archive without flipping status.",
     )
     arch.set_defaults(func=_run_archive)
 
