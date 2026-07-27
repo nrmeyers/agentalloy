@@ -144,7 +144,11 @@ def build_decision_block(
             continue
         kept.append(d)
 
-    # Phase 2: Thematic path (related_decisions)
+    # Phase 2: Thematic path (related_decisions), constrained to GOVERNS set.
+    # F3: the knowledge leg must contain only decisions with a GOVERNS edge into
+    # a symbol in a scope.touches file.  Thematic search can discover governed
+    # decisions missed by the file-glob path, but must NOT add generic README/doc
+    # heading chunks that lack a GOVERNS edge.
     all_decisions = list(kept)
     related_count = 0
     if state is not None and slug is not None and task_title is not None:
@@ -152,27 +156,33 @@ def build_decision_block(
             from agentalloy.code_index.retrieval.hybrid import related_decisions
 
             related_results = asyncio.run(related_decisions(state, slug, task_title, k=8))
-            {r.qualified_name for r in related_results}
             kept_qns = {d.qualified_name for d in kept}
+            # Governed QN set: every decision with a GOVERNS edge into a touched
+            # file (before superseded/instructions exclusion).  Phase 2 results
+            # are filtered to this set so generic prose never enters the leg.
+            governed_qns = {d.qualified_name for d in graph.decisions_for_files(files)}
             for r in related_results:
-                if r.qualified_name not in kept_qns:
-                    # Convert SearchResult to DecisionRow
-                    from agentalloy.storage.protocols import DecisionRow
+                if r.qualified_name not in governed_qns:
+                    continue  # F3: no GOVERNS edge → not a decision for this work
+                if r.qualified_name in kept_qns:
+                    continue  # already present from Phase 1
+                # Convert SearchResult to DecisionRow
+                from agentalloy.storage.protocols import DecisionRow
 
-                    all_decisions.append(
-                        DecisionRow(
-                            qualified_name=r.qualified_name,
-                            heading=r.qualified_name.split("::")[-1]
-                            if "::" in r.qualified_name
-                            else r.qualified_name,
-                            snippet=r.snippet,
-                            file_path=r.qualified_name.split("::")[0]
-                            if "::" in r.qualified_name
-                            else None,
-                            start_line=None,
-                        )
+                all_decisions.append(
+                    DecisionRow(
+                        qualified_name=r.qualified_name,
+                        heading=r.qualified_name.split("::")[-1]
+                        if "::" in r.qualified_name
+                        else r.qualified_name,
+                        snippet=r.snippet,
+                        file_path=r.qualified_name.split("::")[0]
+                        if "::" in r.qualified_name
+                        else None,
+                        start_line=None,
                     )
-                    related_count += 1
+                )
+                related_count += 1
         except Exception:
             # Graceful degradation: if related_decisions fails, fall back to
             # GOVERNS-only path. The feature is additive, not critical.
