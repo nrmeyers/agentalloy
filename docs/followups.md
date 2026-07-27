@@ -96,3 +96,19 @@ subsequent slices (07b, 07c, 11): commits `c1455b1`, `38d524f`, `2d0f83b`,
   **`None`** for intake's `**/*.md`. Covered in
   `tests/signals/test_predicates_store_migration.py` only via hand-built args, never
   against the real pack. **Deferred** — requires slice 11 to land first.
+
+## build/contract-store-and-write-gating — acceptance A5 (fresh install)
+
+**Verified 2026-07-27.** The install code does **not** create `.agentalloy/contracts/`
+on a fresh initialisation. The directory in this repo (77 files across `active/` and
+`archive/`) is residue from the pre-store file-based contract system — it was created
+by the old `init` path before the store migration.
+
+The store currently has **0** contracts (the filesystem copies were never migrated
+into the store). This is expected: the migration was never implemented. The filesystem
+copies are user-authored work and should not be deleted without consent.
+
+**Decision:** Leave `.agentalloy/contracts/` in this repo untouched. It is legacy
+residue, not live behaviour. The store is the source of truth going forward. A future
+cleanup pass could migrate the 77 files into the store (read each file, post via
+`StateClient`), but that is out of scope for this feature set.
