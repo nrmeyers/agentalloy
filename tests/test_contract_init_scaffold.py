@@ -7,8 +7,11 @@ file with its required `## Section` headings, never overwriting).
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
+from unittest.mock import patch
 
+from agentalloy.api.state_client import StateClient
 from agentalloy.install.subcommands import contract as contract_cmd
 from agentalloy.install.subcommands.contract import (
     _active_design_slug,
@@ -80,6 +83,84 @@ class TestInitTemplateSubstitution:
         assert "# My Cool Task" in content
         assert "{" not in content.split("---", 2)[2]
         assert "}" not in content.split("---", 2)[2]
+
+    def test_init_end_to_end_sdd_fast(self, tmp_path: Path) -> None:
+        """Drive `_init` end to end against a stubbed service (sdd-fast route).
+
+        The service is required for storage; stub it so the command can run
+        without a live server. Assert the stored contract body has no stray
+        braces — the original regression that hollowed out this test.
+        """
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands.contract import _init
+
+        captured: list[dict] = []
+
+        def fake_create_contract(payload: dict) -> dict:
+            captured.append(payload)
+            return {"contract_id": payload["contract_id"]}
+
+        mock_client = MagicMock(spec=StateClient)
+        mock_client.is_running.return_value = True
+        mock_client.create_contract = fake_create_contract
+
+        args = argparse.Namespace(
+            phase="sdd-fast",
+            slug="my-cool-task",
+            route="sdd-fast",
+            json=False,
+            quiet=True,
+        )
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            with patch("agentalloy.install.state._repo_root", return_value=tmp_path):
+                rc = _init(args)
+        assert rc == 0
+        assert len(captured) == 1
+        body = captured[0]["body"]
+        assert "# My Cool Task" in body
+        # Body portion (after frontmatter) must not contain stray braces
+        body_part = body.split("---", 2)[2]
+        assert "{" not in body_part
+        assert "}" not in body_part
+
+    def test_init_end_to_end_full_route(self, tmp_path: Path) -> None:
+        """Drive `_init` end to end against a stubbed service (full route).
+
+        Verifies the default "full" route produces a fully resolved contract
+        with correct phase and slug in the stored payload.
+        """
+        from unittest.mock import MagicMock
+
+        from agentalloy.install.subcommands.contract import _init
+
+        captured: list[dict] = []
+
+        def fake_create_contract(payload: dict) -> dict:
+            captured.append(payload)
+            return {"contract_id": payload["contract_id"]}
+
+        mock_client = MagicMock(spec=StateClient)
+        mock_client.is_running.return_value = True
+        mock_client.create_contract = fake_create_contract
+
+        args = argparse.Namespace(
+            phase="build",
+            slug="01-auth",
+            route="full",
+            json=False,
+            quiet=True,
+        )
+        with patch("agentalloy.install.subcommands.contract.StateClient", return_value=mock_client):
+            with patch("agentalloy.install.state._repo_root", return_value=tmp_path):
+                rc = _init(args)
+        assert rc == 0
+        assert len(captured) == 1
+        assert captured[0]["phase"] == "build"
+        assert captured[0]["slug"] == "01-auth"
+        assert captured[0]["route"] == "full"
+        body = captured[0]["body"]
+        assert "# 01-auth" in body or "# 01 Auth" in body  # template-dependent
 
 
 class TestConcretizeGlob:
