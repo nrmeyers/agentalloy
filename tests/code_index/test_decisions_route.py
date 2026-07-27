@@ -36,6 +36,7 @@ def seed_decisions_repo(settings: Settings) -> None:
             ),
         ],
         edges=[CodeEdge(src=DECISION_QN, dst="pkg.util.helper", kind="GOVERNS", file_path=DOC)],
+        repo_path="/repo/kdemo",
     )
 
 

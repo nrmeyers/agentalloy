@@ -20,6 +20,7 @@ from agentalloy.code_index.store.jobs_store import (
     CodeIndexJob,
     CodeIndexJobsStore,
     IndexedRepo,
+    repo_path_key,
 )
 from agentalloy.code_index.store.open import (
     CodeIndexPaths,
@@ -38,6 +39,7 @@ __all__ = [
     "CodeIndexJob",
     "CodeIndexJobsStore",
     "IndexedRepo",
+    "repo_path_key",
     "CodeIndexPaths",
     "code_index_paths",
     "open_code_index",

@@ -85,7 +85,7 @@ class CodeIndexState:
         # Successful index of a watch-ENROLLED repo: begin watching it. A repo
         # that never opted in (`agentalloy code watch enable`) is left alone.
         if result.status == "done" and self.watch is not None:
-            repo = self.jobs.get_repo(slug)
+            repo = self.jobs.get_repo(slug, repo_path=str(repo_path))
             if repo is not None and repo.watch_enabled:
                 with contextlib.suppress(Exception):
                     self.watch.start(slug, repo_path)

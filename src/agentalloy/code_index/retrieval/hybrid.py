@@ -117,6 +117,8 @@ class SearchResult(BaseModel):
     end_line: int | None
     score: float
     snippet: str
+    indexed_head: str | None = None
+    """HEAD commit this index was built from (for staleness detection)."""
 
 
 def _snippet(sym: CodeSymbol) -> str:
@@ -134,6 +136,7 @@ def _hydrate(
     *,
     k: int,
     dense_by_qn: dict[str, CodeSearchHit],
+    indexed_head: str | None = None,
 ) -> list[SearchResult]:
     """Build typed results for the top-k ranked qualified names.
 
@@ -156,6 +159,7 @@ def _hydrate(
                     end_line=sym.end_line,
                     score=score,
                     snippet=_snippet(sym),
+                    indexed_head=indexed_head,
                 )
             )
             continue
@@ -170,6 +174,7 @@ def _hydrate(
                     end_line=hit.end_line,
                     score=score,
                     snippet="",
+                    indexed_head=indexed_head,
                 )
             )
     return out
@@ -209,13 +214,19 @@ def _embed_query(state: CodeIndexState, query: str) -> list[float]:
 
 
 async def semantic_search(
-    state: CodeIndexState, slug: str, query: str, *, k: int = 10
+    state: CodeIndexState,
+    slug: str,
+    query: str,
+    *,
+    k: int = 10,
+    repo_path: str | None = None,
+    indexed_head: str | None = None,
 ) -> list[SearchResult]:
     """Full hybrid pipeline (see module docstring). Returns at most ``k``."""
     query_vec = await asyncio.to_thread(_embed_query, state, query)
 
     def _search() -> list[SearchResult]:
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo_path)
         try:
             dense = handles.vectors.search_similar(query_vec, k=_FETCH_K)
             dense_by_qn = {h.qualified_name: h for h in dense}
@@ -237,7 +248,9 @@ async def semantic_search(
             bm25 = handles.vectors.search_bm25(query, k=_FETCH_K)
 
             ranked = _rrf_fuse([h.qualified_name for h in fused_dense], [qn for qn, _score in bm25])
-            return _hydrate(handles.graph, ranked, k=k, dense_by_qn=dense_by_qn)
+            return _hydrate(
+                handles.graph, ranked, k=k, dense_by_qn=dense_by_qn, indexed_head=indexed_head
+            )
         finally:
             handles.close()
 
@@ -245,15 +258,21 @@ async def semantic_search(
 
 
 async def lexical_search(
-    state: CodeIndexState, slug: str, query: str, *, k: int = 10
+    state: CodeIndexState,
+    slug: str,
+    query: str,
+    *,
+    k: int = 10,
+    repo_path: str | None = None,
+    indexed_head: str | None = None,
 ) -> list[SearchResult]:
     """BM25-only search, hydrated from the graph the same way."""
 
     def _search() -> list[SearchResult]:
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo_path)
         try:
             ranked = handles.vectors.search_bm25(query, k=k)
-            return _hydrate(handles.graph, ranked, k=k, dense_by_qn={})
+            return _hydrate(handles.graph, ranked, k=k, dense_by_qn={}, indexed_head=indexed_head)
         finally:
             handles.close()
 
@@ -261,7 +280,13 @@ async def lexical_search(
 
 
 async def related_decisions(
-    state: CodeIndexState, slug: str, query: str, *, k: int = 8
+    state: CodeIndexState,
+    slug: str,
+    query: str,
+    *,
+    k: int = 8,
+    repo_path: str | None = None,
+    indexed_head: str | None = None,
 ) -> list[SearchResult]:
     """Hybrid search constrained to decision-doc chunks (MarkdownDoc kind).
 
@@ -273,7 +298,7 @@ async def related_decisions(
     query_vec = await asyncio.to_thread(_embed_query, state, query)
 
     def _search() -> list[SearchResult]:
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo_path)
         try:
             qns = handles.graph.decision_qns()
             if not qns:
@@ -283,7 +308,11 @@ async def related_decisions(
             bm25 = handles.vectors.search_bm25(query, k=_FETCH_K, where=where)
             ranked = _rrf_fuse([d.qualified_name for d in dense], [qn for qn, _ in bm25])
             return _hydrate(
-                handles.graph, ranked, k=k, dense_by_qn={d.qualified_name: d for d in dense}
+                handles.graph,
+                ranked,
+                k=k,
+                dense_by_qn={d.qualified_name: d for d in dense},
+                indexed_head=indexed_head,
             )
         finally:
             handles.close()

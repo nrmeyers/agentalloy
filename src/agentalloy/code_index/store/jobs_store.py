@@ -2,8 +2,9 @@
 
 Adopted from codebase-indexer's ``app/services/jobs_store.py`` DAO, rewritten
 for agentalloy: class-based instead of module-global state, actor/S3/GitHub
-concerns dropped, ``indexed_repos`` reshaped around per-slug data dirs (for
-unwire cleanup). Keeps the design that made the original robust:
+concerns dropped, ``indexed_repos`` keyed by ``(slug, repo_path)`` so multiple
+checkouts of the same remote coexist (for unwire cleanup). Keeps the design
+that made the original robust:
 
 - WAL mode + ``busy_timeout`` so readers never block on the single writer.
 - One long-lived connection (``check_same_thread=False``) guarded by an
@@ -16,6 +17,7 @@ unwire cleanup). Keeps the design that made the original robust:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 import threading
@@ -70,15 +72,18 @@ CREATE TABLE IF NOT EXISTS job_events (
 CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id);
 
 CREATE TABLE IF NOT EXISTS indexed_repos (
-  slug TEXT PRIMARY KEY,
+  slug TEXT NOT NULL,
   repo_path TEXT NOT NULL,
   data_dir TEXT NOT NULL,
   last_indexed_at INTEGER,
   head_sha TEXT,
   watch_enabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (slug, repo_path)
 );
+
+CREATE INDEX IF NOT EXISTS idx_indexed_repos_slug ON indexed_repos(slug);
 """
 
 # Additive column migrations for databases created before the column existed
@@ -91,8 +96,92 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ),
 )
 
+# Structural migrations that require table recreation (primary key changes).
+# Each entry is (table_name, migration_id, ddl_for_new_table).
+# migration_id is stored in corpus_meta so we never re-run.
+_STRUCTURAL_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "indexed_repos",
+        "indexed_repos_composite_key",
+        """
+        CREATE TABLE indexed_repos (
+          slug TEXT NOT NULL,
+          repo_path TEXT NOT NULL,
+          data_dir TEXT NOT NULL,
+          last_indexed_at INTEGER,
+          head_sha TEXT,
+          watch_enabled INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (slug, repo_path)
+        );
+        """,
+    ),
+)
+
 _TERMINAL_STATUSES: frozenset[str] = frozenset({"done", "failed", "cancelled", "interrupted"})
 _ACTIVE_STATUSES: frozenset[str] = frozenset({"queued", "running"})
+
+
+class _StructuralMigration:
+    """One-shot table-recreation migrations tracked by a meta key."""
+
+    _META_TABLE = "jobs_meta"
+    _META_DDL = """
+    CREATE TABLE IF NOT EXISTS jobs_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    """
+
+    @classmethod
+    def _apply(
+        cls,
+        conn: sqlite3.Connection,
+        migrations: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        conn.execute(cls._META_DDL)
+        for table_name, migration_id, new_ddl in migrations:
+            if cls._is_applied(conn, migration_id):
+                continue
+            cols = {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")}
+            pk_cols = {
+                str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})") if r["pk"]
+            }
+            new_pk_cols = {
+                c.strip().split()[0]
+                for c in new_ddl.split("PRIMARY KEY")[1].split(")")[0].strip("(").split(",")
+            }
+            if pk_cols == new_pk_cols:
+                continue  # already has the right PK
+            old_name = f"{table_name}_old"
+            conn.execute(f"ALTER TABLE {table_name} RENAME TO {old_name}")
+            conn.execute(new_ddl)
+            col_list = sorted(
+                cols & {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table_name})")}
+            )
+            if col_list:
+                conn.execute(
+                    f"INSERT INTO {table_name} ({', '.join(col_list)}) "
+                    f"SELECT {', '.join(col_list)} FROM {old_name}"
+                )
+            conn.execute(f"DROP TABLE {old_name}")
+            # Recreate indexes from _DDL (they reference the new table name)
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_slug ON {table_name}(slug)")
+            cls._mark_applied(conn, migration_id)
+            logger.info("structural migration %s applied for %s", migration_id, table_name)
+
+    @classmethod
+    def _is_applied(cls, conn: sqlite3.Connection, key: str) -> bool:
+        row = conn.execute(f"SELECT value FROM {cls._META_TABLE} WHERE key = ?", (key,)).fetchone()
+        return row is not None
+
+    @classmethod
+    def _mark_applied(cls, conn: sqlite3.Connection, key: str) -> None:
+        conn.execute(
+            f"INSERT OR REPLACE INTO {cls._META_TABLE} (key, value) VALUES (?, ?)",
+            (key, "1"),
+        )
 
 
 @dataclass(frozen=True)
@@ -125,7 +214,11 @@ class CodeIndexJob:
 class IndexedRepo:
     """One row in the ``indexed_repos`` registry.
 
-    ``data_dir`` records the per-slug storage directory so ``unwire`` can
+    Keyed by ``(slug, repo_path)`` so multiple checkouts of the same remote
+    coexist. ``repo_key`` is a deterministic path hash used to derive the
+    per-checkout data directory under ``repos/{slug}/{repo_key}/``.
+
+    ``data_dir`` records the per-checkout storage directory so ``unwire`` can
     remove exactly what an index run created.
     """
 
@@ -137,6 +230,11 @@ class IndexedRepo:
     watch_enabled: bool
     created_at: int
     updated_at: int
+
+
+def repo_path_key(repo_path: str) -> str:
+    """Deterministic 8-hex hash of a resolved repo path (for data-dir naming)."""
+    return hashlib.sha256(repo_path.encode()).hexdigest()[:8]
 
 
 def _row_to_job(row: sqlite3.Row) -> CodeIndexJob:
@@ -197,11 +295,15 @@ class CodeIndexJobsStore:
 
     @staticmethod
     def _apply_migrations(conn: sqlite3.Connection) -> None:
-        """Additive schema migrations (ALTER TABLE ADD COLUMN) for existing DBs."""
+        """Apply additive and structural schema migrations for existing DBs."""
+        # Additive column migrations
         for table, column, ddl in _MIGRATIONS:
             cols = {str(r["name"]) for r in conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 conn.execute(ddl)
+
+        # Structural migrations (table recreation for PK changes)
+        _StructuralMigration._apply(conn, _STRUCTURAL_MIGRATIONS)
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -474,7 +576,7 @@ class CodeIndexJobsStore:
         data_dir: str,
         head_sha: str | None = None,
     ) -> None:
-        """Insert or update the registry row for ``slug``.
+        """Insert or update the registry row for ``(slug, repo_path)``.
 
         Preserves ``created_at`` and ``last_indexed_at`` on update; the latter
         advances via :meth:`mark_indexed` after a successful index run.
@@ -487,8 +589,7 @@ class CodeIndexJobsStore:
                   slug, repo_path, data_dir, last_indexed_at, head_sha,
                   created_at, updated_at
                 ) VALUES (?, ?, ?, NULL, ?, ?, ?)
-                ON CONFLICT(slug) DO UPDATE SET
-                  repo_path = excluded.repo_path,
+                ON CONFLICT(slug, repo_path) DO UPDATE SET
                   data_dir = excluded.data_dir,
                   head_sha = COALESCE(excluded.head_sha, indexed_repos.head_sha),
                   updated_at = excluded.updated_at
@@ -496,11 +597,30 @@ class CodeIndexJobsStore:
                 (slug, repo_path, data_dir, head_sha, now, now),
             )
 
-    def mark_indexed(self, slug: str, *, head_sha: str | None = None) -> bool:
-        """Advance ``last_indexed_at`` (and optionally ``head_sha``)."""
+    def mark_indexed(
+        self, slug: str, *, head_sha: str | None = None, repo_path: str | None = None
+    ) -> bool:
+        """Advance ``last_indexed_at`` (and optionally ``head_sha``).
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise updates all entries for the slug.
+        """
         now = int(time.time())
         with self._lock:
-            if head_sha is None:
+            if repo_path is not None:
+                if head_sha is None:
+                    cur = self.conn.execute(
+                        "UPDATE indexed_repos SET last_indexed_at = ?, updated_at = ? "
+                        "WHERE slug = ? AND repo_path = ?",
+                        (now, now, slug, repo_path),
+                    )
+                else:
+                    cur = self.conn.execute(
+                        "UPDATE indexed_repos SET last_indexed_at = ?, head_sha = ?, "
+                        "updated_at = ? WHERE slug = ? AND repo_path = ?",
+                        (now, head_sha, now, slug, repo_path),
+                    )
+            elif head_sha is None:
                 cur = self.conn.execute(
                     "UPDATE indexed_repos SET last_indexed_at = ?, updated_at = ? WHERE slug = ?",
                     (now, now, slug),
@@ -513,22 +633,90 @@ class CodeIndexJobsStore:
                 )
             return cur.rowcount > 0
 
-    def get_repo(self, slug: str) -> IndexedRepo | None:
-        row = self.conn.execute("SELECT * FROM indexed_repos WHERE slug = ?", (slug,)).fetchone()
-        return _row_to_repo(row) if row is not None else None
+    def get_repo(self, slug: str, *, repo_path: str | None = None) -> IndexedRepo | None:
+        """Fetch a registry row.
+
+        With only ``slug``, returns the sole entry for that slug (raises if
+        ambiguous — multiple checkouts). With both ``slug`` and ``repo_path``,
+        returns the exact match.
+        """
+        if repo_path is not None:
+            row = self.conn.execute(
+                "SELECT * FROM indexed_repos WHERE slug = ? AND repo_path = ?",
+                (slug, repo_path),
+            ).fetchone()
+            return _row_to_repo(row) if row is not None else None
+        # slug-only: return the entry if there's exactly one; else None.
+        rows = self.conn.execute("SELECT * FROM indexed_repos WHERE slug = ?", (slug,)).fetchall()
+        if len(rows) == 1:
+            return _row_to_repo(rows[0])
+        return None  # ambiguous (multiple checkouts) — caller should use repo_path
+
+    def get_repos_by_slug(self, slug: str) -> list[IndexedRepo]:
+        """All registry rows for a slug (0, 1, or multiple checkouts)."""
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE slug = ? ORDER BY repo_path", (slug,)
+        ).fetchall()
+        return [_row_to_repo(r) for r in rows]
+
+    def resolve_repo(self, slug: str, *, cwd: str | None = None) -> IndexedRepo | None:
+        """Resolve the registry entry for ``slug`` matching ``cwd``.
+
+        Walks up from ``cwd`` to find the enclosing git worktree, then matches
+        against registered entries. Falls back to the sole entry when
+        unambiguous. Returns None when no match or ambiguous.
+        """
+        repos = self.get_repos_by_slug(slug)
+        if not repos:
+            return None
+        if len(repos) == 1:
+            return repos[0]
+        # Multiple checkouts: match against cwd.
+        if cwd is None:
+            return None  # ambiguous without cwd
+        cwd_path = Path(cwd).resolve()
+        for repo in repos:
+            repo_root = Path(repo.repo_path).resolve()
+            # cwd must be inside or equal to the repo root
+            try:
+                cwd_path.relative_to(repo_root)
+                return repo
+            except ValueError:
+                continue
+        return None  # cwd not inside any registered checkout
 
     def list_repos(self) -> list[IndexedRepo]:
         rows = self.conn.execute("SELECT * FROM indexed_repos ORDER BY updated_at DESC").fetchall()
         return [_row_to_repo(r) for r in rows]
 
-    def set_watch_enabled(self, slug: str, enabled: bool) -> bool:
-        """Flip per-repo watch enrollment. True iff the registry row exists."""
+    def set_watch_enabled(self, slug: str, enabled: bool, *, repo_path: str | None = None) -> bool:
+        """Flip per-repo watch enrollment. True iff the registry row exists.
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise updates all entries for the slug.
+        """
+        now = int(time.time())
         with self._lock:
-            cur = self.conn.execute(
-                "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? WHERE slug = ?",
-                (1 if enabled else 0, int(time.time()), slug),
-            )
+            if repo_path is not None:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? "
+                    "WHERE slug = ? AND repo_path = ?",
+                    (1 if enabled else 0, now, slug, repo_path),
+                )
+            else:
+                cur = self.conn.execute(
+                    "UPDATE indexed_repos SET watch_enabled = ?, updated_at = ? WHERE slug = ?",
+                    (1 if enabled else 0, now, slug),
+                )
             return cur.rowcount > 0
+
+    def find_by_repo_path(self, repo_path: str) -> list[IndexedRepo]:
+        """Find all registry entries whose repo_path matches (resolved)."""
+        target = str(Path(repo_path).resolve())
+        rows = self.conn.execute(
+            "SELECT * FROM indexed_repos WHERE repo_path = ? ORDER BY slug", (target,)
+        ).fetchall()
+        return [_row_to_repo(r) for r in rows]
 
     def list_watch_enabled_repos(self) -> list[IndexedRepo]:
         """Registry rows enrolled for watching (service-startup observer set)."""
@@ -537,11 +725,21 @@ class CodeIndexJobsStore:
         ).fetchall()
         return [_row_to_repo(r) for r in rows]
 
-    def delete_repo(self, slug: str) -> bool:
-        """Drop a registry row (unwire). True iff one was deleted."""
+    def delete_repo(self, slug: str, *, repo_path: str | None = None) -> int:
+        """Drop registry row(s) (unwire). Returns the number of deleted rows.
+
+        When ``repo_path`` is provided, targets the exact (slug, repo_path)
+        entry; otherwise deletes all entries for the slug.
+        """
         with self._lock:
-            cur = self.conn.execute("DELETE FROM indexed_repos WHERE slug = ?", (slug,))
-            return cur.rowcount > 0
+            if repo_path is not None:
+                cur = self.conn.execute(
+                    "DELETE FROM indexed_repos WHERE slug = ? AND repo_path = ?",
+                    (slug, repo_path),
+                )
+            else:
+                cur = self.conn.execute("DELETE FROM indexed_repos WHERE slug = ?", (slug,))
+            return cur.rowcount
 
     # -- diagnostics ---------------------------------------------------------------
 

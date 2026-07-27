@@ -50,8 +50,10 @@ async def search_semantic(
     k: int = Query(default=10, ge=1, le=100),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[SearchResult]:
-    require_indexed_repo(state, repo)
-    return await semantic_search(state, repo, q, k=k)
+    indexed = require_indexed_repo(state, repo)
+    return await semantic_search(
+        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+    )
 
 
 @router.get(
@@ -65,8 +67,10 @@ async def search_lexical(
     k: int = Query(default=10, ge=1, le=100),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[SearchResult]:
-    require_indexed_repo(state, repo)
-    return await lexical_search(state, repo, q, k=k)
+    indexed = require_indexed_repo(state, repo)
+    return await lexical_search(
+        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+    )
 
 
 @router.get(
@@ -81,8 +85,10 @@ async def search_related_decisions(
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[SearchResult]:
     """Semantic search over decision docs only."""
-    require_indexed_repo(state, repo)
-    return await related_decisions(state, repo, q, k=k)
+    indexed = require_indexed_repo(state, repo)
+    return await related_decisions(
+        state, repo, q, k=k, repo_path=indexed.repo_path, indexed_head=indexed.head_sha
+    )
 
 
 @router.get(
@@ -95,8 +101,10 @@ async def search_symbol(
     fqn: str = Query(min_length=1, description="Fully-qualified symbol name"),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> SymbolView:
-    require_indexed_repo(state, repo)
-    sym = await with_handles(state, repo, lambda h: h.graph.symbol(fqn))
+    indexed = require_indexed_repo(state, repo)
+    sym = await with_handles(
+        state, repo, lambda h: h.graph.symbol(fqn), repo_path=indexed.repo_path
+    )
     if sym is None:
         raise HTTPException(status_code=404, detail=f"no such symbol in {repo!r}: {fqn}")
     return SymbolView.from_symbol(sym)
@@ -114,9 +122,12 @@ async def search_files(
     offset: int = Query(default=0, ge=0),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[str]:
-    require_indexed_repo(state, repo)
+    indexed = require_indexed_repo(state, repo)
     return await with_handles(
-        state, repo, lambda h: h.graph.list_files(prefix=prefix, limit=limit, offset=offset)
+        state,
+        repo,
+        lambda h: h.graph.list_files(prefix=prefix, limit=limit, offset=offset),
+        repo_path=indexed.repo_path,
     )
 
 
@@ -130,7 +141,7 @@ async def search_centrality(
     limit: int = Query(default=20, ge=1, le=100),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> list[CentralitySymbol]:
-    require_indexed_repo(state, repo)
+    indexed = require_indexed_repo(state, repo)
 
     def _collect(h: CodeIndexHandles) -> list[CentralitySymbol]:
         out: list[CentralitySymbol] = []
@@ -146,7 +157,7 @@ async def search_centrality(
             )
         return out
 
-    return await with_handles(state, repo, _collect)
+    return await with_handles(state, repo, _collect, repo_path=indexed.repo_path)
 
 
 @router.get(
@@ -161,7 +172,7 @@ async def search_structural(
     depth: int = Query(default=4, ge=1, le=10, description="transitive_callers hop cap"),
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> dict[str, object]:
-    require_indexed_repo(state, repo)
+    indexed = require_indexed_repo(state, repo)
     if query not in _STRUCTURAL_QUERIES:
         raise HTTPException(
             status_code=400,
@@ -182,5 +193,5 @@ async def search_structural(
             return [DecisionView.from_decision(d) for d in h.graph.governing_decisions(fqn)]
         return h.graph.counts_by_kind()
 
-    results = await with_handles(state, repo, _run)
+    results = await with_handles(state, repo, _run, repo_path=indexed.repo_path)
     return {"query": query, "fqn": fqn or None, "results": results}

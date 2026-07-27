@@ -27,6 +27,25 @@ from agentalloy.code_index.store import code_index_paths, open_code_index
 router = APIRouter()
 
 
+def _git_current_head(repo_path: Path) -> str | None:
+    """Read HEAD commit sha from a git repo, or None on any failure."""
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 @router.get("/repos", response_model=list[RepoView], summary="List indexed repos")
 async def list_repos(
     state: CodeIndexState = Depends(get_code_index_state),
@@ -34,7 +53,10 @@ async def list_repos(
     out: list[RepoView] = []
     for repo in state.jobs.list_repos():
         done = state.jobs.list_jobs(slug=repo.slug, status={"done"}, limit=1)
-        out.append(RepoView.from_repo(repo, last_done=done[0] if done else None))
+        current_head = _git_current_head(Path(repo.repo_path))
+        out.append(
+            RepoView.from_repo(repo, last_done=done[0] if done else None, current_head=current_head)
+        )
     return out
 
 
@@ -43,13 +65,17 @@ async def repo_stats(
     slug: str,
     state: CodeIndexState = Depends(get_code_index_state),
 ) -> RepoStats:
-    if not code_index_paths(state.settings, slug).graph_path.exists():
+    repo = state.jobs.get_repo(slug)
+    if repo is None:
+        raise HTTPException(status_code=404, detail=f"no index for repo: {slug}")
+    paths = code_index_paths(state.settings, slug, repo_path=repo.repo_path)
+    if not paths.graph_path.exists():
         raise HTTPException(status_code=404, detail=f"no index for repo: {slug}")
 
     def _collect() -> RepoStats:
         # "service" role matches the job writer's connection config so DuckDB's
         # in-process instance cache shares the database with a running job.
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo.repo_path)
         try:
             return RepoStats(
                 slug=slug,
@@ -94,7 +120,7 @@ async def set_watch(
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
     elif state.watch is not None:
         state.watch.stop(slug)
-    state.jobs.set_watch_enabled(slug, req.enabled)
+    state.jobs.set_watch_enabled(slug, req.enabled, repo_path=repo.repo_path)
     return WatchToggleView(
         slug=slug, watch_enabled=req.enabled, watching=watching, master_switch=master
     )

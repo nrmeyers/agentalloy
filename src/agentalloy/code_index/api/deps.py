@@ -12,9 +12,19 @@ from agentalloy.code_index.store import IndexedRepo, open_code_index
 from agentalloy.storage.protocols import CodeIndexHandles
 
 
-def require_indexed_repo(state: CodeIndexState, slug: str) -> IndexedRepo:
-    """404 unless ``slug`` is in the indexed_repos registry."""
-    repo = state.jobs.get_repo(slug)
+def require_indexed_repo(
+    state: CodeIndexState, slug: str, *, repo_path: str | None = None
+) -> IndexedRepo:
+    """404 unless ``slug`` is in the indexed_repos registry.
+
+    With ``repo_path`` provided, resolves the exact (slug, repo_path) entry.
+    Without it, falls back to the sole entry for the slug (returns 404 when
+    ambiguous — multiple checkouts of the same remote).
+    """
+    if repo_path is not None:
+        repo = state.jobs.get_repo(slug, repo_path=repo_path)
+    else:
+        repo = state.jobs.get_repo(slug)
     if repo is None:
         raise HTTPException(
             status_code=404,
@@ -24,16 +34,23 @@ def require_indexed_repo(state: CodeIndexState, slug: str) -> IndexedRepo:
 
 
 async def with_handles[T](
-    state: CodeIndexState, slug: str, fn: Callable[[CodeIndexHandles], T]
+    state: CodeIndexState,
+    slug: str,
+    fn: Callable[[CodeIndexHandles], T],
+    *,
+    repo_path: str | None = None,
 ) -> T:
     """Run a synchronous store read in a worker thread with open/close managed.
 
     ``service`` role matches the job writer's connection config so DuckDB's
     in-process instance cache shares the database with a running job.
+
+    When ``repo_path`` is provided, the data directory is scoped to that
+    specific checkout (multiple checkouts of the same remote coexist).
     """
 
     def _run() -> T:
-        handles = open_code_index(state.settings, slug, role="service")
+        handles = open_code_index(state.settings, slug, role="service", repo_path=repo_path)
         try:
             return fn(handles)
         finally:

@@ -123,7 +123,10 @@ class TestStatus:
                             "slug": "org__repo",
                             "repo_path": "/tmp/repo",
                             "last_indexed_at": 1,
-                            "head_sha": "abc",
+                            "indexed_head": "abc",
+                            "current_head": "abc",
+                            "is_stale": False,
+                            "watch_enabled": False,
                             "symbol_count": 10,
                             "edge_count": 5,
                         }
@@ -780,11 +783,17 @@ class TestStatusStaleness:
         return handler
 
     def _repo_view(self, path: str, sha: str | None) -> dict[str, Any]:
+        """Return a repo view with the given indexed_head.
+
+        Deliberately omits is_stale/current_head so the CLI falls back to a
+        local staleness check against the real git HEAD — the whole point of
+        these tests is to exercise that fallback path.
+        """
         return {
             "slug": "org__repo",
             "repo_path": path,
             "last_indexed_at": 1,
-            "head_sha": sha,
+            "indexed_head": sha,
             "watch_enabled": False,
             "symbol_count": 10,
             "edge_count": 5,

@@ -257,13 +257,24 @@ def _wait_for_job(client: httpx.Client, job_id: str, *, as_json: bool) -> int:
 
 
 def _staleness_marker(repo: dict[str, Any]) -> str:
-    """`` [stale ...]`` suffix when the repo's HEAD moved since its index.
+    """`` [stale]`` suffix when the repo's HEAD moved since its index.
 
-    Silent (empty string) for non-git repos, missing paths, or when the
-    comparison is impossible — a nudge, never an error.
+    Uses the server-side ``is_stale`` flag (computed from indexed_head vs
+    current_head). Falls back to a local staleness check for older servers
+    that don't provide the new fields. Silent for non-git repos, missing
+    paths, or when the comparison is impossible — a nudge, never an error.
     """
     repo_path = repo.get("repo_path")
-    head_sha = repo.get("head_sha")
+    # Prefer the server-side staleness flag (new API)
+    if repo.get("is_stale") is True:
+        indexed = repo.get("indexed_head", "?")[:7]
+        current = repo.get("current_head", "?")[:7]
+        return (
+            f"  [stale — indexed @{indexed}, current @{current}; "
+            f"run `agentalloy code index {repo_path}`]"
+        )
+    # Fallback: local check for older servers still using head_sha
+    head_sha = repo.get("indexed_head") or repo.get("head_sha")
     if not isinstance(repo_path, str) or not isinstance(head_sha, str):
         return ""
     verdict = check_staleness(Path(repo_path), head_sha)

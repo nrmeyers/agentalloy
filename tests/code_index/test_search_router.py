@@ -42,6 +42,7 @@ def seed_demo_repo(settings: Settings) -> None:
         ],
         centrality={"pkg.util.helper": 0.5, "pkg.util.caller": 0.3, "pkg.main.main": 0.2},
         fts=True,
+        repo_path="/repo/demo",
     )
 
 

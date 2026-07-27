@@ -61,18 +61,34 @@ class RepoView(BaseModel):
     slug: str
     repo_path: str
     last_indexed_at: int | None
-    head_sha: str | None
+    indexed_head: str | None
+    """HEAD commit the index was built from."""
+    current_head: str | None
+    """Current HEAD of the working tree (for staleness comparison)."""
+    is_stale: bool
     watch_enabled: bool
     symbol_count: int
     edge_count: int
 
     @classmethod
-    def from_repo(cls, repo: IndexedRepo, *, last_done: CodeIndexJob | None) -> RepoView:
+    def from_repo(
+        cls,
+        repo: IndexedRepo,
+        *,
+        last_done: CodeIndexJob | None,
+        current_head: str | None = None,
+    ) -> RepoView:
         return cls(
             slug=repo.slug,
             repo_path=repo.repo_path,
             last_indexed_at=repo.last_indexed_at,
-            head_sha=repo.head_sha,
+            indexed_head=repo.head_sha,
+            current_head=current_head,
+            is_stale=(
+                current_head is not None
+                and repo.head_sha is not None
+                and current_head != repo.head_sha
+            ),
             watch_enabled=repo.watch_enabled,
             symbol_count=last_done.symbol_count if last_done else 0,
             edge_count=last_done.edge_count if last_done else 0,
