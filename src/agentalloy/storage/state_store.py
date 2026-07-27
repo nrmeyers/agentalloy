@@ -22,10 +22,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -421,6 +419,7 @@ class DuckDBStateStore:
         """Import state from file mirror.  Returns dict of kind -> value imported.
 
         Idempotent: only imports kinds that have no row in the store yet.
+        Kept for one-shot migration of existing phase/cursor files.
         """
         imported: dict[str, str] = {}
         all_kinds = REPO_SCOPED_KINDS | SESSION_SCOPED_KINDS
@@ -441,7 +440,15 @@ class DuckDBStateStore:
         return imported
 
     def mirror_to_files(self, kind: str, value: str, agentalloy_dir: Path) -> bool:
-        """Write a value to the file mirror.  Returns False if the write fails."""
+        """Write a value to the file mirror.  Returns False if the write fails.
+
+        Kept for backward compatibility with consumers that still read the
+        .agentalloy file mirror.  New code should use the store directly.
+        """
+        import os
+        import tempfile
+        from contextlib import suppress
+
         try:
             agentalloy_dir.mkdir(parents=True, exist_ok=True)
 
@@ -760,6 +767,42 @@ class DuckDBStateStore:
         result = self.conn.execute(sql, params)
         count = result.fetchall()
         return count and count[0][0] > 0
+
+    # -- repo management -----------------------------------------------------
+
+    def list_repos(self) -> list[str]:
+        """Return all distinct repo slugs recorded in the store."""
+        rows = self.conn.execute("SELECT DISTINCT repo FROM sdd_state").fetchall()
+        state_repos = {r[0] for r in rows}
+
+        rows = self.conn.execute("SELECT DISTINCT repo FROM sdd_contract").fetchall()
+        contract_repos = {r[0] for r in rows}
+
+        return sorted(state_repos | contract_repos)
+
+    def delete_repo_rows(self, repo: str) -> int:
+        """Delete all rows for a repo from both sdd_state and sdd_contract.
+
+        Returns the total number of deleted rows.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+
+        result = self.conn.execute(
+            "DELETE FROM sdd_state WHERE repo=?",
+            (repo,),
+        )
+        state_count = result.fetchall()
+        state_deleted = state_count[0][0] if state_count else 0
+
+        result = self.conn.execute(
+            "DELETE FROM sdd_contract WHERE repo=?",
+            (repo,),
+        )
+        contract_count = result.fetchall()
+        contract_deleted = contract_count[0][0] if contract_count else 0
+
+        return state_deleted + contract_deleted
 
 
 def open_state_store(db_path: str | Path, *, read_only: bool = False) -> DuckDBStateStore:

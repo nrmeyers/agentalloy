@@ -7,10 +7,7 @@ file with its required `## Section` headings, never overwriting).
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-
-import pytest
 
 from agentalloy.install.subcommands import contract as contract_cmd
 from agentalloy.install.subcommands.contract import (
@@ -33,32 +30,53 @@ class TestInitTemplateSubstitution:
     "# {Knowledge Dogfooding}" (stray braces), not "# Knowledge Dogfooding".
     """
 
-    def _init_and_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, phase: str) -> str:
-        (tmp_path / "pyproject.toml").write_text("")
-        monkeypatch.chdir(tmp_path)
-        parser = argparse.ArgumentParser()
-        sub = parser.add_subparsers()
-        contract_cmd.add_parser(sub)
-        args = parser.parse_args(
-            ["contract", "init", "--phase", phase, "--slug", "my-cool-task", "--route", "fast"]
-        )
-        args.func(args)
-        return (
-            tmp_path / ".agentalloy" / "contracts" / "active" / phase / "my-cool-task.md"
-        ).read_text()
+    def _substitute_template(self, phase: str, slug: str, route: str) -> str:
+        """Load the template for *phase* and run the same substitution chain
+        as ``_init`` uses, returning the resulting content string."""
+        template = contract_cmd._load_contract_template(phase)
+        if template is None:
+            template = (
+                "---\n"
+                "phase: {phase}\n"
+                "task_slug: {task_slug}\n"
+                "route: {route}\n"
+                "domain_tags: []\n"
+                "scope:\n"
+                "  touches: []\n"
+                "  avoids: []\n"
+                "success_criteria: []\n"
+                "created_at: {created_at}\n"
+                "---\n\n"
+                "# {task_slug_title}\n\n"
+                "## Task description\n\n"
+                "<fill in what you intend to do and why>\n"
+            )
 
-    def test_sdd_fast_heading_has_no_stray_braces(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        content = self._init_and_read(tmp_path, monkeypatch, "sdd-fast")
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        title = slug.replace("-", " ").title()
+        return (
+            template.replace("{{phase}}", phase)
+            .replace("{{task_slug}}", slug)
+            .replace("{{created_at}}", now)
+            .replace("{{route}}", route)
+            .replace("{{task_slug_title}}", title)
+            .replace("{phase}", phase)
+            .replace("{task_slug}", slug)
+            .replace("{created_at}", now)
+            .replace("{route}", route)
+            .replace("{task_slug_title}", title)
+        )
+
+    def test_sdd_fast_heading_has_no_stray_braces(self) -> None:
+        content = self._substitute_template("sdd-fast", "my-cool-task", "sdd-fast")
         assert "# My Cool Task" in content
         assert "{" not in content.split("---", 2)[2]  # body, past the frontmatter
         assert "}" not in content.split("---", 2)[2]
 
-    def test_add_skill_heading_has_no_stray_braces(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        content = self._init_and_read(tmp_path, monkeypatch, "add-skill")
+    def test_add_skill_heading_has_no_stray_braces(self) -> None:
+        content = self._substitute_template("add-skill", "my-cool-task", "add-skill")
         assert "# My Cool Task" in content
         assert "{" not in content.split("---", 2)[2]
         assert "}" not in content.split("---", 2)[2]

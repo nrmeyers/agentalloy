@@ -268,6 +268,33 @@ def validate_contract(contract: Contract, project_root: Any) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Validation — from store row dict
+# ---------------------------------------------------------------------------
+
+
+def validate_contract_from_dict(row: dict[str, Any]) -> list[str]:
+    """Validate a contract from a store row dict. Returns list of issues (empty = valid).
+
+    Converts the row to a :class:`Contract` via :func:`contract_from_row`, then
+    delegates to :func:`validate_contract`.
+    """
+    try:
+        contract = contract_from_row(row)
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"Cannot parse contract from row: {exc}"]
+
+    # Required field checks
+    issues: list[str] = []
+    if not contract.phase:
+        issues.append("Contract 'phase' is empty")
+    if not contract.task_slug:
+        issues.append("Contract 'task_slug' is empty")
+
+    issues.extend(validate_contract(contract, None))
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # Code index query construction
 # ---------------------------------------------------------------------------
 

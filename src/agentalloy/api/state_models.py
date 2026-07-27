@@ -213,3 +213,33 @@ class PhaseAdvanceResponse(BaseModel):
     lease_expires_at: str | None = None
     conflict: StateConflictInfo | None = None
     contract_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Resume response
+# ---------------------------------------------------------------------------
+
+
+class ResumeContractInfo(BaseModel):
+    """Contract info inside a resume response."""
+
+    contract_id: str
+    phase: str
+    slug: str
+    domain_tags: list[str] | None = None
+    scope_touches: list[str] | None = None
+    scope_avoids: list[str] | None = None
+    body: str | None = None
+
+
+class ResumeResponse(BaseModel):
+    """Response for GET /state/resume — assembled server-side for cold-session bootstrap.
+
+    Contains the current phase, the cursor'd work-item with its tags and scope,
+    the artifacts that phase owes, and governing decisions for scope.touches.
+    """
+
+    phase: str | None = None
+    cursor_contract: ResumeContractInfo | None = None
+    owed_artifacts: list[str] | None = None
+    governing_decisions: list[str] | None = None

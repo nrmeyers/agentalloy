@@ -170,6 +170,24 @@ class StateClient:
         """Supersede a contract with a new revision."""
         return self._post(f"/contracts/{contract_id}/supersede", new_contract)
 
+    def get_resume(self) -> dict[str, Any]:
+        """Get assembled resume data for cold-session bootstrap.
+
+        Returns a dict with phase, cursor_contract, owed_artifacts, and
+        governing_decisions.  Raises ``StateClientError`` if the service
+        is unreachable.
+        """
+        try:
+            resp = urllib.request.urlopen(f"{self.base_url}/state/resume", timeout=self._timeout)
+            return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
     # -- internal helpers ------------------------------------------------
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:

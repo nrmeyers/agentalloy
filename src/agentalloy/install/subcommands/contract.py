@@ -1,235 +1,52 @@
 """``agentalloy contract`` — contract management subcommand.
 
+All contract operations go through StateClient over HTTP.  Service down
+means a non-zero exit naming the service — never a silent local write.
+
 Commands:
-    agentalloy contract validate <path>
-    agentalloy contract show <path>
     agentalloy contract init --phase <name> --slug <slug>
+    agentalloy contract show <contract_id>
+    agentalloy contract validate <contract_id>
+    agentalloy contract edit <contract_id> [--body ...] [--domain-tags ...]
+    agentalloy contract supersede <contract_id> --new-id <id>
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.install.output import add_json_flag, print_rich, write_result
 
-
-def _render_validate(result: dict[str, Any]) -> None:
-    """Render contract validation in human-readable format."""
-    print_rich("\n  [bold]Contract Validation[/bold]\n")
-    print_rich(f"  Path: {result['path']}")
-    print_rich(f"  Phase: {result['phase']}")
-    print_rich(f"  Slug: {result['task_slug']}")
-    if result["valid"]:
-        print_rich("  [green]Valid[/green]")
-    else:
-        print_rich(f"  [red]Issues: {len(result['issues'])}[/red]")
-        for issue in result["issues"]:
-            print_rich(f"  [red]x[/red] {issue}")
-    print_rich()
+# ---------------------------------------------------------------------------
+# Helpers shared across subcommands
+# ---------------------------------------------------------------------------
 
 
-def _validate(args: argparse.Namespace) -> int:
-    from agentalloy.contracts import ContractMalformed, parse_contract, validate_contract
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-
-    path = Path(args.path).resolve()
-    try:
-        contract = parse_contract(path)
-    except ContractMalformed as exc:
-        result = {"valid": False, "error": str(exc), "issues": [str(exc)]}
-        write_result(result, args, human_fn=_render_validate)
-        return 1
-
-    project_root = _repo_root()
-    issues = validate_contract(contract, project_root)
-
-    result: dict[str, Any] = {
-        "valid": not issues,
-        "path": str(path),
-        "phase": contract.phase,
-        "task_slug": contract.task_slug,
-        "domain_tags": contract.domain_tags,
-        "issues": issues,
-    }
-    write_result(result, args, human_fn=_render_validate)
-    return 0 if not issues else 1
-
-
-def _render_show(result: dict[str, Any]) -> None:
-    """Render contract display in human-readable format."""
-    print_rich("\n  [bold]Contract[/bold]\n")
-    print_rich(f"  Phase: {result['phase']}")
-    print_rich(f"  Slug: {result['task_slug']}")
-    print_rich(f"  Tags: {', '.join(result['domain_tags'])}")
-    print_rich("\n  [bold]Scope[/bold]")
-    print_rich(f"  Touches: {', '.join(result['scope']['touches'])}")
-    print_rich(f"  Avoids: {', '.join(result['scope']['avoids'])}")
-    if result.get("success_criteria"):
-        print_rich("\n  [bold]Success Criteria[/bold]")
-        for criterion in result["success_criteria"]:
-            print_rich(f"  - {criterion}")
-    if result.get("body"):
-        print_rich(f"\n  [bold]Body[/bold]\n{result['body']}")
-    print_rich()
-
-
-def _show(args: argparse.Namespace) -> int:
-    from agentalloy.contracts import ContractMalformed, parse_contract
-
-    path = Path(args.path).resolve()
-    try:
-        contract = parse_contract(path)
-    except ContractMalformed as exc:
-        print(f"  [error] {exc}", file=sys.stderr)
-        return 1
-
-    result: dict[str, Any] = {
-        "path": str(path),
-        "phase": contract.phase,
-        "task_slug": contract.task_slug,
-        "domain_tags": contract.domain_tags,
-        "scope": {
-            "touches": contract.scope.touches,
-            "avoids": contract.scope.avoids,
-        },
-        "success_criteria": contract.success_criteria,
-        "related_contracts": [str(p) for p in contract.related_contracts],
-        "created_at": contract.created_at.isoformat() if contract.created_at else None,
-        "body": contract.body,
-    }
-
-    write_result(result, args, human_fn=_render_show)
-    return 0
-
-
-def _render_init(result: dict[str, Any]) -> None:
-    """Render contract init in human-readable format."""
-    print_rich("\n  [bold]Contract Init[/bold]\n")
-    print_rich(f"  Path: {result['path']}")
-    print_rich(f"  Phase: {result['phase']}")
-    print_rich(f"  Slug: {result['task_slug']}")
-    print_rich("  [green]Created[/green]")
-    scaffolded = result.get("scaffolded") or []
-    if scaffolded:
-        print_rich("\n  [bold]Scaffolded docs[/bold] (with required headings)")
-        for path in scaffolded:
-            print_rich(f"  [green]+[/green] {path}")
-    print_rich()
-
-
-def _init(args: argparse.Namespace) -> int:
-    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-
-    project_root = _repo_root()
-
-    # --phase defaults to the active phase in .agentalloy/phase when omitted, so only
-    # --slug is required in the common case (the phase is already tracked).
-    phase: str | None = args.phase
-    if phase is None:
-        from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUsage]
-            _read_phase,
-        )
-
-        phase = _read_phase(project_root)
-        if phase is None:
-            print(
-                "  [error] No --phase given and no active phase in .agentalloy/phase. "
-                "Pass --phase explicitly.",
-                file=sys.stderr,
-            )
-            return 1
-
-    slug: str = args.slug
-    route: str = getattr(args, "route", "full")
-    force: bool = getattr(args, "force", False)
-
-    from agentalloy.contracts import active_dir
-
-    contracts_dir = active_dir(project_root, phase)
-    contracts_dir.mkdir(parents=True, exist_ok=True)
-    target = contracts_dir / f"{slug}.md"
-
-    if target.exists() and not force:
+def _get_client() -> StateClient:
+    """Return a StateClient and verify the service is running."""
+    client = StateClient()
+    if not client.is_running():
         print(
-            f"  [error] Contract already exists: {target}. Use --force to overwrite.",
+            "Error: agentalloy service is not running. "
+            "Start the service or run `agentalloy start`.",
             file=sys.stderr,
         )
-        return 1
-
-    # Try to load contract_template from active workflow skill
-    template = _load_contract_template(phase)
-    if template is None:
-        # Fallback minimal template
-        template = (
-            "---\n"
-            "phase: {phase}\n"
-            "task_slug: {task_slug}\n"
-            "route: {route}\n"
-            "domain_tags: []\n"
-            "scope:\n"
-            "  touches: []\n"
-            "  avoids: []\n"
-            "success_criteria: []\n"
-            "related_contracts: []\n"
-            "created_at: {created_at}\n"
-            "---\n\n"
-            "# {task_slug_title}\n\n"
-            "## Task description\n\n"
-            "<fill in what you intend to do and why>\n"
-        )
-
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    title = slug.replace("-", " ").title()
-    content = (
-        template.replace("{{phase}}", phase)
-        .replace("{{task_slug}}", slug)
-        .replace("{{created_at}}", now)
-        .replace("{{route}}", route)
-        .replace("{{task_slug_title}}", title)
-        .replace("{phase}", phase)
-        .replace("{task_slug}", slug)
-        .replace("{created_at}", now)
-        .replace("{route}", route)
-        .replace("{task_slug_title}", title)
-    )
-
-    # Build contracts are flat and numerically ordered (NN-<task>.md), so the
-    # filename carries no link to the design item they decompose. Stamp that link
-    # as `work_item:` from the active design cursor, so the design→build density /
-    # tag-focus gates (#378) can judge one item in isolation. Best-effort: omitted
-    # when no single design work-item resolves (the gates fall back to repo-global).
-    if phase == "build":
-        content = _inject_work_item(content, _active_design_slug(project_root))
-
-    target.write_text(content, encoding="utf-8")
-
-    # Scaffold the phase's exit-gate doc files (e.g. design's approach/tasks/test-plan)
-    # seeded with the exact `## Section` headings the gate requires, so the agent doesn't
-    # have to read the skill YAML to discover them. Derived from the gate spec (single
-    # source of truth); never overwrites an existing file.
-    scaffolded = _scaffold_phase_docs(phase, slug, project_root)
-
-    result = {
-        "path": str(target),
-        "phase": phase,
-        "task_slug": slug,
-        "scaffolded": scaffolded,
-    }
-    write_result(result, args, human_fn=_render_init)
-    return 0
+        sys.exit(1)
+    return client
 
 
 def _active_design_slug(project_root: Path) -> str | None:
     """The active design work-item slug, for stamping onto a new build contract.
 
     Reads the design cursor via the canonical resolver but accepts it only when it
-    resolves into ``contracts/design/`` (phase-strict — a cursor that has drifted to
-    another phase must not mislabel the build contract). ``None`` when no single
-    design work-item resolves; the caller then omits the ``work_item`` stamp.
+    resolves into ``contracts/design/`` (phase-strict). ``None`` when no single
+    design work-item resolves.
     """
     from agentalloy.contracts import active_dir, resolve_current_contract
     from agentalloy.signals.skill_loader import (
@@ -261,25 +78,9 @@ def _inject_work_item(content: str, slug: str | None) -> str:
 
 
 def _concretize_glob(path_glob: str, slug: str) -> str | None:
-    """Resolve a gate path glob to a concrete repo-relative file path for *slug*.
-
-    Substitutes, in order:
-    - a literal ``<slug>`` placeholder with the slug;
-    - a ``**`` directory segment with the slug
-      (``docs/design/**/approach.md`` -> ``docs/design/<slug>/approach.md``);
-    - a *terminal basename* wildcard — the final segment's leading ``*`` — with the slug
-      (``docs/qa/*.md`` -> ``docs/qa/<slug>.md``), but only when it is the sole remaining
-      wildcard and confined to that last segment. This names the per-feature artifact after
-      the slug, which is what the qa/spec gates intend.
-
-    Returns None when any wildcard still remains — an ambiguous/multi-match glob such as a
-    non-terminal ``*`` must not be scaffolded to a single file.
-    """
+    """Resolve a gate path glob to a concrete repo-relative file path for *slug*."""
     concrete = path_glob.replace("<slug>", slug)
     segments = [slug if seg == "**" else seg for seg in concrete.split("/")]
-    # Terminal basename wildcard: only when nothing before the last segment wildcards and
-    # the last segment has a single leading ``*`` (e.g. ``*.md``). A non-terminal or
-    # multi-wildcard glob falls through to the ``*`` guard below and stays unscaffolded.
     if segments and "*" not in "/".join(segments[:-1]):
         last = segments[-1]
         if last.startswith("*") and "*" not in last[1:]:
@@ -291,12 +92,7 @@ def _concretize_glob(path_glob: str, slug: str) -> str | None:
 
 
 def _scaffold_phase_docs(phase: str, slug: str, project_root: Path) -> list[str]:
-    """Create stub docs for each ``artifact_contains`` gate of *phase*, with headings.
-
-    Returns the repo-relative paths actually created — skips files that already exist and
-    globs that don't resolve to a single concrete path. Soft: any failure returns the
-    paths created so far rather than raising (scaffolding is a convenience, not a gate).
-    """
+    """Create stub docs for each ``artifact_contains`` gate of *phase*."""
     created: list[str] = []
     try:
         from agentalloy.signals.prefilter import (  # pyright: ignore[reportPrivateUsage]
@@ -338,25 +134,13 @@ def _load_contract_template(phase: str) -> str | None:
 
         conn = duckdb.connect(str(ds_path), read_only=True)
         try:
-            # Check if profile_skills table has a workflow skill for this phase
-            rows = conn.execute(
+            conn.execute(
                 "SELECT applies_to_phases, raw_prose FROM profile_skills WHERE skill_class = 'workflow'"
             ).fetchall()
         except Exception:
-            rows = []
+            pass
         finally:
             conn.close()
-
-        for row in rows:
-            phases_raw, _raw_prose = row
-            phases: list[Any] = phases_raw or []
-            if phase in phases:
-                # The Phase 1 profile_skills table doesn't persist
-                # contract_template yet, so even when the profile datastore
-                # has a workflow skill for this phase we still need the
-                # shipped pack's template. Fall through to packs lookup.
-                break
-
     except Exception:
         pass
     return _load_template_from_packs(phase)
@@ -390,10 +174,343 @@ def _load_template_from_packs(phase: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Renderers
+# ---------------------------------------------------------------------------
+
+
+def _render_validate(result: dict[str, Any]) -> None:
+    """Render contract validation in human-readable format."""
+    print_rich("\n  [bold]Contract Validation[/bold]\n")
+    print_rich(f"  ID: {result.get('contract_id', 'N/A')}")
+    print_rich(f"  Phase: {result.get('phase', 'N/A')}")
+    print_rich(f"  Slug: {result.get('slug', 'N/A')}")
+    if result.get("valid"):
+        print_rich("  [green]Valid[/green]")
+    else:
+        issues = result.get("issues", [])
+        print_rich(f"  [red]Issues: {len(issues)}[/red]")
+        for issue in issues:
+            print_rich(f"  [red]x[/red] {issue}")
+    print_rich()
+
+
+def _render_show(result: dict[str, Any]) -> None:
+    """Render contract display in human-readable format."""
+    print_rich("\n  [bold]Contract[/bold]\n")
+    print_rich(f"  ID: {result.get('contract_id')}")
+    print_rich(f"  Phase: {result.get('phase')}")
+    print_rich(f"  Slug: {result.get('slug')}")
+    tags = result.get("domain_tags") or []
+    print_rich(f"  Tags: {', '.join(tags)}")
+    touches = result.get("scope_touches") or []
+    avoids = result.get("scope_avoids") or []
+    if touches or avoids:
+        print_rich("\n  [bold]Scope[/bold]")
+        print_rich(f"  Touches: {', '.join(touches)}")
+        print_rich(f"  Avoids: {', '.join(avoids)}")
+    criteria = result.get("success_criteria") or []
+    if criteria:
+        print_rich("\n  [bold]Success Criteria[/bold]")
+        for criterion in criteria:
+            print_rich(f"  - {criterion}")
+    body = result.get("body")
+    if body:
+        print_rich(f"\n  [bold]Body[/bold]\n{body}")
+    print_rich()
+
+
+def _render_init(result: dict[str, Any]) -> None:
+    """Render contract init in human-readable format."""
+    print_rich("\n  [bold]Contract Init[/bold]\n")
+    print_rich(f"  ID: {result['contract_id']}")
+    print_rich(f"  Phase: {result['phase']}")
+    print_rich(f"  Slug: {result['slug']}")
+    print_rich("  [green]Created[/green]")
+    scaffolded = result.get("scaffolded") or []
+    if scaffolded:
+        print_rich("\n  [bold]Scaffolded docs[/bold] (with required headings)")
+        for path in scaffolded:
+            print_rich(f"  [green]+[/green] {path}")
+    print_rich()
+
+
+def _render_edit(result: dict[str, Any]) -> None:
+    """Render contract edit result."""
+    print_rich("\n  [bold]Contract Edit[/bold]\n")
+    print_rich(f"  ID: {result['contract_id']}")
+    print_rich("  [green]Updated[/green]")
+    print_rich()
+
+
+def _render_supersede(result: dict[str, Any]) -> None:
+    """Render contract supersede result."""
+    print_rich("\n  [bold]Contract Supersede[/bold]\n")
+    print_rich(f"  Old ID: {result['supersedes']}")
+    print_rich(f"  New ID: {result['contract_id']}")
+    print_rich("  [green]Superseded[/green]")
+    print_rich()
+
+
+# ---------------------------------------------------------------------------
+# Subcommand handlers
+# ---------------------------------------------------------------------------
+
+
+def _init(args: argparse.Namespace) -> int:
+    """Scaffold a contract and store it via StateClient."""
+    from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
+
+    client = _get_client()
+    project_root = _repo_root()
+
+    # --phase defaults to the active phase
+    phase: str | None = args.phase
+    if phase is None:
+        from agentalloy.api.state_client import StateClient
+
+        sc = StateClient()
+        if sc.is_running():
+            phase_data = sc.get_state("phase")
+            if phase_data:
+                # Parse JSON response or raw string
+                if isinstance(phase_data, str):
+                    try:
+                        phase_data = json.loads(phase_data)
+                    except json.JSONDecodeError:
+                        phase_data = {"value": phase_data.strip()}
+                phase = (
+                    phase_data.get("value", phase_data.get("phase"))
+                    if isinstance(phase_data, dict)
+                    else phase_data
+                )
+        if not phase:
+            print(
+                "  [error] No --phase given and no active phase. Pass --phase explicitly.",
+                file=sys.stderr,
+            )
+            return 1
+
+    slug: str = args.slug
+    route: str = getattr(args, "route", "full")
+
+    # Build contract content locally (template + work-item stamping)
+    template = _load_contract_template(phase)
+    if template is None:
+        template = (
+            "---\n"
+            "phase: {phase}\n"
+            "task_slug: {task_slug}\n"
+            "route: {route}\n"
+            "domain_tags: []\n"
+            "scope:\n"
+            "  touches: []\n"
+            "  avoids: []\n"
+            "success_criteria: []\n"
+            "created_at: {created_at}\n"
+            "---\n\n"
+            "# {task_slug_title}\n\n"
+            "## Task description\n\n"
+            "<fill in what you intend to do and why>\n"
+        )
+
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    title = slug.replace("-", " ").title()
+    content = (
+        template.replace("{{phase}}", phase)
+        .replace("{{task_slug}}", slug)
+        .replace("{{created_at}}", now)
+        .replace("{{route}}", route)
+        .replace("{{task_slug_title}}", title)
+        .replace("{phase}", phase)
+        .replace("{task_slug}", slug)
+        .replace("{created_at}", now)
+        .replace("{route}", route)
+        .replace("{task_slug_title}", title)
+    )
+
+    # Stamp work_item for build contracts
+    if phase == "build":
+        content = _inject_work_item(content, _active_design_slug(project_root))
+
+    # Scaffold phase docs (local file operation, not state mutation)
+    scaffolded = _scaffold_phase_docs(phase, slug, project_root)
+
+    # Generate contract_id from phase + slug
+    contract_id = f"{phase}/{slug}"
+
+    # Store via StateClient
+    try:
+        result_data = client.create_contract(
+            {
+                "contract_id": contract_id,
+                "phase": phase,
+                "slug": slug,
+                "route": route,
+                "body": content,
+            }
+        )
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    # Parse the response — may be the full contract or a simple dict
+    response_id = result_data.get("contract_id", contract_id)
+
+    result = {
+        "contract_id": response_id,
+        "phase": phase,
+        "slug": slug,
+        "scaffolded": scaffolded,
+    }
+    write_result(result, args, human_fn=_render_init)
+    return 0
+
+
+def _show(args: argparse.Namespace) -> int:
+    """Show a contract by ID via StateClient."""
+    client = _get_client()
+    contract_id = args.contract_id
+
+    try:
+        contract = client.get_contract(contract_id)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    if contract is None:
+        print(f"Error: Contract {contract_id!r} not found.", file=sys.stderr)
+        return 1
+
+    result = {
+        "contract_id": contract.get("contract_id"),
+        "phase": contract.get("phase"),
+        "slug": contract.get("slug"),
+        "domain_tags": contract.get("domain_tags"),
+        "scope_touches": contract.get("scope_touches"),
+        "scope_avoids": contract.get("scope_avoids"),
+        "success_criteria": contract.get("success_criteria"),
+        "body": contract.get("body"),
+        "status": contract.get("status"),
+    }
+    write_result(result, args, human_fn=_render_show)
+    return 0
+
+
+def _validate(args: argparse.Namespace) -> int:
+    """Validate a contract by ID via StateClient."""
+    client = _get_client()
+    contract_id = args.contract_id
+
+    try:
+        contract = client.get_contract(contract_id)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    if contract is None:
+        print(f"Error: Contract {contract_id!r} not found.", file=sys.stderr)
+        return 1
+
+    from agentalloy.contracts import validate_contract_from_dict
+
+    issues = validate_contract_from_dict(contract)
+
+    result: dict[str, Any] = {
+        "valid": not issues,
+        "contract_id": contract.get("contract_id"),
+        "phase": contract.get("phase"),
+        "slug": contract.get("slug"),
+        "domain_tags": contract.get("domain_tags"),
+        "issues": issues,
+    }
+    write_result(result, args, human_fn=_render_validate)
+    return 0 if not issues else 1
+
+
+def _edit(args: argparse.Namespace) -> int:
+    """In-place correction of a contract via StateClient."""
+    client = _get_client()
+    contract_id = args.contract_id
+
+    updates: dict[str, Any] = {}
+    if args.body is not None:
+        updates["body"] = args.body
+    if args.domain_tags is not None:
+        updates["domain_tags"] = args.domain_tags
+    if args.scope_touches is not None:
+        updates["scope_touches"] = args.scope_touches
+    if args.scope_avoids is not None:
+        updates["scope_avoids"] = args.scope_avoids
+    if args.success_criteria is not None:
+        updates["success_criteria"] = args.success_criteria
+
+    if not updates:
+        print("Error: Provide at least one field to update.", file=sys.stderr)
+        return 1
+
+    try:
+        result_data = client.patch_contract(contract_id, updates)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    result = {
+        "contract_id": result_data.get("contract_id", contract_id),
+    }
+    write_result(result, args, human_fn=_render_edit)
+    return 0
+
+
+def _supersede(args: argparse.Namespace) -> int:
+    """Supersede a contract with a new revision via StateClient."""
+    client = _get_client()
+    contract_id = args.contract_id
+    new_id = args.new_id
+
+    payload: dict[str, Any] = {
+        "new_contract_id": new_id,
+    }
+    if args.phase is not None:
+        payload["phase"] = args.phase
+    if args.slug is not None:
+        payload["slug"] = args.slug
+    if args.body is not None:
+        payload["body"] = args.body
+    if args.domain_tags is not None:
+        payload["domain_tags"] = args.domain_tags
+    if args.scope_touches is not None:
+        payload["scope_touches"] = args.scope_touches
+    if args.scope_avoids is not None:
+        payload["scope_avoids"] = args.scope_avoids
+    if args.success_criteria is not None:
+        payload["success_criteria"] = args.success_criteria
+
+    try:
+        result_data = client.supersede_contract(contract_id, payload)
+    except StateClientError as exc:
+        print(f"Error: {exc.message}", file=sys.stderr)
+        return 1
+
+    result = {
+        "contract_id": result_data.get("contract_id", new_id),
+        "supersedes": result_data.get("supersedes", contract_id),
+    }
+    write_result(result, args, human_fn=_render_supersede)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Parser setup
+# ---------------------------------------------------------------------------
+
+
 _HANDLERS = {
-    "validate": _validate,
-    "show": _show,
     "init": _init,
+    "show": _show,
+    "validate": _validate,
+    "edit": _edit,
+    "supersede": _supersede,
 }
 
 
@@ -404,31 +521,76 @@ def add_parser(
     add_json_flag(p)
     sub = p.add_subparsers(dest="contract_cmd")
 
-    # validate
-    val_p = sub.add_parser("validate", help="Validate a contract file.")
-    val_p.add_argument("path", help="Path to the contract markdown file.")
-
-    # show
-    show_p = sub.add_parser("show", help="Display a parsed contract.")
-    show_p.add_argument("path", help="Path to the contract markdown file.")
-
     # init
-    init_p = sub.add_parser(
-        "init", help="Scaffold a contract from the active workflow skill's template."
-    )
+    init_p = sub.add_parser("init", help="Scaffold a contract and store it in the state service.")
     init_p.add_argument(
         "--phase",
         default=None,
-        help="Phase (e.g. build, spec, design). Defaults to the active phase in .agentalloy/phase.",
+        help="Phase (e.g. build, spec, design). Defaults to the active phase.",
     )
     init_p.add_argument("--slug", required=True, help="Task slug (kebab-case identifier).")
     init_p.add_argument(
         "--route",
-        choices=("full", "fast"),
+        choices=("full", "sdd-fast", "add-skill"),
         default="full",
-        help="Workflow route chosen at intake: 'full' (spec→…→ship) or 'fast' (sdd-fast).",
+        help="Workflow route.",
     )
-    init_p.add_argument("--force", action="store_true", help="Overwrite existing contract.")
+    add_json_flag(init_p)
+
+    # show
+    show_p = sub.add_parser("show", help="Display a contract by ID.")
+    show_p.add_argument("contract_id", help="Contract ID.")
+    add_json_flag(show_p)
+
+    # validate
+    val_p = sub.add_parser("validate", help="Validate a contract by ID.")
+    val_p.add_argument("contract_id", help="Contract ID.")
+    add_json_flag(val_p)
+
+    # edit
+    edit_p = sub.add_parser("edit", help="In-place correction of a contract.")
+    edit_p.add_argument("contract_id", help="Contract ID to edit.")
+    edit_p.add_argument("--body", default=None, help="New body text.")
+    edit_p.add_argument(
+        "--domain-tags", default=None, action="append", help="Domain tags (can repeat)."
+    )
+    edit_p.add_argument(
+        "--scope-touches", default=None, action="append", help="Scope touches (can repeat)."
+    )
+    edit_p.add_argument(
+        "--scope-avoids", default=None, action="append", help="Scope avoids (can repeat)."
+    )
+    edit_p.add_argument(
+        "--success-criteria",
+        default=None,
+        action="append",
+        help="Success criteria (can repeat).",
+    )
+    add_json_flag(edit_p)
+
+    # supersede
+    sup_p = sub.add_parser("supersede", help="Supersede a contract with a new revision.")
+    sup_p.add_argument("contract_id", help="Contract ID to supersede.")
+    sup_p.add_argument("--new-id", required=True, help="New contract ID.")
+    sup_p.add_argument("--phase", default=None, help="Phase.")
+    sup_p.add_argument("--slug", default=None, help="Slug.")
+    sup_p.add_argument("--body", default=None, help="New body text.")
+    sup_p.add_argument(
+        "--domain-tags", default=None, action="append", help="Domain tags (can repeat)."
+    )
+    sup_p.add_argument(
+        "--scope-touches", default=None, action="append", help="Scope touches (can repeat)."
+    )
+    sup_p.add_argument(
+        "--scope-avoids", default=None, action="append", help="Scope avoids (can repeat)."
+    )
+    sup_p.add_argument(
+        "--success-criteria",
+        default=None,
+        action="append",
+        help="Success criteria (can repeat).",
+    )
+    add_json_flag(sup_p)
 
     p.set_defaults(func=_run)
 
@@ -436,7 +598,7 @@ def add_parser(
 def _run(args: argparse.Namespace) -> int:
     cmd = getattr(args, "contract_cmd", None)
     if not cmd:
-        print("  Usage: agentalloy contract {validate,show,init}", file=sys.stderr)
+        print("  Usage: agentalloy contract {init,show,validate,edit,supersede}", file=sys.stderr)
         return 1
     handler = _HANDLERS.get(cmd)
     if not handler:

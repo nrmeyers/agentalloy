@@ -31,6 +31,8 @@ from agentalloy.api.state_models import (
     ContractSupersedeRequest,
     PhaseAdvanceRequest,
     PhaseAdvanceResponse,
+    ResumeContractInfo,
+    ResumeResponse,
     StateAllResponse,
     StateConflictInfo,
     StateReadResponse,
@@ -335,6 +337,80 @@ async def write_approve(
             detail=response.model_dump(),  # type: ignore[union-attr]
         )
     return response  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# GET /state/resume — assembled cold-session bootstrap
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/resume",
+    response_model=ResumeResponse,
+    summary="Assembled resume data for cold-session bootstrap",
+)
+async def read_resume(
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> ResumeResponse:
+    """Assemble phase, cursor'd work-item, owed artifacts, and governing decisions.
+
+    This is a single server-side endpoint that replaces the client-side
+    fan-out of four separate calls.  The shape matches what the proxy's
+    orientation block sends to the agent.
+    """
+    phase = await asyncio.to_thread(store.read, "phase")
+    cursor_value = await asyncio.to_thread(store.read, "cursor")
+
+    cursor_contract: ResumeContractInfo | None = None
+    owed_artifacts: list[str] | None = None
+    governing_decisions: list[str] | None = None
+
+    if cursor_value:
+        # Extract contract_id from cursor value (format: "active/<phase>/<slug>.md")
+        parts = cursor_value.strip().rsplit("/", 1)
+        if len(parts) == 2:
+            slug_file = parts[1]
+            slug = slug_file.rsplit(".md", 1)[0] if slug_file.endswith(".md") else parts[1]
+
+            # Find the contract by slug
+            contracts = await asyncio.to_thread(store.list_contracts, slug=slug, status="active")
+            if contracts:
+                row = contracts[0]
+                cursor_contract = ResumeContractInfo(
+                    contract_id=row["contract_id"],
+                    phase=row["phase"],
+                    slug=row["slug"],
+                    domain_tags=row.get("domain_tags"),
+                    scope_touches=row.get("scope_touches"),
+                    scope_avoids=row.get("scope_avoids"),
+                    body=row.get("body"),
+                )
+
+    if phase:
+        # Get owed artifacts from exit gates for the current phase
+        try:
+            from agentalloy.signals.skill_loader import exit_gates_for_phase
+
+            gates = exit_gates_for_phase(phase) or {}
+            artifacts: list[str] = []
+            for _gate_name, gate_spec in gates.items():
+                if isinstance(gate_spec, dict):
+                    artifact = gate_spec.get("artifact") or gate_spec.get("artifact_contains")
+                    if isinstance(artifact, str):
+                        artifacts.append(artifact)
+                    elif isinstance(artifact, list):
+                        artifacts.extend(artifact)
+            if artifacts:
+                owed_artifacts = artifacts
+        except Exception:
+            pass
+
+    return ResumeResponse(
+        phase=phase,
+        cursor_contract=cursor_contract,
+        owed_artifacts=owed_artifacts,
+        governing_decisions=governing_decisions,
+    )
 
 
 # ---------------------------------------------------------------------------
