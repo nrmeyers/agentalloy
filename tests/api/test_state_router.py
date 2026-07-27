@@ -3,7 +3,10 @@
 Test cases from docs/design/contract-store-and-write-gating/test-plan.md:
 
 - TA2 — no ``duckdb.connect`` in the install/web import graph for state paths
+- TA3 — phase advance carrying a contract commits both rows
+- TA4 — invalid payload rolls back both
 - TA5 — service down: StateClient raises StateClientError naming the service
+- TB5 — service-side write triggers in-process compose
 - TE2 — compose opens no HTTP connection for state
 """
 
@@ -13,12 +16,14 @@ import importlib
 import inspect
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.api.state_router import (
+    contract_router,
     get_state_store,
 )
 from agentalloy.api.state_router import (
@@ -49,6 +54,18 @@ def state_client(state_store: DuckDBStateStore) -> TestClient:
 
     app = FastAPI()
     app.include_router(state_router)
+    app.dependency_overrides[get_state_store] = lambda: state_store
+    return TestClient(app)
+
+
+@pytest.fixture
+def full_client(state_store: DuckDBStateStore) -> TestClient:
+    """A TestClient with both state and contract routers mounted."""
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(state_router)
+    app.include_router(contract_router)
     app.dependency_overrides[get_state_store] = lambda: state_store
     return TestClient(app)
 
@@ -159,8 +176,6 @@ class TestLeaseConflict:
     ) -> None:
         from datetime import datetime, timedelta
 
-        # Set up a row with an active lease directly via SQL (work around
-        # pre-existing bug in acquire_lease INSERT param count).
         now = datetime.now()
         future = (now + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -171,7 +186,6 @@ class TestLeaseConflict:
             "VALUES (?, ?, '', 'spec', ?, ?, ?)",
             (repo, "phase", "s1", ts, future),
         )
-        # Session s2 tries to write — should get 409.
         resp = state_client.post("/state/phase", json={"value": "build", "owner": "s2"})
         assert resp.status_code == 409
         body = resp.json()
@@ -182,22 +196,368 @@ class TestLeaseConflict:
 
 
 # ---------------------------------------------------------------------------
+# TA3 — phase advance carrying a contract commits both rows
+# ---------------------------------------------------------------------------
+
+
+class TestTA3:
+    """TA3: Phase advance carrying a contract commits both rows inside one
+    transaction().  Both the phase and the contract row are visible after
+    the response returns 200."""
+
+    def test_phase_advance_with_contract_commits_both(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Phase + contract in a single POST /state/phase commits both rows."""
+        payload = {
+            "value": "build",
+            "contract": {
+                "contract_id": "ctr-ta3-1",
+                "phase": "build",
+                "slug": "test-slug",
+                "work_item": "04-contract-routes",
+                "route": "full",
+                "domain_tags": ["api-design"],
+                "body": "# Test contract",
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["kind"] == "phase"
+        assert body["value"] == "build"
+        assert body["contract_id"] == "ctr-ta3-1"
+
+        # Verify both rows exist in the store
+        assert state_store.read("phase") == "build"
+        contract = state_store.get_contract("ctr-ta3-1")
+        assert contract is not None
+        assert contract["phase"] == "build"
+        assert contract["slug"] == "test-slug"
+        assert contract["body"] == "# Test contract"
+
+    def test_phase_advance_without_contract_still_works(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Phase advance without a contract uses the fast path."""
+        resp = full_client.post("/state/phase", json={"value": "design"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["kind"] == "phase"
+        assert body["value"] == "design"
+        assert body["contract_id"] is None
+        assert state_store.read("phase") == "design"
+
+    def test_phase_advance_contract_optional_fields(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Contract with optional fields stores them correctly."""
+        payload = {
+            "value": "spec",
+            "contract": {
+                "contract_id": "ctr-ta3-2",
+                "phase": "spec",
+                "slug": "optional-slug",
+                "scope_touches": ["src/a.py"],
+                "scope_avoids": ["src/b.py"],
+                "success_criteria": ["criterion 1"],
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 200
+        contract = state_store.get_contract("ctr-ta3-2")
+        assert contract is not None
+        assert contract["scope_touches"] == ["src/a.py"]
+        assert contract["scope_avoids"] == ["src/b.py"]
+        assert contract["success_criteria"] == ["criterion 1"]
+
+
+# ---------------------------------------------------------------------------
+# TA4 — invalid payload rolls back both
+# ---------------------------------------------------------------------------
+
+
+class TestTA4:
+    """TA4: Phase advance whose contract payload fails validation leaves phase
+    unchanged AND writes no contract row (rollback)."""
+
+    def test_invalid_contract_payload_rolls_back_phase(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Missing required contract field -> 422 -> phase unchanged, no contract."""
+        state_store.write("phase", "intake")
+
+        payload = {
+            "value": "build",
+            "contract": {
+                "contract_id": "ctr-ta4-1",
+                "phase": "build",
+                # slug is missing — should fail validation
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 422
+
+        # Phase should be unchanged
+        assert state_store.read("phase") == "intake"
+        # No contract row should exist
+        assert state_store.get_contract("ctr-ta4-1") is None
+
+    def test_invalid_contract_phase_rolls_back(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Invalid contract phase value -> 422 -> phase unchanged, no contract."""
+        state_store.write("phase", "intake")
+
+        payload = {
+            "value": "build",
+            "contract": {
+                "contract_id": "ctr-ta4-2",
+                "phase": "invalid-phase",
+                "slug": "test-slug",
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 422
+
+        assert state_store.read("phase") == "intake"
+        assert state_store.get_contract("ctr-ta4-2") is None
+
+    def test_empty_contract_id_rolls_back(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Empty contract_id -> 422 -> phase unchanged, no contract."""
+        state_store.write("phase", "intake")
+
+        payload = {
+            "value": "build",
+            "contract": {
+                "contract_id": "",
+                "phase": "build",
+                "slug": "test-slug",
+            },
+        }
+        resp = full_client.post("/state/phase", json=payload)
+        assert resp.status_code == 422
+
+        assert state_store.read("phase") == "intake"
+        assert state_store.get_contract("") is None
+
+
+# ---------------------------------------------------------------------------
+# Contract CRUD endpoint tests
+# ---------------------------------------------------------------------------
+
+
+class TestContractCreate:
+    """POST /contracts — create a contract."""
+
+    def test_create_contract(self, full_client: TestClient, state_store: DuckDBStateStore) -> None:
+        payload = {
+            "contract_id": "ctr-create-1",
+            "phase": "build",
+            "slug": "create-slug",
+            "body": "# Created contract",
+        }
+        resp = full_client.post("/contracts", json=payload)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["contract_id"] == "ctr-create-1"
+        assert body["phase"] == "build"
+        assert body["body"] == "# Created contract"
+
+        c = state_store.get_contract("ctr-create-1")
+        assert c is not None
+        assert c["body"] == "# Created contract"
+
+    def test_create_contract_missing_required_422(self, full_client: TestClient) -> None:
+        resp = full_client.post("/contracts", json={"contract_id": "x"})
+        assert resp.status_code == 422
+
+
+class TestContractList:
+    """GET /contracts — list with filters."""
+
+    def test_list_contracts_empty(self, full_client: TestClient) -> None:
+        resp = full_client.get("/contracts")
+        assert resp.status_code == 200
+        assert resp.json()["contracts"] == []
+
+    def test_list_contracts_with_data(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.put_contract("ctr-list-1", phase="build", slug="alpha")
+        state_store.put_contract("ctr-list-2", phase="design", slug="beta")
+
+        resp = full_client.get("/contracts")
+        assert resp.status_code == 200
+        assert len(resp.json()["contracts"]) == 2
+
+        resp = full_client.get("/contracts?phase=build")
+        assert len(resp.json()["contracts"]) == 1
+        assert resp.json()["contracts"][0]["contract_id"] == "ctr-list-1"
+
+        resp = full_client.get("/contracts?slug=beta")
+        assert len(resp.json()["contracts"]) == 1
+        assert resp.json()["contracts"][0]["contract_id"] == "ctr-list-2"
+
+
+class TestContractGet:
+    """GET /contracts/{id}."""
+
+    def test_get_contract(self, full_client: TestClient, state_store: DuckDBStateStore) -> None:
+        state_store.put_contract("ctr-get-1", phase="build", slug="s", body="body text")
+        resp = full_client.get("/contracts/ctr-get-1")
+        assert resp.status_code == 200
+        assert resp.json()["contract_id"] == "ctr-get-1"
+        assert resp.json()["body"] == "body text"
+
+    def test_get_contract_404(self, full_client: TestClient) -> None:
+        resp = full_client.get("/contracts/nonexistent")
+        assert resp.status_code == 404
+
+
+class TestContractPatch:
+    """PATCH /contracts/{id} — in-place correction."""
+
+    def test_patch_contract(self, full_client: TestClient, state_store: DuckDBStateStore) -> None:
+        state_store.put_contract("ctr-patch-1", phase="build", slug="s", body="original")
+        resp = full_client.patch("/contracts/ctr-patch-1", json={"body": "corrected"})
+        assert resp.status_code == 200
+        assert resp.json()["body"] == "corrected"
+
+        c = state_store.get_contract("ctr-patch-1")
+        assert c["phase"] == "build"
+        assert c["slug"] == "s"
+
+    def test_patch_contract_404(self, full_client: TestClient) -> None:
+        resp = full_client.patch("/contracts/nonexistent", json={"body": "x"})
+        assert resp.status_code == 404
+
+
+class TestContractArchive:
+    """POST /contracts/{id}/archive."""
+
+    def test_archive_contract(self, full_client: TestClient, state_store: DuckDBStateStore) -> None:
+        state_store.put_contract("ctr-arch-1", phase="build", slug="s")
+        resp = full_client.post("/contracts/ctr-arch-1/archive")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "archived"
+
+    def test_archive_contract_404(self, full_client: TestClient) -> None:
+        resp = full_client.post("/contracts/nonexistent/archive")
+        assert resp.status_code == 404
+
+
+class TestContractSupersede:
+    """POST /contracts/{id}/supersede."""
+
+    def test_supersede_contract(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.put_contract("ctr-sup-1", phase="build", slug="s", body="v1")
+        payload = {
+            "new_contract_id": "ctr-sup-2",
+            "phase": "build",
+            "slug": "s",
+            "body": "v2",
+        }
+        resp = full_client.post("/contracts/ctr-sup-1/supersede", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["contract_id"] == "ctr-sup-2"
+        assert resp.json()["supersedes"] == "ctr-sup-1"
+
+        old = state_store.get_contract("ctr-sup-1")
+        assert old["status"] == "superseded"
+
+
+# ---------------------------------------------------------------------------
+# TB5 — service-side write triggers in-process compose
+# ---------------------------------------------------------------------------
+
+
+class TestTB5:
+    """TB5: A service-side contract write triggers compose in-process with no
+    watcher and no subprocess."""
+
+    def test_compose_triggered_on_contract_create(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """POST /contracts triggers in-process compose via app.state orchestrator."""
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.compose = AsyncMock(return_value=None)
+
+        client = full_client
+        client.app.state.compose_orchestrator = mock_orchestrator
+
+        payload = {
+            "contract_id": "ctr-tb5-1",
+            "phase": "build",
+            "slug": "tb5-slug",
+            "body": "# TB5 test contract",
+        }
+        resp = client.post("/contracts", json=payload)
+        assert resp.status_code == 200, resp.text
+
+        # Give the background task a moment to run
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
+
+        mock_orchestrator.compose.assert_called_once()
+        call_args = mock_orchestrator.compose.call_args[0][0]
+        assert call_args.phase == "build"
+        assert call_args.requesting_agent == "contract_write"
+
+    def test_compose_triggered_on_phase_advance_with_contract(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """POST /state/phase with contract triggers in-process compose."""
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.compose = AsyncMock(return_value=None)
+
+        client = full_client
+        client.app.state.compose_orchestrator = mock_orchestrator
+
+        payload = {
+            "value": "build",
+            "contract": {
+                "contract_id": "ctr-tb5-2",
+                "phase": "build",
+                "slug": "tb5-slug-2",
+                "body": "# Phase advance contract",
+            },
+        }
+        resp = client.post("/state/phase", json=payload)
+        assert resp.status_code == 200, resp.text
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
+
+        mock_orchestrator.compose.assert_called_once()
+        call_args = mock_orchestrator.compose.call_args[0][0]
+        assert call_args.phase == "build"
+
+    def test_no_subprocess_or_watcher_in_compose_path(self) -> None:
+        """The compose trigger path does not use subprocess or file watchers."""
+        mod = importlib.import_module("agentalloy.api.state_router")
+        source = inspect.getsource(mod)
+        assert "subprocess" not in source
+        assert "watchdog" not in source
+        assert "FileSystemWatcher" not in source
+        assert "os.system" not in source
+
+
+# ---------------------------------------------------------------------------
 # TA2 — no duckdb.connect in install/web import graph
 # ---------------------------------------------------------------------------
 
 
 class TestTA2:
-    """TA2: Every out-of-process caller path (CLI, web) goes through HTTP —
-    assert no ``duckdb.connect`` in install/web import graph for state paths.
-
-    The state-related CLI subcommands (phase, approve, task, flow) must not
-    open DuckDB directly; they route through StateClient → HTTP.  Other
-    install subcommands (customize, update, contract) may still use DuckDB
-    for non-state operations.
-    """
+    """TA2: Every out-of-process caller path (CLI, web) goes through HTTP."""
 
     def test_state_subcommands_no_duckdb_connect(self) -> None:
-        """State-related install subcommands do not call duckdb.connect."""
         state_modules = [
             "agentalloy.install.subcommands.phase",
             "agentalloy.install.subcommands.approve",
@@ -212,7 +572,6 @@ class TestTA2:
             )
 
     def test_web_modules_no_duckdb_connect(self) -> None:
-        """Web API modules do not call duckdb.connect."""
         web_modules = [
             "agentalloy.web.ops_api",
             "agentalloy.web.wizard_api",
@@ -230,7 +589,6 @@ class TestTA2:
             )
 
     def test_state_client_no_duckdb_import(self) -> None:
-        """StateClient itself does not import duckdb."""
         mod = importlib.import_module("agentalloy.api.state_client")
         source = inspect.getsource(mod)
         assert "import duckdb" not in source
@@ -247,28 +605,24 @@ class TestTA5:
     service and writes nothing."""
 
     def test_set_phase_raises_when_service_down(self) -> None:
-        """set_phase raises StateClientError with service name."""
         client = StateClient(base_url="http://127.0.0.1:19999")
         with pytest.raises(StateClientError) as exc_info:
             client.set_phase("build")
         assert "agentalloy service" in exc_info.value.message
 
     def test_approve_raises_when_service_down(self) -> None:
-        """approve raises StateClientError with service name."""
         client = StateClient(base_url="http://127.0.0.1:19988")
         with pytest.raises(StateClientError) as exc_info:
             client.approve("spec")
         assert "agentalloy service" in exc_info.value.message
 
     def test_set_cursor_raises_when_service_down(self) -> None:
-        """set_cursor raises StateClientError with service name."""
         client = StateClient(base_url="http://127.0.0.1:19997")
         with pytest.raises(StateClientError) as exc_info:
             client.set_cursor("active/build/01.md")
         assert "agentalloy service" in exc_info.value.message
 
     def test_no_file_written_when_service_down(self, tmp_path: Path) -> None:
-        """A failed set_phase does not create any files."""
         client = StateClient(base_url="http://127.0.0.1:19996")
         phase_file = tmp_path / ".agentalloy" / "phase"
         phase_file.parent.mkdir(parents=True)
@@ -277,7 +631,6 @@ class TestTA5:
         assert not phase_file.exists()
 
     def test_no_fallback_methods_exist(self) -> None:
-        """_read_phase_file and _write_phase_file have been removed."""
         client = StateClient(base_url="http://127.0.0.1:19995")
         assert not hasattr(client, "_read_phase_file")
         assert not hasattr(client, "_write_phase_file")
@@ -293,27 +646,23 @@ class TestTE2:
     compose path uses StateStore directly, not StateClient."""
 
     def test_compose_orchestrator_no_state_client_import(self) -> None:
-        """ComposeOrchestrator does not import StateClient."""
         mod = importlib.import_module("agentalloy.orchestration.compose")
         source = inspect.getsource(mod)
         assert "state_client" not in source.lower()
         assert "StateClient" not in source
 
     def test_compose_router_no_state_client_import(self) -> None:
-        """compose_router does not import StateClient."""
         mod = importlib.import_module("agentalloy.api.compose_router")
         source = inspect.getsource(mod)
         assert "state_client" not in source.lower()
         assert "StateClient" not in source
 
     def test_proxy_signal_no_state_client_import(self) -> None:
-        """proxy_signal does not import StateClient for state operations."""
         mod = importlib.import_module("agentalloy.api.proxy_signal")
         source = inspect.getsource(mod)
         assert "StateClient" not in source
 
     def test_signals_module_no_state_client_import(self) -> None:
-        """signals package does not import StateClient."""
         signals_pkg = importlib.import_module("agentalloy.signals")
         pkg_dir = Path(signals_pkg.__file__).parent
         for py_file in pkg_dir.glob("*.py"):

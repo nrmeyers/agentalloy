@@ -32,7 +32,7 @@ from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.api.skill_router import router as skill_router
-from agentalloy.api.state_router import get_state_store
+from agentalloy.api.state_router import contract_router, get_state_store
 from agentalloy.api.state_router import router as state_router
 from agentalloy.api.telemetry_router import TelemetryQuerier
 from agentalloy.api.telemetry_router import router as telemetry_router
@@ -402,6 +402,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app.include_router(diagnostics_router)
     app.include_router(telemetry_router)
     app.include_router(state_router)
+    app.include_router(contract_router)
 
     if settings.compose_enabled:
         app.include_router(compose_router)

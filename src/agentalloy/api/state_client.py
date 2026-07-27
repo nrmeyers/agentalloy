@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -64,6 +65,14 @@ class StateClient:
         """Set the current phase via the service."""
         return self._post("/state/phase", {"value": value})
 
+    def set_phase_with_contract(self, value: str, contract: dict[str, Any]) -> dict[str, Any]:
+        """Advance phase and store a contract in a single transaction.
+
+        Both writes commit or roll back together.  Raises ``StateClientError``
+        if the service rejects the payload or rolls back.
+        """
+        return self._post("/state/phase", {"value": value, "contract": contract})
+
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""
         return self._post("/state/approve", {"value": phase})
@@ -85,6 +94,81 @@ class StateClient:
             return resp.read().decode()
         except (urllib.error.URLError, OSError):
             return None
+
+    # -- contract operations ------------------------------------------------
+
+    def create_contract(self, contract: dict[str, Any]) -> dict[str, Any]:
+        """Create a contract via the service."""
+        return self._post("/contracts", contract)
+
+    def get_contract(self, contract_id: str) -> dict[str, Any] | None:
+        """Read a contract by ID.  Returns None if not found."""
+        try:
+            resp = urllib.request.urlopen(
+                f"{self.base_url}/contracts/{contract_id}", timeout=self._timeout
+            )
+            return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def list_contracts(
+        self,
+        *,
+        phase: str | None = None,
+        slug: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List contracts with optional filters."""
+        params: list[tuple[str, str]] = []
+        if phase is not None:
+            params.append(("phase", phase))
+        if slug is not None:
+            params.append(("slug", slug))
+        if status is not None:
+            params.append(("status", status))
+
+        qs = urllib.parse.urlencode(params) if params else ""
+        url = f"{self.base_url}/contracts?{qs}" if qs else f"{self.base_url}/contracts"
+        try:
+            resp = urllib.request.urlopen(url, timeout=self._timeout)
+            data = json.loads(resp.read().decode())
+            return data.get("contracts", [])
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def patch_contract(self, contract_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        """In-place correction of a contract."""
+        req = urllib.request.Request(
+            f"{self.base_url}/contracts/{contract_id}",
+            data=json.dumps(updates).encode("utf-8"),
+            method="PATCH",
+        )
+        req.add_header("Content-Type", "application/json")
+        try:
+            resp = urllib.request.urlopen(req, timeout=self._timeout)
+            return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+
+    def archive_contract(self, contract_id: str) -> dict[str, Any]:
+        """Archive a contract."""
+        return self._post(f"/contracts/{contract_id}/archive", {})
+
+    def supersede_contract(self, contract_id: str, new_contract: dict[str, Any]) -> dict[str, Any]:
+        """Supersede a contract with a new revision."""
+        return self._post(f"/contracts/{contract_id}/supersede", new_contract)
 
     # -- internal helpers ------------------------------------------------
 
