@@ -76,14 +76,14 @@ def _write_result_to_response(
     if conflict is not None:
         return 409, StateConflictInfo(
             owner=conflict.owner,
-            lease_expires_at=conflict.lease_expires_at.isoformat(),
+            lease_expires_at=conflict.lease_expires_at,
             message=conflict.message,
         )
     return 200, StateWriteResponse(
         kind=result.kind,
         value=result.value,
         owner=result.owner,
-        lease_expires_at=(result.lease_expires_at.isoformat() if result.lease_expires_at else None),
+        lease_expires_at=result.lease_expires_at,
     )
 
 
@@ -135,11 +135,17 @@ async def _trigger_compose_in_process(
     Retrieves the ComposeOrchestrator from app.state and composes using the
     stored contract's phase, domain_tags, and body.  Runs asynchronously so
     it does not block the HTTP response.
+
+    The task is stored on ``request.app.state`` to prevent garbage collection
+    and to surface failures at WARNING level (A4: the compose trigger must be
+    observable — a silently dropped trigger defeats acceptance criterion B3).
     """
     orchestrator = getattr(request.app.state, "compose_orchestrator", None)
     if orchestrator is None:
-        logger.debug(
-            "compose_orchestrator not available on app.state — skipping in-process compose"
+        logger.warning(
+            "compose_orchestrator not available on app.state — "
+            "in-process compose will not run for contract %s",
+            contract_id,
         )
         return
 
@@ -158,10 +164,22 @@ async def _trigger_compose_in_process(
         legs="both",
     )
 
-    try:
-        await orchestrator.compose(compose_req)
-    except Exception:
-        logger.exception("In-process compose failed for contract %s", contract_id)
+    async def _run() -> None:
+        try:
+            await orchestrator.compose(compose_req)
+        except Exception:
+            logger.exception("In-process compose failed for contract %s", contract_id)
+
+    task = asyncio.create_task(_run())
+    # Prevent GC: store the task on app.state keyed by contract_id.
+    # The task self-removes on completion via the done callback.
+    state = request.app.state
+    tasks = getattr(state, "compose_tasks", None)
+    if tasks is None:
+        tasks = {}
+        state.compose_tasks = tasks
+    task.add_done_callback(lambda t: tasks.pop(contract_id, None))
+    tasks[contract_id] = task
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +348,7 @@ async def write_phase(
         if http_status != 200:
             raise HTTPException(
                 status_code=409,
-                detail=response.model_dump(),  # type: ignore[union-attr]
+                detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
             )
         # Posture rewrite after successful phase advance
         if repo_root is not None:
@@ -339,9 +357,7 @@ async def write_phase(
             kind=result.kind,
             value=result.value,
             owner=result.owner,
-            lease_expires_at=(
-                result.lease_expires_at.isoformat() if result.lease_expires_at else None
-            ),
+            lease_expires_at=result.lease_expires_at,
             end_session_instruction=end_session_instruction(phase_value),
         )
 
@@ -356,9 +372,9 @@ async def write_phase(
                     status_code=409,
                     detail=StateConflictInfo(
                         owner=result.conflict.owner,
-                        lease_expires_at=result.conflict.lease_expires_at.isoformat(),
+                        lease_expires_at=result.conflict.lease_expires_at,
                         message=result.conflict.message,
-                    ).model_dump(),
+                    ).model_dump(mode="json"),
                 )
 
             # Write the contract
@@ -392,7 +408,7 @@ async def write_phase(
         kind=result.kind,
         value=result.value,
         owner=result.owner,
-        lease_expires_at=(result.lease_expires_at.isoformat() if result.lease_expires_at else None),
+        lease_expires_at=result.lease_expires_at,
         contract_id=contract_id,
         end_session_instruction=end_session_instruction(phase_value),
     )
@@ -420,7 +436,7 @@ async def write_cursor(
     if http_status != 200:
         raise HTTPException(
             status_code=409,
-            detail=response.model_dump(),  # type: ignore[union-attr]
+            detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
         )
     return response  # type: ignore[return-value]
 
@@ -447,7 +463,7 @@ async def write_approve(
     if http_status != 200:
         raise HTTPException(
             status_code=409,
-            detail=response.model_dump(),  # type: ignore[union-attr]
+            detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
         )
     return response  # type: ignore[return-value]
 

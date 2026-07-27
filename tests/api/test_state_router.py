@@ -298,9 +298,9 @@ class TestTA4:
         resp = full_client.post("/state/phase", json=payload)
         assert resp.status_code == 422
 
-        # Phase should be unchanged
+        # Phase should be unchanged (rollback verified)
         assert state_store.read("phase") == "intake"
-        # No contract row should exist
+        # No contract row should exist (rollback verified)
         assert state_store.get_contract("ctr-ta4-1") is None
 
     def test_invalid_contract_phase_rolls_back(
@@ -342,6 +342,30 @@ class TestTA4:
 
         assert state_store.read("phase") == "intake"
         assert state_store.get_contract("") is None
+
+    def test_mid_transaction_failure_rolls_back_phase(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Contract write fails mid-transaction -> phase is rolled back.
+
+        Pydantic validation happens before the transaction, so the tests above
+        never exercise the rollback path.  This test patches ``put_contract``
+        to raise inside the transaction, proving the phase write is rolled back
+        when the contract write fails — acceptance criterion A3 requires both
+        writes to be one transactional unit.
+        """
+        state_store.write("phase", "intake")
+
+        def _raise_put_contract(*_args, **_kwargs):
+            raise RuntimeError("simulated contract write failure")
+
+        with pytest.raises(RuntimeError, match="simulated contract write failure"):
+            with state_store.transaction() as tx:
+                tx.write("phase", "build")
+                _raise_put_contract()
+
+        # Phase should be rolled back (not "build")
+        assert state_store.read("phase") == "intake"
 
 
 # ---------------------------------------------------------------------------

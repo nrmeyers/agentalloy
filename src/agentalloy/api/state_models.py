@@ -8,6 +8,7 @@ validation and OpenAPI documentation.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -76,15 +77,24 @@ class StateWriteResponse(BaseModel):
     kind: str
     value: str
     owner: str | None = None
-    lease_expires_at: str | None = None
+    lease_expires_at: datetime | None = None
     conflict: StateConflictInfo | None = None
 
 
 class StateConflictInfo(BaseModel):
-    """Conflict detail returned when a lease is held by another session."""
+    """Conflict detail returned when a lease is held by another session.
+
+    ``lease_expires_at`` is a :class:`datetime` — Pydantic serialises it as
+    an ISO-8601 string in the JSON response, so the wire format is unchanged
+    from pre-branch behaviour.  The type was temporarily ``str`` during
+    slice-01 development but that was a breaking API change that shipped
+    unremarked; reverting to ``datetime`` restores type consistency with
+    the internal :class:`~agentalloy.storage.state_store.LeaseConflict`
+    dataclass.
+    """
 
     owner: str
-    lease_expires_at: str
+    lease_expires_at: datetime
     message: str
 
 
@@ -215,7 +225,7 @@ class PhaseAdvanceResponse(BaseModel):
     kind: str
     value: str
     owner: str | None = None
-    lease_expires_at: str | None = None
+    lease_expires_at: datetime | None = None
     conflict: StateConflictInfo | None = None
     contract_id: str | None = None
     end_session_instruction: str | None = None

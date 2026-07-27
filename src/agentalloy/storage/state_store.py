@@ -320,15 +320,15 @@ class DuckDBStateStore:
 
         row = self.conn.execute(
             "SELECT owner, lease_expires_at FROM sdd_state "
-            "WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?",
-            (repo, kind, ""),
+            "WHERE repo=? AND kind=? AND session_key IS NULL",
+            (repo, kind),
         ).fetchone()
 
         if not row:
             self.conn.execute(
                 "INSERT INTO sdd_state "
                 "(repo, kind, session_key, value, owner, updated_at, lease_expires_at) "
-                "VALUES (?, ?, '', '', ?, ?, ?)",
+                "VALUES (?, ?, NULL, '', ?, ?, ?)",
                 (repo, kind, session_key, ts, expires_ts),
             )
             return LeaseResult(
@@ -360,8 +360,8 @@ class DuckDBStateStore:
         # Acquire or refresh lease
         self.conn.execute(
             "UPDATE sdd_state SET owner=?, lease_expires_at=?, updated_at=? "
-            "WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?",
-            (session_key, expires_ts, ts, repo, kind, ""),
+            "WHERE repo=? AND kind=? AND session_key IS NULL",
+            (session_key, expires_ts, ts, repo, kind),
         )
         if expires_dt is not None and expires_dt > now:
             new_expires = expires_dt
@@ -479,6 +479,12 @@ class DuckDBStateStore:
         }
 
     # -- contract CRUD -------------------------------------------------------
+    # Three entry points are intentional (not redundant):
+    #   put_contract      — upsert: create or replace a contract by id
+    #   update_contract   — partial in-place correction (no revision fork)
+    #   supersede_contract — revision fork: new row + mark old as superseded
+    # Merging any two would conflate distinct semantics (replace vs correct
+    # vs fork) and force callers to guess the intended operation.
 
     def put_contract(
         self,
