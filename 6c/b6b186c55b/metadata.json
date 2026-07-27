@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "6cb6b186c55b",
+  "strategy": "manual-commit",
+  "branch": "build/contract-store-and-write-gating",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/agentalloy/api/compose_models.py",
+    "src/agentalloy/api/compose_router.py",
+    "src/agentalloy/api/proxy_apply.py",
+    "src/agentalloy/api/proxy_passthrough_router.py",
+    "src/agentalloy/api/proxy_router.py",
+    "src/agentalloy/api/proxy_signal.py",
+    "src/agentalloy/api/proxy_telemetry.py",
+    "src/agentalloy/api/telemetry_router.py",
+    "src/agentalloy/contracts.py",
+    "src/agentalloy/install/subcommands/compose.py",
+    "src/agentalloy/install/subcommands/contract.py",
+    "src/agentalloy/storage/protocols.py",
+    "src/agentalloy/storage/telemetry_store.py",
+    "tests/test_compose_contract.py",
+    "tests/test_config_consistency.py",
+    "tests/test_contracts.py",
+    "tests/test_eval_contract_arm.py",
+    "tests/test_knowledge_push.py",
+    "tests/test_lessons_recorded.py",
+    "tests/test_proxy_contract_provenance.py",
+    "tests/test_proxy_decision_push.py",
+    "tests/test_task_cursor.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/6c/b6b186c55b/0/metadata.json",
+      "transcript": "/6c/b6b186c55b/0/full.jsonl",
+      "compact_transcript": "/6c/b6b186c55b/0/transcript.jsonl",
+      "content_hash": "/6c/b6b186c55b/0/content_hash.txt",
+      "prompt": "/6c/b6b186c55b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 21,
+    "cache_creation_tokens": 45366,
+    "cache_read_tokens": 978054,
+    "output_tokens": 3322,
+    "api_call_count": 11
+  }
+}
