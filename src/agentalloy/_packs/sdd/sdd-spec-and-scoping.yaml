@@ -69,7 +69,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: spec reads its incoming work-item from contracts/active/spec/ (intake authored) and hands off by seeding design's work-item in contracts/active/design/ with the design-surface domain_tags + a body that becomes design's retrieval prompt; spec doc stays the single acceptance source (assumptions → checkable acceptance → non-goals, docs/spec/<slug>.md)"
+change_summary: "two-tier cascade: spec reads its incoming work-item from the contract store (intake authored) and hands off by seeding design's work-item in the store with the design-surface domain_tags + a body that becomes design's retrieval prompt; spec doc stays the single acceptance source (assumptions → checkable acceptance → non-goals, docs/spec/<slug>.md)"
 raw_prose: |
   # SDD — Spec
 

@@ -56,7 +56,7 @@ contract_template: |
 phase_scope: []
 category_scope: [process]
 author: navistone
-change_summary: "two-tier cascade: ship reads its incoming work-item from contracts/active/ship/ (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
+change_summary: "two-tier cascade: ship reads its incoming work-item from the contract store (qa authored, delivery skills front-loaded on entry); terminal phase, no further hand-off; keeps the proportionate delivery (ride the QA report → traceable PR narrative → docs/ship/<slug>.md record with rollback → reversibility scaled to risk) and the user-confirmed reset to intake"
 raw_prose: |
   # SDD — Ship (Deliver)
 

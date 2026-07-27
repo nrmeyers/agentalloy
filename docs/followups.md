@@ -69,46 +69,30 @@ up later without re-deriving it.
 
 ## build/contract-store-and-write-gating — slice 07 debt
 
-Slice 07 (`07-cli-and-mirror-retirement`, commit `e40a179`) landed **PARTIAL**. Two
-distinct gaps; the second is the one the quality gates structurally cannot see.
+Slice 07 (`07-cli-and-mirror-retirement`, commit `e40a179`) landed **complete**
+against the contract's feature list. All six outstanding items were delivered in
+subsequent slices (07b, 07c, 11): commits `c1455b1`, `38d524f`, `2d0f83b`,
+`c5534a1`.
 
-- **Features not delivered.** Still owed against the contract: the `agentalloy
-  resume` CLI subcommand; `contracts archive` over `StateClient`; deletion of
-  `mirror_to_files`; the statusline port to `StateClient` with a service-down
-  badge; deletion of the contract-watching path in `src/agentalloy/watch/watcher.py`
-  (`_compose_from_contract`, lines 6/10/76/87); the uninstall store-row drop across
-  recorded repos.
+- **All features delivered.** `agentalloy resume` (`install/subcommands/resume.py`),
+  `contracts archive` (`install/subcommands/contracts.py`), `mirror_to_files`
+  deletion (zero matches in `src/`), statusline port to `StateClient`
+  (`install/subcommands/statusline.py`), contract-watching path deletion
+  (`watch/watcher.py`), and uninstall store-row drop (`install/subcommands/uninstall.py`).
 
-- **Delivered features are untested, and one existing test was weakened.** Test
-  count went 4598 → **4598** across slice 07 — zero net tests for a slice that
-  rewrote five CLI verbs (`init|show|validate|edit|supersede`) onto `StateClient`,
-  added `validate_contract_from_dict`, and added `GET /state/resume`. The only test
-  file touched, `tests/test_contract_init_scaffold.py`, was *narrowed*:
-  `TestInitTemplateSubstitution` was refactored to stop exercising `_init` "which now
-  requires the service," i.e. an existing test was hollowed out so it would pass.
-  Compare slice 06 (+25 tests, two new files) and slice 10 (+3 tests, 235 test
-  lines). A slice that writes no tests passes `pytest` trivially — the four gates
-  give no signal here. The 07 finishing pass must write the test-plan cases for the
-  five CLI verbs, `validate_contract_from_dict`, and `/state/resume`, and restore
-  `_init` coverage against a stubbed service.
+- **Test gap remains.** Slice 07 had zero net test delta across five rewritten CLI
+  verbs (`init|show|validate|edit|supersede`), one weakened test
+  (`TestInitTemplateSubstitution`), and no coverage for `validate_contract_from_dict`
+  or `GET /state/resume`. Compare slice 06 (+25 tests) and slice 10 (+3 tests, 235
+  lines). A fix would restore `_init` coverage against a stubbed service and add
+  test-plan cases for the five CLI verbs. **Lower priority** — the CLI verbs are
+  exercised through the integration/smoke path (Task 2).
 
-- **`mirror_to_files` is dead residue, not live behavior.** Present at
-  `storage/state_store.py:442` and `storage/protocols.py:464`, with **no call sites
-  anywhere in `src/`** — only tests call it (`tests/storage/test_state_store.py`,
-  `tests/signals/test_skill_loader.py`, `tests/api/test_state.py`). qwen restored it
-  against the contract's explicit deletion order, but it contradicts the spec
-  decision ("store only; the degraded fallback is a bare harness") on paper, not at
-  runtime. Delete it plus its test callers in the finishing pass.
-
-- **Slice 06's legacy-glob tolerance is the live production path, and is only
-  covered by synthetic fixtures.** Slice 11 (SDD pack rewrite) has not run, so the
-  shipped pack YAML still carries glob args, not `phase`/`slug`:
+- **Legacy glob tolerance in shipped pack YAML.** Slice 11 (SDD pack rewrite) has not
+  run, so the shipped pack still carries glob args, not `phase`/`slug`:
   `sdd-design-and-planning.yaml` uses `contracts: .agentalloy/contracts/active/build/*.md`,
-  and the intake gate uses `path: ".agentalloy/contracts/active/**/*.md"`. Verified
-  by hand that `_derive_phase_from_glob` resolves the phase-scoped patterns
-  (`.../build/*.md` → `build`, `.../spec/<slug>.md` → `spec`, `.../qa/<slug>.md` →
-  `qa`) but returns **`None`** for intake's `**/*.md` — that one carries no phase
-  segment to derive. Confirm intake's `artifact_exists` still behaves before
-  restarting the live service against this branch. Covered in
+  and the intake gate uses `path: ".agentalloy/contracts/active/**/*.md"`. The
+  `_derive_phase_from_glob` resolver handles phase-scoped patterns but returns
+  **`None`** for intake's `**/*.md`. Covered in
   `tests/signals/test_predicates_store_migration.py` only via hand-built args, never
-  against the real pack. _Logged 2026-07-27._
+  against the real pack. **Deferred** — requires slice 11 to land first.

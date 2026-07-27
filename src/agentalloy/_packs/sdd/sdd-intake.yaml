@@ -111,7 +111,7 @@ raw_prose: |
   ## 3. Hand off the next phase's work-item
 
   Intake doesn't keep a contract of its own — it writes the **work-item the next
-  phase picks up**, into that phase's contract folder:
+  phase picks up**, into the contract store:
 
       agentalloy contract init --phase spec --slug <task-slug>       # full lane
       # or, for the fast lane:
