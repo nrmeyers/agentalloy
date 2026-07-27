@@ -56,7 +56,11 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
     if client.is_running():
         try:
             phase = _read_phase(root) or _DEFAULT_PHASE
-            return client.set_phase(f"free-flow:{phase}", repo_root=str(root))
+            # No repo_root: free-flow is a mode toggle, not a phase advance.
+            # The router writes req.value verbatim and passes it to the posture
+            # rewriter, and "free-flow:design" is not in DENIED_PHASES — it would
+            # fail open and CLEAR the design deny rules. Leave the posture alone.
+            return client.set_phase(f"free-flow:{phase}")
         except StateClientError as exc:
             print(
                 f"Warning: state service returned {exc.status}: {exc.message}; "
@@ -107,7 +111,9 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     if client.is_running():
         try:
             phase = _read_phase(root) or _DEFAULT_PHASE
-            return client.set_phase(f"resume:{phase}", repo_root=str(root))
+            # No repo_root — see run_flow_free. "resume:design" falls open in
+            # DENIED_PHASES and would clear the deny rules on resume.
+            return client.set_phase(f"resume:{phase}")
         except StateClientError as exc:
             print(
                 f"Warning: state service returned {exc.status}: {exc.message}; "

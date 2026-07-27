@@ -249,12 +249,28 @@ class TestCLIForwardsRepoRoot:
         phase_mod.run_phase_set("build", root=tmp_path)
         assert captured["repo_root"] == str(tmp_path)
 
-    def test_flow_free_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
-        flow_mod.run_flow_free(root=tmp_path)
-        assert captured["repo_root"] == str(tmp_path)
-        assert captured["value"].startswith("free-flow:")
+    @pytest.mark.parametrize("prefix", ["free-flow", "resume"])
+    def test_prefixed_phase_values_would_fail_open(self, prefix: str) -> None:
+        """Why flow must NOT forward repo_root.
 
-    def test_flow_resume_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
+        The router writes ``req.value`` verbatim and hands the same string to the
+        posture rewriter. A prefixed value is not in ``DENIED_PHASES``, so it
+        fails open — forwarding ``repo_root`` from flow would CLEAR the deny
+        rules of a locked phase.
+        """
+        assert build_claude_code_permissions(f"{prefix}:design")["deny"] == []
+        assert build_claude_code_permissions("design")["deny"] != []
+
+    def test_flow_free_does_not_forward_repo_root(
+        self, captured: dict[str, Any], tmp_path: Path
+    ) -> None:
+        flow_mod.run_flow_free(root=tmp_path)
+        assert captured["value"].startswith("free-flow:")
+        assert captured["repo_root"] is None
+
+    def test_flow_resume_does_not_forward_repo_root(
+        self, captured: dict[str, Any], tmp_path: Path
+    ) -> None:
         flow_mod.run_flow_resume(root=tmp_path)
-        assert captured["repo_root"] == str(tmp_path)
         assert captured["value"].startswith("resume:")
+        assert captured["repo_root"] is None
