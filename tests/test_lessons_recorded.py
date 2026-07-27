@@ -127,4 +127,9 @@ def test_proxy_wrapper_matches_resolver(tmp_path: Path):
     from agentalloy.api.proxy_signal import _resolve_current_contract
 
     _qa_contract(tmp_path, "feat-x")
-    assert _resolve_current_contract(tmp_path, "qa") == resolve_current_contract(tmp_path, "qa")
+    proxy_cid, proxy_path = _resolve_current_contract(tmp_path, "qa")
+    fs_cid, fs_path = resolve_current_contract(tmp_path, "qa")
+    # contract_id should match; path is deprecated in the proxy wrapper (always None)
+    assert proxy_cid == fs_cid
+    assert proxy_path is None
+    assert fs_path is not None and fs_path.name == "feat-x.md"

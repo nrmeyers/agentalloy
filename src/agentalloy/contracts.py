@@ -1,8 +1,8 @@
-"""Contract artifact: parsing, validation, and file management.
+"""Contract artifact: in-memory model and markdown+frontmatter serializer.
 
-A contract is a markdown file with YAML frontmatter written by the paid LLM
-to state task intent and domain tags. It drives domain retrieval (Phase 2)
-and gate evaluation (Phase 3).
+A contract is stored in the DuckDB state store (``sdd_contract`` table) and
+represented in memory by :class:`Contract`.  The markdown+frontmatter
+serializer is retained for ``contract show`` and the web edit round-trip.
 
 Format::
 
@@ -30,12 +30,12 @@ Format::
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
-import re
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -54,13 +54,13 @@ class ContractScope:
 
 @dataclass(frozen=True)
 class Contract:
-    path: Path
+    contract_id: str
     phase: str
     task_slug: str
     domain_tags: list[str]
     scope: ContractScope
     success_criteria: list[str]
-    related_contracts: list[Path]
+    related_contracts: list[str]
     created_at: datetime | None
     body: str
     # Workflow route chosen at intake: "full" (spec→design→build→qa→ship) or
@@ -104,7 +104,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
     # Find closing delimiter
     rest = text[3:].lstrip("\n")
-    end_match = re.search(r"^---\s*$", rest, re.MULTILINE)
+    end_match = __import__("re").search(r"^---\s*$", rest, __import__("re").MULTILINE)
     if not end_match:
         raise ContractMalformed("Contract frontmatter is not closed with a '---' delimiter")
 
@@ -124,17 +124,20 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 # ---------------------------------------------------------------------------
-# Parsing
+# Parsing — from markdown text
 # ---------------------------------------------------------------------------
 
 
-def parse_contract(path: Path) -> Contract:
-    """Read and validate a contract file. Raises ContractMalformed on errors."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ContractMalformed(f"Cannot read contract file {path}: {exc}") from exc
+def parse_contract_text(
+    text: str,
+    *,
+    contract_id: str,
+) -> Contract:
+    """Parse a contract from markdown+frontmatter text.
 
+    Raises ContractMalformed on errors.  ``contract_id`` is the store key
+    (e.g. ``01-add-auth``) — it is not derived from the text.
+    """
     data, body = _split_frontmatter(text)
 
     # Required fields
@@ -165,26 +168,11 @@ def parse_contract(path: Path) -> Contract:
 
     success_criteria = [str(c) for c in cast(list[Any], data.get("success_criteria") or [])]
 
+    # related_contracts — list of contract_ids (strings)
     related_raw: list[Any] = data.get("related_contracts") or []
-    related_contracts: list[Path] = []
-    for r in related_raw:
-        rp = Path(str(r))
-        if not rp.is_absolute():
-            candidate = path.parent / rp
-            # Accept either convention: a path relative to THIS contract's directory
-            # (e.g. ``../intake/x.md``) OR a repo-root-relative path (e.g.
-            # ``.agentalloy/contracts/intake/x.md``). When the contract-dir join is
-            # missing, retry against the repo root (the dir that contains ``.agentalloy``)
-            # so neither form is a spurious "related contract not found".
-            if not candidate.exists():
-                for parent in path.resolve().parents:
-                    if (parent / ".agentalloy").is_dir() and (parent / rp).exists():
-                        candidate = parent / rp
-                        break
-            rp = candidate
-        related_contracts.append(rp)
+    related_contracts = [str(r) for r in related_raw]
 
-    # created_at — optional; fall back to file mtime
+    # created_at — optional
     created_at: datetime | None = None
     raw_ts = data.get("created_at")
     if raw_ts:
@@ -195,12 +183,6 @@ def parse_contract(path: Path) -> Contract:
                 created_at = raw_ts
         except (ValueError, TypeError):
             created_at = None
-    if created_at is None:
-        try:
-            mtime = path.stat().st_mtime
-            created_at = datetime.fromtimestamp(mtime, tz=UTC)
-        except OSError:
-            pass
 
     route = str(data.get("route") or "full").strip().lower()
     if route not in ("full", "fast", "add-skill"):
@@ -209,7 +191,7 @@ def parse_contract(path: Path) -> Contract:
         )
 
     return Contract(
-        path=path.resolve(),
+        contract_id=contract_id,
         phase=phase,
         task_slug=task_slug,
         domain_tags=domain_tags,
@@ -222,65 +204,44 @@ def parse_contract(path: Path) -> Contract:
     )
 
 
-# ---------------------------------------------------------------------------
-# Path containment
-# ---------------------------------------------------------------------------
+def contract_from_row(row: dict[str, Any]) -> Contract:
+    """Construct a :class:`Contract` from a store row dict.
 
-
-def safe_contract_path(
-    path_str: str,
-    project_root: Path | None = None,
-) -> tuple[Path | None, Path | None]:
-    """Validate a user-supplied contract path is contained under ``.agentalloy/contracts/``.
-
-    Returns ``(resolved_path, project_root)`` on success, ``(None, None)`` on failure.
-    Resolution failures, missing ``.agentalloy`` ancestor, or paths that escape the
-    contracts directory all return ``(None, None)`` — callers should treat that as a
-    400 / reject.
-
-    When ``project_root`` is ``None``, the project root is derived from the path itself
-    by walking up to the ``.agentalloy`` parent. This is the common case for the API:
-    the caller supplies an absolute path and we verify it's a well-formed contract path
-    living inside *some* project's ``.agentalloy/contracts/`` tree.
+    ``row`` is the dict returned by ``DuckDBStateStore.get_contract()`` or
+    ``DuckDBStateStore.list_contracts()``.
     """
-    try:
-        resolved = Path(path_str).resolve()
-    except OSError:
-        return None, None
+    created_at: datetime | None = None
+    raw_ts = row.get("created_at")
+    if isinstance(raw_ts, str):
+        with contextlib.suppress(ValueError):
+            created_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+    elif isinstance(raw_ts, datetime):
+        created_at = raw_ts
 
-    if not resolved.is_file():
-        return None, None
+    domain_tags = row.get("domain_tags") or []
+    scope_touches = row.get("scope_touches") or []
+    scope_avoids = row.get("scope_avoids") or []
+    success_criteria = row.get("success_criteria") or []
 
-    # Walk up until we find the .agentalloy parent (the project's agentalloy dir).
-    contracts_root: Path | None = None
-    for ancestor in resolved.parents:
-        if ancestor.name == ".agentalloy":
-            contracts_root = ancestor / "contracts"
-            break
-    if contracts_root is None:
-        return None, None
+    route = str(row.get("route") or "full").strip().lower()
+    if route not in ("full", "fast", "add-skill"):
+        route = "full"
 
-    derived_root = contracts_root.parent.parent  # `.agentalloy/`.parent = project root
-
-    # If caller pinned a project_root, the resolved path must also live under it.
-    if project_root is not None:
-        try:
-            project_resolved = project_root.resolve()
-        except OSError:
-            return None, None
-        try:
-            resolved.relative_to(project_resolved)
-        except ValueError:
-            return None, None
-        derived_root = project_resolved
-
-    # And the path must live under derived_root/.agentalloy/contracts/
-    try:
-        resolved.relative_to(contracts_root.resolve())
-    except (ValueError, OSError):
-        return None, None
-
-    return resolved, derived_root
+    return Contract(
+        contract_id=str(row["contract_id"]),
+        phase=str(row["phase"]),
+        task_slug=str(row.get("slug", "")),
+        domain_tags=[str(t) for t in domain_tags],
+        scope=ContractScope(
+            touches=[str(g) for g in scope_touches],
+            avoids=[str(g) for g in scope_avoids],
+        ),
+        success_criteria=[str(c) for c in success_criteria],
+        related_contracts=[],
+        created_at=created_at,
+        body=str(row.get("body") or ""),
+        route=route,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -288,35 +249,13 @@ def safe_contract_path(
 # ---------------------------------------------------------------------------
 
 
-def validate_contract(contract: Contract, project_root: Path) -> list[str]:
-    """Return a list of issues (empty = valid). Does not raise."""
+def validate_contract(contract: Contract, project_root: Any) -> list[str]:
+    """Return a list of issues (empty = valid). Does not raise.
+
+    Note: ``project_root`` is retained for backward compatibility with
+    existing callers but is no longer used for phase-file checks.
+    """
     issues: list[str] = []
-
-    # Phase match check
-    phase_file = project_root / ".agentalloy" / "phase"
-    if phase_file.exists():
-        try:
-            raw_phase: Any = yaml.safe_load(phase_file.read_text(encoding="utf-8")) or {}
-            if isinstance(raw_phase, dict):
-                phase_data: dict[str, Any] = cast(dict[str, Any], raw_phase)
-                active_phase = str(phase_data.get("phase", "")).strip()
-            else:
-                active_phase = ""
-            if active_phase and active_phase != contract.phase:
-                issues.append(
-                    f"Contract phase '{contract.phase}' does not match active phase "
-                    f"'{active_phase}' in .agentalloy/phase"
-                )
-        except Exception:
-            pass
-
-    # Related contracts existence
-    for rp in contract.related_contracts:
-        if not rp.exists():
-            issues.append(f"Related contract not found: {rp}")
-
-    # domain_tags is optional — empty is valid (compose falls back to body-text
-    # retrieval). Tags only refine/boost retrieval when present.
 
     # scope.touches globs valid syntax
     for pattern in contract.scope.touches + contract.scope.avoids:
@@ -329,62 +268,117 @@ def validate_contract(contract: Contract, project_root: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# File discovery
+# Code index query construction
 # ---------------------------------------------------------------------------
 
 
-def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return all .agentalloy/contracts/active/<phase>/*.md sorted newest-first by mtime."""
-    contracts_dir = active_dir(project_root, phase)
-    if not contracts_dir.is_dir():
-        return []
-    files = [f for f in contracts_dir.glob("*.md") if f.is_file()]
-    return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
+@dataclass(frozen=True)
+class CodeIndexQuery:
+    """Parameters for an in-process code-index search derived from a contract.
 
-
-def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
-    """Return contracts/<phase>/*.md in FILENAME order (``01-``, ``02-``, …).
-
-    The design phase numbers build work-items by filename prefix to fix the
-    worklist order, so this — not the mtime order of ``list_contracts_for_phase``
-    — is the correct sequence for "which task is first/next". The single ordering
-    definition shared by the ``task`` cursor commands and phase-entry seeding.
+    ``repo`` + ``semantic_q`` map onto ``GET /code/search/semantic?repo=&q=``
+    and ``repo`` + ``lexical_q`` onto ``GET /code/search/lexical?repo=&q=`` on
+    the local service port.
     """
-    contracts_dir = active_dir(project_root, phase)
-    if not contracts_dir.is_dir():
-        return []
-    return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
+
+    repo: str
+    semantic_q: str
+    lexical_q: str | None
+    path_globs: list[str]
 
 
-def first_workitem_id(project_root: Path, phase: str) -> str | None:
-    """The first work-item of ``phase`` (filename order) as a cursor id
-    (``active/<phase>/<file>.md``), or ``None`` when the phase has no contracts.
+def code_index_query_params(contract: Contract) -> CodeIndexQuery:
+    """Build ``/code/search/*`` query parameters from a contract.
 
-    Used to seed ``.agentalloy/cursor`` on phase entry so the current work-item
-    is reliably set without waiting for the agent's first ``agentalloy task next``.
-    The id is contracts-root-relative, so it now carries the ``active/`` prefix
-    to resolve against the tree layout (``resolve_current_contract`` joins it to
-    ``.agentalloy/contracts/``).
+    Derives the repo slug from the contract's ``slug`` field.
     """
-    contracts = ordered_contracts_for_phase(project_root, phase)
-    if not contracts:
-        return None
-    return f"active/{phase}/{contracts[0].name}"
+    body = (contract.body or "").strip()
+    first_line = body.split("\n")[0].lstrip("# ").strip() if body else ""
+    semantic_q = first_line or contract.task_slug
+
+    lexical_q = " ".join(contract.domain_tags) if contract.domain_tags else None
+    path_globs = list(contract.scope.touches) if contract.scope.touches else []
+
+    return CodeIndexQuery(
+        repo=contract.task_slug,
+        semantic_q=semantic_q,
+        lexical_q=lexical_q,
+        path_globs=path_globs,
+    )
+
+
+def cursor_state_name(session_key: str | None) -> str:
+    """Backing filename for the work-item cursor, session-scoped when possible.
+
+    A repo has ONE ``.agentalloy/contracts`` tree but may be driven by several
+    concurrent sessions; a single shared ``.agentalloy/cursor`` lets one session's
+    ``task start`` clobber another's current work-item (Bug C). Scoping the cursor
+    file by the session key isolates them: ``cursor.<sha1(key)[:16]>`` when a key is
+    known, else the shared ``cursor`` (single-session, non-Claude-Code harnesses,
+    and every pre-scoping repo — the back-compat floor). The key is the same value
+    on both sides: the proxy's ``x-claude-code-session-id`` header and the CLI's
+    ``CLAUDE_CODE_SESSION_ID`` env var are the one session UUID, so a scoped write
+    by the CLI is read back by the proxy (and vice versa) across the container bind
+    mount. The cursor is deliberately NOT a relocated runtime-state key, so scoped
+    files stay in the repo tree where both sides see them."""
+    if not session_key:
+        return "cursor"
+    digest = hashlib.sha1(session_key.encode()).hexdigest()[:16]
+    return f"cursor.{digest}"
 
 
 # ---------------------------------------------------------------------------
-# Contracts tree layout (active/<phase>/ + archive/<phase>/)
+# Backward-compat filesystem helpers
 #
-# The tree strategy: live work-item contracts live under
-# ``.agentalloy/contracts/active/<phase>/``; completed / superseded ones under
-# ``.agentalloy/contracts/archive/<phase>/``. This replaces the legacy flat
-# layout (``contracts/*.md`` + per-phase ``contracts/<phase>/`` + flat
-# ``contracts/archive/*.md`` + ``contracts/_superseded/``).
-#
-# This module contributes only the *pure* path helpers and a side-effect-free
-# migration planner; the CLI command that executes a plan, the writer/reader
-# cutover, and the archive move live in later changes.
+# Retained for consumers outside the compose path (predicates, CLI, skill_loader)
+# that will be migrated in later tasks. The compose/proxy reader path uses the
+# store exclusively (contract_id-based).
 # ---------------------------------------------------------------------------
+
+
+def safe_contract_path(
+    path_str: str,
+    project_root: Path | None = None,
+) -> tuple[Path | None, Path | None]:
+    """Validate a user-supplied contract path is contained under ``.agentalloy/contracts/``.
+
+    Returns ``(resolved_path, project_root)`` on success, ``(None, None)`` on failure.
+    """
+    try:
+        resolved = Path(path_str).resolve()
+    except OSError:
+        return None, None
+
+    if not resolved.is_file():
+        return None, None
+
+    contracts_root: Path | None = None
+    for ancestor in resolved.parents:
+        if ancestor.name == ".agentalloy":
+            contracts_root = ancestor / "contracts"
+            break
+    if contracts_root is None:
+        return None, None
+
+    derived_root = contracts_root.parent.parent
+
+    if project_root is not None:
+        try:
+            project_resolved = project_root.resolve()
+        except OSError:
+            return None, None
+        try:
+            resolved.relative_to(project_resolved)
+        except ValueError:
+            return None, None
+        derived_root = project_resolved
+
+    try:
+        resolved.relative_to(contracts_root.resolve())
+    except (ValueError, OSError):
+        return None, None
+
+    return resolved, derived_root
 
 
 def contracts_root(project_root: Path) -> Path:
@@ -402,13 +396,33 @@ def archive_dir(project_root: Path, phase: str) -> Path:
     return contracts_root(project_root) / "archive" / phase
 
 
-def _read_contract_phase(path: Path) -> str | None:
-    """Best-effort read of a contract's ``phase`` frontmatter field.
+def list_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
+    """Return all .agentalloy/contracts/active/<phase>/*.md sorted newest-first by mtime."""
+    contracts_dir = active_dir(project_root, phase)
+    if not contracts_dir.is_dir():
+        return []
+    files = [f for f in contracts_dir.glob("*.md") if f.is_file()]
+    return sorted(files, key=lambda f: f.stat().st_mtime, reverse=True)
 
-    Returns the trimmed phase, or ``None`` when the file is unreadable, has no
-    frontmatter, or lacks a non-empty string ``phase``. Never raises — the
-    migration planner treats a ``None`` here as "cannot place this file".
-    """
+
+def ordered_contracts_for_phase(project_root: Path, phase: str) -> list[Path]:
+    """Return contracts/<phase>/*.md in FILENAME order (``01-``, ``02-``, …)."""
+    contracts_dir = active_dir(project_root, phase)
+    if not contracts_dir.is_dir():
+        return []
+    return sorted((f for f in contracts_dir.glob("*.md") if f.is_file()), key=lambda f: f.name)
+
+
+def first_workitem_id(project_root: Path, phase: str) -> str | None:
+    """The first work-item of ``phase`` (filename order) as a cursor id."""
+    contract_files = ordered_contracts_for_phase(project_root, phase)
+    if not contract_files:
+        return None
+    return f"active/{phase}/{contract_files[0].name}"
+
+
+def _read_contract_phase(path: Path) -> str | None:
+    """Best-effort read of a contract's ``phase`` frontmatter field."""
     try:
         data, _ = _split_frontmatter(path.read_text(encoding="utf-8"))
     except (OSError, ContractMalformed):
@@ -425,22 +439,15 @@ class ContractMove:
 
     src: Path
     dst: Path
-    archived: bool  # True → destination is archive/<phase>/, False → active/<phase>/
+    archived: bool
 
 
 @dataclass(frozen=True)
 class MigrationPlan:
-    """The side-effect-free result of planning a legacy → tree migration.
-
-    ``moves`` are safe to apply in order. ``collisions`` are source files whose
-    computed destination is already claimed (by another source in this plan or
-    an existing on-disk file) — reported, never silently overwritten.
-    ``unreadable`` are files whose ``phase`` could not be determined, so no
-    destination could be computed.
-    """
+    """The side-effect-free result of planning a legacy → tree migration."""
 
     moves: list[ContractMove]
-    collisions: list[tuple[Path, Path]]  # (src, intended dst)
+    collisions: list[tuple[Path, Path]]
     unreadable: list[Path]
 
     @property
@@ -449,27 +456,12 @@ class MigrationPlan:
 
 
 def plan_contracts_migration(project_root: Path) -> MigrationPlan:
-    """Plan the move of a repo's legacy-layout contracts into the tree.
-
-    Pure: reads the filesystem but mutates nothing. Classification by source
-    location (destination phase always comes from the file's own frontmatter):
-
-      - ``active/**``                     → already migrated, skipped.
-      - ``archive/<phase>/**`` (nested)   → already migrated, skipped.
-      - ``archive/*.md`` (flat)           → ``archive/<phase>/`` (archived).
-      - ``_superseded/**``                → ``archive/<phase>/`` (archived).
-      - everything else (flat root,
-        legacy per-phase ``<phase>/*.md``) → ``active/<phase>/`` (live).
-
-    A file already sitting at its computed destination is skipped. A
-    destination claimed twice — or already occupied on disk by a different
-    file — becomes a collision rather than a move.
-    """
+    """Plan the move of a repo's legacy-layout contracts into the tree."""
     root = contracts_root(project_root)
     moves: list[ContractMove] = []
     collisions: list[tuple[Path, Path]] = []
     unreadable: list[Path] = []
-    claimed: dict[Path, Path] = {}  # dst → first src that claimed it
+    claimed: dict[Path, Path] = {}
 
     if not root.is_dir():
         return MigrationPlan(moves, collisions, unreadable)
@@ -480,10 +472,9 @@ def plan_contracts_migration(project_root: Path) -> MigrationPlan:
         parts = src.relative_to(root).parts
         top = parts[0]
 
-        # Already in the tree.
         if top == "active":
             continue
-        if top == "archive" and len(parts) >= 3:  # archive/<phase>/<file>.md
+        if top == "archive" and len(parts) >= 3:
             continue
 
         phase = _read_contract_phase(src)
@@ -496,10 +487,8 @@ def plan_contracts_migration(project_root: Path) -> MigrationPlan:
         dst = base / src.name
 
         if dst == src:
-            continue  # already correctly placed
+            continue
 
-        # Destination claimed by an earlier source, or occupied on disk by a
-        # different file → collision (never overwrite).
         if dst in claimed or (dst.exists() and dst.resolve() != src.resolve()):
             collisions.append((src, dst))
             continue
@@ -511,23 +500,11 @@ def plan_contracts_migration(project_root: Path) -> MigrationPlan:
 
 
 def apply_contracts_migration(plan: MigrationPlan) -> list[ContractMove]:
-    """Execute a plan's ``moves`` on disk, returning the moves performed.
-
-    Creates each destination's parent directory and relocates the file
-    (``shutil.move`` — tolerant of a cross-filesystem ``.agentalloy``). Only
-    ``moves`` are applied: collisions and unreadable files were deliberately
-    excluded by the planner, so nothing here can overwrite an existing file. A
-    caller that has already applied the plan sees the moves as no-ops guarded by
-    ``src.exists()`` (idempotent re-runs are safe).
-
-    Cursor rewriting is intentionally *not* done here — the cursor helpers live
-    in the signal layer (which imports this module); the migration entrypoint
-    that owns the cursor performs that step after calling this.
-    """
+    """Execute a plan's ``moves`` on disk, returning the moves performed."""
     done: list[ContractMove] = []
     for mv in plan.moves:
         if not mv.src.exists():
-            continue  # already applied on a prior run
+            continue
         mv.dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(mv.src), str(mv.dst))
         done.append(mv)
@@ -535,14 +512,7 @@ def apply_contracts_migration(plan: MigrationPlan) -> list[ContractMove]:
 
 
 def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: Path) -> str | None:
-    """Return the cursor value rewritten to follow a migration, or unchanged.
-
-    The cursor is a contracts-root-relative posix id (e.g. ``build/01.md``).
-    When a move relocated exactly that file, the cursor becomes the move's new
-    contracts-relative id (e.g. ``active/build/01.md``); otherwise it is
-    returned as-is. Pure — the caller writes the result through its own cursor
-    helper. ``root`` is ``.agentalloy/contracts`` so relatives can be computed.
-    """
+    """Return the cursor value rewritten to follow a migration, or unchanged."""
     if not cursor:
         return cursor
     for mv in moves:
@@ -558,13 +528,7 @@ def cursor_after_migration(cursor: str | None, moves: list[ContractMove], root: 
 def plan_archive(
     project_root: Path, *, phase: str | None = None, slug: str | None = None
 ) -> MigrationPlan:
-    """Plan moving live contracts from ``active/<phase>/`` to ``archive/<phase>/``.
-
-    Pure. ``phase=None`` archives every live phase; a ``phase`` restricts to that
-    phase's dir; a ``slug`` restricts to files whose stem equals it (across the
-    selected phase(s)). A destination already occupied by a different file
-    becomes a collision (never overwritten), mirroring the migration planner.
-    """
+    """Plan moving live contracts from ``active/<phase>/`` to ``archive/<phase>/``."""
     root = contracts_root(project_root)
     active_root = root / "active"
     moves: list[ContractMove] = []
@@ -596,82 +560,11 @@ def plan_archive(
     return MigrationPlan(moves=moves, collisions=collisions, unreadable=[])
 
 
-@dataclass(frozen=True)
-class CodeIndexQuery:
-    """Parameters for an in-process code-index search derived from a contract.
-
-    ``repo`` + ``semantic_q`` map onto ``GET /code/search/semantic?repo=&q=``
-    and ``repo`` + ``lexical_q`` onto ``GET /code/search/lexical?repo=&q=`` on
-    the local service port.
-    """
-
-    repo: str
-    semantic_q: str
-    lexical_q: str | None
-    path_globs: list[str]
-
-
-def code_index_query_params(contract: Contract, project_root: Path) -> CodeIndexQuery:
-    """Build ``/code/search/*`` query parameters from a contract.
-
-    Derives the repo slug with the same rule the code-index module uses to key
-    its indexes (single github.com origin → ``{org}__{repo}``, else the
-    slugified directory basename), so the resulting search query resolves
-    instead of 404ing. See ``agentalloy.code_index.slug``.
-    """
-    from agentalloy.code_index.slug import repo_slug
-
-    # The repo slug MUST byte-match the code-index module's own derivation —
-    # it keys each index by this string, so any divergence 404s the lookup.
-    repo = repo_slug(project_root)
-
-    body = (contract.body or "").strip()
-    first_line = body.split("\n")[0].lstrip("# ").strip() if body else ""
-    semantic_q = first_line or contract.task_slug
-
-    lexical_q = " ".join(contract.domain_tags) if contract.domain_tags else None
-    path_globs = list(contract.scope.touches) if contract.scope and contract.scope.touches else []
-
-    return CodeIndexQuery(
-        repo=repo,
-        semantic_q=semantic_q,
-        lexical_q=lexical_q,
-        path_globs=path_globs,
-    )
-
-
-def cursor_state_name(session_key: str | None) -> str:
-    """Backing filename for the work-item cursor, session-scoped when possible.
-
-    A repo has ONE ``.agentalloy/contracts`` tree but may be driven by several
-    concurrent sessions; a single shared ``.agentalloy/cursor`` lets one session's
-    ``task start`` clobber another's current work-item (Bug C). Scoping the cursor
-    file by the session key isolates them: ``cursor.<sha1(key)[:16]>`` when a key is
-    known, else the shared ``cursor`` (single-session, non-Claude-Code harnesses,
-    and every pre-scoping repo — the back-compat floor). The key is the same value
-    on both sides: the proxy's ``x-claude-code-session-id`` header and the CLI's
-    ``CLAUDE_CODE_SESSION_ID`` env var are the one session UUID, so a scoped write
-    by the CLI is read back by the proxy (and vice versa) across the container bind
-    mount. The cursor is deliberately NOT a relocated runtime-state key, so scoped
-    files stay in the repo tree where both sides see them."""
-    if not session_key:
-        return "cursor"
-    digest = hashlib.sha1(session_key.encode("utf-8")).hexdigest()[:16]  # noqa: S324 non-crypto id
-    return f"cursor.{digest}"
-
-
 def _read_cursor_value(project_root: Path, session_key: str | None = None) -> str | None:
-    """Read the work-item cursor (a contracts-relative id).
-
-    Reads the session-scoped file first (``cursor.<hash>``), then falls back to the
-    shared ``cursor`` — so a session that never scoped, and every pre-scoping repo,
-    resolve exactly as before. Mirrors ``skill_loader._read_cursor`` but lives here
-    so this low-level module can resolve the current work-item without importing the
-    signals/api layers. Returns ``None`` when absent or empty.
-    """
+    """Read the work-item cursor (a contracts-relative id)."""
     names = [cursor_state_name(session_key)]
     if names[0] != "cursor":
-        names.append("cursor")  # shared fallback
+        names.append("cursor")
     for name in names:
         try:
             raw = (project_root / ".agentalloy" / name).read_text(encoding="utf-8")
@@ -689,44 +582,20 @@ def resolve_current_contract(
     """Resolve the current work-item contract for ``phase``.
 
     Returns ``(contract_id, abs_path)`` where ``contract_id`` is the
-    contracts-relative posix path (e.g. ``build/01-cache.md``) and ``abs_path`` is
-    the file to use. Resolution order:
-
-    1. An explicit ``.agentalloy/cursor`` that resolves to a file under
-       ``.agentalloy/contracts/`` (set by phase-entry seeding — see
-       ``first_workitem_id`` — or advanced by ``agentalloy task next``).
-    2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
-       (the common single-item phase: spec/design/qa/ship).
-    3. ≥2 with no cursor (an uncursored build fan-out) → ``(None, None)``: don't
-       guess. This is the fail-safe floor, not the normal path — the cursor is
-       seeded to the first work-item on phase entry (``_write_phase_atomic`` /
-       ``run_phase_set``) and advanced by ``task next``, so a live phase almost
-       always has a cursor. Both consumers depend on this strictness: the proxy
-       composes nothing (rather than a mis-scoped guess) and the
-       ``lessons_recorded`` gate fails open (UNKNOWN) rather than block against a
-       guessed slug.
-    4. Zero contracts → ``(None, None)``.
-
-    The single source of truth is the cursor. This resolver never falls back to
-    ``latest_contract`` (newest by mtime): mtime is fragile — git checkout/clone
-    reset it — and, shared with a correctness gate, a newest-by-mtime guess could
-    satisfy or block the gate against the wrong task.
+    contracts-relative posix path and ``abs_path`` is the file to use.
     """
-    contracts_root = (project_root / ".agentalloy" / "contracts").resolve()
+    cr = (project_root / ".agentalloy" / "contracts").resolve()
     cursor = _read_cursor_value(project_root, session_key)
     if cursor:
-        candidate = (contracts_root / cursor).resolve()
-        # Containment guard: a stale/hostile cursor must not read outside the tree.
-        if candidate.is_file() and candidate.is_relative_to(contracts_root):
-            return candidate.relative_to(contracts_root).as_posix(), candidate
-        # stale/invalid cursor → fall through to the phase default
+        candidate = (cr / cursor).resolve()
+        if candidate.is_file() and candidate.is_relative_to(cr):
+            return candidate.relative_to(cr).as_posix(), candidate
 
     in_phase = list_contracts_for_phase(project_root, phase)
     if len(in_phase) != 1:
-        # 0 → nothing current; ≥2 with no cursor → fan-out, don't guess.
         return None, None
     only = in_phase[0].resolve()
-    return only.relative_to(contracts_root).as_posix(), only
+    return only.relative_to(cr).as_posix(), only
 
 
 def latest_contract(project_root: Path, phase: str | None = None) -> Path | None:
@@ -735,7 +604,6 @@ def latest_contract(project_root: Path, phase: str | None = None) -> Path | None
         files = list_contracts_for_phase(project_root, phase)
         return files[0] if files else None
 
-    # No phase filter — scan all live phases under the active tree.
     active_root = contracts_root(project_root) / "active"
     if not active_root.is_dir():
         return None
@@ -749,3 +617,20 @@ def latest_contract(project_root: Path, phase: str | None = None) -> Path | None
         return None
 
     return max(all_files, key=lambda f: f.stat().st_mtime)
+
+
+def parse_contract(path: Path) -> Contract:
+    """Read and validate a contract file from the filesystem.
+
+    Backward-compat wrapper: derives ``contract_id`` from the filename stem.
+    Raises ContractMalformed on errors.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContractMalformed(f"Cannot read contract file {path}: {exc}") from exc
+
+    # Derive contract_id from filename stem (without .md extension)
+    contract_id = path.stem
+
+    return parse_contract_text(text, contract_id=contract_id)

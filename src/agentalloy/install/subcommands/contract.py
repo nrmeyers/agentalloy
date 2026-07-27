@@ -88,7 +88,7 @@ def _show(args: argparse.Namespace) -> int:
         return 1
 
     result: dict[str, Any] = {
-        "path": str(contract.path),
+        "path": str(path),
         "phase": contract.phase,
         "task_slug": contract.task_slug,
         "domain_tags": contract.domain_tags,

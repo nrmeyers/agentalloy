@@ -49,7 +49,7 @@ class TraceRecord(BaseModel):
     gates_met: list[str] = []
     gates_unmet: list[str] = []
     qwen_calls: int = 0
-    contract_path: str | None = None
+    contract_id: str | None = None
     contract_tags: list[str] = []
     bm25_source: str = "rule-extracted"
     reranked: bool = False
@@ -93,7 +93,7 @@ class TraceRecord(BaseModel):
             gates_met=t.gates_met,
             gates_unmet=t.gates_unmet,
             qwen_calls=t.qwen_calls,
-            contract_path=t.contract_path,
+            contract_id=t.contract_id,
             contract_tags=t.contract_tags,
             bm25_source=t.bm25_source,
             reranked=t.reranked,

@@ -51,7 +51,7 @@ def write_proxy_trace(
     session_key: str | None = None,
     session_source: str | None = None,
     category: str | None = None,
-    contract_path: str | None = None,
+    contract_id: str | None = None,
     contract_tags: Sequence[str] | None = None,
 ) -> None:
     """Write a CompositionTrace for a proxy request.
@@ -80,7 +80,7 @@ def write_proxy_trace(
         category: Mode tag reusing the existing free-text ``category`` column —
             ``"free-flow"`` for a request handled in free-flow mode, else None
             (workflow mode). Lets free→contract conversion be measured later.
-        contract_path: Path of the work-item contract a Tier-2 contract-scoped
+        contract_id: ID of the work-item contract a Tier-2 contract-scoped
             compose was built from; None on free-text rows — the populated/null
             split is what makes injection mode auditable in production.
         contract_tags: The contract's domain_tags (the BM25 steer + soft filter).
@@ -118,7 +118,7 @@ def write_proxy_trace(
             repo=repo,
             session_key=session_key,
             session_source=session_source,
-            contract_path=contract_path,
+            contract_id=contract_id,
             contract_tags=list(contract_tags) if contract_tags else [],
         )
         vector_store.record_composition_trace(trace)

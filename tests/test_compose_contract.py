@@ -48,24 +48,12 @@ def test_resolved_contract_tags_from_explicit(tmp_path: Path):
     assert req.resolved_contract_tags == ["A", "B"]
 
 
-def test_resolved_contract_tags_from_path(tmp_path: Path):
+def test_resolved_contract_tags_from_contract_tags(tmp_path: Path):
+    """contract_tags field populates resolved_contract_tags directly."""
     from agentalloy.api.compose_models import ComposeRequest
 
-    # Must live under a project's .agentalloy/contracts/<phase>/ directory
-    # to pass the path-containment guard.
-    contract_dir = tmp_path / ".agentalloy" / "contracts" / "active" / "build"
-    f = _write_contract(contract_dir / "c.md", domain_tags=["NestJS", "JWT"])
-    req = ComposeRequest(task="do thing", phase="build", contract_path=str(f))
+    req = ComposeRequest(task="do thing", phase="build", contract_tags=["NestJS", "JWT"])
     assert req.resolved_contract_tags == ["NestJS", "JWT"]
-
-
-def test_resolved_contract_tags_rejects_unsafe_path(tmp_path: Path):
-    """Paths outside any .agentalloy/contracts/ tree are silently rejected (returns None)."""
-    from agentalloy.api.compose_models import ComposeRequest
-
-    f = _write_contract(tmp_path / "loose-contract.md", domain_tags=["X"])
-    req = ComposeRequest(task="do thing", phase="build", contract_path=str(f))
-    assert req.resolved_contract_tags is None
 
 
 def test_resolved_contract_tags_none_when_not_set():

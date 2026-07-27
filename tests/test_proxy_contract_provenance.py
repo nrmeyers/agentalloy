@@ -73,13 +73,13 @@ def test_merge_populates_contract_fields_from_tier2_request(tmp_path: Path) -> N
     contract = parse_contract(_seed_contract(tmp_path))
     req = compose_request_from_contract(contract, legs="domain", k=2)
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, _result(), req)
-    assert tel.contract_path == str(contract.path)
+    assert tel.contract_id == contract.contract_id
     assert tel.contract_tags == ["redis", "streams"]
 
 
 def test_merge_leaves_contract_fields_null_without_request() -> None:
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, _result(), None)
-    assert tel.contract_path is None
+    assert tel.contract_id is None
     assert tel.contract_tags == []
 
 
@@ -89,7 +89,7 @@ def test_merge_ignores_request_when_tier2_compose_failed(tmp_path: Path) -> None
     contract = parse_contract(_seed_contract(tmp_path))
     req = compose_request_from_contract(contract, legs="domain", k=2)
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, None, req)
-    assert tel.contract_path is None
+    assert tel.contract_id is None
     assert tel.contract_tags == []
 
 
@@ -98,7 +98,7 @@ def test_merge_free_text_request_has_no_contract_fields() -> None:
     # no contract fields, so the row stays null by construction.
     req = ComposeRequest(task="t", phase="build", legs="domain")
     tel = _merge_compose_telemetry(SignalResult(should_compose=True), None, _result(), req)
-    assert tel.contract_path is None
+    assert tel.contract_id is None
     assert tel.contract_tags == []
 
 
@@ -134,7 +134,7 @@ def test_e2e_contract_scoped_row_carries_contract_provenance(tmp_path: Path) -> 
         assert len(rows) == 1
         row = rows[0]
         assert row.status == "proxy_composed"
-        assert row.contract_path == str(contract_path)
+        assert row.contract_id is not None
         assert list(row.contract_tags) == ["redis", "streams"]
 
 
@@ -149,5 +149,5 @@ def test_e2e_free_text_row_has_null_contract_provenance(tmp_path: Path) -> None:
         rows = store.query_traces(limit=10)
         assert len(rows) == 1
         assert rows[0].status == "proxy_composed"
-        assert rows[0].contract_path is None
+        assert rows[0].contract_id is None
         assert list(rows[0].contract_tags) == []

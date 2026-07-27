@@ -188,41 +188,32 @@ def _resolve_current_contract(
 ) -> tuple[str | None, Path | None]:
     """Resolve the current work-item contract for Tier 2 domain composition.
 
-    Returns ``(contract_id, abs_path)`` where ``contract_id`` is the cursor's
-    canonical value used for cadence (the contracts-relative posix path, e.g.
-    ``build/01-cache.md``) and ``abs_path`` is the file to compose.
+    Returns ``(contract_id, None)`` where ``contract_id`` is the store key
+    (e.g. ``01-cache``). The path component is deprecated and always ``None``;
+    consumers should load the contract from the store using the id.
 
-    Work-items for a phase live in ``.agentalloy/contracts/<phase>/`` and are
-    authored by the *prior* phase (the cascade hand-off). Resolution:
+    Resolution reads the cursor value (``.agentalloy/cursor``) and treats it as
+    the contract's store key.  The cursor is seeded to the phase's first work-item
+    on entry and advanced by ``agentalloy task next``.
 
-    1. An explicit ``.agentalloy/cursor`` wins when it resolves to a file under
-       ``.agentalloy/contracts/``. The cursor is seeded to the phase's first
-       work-item on entry (``skill_loader._write_phase_atomic``) and advanced by
-       ``agentalloy task next`` — so a live phase almost always has one.
-    2. Exactly one contract in ``contracts/<phase>/`` → that single work-item
-       (the common single-item phase: spec/design/qa/ship).
-    3. Two or more, no cursor → ``(None, None)``; Tier 2 stays silent rather than
-       guess a mis-scoped work-item. Seeding makes this fan-out floor rare; it is
-       a fail-safe, not the normal path.
-    4. None → ``(None, None)``; Tier 2 stays silent.
-
-    Thin wrapper over :func:`agentalloy.contracts.resolve_current_contract` — the
-    canonical cursor-strict resolver, shared with the ``lessons_recorded`` gate
-    predicate so the proxy and the gate always agree on which work-item is current.
-    Kept here for the existing call sites and to emit the stale-cursor diagnostic.
+    Falls back to the filesystem resolver when the cursor value is not found in
+    the store (backward-compat for repos that haven't migrated their contracts).
     """
-    from agentalloy.contracts import resolve_current_contract
+    from agentalloy.contracts import resolve_current_contract as _fs_resolve
     from agentalloy.signals.skill_loader import ensure_migrated
 
-    # Auto-migrate a legacy flat-layout repo into the tree on first read (cheap
-    # no-op once migrated), so the tree-only resolver below never silently
-    # returns empty for a repo whose contracts predate the active/<phase> layout.
     ensure_migrated(cwd)
 
-    cid, path = resolve_current_contract(cwd, phase, session_key)
-    if path is None and _read_cursor(cwd, session_key):
-        logger.warning("cursor is set but did not resolve to a contract file; used phase default")
-    return cid, path
+    # Try store-first resolution via the cursor value
+    cursor_val = _read_cursor(cwd, session_key)
+    if cursor_val:
+        # The cursor value is the contract_id (store key).
+        # Return it directly — the compose path loads from the store.
+        return cursor_val, None
+
+    # Fallback: filesystem resolution for repos without store-backed contracts
+    cid, _fs_path = _fs_resolve(cwd, phase, session_key)
+    return cid, None  # path deprecated — consumers load from store via cid
 
 
 # Per-phase banner directive — the imperative core of the per-turn recency banner,
@@ -230,7 +221,7 @@ def _resolve_current_contract(
 # schema that carries no banner column; the gate-path derivation below is the fallback
 # for an unrecognized phase. Mirrors the MUST/MUST-NOT framing of each phase's orientation.
 _PHASE_BANNER_DIRECTIVE: dict[str, str] = {
-    "intake": "MUST capture the request as a contract (.agentalloy/contracts/) before any spec, design, or code",
+    "intake": "MUST capture the request as a contract before any spec, design, or code",
     "spec": "MUST write docs/spec/<slug>.md (Acceptance Criteria + Out of Scope) before designing or coding",
     "design": "MUST write docs/design/<slug>/{approach,tasks,test-plan}.md before any src/ code",
     "build": "MUST work the design's tasks with tests — no new architecture or acceptance decisions here",
@@ -648,8 +639,15 @@ async def evaluate_signal(
     # Resolve the active work-item contract ONCE here (reused for the banner's <slug>
     # resolution and the Tier 2 cursor cadence further down). `phase` is the in-memory
     # phase for this turn; a later transition writes the phase file but leaves it unchanged.
-    contract_id, contract_path = _resolve_current_contract(cwd, phase, session_key)
-    contract_slug = contract_path.stem if contract_path is not None else None
+    contract_id, _contract_path = _resolve_current_contract(cwd, phase, session_key)
+    # Derive slug from contract_id (store key) for the banner's <slug> placeholder.
+    # contract_id is either a store key (e.g. "01-cache") or a contracts-relative
+    # path from the filesystem fallback (e.g. "active/build/01-cache.md").
+    if contract_id:
+        _stem = contract_id.split("/")[-1]  # handle both forms
+        contract_slug = _stem.rsplit(".", 1)[0] if "." in _stem else _stem
+    else:
+        contract_slug = None
 
     # Per-turn banner cadence. The recency-anchor banner is emitted once every
     # `_banner_turn_cadence()` carrier turns rather than on every turn — the every-turn
@@ -854,7 +852,7 @@ async def evaluate_signal(
         announce=announce,
         workflow_prose=skill.get("raw_prose") if announce else None,
         workflow_skill_id=(skill.get("skill_id") or None) if announce else None,
-        current_contract=str(contract_path) if announce_cursor and contract_path else None,
+        current_contract=contract_id if announce_cursor else None,
         announce_cursor=announce_cursor,
         phase=phase,
         task=task,

@@ -140,13 +140,13 @@ class ComposeRequest(BaseModel):
         description="Retrieval legs to assemble: both | system (Tier 1) | domain (Tier 2).",
     )
     # Contract integration (Phase 2)
-    contract_path: str | None = Field(
+    contract_id: str | None = Field(
         default=None,
-        description="Absolute path to a contract markdown file. If provided, loads domain_tags from it.",
+        description="Contract identifier in the store. If provided, loads domain_tags from it.",
     )
     contract_tags: list[str] | None = Field(
         default=None,
-        description="Explicit contract tags (bypasses contract_path loading; useful for tests).",
+        description="Explicit contract tags (bypasses contract_id loading; useful for tests).",
     )
     debug: bool = Field(
         default=False,
@@ -165,23 +165,11 @@ class ComposeRequest(BaseModel):
     def resolved_contract_tags(self) -> list[str] | None:
         """Return contract domain_tags if available, else None.
 
-        When loading from ``contract_path``, the path is run through the
-        same containment guard the API endpoint uses — paths outside any
-        ``.agentalloy/contracts/`` tree return ``None`` rather than reading
-        arbitrary local files.
+        When ``contract_id`` is set, the store-based resolution happens in
+        the router layer; this property only returns explicit ``contract_tags``.
         """
         if self.contract_tags is not None:
             return self.contract_tags
-        if self.contract_path is not None:
-            from agentalloy.contracts import parse_contract, safe_contract_path
-
-            safe_path, _ = safe_contract_path(self.contract_path)
-            if safe_path is None:
-                return None
-            try:
-                return parse_contract(safe_path).domain_tags
-            except Exception:
-                return None
         return None
 
 
@@ -208,7 +196,7 @@ def compose_request_from_contract(
         task=contract.body or contract.task_slug,
         phase=contract.phase,  # type: ignore[arg-type]
         contract_tags=contract.domain_tags,
-        contract_path=str(contract.path),
+        contract_id=contract.contract_id,
         requesting_agent=requesting_agent,
         legs=legs,
         k=k,

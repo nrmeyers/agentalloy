@@ -21,7 +21,7 @@ from agentalloy.storage.protocols import CodeEdge, CodeSymbol
 
 def contract(touches: list[str]) -> Contract:
     return Contract(
-        path=Path("c.md"),
+        contract_id="test-id",
         phase="design",
         task_slug="t",
         domain_tags=[],
@@ -30,7 +30,6 @@ def contract(touches: list[str]) -> Contract:
         related_contracts=[],
         created_at=None,
         body="",
-        route="full",
     )
 
 

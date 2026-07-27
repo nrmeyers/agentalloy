@@ -50,7 +50,7 @@ def _run(args: argparse.Namespace) -> int:
         return 1
 
     url = f"http://localhost:{args.port}/compose/from-contract"
-    payload = json.dumps({"contract_path": str(contract_path)}).encode("utf-8")
+    payload = json.dumps({"contract_id": str(contract_path)}).encode("utf-8")
 
     try:
         req = urllib.request.Request(

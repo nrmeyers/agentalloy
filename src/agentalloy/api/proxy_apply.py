@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from agentalloy.api import code_index_gate
 from agentalloy.api.compose_models import ComposedResult, ComposeRequest, EmptyResult, Phase
 from agentalloy.api.proxy_signal import CONFIRM_LABEL, SignalResult, commit_markers
+from agentalloy.storage.state_store import DuckDBStateStore
 
 if TYPE_CHECKING:
     from agentalloy.contracts import Contract
@@ -71,7 +72,7 @@ class ProxyComposeTelemetry:
     - ``tokens_returned`` / ``tokens_flat_equivalent``: summed across both tiers.
     - ``lm_assist_*``: Stage B detail from the Tier 2 domain leg (Stage B never runs
       on the system leg).
-    - ``contract_path`` / ``contract_tags``: Tier-2 contract provenance, carried
+    - ``contract_id`` / ``contract_tags``: Tier-2 contract provenance, carried
       from the ``compose_request_from_contract`` request so production rows are
       auditable for contract-scoped vs free-text injection. Null/empty on every
       free-text path by construction (those never build a contract request).
@@ -95,7 +96,7 @@ class ProxyComposeTelemetry:
     # omitted — it's structurally 0 since generative assembly was removed.
     retrieval_latency_ms: int | None = None
     total_latency_ms: int | None = None
-    contract_path: str | None = None
+    contract_id: str | None = None
     contract_tags: list[str] = field(default_factory=list)
 
 
@@ -182,7 +183,11 @@ def _compose_decision_push(
     return push.text
 
 
-async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator) -> _ComposedBlock:
+async def _compose_block(
+    signal: SignalResult,
+    orchestrator: ComposeOrchestrator,
+    store: DuckDBStateStore | None = None,
+) -> _ComposedBlock:
     """Compose the prose block to inject.
 
     Three independent parts, each gated separately:
@@ -196,6 +201,10 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
       contract (``signal.current_contract``), keyed off its task, not the phase.
       Emitted once per work-item (``signal.announce_cursor``): phase entry, or an
       ``agentalloy task next``.
+
+    When *store* is provided, the contract is loaded from the DuckDB state store
+    using the contract_id. Falls back to filesystem parsing for backward
+    compatibility with repos that haven't migrated their contracts.
 
     Returns a :class:`_ComposedBlock` whose ``text`` is the parts joined (``""``
     when none has content) and whose flags tell the caller which cadence markers
@@ -270,9 +279,24 @@ async def _compose_block(signal: SignalResult, orchestrator: ComposeOrchestrator
     if signal.announce_cursor and signal.current_contract:
         contract: Contract | None = None
         try:
-            from agentalloy.contracts import parse_contract
+            # Store-first: load contract from the DuckDB state store using the id.
+            # Falls back to filesystem parsing for backward compatibility.
+            if store is not None:
+                from agentalloy.contracts import contract_from_row
 
-            contract = parse_contract(Path(signal.current_contract))
+                row = store.get_contract(signal.current_contract)
+                if row is not None:
+                    contract = contract_from_row(row)
+                else:
+                    # Store lookup failed — fall through to filesystem parsing
+                    logger.debug(
+                        "Contract %r not in store, falling back to filesystem",
+                        signal.current_contract,
+                    )
+            if contract is None:
+                from agentalloy.contracts import parse_contract
+
+                contract = parse_contract(Path(signal.current_contract))
         except Exception:
             logger.warning("Tier 2 contract parse failed -- passing through", exc_info=True)
 
@@ -383,7 +407,7 @@ def _merge_compose_telemetry(
     provenance record. Stage B fields come from Tier 2 only — it never runs on the
     system leg. Missing legs (passthrough) contribute nothing.
 
-    ``tier2_request`` carries the contract provenance (``contract_path`` /
+    ``tier2_request`` carries the contract provenance (``contract_id`` /
     ``contract_tags``) the request objects already hold but the results do not;
     it is recorded only when the Tier-2 leg actually composed (``tier2`` set),
     so a thrown compose never stamps contract fields on a row without skills."""
@@ -426,8 +450,8 @@ def _merge_compose_telemetry(
         lm_assist_scores=dict(t2.lm_assist_scores) if t2 else {},
         retrieval_latency_ms=retrieval_latency_ms,
         total_latency_ms=total_latency_ms,
-        contract_path=(
-            tier2_request.contract_path if tier2_request is not None and tier2 is not None else None
+        contract_id=(
+            tier2_request.contract_id if tier2_request is not None and tier2 is not None else None
         ),
         contract_tags=(
             list(tier2_request.contract_tags or [])
@@ -467,6 +491,7 @@ async def apply_signal[T](
     orchestrator: ComposeOrchestrator,
     inject: Callable[[str], T | None],
     delivered: Callable[[T], bool],
+    store: DuckDBStateStore | None = None,
 ) -> InjectOutcome[T]:
     """Shared inject seam for both proxy surfaces (commit is deferred).
 
@@ -478,7 +503,7 @@ async def apply_signal[T](
     processed (overloaded/errored upstream) leaves the cadence intact and re-fires
     on the harness retry.
     """
-    composed = await _compose_block(signal, orchestrator)
+    composed = await _compose_block(signal, orchestrator, store=store)
     if not composed.text:
         return InjectOutcome(
             injected=None,
