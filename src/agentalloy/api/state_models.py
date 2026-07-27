@@ -7,7 +7,6 @@ validation and OpenAPI documentation.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -75,7 +74,7 @@ class StateConflictInfo(BaseModel):
     """Conflict detail returned when a lease is held by another session."""
 
     owner: str
-    lease_expires_at: datetime
+    lease_expires_at: str
     message: str
 
 

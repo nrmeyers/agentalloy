@@ -72,7 +72,7 @@ def _start_fake_service(
             body = health_handler
         elif "/state/phase" in path:
             body = phase_handler
-        elif "/state/approved" in path:
+        elif "/state/approve" in path:
             body = approved_handler
         elif "/state/cursor" in path:
             body = cursor_handler
@@ -184,7 +184,7 @@ class TestStateClientWrites:
             client = StateClient(base_url="http://127.0.0.1:19993")
             result = client.approve("spec")
             assert result == {"ok": True, "phase": "design"}
-            assert any("POST /state/approved" in r for r in log)
+            assert any("POST /state/approve" in r for r in log)
         finally:
             thread.join(timeout=2.0)
 

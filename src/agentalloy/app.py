@@ -32,6 +32,8 @@ from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.api.skill_router import router as skill_router
+from agentalloy.api.state_router import get_state_store
+from agentalloy.api.state_router import router as state_router
 from agentalloy.api.telemetry_router import TelemetryQuerier
 from agentalloy.api.telemetry_router import router as telemetry_router
 from agentalloy.config import configure_logging, get_settings
@@ -46,6 +48,7 @@ from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
 from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
+from agentalloy.storage.state_store import open_state_store
 from agentalloy.telemetry import DuckDBTelemetryWriter
 from agentalloy.web.config_api import router as web_config_router
 from agentalloy.web.ops_api import router as web_ops_router
@@ -122,6 +125,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     embed_client: EmbedClient = get_embed_client(settings)
     telemetry = DuckDBTelemetryWriter(telemetry_store)
 
+    # SDD state store — single-writer DuckDB, opened once for the process
+    # lifetime.  Path sits alongside the corpus DuckDB file.
+    state_db_path = str(Path(settings.duckdb_path).parent / "state.duck")
+    state_store = open_state_store(state_db_path)
+
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None
     runtime_load_error: str | None = None
@@ -156,6 +164,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.dependency_overrides[get_orchestrator] = lambda: orchestrator
     app.dependency_overrides[get_retrieve_orchestrator] = lambda: retrieve_orch
     app.dependency_overrides[get_skill_store] = lambda: store  # inspection always live
+    app.dependency_overrides[get_state_store] = lambda: state_store
     # Stashed so an in-process corpus write (web reembed / wizard install) can
     # rebind a freshly reloaded RuntimeCache — see web/runtime_refresh.py.
     app.state.compose_orchestrator = orchestrator
@@ -307,6 +316,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_orchestrator, None)
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
+        app.dependency_overrides.pop(get_state_store, None)
         # Guard each close independently: a failure in one (e.g. an in-flight
         # passthrough request at shutdown) must not skip the rest and leak the
         # DuckDB / Lance connections.
@@ -319,7 +329,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await anthropic_passthrough_client.aclose()
         with suppress(Exception):
             await responses_passthrough_client.aclose()
-        for closeable in (telemetry, embed_client, vector_store, store, telemetry_store):
+        for closeable in (
+            telemetry,
+            embed_client,
+            vector_store,
+            store,
+            telemetry_store,
+            state_store,
+        ):
             with suppress(Exception):
                 closeable.close()
 
@@ -384,6 +401,7 @@ def create_app(*, use_default_lifespan: bool = True) -> FastAPI:
     app.include_router(health_router)
     app.include_router(diagnostics_router)
     app.include_router(telemetry_router)
+    app.include_router(state_router)
 
     if settings.compose_enabled:
         app.include_router(compose_router)
