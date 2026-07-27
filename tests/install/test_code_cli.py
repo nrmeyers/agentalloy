@@ -997,3 +997,116 @@ class TestEnableInstallsExtraOnDemand:
         monkeypatch.setattr("agentalloy.install.subcommands.upgrade.ensure_code_index_extra", _fail)
         assert code_mod._run_module_toggle(enabled=False) == 0
         assert ("CODE_INDEX_ENABLED", "0") in patched
+
+
+class TestMigrateLayout:
+    """The CLI half of the automatic, no-opt-in upgrade migration.
+
+    Its job is to be un-failable for reasons that are not a real migration
+    failure: an upgrade must never be downgraded to "completed with warnings"
+    because the module is off, the service is down, or the service predates the
+    endpoint.
+    """
+
+    def test_registered_and_flags_parse(self) -> None:
+        args = _parse(["code", "migrate-layout", "--wait", "--quiet", "--dry-run"])
+        assert args.func is code_mod._run_migrate_layout  # pyright: ignore[reportPrivateUsage]
+        assert args.wait and args.quiet and args.dry_run
+        assert _parse(["code", "migrate-layout"]).keep_missing is False
+
+    def test_sends_prune_and_dry_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "dry_run": True,
+                    "total": 0,
+                    "current": 0,
+                    "legacy": 0,
+                    "pruned": 0,
+                    "busy": 0,
+                    "entries": [],
+                    "jobs": [],
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout", "--dry-run", "--keep-missing"])
+        assert args.func(args) == 0
+        assert seen == {"dry_run": True, "prune_missing": False}
+
+    def test_prunes_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "dry_run": False,
+                    "total": 0,
+                    "current": 0,
+                    "legacy": 0,
+                    "pruned": 0,
+                    "busy": 0,
+                    "entries": [],
+                    "jobs": [],
+                },
+            )
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout"])
+        assert args.func(args) == 0
+        assert seen["prune_missing"] is True
+
+    @pytest.mark.parametrize("status", [404, 405])
+    def test_older_service_is_not_a_failure(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        """Verified live against 7.8.0: the SPA catch-all answers 405, not 404."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(status, json={"detail": "Method Not Allowed"})
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout", "--quiet"])
+        assert args.func(args) == 0
+
+    def test_disabled_module_is_not_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"modules": {"code_index": "disabled"}})
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout", "--quiet"])
+        assert args.func(args) == 0
+
+    def test_service_down_is_not_a_failure_when_quiet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout", "--quiet"])
+        assert args.func(args) == 0
+
+    def test_real_server_error_still_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Only version skew is forgiven — a 500 is a genuine failure."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/health":
+                return httpx.Response(200, json=_HEALTH_ENABLED)
+            return httpx.Response(500, json={"detail": "boom"})
+
+        _mock_client(monkeypatch, handler)
+        args = _parse(["code", "migrate-layout", "--quiet"])
+        assert args.func(args) == 1

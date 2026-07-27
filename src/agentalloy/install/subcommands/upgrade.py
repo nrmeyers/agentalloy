@@ -643,7 +643,37 @@ def _upgrade_native(
 
     _start_service()
     actions.append("restarted service")
+
+    _migrate_code_index_layout(actions, warnings, show_progress=show_progress)
     return actions, warnings
+
+
+def _migrate_code_index_layout(
+    actions: list[str], warnings: list[str], *, show_progress: bool
+) -> None:
+    """Run every pending code-index store migration, for every registered repo.
+
+    Unconditional and un-prompted: taking the update *is* the consent. Runs
+    AFTER the service is back up, because the service is the code-index writer
+    (``agentalloy code migrate-layout`` is a thin HTTP client) and DuckDB is
+    single-writer across processes.
+
+    Never fails an upgrade. The legacy ``repos/{slug}/`` layout stays readable
+    (``code_index_paths`` keeps it as an explicit fallback), so a migration that
+    could not run is a warning to retry, not a broken install. ``--quiet``
+    keeps a disabled module or a down service silent.
+    """
+    with progress_activity("migrating code index layout", enabled=show_progress):
+        res = _run_cli(["code", "migrate-layout", "--wait", "--quiet"], check=False, capture=True)
+    out = (res.stdout or "").strip()
+    if res.returncode != 0:
+        warnings.append(
+            "code-index layout migration incomplete — the existing index still works; "
+            "re-run `agentalloy code migrate-layout --wait`"
+        )
+        return
+    if out:
+        actions.append("migrated code index layout")
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +782,11 @@ def _upgrade_container(
         a, w = _recreate_container(image, state)
         actions.extend(a)
         warnings.extend(w)
+
+    # Same automatic migration as the native path — container users are not a
+    # second class of install, and the CLI talks to the containerized service
+    # over the same published port.
+    _migrate_code_index_layout(actions, warnings, show_progress=False)
     return actions, warnings
 
 

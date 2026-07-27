@@ -441,12 +441,14 @@ def test_native_ordering_uv_tool():
         actions, warnings = up._upgrade_native("v2.3.0", state, assume_yes=True)
 
     # stop -> swap -> inference up -> install-packs -> update -> start
+    #      -> code migrate-layout (needs the service back up; it is the writer)
     assert calls[0] == "stop"
     assert calls[1] == "swap:uv"
     assert "inference" in calls
     assert any(c.startswith("cli:install-packs") and "core,fastapi" in c for c in calls)
     assert any(c.startswith("cli:update") for c in calls)
-    assert calls[-1] == "start"
+    assert calls[-1].startswith("cli:code migrate-layout")
+    assert calls[calls.index("start") - 1] != "cli:code migrate-layout"
     assert not warnings
 
 
@@ -848,6 +850,7 @@ def test_container_recreates_with_versioned_image():
         patch.object(up, "_detect_install_method", return_value="source"),  # skip CLI swap
         patch.object(cr, "_pull_image", return_value=0) as pull,
         patch.object(cr, "_run_container", return_value=0) as run_ct,
+        patch.object(up, "_run_cli", return_value=_proc(0)),
         patch("agentalloy.install.state.save_state") as save,
     ):
         actions, warnings = up._upgrade_container("v2.2.1", state, assume_yes=True)
@@ -944,11 +947,13 @@ def test_container_recreate_runs_under_new_cli_after_swap():
         actions, warnings = up._upgrade_container("v3.0.5", state, assume_yes=True)
 
     run_ct.assert_not_called()  # recreate did NOT happen in the stale process
-    # Two post-swap child calls under the new CLI: recreate, then re-validate
-    # customizations against the new _packs.
-    assert run_cli.call_count == 2
+    # Post-swap child calls under the new CLI: recreate, re-validate
+    # customizations against the new _packs, then the automatic code-index
+    # layout migration (which every deployment path runs).
+    assert run_cli.call_count == 3
     assert run_cli.call_args_list[0].args[0] == ["upgrade", "--recreate-only", "--ref", "v3.0.5"]
     assert run_cli.call_args_list[1].args[0] == ["customize", "revalidate", "--json"]
+    assert run_cli.call_args_list[2].args[0][:2] == ["code", "migrate-layout"]
     assert any("recreated container (post-swap CLI)" in a for a in actions)
     assert any("re-validated overrides" in a for a in actions)
     assert not warnings
@@ -969,12 +974,14 @@ def test_container_recreate_source_stays_in_process():
         patch.object(up, "_detect_install_method", return_value="source"),
         patch.object(cr, "_pull_image", return_value=0),
         patch.object(cr, "_run_container", return_value=0) as run_ct,
-        patch.object(up, "_run_cli") as run_cli,  # must NOT shell out for source
+        patch.object(up, "_run_cli", return_value=_proc(0)) as run_cli,
         patch.object(up, "_verify_container_spec", return_value=[]),
     ):
         actions, warnings = up._upgrade_container("v3.0.5", state, assume_yes=True)
 
-    run_cli.assert_not_called()
+    # No CLI swap and no delegated recreate for source — the only child call is
+    # the code-index layout migration, which is deployment-independent.
+    assert [c.args[0][:2] for c in run_cli.call_args_list] == [["code", "migrate-layout"]]
     run_ct.assert_called_once()
     assert any("recreated container" in a for a in actions)
     assert not warnings
@@ -1160,3 +1167,126 @@ def test_ensure_code_index_extra_reports_failure(monkeypatch, tmp_path):
     status, detail = up.ensure_code_index_extra(show_progress=False)
     assert status == "failed"
     assert "No solution found" in detail
+
+
+# --- automatic code-index layout migration ----------------------------------
+#
+# "If you take the update, there is no opt-in." Both deployment paths must run
+# every pending per-repo migration, unprompted, without being able to fail the
+# upgrade.
+
+
+def _migrate_calls(run_cli: Any) -> list[list[str]]:
+    return [
+        c.args[0] for c in run_cli.call_args_list if c.args[0][:2] == ["code", "migrate-layout"]
+    ]
+
+
+def test_native_upgrade_migrates_code_index_after_restart():
+    order: list[str] = []
+
+    def cli(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        order.append(" ".join(args[:2]))
+        if args[:2] == ["code", "migrate-layout"]:
+            return _proc(0, stdout="Code-index layout migration: 3 registered repos")
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service", side_effect=lambda *a, **k: order.append("START")),
+        patch.object(up, "_run_cli", side_effect=cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+    ):
+        actions, warnings = up._upgrade_native(
+            "v2.4.0", {"installed_packs": ["core"]}, assume_yes=True
+        )
+
+    assert "code migrate-layout" in order
+    # The service is the code-index writer, so the migration MUST come after the
+    # restart — before it, the CLI has nothing to talk to.
+    assert order.index("START") < order.index("code migrate-layout")
+    assert "migrated code index layout" in actions
+    assert not any("migrate-layout" in w for w in warnings)
+
+
+def test_native_migration_is_unconditional_and_waits():
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0)) as run_cli,
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+    ):
+        up._upgrade_native("v2.4.0", {"installed_packs": ["core"]}, assume_yes=True)
+
+    calls = _migrate_calls(run_cli)
+    assert len(calls) == 1
+    # --wait: an upgrade that returns before the reindex finishes has not
+    # migrated anything. --quiet: a disabled module is not upgrade noise.
+    assert "--wait" in calls[0]
+    assert "--quiet" in calls[0]
+    # No --dry-run, no confirmation flag: taking the update is the consent.
+    assert "--dry-run" not in calls[0]
+
+
+def test_migration_failure_warns_but_never_fails_the_upgrade():
+    def cli(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        if args[:2] == ["code", "migrate-layout"]:
+            return _proc(1, stderr="2 of 3 jobs did not complete")
+        return _proc(0)
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", side_effect=cli),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+    ):
+        actions, warnings = up._upgrade_native(
+            "v2.4.0", {"installed_packs": ["core"]}, assume_yes=True
+        )
+
+    assert any("migrate-layout" in w for w in warnings)
+    assert "migrated code index layout" not in actions
+
+
+def test_quiet_no_op_is_not_reported_as_an_action():
+    """Nothing to migrate must not manufacture an upgrade action line."""
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(up, "_stop_service", return_value="systemd"),
+        patch.object(up, "_start_inference_servers"),
+        patch.object(up, "_start_service"),
+        patch.object(up, "_run_cli", return_value=_proc(0, stdout="")),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+    ):
+        actions, warnings = up._upgrade_native(
+            "v2.4.0", {"installed_packs": ["core"]}, assume_yes=True
+        )
+
+    assert "migrated code index layout" not in actions
+    assert not any("migrate-layout" in w for w in warnings)
+
+
+def test_container_upgrade_also_migrates():
+    """Container users are not a second class of install."""
+    state = {
+        "deployment": "container",
+        "container": {"runtime": "podman", "image": "ghcr.io/nrmeyers/agentalloy:v3.0.0"},
+    }
+    from agentalloy.install.subcommands import container_runtime as cr
+
+    with (
+        patch.object(up, "_detect_install_method", return_value="uv-tool"),
+        patch.object(cr, "_pull_image", return_value=0),
+        patch.object(cr, "_run_container", return_value=0),
+        patch.object(up.subprocess, "run", return_value=_proc(0)),
+        patch.object(up, "_run_cli", return_value=_proc(0, stdout="migrated")) as run_cli,
+    ):
+        up._upgrade_container("v3.0.6", state, assume_yes=True)
+
+    assert _migrate_calls(run_cli), "container path skipped the code-index migration"

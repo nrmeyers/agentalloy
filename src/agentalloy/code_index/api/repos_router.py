@@ -15,6 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from agentalloy.code_index.api.models import (
     CentralityEntry,
     JobView,
+    MigrateLayoutEntry,
+    MigrateLayoutRequest,
+    MigrateLayoutView,
     RepoStats,
     RepoView,
     WatchToggleRequest,
@@ -22,7 +25,7 @@ from agentalloy.code_index.api.models import (
 )
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
 from agentalloy.code_index.ingest.watch import WatchCapacityError
-from agentalloy.code_index.store import code_index_paths, open_code_index
+from agentalloy.code_index.store import code_index_paths, open_code_index, remove_repo
 
 router = APIRouter()
 
@@ -153,3 +156,116 @@ async def reindex_repo(
         )
     job = state.start_job(repo_path=repo_path, slug=slug, force=True)
     return JobView.from_job(job)
+
+
+@router.post(
+    "/migrate-layout",
+    response_model=MigrateLayoutView,
+    summary="Migrate every registered repo to the per-checkout store layout",
+)
+async def migrate_layout(
+    req: MigrateLayoutRequest,
+    state: CodeIndexState = Depends(get_code_index_state),
+) -> MigrateLayoutView:
+    """Bring the whole registry onto the ``repos/{slug}/{path_key}/`` layout.
+
+    Idempotent and unconditional by design: this is the automatic step
+    ``agentalloy upgrade`` runs, so taking the update *is* the consent — there
+    is no per-repo opt-in. Every registry row is classified:
+
+    - ``current``  — ``data_dir`` already ends in this checkout's path key.
+    - ``legacy``   — old ``repos/{slug}/`` layout; a forced reindex is enqueued,
+      which writes the new location. The legacy directory is left in place
+      (``code_index_paths`` still reads it as a fallback), so this is additive
+      and safe to interrupt.
+    - ``missing``  — ``repo_path`` is gone from disk; the row and its store are
+      dropped when ``prune_missing`` is set. Without this the registry keeps
+      accumulating dead rows and every future upgrade retries them forever.
+    - ``busy``     — an index job is already active for the slug; left alone,
+      the next run picks it up.
+
+    Enqueues jobs but does not wait: poll ``jobs`` to a terminal state.
+    """
+    entries: list[MigrateLayoutEntry] = []
+    jobs: list[JobView] = []
+    counts = {"current": 0, "legacy": 0, "missing": 0, "busy": 0}
+
+    for repo in state.jobs.list_repos():
+        repo_path = Path(repo.repo_path)
+        active = state.jobs.find_active(repo.slug)
+        if active is not None:
+            counts["busy"] += 1
+            entries.append(
+                MigrateLayoutEntry(
+                    slug=repo.slug,
+                    repo_path=repo.repo_path,
+                    data_dir=repo.data_dir,
+                    verdict="busy",
+                    action="skipped",
+                )
+            )
+            continue
+
+        if not repo_path.is_dir():
+            counts["missing"] += 1
+            action = "none"
+            if not req.dry_run and req.prune_missing:
+                if state.watch is not None:
+                    state.watch.stop(repo.slug)
+                await asyncio.to_thread(remove_repo, state.settings, repo.slug)
+                state.jobs.delete_repo(repo.slug)
+                action = "pruned"
+            entries.append(
+                MigrateLayoutEntry(
+                    slug=repo.slug,
+                    repo_path=repo.repo_path,
+                    data_dir=repo.data_dir,
+                    verdict="missing",
+                    action=action,
+                )
+            )
+            continue
+
+        expected = code_index_paths(state.settings, repo.slug, repo_path=repo.repo_path).repo_dir
+        if Path(repo.data_dir) == expected:
+            counts["current"] += 1
+            entries.append(
+                MigrateLayoutEntry(
+                    slug=repo.slug,
+                    repo_path=repo.repo_path,
+                    data_dir=repo.data_dir,
+                    verdict="current",
+                    action="none",
+                )
+            )
+            continue
+
+        counts["legacy"] += 1
+        job_id: str | None = None
+        action = "none"
+        if not req.dry_run:
+            job = state.start_job(repo_path=repo_path, slug=repo.slug, force=True)
+            jobs.append(JobView.from_job(job))
+            job_id = job.job_id
+            action = "reindex"
+        entries.append(
+            MigrateLayoutEntry(
+                slug=repo.slug,
+                repo_path=repo.repo_path,
+                data_dir=repo.data_dir,
+                verdict="legacy",
+                action=action,
+                job_id=job_id,
+            )
+        )
+
+    return MigrateLayoutView(
+        dry_run=req.dry_run,
+        total=len(entries),
+        current=counts["current"],
+        legacy=counts["legacy"],
+        pruned=sum(1 for e in entries if e.action == "pruned"),
+        busy=counts["busy"],
+        entries=entries,
+        jobs=jobs,
+    )

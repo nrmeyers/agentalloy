@@ -110,6 +110,46 @@ class WatchToggleView(BaseModel):
     master_switch: bool  # CODE_INDEX_WATCH in the running service
 
 
+class MigrateLayoutRequest(BaseModel):
+    """POST /code/migrate-layout body."""
+
+    dry_run: bool = Field(
+        default=False, description="Classify every registry row but change nothing."
+    )
+    prune_missing: bool = Field(
+        default=True,
+        description="Drop registry rows whose repo_path no longer exists on disk.",
+    )
+
+
+class MigrateLayoutEntry(BaseModel):
+    """One registry row's classification and disposition."""
+
+    slug: str
+    repo_path: str
+    data_dir: str
+    verdict: str  # current | legacy | missing | busy
+    action: str  # none | reindex | pruned | skipped
+    job_id: str | None = None
+
+
+class MigrateLayoutView(BaseModel):
+    """POST /code/migrate-layout response.
+
+    ``jobs`` are the force-index jobs enqueued for legacy-layout repos; a
+    caller that wants a completed migration must poll them to a terminal state.
+    """
+
+    dry_run: bool
+    total: int
+    current: int
+    legacy: int
+    pruned: int
+    busy: int
+    entries: list[MigrateLayoutEntry]
+    jobs: list[JobView]
+
+
 class CentralityEntry(BaseModel):
     qualified_name: str
     pagerank: float
