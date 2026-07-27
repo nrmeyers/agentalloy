@@ -8,6 +8,7 @@ reindex (a forced index job using the registry's stored repo_path).
 from __future__ import annotations
 
 import asyncio
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -25,9 +26,34 @@ from agentalloy.code_index.api.models import (
 )
 from agentalloy.code_index.api.state import CodeIndexState, get_code_index_state
 from agentalloy.code_index.ingest.watch import WatchCapacityError
-from agentalloy.code_index.store import code_index_paths, open_code_index, remove_repo
+from agentalloy.code_index.store import IndexedRepo, code_index_paths, open_code_index
 
 router = APIRouter()
+
+
+def _prunable_store_dir(
+    state: CodeIndexState, repo: IndexedRepo, survivors: list[IndexedRepo]
+) -> Path | None:
+    """The directory a dead registry row owns outright, or None.
+
+    The registry is keyed ``(slug, repo_path)``, so several checkouts share a
+    slug — which is the whole reason the per-checkout layout exists. A dead row
+    still in the legacy layout owns ``repos/{slug}/``, the *parent* of every
+    live sibling's store, so deleting it by slug alone would wipe indexes that
+    are still in use. Only delete a directory no surviving row lives in or
+    under.
+    """
+    own = Path(repo.data_dir)
+    if not own.exists():
+        return None
+    for other in survivors:
+        for cand in (
+            Path(other.data_dir),
+            code_index_paths(state.settings, other.slug, repo_path=other.repo_path).repo_dir,
+        ):
+            if cand == own or own in cand.parents:
+                return None
+    return own
 
 
 def _git_current_head(repo_path: Path) -> str | None:
@@ -175,12 +201,15 @@ async def migrate_layout(
 
     - ``current``  — ``data_dir`` already ends in this checkout's path key.
     - ``legacy``   — old ``repos/{slug}/`` layout; a forced reindex is enqueued,
-      which writes the new location. The legacy directory is left in place
-      (``code_index_paths`` still reads it as a fallback), so this is additive
-      and safe to interrupt.
-    - ``missing``  — ``repo_path`` is gone from disk; the row and its store are
-      dropped when ``prune_missing`` is set. Without this the registry keeps
-      accumulating dead rows and every future upgrade retries them forever.
+      which writes the new location. The legacy directory is left in place: it
+      is not read (every reader resolves with ``repo_path=``, so a legacy row is
+      already dark before this runs) and deleting it is not this migration's
+      job. Interrupting therefore leaves a repo exactly as searchable as it was,
+      never worse — retry is always safe.
+    - ``missing``  — ``repo_path`` is gone from disk; the row is dropped when
+      ``prune_missing`` is set, along with its store if no surviving row lives
+      under that directory. Without this the registry keeps accumulating dead
+      rows and every future upgrade retries them forever.
     - ``busy``     — an index job is already active for the slug; left alone,
       the next run picks it up.
 
@@ -190,7 +219,9 @@ async def migrate_layout(
     jobs: list[JobView] = []
     counts = {"current": 0, "legacy": 0, "missing": 0, "busy": 0}
 
-    for repo in state.jobs.list_repos():
+    rows = state.jobs.list_repos()
+
+    for repo in rows:
         repo_path = Path(repo.repo_path)
         active = state.jobs.find_active(repo.slug)
         if active is not None:
@@ -210,10 +241,22 @@ async def migrate_layout(
             counts["missing"] += 1
             action = "none"
             if not req.dry_run and req.prune_missing:
-                if state.watch is not None:
+                # Scope every destructive step to this exact (slug, repo_path):
+                # a sibling checkout may share the slug and still be live.
+                # Rows pruned earlier in this pass are dead-path rows too, so
+                # the is_dir() filter already excludes them.
+                survivors = [
+                    r
+                    for r in rows
+                    if (r.slug, r.repo_path) != (repo.slug, repo.repo_path)
+                    and Path(r.repo_path).is_dir()
+                ]
+                if state.watch is not None and not any(r.slug == repo.slug for r in survivors):
                     state.watch.stop(repo.slug)
-                await asyncio.to_thread(remove_repo, state.settings, repo.slug)
-                state.jobs.delete_repo(repo.slug)
+                target = _prunable_store_dir(state, repo, survivors)
+                if target is not None:
+                    await asyncio.to_thread(shutil.rmtree, target, True)
+                state.jobs.delete_repo(repo.slug, repo_path=repo.repo_path)
                 action = "pruned"
             entries.append(
                 MigrateLayoutEntry(

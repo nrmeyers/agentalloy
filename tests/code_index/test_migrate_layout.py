@@ -149,6 +149,33 @@ def test_missing_repo_rows_are_pruned(
     assert state.jobs.list_repos() == []
 
 
+def test_pruning_a_dead_sibling_spares_the_live_checkout(
+    client: tuple[TestClient, CodeIndexState], tmp_path: Path
+) -> None:
+    """The registry is keyed (slug, repo_path): checkouts share a slug.
+
+    A dead row still in the legacy layout owns ``repos/{slug}/`` — the parent of
+    every sibling's store. Pruning it by slug alone would delete a live
+    checkout's index and its registry row along with the dead one.
+    """
+    c, state = client
+    live = tmp_path / "live"
+    write_fixture_repo(live)
+    gone = tmp_path / "gone"
+
+    _seed_current(state, "demo", live)
+    live_dir = _current_dir(state, "demo", live)
+    live_dir.mkdir(parents=True, exist_ok=True)
+    (live_dir / "graph.duck").write_bytes(b"stub")
+    _seed_legacy(state, "demo", gone)  # same slug, deleted checkout
+
+    body = _post(c)
+
+    assert body["pruned"] == 1
+    assert [(r.slug, r.repo_path) for r in state.jobs.list_repos()] == [("demo", str(live))]
+    assert (live_dir / "graph.duck").exists()
+
+
 def test_keep_missing_leaves_dead_rows_alone(
     client: tuple[TestClient, CodeIndexState], tmp_path: Path
 ) -> None:
