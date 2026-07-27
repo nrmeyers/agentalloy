@@ -44,6 +44,13 @@ up later without re-deriving it.
   **07-cli-and-mirror-retirement**, which already moves `contract validate` onto
   `StateClient` — validating a store row drops the file/phase coupling anyway.
   Not fixed at design (that is a `src/` change). _Logged 2026-07-26._
+  **Resolved on `build/contract-store-and-write-gating`, 2026-07-27.** The phase
+  match check is gone from `validate_contract`, dropped as a side effect of the
+  store migration rather than as a targeted fix — the function now validates row
+  structure only and its docstring records that it "is no longer used for
+  phase-file checks." Slice 07c covers the post-migration behavior
+  (`tests/test_contracts_model.py::TestValidateContractFromDictPhaseAhead`).
+  Nothing further owed; re-verify if the store migration is ever reverted.
 
 - **Design exit gate is half cursor-scoped, half repo-wide.** In
   `_packs/sdd/sdd-design-and-planning.yaml`, `build_contracts_cover_tasks` and
