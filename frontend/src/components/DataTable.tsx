@@ -13,12 +13,14 @@ export function DataTable<T>({
   rowKey,
   emptyLabel = 'No data',
   onRowClick,
+  selectedRowKey,
 }: {
   data: T[];
   columns: Column<T>[];
   rowKey: (row: T, index: number) => string | number;
   emptyLabel?: string;
   onRowClick?: (row: T) => void;
+  selectedRowKey?: string | number | null;
 }) {
   if (data.length === 0) {
     return <div className="py-6 text-center text-sm text-gray-500">{emptyLabel}</div>;
@@ -39,19 +41,26 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {data.map((row, i) => (
-            <tr
-              key={rowKey(row, i)}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={onRowClick ? 'cursor-pointer hover:bg-gray-50' : undefined}
-            >
-              {columns.map((col) => (
-                <td key={col.key} className={`px-4 py-2 text-sm text-gray-900 ${col.className ?? ''}`}>
-                  {col.render(row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {data.map((row, i) => {
+            const key = rowKey(row, i);
+            const isSelected = selectedRowKey !== undefined && String(key) === String(selectedRowKey);
+            return (
+              <tr
+                key={key}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={
+                  (onRowClick ? 'cursor-pointer hover:bg-gray-50' : '') +
+                  (isSelected ? ' bg-blue-50' : '')
+                }
+              >
+                {columns.map((col) => (
+                  <td key={col.key} className={`px-4 py-2 text-sm text-gray-900 ${col.className ?? ''}`}>
+                    {col.render(row)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

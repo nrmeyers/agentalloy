@@ -20,9 +20,11 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from agentalloy.api.state_router import get_state_store
+from agentalloy.storage.state_store import DuckDBStateStore
 from agentalloy.web.config_api import _require_csrf
 
 router = APIRouter()
@@ -98,7 +100,11 @@ def _newest_mtime(root: Path, glob: str) -> float | None:
     return max(mtimes) if mtimes else None
 
 
-def _repo_info(root_str: str, harnesses: list[str]) -> RepoInfo:
+def _repo_info(
+    root_str: str,
+    harnesses: list[str],
+    store: DuckDBStateStore | None = None,
+) -> RepoInfo:
     from agentalloy.api.proxy_context import read_upstream
     from agentalloy.install.subcommands.status import (
         _repo_phase,  # pyright: ignore[reportPrivateUsage]
@@ -127,14 +133,14 @@ def _repo_info(root_str: str, harnesses: list[str]) -> RepoInfo:
         )
     phase = _repo_phase(root_str)
     upstream = read_upstream(root)
+
+    # Count contracts by phase from the store (not the filesystem).
     contracts: dict[str, int] = {}
-    active_dir = root / ".agentalloy" / "contracts" / "active"
-    if active_dir.is_dir():
-        for phase_dir in sorted(active_dir.iterdir()):
-            if phase_dir.is_dir():
-                n = len(list(phase_dir.glob("*.md")))
-                if n:
-                    contracts[phase_dir.name] = n
+    if store is not None:
+        all_contracts = store.list_contracts()
+        for row in all_contracts:
+            p = row["phase"]
+            contracts[p] = contracts.get(p, 0) + 1
     try:
         profile = detect_profile(root).name
     except Exception:  # noqa: BLE001 — profile detection is decoration here
@@ -157,9 +163,13 @@ def _repo_info(root_str: str, harnesses: list[str]) -> RepoInfo:
 
 
 @router.get("/api/repos", response_model=ReposResponse, summary="Wired repos with live state")
-async def list_repos() -> ReposResponse:
+async def list_repos(
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> ReposResponse:
     def _build() -> ReposResponse:
-        repos = [_repo_info(root, harnesses) for root, harnesses in sorted(_wired_repos().items())]
+        repos = [
+            _repo_info(root, harnesses, store) for root, harnesses in sorted(_wired_repos().items())
+        ]
         return ReposResponse(total=len(repos), repos=repos)
 
     return await asyncio.to_thread(_build)
