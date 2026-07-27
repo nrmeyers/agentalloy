@@ -118,7 +118,11 @@ class MigrateLayoutRequest(BaseModel):
     )
     prune_missing: bool = Field(
         default=True,
-        description="Drop registry rows whose repo_path no longer exists on disk.",
+        description=(
+            "Drop registry rows whose repo_path has been gone long enough to be a "
+            "deletion rather than a transient absence. Gated: the first sighting "
+            "only starts the clock."
+        ),
     )
 
 
@@ -128,8 +132,8 @@ class MigrateLayoutEntry(BaseModel):
     slug: str
     repo_path: str
     data_dir: str
-    verdict: str  # current | legacy | missing | busy
-    action: str  # none | reindex | pruned | skipped
+    verdict: str  # current | legacy | missing | unreachable | busy
+    action: str  # none | reindex | stamped | waiting | pruned | skipped
     job_id: str | None = None
 
 
@@ -145,6 +149,7 @@ class MigrateLayoutView(BaseModel):
     current: int
     legacy: int
     pruned: int
+    unreachable: int = 0
     busy: int
     entries: list[MigrateLayoutEntry]
     jobs: list[JobView]

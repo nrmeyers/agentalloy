@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS indexed_repos (
   last_indexed_at INTEGER,
   head_sha TEXT,
   watch_enabled INTEGER NOT NULL DEFAULT 0,
+  missing_since INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (slug, repo_path)
@@ -93,6 +94,11 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
         "indexed_repos",
         "watch_enabled",
         "ALTER TABLE indexed_repos ADD COLUMN watch_enabled INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "indexed_repos",
+        "missing_since",
+        "ALTER TABLE indexed_repos ADD COLUMN missing_since INTEGER",
     ),
 )
 
@@ -111,6 +117,7 @@ _STRUCTURAL_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
           last_indexed_at INTEGER,
           head_sha TEXT,
           watch_enabled INTEGER NOT NULL DEFAULT 0,
+          missing_since INTEGER,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
           PRIMARY KEY (slug, repo_path)
@@ -228,6 +235,7 @@ class IndexedRepo:
     last_indexed_at: int | None
     head_sha: str | None
     watch_enabled: bool
+    missing_since: int | None
     created_at: int
     updated_at: int
 
@@ -270,6 +278,7 @@ def _row_to_repo(row: sqlite3.Row) -> IndexedRepo:
         last_indexed_at=(None if row["last_indexed_at"] is None else int(row["last_indexed_at"])),
         head_sha=None if row["head_sha"] is None else str(row["head_sha"]),
         watch_enabled=bool(row["watch_enabled"]),
+        missing_since=(None if row["missing_since"] is None else int(row["missing_since"])),
         created_at=int(row["created_at"]),
         updated_at=int(row["updated_at"]),
     )
@@ -596,6 +605,22 @@ class CodeIndexJobsStore:
                 """,
                 (slug, repo_path, data_dir, head_sha, now, now),
             )
+
+    def set_missing_since(self, slug: str, repo_path: str, ts: int | None) -> bool:
+        """Stamp (or clear) when this checkout was first observed absent.
+
+        The stamp is the grace clock behind pruning: a checkout must still be
+        gone on a later look, far enough apart, before its index is deleted.
+        Pass ``None`` when the path is back — a transient absence must not leave
+        a clock running.
+        """
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE indexed_repos SET missing_since = ?, updated_at = ? "
+                "WHERE slug = ? AND repo_path = ?",
+                (ts, int(time.time()), slug, repo_path),
+            )
+            return cur.rowcount > 0
 
     def mark_indexed(
         self, slug: str, *, head_sha: str | None = None, repo_path: str | None = None

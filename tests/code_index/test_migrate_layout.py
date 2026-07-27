@@ -72,6 +72,17 @@ def _seed_legacy(state: CodeIndexState, slug: str, repo_path: Path) -> None:
     )
 
 
+def _seed_deleted(state: CodeIndexState, slug: str, repo_path: Path, *, days_gone: float) -> None:
+    """A row whose checkout is gone, already past ``days_gone`` of the clock.
+
+    The parent directory is created: an absent path whose parent is *also* gone
+    reads as an unreachable mount, not a deletion, and is never pruned.
+    """
+    repo_path.parent.mkdir(parents=True, exist_ok=True)
+    _seed_legacy(state, slug, repo_path)
+    state.jobs.set_missing_since(slug, str(repo_path), int(time.time() - days_gone * 86400))
+
+
 def _seed_current(state: CodeIndexState, slug: str, repo_path: Path) -> None:
     state.jobs.upsert_repo(
         slug=slug, repo_path=str(repo_path), data_dir=str(_current_dir(state, slug, repo_path))
@@ -106,7 +117,7 @@ def test_classifies_legacy_current_and_missing(
 
     _seed_legacy(state, "old-one", live)
     _seed_current(state, "new-one", done)
-    _seed_legacy(state, "ghost", tmp_path / "deleted-checkout")
+    _seed_deleted(state, "ghost", tmp_path / "checkouts" / "deleted", days_gone=30)
 
     body = _post(c, dry_run=True)
 
@@ -121,7 +132,9 @@ def test_dry_run_changes_nothing(client: tuple[TestClient, CodeIndexState], tmp_
     live = tmp_path / "live"
     write_fixture_repo(live)
     _seed_legacy(state, "old-one", live)
-    _seed_legacy(state, "ghost", tmp_path / "gone")
+    gone = tmp_path / "checkouts" / "gone"
+    gone.parent.mkdir(parents=True)
+    _seed_legacy(state, "ghost", gone)
 
     body = _post(c, dry_run=True)
 
@@ -129,6 +142,8 @@ def test_dry_run_changes_nothing(client: tuple[TestClient, CodeIndexState], tmp_
     assert body["pruned"] == 0
     assert {r.slug for r in state.jobs.list_repos()} == {"old-one", "ghost"}
     assert all(e["action"] == "none" for e in body["entries"])
+    # Not even the grace clock is started on a dry run.
+    assert all(r.missing_since is None for r in state.jobs.list_repos())
 
 
 # ---------------------------------------------------------------------------
@@ -136,17 +151,77 @@ def test_dry_run_changes_nothing(client: tuple[TestClient, CodeIndexState], tmp_
 # ---------------------------------------------------------------------------
 
 
-def test_missing_repo_rows_are_pruned(
+def test_missing_repo_rows_are_pruned_once_the_absence_persists(
     client: tuple[TestClient, CodeIndexState], tmp_path: Path
 ) -> None:
     c, state = client
-    _seed_legacy(state, "ghost-a", tmp_path / "gone-a")
-    _seed_legacy(state, "ghost-b", tmp_path / "gone-b")
+    _seed_deleted(state, "ghost-a", tmp_path / "checkouts" / "gone-a", days_gone=30)
+    _seed_deleted(state, "ghost-b", tmp_path / "checkouts" / "gone-b", days_gone=8)
 
     body = _post(c)
 
     assert body["pruned"] == 2
     assert state.jobs.list_repos() == []
+
+
+def test_first_sighting_only_starts_the_clock(
+    client: tuple[TestClient, CodeIndexState], tmp_path: Path
+) -> None:
+    """The gate: one unattended upgrade during a transient absence must not
+    delete a live index. Absence has to persist across runs to count."""
+    c, state = client
+    gone = tmp_path / "checkouts" / "gone"
+    gone.parent.mkdir(parents=True)
+    _seed_legacy(state, "ghost", gone)
+
+    body = _post(c)
+
+    assert body["pruned"] == 0
+    assert _verdicts(body) == {"ghost": "missing"}
+    assert [e["action"] for e in body["entries"]] == ["stamped"]
+    rows = state.jobs.list_repos()
+    assert len(rows) == 1 and rows[0].missing_since is not None
+
+    # Still inside the grace window on the next run: still no deletion.
+    again = _post(c)
+    assert again["pruned"] == 0
+    assert [e["action"] for e in again["entries"]] == ["waiting"]
+    assert len(state.jobs.list_repos()) == 1
+
+
+def test_a_returning_checkout_clears_the_clock(
+    client: tuple[TestClient, CodeIndexState], tmp_path: Path
+) -> None:
+    """A repo that comes back must not carry an old stamp into a later run."""
+    c, state = client
+    live = tmp_path / "checkouts" / "live"
+    _seed_deleted(state, "demo", live, days_gone=30)
+
+    write_fixture_repo(live)  # the mount is back before the migration runs
+    body = _post(c)
+    for job in body["jobs"]:  # pyright: ignore[reportGeneralTypeIssues]
+        _wait_for_terminal(c, job["id"])
+
+    assert body["pruned"] == 0
+    rows = state.jobs.list_repos()
+    assert len(rows) == 1 and rows[0].missing_since is None
+
+
+def test_absent_with_a_missing_ancestor_is_never_pruned(
+    client: tuple[TestClient, CodeIndexState], tmp_path: Path
+) -> None:
+    """A down mount takes ancestors with it — that is not evidence of deletion,
+    so it is neither pruned nor allowed to start the clock, however long."""
+    c, state = client
+    _seed_legacy(state, "on-nfs", tmp_path / "unmounted" / "vol" / "repo")
+    state.jobs.set_missing_since("on-nfs", str(tmp_path / "unmounted" / "vol" / "repo"), 0)
+
+    body = _post(c)
+
+    assert _verdicts(body) == {"on-nfs": "unreachable"}
+    assert body["pruned"] == 0
+    assert body["unreachable"] == 1
+    assert [r.slug for r in state.jobs.list_repos()] == ["on-nfs"]
 
 
 def test_pruning_a_dead_sibling_spares_the_live_checkout(
@@ -167,7 +242,7 @@ def test_pruning_a_dead_sibling_spares_the_live_checkout(
     live_dir = _current_dir(state, "demo", live)
     live_dir.mkdir(parents=True, exist_ok=True)
     (live_dir / "graph.duck").write_bytes(b"stub")
-    _seed_legacy(state, "demo", gone)  # same slug, deleted checkout
+    _seed_deleted(state, "demo", gone, days_gone=30)  # same slug, deleted checkout
 
     body = _post(c)
 
@@ -180,7 +255,7 @@ def test_keep_missing_leaves_dead_rows_alone(
     client: tuple[TestClient, CodeIndexState], tmp_path: Path
 ) -> None:
     c, state = client
-    _seed_legacy(state, "ghost", tmp_path / "gone")
+    _seed_deleted(state, "ghost", tmp_path / "checkouts" / "gone", days_gone=30)
 
     body = _post(c, prune_missing=False)
 
@@ -264,6 +339,7 @@ def test_empty_registry_is_clean(client: tuple[TestClient, CodeIndexState]) -> N
         "current": 0,
         "legacy": 0,
         "pruned": 0,
+        "unreachable": 0,
         "busy": 0,
         "entries": [],
         "jobs": [],

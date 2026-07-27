@@ -325,19 +325,21 @@ def _print_migrate_summary(body: dict[str, Any], *, quiet: bool) -> None:
     total = body.get("total", 0)
     legacy = body.get("legacy", 0)
     pruned = body.get("pruned", 0)
+    unreachable = body.get("unreachable", 0)
     busy = body.get("busy", 0)
-    if quiet and not legacy and not pruned:
+    if quiet and not legacy and not pruned and not unreachable:
         return
     prefix = "Would migrate" if body.get("dry_run") else "Code-index layout migration"
     print(
         f"{prefix}: {total} registered repos — {body.get('current', 0)} already current, "
-        f"{legacy} legacy, {pruned} pruned (path gone), {busy} busy."
+        f"{legacy} legacy, {pruned} pruned (gone long enough to be a deletion), "
+        f"{unreachable} unreachable (left alone), {busy} busy."
     )
     entries = body.get("entries")
     if not isinstance(entries, list):
         return
     for entry in entries:
-        if entry.get("verdict") in ("legacy", "missing", "busy"):
+        if entry.get("verdict") in ("legacy", "missing", "unreachable", "busy"):
             print(f"  {entry.get('verdict'):8} {entry.get('action'):8} {entry.get('slug')}")
 
 

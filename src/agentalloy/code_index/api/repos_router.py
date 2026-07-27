@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,6 +30,24 @@ from agentalloy.code_index.ingest.watch import WatchCapacityError
 from agentalloy.code_index.store import IndexedRepo, code_index_paths, open_code_index
 
 router = APIRouter()
+
+#: A checkout must be observed absent at least this long before its index is
+#: deleted. Long enough that an unattended upgrade run during a down mount or a
+#: mid-move worktree only ever stamps the clock; short enough that dead rows do
+#: not accumulate across a normal upgrade cadence.
+PRUNE_GRACE_SECONDS = 7 * 24 * 3600
+
+
+def _absence_is_corroborated(repo_path: Path) -> bool:
+    """True when the checkout looks deleted rather than merely unreachable.
+
+    A removed worktree leaves its parent directory in place. A down NFS mount,
+    an unplugged drive, or an unmounted volume takes whole ancestors with it —
+    so an absent path whose parent is also absent is not evidence of deletion,
+    and must never start the prune clock.
+    """
+    parent = repo_path.parent
+    return parent != repo_path and parent.is_dir()
 
 
 def _prunable_store_dir(
@@ -206,10 +225,16 @@ async def migrate_layout(
       already dark before this runs) and deleting it is not this migration's
       job. Interrupting therefore leaves a repo exactly as searchable as it was,
       never worse — retry is always safe.
-    - ``missing``  — ``repo_path`` is gone from disk; the row is dropped when
-      ``prune_missing`` is set, along with its store if no surviving row lives
-      under that directory. Without this the registry keeps accumulating dead
-      rows and every future upgrade retries them forever.
+    - ``missing``  — ``repo_path`` is gone and its parent is still there, so the
+      checkout looks deleted rather than unreachable. Pruning it (row, and store
+      if no surviving row lives under that directory) is *gated*: the first
+      sighting only stamps ``missing_since``, and the index is deleted once the
+      absence has persisted ``PRUNE_GRACE_SECONDS``. Without any pruning the
+      registry accumulates dead rows and every future upgrade retries them
+      forever; without the gate, one unattended upgrade during a transient
+      absence deletes a live index.
+    - ``unreachable`` — absent along with an ancestor: a down mount or unplugged
+      drive, not a deletion. Never pruned, never stamped, only reported.
     - ``busy``     — an index job is already active for the slug; left alone,
       the next run picks it up.
 
@@ -217,7 +242,8 @@ async def migrate_layout(
     """
     entries: list[MigrateLayoutEntry] = []
     jobs: list[JobView] = []
-    counts = {"current": 0, "legacy": 0, "missing": 0, "busy": 0}
+    counts = {"current": 0, "legacy": 0, "missing": 0, "unreachable": 0, "busy": 0}
+    now = int(time.time())
 
     rows = state.jobs.list_repos()
 
@@ -238,9 +264,38 @@ async def migrate_layout(
             continue
 
         if not repo_path.is_dir():
-            counts["missing"] += 1
+            corroborated = _absence_is_corroborated(repo_path)
+            verdict = "missing" if corroborated else "unreachable"
+            counts[verdict] += 1
             action = "none"
-            if not req.dry_run and req.prune_missing:
+
+            if not corroborated:
+                # An ancestor is gone too: a down mount, not a deleted checkout.
+                # Never prune, never even start the clock.
+                entries.append(
+                    MigrateLayoutEntry(
+                        slug=repo.slug,
+                        repo_path=repo.repo_path,
+                        data_dir=repo.data_dir,
+                        verdict=verdict,
+                        action=action,
+                    )
+                )
+                continue
+
+            waited = now - repo.missing_since if repo.missing_since is not None else 0
+            ripe = repo.missing_since is not None and waited >= PRUNE_GRACE_SECONDS
+
+            if not req.dry_run and req.prune_missing and not ripe:
+                # First (or too-recent) sighting: stamp the clock and leave the
+                # index alone. Absence has to persist across runs to count.
+                if repo.missing_since is None:
+                    state.jobs.set_missing_since(repo.slug, repo.repo_path, now)
+                    action = "stamped"
+                else:
+                    action = "waiting"
+
+            if not req.dry_run and req.prune_missing and ripe:
                 # Scope every destructive step to this exact (slug, repo_path):
                 # a sibling checkout may share the slug and still be live.
                 # Rows pruned earlier in this pass are dead-path rows too, so
@@ -263,11 +318,16 @@ async def migrate_layout(
                     slug=repo.slug,
                     repo_path=repo.repo_path,
                     data_dir=repo.data_dir,
-                    verdict="missing",
+                    verdict=verdict,
                     action=action,
                 )
             )
             continue
+
+        # The path is back (or never left): a stale clock must not survive to
+        # make a future run prune a repo that is only intermittently reachable.
+        if repo.missing_since is not None and not req.dry_run:
+            state.jobs.set_missing_since(repo.slug, repo.repo_path, None)
 
         expected = code_index_paths(state.settings, repo.slug, repo_path=repo.repo_path).repo_dir
         if Path(repo.data_dir) == expected:
@@ -308,6 +368,7 @@ async def migrate_layout(
         current=counts["current"],
         legacy=counts["legacy"],
         pruned=sum(1 for e in entries if e.action == "pruned"),
+        unreachable=counts["unreachable"],
         busy=counts["busy"],
         entries=entries,
         jobs=jobs,
