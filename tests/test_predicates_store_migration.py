@@ -182,7 +182,9 @@ class TestTB3LegacyGlobTolerance:
         assert _derive_phase_from_glob(".agentalloy/contracts/active/spec/*.md") == "spec"
         assert _derive_phase_from_glob(".agentalloy/contracts/active/sdd-fast/*.md") == "sdd-fast"
 
-    def test_legacy_glob_arg_contract_exists(self, ctx_with_contracts: PredicateContext) -> None:
+    def test_legacy_glob_arg_contract_exists(
+        self, ctx_with_contracts: PredicateContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """eval_contract_exists with legacy `contracts` arg evaluates and traces deprecation."""
         from agentalloy.signals import predicates as pred_mod
 
@@ -191,24 +193,22 @@ class TestTB3LegacyGlobTolerance:
         def mock_trace(glob_pattern: str) -> None:
             trace_calls.append((glob_pattern,))
 
-        pred_mod._emit_legacy_glob_trace = mock_trace  # type: ignore[method-assign]
-        try:
-            result = eval_contract_exists(
-                {
-                    "contracts": ".agentalloy/contracts/active/build/*.md",
-                },
-                ctx_with_contracts,
-            )
-        finally:
-            # Restore original
-            pred_mod._emit_legacy_glob_trace = pred_mod._emit_legacy_glob_trace  # no-op restore
+        monkeypatch.setattr(pred_mod, "_emit_legacy_glob_trace", mock_trace)
+        result = eval_contract_exists(
+            {
+                "contracts": ".agentalloy/contracts/active/build/*.md",
+            },
+            ctx_with_contracts,
+        )
 
         # Should still evaluate correctly (derives phase='build' from glob)
         assert result == PredicateResult.MET
         assert trace_calls, "Expected _emit_legacy_glob_trace to be called"
         assert trace_calls[0][0] == ".agentalloy/contracts/active/build/*.md"
 
-    def test_legacy_glob_arg_has_tags(self, ctx_with_contracts: PredicateContext) -> None:
+    def test_legacy_glob_arg_has_tags(
+        self, ctx_with_contracts: PredicateContext, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """eval_contract_has_tags with legacy `contracts` arg evaluates and traces."""
         from agentalloy.signals import predicates as pred_mod
 
@@ -217,17 +217,14 @@ class TestTB3LegacyGlobTolerance:
         def mock_trace(glob_pattern: str) -> None:
             trace_calls.append((glob_pattern,))
 
-        pred_mod._emit_legacy_glob_trace = mock_trace  # type: ignore[method-assign]
-        try:
-            result = eval_contract_has_tags(
-                {
-                    "contracts": ".agentalloy/contracts/active/build/*.md",
-                    "any_of": ["api"],
-                },
-                ctx_with_contracts,
-            )
-        finally:
-            pass
+        monkeypatch.setattr(pred_mod, "_emit_legacy_glob_trace", mock_trace)
+        result = eval_contract_has_tags(
+            {
+                "contracts": ".agentalloy/contracts/active/build/*.md",
+                "any_of": ["api"],
+            },
+            ctx_with_contracts,
+        )
 
         assert result == PredicateResult.MET
         assert trace_calls, "Expected _emit_legacy_glob_trace to be called"
