@@ -15,6 +15,7 @@ import pytest
 from agentalloy.storage.state_store import (
     DuckDBStateStore,
     LeaseConflict,
+    StateStoreError,
     open_state_store,
 )
 
@@ -488,3 +489,502 @@ class TestOpenStateStore:
             assert row == 0
         finally:
             store.close()
+
+
+# ---------------------------------------------------------------------------
+# Contract schema + CRUD (TA1, TA7, TA8, TA9)
+# ---------------------------------------------------------------------------
+
+
+class TestContractSchema:
+    """sdd_contract table creation and migration."""
+
+    def test_contract_table_created_by_migrate(self, tmp_path: Path) -> None:
+        """migrate() creates the sdd_contract table."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            count = store.scalar("SELECT COUNT(*) FROM sdd_contract")
+            assert count == 0
+
+    def test_migrate_on_existing_db_no_data_loss(self, tmp_path: Path) -> None:
+        """migrate() on an existing DB preserves sdd_state data."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.write("phase", "build")
+        # Re-open and re-migrate — simulates schema extension on existing DB
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            assert store.read("phase") == "build"
+            # Contract table should also exist
+            count = store.scalar("SELECT COUNT(*) FROM sdd_contract")
+            assert count == 0
+
+
+class TestContractCRUD:
+    """TA1 — put_contract / get_contract / list_contracts."""
+
+    def test_put_and_get_contract(self, tmp_path: Path) -> None:
+        """Store a contract and retrieve it by contract_id."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            cid = store.put_contract(
+                "ctr-001",
+                phase="build",
+                slug="my-slug",
+                work_item="03-contract-schema",
+                route="full",
+                domain_tags=["state-management"],
+                body="# Contract body",
+            )
+            assert cid == "ctr-001"
+
+            contract = store.get_contract("ctr-001")
+            assert contract is not None
+            assert contract["contract_id"] == "ctr-001"
+            assert contract["phase"] == "build"
+            assert contract["slug"] == "my-slug"
+            assert contract["work_item"] == "03-contract-schema"
+            assert contract["route"] == "full"
+            assert contract["domain_tags"] == ["state-management"]
+            assert contract["body"] == "# Contract body"
+            assert contract["status"] == "active"
+
+    def test_get_missing_contract_returns_none(self, tmp_path: Path) -> None:
+        """get_contract for a non-existent ID returns None."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            assert store.get_contract("nonexistent") is None
+
+    # TA1 — a stored contract is retrievable by phase
+    def test_ta1_list_contracts_by_phase(self, tmp_path: Path) -> None:
+        """TA1 — stored contracts are retrievable via list_contracts(phase=)."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-build-1", phase="build", slug="my-slug", body="build contract")
+            store.put_contract(
+                "ctr-design-1", phase="design", slug="my-slug", body="design contract"
+            )
+            store.put_contract(
+                "ctr-build-2", phase="build", slug="other-slug", body="another build"
+            )
+
+            # Filter by phase
+            build_contracts = store.list_contracts(phase="build")
+            assert len(build_contracts) == 2
+            ids = {c["contract_id"] for c in build_contracts}
+            assert ids == {"ctr-build-1", "ctr-build-2"}
+
+            design_contracts = store.list_contracts(phase="design")
+            assert len(design_contracts) == 1
+            assert design_contracts[0]["contract_id"] == "ctr-design-1"
+
+    def test_list_contracts_by_slug(self, tmp_path: Path) -> None:
+        """list_contracts(slug=) filters by slug."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="alpha", body="a")
+            store.put_contract("ctr-2", phase="build", slug="beta", body="b")
+            store.put_contract("ctr-3", phase="design", slug="alpha", body="c")
+
+            results = store.list_contracts(slug="alpha")
+            assert len(results) == 2
+            ids = {c["contract_id"] for c in results}
+            assert ids == {"ctr-1", "ctr-3"}
+
+    def test_list_contracts_by_status(self, tmp_path: Path) -> None:
+        """list_contracts(status=) filters by status."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s", status="active")
+            store.put_contract("ctr-2", phase="build", slug="s", status="archived")
+
+            active = store.list_contracts(status="active")
+            assert len(active) == 1
+            assert active[0]["contract_id"] == "ctr-1"
+
+            archived = store.list_contracts(status="archived")
+            assert len(archived) == 1
+            assert archived[0]["contract_id"] == "ctr-2"
+
+    def test_list_contracts_combined_filters(self, tmp_path: Path) -> None:
+        """list_contracts with multiple filters combines them with AND."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="alpha", status="active")
+            store.put_contract("ctr-2", phase="build", slug="beta", status="active")
+            store.put_contract("ctr-3", phase="design", slug="alpha", status="active")
+
+            results = store.list_contracts(phase="build", slug="alpha")
+            assert len(results) == 1
+            assert results[0]["contract_id"] == "ctr-1"
+
+    def test_list_contracts_empty(self, tmp_path: Path) -> None:
+        """list_contracts with no contracts returns empty list."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            assert store.list_contracts() == []
+
+    def test_put_contract_upsert(self, tmp_path: Path) -> None:
+        """put_contract updates an existing row without changing created_at."""
+        import time
+
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s", body="original")
+            original = store.get_contract("ctr-1")
+            original_created = original["created_at"]
+            original_updated = original["updated_at"]
+
+            time.sleep(1.1)  # timestamps are second-precision; need to cross a boundary
+
+            store.put_contract("ctr-1", phase="build", slug="s", body="updated")
+            updated = store.get_contract("ctr-1")
+            assert updated["body"] == "updated"
+            assert updated["created_at"] == original_created
+            assert updated["updated_at"] > original_updated
+
+    def test_put_contract_json_columns(self, tmp_path: Path) -> None:
+        """JSON columns are serialized and deserialized correctly."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract(
+                "ctr-1",
+                phase="build",
+                slug="s",
+                domain_tags=["state-management", "api-design"],
+                scope_touches=["src/a.py", "src/b.py"],
+                scope_avoids=["src/x.py"],
+                success_criteria=["criterion 1", "criterion 2"],
+            )
+            c = store.get_contract("ctr-1")
+            assert c["domain_tags"] == ["state-management", "api-design"]
+            assert c["scope_touches"] == ["src/a.py", "src/b.py"]
+            assert c["scope_avoids"] == ["src/x.py"]
+            assert c["success_criteria"] == ["criterion 1", "criterion 2"]
+
+    def test_put_contract_readonly_refused(self, tmp_path: Path) -> None:
+        """put_contract refuses on a read-only store."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+        store = DuckDBStateStore(db, read_only=True)
+        with store:
+            with pytest.raises(RuntimeError, match="cannot write"):
+                store.put_contract("ctr-1", phase="build", slug="s")
+
+
+# ---------------------------------------------------------------------------
+# TA7 — archive
+# ---------------------------------------------------------------------------
+
+
+class TestContractArchive:
+    """TA7 — archive flips status, row stays fetchable."""
+
+    def test_ta7_archive_flips_status(self, tmp_path: Path) -> None:
+        """TA7 — archive_contract flips status to 'archived'."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s", body="active contract")
+
+            result = store.archive_contract("ctr-1")
+            assert result is True
+
+            c = store.get_contract("ctr-1")
+            assert c is not None
+            assert c["status"] == "archived"
+            assert c["body"] == "active contract"  # body unchanged
+
+    def test_ta7_archived_row_stays_fetchable(self, tmp_path: Path) -> None:
+        """TA7 — archived contract is still retrievable by contract_id."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s")
+            store.archive_contract("ctr-1")
+
+            # Still fetchable by ID
+            c = store.get_contract("ctr-1")
+            assert c is not None
+            assert c["contract_id"] == "ctr-1"
+            assert c["status"] == "archived"
+
+            # Also visible in list_contracts with status filter
+            archived = store.list_contracts(status="archived")
+            assert len(archived) == 1
+            assert archived[0]["contract_id"] == "ctr-1"
+
+    def test_archive_nonexistent_returns_false(self, tmp_path: Path) -> None:
+        """archive_contract for a non-existent ID returns False."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            result = store.archive_contract("nonexistent")
+            assert result is False
+
+    def test_archive_idempotent(self, tmp_path: Path) -> None:
+        """Archiving an already-archived contract returns False (no-op)."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s")
+            assert store.archive_contract("ctr-1") is True
+            assert store.archive_contract("ctr-1") is False  # already archived
+
+    def test_archive_readonly_refused(self, tmp_path: Path) -> None:
+        """archive_contract refuses on a read-only store."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+        store = DuckDBStateStore(db, read_only=True)
+        with store:
+            with pytest.raises(RuntimeError, match="cannot write"):
+                store.archive_contract("ctr-1")
+
+
+# ---------------------------------------------------------------------------
+# TA8 — supersede
+# ---------------------------------------------------------------------------
+
+
+class TestContractSupersede:
+    """TA8 — supersede chain; both rows readable."""
+
+    def test_ta8_supersede_creates_new_row(self, tmp_path: Path) -> None:
+        """TA8 — supersede_contract writes a new row with supersedes set."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-v1", phase="build", slug="s", body="version 1")
+
+            new_id = store.supersede_contract(
+                "ctr-v1",
+                new_contract_id="ctr-v2",
+                phase="build",
+                slug="s",
+                body="version 2",
+            )
+            assert new_id == "ctr-v2"
+
+            # New contract has supersedes set
+            v2 = store.get_contract("ctr-v2")
+            assert v2 is not None
+            assert v2["supersedes"] == "ctr-v1"
+            assert v2["status"] == "active"
+            assert v2["body"] == "version 2"
+
+    def test_ta8_prior_flipped_to_superseded(self, tmp_path: Path) -> None:
+        """TA8 — the prior contract is flipped to 'superseded'."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-v1", phase="build", slug="s")
+            store.supersede_contract("ctr-v1", new_contract_id="ctr-v2", phase="build", slug="s")
+
+            v1 = store.get_contract("ctr-v1")
+            assert v1 is not None
+            assert v1["status"] == "superseded"
+
+    def test_ta8_both_rows_readable(self, tmp_path: Path) -> None:
+        """TA8 — both the old and new contract remain readable."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-v1", phase="build", slug="s", body="original")
+            store.supersede_contract(
+                "ctr-v1", new_contract_id="ctr-v2", phase="build", slug="s", body="replacement"
+            )
+
+            v1 = store.get_contract("ctr-v1")
+            v2 = store.get_contract("ctr-v2")
+            assert v1 is not None
+            assert v2 is not None
+            assert v1["status"] == "superseded"
+            assert v2["status"] == "active"
+            assert v1["body"] == "original"
+            assert v2["body"] == "replacement"
+
+    def test_supersede_nonexistent_raises(self, tmp_path: Path) -> None:
+        """supersede_contract raises StateStoreError for a non-existent contract."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with pytest.raises(StateStoreError, match="not found"):
+                store.supersede_contract(
+                    "nonexistent",
+                    new_contract_id="new-one",
+                    phase="build",
+                    slug="s",
+                )
+
+    def test_supersede_archived_raises(self, tmp_path: Path) -> None:
+        """supersede_contract refuses to supersede an archived contract."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s")
+            store.archive_contract("ctr-1")
+
+            with pytest.raises(StateStoreError, match="archived"):
+                store.supersede_contract(
+                    "ctr-1",
+                    new_contract_id="ctr-2",
+                    phase="build",
+                    slug="s",
+                )
+
+    def test_supersede_readonly_refused(self, tmp_path: Path) -> None:
+        """supersede_contract refuses on a read-only store."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+        store = DuckDBStateStore(db, read_only=True)
+        with store:
+            with pytest.raises(RuntimeError, match="cannot write"):
+                store.supersede_contract(
+                    "ctr-1",
+                    new_contract_id="ctr-2",
+                    phase="build",
+                    slug="s",
+                )
+
+
+# ---------------------------------------------------------------------------
+# TA9 — correction (in-place update)
+# ---------------------------------------------------------------------------
+
+
+class TestContractCorrection:
+    """TA9 — correction bumps updated_at without forking."""
+
+    def test_ta9_update_bumps_updated_at(self, tmp_path: Path) -> None:
+        """TA9 — update_contract bumps updated_at."""
+        import time
+
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s", body="original body")
+            original = store.get_contract("ctr-1")
+            original_updated = original["updated_at"]
+
+            time.sleep(1.1)  # timestamps are second-precision; need to cross a boundary
+
+            result = store.update_contract("ctr-1", body="corrected body")
+            assert result is True
+
+            updated = store.get_contract("ctr-1")
+            assert updated["body"] == "corrected body"
+            assert updated["updated_at"] > original_updated
+
+    def test_ta9_no_fork(self, tmp_path: Path) -> None:
+        """TA9 — correction does not create a new row."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract("ctr-1", phase="build", slug="s")
+            store.update_contract("ctr-1", body="corrected")
+
+            # Only one row exists
+            all_contracts = store.list_contracts()
+            assert len(all_contracts) == 1
+            assert all_contracts[0]["contract_id"] == "ctr-1"
+
+    def test_ta9_preserves_other_fields(self, tmp_path: Path) -> None:
+        """TA9 — correction only changes specified fields."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract(
+                "ctr-1",
+                phase="build",
+                slug="my-slug",
+                domain_tags=["state-management"],
+                body="original",
+            )
+            store.update_contract("ctr-1", body="corrected")
+
+            c = store.get_contract("ctr-1")
+            assert c["body"] == "corrected"
+            assert c["phase"] == "build"  # unchanged
+            assert c["slug"] == "my-slug"  # unchanged
+            assert c["domain_tags"] == ["state-management"]  # unchanged
+            assert c["status"] == "active"  # unchanged
+
+    def test_ta9_update_domain_tags(self, tmp_path: Path) -> None:
+        """TA9 — correction can update JSON columns."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            store.put_contract(
+                "ctr-1",
+                phase="build",
+                slug="s",
+                domain_tags=["old-tag"],
+            )
+            store.update_contract("ctr-1", domain_tags=["new-tag", "another-tag"])
+
+            c = store.get_contract("ctr-1")
+            assert c["domain_tags"] == ["new-tag", "another-tag"]
+
+    def test_update_nonexistent_returns_false(self, tmp_path: Path) -> None:
+        """update_contract for a non-existent ID returns False."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            result = store.update_contract("nonexistent", body="nope")
+            assert result is False
+
+    def test_update_readonly_refused(self, tmp_path: Path) -> None:
+        """update_contract refuses on a read-only store."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as writer:
+            writer.migrate()
+        store = DuckDBStateStore(db, read_only=True)
+        with store:
+            with pytest.raises(RuntimeError, match="cannot write"):
+                store.update_contract("ctr-1", body="nope")
+
+
+# ---------------------------------------------------------------------------
+# Contract + transaction integration
+# ---------------------------------------------------------------------------
+
+
+class TestContractTransaction:
+    """Contract writes inside transaction() blocks."""
+
+    def test_contract_write_committed_in_transaction(self, tmp_path: Path) -> None:
+        """A contract written inside a transaction is visible after commit."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with store.transaction() as tx:
+                tx.put_contract("ctr-1", phase="build", slug="s")
+            c = store.get_contract("ctr-1")
+            assert c is not None
+            assert c["contract_id"] == "ctr-1"
+
+    def test_contract_write_rolled_back_on_exception(self, tmp_path: Path) -> None:
+        """A contract written inside a rolled-back transaction disappears."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            with pytest.raises(ValueError):
+                with store.transaction() as tx:
+                    tx.put_contract("ctr-1", phase="build", slug="s")
+                    raise ValueError("abort")
+            assert store.get_contract("ctr-1") is None
+            assert store.list_contracts() == []
