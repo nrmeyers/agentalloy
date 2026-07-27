@@ -204,7 +204,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     client = StateClient()
     if client.is_running():
         try:
-            return client.set_phase(phase)
+            return client.set_phase(phase, repo_root=str(root))
         except StateClientError as exc:
             # Service responded but errored — fall through to file mirror.
             print(

@@ -56,7 +56,7 @@ def run_flow_free(root: Path | None = None) -> dict[str, Any]:
     if client.is_running():
         try:
             phase = _read_phase(root) or _DEFAULT_PHASE
-            return client.set_phase(f"free-flow:{phase}")
+            return client.set_phase(f"free-flow:{phase}", repo_root=str(root))
         except StateClientError as exc:
             print(
                 f"Warning: state service returned {exc.status}: {exc.message}; "
@@ -107,7 +107,7 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     if client.is_running():
         try:
             phase = _read_phase(root) or _DEFAULT_PHASE
-            return client.set_phase(f"resume:{phase}")
+            return client.set_phase(f"resume:{phase}", repo_root=str(root))
         except StateClientError as exc:
             print(
                 f"Warning: state service returned {exc.status}: {exc.message}; "

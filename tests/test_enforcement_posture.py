@@ -13,6 +13,9 @@ from typing import Any
 
 import pytest
 
+from agentalloy.api import state_client as state_client_mod
+from agentalloy.install.subcommands import flow as flow_mod
+from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
 from agentalloy.providers.base import (
     DENIED_PHASES,
@@ -220,3 +223,38 @@ class TestTD9Banner:
         assert is_tier_a_enforced("claude-code")
         assert is_tier_a_enforced("codex")
         assert not is_tier_a_enforced("cursor")
+
+
+# ---------------------------------------------------------------------------
+# CLI call sites must forward repo_root — without it the service skips the
+# posture rewrite entirely and the whole slice is dead on the CLI path.
+# ---------------------------------------------------------------------------
+
+
+class TestCLIForwardsRepoRoot:
+    @pytest.fixture
+    def captured(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        seen: dict[str, Any] = {}
+
+        def _set_phase(_self: Any, value: str, *, repo_root: str | None = None) -> dict[str, Any]:
+            seen["value"] = value
+            seen["repo_root"] = repo_root
+            return {"kind": "phase", "value": value}
+
+        monkeypatch.setattr(state_client_mod.StateClient, "is_running", lambda _self: True)
+        monkeypatch.setattr(state_client_mod.StateClient, "set_phase", _set_phase)
+        return seen
+
+    def test_phase_set_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
+        phase_mod.run_phase_set("build", root=tmp_path)
+        assert captured["repo_root"] == str(tmp_path)
+
+    def test_flow_free_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
+        flow_mod.run_flow_free(root=tmp_path)
+        assert captured["repo_root"] == str(tmp_path)
+        assert captured["value"].startswith("free-flow:")
+
+    def test_flow_resume_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
+        flow_mod.run_flow_resume(root=tmp_path)
+        assert captured["repo_root"] == str(tmp_path)
+        assert captured["value"].startswith("resume:")

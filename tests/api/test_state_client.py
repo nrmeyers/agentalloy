@@ -243,7 +243,9 @@ class TestPhaseSetRouting:
             ) as mock_post:
                 result = run_phase_set("build", root=tmp_path)
                 assert result == service_response
-                mock_post.assert_called_once_with("build")
+                # repo_root must be forwarded — the service skips the
+                # enforcement-posture rewrite without it.
+                mock_post.assert_called_once_with("build", repo_root=str(tmp_path))
 
     def test_clears_phase_file_on_set(self, tmp_path: Path) -> None:
         """phase clear still works when service is down (file-mirror path)."""
