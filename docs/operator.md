@@ -175,7 +175,7 @@ For proxy-wired harnesses, the AgentAlloy proxy intercepts every LLM request, ev
 
 ### Sidecar
 
-Sidecar harnesses (Cursor, Windsurf, Antigravity CLI, GitHub Copilot) route through their own backends and can't be proxy-intercepted. The service's in-process store hook fires a regenerator callback post-commit when the phase row changes, keeping the harness's static rules file current within ~1s. No separate `agentalloy watch` process is needed — the running service handles regeneration automatically via the `register_watcher` hook registered at startup for every wired harness. Sidecar capability is reduced compared to proxy-wired: no enforcement, advisory text only. See [Sidecar Experience](sidecar-experience.md) for details.
+Sidecar harnesses (Cursor, Windsurf, Antigravity CLI, GitHub Copilot) route through their own backends and can't be proxy-intercepted. The service's in-process store hook fires a regenerator callback post-commit when the phase row changes, keeping the harness's static rules file current within ~1s. No separate `agentalloy watch` process is needed — the running service registers a single `register_wired_repos_watcher` hook at startup that reads the harness wiring on every phase write and regenerates only the repo that changed. Sidecar capability is reduced compared to proxy-wired: no enforcement, advisory text only. See [Sidecar Experience](sidecar-experience.md) for details.
 
 ### Classification
 

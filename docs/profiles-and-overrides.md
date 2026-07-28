@@ -109,7 +109,7 @@ The sidecar store hook (used for harnesses that can't be proxy-wired) is profile
 - **Profile name:** passed to `register_watcher()` during harness wiring; defaults to `"default"`
 - **Service logs:** check `agentalloy status` and service logs for regeneration messages
 
-The store hook uses `profile_name` to load the correct workflow skill prose for phase transitions. The profile name is set during `agentalloy add` and stored in the install state.
+The store hook loads workflow skill prose under the `default` profile. The service-side hook does not yet resolve a per-repo profile; that thread-through is outstanding.
 
 See `docs/sidecar-experience.md` for full sidecar documentation.
 

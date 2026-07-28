@@ -30,7 +30,7 @@ The store hook has **zero gate-related logic**. It only regenerates rules files.
 The sidecar path consists of two components:
 
 1. **Regenerators** (`watch/regenerators.py`) — per-harness writers that update the correct rules file
-2. **In-process store hook** — registered at startup via `register_watcher()` so that every phase write triggers regeneration automatically
+2. **In-process store hook** — one `register_wired_repos_watcher()` callback registered at service startup; every phase write fires it, and it resolves the wiring records *at fire time*
 
 ```
 POST /state/phase (or CLI: agentalloy phase set)
@@ -44,7 +44,7 @@ Loads workflow skill prose for active phase
 Regenerates harness-specific rules file
 ```
 
-No separate watcher process is needed. The running service handles regeneration automatically via the `register_watcher` hook registered at startup for every wired harness.
+No separate watcher process is needed. The running service registers a single hook at startup, and each fire is scoped to the repo whose phase row changed — a repo wired against an already-running service is covered without a restart.
 
 ## Setup
 
@@ -62,7 +62,7 @@ This writes the initial harness configuration (see [harness-catalog.md](install/
 agentalloy serve
 ```
 
-The service auto-discovers every harness wired into recorded repos at startup and registers store hooks via `register_watcher()`. No separate `agentalloy watch` process is needed.
+The service registers one store hook at startup; it reads the recorded harness wiring on every phase write, so repos wired later are picked up without a restart. No separate `agentalloy watch` process is needed.
 
 > **Deprecated:** The `agentalloy watch start` command still exists for backward compatibility but its file-watching handler is a no-op. It emits a deprecation warning on startup.
 
@@ -130,7 +130,7 @@ This writes to the store, which fires the store hook and regenerates the rules f
 
 ## Relationship to Profiles
 
-The store hook uses `profile_name` from the `register_watcher()` call to load the correct workflow skill prose for phase transitions. The profile name comes from the harness wiring configuration and defaults to `"default"`. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution details.
+The store hook loads workflow skill prose under the `default` profile. Per-repo profile resolution is **not** yet threaded through the service-side hook — `register_wired_repos_watcher()` takes `profile_name` but `app.py` does not pass one. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution elsewhere.
 
 ## MCP Fallback
 
