@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 DEFAULT_PORT_FALLBACK = 47950
@@ -68,6 +69,7 @@ class StateClient:
     """
 
     base_url: str | None = None
+    repo_root: str | None = None
     _timeout: float = 5.0
 
     def __post_init__(self) -> None:
@@ -77,6 +79,8 @@ class StateClient:
                 "base_url",
                 os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}",
             )
+        if self.repo_root is None:
+            object.__setattr__(self, "repo_root", str(Path.cwd()))
 
     def is_running(self) -> bool:
         """Return True if the service responds to a health check."""
@@ -96,11 +100,7 @@ class StateClient:
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
         """
-        body: dict[str, Any] = {"value": value}
-        path = "/state/phase"
-        if repo_root is not None:
-            path += f"?repo_root={urllib.parse.quote(repo_root)}"
-        return self._post(path, body)
+        return self._post("/state/phase", {"value": value}, repo_root=repo_root)
 
     def set_phase_with_contract(
         self, value: str, contract: dict[str, Any], *, repo_root: str | None = None
@@ -114,11 +114,9 @@ class StateClient:
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
         """
-        body: dict[str, Any] = {"value": value, "contract": contract}
-        path = "/state/phase"
-        if repo_root is not None:
-            path += f"?repo_root={urllib.parse.quote(repo_root)}"
-        return self._post(path, body)
+        return self._post(
+            "/state/phase", {"value": value, "contract": contract}, repo_root=repo_root
+        )
 
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""
@@ -137,7 +135,7 @@ class StateClient:
         service is down.
         """
         try:
-            resp = urllib.request.urlopen(f"{self.base_url}/state/{kind}", timeout=self._timeout)
+            resp = urllib.request.urlopen(self._url(f"/state/{kind}"), timeout=self._timeout)
             return resp.read().decode()
         except (urllib.error.URLError, OSError):
             return None
@@ -152,7 +150,7 @@ class StateClient:
         """Read a contract by ID.  Returns None if not found."""
         try:
             resp = urllib.request.urlopen(
-                f"{self.base_url}/contracts/{contract_id}", timeout=self._timeout
+                self._url(f"/contracts/{contract_id}"), timeout=self._timeout
             )
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
@@ -181,8 +179,7 @@ class StateClient:
         if status is not None:
             params.append(("status", status))
 
-        qs = urllib.parse.urlencode(params) if params else ""
-        url = f"{self.base_url}/contracts?{qs}" if qs else f"{self.base_url}/contracts"
+        url = self._url("/contracts", params)
         try:
             resp = urllib.request.urlopen(url, timeout=self._timeout)
             data = json.loads(resp.read().decode())
@@ -193,7 +190,7 @@ class StateClient:
     def patch_contract(self, contract_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """In-place correction of a contract."""
         req = urllib.request.Request(
-            f"{self.base_url}/contracts/{contract_id}",
+            self._url(f"/contracts/{contract_id}"),
             data=json.dumps(updates).encode("utf-8"),
             method="PATCH",
         )
@@ -225,7 +222,7 @@ class StateClient:
         is unreachable.
         """
         try:
-            resp = urllib.request.urlopen(f"{self.base_url}/state/resume", timeout=self._timeout)
+            resp = urllib.request.urlopen(self._url("/state/resume"), timeout=self._timeout)
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
             raise StateClientError(
@@ -237,9 +234,35 @@ class StateClient:
 
     # -- internal helpers ------------------------------------------------
 
-    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _url(
+        self,
+        path: str,
+        params: list[tuple[str, str]] | None = None,
+        *,
+        repo_root: str | None = None,
+    ) -> str:
+        """Build a service URL carrying the repo this client speaks for.
+
+        ``repo_root`` rides on *every* call, not just the phase advance: the
+        service serves every repo from one store, so a call without it lands in
+        whichever repo the service happens to be deployed against.
+        """
+        query = list(params or [])
+        root = repo_root or self.repo_root
+        if root:
+            query.append(("repo_root", root))
+        qs = urllib.parse.urlencode(query)
+        return f"{self.base_url}{path}?{qs}" if qs else f"{self.base_url}{path}"
+
+    def _post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        repo_root: str | None = None,
+    ) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(f"{self.base_url}{path}", data=data, method="POST")
+        req = urllib.request.Request(self._url(path, repo_root=repo_root), data=data, method="POST")
         req.add_header("Content-Type", "application/json")
         try:
             resp = urllib.request.urlopen(req, timeout=self._timeout)
@@ -259,5 +282,5 @@ class StateClient:
 
     def _get(self, path: str) -> str:
         """Return the raw response body for a GET request."""
-        resp = urllib.request.urlopen(f"{self.base_url}{path}", timeout=self._timeout)
+        resp = urllib.request.urlopen(self._url(path), timeout=self._timeout)
         return resp.read().decode()

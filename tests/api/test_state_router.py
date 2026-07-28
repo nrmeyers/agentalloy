@@ -23,7 +23,9 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.api.state_router import (
+    _repo_key_for,
     contract_router,
+    default_repo_root,
     get_state_store,
 )
 from agentalloy.api.state_router import (
@@ -40,7 +42,10 @@ from agentalloy.storage.state_store import DuckDBStateStore, open_state_store
 def state_store(tmp_path: Path) -> DuckDBStateStore:
     """A fresh, migrated StateStore at a tmp path."""
     db = tmp_path / "state.duck"
-    store = open_state_store(db)
+    # Seeded through the bare handle but read back through the routes, which
+    # scope to the repo they resolve from the request — so the fixture has to
+    # be opened under that same key or every seeded row is invisible.
+    store = open_state_store(db, repo=_repo_key_for(str(default_repo_root())))
     try:
         yield store
     finally:

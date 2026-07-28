@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +63,63 @@ def get_state_store() -> DuckDBStateStore:
     store (e.g. a bare router without a running app).
     """
     raise RuntimeError("get_state_store must be bound during app lifespan")
+
+
+_REPO_ROOT_QUERY = Query(
+    default=None,
+    description=(
+        "Absolute path to the repository root.  Determines which repo's state "
+        "the call reads or writes.  Omitted means the repo the service was "
+        "deployed against (AGENTALLOY_PROJECT_DIR, else the process cwd)."
+    ),
+)
+
+
+def default_repo_root() -> Path:
+    """The repo a request belongs to when it names none.
+
+    Mirrors :func:`agentalloy.api.proxy_context.resolve_working_dir` minus the
+    proxy-only sources, so both seams answer "which repo is this?" the same way.
+    """
+    env_dir = os.environ.get("AGENTALLOY_PROJECT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.cwd()
+
+
+def resolve_repo_root(repo_root: str | None = _REPO_ROOT_QUERY) -> Path:
+    """Resolve the repo root for this request."""
+    return Path(repo_root) if repo_root else default_repo_root()
+
+
+@lru_cache(maxsize=256)
+def _repo_key_for(root: str) -> str:
+    """Slug a repo root, memoised — ``repo_slug`` shells out to git.
+
+    Imported from ``code_index.slug`` deliberately: that module is the canonical
+    worktree-aware implementation and is pure stdlib, so importing it does not
+    drag in the ``[code-index]`` extra.
+    """
+    from agentalloy.code_index.slug import repo_slug
+
+    try:
+        return repo_slug(Path(root))
+    except Exception:
+        logger.debug("repo_slug failed for %s — falling back to basename", root, exc_info=True)
+        return Path(root).name
+
+
+def get_repo_store(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> DuckDBStateStore:
+    """The lifespan store, scoped to the repo this request is about.
+
+    One service serves every repo from one ``state.duck``; without this scoping
+    they all share a single bucket and a phase set in one repo is read by the
+    next.  That was survivable only while ``.agentalloy/phase`` existed.
+    """
+    return store.for_repo(_repo_key_for(str(root)))
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +255,7 @@ async def _trigger_compose_in_process(
     summary="Read all state kinds for the resolved repo",
 )
 async def read_all_state(
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateAllResponse:
     state: dict[str, str] = {}
     for kind in sorted(ALL_KINDS):
@@ -217,7 +276,7 @@ async def read_all_state(
     summary="Assembled resume data for cold-session bootstrap",
 )
 async def read_resume(
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ResumeResponse:
     """Assemble phase, cursor'd work-item, owed artifacts, and governing decisions.
 
@@ -295,7 +354,7 @@ async def read_resume(
 )
 async def read_state(
     kind: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateReadResponse:
     if kind not in ALL_KINDS:
         raise HTTPException(
@@ -330,7 +389,7 @@ async def write_phase(
             "after a successful phase advance."
         ),
     ),
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> PhaseAdvanceResponse:
     """Advance the phase, optionally storing a contract in the same transaction.
 
@@ -435,7 +494,7 @@ async def write_phase(
 )
 async def write_cursor(
     req: StateWriteRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
     result = await asyncio.to_thread(store.write, "cursor", req.value, owner=req.owner)
     http_status, response = _write_result_to_response(result)
@@ -462,7 +521,7 @@ async def write_cursor(
 )
 async def write_approve(
     req: StateWriteRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
     result = await asyncio.to_thread(store.write, "approved", req.value, owner=req.owner)
     http_status, response = _write_result_to_response(result)
@@ -490,7 +549,7 @@ async def write_approve(
 async def create_contract(
     req: ContractCreateRequest,
     request: Request,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     cid = await asyncio.to_thread(
         store.put_contract,
@@ -529,7 +588,7 @@ async def list_contracts(
     phase: str | None = Query(default=None, description="Filter by phase"),
     slug: str | None = Query(default=None, description="Filter by slug"),
     status: str | None = Query(default=None, description="Filter by status"),
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractListResponse:
     rows = await asyncio.to_thread(store.list_contracts, phase=phase, slug=slug, status=status)
     return ContractListResponse(contracts=[_contract_row_to_response(row) for row in rows])
@@ -550,7 +609,7 @@ async def list_contracts(
 )
 async def get_contract(
     contract_id: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     row = await asyncio.to_thread(store.get_contract, contract_id)
     if row is None:
@@ -574,7 +633,7 @@ async def get_contract(
 async def patch_contract(
     contract_id: str,
     req: ContractPatchRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     updated = await asyncio.to_thread(
         store.update_contract,
@@ -608,7 +667,7 @@ async def patch_contract(
 )
 async def archive_contract(
     contract_id: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     archived = await asyncio.to_thread(store.archive_contract, contract_id)
     if not archived:
@@ -640,7 +699,7 @@ async def supersede_contract(
     contract_id: str,
     req: ContractSupersedeRequest,
     request: Request,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     new_id = await asyncio.to_thread(
         store.supersede_contract,

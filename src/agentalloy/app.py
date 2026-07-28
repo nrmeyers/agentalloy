@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -32,7 +33,11 @@ from agentalloy.api.retrieve_router import get_retrieve_orchestrator
 from agentalloy.api.retrieve_router import router as retrieve_router
 from agentalloy.api.skill_router import get_skill_store
 from agentalloy.api.skill_router import router as skill_router
-from agentalloy.api.state_router import contract_router, get_state_store
+from agentalloy.api.state_router import (
+    _repo_key_for,
+    contract_router,
+    get_state_store,
+)
 from agentalloy.api.state_router import router as state_router
 from agentalloy.api.telemetry_router import TelemetryQuerier
 from agentalloy.api.telemetry_router import router as telemetry_router
@@ -127,8 +132,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # SDD state store — single-writer DuckDB, opened once for the process
     # lifetime.  Path sits alongside the corpus DuckDB file.
+    # Rows are keyed by repo and every request re-scopes the handle
+    # (``get_repo_store``); the deployment repo is only the default for callers
+    # that send no ``repo_root``.  The re-key drains the pre-task-11 bucket,
+    # where the key came from the DB filename and every repo shared one row.
     state_db_path = str(Path(settings.duckdb_path).parent / "state.duck")
-    state_store = open_state_store(state_db_path)
+    deployment_root = os.environ.get("AGENTALLOY_PROJECT_DIR") or str(Path.cwd())
+    state_store = open_state_store(state_db_path, repo=_repo_key_for(deployment_root))
+    try:
+        state_store.rekey_legacy_rows(state_store.repo)
+    except Exception:
+        logger.warning("state store legacy re-key failed — continuing", exc_info=True)
 
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None

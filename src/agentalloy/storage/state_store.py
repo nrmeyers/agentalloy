@@ -20,6 +20,7 @@ takes over.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from collections.abc import Iterator
@@ -33,6 +34,24 @@ from typing import Any, cast
 import duckdb
 
 logger = logging.getLogger(__name__)
+
+# The bucket every row landed in before task 11.  ``_repo()`` used to return
+# ``Path(db_path).stem`` and the service opens exactly one ``state.duck``, so
+# every repo on the machine shared the literal key ``"state"``.  Kept as the
+# unscoped default — deliberately *not* the filename, so a caller that forgets
+# to scope lands in a bucket named for what it is instead of one that merely
+# looks repo-shaped.  ``rekey_legacy_rows`` drains it.
+LEGACY_REPO_KEY = "state"
+
+
+class _TxnFlag:
+    """Connection-wide BEGIN/COMMIT re-entrancy flag, shared across scoped views."""
+
+    __slots__ = ("active",)
+
+    def __init__(self) -> None:
+        self.active = False
+
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -185,11 +204,21 @@ class DuckDBStateStore:
     manager to guarantee the handle is released.
     """
 
-    def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        read_only: bool = False,
+        repo: str | None = None,
+    ) -> None:
         self._db_path = str(db_path)
         self._read_only = read_only
+        self._repo_key = repo or LEGACY_REPO_KEY
         self._conn: duckdb.DuckDBPyConnection | None = None
-        self._in_transaction: bool = False
+        # Shared across scoped views: two views over one connection must not
+        # both issue BEGIN.  A plain bool would be copied per view and the
+        # re-entrancy guard would stop guarding.
+        self._txn = _TxnFlag()
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -245,11 +274,37 @@ class DuckDBStateStore:
     def iter_rows(self, sql: str, params: Any = None) -> Any:
         yield from self.execute(sql, params)
 
-    # -- repo slug (derived from db_path) ------------------------------------
+    # -- repo scoping --------------------------------------------------------
+
+    @property
+    def repo(self) -> str:
+        """The repo key every row read or written through this handle is under."""
+        return self._repo_key
+
+    def for_repo(self, repo: str) -> DuckDBStateStore:
+        """Return a view of this store scoped to ``repo``.
+
+        The service opens exactly one ``state.duck`` and serves every repo from
+        it, so the repo key cannot be a property of the handle's lifetime — it
+        has to be per-request.  A view shares the connection and the transaction
+        flag; only the key differs.  Views must not be closed: closing one would
+        close the connection out from under the store that produced it.
+        """
+        view = copy.copy(self)
+        view._repo_key = repo
+        return view
 
     def _repo(self) -> str:
-        """Return the repo slug for the current store."""
-        return Path(self._db_path).stem
+        """Return the repo key for the current handle."""
+        return self._repo_key
+
+    @property
+    def _in_transaction(self) -> bool:
+        return self._txn.active
+
+    @_in_transaction.setter
+    def _in_transaction(self, value: bool) -> None:
+        self._txn.active = value
 
     # -- schema --------------------------------------------------------------
 
@@ -988,6 +1043,68 @@ class DuckDBStateStore:
 
         return sorted(state_repos | contract_repos)
 
+    def rekey_legacy_rows(self, repo: str) -> int:
+        """Move rows still under :data:`LEGACY_REPO_KEY` to ``repo``.
+
+        Before task 11 the repo column held ``"state"`` for every repo that ever
+        talked to the service, because the key was derived from the database
+        filename.  Those rows have exactly one plausible owner — the repo the
+        service was deployed against — so they are re-keyed to it wholesale.
+
+        Where the target key already has a row for the same ``(kind,
+        session_key)`` or ``contract_id``, the target wins and the legacy row is
+        dropped: a row written deliberately under the real key is the better
+        record than one from a bucket shared by every caller.
+
+        Idempotent — it runs on every service start.  Returns rows moved.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        if repo == LEGACY_REPO_KEY:
+            return 0
+
+        moved = 0
+        with self.transaction():
+            self.conn.execute(
+                """
+                DELETE FROM sdd_state AS legacy
+                 WHERE legacy.repo = ?
+                   AND EXISTS (
+                       SELECT 1 FROM sdd_state AS target
+                        WHERE target.repo = ?
+                          AND target.kind = legacy.kind
+                          AND target.session_key IS NOT DISTINCT FROM legacy.session_key
+                   )
+                """,
+                (LEGACY_REPO_KEY, repo),
+            )
+            self.conn.execute(
+                """
+                DELETE FROM sdd_contract AS legacy
+                 WHERE legacy.repo = ?
+                   AND EXISTS (
+                       SELECT 1 FROM sdd_contract AS target
+                        WHERE target.repo = ?
+                          AND target.contract_id = legacy.contract_id
+                   )
+                """,
+                (LEGACY_REPO_KEY, repo),
+            )
+            for table in ("sdd_state", "sdd_contract"):
+                rows = self.conn.execute(
+                    f"SELECT count(*) FROM {table} WHERE repo = ?",  # noqa: S608 — fixed literals
+                    (LEGACY_REPO_KEY,),
+                ).fetchall()
+                moved += rows[0][0] if rows else 0
+                self.conn.execute(
+                    f"UPDATE {table} SET repo = ? WHERE repo = ?",  # noqa: S608 — fixed literals
+                    (repo, LEGACY_REPO_KEY),
+                )
+
+        if moved:
+            logger.info("state store: re-keyed %d legacy row(s) to repo %r", moved, repo)
+        return moved
+
     def delete_repo_rows(self, repo: str) -> int:
         """Delete all rows for a repo from both sdd_state and sdd_contract.
 
@@ -1013,9 +1130,19 @@ class DuckDBStateStore:
         return state_deleted + contract_deleted
 
 
-def open_state_store(db_path: str | Path, *, read_only: bool = False) -> DuckDBStateStore:
-    """Open (and, in writer mode, migrate) the state store at ``db_path``."""
-    store = DuckDBStateStore(db_path, read_only=read_only).open()
+def open_state_store(
+    db_path: str | Path,
+    *,
+    read_only: bool = False,
+    repo: str | None = None,
+) -> DuckDBStateStore:
+    """Open (and, in writer mode, migrate) the state store at ``db_path``.
+
+    ``repo`` is the default key for handles that are not re-scoped with
+    :meth:`DuckDBStateStore.for_repo`.  The service passes its own repo and then
+    scopes per request; single-repo callers can rely on the default.
+    """
+    store = DuckDBStateStore(db_path, read_only=read_only, repo=repo).open()
     if not read_only:
         store.migrate()
     return store

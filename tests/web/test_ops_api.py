@@ -12,7 +12,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from agentalloy.api.state_router import get_state_store
+from agentalloy.api.state_router import (
+    _repo_key_for,
+    default_repo_root,
+    get_state_store,
+)
 from agentalloy.app import create_app
 from agentalloy.storage.state_store import open_state_store
 
@@ -43,7 +47,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_app(use_default_lifespan=False)
     # Wire a state store so contract-counting routes work (store-backed, not filesystem).
     state_db = tmp_path / "state.duck"
-    store = open_state_store(state_db)
+    # Routes scope to the repo they resolve from the request; the fixture has
+    # to be opened under that same key or seeded rows are invisible to them.
+    store = open_state_store(state_db, repo=_repo_key_for(str(default_repo_root())))
     app.state.store = store
     app.dependency_overrides[get_state_store] = lambda: store
     with TestClient(app) as c:
