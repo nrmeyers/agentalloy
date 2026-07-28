@@ -16,7 +16,7 @@ import importlib
 import inspect
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,6 +68,67 @@ def full_client(state_store: DuckDBStateStore) -> TestClient:
     app.include_router(contract_router)
     app.dependency_overrides[get_state_store] = lambda: state_store
     return TestClient(app)
+
+
+# ---------------------------------------------------------------------------
+# _write_result_to_response unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestWriteResultToResponse:
+    """_write_result_to_response handles conflict.owner=None gracefully."""
+
+    def test_conflict_owner_none_is_non_blocking(self) -> None:
+        """When conflict.owner is None, treat as non-blocking (no real conflict).
+
+        This can happen when acquire_lease returns a conflict for a non-existent
+        row (owner=None, lease_expires_at=None).  The response helper must not
+        crash constructing StateConflictInfo with None values.
+        """
+        from agentalloy.api.state_router import _write_result_to_response
+        from agentalloy.storage.protocols import LeaseConflict, StateWriteResult
+
+        result = StateWriteResult(
+            success=True,
+            kind="phase",
+            value="spec",
+            owner="s1",
+            lease_expires_at=None,
+            conflict=LeaseConflict(
+                owner=None,
+                lease_expires_at=None,
+                message="No row for 'phase' — write it before leasing",
+            ),
+        )
+        status, response = _write_result_to_response(result)
+        assert status == 200
+        assert response.kind == "phase"
+        assert response.value == "spec"
+
+    def test_conflict_owner_present_returns_409(self) -> None:
+        """When conflict.owner is set, return 409 with StateConflictInfo."""
+        from datetime import datetime, timedelta
+
+        from agentalloy.api.state_router import _write_result_to_response
+        from agentalloy.storage.protocols import LeaseConflict, StateWriteResult
+
+        now = datetime.now()
+        result = StateWriteResult(
+            success=False,
+            kind="phase",
+            value="",
+            owner=None,
+            lease_expires_at=None,
+            conflict=LeaseConflict(
+                owner="s1",
+                lease_expires_at=now + timedelta(minutes=5),
+                message="Session s1 holds the phase. Take over?",
+            ),
+        )
+        status, response = _write_result_to_response(result)
+        assert status == 409
+        assert response.owner == "s1"
+        assert "s1" in response.message
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +231,27 @@ class TestPostApprove:
 
 class TestLeaseConflict:
     """Lease conflict returns HTTP 409 with StateConflictInfo."""
+
+    def test_first_write_to_leased_kind_succeeds(self, state_client: TestClient) -> None:
+        """First write to a leased kind (phase/approved) must return 200.
+
+        When no row exists yet, the inline lease check produces no conflict.
+        The _write_result_to_response helper must not crash on a None owner.
+        """
+        resp = state_client.post("/state/phase", json={"value": "spec", "owner": "s1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["kind"] == "phase"
+        assert body["value"] == "spec"
+        assert body["owner"] == "s1"
+
+        # Same for the other leased kind.
+        resp = state_client.post("/state/approve", json={"value": "true", "owner": "s1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["kind"] == "approved"
 
     def test_lease_conflict_on_phase(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -366,6 +448,52 @@ class TestTA4:
 
         # Phase should be rolled back (not "build")
         assert state_store.read("phase") == "intake"
+
+    def test_endpoint_mid_transaction_failure_rolls_back(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Endpoint-level: contract write raises inside transaction -> phase rolled back.
+
+        Pydantic validation happens before the transaction starts, so the 422
+        tests above never exercise the rollback path.  This test patches
+        ``put_contract`` to raise inside the transaction, verifying that the
+        phase write is rolled back when the contract write fails — acceptance
+        criterion A3 requires both writes to be one transactional unit.
+        """
+        state_store.write("phase", "intake")
+
+        def _raise_put_contract(
+            contract_id: str,
+            phase: str,
+            slug: str,
+            work_item: str | None = None,
+            route: str | None = None,
+            domain_tags: list[str] | None = None,
+            scope_touches: list[str] | None = None,
+            scope_avoids: list[str] | None = None,
+            success_criteria: list[str] | None = None,
+            body: str | None = None,
+        ) -> str:
+            raise RuntimeError("simulated contract write failure")
+
+        with patch.object(state_store, "put_contract", side_effect=_raise_put_contract):
+            payload = {
+                "value": "build",
+                "contract": {
+                    "contract_id": "ctr-ta4-rollback",
+                    "phase": "build",
+                    "slug": "test-slug",
+                },
+            }
+            resp = full_client.post("/state/phase", json=payload)
+
+        # The handler returns 500 when the transaction fails
+        assert resp.status_code == 500
+
+        # Phase should be rolled back (not "build")
+        assert state_store.read("phase") == "intake"
+        # No contract row should exist
+        assert state_store.get_contract("ctr-ta4-rollback") is None
 
 
 # ---------------------------------------------------------------------------

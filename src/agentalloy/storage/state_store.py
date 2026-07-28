@@ -99,8 +99,8 @@ LEASED_KINDS: frozenset[str] = frozenset({"phase", "approved"})
 
 @dataclass(frozen=True)
 class LeaseConflict:
-    owner: str
-    lease_expires_at: datetime
+    owner: str | None
+    lease_expires_at: datetime | None
     message: str
 
 
@@ -325,17 +325,19 @@ class DuckDBStateStore:
         ).fetchone()
 
         if not row:
-            self.conn.execute(
-                "INSERT INTO sdd_state "
-                "(repo, kind, session_key, value, owner, updated_at, lease_expires_at) "
-                "VALUES (?, ?, NULL, '', ?, ?, ?)",
-                (repo, kind, session_key, ts, expires_ts),
-            )
+            # Lease semantics: the row must already exist (created by write()).
+            # We claim ownership; we do not create rows.  Returning a conflict
+            # signals "write the row first" rather than silently creating a
+            # ghost row with value=''.
             return LeaseResult(
-                acquired=True,
-                owner=session_key,
-                lease_expires_at=datetime.fromisoformat(expires_ts),
-                conflict=None,
+                acquired=False,
+                owner=None,
+                lease_expires_at=None,
+                conflict=LeaseConflict(
+                    owner=None,
+                    lease_expires_at=None,
+                    message=f"No row for {kind!r} — write it before leasing",
+                ),
             )
 
         owner, lease_expires = row

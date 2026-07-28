@@ -241,6 +241,7 @@ class TestLatencyBudget:
         db = tmp_path / "bench.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            store.write("phase", "")  # seed row — acquire_lease claims ownership, does not create
 
             iterations = 100
             start = time.perf_counter()
