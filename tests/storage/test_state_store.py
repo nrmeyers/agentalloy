@@ -309,6 +309,30 @@ class TestReadWrite:
             assert result.owner is None
             assert store.read("cursor") == "task-1"
 
+    def test_write_leased_kind_before_row_exists(self, tmp_path: Path) -> None:
+        """First write to a leased kind (phase/approved) must not block.
+
+        When no row exists yet, the inline lease check must not produce a
+        conflict — the write creates the row and proceeds.
+        """
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # No seed write — the row does not exist.
+            result = store.write("phase", "spec", owner="s1")
+            assert result.success is True
+            assert result.conflict is None
+            assert result.owner == "s1"
+            assert store.read("phase") == "spec"
+
+        # Same for the other leased kind.
+        db2 = tmp_path / "test2.duck"
+        with DuckDBStateStore(db2).open() as store2:
+            store2.migrate()
+            result = store2.write("approved", "true", owner="s1")
+            assert result.success is True
+            assert result.conflict is None
+
 
 # ---------------------------------------------------------------------------
 # Lease management

@@ -73,7 +73,10 @@ def _write_result_to_response(
 ) -> tuple[int, StateWriteResponse | StateConflictInfo]:
     """Convert a StateWriteResult into an HTTP status + response model."""
     conflict = result.conflict
-    if conflict is not None:
+    # conflict.owner is None when no row exists yet (acquire_lease refuses
+    # to create ghost rows).  There is nothing to conflict with — treat as
+    # non-blocking so the write proceeds.
+    if conflict is not None and conflict.owner is not None:
         return 409, StateConflictInfo(
             owner=conflict.owner,
             lease_expires_at=conflict.lease_expires_at,
@@ -367,7 +370,10 @@ async def write_phase(
         with store.transaction() as tx:
             # Write the phase
             result = tx.write("phase", phase_value, owner=req.owner)
-            if result.conflict is not None:
+            # conflict.owner is None when no row exists yet — non-blocking
+            if result.conflict is not None and result.conflict.owner is not None:
+                # lease_expires_at is also non-None when owner is non-None
+                assert result.conflict.lease_expires_at is not None
                 raise HTTPException(
                     status_code=409,
                     detail=StateConflictInfo(

@@ -71,6 +71,67 @@ def full_client(state_store: DuckDBStateStore) -> TestClient:
 
 
 # ---------------------------------------------------------------------------
+# _write_result_to_response unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestWriteResultToResponse:
+    """_write_result_to_response handles conflict.owner=None gracefully."""
+
+    def test_conflict_owner_none_is_non_blocking(self) -> None:
+        """When conflict.owner is None, treat as non-blocking (no real conflict).
+
+        This can happen when acquire_lease returns a conflict for a non-existent
+        row (owner=None, lease_expires_at=None).  The response helper must not
+        crash constructing StateConflictInfo with None values.
+        """
+        from agentalloy.api.state_router import _write_result_to_response
+        from agentalloy.storage.protocols import LeaseConflict, StateWriteResult
+
+        result = StateWriteResult(
+            success=True,
+            kind="phase",
+            value="spec",
+            owner="s1",
+            lease_expires_at=None,
+            conflict=LeaseConflict(
+                owner=None,
+                lease_expires_at=None,
+                message="No row for 'phase' — write it before leasing",
+            ),
+        )
+        status, response = _write_result_to_response(result)
+        assert status == 200
+        assert response.kind == "phase"
+        assert response.value == "spec"
+
+    def test_conflict_owner_present_returns_409(self) -> None:
+        """When conflict.owner is set, return 409 with StateConflictInfo."""
+        from datetime import datetime, timedelta
+
+        from agentalloy.api.state_router import _write_result_to_response
+        from agentalloy.storage.protocols import LeaseConflict, StateWriteResult
+
+        now = datetime.now()
+        result = StateWriteResult(
+            success=False,
+            kind="phase",
+            value="",
+            owner=None,
+            lease_expires_at=None,
+            conflict=LeaseConflict(
+                owner="s1",
+                lease_expires_at=now + timedelta(minutes=5),
+                message="Session s1 holds the phase. Take over?",
+            ),
+        )
+        status, response = _write_result_to_response(result)
+        assert status == 409
+        assert response.owner == "s1"
+        assert "s1" in response.message
+
+
+# ---------------------------------------------------------------------------
 # Router endpoint tests
 # ---------------------------------------------------------------------------
 
@@ -170,6 +231,27 @@ class TestPostApprove:
 
 class TestLeaseConflict:
     """Lease conflict returns HTTP 409 with StateConflictInfo."""
+
+    def test_first_write_to_leased_kind_succeeds(self, state_client: TestClient) -> None:
+        """First write to a leased kind (phase/approved) must return 200.
+
+        When no row exists yet, the inline lease check produces no conflict.
+        The _write_result_to_response helper must not crash on a None owner.
+        """
+        resp = state_client.post("/state/phase", json={"value": "spec", "owner": "s1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["kind"] == "phase"
+        assert body["value"] == "spec"
+        assert body["owner"] == "s1"
+
+        # Same for the other leased kind.
+        resp = state_client.post("/state/approve", json={"value": "true", "owner": "s1"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["kind"] == "approved"
 
     def test_lease_conflict_on_phase(
         self, state_client: TestClient, state_store: DuckDBStateStore
@@ -394,9 +476,7 @@ class TestTA4:
         ) -> str:
             raise RuntimeError("simulated contract write failure")
 
-        with patch.object(
-            state_store, "put_contract", side_effect=_raise_put_contract
-        ):
+        with patch.object(state_store, "put_contract", side_effect=_raise_put_contract):
             payload = {
                 "value": "build",
                 "contract": {

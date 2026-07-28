@@ -417,8 +417,8 @@ class CodeIndexHandles:
 
 @dataclass
 class LeaseConflict:
-    owner: str
-    lease_expires_at: datetime
+    owner: str | None
+    lease_expires_at: datetime | None
     message: str
 
 
