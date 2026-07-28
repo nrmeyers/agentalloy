@@ -16,7 +16,7 @@ import importlib
 import inspect
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -366,6 +366,54 @@ class TestTA4:
 
         # Phase should be rolled back (not "build")
         assert state_store.read("phase") == "intake"
+
+    def test_endpoint_mid_transaction_failure_rolls_back(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        """Endpoint-level: contract write raises inside transaction -> phase rolled back.
+
+        Pydantic validation happens before the transaction starts, so the 422
+        tests above never exercise the rollback path.  This test patches
+        ``put_contract`` to raise inside the transaction, verifying that the
+        phase write is rolled back when the contract write fails — acceptance
+        criterion A3 requires both writes to be one transactional unit.
+        """
+        state_store.write("phase", "intake")
+
+        def _raise_put_contract(
+            contract_id: str,
+            phase: str,
+            slug: str,
+            work_item: str | None = None,
+            route: str | None = None,
+            domain_tags: list[str] | None = None,
+            scope_touches: list[str] | None = None,
+            scope_avoids: list[str] | None = None,
+            success_criteria: list[str] | None = None,
+            body: str | None = None,
+        ) -> str:
+            raise RuntimeError("simulated contract write failure")
+
+        with patch.object(
+            state_store, "put_contract", side_effect=_raise_put_contract
+        ):
+            payload = {
+                "value": "build",
+                "contract": {
+                    "contract_id": "ctr-ta4-rollback",
+                    "phase": "build",
+                    "slug": "test-slug",
+                },
+            }
+            resp = full_client.post("/state/phase", json=payload)
+
+        # The handler returns 500 when the transaction fails
+        assert resp.status_code == 500
+
+        # Phase should be rolled back (not "build")
+        assert state_store.read("phase") == "intake"
+        # No contract row should exist
+        assert state_store.get_contract("ctr-ta4-rollback") is None
 
 
 # ---------------------------------------------------------------------------
