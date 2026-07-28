@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "b01fe5b0b4e8",
+  "strategy": "manual-commit",
+  "branch": "fix/state-client-default-port",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "src/agentalloy/api/state_client.py",
+    "tests/api/test_state.py",
+    "tests/conftest.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b0/1fe5b0b4e8/0/metadata.json",
+      "transcript": "/b0/1fe5b0b4e8/0/full.jsonl",
+      "compact_transcript": "/b0/1fe5b0b4e8/0/transcript.jsonl",
+      "content_hash": "/b0/1fe5b0b4e8/0/content_hash.txt",
+      "prompt": "/b0/1fe5b0b4e8/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 287,
+    "cache_creation_tokens": 24249,
+    "cache_read_tokens": 3365147,
+    "output_tokens": 12590,
+    "api_call_count": 28
+  }
+}
