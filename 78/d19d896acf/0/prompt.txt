@@ -1,0 +1,5 @@
+anything left on this feature set?
+
+---
+
+give me an holistic summary / instruction document I can had to Qwen to get this finished up. I'm almost out of Anthropic tokens for this session.
