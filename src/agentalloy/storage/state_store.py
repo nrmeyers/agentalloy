@@ -131,6 +131,27 @@ class PhaseState:
     workflow: str = ""
 
 
+def _parse_flat_yaml(text: str) -> dict[str, str]:
+    """Parse the flat ``key: value`` phase file without pulling in a YAML dep.
+
+    The file was only ever written by ``_write_phase_atomic`` and the ``phase``
+    CLI, both of which emit one unnested ``key: value`` per line with optional
+    quoting on ISO timestamps. Splitting on the *first* colon matters: an
+    unquoted timestamp value contains colons of its own.
+
+    Unknown keys are kept — callers pick the fields they know and ignore the
+    rest, so a file written by a newer version does not fail to import.
+    """
+    data: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        key, _, value = stripped.partition(":")
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
+
+
 def _opt_str(value: Any) -> str | None:
     """Coerce a blob field to ``str``, mapping empty/absent to ``None``."""
     if value is None:
@@ -576,28 +597,84 @@ class DuckDBStateStore:
     # -- file mirror ---------------------------------------------------------
 
     def import_from_files(self, agentalloy_dir: Path) -> dict[str, str]:
-        """Import state from file mirror.  Returns dict of kind -> value imported.
+        """One-shot migration of the file mirror into the store.
 
-        Idempotent: only imports kinds that have no row in the store yet.
-        Kept for one-shot migration of existing phase/cursor files.
+        Returns a dict of kind -> the value now in the store for kinds this call
+        imported. Idempotent: a kind that already has a row is skipped, and a
+        repo with no files at all is a no-op.
+
+        ``phase`` is handled separately from every other kind. The others hold a
+        single bare token, so their raw text *is* the value. ``phase`` holds flat
+        YAML across several lines — storing its raw text as the value (what this
+        method did until 2026-07-28) yields a row no reader can parse. It is
+        parsed into the blob shape via :meth:`write_phase` instead.
+
+        The phase file is deleted once its content has been *carried into* the
+        store. A repo that already has a store row is diverged: the store value
+        wins, but the file is left in place for task 08 to remove — until the
+        readers have moved, that file may be the only record of a phase set
+        while the service was down.
+
+        A phase file that cannot be parsed raises :class:`StateStoreError` and is
+        **not** deleted, so a bad file can be inspected rather than destroyed.
         """
         imported: dict[str, str] = {}
-        all_kinds = REPO_SCOPED_KINDS | SESSION_SCOPED_KINDS
 
-        for kind in all_kinds:
-            if self.read(kind) is not None:
-                continue  # already in store
-
+        for kind in sorted(REPO_SCOPED_KINDS | SESSION_SCOPED_KINDS):
             filepath = agentalloy_dir / kind
-            if not filepath.exists():
+            if kind == "phase":
+                value = self._import_phase_file(filepath)
+                if value:
+                    imported[kind] = value
                 continue
 
+            if self.read(kind) is not None:
+                continue  # already in store
+            if not filepath.exists():
+                continue
             value = filepath.read_text(encoding="utf-8").strip()
             if value:
                 self.write(kind, value)
                 imported[kind] = value
 
         return imported
+
+    def _import_phase_file(self, filepath: Path) -> str | None:
+        """Migrate ``.agentalloy/phase`` into the blob row, then remove the file.
+
+        Returns the phase imported, or ``None`` when there was nothing to import
+        (no file, or the store already holds a row and the file was merely
+        cleaned up).
+        """
+        if not filepath.exists():
+            return None
+
+        raw = filepath.read_text(encoding="utf-8")
+        data = _parse_flat_yaml(raw)
+        phase = _opt_str(data.get("phase"))
+        if phase is None:
+            raise StateStoreError(
+                f"{filepath} is not a readable phase file (no 'phase' key); "
+                "refusing to import or delete it"
+            )
+
+        if self.read("phase") is None:
+            self.write_phase(
+                phase,
+                actor=_opt_str(data.get("transitioned_by")),
+                mode=_opt_str(data.get("mode")),
+                free_since=_opt_str(data.get("free_since")),
+            )
+            filepath.unlink()
+            return phase
+
+        # Diverged: the store already has a phase and it wins — readers consult
+        # the store, so the file is already inert. It is *kept* rather than
+        # deleted: until the readers have actually moved (task 08), a per-repo
+        # file may be the only record of a phase this repo set while the
+        # service was down, and the store row it loses to is not yet proven to
+        # be repo-scoped. Deleting it is task 08's job, once that is settled.
+        return None
 
     # -- contract helpers ----------------------------------------------------
 
