@@ -320,6 +320,52 @@ class DuckDBStateStore:
             conflict=conflict,
         )
 
+    def clear(
+        self,
+        kind: str,
+        session_key: str | None = None,
+        *,
+        all_sessions: bool = False,
+    ) -> int:
+        """Delete state rows for ``kind``. Returns how many rows were removed.
+
+        The store equivalent of ``unlink()``ing a file-mirror kind: the reset
+        paths (``wire``, ``add``) and ``run_phase_clear`` need a way to make a
+        kind *absent*, not merely empty-valued — a row holding ``""`` still reads
+        as present to every consumer that checks for ``None``.
+
+        Scoping matches :meth:`read`/:meth:`write`: ``session_key=None`` targets
+        the repo-scoped row. ``all_sessions=True`` sweeps every session's row for
+        that kind, which is what a reset wants for session-scoped kinds
+        (``announced``, ``composed``, …) where no single key identifies "all of
+        them"; it is mutually exclusive with an explicit ``session_key``.
+
+        Deleting the row also **releases any lease** on it — ``acquire_lease``
+        requires an existing row, so a cleared kind cannot leave a session
+        holding a lease on something that no longer exists.
+
+        Clearing an absent kind returns ``0``; it is not an error, so reset paths
+        stay idempotent.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot clear in read-only mode")
+        if all_sessions and session_key is not None:
+            raise ValueError("clear(all_sessions=True) cannot take a session_key")
+
+        repo = self._repo()
+        if all_sessions:
+            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=?"
+            params: tuple[Any, ...] = (repo, kind)
+        else:
+            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?"
+            params = (repo, kind, session_key or "")
+
+        before = self.conn.execute(
+            sql.replace("DELETE FROM", "SELECT COUNT(*) FROM"), params
+        ).fetchone()
+        self.conn.execute(sql, params)
+        return int(before[0]) if before else 0
+
     # -- lease management ----------------------------------------------------
 
     def acquire_lease(
