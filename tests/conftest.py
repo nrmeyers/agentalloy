@@ -125,6 +125,22 @@ def _never_launch_hermes_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _pin_state_service_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point StateClient at a dead port so tests never hit a live service.
+
+    Same rationale as ``_pin_signal_intent_backend`` below. StateClient's
+    default base URL resolves to the port in install state (:47950) — the port
+    a dev box is usually serving. Left unpinned, any test constructing a bare
+    ``StateClient()`` would talk to the developer's real service, reading and
+    writing real phase state and making verdicts environment-dependent (it
+    passes on CI, where nothing is listening, and fails or corrupts locally).
+    Port 1 is never bound, so ``is_running()`` is deterministically False.
+    Tests that want a fake service re-set this env var themselves.
+    """
+    monkeypatch.setenv("STATE_SERVICE_URL", "http://127.0.0.1:1")
+
+
+@pytest.fixture(autouse=True)
 def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the signals-layer intent backend to the deterministic cosine floor.
 
