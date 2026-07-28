@@ -76,7 +76,7 @@ raw_prose: |
 
   ## 1. Resume or new?
 
-  The injected session state (or `.agentalloy/phase`) tells you the current
+  The injected session state (or the current phase from the store) tells you the current
   phase. If it names a phase other than `intake`, there's work in flight — say
   where the user left off (the phase + the active contract from `agentalloy contracts list`)
   and ask: **pick up there, or start something new?**

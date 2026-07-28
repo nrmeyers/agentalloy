@@ -118,7 +118,7 @@ def get_repo_store(
 
     One service serves every repo from one ``state.duck``; without this scoping
     they all share a single bucket and a phase set in one repo is read by the
-    next.  That was survivable only while ``.agentalloy/phase`` existed.
+    next.  Repo-scoped stores isolate each repo's phase row behind a key namespace.
     """
     return store.for_repo(_repo_key_for(str(root)))
 
@@ -723,14 +723,17 @@ async def import_files(
     root: Path = Depends(resolve_repo_root),
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> dict[str, dict[str, str]]:
-    """Carry ``<repo>/.agentalloy/phase`` into the store and delete the file.
+    """Migrate legacy file-based state (``.agentalloy/phase``, etc.) into the store.
 
-    A route rather than a CLI-local call because the service is the process
-    holding the DuckDB write lock — a second handle would deadlock against it.
-    Idempotent: a repo with no file mirror, or one already migrated, returns an
-    empty map. Deliberately *not* subject to the phase-advance gate: this
-    carries a phase that already exists across a storage change, it does not
-    advance one.
+    One-shot migration: carries the file mirror into DuckDB and deletes the
+    phase file once its content has been stored. Idempotent — a repo with no
+    file mirror, or one already migrated, returns an empty map. Deliberately
+    *not* subject to the phase-advance gate: this carries a phase that already
+    exists across a storage change, it does not advance one.
+
+    After migration the store is the sole source of truth. Sidecar harnesses
+    that still watch ``.agentalloy/phase`` will see the file deleted; they must
+    be re-wired to use the proxy or the in-process store hook.
     """
     try:
         imported = await asyncio.to_thread(store.import_from_files, root / ".agentalloy")

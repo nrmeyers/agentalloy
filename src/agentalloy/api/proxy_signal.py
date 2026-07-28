@@ -534,7 +534,7 @@ async def evaluate_signal(
     ``commit_markers``'s job, which a simulator simply never calls.
 
     Flow:
-    1. Read phase file (``.agentalloy/phase``)
+    1. Read phase from the store
     2. If no phase: return ``should_compose=False``
     3. Load workflow skill for the current phase
     4. Build PredicateContext from request data
@@ -558,21 +558,20 @@ async def evaluate_signal(
     # Code) path offers the finer-grained `assist` that keeps system/domain
     # injection because those hooks fire independently of the phase. Guarding
     # before reading the phase means an assist/off repo that still has a stale
-    # `.agentalloy/phase` (e.g. re-wired from full) is not composed for.
+    # phase row in the store (e.g. re-wired from full) is not composed for.
     mode = _read_lifecycle_mode(cwd)
     if mode != "full":
         logger.debug("composition deferred for %s: lifecycle_mode=%s", cwd, mode)
         return SignalResult(should_compose=False)
 
-    # 1. Read phase file (sync, instant). `transitioned_by` is read in the same
-    # breath — the session key (if any) that caused *this* phase value, so a
-    # later comparison against this turn's own `session_key` can tell whether
-    # a different concurrent session moved the phase (see
+    # 1. Read phase from the store (sync, instant). `transitioned_by` is read in
+    # the same breath — the session key (if any) that caused *this* phase value,
+    # so a later comparison against this turn's own `session_key` can tell
+    # whether a different concurrent session moved the phase (see
     # `_boundary_confirm_directives`'s "swept" case). Captured before this
     # turn's own potential transition further down, so it reflects "who set
     # the phase as of the start of this turn", never this turn's own write.
-    # One store read, projected three ways (phase, actor, flow mode). These
-    # were three independent reads, so a transition landing mid-turn could
+    # One store read, projected three ways (phase, actor, flow mode).
     # hand this request a mixed view of the same row.
     phase_state = _phase_state(cwd)
     phase = phase_state.phase if phase_state else None

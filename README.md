@@ -156,13 +156,9 @@ Container inference is CPU-only on every host (GPU acceleration requires a nativ
 
 ## How it works: phases, contracts, signal layer
 
-Three small artifacts on disk drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
+Three small artifacts drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
 
-```
-.agentalloy/phase       →  phase: build
-```
-
-**The phase file.** A sticky, one-line YAML file under your project tracking the SDD lifecycle: `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
+**The phase store.** Phase lives in a per-repo DuckDB state store (not a disk file). Each phase tracks `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Legacy repos can migrate their `.agentalloy/phase` file via `POST /import` on the service. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
 
 **Task contracts.** A short markdown file (`.agentalloy/contracts/<phase>/<task>.md`) the agent writes once at task start, declaring `domain_tags`, scope, and success criteria in its frontmatter. From then on, **`domain_tags` is the BM25 input for retrieval** — surgical, intent-aware, and stable across the conversation. Schema and a full example: [docs/operator.md](docs/operator.md#contracts).
 

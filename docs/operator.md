@@ -86,7 +86,9 @@ intake → spec → design → build → qa → ship
 
 Plus two more routes intake can take. The **fast lane** for small, clearly-bounded work (`intake → sdd-fast → qa → ship` — compresses spec+design+build, then merges into the standard qa → ship verification and delivery). The **add-skill lane** for requests that teach the local corpus rather than change code (`intake → add-skill → intake` — guided custom-skill authoring: scaffold into `.agentalloy/custom-skills/`, strict `validate-pack`, an **unconditional** human-approval exit gate, then `install-pack`; `agentalloy approve add-skill` records the sign-off and auto-advances back to intake). In the default lifecycle mode every session opens with intake: the proxy composes the intake workflow on the first request of a fresh session (the signal layer handles `intake` unconditionally), gated per-repo by `lifecycle_mode` — see **Lifecycle modes** below.
 
-The phase file lives at `.agentalloy/phase` in each project and holds one of these phase names. Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
+Phase lives in the per-repo DuckDB state store (not on disk as a file). Each phase has a corresponding workflow skill whose prose is injected as the agent's persona for that phase. Phase transitions are decided by exit gates (see Signal Layer).
+
+**Migration:** Repos that were created before the store existed can migrate their phase file via `POST /import` on the service, or by running `agentalloy import` from the CLI. After migration the `.agentalloy/phase` file is deleted and the store is the sole source of truth.
 
 Two separate vocabularies exist for **skill authoring/ingest** and should not be confused with the runtime lifecycle above:
 
@@ -118,7 +120,7 @@ agentalloy flow resume    # pick up at exactly the phase you left
 agentalloy flow status    # current mode, phase, and since-when
 ```
 
-While free-flow is active, the proxy suppresses **all workflow steering** — the intake front-door, orientation scaffold, phase banners, exit-gate evaluation, phase transitions, and drift corpus — but **keeps composing domain skills** for whatever you're touching. The `phase` value in `.agentalloy/phase` is never changed; `flow resume` returns to it exactly, and the next request re-runs orientation (and intake, if it never ran) as a fresh session.
+While free-flow is active, the proxy suppresses **all workflow steering** — the intake front-door, orientation scaffold, phase banners, exit-gate evaluation, phase transitions, and drift corpus — but **keeps composing domain skills** for whatever you're touching. The `phase` value in the store is never changed; `flow resume` returns to it exactly, and the next request re-runs orientation (and intake, if it never ran) as a fresh session.
 
 How it differs from `lifecycle_mode: off`: `off` is a standing per-repo deployment posture (full passthrough, nothing composes); free-flow is a temporary state of mind — skills still compose, the pause is visible, and resume is one command.
 
@@ -173,7 +175,7 @@ For proxy-wired harnesses, the AgentAlloy proxy intercepts every LLM request, ev
 
 ### Sidecar
 
-The sidecar is a file-watching process for harnesses that can't be proxy-wired. Watches `.agentalloy/phase` and `.agentalloy/contracts/**` for changes and regenerates the harness's rules file within ~500ms (debounce). See [Sidecar Experience](sidecar-experience.md) for details.
+The sidecar is a file-watching process for harnesses that can't be proxy-wired. Watches `.agentalloy/phase` and `.agentalloy/contracts/**` for changes and regenerates the harness's rules file within ~500ms (debounce). **Note:** After migrating a repo to the state store, the `.agentalloy/phase` file is deleted. Sidecar harnesses on migrated repos should be re-wired to use the proxy to avoid stale phase detection. See [Sidecar Experience](sidecar-experience.md) for details.
 
 ### Classification
 

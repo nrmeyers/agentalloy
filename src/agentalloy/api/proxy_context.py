@@ -1,7 +1,7 @@
 """Proxy context — working directory resolution and phase reading.
 
-Determines the project root per request (used for reading .agentalloy/phase,
-signal evaluation, etc.) and provides helpers to read the current phase file.
+Determines the project root per request (used for signal evaluation, etc.)
+and provides helpers to read the current phase from the state store.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from agentalloy.api.proxy_models import ProxyRequest
 
 logger = logging.getLogger(__name__)
 
-PHASE_FILE = Path(".agentalloy") / "phase"
 UPSTREAM_FILE = Path(".agentalloy") / "upstream"
 
 

@@ -53,6 +53,6 @@ REGISTRY["hermes-agent"] = HarnessSpec(
     # No session_header: hermes sends no usable session id to a custom provider
     # and compacts history, so the proxy uses the sha1(first-user-message)
     # fingerprint fallback. That can drift after a compaction, but session_key
-    # only gates the orientation-announce cadence — phase state is the per-repo
-    # .agentalloy/phase file — so the worst case is a benign re-announce.
+    # only gates the orientation-announce cadence — phase state lives in the
+    # per-repo store row — so the worst case is a benign re-announce.
 )

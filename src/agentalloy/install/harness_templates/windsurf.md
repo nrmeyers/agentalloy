@@ -20,6 +20,6 @@ curl -s -X POST http://localhost:{port}/compose/text \
   -d '{"task": "<one sentence describing what you are about to do>", "phase": "<phase from .agentalloy/phase>"}'
 ```
 
-**Phase transitions.** If the user's activity clearly shifts to a different SDD phase, update `.agentalloy/phase` and call `/compose` with the new phase.
+**Phase transitions.** If the user's activity clearly shifts to a different SDD phase, ask the user first. Do not update `.agentalloy/phase` directly — use `agentalloy phase set <phase>` or the proxy's `POST /state/phase` endpoint. The sidecar watcher keeps the file in sync with the store.
 
 Phases: `intake`, `spec`, `design`, `build`, `qa`, `ship` (fast lane: `intake`, `sdd-fast`, `qa`, `ship`).

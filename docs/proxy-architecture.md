@@ -30,7 +30,7 @@ AgentAlloy's composition path is deterministic by default. Two small-local-model
 │  AgentAlloy Proxy (:47950)                                   │
 │                                                              │
 │  1. Extract working directory from request                   │
-│  2. Read .agentalloy/phase from disk                         │
+│  2. Read phase from DuckDB state store                       │
 │  3. Signal layer: pre-filter + gate evaluation               │
 │  4. If signal matches → compose skills via /compose          │
 │  5. Inject composed skills into system message               │
@@ -88,13 +88,13 @@ These `.env` values are the **global fallback**. A per-repo upstream captured by
 
 ### Working Directory
 
-The proxy determines the working directory to read `.agentalloy/phase` from. Priority:
+The proxy determines the working directory to scope the per-repo DuckDB state store. Priority:
 
 1. `cwd` field in the request (if the harness sends it)
 2. `cwd` from the process environment (`AGENTALLOY_PROJECT_DIR`)
 3. Current working directory of the proxy process
 
-For per-repo resolution, the proxy reads `.agentalloy/phase` from the determined working directory. If no phase file exists, the proxy passes the request through unchanged.
+For per-repo resolution, the proxy reads the phase row from the DuckDB store scoped to the determined working directory. If no phase row exists, the proxy passes the request through unchanged.
 
 ### Profile Resolution
 
@@ -201,8 +201,8 @@ Any error in the pre-forward stage (resolve / compose / inject) forwards the **o
 ### Flow
 
 1. **Request arrives** — proxy extracts system prompt, messages, and working directory
-2. **Lifecycle + phase check** — reads `.agentalloy/config` (mode) and `.agentalloy/phase`. Non-`full` mode or no phase file → passthrough
-3. **Announce decision** — compares `.agentalloy/phase` against `.agentalloy/announced`. A mismatch marks this as an *entry* turn (announce the phase once)
+2. **Lifecycle + phase check** — reads `.agentalloy/config` (mode) and the phase row from the DuckDB store. Non-`full` mode or no phase row → passthrough
+3. **Announce decision** — compares the store phase against the announced state. A mismatch marks this as an *entry* turn (announce the phase once)
 4. **Transition trigger** — runs the reranker-primary intent classifier (deterministic floor) for *every* phase, including intake. No bypass
 5. **Gate evaluation** — when the trigger fires, evaluates exit gates (deterministic predicates + cosine similarity); a met gate advances the phase, an unmet one yields an advisory
 6. **Compose** — entry turn → orchestrator orientation block; advisory present → light `[agentalloy-eval]` block. Neither → nothing
@@ -240,7 +240,7 @@ This describes the OpenAI path. The native Anthropic passthrough path injects in
 ## Conversation State
 
 The proxy maintains minimal state:
-- **Current phase** — read from `.agentalloy/phase` on each request
+- **Current phase** — read from the DuckDB state store on each request
 - **Active profile** — resolved per-request based on working directory
 - **Composition cache** — recent compositions cached to avoid re-composing identical requests
 
@@ -262,7 +262,7 @@ agentalloy add <harness>
 This replaces the previous per-harness wiring logic (`agentalloy wire`, now deprecated, remains for harness auto-detection). The command:
 1. Adopts the named harness upstream
 2. Writes the proxy URL into the harness's LLM configuration
-3. Installs a minimal `.agentalloy/phase` file if one doesn't exist
+3. Seeds an initial phase row in the store if one doesn't exist (legacy repos can migrate existing `.agentalloy/phase` via `POST /import`)
 
 ### MCP Fallback
 
