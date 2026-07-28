@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "70b39e22a8d1",
+  "strategy": "manual-commit",
+  "branch": "feat/phase-blob-shape",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "src/agentalloy/install/subcommands/auto_wire_worktree.py",
+    "src/agentalloy/install/subcommands/uninstall.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/70/b39e22a8d1/0/metadata.json",
+      "transcript": "/70/b39e22a8d1/0/full.jsonl",
+      "compact_transcript": "/70/b39e22a8d1/0/transcript.jsonl",
+      "content_hash": "/70/b39e22a8d1/0/content_hash.txt",
+      "prompt": "/70/b39e22a8d1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23269,
+    "cache_creation_tokens": 2397491,
+    "cache_read_tokens": 118861510,
+    "output_tokens": 452676,
+    "api_call_count": 1041
+  }
+}
