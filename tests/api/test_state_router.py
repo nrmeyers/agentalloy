@@ -587,6 +587,32 @@ class TestContractPatch:
         assert resp.status_code == 404
 
 
+class TestContractIdWithSlash:
+    """`contract init` mints IDs like `intake/slug` — every route must accept them."""
+
+    def test_slash_id_roundtrip(
+        self, full_client: TestClient, state_store: DuckDBStateStore
+    ) -> None:
+        state_store.put_contract("intake/slashy", phase="intake", slug="slashy", body="v1")
+
+        assert full_client.get("/contracts/intake/slashy").json()["contract_id"] == "intake/slashy"
+
+        resp = full_client.patch("/contracts/intake/slashy", json={"body": "v2"})
+        assert resp.status_code == 200
+        assert resp.json()["body"] == "v2"
+
+        resp = full_client.post(
+            "/contracts/intake/slashy/supersede",
+            json={"new_contract_id": "intake/slashy-2", "phase": "intake", "slug": "slashy"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["contract_id"] == "intake/slashy-2"
+
+        resp = full_client.post("/contracts/intake/slashy-2/archive")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "archived"
+
+
 class TestContractArchive:
     """POST /contracts/{id}/archive."""
 

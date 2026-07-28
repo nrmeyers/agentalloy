@@ -541,7 +541,7 @@ async def list_contracts(
 
 
 @contract_router.get(
-    "/{contract_id}",
+    "/{contract_id:path}",
     response_model=ContractResponse,
     responses={
         404: {"description": "Contract not found"},
@@ -564,7 +564,7 @@ async def get_contract(
 
 
 @contract_router.patch(
-    "/{contract_id}",
+    "/{contract_id:path}",
     response_model=ContractResponse,
     responses={
         404: {"description": "Contract not found"},
@@ -599,7 +599,7 @@ async def patch_contract(
 
 
 @contract_router.post(
-    "/{contract_id}/archive",
+    "/{contract_id:path}/archive",
     response_model=ContractResponse,
     responses={
         404: {"description": "Contract not found or already archived"},
@@ -628,7 +628,7 @@ async def archive_contract(
 
 
 @contract_router.post(
-    "/{contract_id}/supersede",
+    "/{contract_id:path}/supersede",
     response_model=ContractResponse,
     responses={
         404: {"description": "Contract not found"},
