@@ -257,8 +257,19 @@ async def _trigger_compose_in_process(
 async def read_all_state(
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateAllResponse:
+    """Every kind that has a value, with ``phase`` unwrapped to its bare name.
+
+    ``phase`` is stored as a blob; its raw row is JSON that no consumer of this
+    map is prepared to parse.  Unwrapping happens here so that nothing outside
+    the store ever handles the blob.
+    """
     state: dict[str, str] = {}
     for kind in sorted(ALL_KINDS):
+        if kind == "phase":
+            phase = await asyncio.to_thread(store.read_phase)
+            if phase is not None:
+                state["phase"] = phase.phase
+            continue
         value = await asyncio.to_thread(store.read, kind)
         if value is not None:
             state[kind] = value
@@ -284,7 +295,8 @@ async def read_resume(
     fan-out of four separate calls.  The shape matches what the proxy's
     orientation block sends to the agent.
     """
-    phase = await asyncio.to_thread(store.read, "phase")
+    phase_state = await asyncio.to_thread(store.read_phase)
+    phase = phase_state.phase if phase_state is not None else None
     cursor_value = await asyncio.to_thread(store.read, "cursor")
 
     cursor_contract: ResumeContractInfo | None = None
@@ -340,6 +352,34 @@ async def read_resume(
 
 
 # ---------------------------------------------------------------------------
+# GET /state/phase — the bare phase name (before /{kind})
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/phase",
+    response_model=StateReadResponse,
+    summary="Read the current phase as a bare name",
+)
+async def read_phase(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateReadResponse:
+    """Return the phase name alone — never the stored blob.
+
+    Its own route rather than a branch inside ``/{kind}`` because the two
+    return genuinely different things: every other kind's stored value *is*
+    its value, while ``phase``'s row is JSON carrying mode, actor, and
+    timestamps alongside the name.  Serving it through the generic route
+    handed every caller a JSON envelope where it expected ``"build"``.
+
+    Note the deliberate asymmetry with writes: ``POST /state/phase`` is gated
+    (task 09), this read is not.  Reading a phase cannot advance one.
+    """
+    phase = await asyncio.to_thread(store.read_phase)
+    return StateReadResponse(kind="phase", value=phase.phase if phase else None)
+
+
+# ---------------------------------------------------------------------------
 # GET /state/{kind} — single kind
 # ---------------------------------------------------------------------------
 
@@ -356,6 +396,19 @@ async def read_state(
     kind: str,
     store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateReadResponse:
+    """Read one kind's stored value verbatim.
+
+    ``phase`` is excluded: its row is a blob, and this route's contract is
+    that ``value`` is the value.  FastAPI already routes ``/state/phase`` to
+    the specific handler above, so the guard only fires on a request that
+    reached here some other way — it exists so the exclusion is enforced by
+    the code rather than by route-declaration order.
+    """
+    if kind == "phase":  # pragma: no cover — unreachable while /phase is declared first
+        raise HTTPException(
+            status_code=404,
+            detail="read 'phase' via GET /state/phase; its stored row is a blob",
+        )
     if kind not in ALL_KINDS:
         raise HTTPException(
             status_code=404,

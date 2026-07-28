@@ -87,7 +87,11 @@ class TestSidecarCompatibility:
             assert result is None
 
     def test_get_state_returns_value_when_service_up(self) -> None:
-        """get_state() returns the raw string body when the service responds."""
+        """A body that is not the ``{"kind","value"}`` envelope is returned as-is.
+
+        The real service always sends the envelope (see
+        ``tests/api/test_state_unwrap.py``); this pins the tolerant fallback.
+        """
         mock_response = MagicMock()
         mock_response.read.return_value = b"spec"
 

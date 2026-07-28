@@ -141,14 +141,26 @@ class StateClient:
     def get_state(self, kind: str) -> str | None:
         """Read a state kind (phase, cursor, approved) from the service.
 
-        Returns the raw string body on success, or ``None`` when the
-        service is down.
+        Returns the **value**, or ``None`` when the service is down or the kind
+        is unset.  It used to return the raw response body — that is, the whole
+        ``{"kind": ..., "value": ...}`` envelope as a string — so every caller
+        got JSON where it expected a bare token and rendered it verbatim.  A
+        body that is not that envelope is returned as-is rather than discarded,
+        so an older service still answers something usable.
         """
         try:
             resp = urllib.request.urlopen(self._url(f"/state/{kind}"), timeout=self._timeout)
-            return resp.read().decode()
+            raw = resp.read().decode()
         except (urllib.error.URLError, OSError):
             return None
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw
+        if isinstance(body, dict) and "value" in body:
+            value = body["value"]
+            return None if value is None else str(value)
+        return raw
 
     # -- contract operations ------------------------------------------------
 

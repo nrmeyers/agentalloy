@@ -14,7 +14,6 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -271,19 +270,9 @@ def _init(args: argparse.Namespace) -> int:
 
         sc = StateClient()
         if sc.is_running():
-            phase_data = sc.get_state("phase")
-            if phase_data:
-                # Parse JSON response or raw string
-                if isinstance(phase_data, str):
-                    try:
-                        phase_data = json.loads(phase_data)
-                    except json.JSONDecodeError:
-                        phase_data = {"value": phase_data.strip()}
-                phase = (
-                    phase_data.get("value", phase_data.get("phase"))
-                    if isinstance(phase_data, dict)
-                    else phase_data
-                )
+            # The client unwraps the response envelope; this is the bare name.
+            active = sc.get_state("phase")
+            phase = active.strip() if active else None
         if not phase:
             print(
                 "  [error] No --phase given and no active phase. Pass --phase explicitly.",
