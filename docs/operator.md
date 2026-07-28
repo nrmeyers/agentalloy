@@ -175,14 +175,14 @@ For proxy-wired harnesses, the AgentAlloy proxy intercepts every LLM request, ev
 
 ### Sidecar
 
-The sidecar is a file-watching process for harnesses that can't be proxy-wired. Watches `.agentalloy/phase` and `.agentalloy/contracts/**` for changes and regenerates the harness's rules file within ~500ms (debounce). **Note:** After migrating a repo to the state store, the `.agentalloy/phase` file is deleted. Sidecar harnesses on migrated repos should be re-wired to use the proxy to avoid stale phase detection. See [Sidecar Experience](sidecar-experience.md) for details.
+Sidecar harnesses (Cursor, Windsurf, Antigravity CLI, GitHub Copilot) route through their own backends and can't be proxy-intercepted. The service's in-process store hook fires a regenerator callback post-commit when the phase row changes, keeping the harness's static rules file current within ~1s. No separate `agentalloy watch` process is needed — the running service handles regeneration automatically via the `register_watcher` hook registered at startup for every wired harness. Sidecar capability is reduced compared to proxy-wired: no enforcement, advisory text only. See [Sidecar Experience](sidecar-experience.md) for details.
 
 ### Classification
 
 Harness classification determines which integration vector is available:
 
 - **Proxy-wired** — harness honors a custom API base URL (OpenAI / Anthropic / config-file `apiBase`). Full capability: per-request context injection, gate enforcement at the proxy, automatic phase transitions. Examples: Claude Code, Continue.dev, Aider, Cline, OpenCode, Hermes Agent.
-- **Sidecar** — harness routes through its own backend and cannot be intercepted. Capabilities reduced: advisory-only system skills, file-watcher phase detection. Examples: Cursor, Windsurf, GitHub Copilot, Antigravity CLI.
+- **Sidecar** — harness routes through its own backend and cannot be intercepted. Capabilities reduced: advisory-only system skills, store-hook phase detection. Examples: Cursor, Windsurf, GitHub Copilot, Antigravity CLI.
 
 See [Harness Catalog](install/harness-catalog.md) for the full list and [Harness Classification](harness-classification.md) for the classification spec.
 

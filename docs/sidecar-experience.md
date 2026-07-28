@@ -1,6 +1,6 @@
 # Sidecar Harnesses: File-Watching Fallback
 
-The AgentAlloy proxy intercepts LLM traffic from harnesses that honor a custom API base URL (Anthropic / OpenAI / custom endpoint) and injects skill context on every turn. A few harnesses can't be proxy-wired — they route to their own backends or ignore base-URL overrides — so AgentAlloy falls back to writing a static rules file that the harness reads ambiently, kept current by a **file-watching sidecar**.
+The AgentAlloy proxy intercepts LLM traffic from harnesses that honor a custom API base URL (Anthropic / OpenAI / custom endpoint) and injects skill context on every turn. A few harnesses can't be proxy-wired — they route to their own backends or ignore base-URL overrides — so AgentAlloy falls back to writing a static rules file that the harness reads ambiently, kept current by an **in-process store hook**.
 
 ## Which Harnesses Are Sidecar-Only
 
@@ -11,40 +11,40 @@ The AgentAlloy proxy intercepts LLM traffic from harnesses that honor a custom A
 | GitHub Copilot | Closed routing through GitHub's backend |
 | Antigravity CLI (formerly Gemini CLI) | Talks to Google's Gemini API; ignores `OPENAI_*` / `ANTHROPIC_*` env vars |
 
-Every other supported harness (Claude Code, Cline, Aider, Continue.dev, OpenCode, Hermes Agent) is proxy-wired by default and does **not** need the watcher.
+Every other supported harness (Claude Code, Cline, Aider, Continue.dev, OpenCode, Hermes Agent, Copilot CLI, qwen-code) is proxy-wired by default and does **not** need the sidecar path.
 
 ## Capability Difference
 
 | Capability | Proxy-wired | Sidecar |
 |---|---|---|
 | Per-turn context injection | Yes — proxy mutates each request | No — context lives in a static file |
-| Phase transition detection | Per-turn via proxy | When watcher running; manual fallback otherwise |
+| Phase transition detection | Per-turn via proxy | Automatic via in-process store hook |
 | System skill enforcement | Gate evaluation in the proxy | Advisory text in rules file only |
 | Semantic gate evaluation | Real-time via `signals/gates.py` | Not available — falls back to UNKNOWN |
-| Contract composition | Per-turn via proxy | On file change via watcher |
+| Contract composition | Per-turn via proxy | On phase change via store hook |
 
-The watcher has **zero gate-related logic**. It only regenerates rules files and runs `agentalloy compose --contract`. Gate evaluation requires per-turn interception, which only the proxy path provides.
+The store hook has **zero gate-related logic**. It only regenerates rules files. Gate evaluation requires per-turn interception, which only the proxy path provides.
 
 ## Architecture
 
-The sidecar consists of two components:
+The sidecar path consists of two components:
 
-1. **File watcher** (`watch/watcher.py`) — a watchdog-based observer watching `.agentalloy/` for changes
-2. **Regenerators** (`watch/regenerators.py`) — per-harness writers that update the correct rules file
+1. **Regenerators** (`watch/regenerators.py`) — per-harness writers that update the correct rules file
+2. **In-process store hook** — registered at startup via `register_watcher()` so that every phase write triggers regeneration automatically
 
 ```
-.agentalloy/
-  phase                    ← watched for modifications
-  contracts/**/*.md        ← watched for new/modified files
-
-Watcher detects change
+POST /state/phase (or CLI: agentalloy phase set)
+  ↓
+State store commits phase row
+  ↓
+on_write callbacks fire (including store hook)
   ↓
 Loads workflow skill prose for active phase
   ↓
-Runs `agentalloy compose --contract` for changed contracts
-  ↓
 Regenerates harness-specific rules file
 ```
+
+No separate watcher process is needed. The running service handles regeneration automatically via the `register_watcher` hook registered at startup for every wired harness.
 
 ## Setup
 
@@ -56,23 +56,15 @@ agentalloy add <name>
 
 This writes the initial harness configuration (see [harness-catalog.md](install/harness-catalog.md) for the full list).
 
-### 2. Start the watcher
+### 2. Start the service
 
 ```bash
-agentalloy watch start --harness <cursor|windsurf|github-copilot|antigravity>
+agentalloy serve
 ```
 
-The watcher runs in the foreground. Press Ctrl+C to stop.
+The service auto-discovers every harness wired into recorded repos at startup and registers store hooks via `register_watcher()`. No separate `agentalloy watch` process is needed.
 
-**Auto-detection:** If you omit `--harness`, the watcher reads `install-state.json` and auto-detects the active sidecar harness from `harness_files_written`.
-
-### 3. Run persistently
-
-The watcher is recommended under one of these:
-
-- **tmux/screen**: `tmux new -s agentalloy-watch agentalloy watch start --harness cursor`
-- **systemd user service**: Create a `[Service]` unit wrapping `agentalloy watch start --harness <name>`
-- **launchd** (macOS): Create a `plist` with the same command
+> **Deprecated:** The `agentalloy watch start` command still exists for backward compatibility but its file-watching handler is a no-op. It emits a deprecation warning on startup.
 
 ## Per-Harness Behavior
 
@@ -99,99 +91,46 @@ The file contains user content alongside AgentAlloy content. Only the sentinel-b
 
 The marker block strategy ensures user edits outside the block survive regeneration. If the markers already exist, the block is replaced in place. On first write, the block is appended.
 
-> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`, but both are proxy-wired by default and should not need the watcher.
+> **Legacy harnesses:** Regenerators for `cline` (`.clinerules`) and `aider` (`.aider/agentalloy-context.txt`) still exist for users running `agentalloy wire-harness --legacy`, but both are proxy-wired by default and should not need the sidecar path.
 
-## What the Watcher Does
+## What the Store Hook Does
 
-### On `.agentalloy/phase` change
+### On phase change
 
-1. Reads the phase file (YAML or plain text)
-2. Extracts the `phase` value
-3. Loads the workflow skill's `raw_prose` for that phase via `_load_workflow_skill_for_phase()`
-4. Regenerates the rules file with `# Active Phase: <name>\n\n<prose>`
+1. Extracts the phase value from the committed store blob
+2. Loads the workflow skill's `raw_prose` for that phase via `_load_workflow_skill_for_phase()`
+3. Regenerates the rules file with `# Active Phase: <name>\n\n<prose>`
 
-### On `.agentalloy/contracts/**/*.md` change
+### What the Store Hook Does NOT Do
 
-1. Runs `agentalloy compose --contract <path> --inject --port <port>`
-2. Appends the composed output to the content
-3. Regenerates the rules file
-
-### Combined events
-
-When both phase and contract changes occur within the same debounce window, the content is joined with `\n\n---\n\n` separators: phase prose first, then contract compositions.
-
-## What the Watcher Does NOT Do
-
-- **No gate evaluation** — semantic gates require per-turn interception, which the watcher does not provide.
+- **No gate evaluation** — semantic gates require per-turn interception, which the sidecar path does not provide.
 - **No semantic analysis** — it does not analyze task content or make decisions about which skills apply.
 - **No pre-filtering** — it regenerates files; it does not filter agent output.
 - **No system skill enforcement** — system skills written to the rules file are suggestions, not gates.
 
-## Configuration
-
-### Watch config file
-
-Location: `~/.agentalloy/watch/<profile_name>.yaml`
-
-Contents (auto-generated by `watch start`):
-
-```yaml
-project_root: /path/to/project
-profile_name: default
-harness: cursor
-poll_interval_s: 1.0
-debounce_ms: 500
-```
-
-### PID file
-
-Location: `~/.agentalloy/watch/<profile_name>.pid`
-
-Contains the watcher process PID. Removed automatically on shutdown.
-
-### Log file
-
-Location: `~/.agentalloy/watch/<profile_name>.log`
-
-Contains timestamped log entries. Example:
-
-```
-2026-05-24 10:30:00,123 INFO Watching /path/to/project/.agentalloy for harness=cursor profile=default
-2026-05-24 10:31:15,456 INFO Regenerated cursor rules file
-```
-
-### Debounce
-
-Default: **500ms**. Multiple file events within the debounce window are coalesced into a single regeneration. This prevents burst writes (e.g., saving multiple files in an editor) from triggering redundant regenerations.
-
 ## CLI Commands
 
 ```bash
-# Start the watcher (foreground)
-agentalloy watch start --harness <name> [--profile <name>]
+# Start the service (handles store hook registration automatically)
+agentalloy serve
 
-# Stop a running watcher (sends SIGTERM)
-agentalloy watch stop [--profile <name>]
-
-# Check watcher status
-agentalloy watch status [--profile <name>] [--json]
+# Check if the service is running
+agentalloy status
 ```
-
-All commands default to `profile=default` when `--profile` is omitted.
 
 ### Manual phase override (sidecar fallback)
 
-When the sidecar watcher is not running, you can manually trigger a phase transition:
+When you want to trigger regeneration manually, you can set the phase via CLI:
 
 ```bash
 agentalloy phase set <name>
 ```
 
-This is a fallback for sidecar harnesses. When the watcher is running, phase changes are detected automatically via the file watcher — you do not need to run `phase set`. Proxy-wired harnesses never need this command; the proxy handles phase transitions automatically.
+This writes to the store, which fires the store hook and regenerates the rules file. Proxy-wired harnesses never need this command; the proxy handles phase transitions automatically.
 
 ## Relationship to Profiles
 
-The watcher is profile-aware: its config, PID, and log files are all keyed by `profile_name` (see [Configuration](#configuration) above), resolved via `profiles.py` and defaulting to `"default"`. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution details.
+The store hook uses `profile_name` from the `register_watcher()` call to load the correct workflow skill prose for phase transitions. The profile name comes from the harness wiring configuration and defaults to `"default"`. See [profiles-and-overrides.md](profiles-and-overrides.md) for profile resolution details.
 
 ## MCP Fallback
 
@@ -217,36 +156,30 @@ See [harness-catalog.md § "MCP fallback"](install/harness-catalog.md) for per-h
 
 ## Troubleshooting
 
-### Check if the watcher is running
+### Check if the service is running
 
 ```bash
-agentalloy watch status
+agentalloy status
 ```
 
-JSON output (machine-readable):
+### Rules file not updating after phase change
 
-```bash
-agentalloy watch status --json
-```
+1. Verify the service is running: `agentalloy status`
+2. Check the service logs for `Regeneration failed` or `Regenerated` messages
+3. Ensure the harness name matches what was wired: compare with `install-state.json`
+4. Confirm the harness has a registered regenerator: one of `cursor`, `windsurf`, `github-copilot`, `antigravity`
 
-Returns: `{"profile": "default", "running": true/false, "pid": <int|null>, "last_log": "..."}`
+### Stale rules file
 
-### Watcher not detecting changes
+If the rules file hasn't updated after a phase change:
 
-1. Verify the `.agentalloy/` directory exists in your project root
-2. Check the log file: `~/.agentalloy/watch/<profile_name>.log`
-3. Ensure the harness name matches what was wired: compare `--harness` with `install-state.json`
-
-### Stale PID file
-
-If `watch status` reports `running: false` but the PID file exists, remove it manually:
-
-```bash
-rm ~/.agentalloy/watch/<profile_name>.pid
-```
+1. Verify the service is running and not logging errors
+2. Manually trigger regeneration: `agentalloy phase set <name>`
+3. Check the service logs for regeneration messages
 
 ### Regeneration errors
 
-Check the log file for `Regeneration failed` messages. Common causes:
+Check the service logs for `Regeneration failed` messages. Common causes:
 - No regenerator registered for the harness (must be one of: cursor, windsurf, github-copilot, antigravity; legacy: cline, aider, gemini-cli alias)
 - Disk full or permission denied on the target file path
+- Workflow skill prose not found for the active phase (the regenerator silently skips if prose is empty)

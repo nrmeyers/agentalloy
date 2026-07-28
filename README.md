@@ -212,7 +212,7 @@ Four paths, depending on how your harness integrates with external tools.
 
 **Parallel sessions with git worktrees.** `agentalloy worktree <harness> <branch> -b` creates the worktree and wires it in one shot; each worktree's distinct path gets its own `/proj/<token>` — its own phase, its own upstream — while all worktrees share the one running service and corpus. One caveat: corpus mutations (`install-packs`, `reembed`) take the single-writer lock and affect every worktree, so stop the service before running them. Details: the `worktree` entry in [INSTALL.md](INSTALL.md).
 
-**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy add` writes a static rules file and `agentalloy watch start --harness <name>` (once per session) keeps it regenerated within ~1s of a phase or contract change. Capability matrix: [Harness support](#harness-support) below.
+**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy add` writes a static rules file and the running service's in-process store hook keeps it regenerated within ~1s of a phase change (no separate `watch` process needed). Capability matrix: [Harness support](#harness-support) below.
 
 ---
 
@@ -229,7 +229,7 @@ This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **insta
 Harnesses fall into two categories:
 
 - **Proxy-wired** (Claude Code, Aider, Cline, Codex, Continue.dev, OpenClaw, OpenCode, Hermes Agent, Copilot CLI, qwen-code — **all ten live-verified** by the harness e2e matrix, real binaries end to end) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically. Codex rides the native [OpenAI Responses passthrough](docs/responses-surface.md) (`/proj/<token>/v1/responses`).
-- **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by the service's in-process store hook (fires post-commit on phase change). Reduced capability: no enforcement, advisory text only.
 - **Dual-carrier** (GitHub Copilot in VS Code, `github-copilot`) — BYOK "Custom Endpoint" proxy carrier (`chatLanguageModels.json`, agent-mode capable, pending manual verification) **plus** the instructions-file sidecar as ambient context and as the fallback when org policy disables BYOK.
 
 > Copilot has two entries: the standalone **Copilot CLI** (`copilot-cli`, npm `@github/copilot`) is proxy-wired via its BYOK env vars (`COPILOT_PROVIDER_*`), and the VS Code surface (`github-copilot`) is dual-carrier as above. In both BYOK modes, model traffic routes to your configured upstream key, not your Copilot subscription.
