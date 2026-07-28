@@ -40,13 +40,13 @@ If yes — the harness honors an OpenAI / Anthropic / custom base-URL override �
 
 ### Sidecar
 
-**Mechanism:** Harness cannot be proxy-wired (does not expose a base-URL override, or routes through its own backend). AgentAlloy writes a static rules file that the harness reads on its own. A file-watching sidecar detects changes to `.agentalloy/phase` and `.agentalloy/contracts/**` and rewrites the rules file within ~500ms (debounced).
+**Mechanism:** Harness cannot be proxy-wired (does not expose a base-URL override, or routes through its own backend). AgentAlloy writes a static rules file that the harness reads on its own. The running service holds an in-process store hook: when the phase row is committed the hook fires post-commit and rewrites the rules file (~1s). No separate watch process, and no file watching — `.agentalloy/phase` and the `.agentalloy/contracts/**` watch path are both gone.
 
 **Key properties:**
 - Context lives in a static file (not regenerated per turn)
-- Sidecar rewrites the file on phase/contract changes
+- The service's store hook rewrites the file on phase changes
 - System skills are advisory text only (no enforcement)
-- Phase transitions are automatic only when sidecar is running
+- Regeneration happens only while the service is running
 - Manual fallback: `agentalloy phase set <name>`
 
 **Current members:**
