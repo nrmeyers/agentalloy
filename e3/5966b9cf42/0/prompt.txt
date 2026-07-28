@@ -1,0 +1,25 @@
+why do we still have a phase file in the .agentalloy subdirectory? are we using that??
+
+---
+
+Phase was moved FIRST!! Before contracts!
+
+---
+
+are we in intake phase now?
+
+---
+
+That should have been injected via instruction. So, I want to completely remove phase from being a file. I only want it in the data store.
+
+---
+
+what decisions do you need me to make? what outcomes if you need me to choose between?
+
+---
+
+1. Auto-restart. 2. You decide. 4. auto import on upgrade and then delete the file. 5. In-process hook as long as it is harness agnostic. I don't want to build anything specifically for Claude code. 6. wiring writes nothing, EXCEPT the rwquired config file.
+
+---
+
+fiz the two defects

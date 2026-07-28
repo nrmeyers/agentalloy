@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "e35966b9cf42",
+  "strategy": "manual-commit",
+  "branch": "fix/contract-id-slash-routing",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "src/agentalloy/api/state_router.py",
+    "tests/api/test_state_router.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e3/5966b9cf42/0/metadata.json",
+      "transcript": "/e3/5966b9cf42/0/full.jsonl",
+      "compact_transcript": "/e3/5966b9cf42/0/transcript.jsonl",
+      "content_hash": "/e3/5966b9cf42/0/content_hash.txt",
+      "prompt": "/e3/5966b9cf42/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 815,
+    "cache_creation_tokens": 394747,
+    "cache_read_tokens": 4682167,
+    "output_tokens": 29020,
+    "api_call_count": 58
+  }
+}
