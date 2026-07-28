@@ -54,7 +54,7 @@ def add_parser(
         choices=sorted(VALID_HARNESSES),
         default=None,
         help="Unwire only this harness; leave any other wired harness and the repo's "
-        "shared lifecycle state (.agentalloy/phase, config) intact. Combine with --all "
+        "shared lifecycle state (.agentalloy/config, store phase row) intact. Combine with --all "
         "to unwire this harness across every recorded repo.",
     )
     p.add_argument(
@@ -370,7 +370,7 @@ def _run(args: argparse.Namespace) -> int:
         remove_models=False,
         remove_wiring=True,
         # When set, scope the teardown to a single harness: leave any other wired
-        # harness and the repo's shared lifecycle state (.agentalloy/phase, config)
+        # harness and the repo's shared lifecycle state (.agentalloy/config, store row)
         # in place. None == today's behavior (every harness in scope).
         harness=harness,
     )

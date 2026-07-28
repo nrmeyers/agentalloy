@@ -96,7 +96,12 @@ def run_auto_wire_worktree(cwd: Path | None = None) -> int:
 
 
 def _try_auto_wire(cwd: Path) -> None:
-    if (cwd / ".agentalloy" / "phase").exists() or (cwd / ".agentalloy" / "upstream").exists():
+    # `.agentalloy/config` is the marker: `adopt_and_wire` writes it unconditionally
+    # (via `_write_lifecycle_mode`), and unwire preserves it. `upstream` is not a
+    # marker — `adopt_upstream` returns without writing when a harness has nothing
+    # to adopt (claude-code, whose passthrough forwards the caller's own key), and
+    # `phase` no longer exists at all now that the store owns it.
+    if (cwd / ".agentalloy" / "config").exists():
         return  # already wired — nothing to do
 
     main_root = _main_checkout_root(cwd)

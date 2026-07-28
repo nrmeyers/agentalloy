@@ -567,16 +567,12 @@ class TestUnwire:
         contract.parent.mkdir(parents=True)
         contract.write_text("# user's contract\n")
 
-        # Mock the store operations since we don't have a real DB in this test
+        # Stand in for the bound store: unwire prefers the process handle rather
+        # than opening a second writer against the DB the service holds.
         mock_store = MagicMock()
         mock_store.delete_repo_rows.return_value = 0
-        mock_settings = MagicMock()
-        mock_settings.duckdb_path = str(repo_root / "agentalloy.duck")
 
-        with (
-            patch("agentalloy.config.get_settings", return_value=mock_settings),
-            patch("agentalloy.storage.state_store.open_state_store", return_value=mock_store),
-        ):
+        with patch("agentalloy.storage.state_store.process_store", return_value=mock_store):
             rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
         mock_store.delete_repo_rows.assert_called_once()

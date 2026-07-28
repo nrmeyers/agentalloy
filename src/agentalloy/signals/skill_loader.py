@@ -655,12 +655,20 @@ def _read_intake_route(project_root: Path) -> str | None:
     Queries the store for active intake contracts and returns the newest one's
     ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
     failure returns ``None``. Never raises.
+
+    Reads the *bound* process store rather than opening a handle of its own.
+    This used to open ``<repo>/.agentalloy/state.db`` — a store nothing in
+    ``src/`` has ever written, so intake routing silently always took the
+    default route, and the open *created* an empty file in every repo it
+    touched. Opening a second writer against the real store is not an option
+    either: the service holds the DuckDB write lock.
     """
     try:
-        from agentalloy.storage.state_store import open_state_store
+        from agentalloy.storage.state_store import process_store
 
-        db_path = project_root / ".agentalloy" / "state.db"
-        store = open_state_store(db_path)
+        store = process_store()
+        if store is None:
+            return None
         contracts = store.list_contracts(phase="intake", status="active")
         if not contracts:
             return None
@@ -694,10 +702,11 @@ def _intake_route_hint(project_root: Path) -> str | None:
 
     # No readable intake contract: fall back to store-presence (cascade).
     try:
-        from agentalloy.storage.state_store import open_state_store
+        from agentalloy.storage.state_store import process_store
 
-        db_path = project_root / ".agentalloy" / "state.db"
-        store = open_state_store(db_path)
+        store = process_store()
+        if store is None:
+            return None
         fast_contracts = store.list_contracts(phase="sdd-fast", status="active")
         if fast_contracts:
             return "sdd-fast"

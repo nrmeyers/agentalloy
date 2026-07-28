@@ -97,9 +97,10 @@ class TestTA6RetainsConfig:
         aa = repo / ".agentalloy"
         aa.mkdir()
         (aa / "config").write_text("harness: claude-code\n")
-        (aa / "phase").write_text(
-            "phase: build\n"
-        )  # phase is no longer cleaned up (store is source of truth)
+        # A legacy phase file, from a repo that never took the upgrade path. The
+        # store owns phase now, so unwire must clear this rather than leave it —
+        # `_import_phase_file` would otherwise resurrect the row on a re-add.
+        (aa / "phase").write_text("phase: build\n")
         (aa / "upstream").write_text("origin/main\n")
         (aa / "README.md").write_text("test\n")
         (aa / "claude-code-env.sh").write_text("export FOO=bar\n")
@@ -109,9 +110,9 @@ class TestTA6RetainsConfig:
         # config and claude-code-env.sh should remain
         assert (aa / "config").exists(), "config should be preserved"
         assert (aa / "claude-code-env.sh").exists(), "claude-code-env.sh should be preserved"
-        # upstream and README.md are removed; phase is left behind (store is source of truth)
         assert not (aa / "upstream").exists(), "upstream should be removed"
         assert not (aa / "README.md").exists(), "README.md should be removed"
+        assert not (aa / "phase").exists(), "a legacy phase file should be removed"
 
     def test_unwire_repo_local_does_not_remove_contracts_dir(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.uninstall import _unwire_repo_local
@@ -334,7 +335,31 @@ class TestTA11ResumeReconstructsSession:
 class TestTE3UninstallSweepsAllRepos:
     """uninstall drops store rows for every recorded repo, not only cwd."""
 
-    def test_unwire_repo_local_calls_delete_repo_rows(self, tmp_path: Path) -> None:
+    def test_unwire_repo_local_uses_the_bound_store(self, tmp_path: Path) -> None:
+        """The bound handle wins, and is never closed — it is not ours to close."""
+        from agentalloy.install.subcommands.uninstall import _unwire_repo_local
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        aa = repo / ".agentalloy"
+        aa.mkdir()
+        (aa / "config").write_text("harness: claude-code\n")
+
+        mock_store = MagicMock()
+        mock_store.delete_repo_rows.return_value = 5
+
+        with patch(
+            "agentalloy.storage.state_store.process_store",
+            return_value=mock_store,
+        ):
+            _unwire_repo_local(repo, set(), warnings=[], remove_lifecycle=True)
+
+        mock_store.delete_repo_rows.assert_called_once_with(str(repo))
+        mock_store.close.assert_not_called()
+
+    def test_unwire_repo_local_opens_directly_when_nothing_is_listening(
+        self, tmp_path: Path
+    ) -> None:
         from agentalloy.install.subcommands.uninstall import _unwire_repo_local
 
         repo = tmp_path / "repo"
@@ -350,10 +375,12 @@ class TestTE3UninstallSweepsAllRepos:
         mock_settings.duckdb_path = str(tmp_path / "agentalloy.duck")
 
         with (
+            patch("agentalloy.storage.state_store.process_store", return_value=None),
             patch(
-                "agentalloy.config.get_settings",
-                return_value=mock_settings,
+                "agentalloy.install.subcommands.uninstall._state_service_running",
+                return_value=False,
             ),
+            patch("agentalloy.config.get_settings", return_value=mock_settings),
             patch(
                 "agentalloy.storage.state_store.open_state_store",
                 return_value=mock_store,
@@ -363,6 +390,37 @@ class TestTE3UninstallSweepsAllRepos:
 
         mock_store.delete_repo_rows.assert_called_once_with(str(repo))
         mock_store.close.assert_called_once()
+
+    def test_unwire_repo_local_will_not_open_a_writer_behind_a_live_service(
+        self, tmp_path: Path
+    ) -> None:
+        """The deadlock guard: a running service means no second writer handle.
+
+        Out of process with the service up, opening ``state.duck`` read-write
+        blocks on DuckDB's lock. Warn and leave the rows rather than hang.
+        """
+        from agentalloy.install.subcommands.uninstall import _unwire_repo_local
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        aa = repo / ".agentalloy"
+        aa.mkdir()
+        (aa / "config").write_text("harness: claude-code\n")
+
+        warnings_list: list[str] = []
+
+        with (
+            patch("agentalloy.storage.state_store.process_store", return_value=None),
+            patch(
+                "agentalloy.install.subcommands.uninstall._state_service_running",
+                return_value=True,
+            ),
+            patch("agentalloy.storage.state_store.open_state_store") as mock_open,
+        ):
+            _unwire_repo_local(repo, set(), warnings_list, remove_lifecycle=True)
+
+        mock_open.assert_not_called()
+        assert any("Service is running" in w for w in warnings_list)
 
     def test_unwire_repo_local_records_deleted_rows(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.uninstall import _unwire_repo_local
@@ -376,18 +434,9 @@ class TestTE3UninstallSweepsAllRepos:
         mock_store = MagicMock()
         mock_store.delete_repo_rows.return_value = 3
 
-        mock_settings = MagicMock()
-        mock_settings.duckdb_path = str(tmp_path / "agentalloy.duck")
-
-        with (
-            patch(
-                "agentalloy.config.get_settings",
-                return_value=mock_settings,
-            ),
-            patch(
-                "agentalloy.storage.state_store.open_state_store",
-                return_value=mock_store,
-            ),
+        with patch(
+            "agentalloy.storage.state_store.process_store",
+            return_value=mock_store,
         ):
             _, files_removed = _unwire_repo_local(repo, set(), warnings=[], remove_lifecycle=True)
 
@@ -406,9 +455,12 @@ class TestTE3UninstallSweepsAllRepos:
 
         warnings_list: list[str] = []
 
+        mock_store = MagicMock()
+        mock_store.delete_repo_rows.side_effect = RuntimeError("db locked")
+
         with patch(
-            "agentalloy.config.get_settings",
-            side_effect=RuntimeError("db locked"),
+            "agentalloy.storage.state_store.process_store",
+            return_value=mock_store,
         ):
             _unwire_repo_local(repo, set(), warnings_list, remove_lifecycle=True)
 

@@ -283,6 +283,38 @@ def test_register_watcher_hooks_store(tmp_path: Path) -> None:
     # No exception, no crash — the callback ran and logged.
 
 
+def test_phase_write_regenerates_the_harness_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-6 end to end: a phase write regenerates the rules file on disk.
+
+    ``test_register_watcher_hooks_store`` proves a callback is *registered* and
+    that a write does not raise — both of which hold when the regenerator never
+    runs. This is the assertion that fails if the hook is wired but inert, which
+    is exactly the state the file-based trigger left behind.
+    """
+    from agentalloy.storage.state_store import open_state_store
+    from agentalloy.watch import watcher as watcher_mod
+    from agentalloy.watch.watcher import register_watcher
+
+    monkeypatch.setattr(
+        watcher_mod, "_load_workflow_skill_prose", lambda phase, profile: f"prose for {phase}"
+    )
+
+    (tmp_path / ".cursor").mkdir()
+    store = open_state_store(tmp_path / "state.duck", repo="test")
+    store.open()
+    register_watcher(store, tmp_path, "default", "cursor")
+
+    mdc = tmp_path / ".cursor" / "rules" / "agentalloy.mdc"
+    assert not mdc.exists(), "nothing regenerated before the write"
+
+    store.write_phase("design")
+
+    assert mdc.exists(), "phase write did not regenerate the harness rules file"
+    assert "prose for design" in mdc.read_text()
+
+
 def test_harness_agnostic_registry_grep() -> None:
     """The registry and watcher trigger contain no harness name.
 

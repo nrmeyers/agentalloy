@@ -215,7 +215,7 @@ def sdd_instructions_markdown(port: int) -> str:
         f"**Health-gate.** Before using, verify: `curl -fs http://localhost:{port}/health`.\n"
         "If unreachable, ignore this block.\n\n"
         "**Open every session with intake.** Check the current phase (via\n"
-        "`.agentalloy/phase` file or proxy metadata):\n"
+        "`agentalloy phase` or proxy metadata):\n"
         "- If it names a phase other than `intake`, work is in progress — tell the user where\n"
         "  they left off (the phase + the active contract) and ask whether to resume there or\n"
         "  start something new. Resume → continue in that phase.\n"
