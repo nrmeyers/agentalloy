@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "a278682975bc",
+  "strategy": "manual-commit",
+  "branch": "feat/phase-blob-shape",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "tests/install/test_auto_wire_worktree.py",
+    "tests/install/test_cli_surface_07b.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a2/78682975bc/0/metadata.json",
+      "transcript": "/a2/78682975bc/0/full.jsonl",
+      "compact_transcript": "/a2/78682975bc/0/transcript.jsonl",
+      "content_hash": "/a2/78682975bc/0/content_hash.txt",
+      "prompt": "/a2/78682975bc/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23157,
+    "cache_creation_tokens": 2347497,
+    "cache_read_tokens": 111931765,
+    "output_tokens": 428046,
+    "api_call_count": 982
+  }
+}
