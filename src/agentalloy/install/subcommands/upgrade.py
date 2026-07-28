@@ -681,27 +681,31 @@ def _migrate_code_index_layout(
 
 
 def _repos_with_state_files() -> list[str]:
-    """Every wired repo root, newest wiring record first.
+    """Every repo root that may hold a file mirror, wiring records first.
 
-    Wiring is the registry because it is the only record of which repos exist.
-    A repo that was never wired carries no harness config, so nothing composes
-    against its phase and its file mirror is already inert — it is skipped
-    rather than searched for.
+    Wiring is the registry because it is the near-complete record of which repos
+    exist.  It is not the *whole* record: a repo reached through the bare ``/v1``
+    surface resolves its state from the deployment directory rather than from a
+    wiring record, so ``AGENTALLOY_PROJECT_DIR`` (falling back to the cwd) is
+    appended.  Any other never-wired repo carries no harness config, so nothing
+    composes against its phase — it is skipped rather than searched for.
     """
     roots: list[str] = []
+    deployment = os.environ.get("AGENTALLOY_PROJECT_DIR") or str(Path.cwd())
     try:
         st = install_state.load_state()
         entries = st.get("harness_files_written") or []
+        entries = entries if isinstance(entries, list) else []
     except Exception:  # noqa: BLE001 — a bad state file must not fail an upgrade
-        return roots
-    if not isinstance(entries, list):
-        return roots
+        entries = []
     for entry in entries:  # pyright: ignore[reportUnknownVariableType]
         if not isinstance(entry, dict):
             continue
         root = str(entry.get("repo_root") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         if root and root not in roots:
             roots.append(root)
+    if deployment not in roots:
+        roots.append(deployment)
     return roots
 
 

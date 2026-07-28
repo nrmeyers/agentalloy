@@ -14,6 +14,9 @@ import pytest
 from agentalloy.api.state_client import StateClientError
 from agentalloy.install.subcommands import upgrade
 
+#: A deployment root that cannot hold a mirror, for tests not about that sweep.
+_DEPLOYMENT = Path("/nonexistent/agentalloy-deployment-root")
+
 
 class _StubClient:
     def __init__(self, *, imported: dict[str, str] | None = None, raises: Exception | None = None):
@@ -37,11 +40,17 @@ def stub(monkeypatch: pytest.MonkeyPatch):
     return _install
 
 
-def _wire(monkeypatch: pytest.MonkeyPatch, *roots: Path) -> None:
+def _wire(monkeypatch: pytest.MonkeyPatch, *roots: Path, deployment: Path | None = None) -> None:
+    """Record *roots* as wired, and pin the deployment root out of the way.
+
+    The deployment directory is always swept alongside the wiring records, so a
+    test that does not care about it points it at an empty tmp dir it can name.
+    """
     state: dict[str, Any] = {
         "harness_files_written": [{"repo_root": str(r), "harness": "claude-code"} for r in roots]
     }
     monkeypatch.setattr(upgrade.install_state, "load_state", lambda: state)
+    monkeypatch.setenv("AGENTALLOY_PROJECT_DIR", str(deployment or _DEPLOYMENT))
 
 
 def _mirror(root: Path) -> Path:
@@ -56,21 +65,44 @@ class TestRepoRegistry:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _wire(monkeypatch, tmp_path / "a", tmp_path / "b")
-        assert upgrade._repos_with_state_files() == [str(tmp_path / "a"), str(tmp_path / "b")]
+        assert upgrade._repos_with_state_files() == [
+            str(tmp_path / "a"),
+            str(tmp_path / "b"),
+            str(_DEPLOYMENT),
+        ]
 
     def test_a_repo_wired_twice_appears_once(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """One repo, two harnesses, is still one import."""
         _wire(monkeypatch, tmp_path / "a", tmp_path / "a")
-        assert upgrade._repos_with_state_files() == [str(tmp_path / "a")]
+        assert upgrade._repos_with_state_files() == [str(tmp_path / "a"), str(_DEPLOYMENT)]
 
-    def test_unreadable_install_state_yields_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_deployment_root_is_swept_unwired(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Bare-``/v1`` repos resolve state from here and hold no wiring record."""
+        _wire(monkeypatch, deployment=tmp_path / "deployed")
+        assert upgrade._repos_with_state_files() == [str(tmp_path / "deployed")]
+
+    def test_a_wired_deployment_root_is_not_duplicated(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        a = tmp_path / "a"
+        _wire(monkeypatch, a, deployment=a)
+        assert upgrade._repos_with_state_files() == [str(a)]
+
+    def test_unreadable_install_state_still_sweeps_the_deployment_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A broken registry must not cost the one root we can always name."""
+
         def _boom() -> dict[str, Any]:
             raise OSError("state file is gone")
 
         monkeypatch.setattr(upgrade.install_state, "load_state", _boom)
-        assert upgrade._repos_with_state_files() == []
+        monkeypatch.setenv("AGENTALLOY_PROJECT_DIR", str(tmp_path / "deployed"))
+        assert upgrade._repos_with_state_files() == [str(tmp_path / "deployed")]
 
 
 class TestImportStep:
@@ -142,10 +174,11 @@ class TestImportStep:
 
         upgrade._import_state_files([], [], show_progress=False)  # must not raise
 
-    def test_no_wired_repos_skips_the_client_entirely(
+    def test_no_repo_with_a_mirror_skips_the_client_entirely(
         self, monkeypatch: pytest.MonkeyPatch, stub
     ) -> None:
         monkeypatch.setattr(upgrade.install_state, "load_state", dict)
+        monkeypatch.setenv("AGENTALLOY_PROJECT_DIR", str(_DEPLOYMENT))
         client = stub(_StubClient())
 
         upgrade._import_state_files([], [], show_progress=False)
