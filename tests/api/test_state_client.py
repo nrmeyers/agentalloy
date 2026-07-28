@@ -1,10 +1,11 @@
 """Tests for ``src/agentalloy/api/state_client.py`` and CLI routing.
 
-Verifies the check-then-route pattern:
-  - When the state service is running, CLI verbs route through HTTP.
-  - When the state service is down, CLI verbs fall back to file-mirror writes.
-  - Clear error messages when both paths fail.
-  - No regression when the service is down (file-mirror path).
+Verifies the transport seam and the CLI's fail-loud posture:
+  - ``StateClient`` itself: reachability, reads, and writes over HTTP.
+  - Phase verbs persist to the state store and write no repo file — the
+    file-mirror fallback these tests used to assert is gone (slice 06).
+  - The cursor is still a repo file, so ``task`` keeps its own HTTP routing.
+  - Clear error messages instead of a silent second source of truth.
 """
 
 from __future__ import annotations
@@ -215,46 +216,49 @@ class TestStateClientReads:
 # ---------------------------------------------------------------------------
 
 
-class TestPhaseSetRouting:
-    """phase set routes through HTTP when service is up, falls back to file."""
+class TestPhaseSetPersistence:
+    """``phase set`` has exactly one destination: the state store.
 
-    def test_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
-        """When the service is down, phase set writes the file directly."""
+    These were the file-mirror tests.  They asserted that a phase set without a
+    reachable service wrote ``.agentalloy/phase`` — the behaviour that let the
+    CLI and the service disagree about which phase a repo was in.  They now
+    assert the opposite: the row is the record, and the repo stays clean.
+    """
+
+    def test_writes_the_row_and_no_file(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import run_phase_set
 
         result = run_phase_set("build", root=tmp_path)
+
         assert result["phase"] == "build"
         assert result["blocked"] is False
-        phase_file = tmp_path / ".agentalloy" / "phase"
-        assert phase_file.exists()
-        assert "phase: build" in phase_file.read_text()
+        state = phase_access(tmp_path).read()
+        assert state is not None and state.phase == "build"
+        assert not (tmp_path / ".agentalloy" / "phase").exists()
 
-    def test_returns_service_result_when_up(self, tmp_path: Path) -> None:
-        """When the service is up, phase set returns the service's response."""
+    def test_repo_scoping_keeps_two_repos_apart(self, tmp_path: Path) -> None:
+        """The row carries repo identity, so one store serves many repos."""
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import run_phase_set
 
-        service_response = {"phase": "build"}
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        run_phase_set("build", root=a)
+        run_phase_set("qa", root=b)
 
-        with patch.object(StateClient, "is_running", return_value=True):
-            with patch.object(
-                StateClient,
-                "set_phase",
-                return_value=service_response,
-            ) as mock_post:
-                result = run_phase_set("build", root=tmp_path)
-                assert result == service_response
-                # repo_root must be forwarded — the service skips the
-                # enforcement-posture rewrite without it.
-                mock_post.assert_called_once_with("build", repo_root=str(tmp_path))
+        assert phase_access(a).read().phase == "build"  # pyright: ignore[reportOptionalMemberAccess]
+        assert phase_access(b).read().phase == "qa"  # pyright: ignore[reportOptionalMemberAccess]
 
-    def test_clears_phase_file_on_set(self, tmp_path: Path) -> None:
-        """phase clear still works when service is down (file-mirror path)."""
+    def test_clear_removes_the_row(self, tmp_path: Path) -> None:
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import run_phase_clear, run_phase_set
 
         run_phase_set("build", root=tmp_path)
         result = run_phase_clear(root=tmp_path)
         assert result["message"] == "Phase cleared"
-        assert not (tmp_path / ".agentalloy" / "phase").exists()
+        assert phase_access(tmp_path).read() is None
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +267,8 @@ class TestPhaseSetRouting:
 
 
 class TestApproveRouting:
-    def test_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
-        """When the service is down, approve writes the marker file directly."""
+    def test_records_the_marker_file(self, tmp_path: Path) -> None:
+        """The approval marker is a repo file by design; only phase moved."""
         from agentalloy.install.subcommands.approve import run_approve
         from agentalloy.install.subcommands.phase import run_phase_set
 
@@ -280,21 +284,28 @@ class TestApproveRouting:
         assert marker.exists()
         assert "approver: test" in marker.read_text()
 
-    def test_returns_service_result_when_up(self, tmp_path: Path) -> None:
-        """When the service is up, approve returns the service's response."""
+    def test_advance_lands_in_the_store(self, tmp_path: Path) -> None:
+        """Approving the current phase advances it — in the store, not a file.
+
+        ``run_approve`` used to hand the whole verb to ``StateClient.approve``
+        whenever the service answered.  It now reads and writes the phase
+        through the shared seam, so the advance is observable in one place.
+        """
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.approve import run_approve
+        from agentalloy.install.subcommands.phase import run_phase_set
 
-        service_response = {"ok": True, "phase": "design"}
+        spec = tmp_path / "docs" / "spec"
+        spec.mkdir(parents=True)
+        (spec / "x.md").write_text("# spec\n## Acceptance Criteria\n- a\n## Out of Scope\n- b\n")
+        run_phase_set("spec", root=tmp_path)
 
-        with patch.object(StateClient, "is_running", return_value=True):
-            with patch.object(
-                StateClient,
-                "approve",
-                return_value=service_response,
-            ) as mock_post:
-                result = run_approve("spec", root=tmp_path)
-                assert result == service_response
-                mock_post.assert_called_once_with("spec")
+        result = run_approve("spec", root=tmp_path, approver="test")
+
+        assert result["ok"] is True
+        state = phase_access(tmp_path).read()
+        assert state is not None and state.phase == "design"
+        assert not (tmp_path / ".agentalloy" / "phase").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -305,14 +316,15 @@ class TestApproveRouting:
 class TestTaskRouting:
     @staticmethod
     def _seed(root: Path, phase: str, names: list[str]) -> None:
-        (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
-        (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\n")
+        from agentalloy.install.subcommands.phase import run_phase_set
+
+        run_phase_set(phase, root=root, force=True)
         d = root / ".agentalloy" / "contracts" / "active" / phase
         d.mkdir(parents=True, exist_ok=True)
         for n in names:
             (d / f"{n}.md").write_text(f"---\nphase: {phase}\n---\n# {n}\n")
 
-    def test_task_next_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_task_next_writes_the_cursor_file_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.task import run_task_next
 
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
@@ -341,7 +353,7 @@ class TestTaskRouting:
                 assert result["cursor"] == "active/build/02-api.md"
                 mock_set_cursor.assert_called_once_with("active/build/02-api.md")
 
-    def test_task_start_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_task_start_resolves_a_named_contract(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.task import run_task_start
 
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
@@ -349,7 +361,7 @@ class TestTaskRouting:
         assert result["ok"] is True
         assert result["cursor"] == "active/build/02-api.md"
 
-    def test_task_status_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_task_status_reports_the_started_contract(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.task import run_task_start, run_task_status
 
         TestTaskRouting._seed(tmp_path, "build", ["01-cache", "02-api"])
@@ -365,7 +377,7 @@ class TestTaskRouting:
 
 
 class TestFlowRouting:
-    def test_flow_free_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_flow_free_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.flow import run_flow_free
         from agentalloy.install.subcommands.phase import run_phase_set
 
@@ -375,7 +387,7 @@ class TestFlowRouting:
         assert result["mode"] == "free"
         assert result["phase"] == "build"
 
-    def test_flow_resume_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_flow_resume_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.flow import run_flow_free, run_flow_resume
         from agentalloy.install.subcommands.phase import run_phase_set
 
@@ -386,7 +398,7 @@ class TestFlowRouting:
         assert result["mode"] == "workflow"
         assert result["phase"] == "build"
 
-    def test_flow_status_falls_back_to_file_when_service_down(self, tmp_path: Path) -> None:
+    def test_flow_status_falls_back_to_store_when_service_down(self, tmp_path: Path) -> None:
         from agentalloy.install.subcommands.flow import run_flow_status
         from agentalloy.install.subcommands.phase import run_phase_set
 
@@ -419,11 +431,11 @@ class TestErrorHandling:
 
     def test_task_start_no_match_fails_clearly(self, tmp_path: Path) -> None:
         """No matching contract returns a clear error."""
+        # A phase, but no contracts under it.
+        from agentalloy.install.subcommands.phase import run_phase_set
         from agentalloy.install.subcommands.task import run_task_start
 
-        # Manually create phase file without contracts
-        (tmp_path / ".agentalloy").mkdir(parents=True, exist_ok=True)
-        (tmp_path / ".agentalloy" / "phase").write_text("phase: build\n")
+        run_phase_set("build", root=tmp_path, force=True)
 
         result = run_task_start("nonexistent", tmp_path)
         assert result["ok"] is False

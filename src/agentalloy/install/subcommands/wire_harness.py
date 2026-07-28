@@ -1992,16 +1992,6 @@ def _wire_mcp_fallback(
 # ---------------------------------------------------------------------------
 
 
-def _read_phase_file(root: Path) -> str | None:
-    """Read the current phase from ``.agentalloy/phase``, or ``None``."""
-    phase_path = root / ".agentalloy" / "phase"
-    if phase_path.exists():
-        content = phase_path.read_text().strip()
-        if content:
-            return content
-    return None
-
-
 def _has_wire_record_for_harness(root: Path, harness: str) -> bool:
     """Check if *root* has any WireRecord entries for *harness*.
 

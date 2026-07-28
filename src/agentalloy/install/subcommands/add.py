@@ -126,15 +126,19 @@ def adopt_and_wire(
     key_env: str | None = None,
     lifecycle_mode: str | None = None,
     assume_index: bool = False,
-) -> tuple[Upstream | None, dict[str, Any], str | None]:
+) -> tuple[Upstream | None, dict[str, Any]]:
     """Adopt *harness*'s upstream and wire interception at *root* (repo scope).
 
     The reusable core shared by ``add`` (root = cwd) and ``worktree`` (root = a
     freshly created worktree): capture upstream → wire the harness through the
-    proxy → record the lifecycle mode → seed the entry phase (``full`` only) →
-    git-exclude ``.agentalloy/``. Returns ``(upstream, wire_result,
-    phase_seeded)`` for the caller to render. Callers are responsible for
-    validating *harness* against ``REGISTRY`` first.
+    proxy → record the lifecycle mode → drop the README and git-exclude
+    ``.agentalloy/``. Returns ``(upstream, wire_result)`` for the caller to
+    render. Callers are responsible for validating *harness* against
+    ``REGISTRY`` first.
+
+    No lifecycle state is written here in either mode: the phase lives only in
+    the state store and is seeded lazily on the repo's first proxy request, so
+    adopting a harness never needs a running service.
 
     ``lifecycle_mode`` follows ``wire``'s precedence: an explicit value wins;
     ``None`` prompts when the repo defines its own agent workflow (TTY only)
@@ -162,9 +166,8 @@ def adopt_and_wire(
     # Wire the harness through the proxy (per-repo) and activate the repo.
     from agentalloy.install.subcommands.wire import (
         _detect_custom_workflow,  # pyright: ignore[reportPrivateUsage]
-        _git_exclude_agentalloy,  # pyright: ignore[reportPrivateUsage]
         _prompt_lifecycle_mode,  # pyright: ignore[reportPrivateUsage]
-        _seed_entry_phase,  # pyright: ignore[reportPrivateUsage]
+        _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
     )
     from agentalloy.install.subcommands.wire_harness import (
         _wire_harness_core,  # pyright: ignore[reportPrivateUsage]
@@ -183,18 +186,7 @@ def adopt_and_wire(
 
     result = _wire_harness_core(harness, port=port, root=root, scope="repo")
     result["lifecycle_mode"] = mode
-    if mode == "full":
-        phase_seeded = _seed_entry_phase(root)
-    else:
-        # off must NOT seed a phase (a seeded `intake` re-arms the front door),
-        # and a stale phase from a prior `full` wiring would silently suppress
-        # composition while looking active — clear it.
-        phase_seeded = None
-        phase_file = root / ".agentalloy" / "phase"
-        if phase_file.exists():
-            phase_file.unlink()
-            result["stale_phase_cleared"] = True
-    _git_exclude_agentalloy(root)  # ensure .agentalloy/ (upstream + phase) stays uncommitted
+    _seed_repo_metadata(root)  # README + git-exclude; keeps .agentalloy/ uncommitted
 
     # Auto-wire future worktrees of this repo (a post-checkout hook, shared
     # across worktrees — installing once from any checkout covers all of
@@ -208,7 +200,7 @@ def adopt_and_wire(
     from agentalloy.install import code_index_wiring
 
     code_index_wiring.maybe_wire(root, port, assume_yes=assume_index, harness=harness)
-    return upstream, result, phase_seeded
+    return upstream, result
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -221,7 +213,7 @@ def _run(args: argparse.Namespace) -> int:
     cwd = Path.cwd().resolve()
     port = resolve_port(args.port)
 
-    upstream, result, phase_seeded = adopt_and_wire(
+    upstream, result = adopt_and_wire(
         harness,
         cwd,
         port=port,
@@ -231,7 +223,7 @@ def _run(args: argparse.Namespace) -> int:
         lifecycle_mode=getattr(args, "lifecycle_mode", None),
     )
 
-    _render(harness, upstream, result, phase_seeded)
+    _render(harness, upstream, result)
     return 0
 
 
@@ -239,7 +231,6 @@ def _render(
     harness: str,
     upstream: Upstream | None,
     result: dict[str, Any],
-    phase_seeded: str | None,
 ) -> None:
     """Human-readable summary of what ``add`` captured and wired."""
     print(f"[AgentAlloy] add {harness}")
@@ -257,5 +248,3 @@ def _render(
     mode = result.get("lifecycle_mode")
     if mode and mode != "full":
         print(f"  lifecycle: {mode} (proxy wired; no workflow injected)")
-    if phase_seeded:
-        print(f"  phase: {phase_seeded} (repo activated; composes next prompt)")

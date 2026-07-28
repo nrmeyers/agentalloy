@@ -195,22 +195,18 @@ def _git_exclude_agentalloy(root: Path) -> None:
         pass
 
 
-def _seed_entry_phase(root: Path) -> str | None:
-    """Activate *root* by seeding the entry phase, returning the phase or None.
+def _seed_repo_metadata(root: Path) -> None:
+    """Drop the explanatory README into ``.agentalloy/`` and git-exclude the dir.
 
-    Composition short-circuits (the proxy path) when ``.agentalloy/phase`` is
-    absent, so a wired-but-phaseless repo is inert. Seed ``intake``
-    so the intent-interview workflow composes on the next prompt. Create-only:
-    never clobber a repo already mid-lifecycle. Also git-excludes ``.agentalloy/``.
+    Deliberately writes **no** lifecycle state.  Wiring used to seed the entry
+    phase here, which meant wiring needed a running state service and made
+    ``add``/``wire`` a writer of SDD state on a cold box.  The phase is now
+    seeded lazily by the proxy on the repo's first real request
+    (``proxy_signal.evaluate_signal``), so a freshly wired repo is legitimately
+    phase-less until then, and wiring stays a pure configuration step.
     """
-    from agentalloy.install.subcommands.phase import _phase_path, run_phase_set  # noqa: PLC0415
-
     _seed_agentalloy_readme(root)
-    if _phase_path(root).exists():
-        return None
-    result = run_phase_set("intake", root=root)
     _git_exclude_agentalloy(root)
-    return result.get("phase")
 
 
 _AGENTALLOY_README = """\
@@ -271,12 +267,6 @@ def _render_human(result: dict[str, Any]) -> None:
     if not files_written and not files_modified:
         print_rich("  [dim]No files to wire.[/dim]")
 
-    phase_seeded = result.get("phase_seeded")
-    if phase_seeded:
-        print_rich(
-            f"  Phase: [bold]{phase_seeded}[/bold] [dim](repo activated; composes next prompt)[/dim]"
-        )
-
     detected = result.get("custom_workflow_detected")
     if detected:
         print_rich(f"  [dim]Detected your own workflow: {', '.join(detected)}[/dim]")
@@ -284,9 +274,6 @@ def _render_human(result: dict[str, Any]) -> None:
     mode = result.get("lifecycle_mode")
     if mode and mode != "full":
         print_rich(f"  Lifecycle: [bold]{mode}[/bold] [dim](wired, injection muted)[/dim]")
-
-    if result.get("stale_phase_cleared"):
-        print_rich("  [dim]Cleared a stale phase file (lifecycle is not full)[/dim]")
 
     if result.get("soft_precedence_note"):
         print_rich("  [dim].claude/CLAUDE.md note added (repo workflow loads last)[/dim]")
@@ -566,8 +553,13 @@ def _normalize_harnesses(raw: list[str] | str | None) -> list[str]:
 
 
 def _list_wired(args: argparse.Namespace, cwd: Path) -> int:
-    """Print the harnesses wired in ``cwd`` plus the repo's lifecycle + phase."""
-    from agentalloy.install.subcommands.phase import _read_phase
+    """Print the harnesses wired in ``cwd`` plus the repo's lifecycle mode.
+
+    Deliberately does not report the phase.  Phase lives only in the state
+    store, so showing it here would make a listing command depend on a running
+    service — and wiring is specified to neither seed nor read lifecycle state.
+    ``agentalloy phase`` is the one place that answers "which phase".
+    """
     from agentalloy.signals.skill_loader import _read_lifecycle_mode
 
     st = install_state.load_state()
@@ -587,12 +579,10 @@ def _list_wired(args: argparse.Namespace, cwd: Path) -> int:
         if same_repo and harness not in wired:
             wired.append(harness)
 
-    phase_info = _read_phase(cwd)
     result = {
         "repo_root": str(cwd),
         "harnesses": wired,
         "lifecycle_mode": _read_lifecycle_mode(cwd),
-        "phase": phase_info.get("phase") if isinstance(phase_info, dict) else None,
     }
     write_result(result, args, human_fn=_render_wired_list)
     return 0
@@ -608,7 +598,7 @@ def _render_wired_list(result: dict[str, Any]) -> None:
     else:
         print_rich("    [dim]none wired in this repo[/dim]")
     print_rich(f"\n  Lifecycle: [bold]{result.get('lifecycle_mode', 'off')}[/bold]")
-    print_rich(f"  Phase: {result.get('phase') or '[dim]none[/dim]'}\n")
+    print_rich("  [dim]Phase: run `agentalloy phase`[/dim]\n")
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -667,26 +657,13 @@ def _run(args: argparse.Namespace) -> int:
     if detected_workflow:
         result["custom_workflow_detected"] = detected_workflow
 
-    if mode == "full":
-        # Activate this repo: seed the entry phase so composition engages on the
-        # next prompt. Without a phase file, the proxy path short-circuits and
-        # the repo stays inert (the "wired but nothing happens" trap).
-        # Create-only — an already-phased repo is left untouched.
-        phase_seeded = _seed_entry_phase(cwd)
-        if phase_seeded:
-            result["phase_seeded"] = phase_seeded
-    else:
-        # off must NOT seed a phase (a seeded `intake` re-arms the front door).
-        # Still git-exclude `.agentalloy/` — the config file lives there.
-        _git_exclude_agentalloy(cwd)
-        # Reconcile a stale phase file: an existing phase (e.g. `build` from a
-        # prior `full` wiring) would otherwise sit alongside `lifecycle_mode:
-        # off` and silently suppress composition while looking active. The
-        # lifecycle is off here, so the phase is meaningless — clear it.
-        phase_file = cwd / ".agentalloy" / "phase"
-        if phase_file.exists():
-            phase_file.unlink()
-            result["stale_phase_cleared"] = True
+    # Wiring is a pure configuration step in both modes: it writes the config
+    # file, the README, and the git exclude, and no lifecycle state at all.
+    # `full` used to seed the entry phase here and `off` used to clear a stale
+    # phase file; the phase now lives only in the state store, is seeded lazily
+    # on the repo's first proxy request, and a stale row under `off` is inert
+    # anyway (the mode guard short-circuits before the phase is ever read).
+    _seed_repo_metadata(cwd)
 
     # Wire each requested harness's carrier in turn. Carriers are disjoint across
     # harnesses, and _persist_extra_records merges state by path, so stacking a

@@ -58,13 +58,20 @@ class TestPhaseRoute:
         resp = client.get("/state/phase", params={"repo_root": str(repo)})
 
         assert resp.status_code == 200
-        assert resp.json() == {"kind": "phase", "value": "build"}
+        body = resp.json()
+        # `value` stays the bare name; the decoded row rides alongside it so a
+        # CLI can render mode/timestamps without a second source of truth.
+        assert body["kind"] == "phase"
+        assert body["value"] == "build"
+        assert body["workflow"] == "sdd-build"
 
     def test_unset_phase_is_a_null_value_not_an_error(self, wired, tmp_path: Path) -> None:
         _store, client = wired
         resp = client.get("/state/phase", params={"repo_root": str(tmp_path / "fresh")})
         assert resp.status_code == 200
-        assert resp.json() == {"kind": "phase", "value": None}
+        body = resp.json()
+        assert body["kind"] == "phase"
+        assert all(body[k] is None for k in body if k != "kind")
 
     def test_the_route_wins_over_the_generic_kind_route(self, wired, tmp_path: Path) -> None:
         """Declaration order is load-bearing — pin it so a reorder is caught."""

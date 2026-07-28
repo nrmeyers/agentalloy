@@ -542,16 +542,29 @@ class TestMissingProjectRootWarning:
         warns = [r for r in caplog.records if "not visible to the proxy" in r.getMessage()]
         assert len(warns) == 1
 
-    def test_present_agentalloy_dir_does_not_warn(
+    def test_present_agentalloy_dir_seeds_intake_instead_of_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        # `.agentalloy/` exists but holds no phase file: the root IS visible, so
-        # this is a legitimate passthrough — no "not visible" warning.
+        # `.agentalloy/` exists but the repo has no phase row: the root IS
+        # visible, so this is a freshly wired repo, not an invisible one. Wiring
+        # deliberately seeds no state, so the entry phase is seeded here, on the
+        # first request — a wired repo that stayed inert until someone ran
+        # `phase set` by hand was the "wired but nothing happens" trap.
         (tmp_path / ".agentalloy").mkdir()
         with caplog.at_level(logging.WARNING, logger="agentalloy.api.proxy_signal"):
             result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
-        assert result.should_compose is False
+        assert result.should_compose is True
+        assert result.phase == "intake"
         assert not any("not visible to the proxy" in r.getMessage() for r in caplog.records)
+
+    def test_phaseless_read_only_evaluation_seeds_nothing(self, tmp_path: Path) -> None:
+        """``mutate=False`` evaluates as intake without recording it."""
+        from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+        (tmp_path / ".agentalloy").mkdir()
+        result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, mutate=False))
+        assert result.phase == "intake"
+        assert _read_phase(tmp_path) is None
 
 
 def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:

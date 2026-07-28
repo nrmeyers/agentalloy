@@ -74,11 +74,12 @@ class TestPhaseGet:
 
 
 class TestPhaseSet:
-    def test_creates_phase_file(self, repo_root: Path) -> None:
+    def test_records_the_phase_in_the_store(self, repo_root: Path) -> None:
         result = run_phase_set("build", root=repo_root)
-        phase_file = repo_root / ".agentalloy" / "phase"
-        assert phase_file.exists()
         assert result["phase"] == "build"
+        assert run_phase_get(root=repo_root)["phase"] == "build"
+        # The row is the only record: no file is written alongside it.
+        assert not (repo_root / ".agentalloy" / "phase").exists()
 
     def test_validates_phase(self, repo_root: Path) -> None:
         with pytest.raises((SystemExit, ValueError)):
@@ -86,7 +87,7 @@ class TestPhaseSet:
 
     def test_valid_phases_accepted(self, repo_root: Path) -> None:
         for phase in ("intake", "spec", "design", "build", "qa", "ship"):
-            (repo_root / ".agentalloy" / "phase").unlink(missing_ok=True)
+            run_phase_clear(root=repo_root)
             result = run_phase_set(phase, root=repo_root)
             assert result["phase"] == phase
 
@@ -98,10 +99,16 @@ class TestPhaseSet:
         assert updated["phase"] == "design"
         assert updated["started_at"] == original["started_at"]
 
-    def test_creates_directory(self, repo_root: Path) -> None:
+    def test_creates_no_repo_directory(self, repo_root: Path) -> None:
+        """A phase write touches the store and nothing in the repo.
+
+        It used to create ``.agentalloy/`` on the way to writing the phase file.
+        Nothing about setting a phase needs a directory now, and creating one
+        would put a repo-local artifact back beside the single source of truth.
+        """
         assert not (repo_root / ".agentalloy").exists()
         run_phase_set("build", root=repo_root)
-        assert (repo_root / ".agentalloy").is_dir()
+        assert not (repo_root / ".agentalloy").exists()
 
 
 class TestPhaseSetTransitionedBy:
@@ -142,30 +149,39 @@ class TestPhaseSetTransitionedBy:
 
 
 class TestPhaseClear:
-    def test_removes_phase_file(self, repo_root: Path) -> None:
+    def test_removes_the_phase_row(self, repo_root: Path) -> None:
         run_phase_set("build", root=repo_root)
-        assert (repo_root / ".agentalloy" / "phase").exists()
+        assert run_phase_get(root=repo_root)["phase"] == "build"
         run_phase_clear(root=repo_root)
-        assert not (repo_root / ".agentalloy" / "phase").exists()
+        # Cleared means *absent*, not an empty value: a repo with no phase row
+        # is the same state as a freshly wired one.
+        assert run_phase_get(root=repo_root)["phase"] is None
 
     def test_clear_when_no_phase(self, repo_root: Path) -> None:
         result = run_phase_clear(root=repo_root)
         assert result is not None
 
 
-class TestPhaseFileFormat:
-    def test_yaml_format(self, repo_root: Path) -> None:
+class TestPhaseRecordShape:
+    """What a phase write actually persists, now that it persists to a row."""
+
+    def _row(self, repo_root: Path):
+        from agentalloy.install.subcommands._state import phase_access
+
+        return phase_access(repo_root).read()
+
+    def test_metadata_rides_with_the_name(self, repo_root: Path) -> None:
         run_phase_set("build", root=repo_root)
-        content = (repo_root / ".agentalloy" / "phase").read_text()
-        assert "phase: build" in content
-        assert "started_at:" in content
-        assert "last_updated:" in content
-        assert "workflow:" in content
+        row = self._row(repo_root)
+        assert row.phase == "build"
+        assert row.started_at and row.last_updated
+        assert row.workflow == "sdd-build"
 
     def test_blocked_flag_not_persisted(self, repo_root: Path) -> None:
-        # The return-only `blocked` signal must never leak into the lock file.
+        # `blocked` is a return-only signal about *this call*; it is not state.
         run_phase_set("build", root=repo_root)
-        assert "blocked" not in (repo_root / ".agentalloy" / "phase").read_text()
+        row = self._row(repo_root)
+        assert not hasattr(row, "blocked")
 
 
 def _write_spec_doc(repo_root: Path) -> None:
@@ -222,11 +238,11 @@ class TestGuardedAdvance:
         run_phase_set("qa", root=repo_root)
         assert run_phase_set("build", root=repo_root)["phase"] == "build"
 
-        (repo_root / ".agentalloy" / "phase").unlink()
+        run_phase_clear(root=repo_root)
         run_phase_set("design", root=repo_root)
         assert run_phase_set("spec", root=repo_root)["phase"] == "spec"
 
-        (repo_root / ".agentalloy" / "phase").unlink()
+        run_phase_clear(root=repo_root)
         run_phase_set("sdd-fast", root=repo_root)
         assert run_phase_set("spec", root=repo_root)["phase"] == "spec"
 
@@ -258,7 +274,7 @@ class TestGuardedAdvance:
         assert run_phase_set("design", root=repo_root)["blocked"] is False
 
         # deterministic part NOT_MET → blocked, regardless of the UNKNOWN semantic part
-        (repo_root / ".agentalloy" / "phase").unlink()
+        run_phase_clear(root=repo_root)
         for p in (repo_root / "docs" / "spec").glob("*.md"):
             p.unlink()
         run_phase_set("spec", root=repo_root)

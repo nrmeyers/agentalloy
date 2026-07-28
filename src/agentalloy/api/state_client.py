@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_PORT_FALLBACK = 47950
 
@@ -93,14 +93,37 @@ class StateClient:
 
     # -- write operations ------------------------------------------------
 
-    def set_phase(self, value: str, *, repo_root: str | None = None) -> dict[str, Any]:
+    def set_phase(
+        self,
+        value: str,
+        *,
+        repo_root: str | None = None,
+        actor: str | None = None,
+        mode: str | None = None,
+        free_since: str | None = None,
+    ) -> dict[str, Any]:
         """Set the current phase via the service.
 
         When *repo_root* is provided, it is forwarded as a query parameter
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
+
+        ``mode``/``free_since`` are the free-flow pair.  Omitting them carries
+        the stored values forward; passing ``""`` clears them, which is how
+        ``flow resume`` leaves free-flow.  They are real fields rather than
+        something smuggled inside *value*: ``flow free`` used to POST
+        ``"free-flow:<phase>"`` as the phase name, which wrote a phase nothing
+        recognises and had to skip the posture rewrite to avoid clearing the
+        deny rules.
         """
-        return self._post("/state/phase", {"value": value}, repo_root=repo_root)
+        body: dict[str, Any] = {"value": value}
+        if actor is not None:
+            body["actor"] = actor
+        if mode is not None:
+            body["mode"] = mode
+        if free_since is not None:
+            body["free_since"] = free_since
+        return self._post("/state/phase", body, repo_root=repo_root)
 
     def set_phase_with_contract(
         self, value: str, contract: dict[str, Any], *, repo_root: str | None = None
@@ -161,6 +184,48 @@ class StateClient:
             value = body["value"]
             return None if value is None else str(value)
         return raw
+
+    def get_phase(self, *, repo_root: str | None = None) -> dict[str, Any] | None:
+        """Read the decoded phase row, or ``None`` when no phase is recorded.
+
+        Distinct from ``get_state("phase")``, which returns only the bare name:
+        the CLI renders ``mode``, ``free_since`` and the timestamps too, and
+        reaching them was the last thing keeping the file mirror alive.
+
+        Raises ``StateClientError`` when the service is unreachable.  A down
+        service must never read as "this repo has no phase" — that is exactly
+        how an outage used to look like a fresh repo and reset the workflow.
+        """
+        try:
+            resp = urllib.request.urlopen(
+                self._url("/state/phase", repo_root=repo_root), timeout=self._timeout
+            )
+            body = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+        if not isinstance(body, dict) or body.get("value") is None:
+            return None
+        return cast("dict[str, Any]", body)
+
+    def clear_phase(self, *, repo_root: str | None = None) -> None:
+        """Delete the phase row.  Idempotent — clearing an absent phase is fine."""
+        req = urllib.request.Request(
+            self._url("/state/phase", repo_root=repo_root), method="DELETE"
+        )
+        try:
+            urllib.request.urlopen(req, timeout=self._timeout)
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
     # -- contract operations ------------------------------------------------
 

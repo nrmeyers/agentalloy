@@ -126,7 +126,9 @@ class TestWireMultiple:
         out = json.loads(capsys.readouterr().out)
         assert sorted(out["harnesses"]) == ["claude-code", "hermes-agent"]
         assert out["lifecycle_mode"] == "full"
-        assert out["phase"] == "intake"
+        # The listing deliberately carries no phase: it would make `wire --list`
+        # depend on a running state service. `agentalloy phase` answers that.
+        assert "phase" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +143,15 @@ class TestUnwireSingleHarness:
         monkeypatch.chdir(repo_root)
         wire._run(_wire(["claude-code", "hermes-agent"]))
         hermes_cfg = repo_root / ".hermes" / "config.yaml"
-        phase = repo_root / ".agentalloy" / "phase"
         config = repo_root / ".agentalloy" / "config"
-        assert phase.exists() and config.exists()
+        assert config.exists()
+        # Wiring seeds no phase, so set one to have lifecycle state to preserve.
+        from agentalloy.install.subcommands.phase import run_phase_set
+        from agentalloy.install.subcommands.status import (
+            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        run_phase_set("build", root=repo_root, force=True)
         capsys.readouterr()
 
         rc = unwire._run(_unwire("claude-code"))
@@ -155,7 +163,9 @@ class TestUnwireSingleHarness:
         assert not (repo_root / ".claude" / "CLAUDE.md").exists()
         # ...Hermes (repo-local carrier) + the shared lifecycle state survive...
         assert hermes_cfg.exists(), "hermes carrier must survive a claude-code unwire"
-        assert phase.exists(), "lifecycle phase must survive while hermes remains wired"
+        assert _repo_phase(str(repo_root)) == "build", (
+            "lifecycle phase must survive while hermes remains wired"
+        )
         assert config.exists()
         # ...and state now lists only the remaining harness.
         assert _wired_harnesses(repo_root) == {"hermes-agent"}

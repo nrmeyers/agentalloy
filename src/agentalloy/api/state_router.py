@@ -34,6 +34,7 @@ from agentalloy.api.state_models import (
     ContractSupersedeRequest,
     PhaseAdvanceRequest,
     PhaseAdvanceResponse,
+    PhaseReadResponse,
     ResumeContractInfo,
     ResumeResponse,
     StateAllResponse,
@@ -383,13 +384,13 @@ async def read_resume(
 
 @router.get(
     "/phase",
-    response_model=StateReadResponse,
-    summary="Read the current phase as a bare name",
+    response_model=PhaseReadResponse,
+    summary="Read the current phase, decoded",
 )
 async def read_phase(
     store: DuckDBStateStore = Depends(get_repo_store),
-) -> StateReadResponse:
-    """Return the phase name alone — never the stored blob.
+) -> PhaseReadResponse:
+    """Return the decoded phase row — never the stored blob verbatim.
 
     Its own route rather than a branch inside ``/{kind}`` because the two
     return genuinely different things: every other kind's stored value *is*
@@ -397,11 +398,47 @@ async def read_phase(
     timestamps alongside the name.  Serving it through the generic route
     handed every caller a JSON envelope where it expected ``"build"``.
 
+    ``value`` stays the bare name so that older callers keep working; the
+    decoded fields ride alongside it because the CLI reads the whole row and,
+    without them, had no way to reach ``mode``/``free_since``/``transitioned_by``
+    except the file mirror this migration is removing.
+
     Note the deliberate asymmetry with writes: ``POST /state/phase`` is gated
     (task 09), this read is not.  Reading a phase cannot advance one.
     """
     phase = await asyncio.to_thread(store.read_phase)
-    return StateReadResponse(kind="phase", value=phase.phase if phase else None)
+    if phase is None:
+        return PhaseReadResponse(kind="phase", value=None)
+    return PhaseReadResponse(
+        kind="phase",
+        value=phase.phase,
+        mode=phase.mode,
+        free_since=phase.free_since,
+        transitioned_by=phase.transitioned_by,
+        started_at=phase.started_at,
+        last_updated=phase.last_updated,
+        workflow=phase.workflow or None,
+    )
+
+
+@router.delete(
+    "/phase",
+    response_model=StateReadResponse,
+    summary="Clear the current phase",
+)
+async def clear_phase(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateReadResponse:
+    """Delete the phase row, leaving the repo genuinely phase-less.
+
+    ``agentalloy phase clear`` used to ``unlink()`` the file; with the store as
+    the only source it needs a route, and it must *delete* rather than write an
+    empty value — a row holding ``""`` still reads as present to every consumer
+    that checks for ``None``.  Idempotent: clearing an absent phase is a
+    success, so reset paths stay re-runnable.
+    """
+    await asyncio.to_thread(store.clear, "phase")
+    return StateReadResponse(kind="phase", value=None)
 
 
 # ---------------------------------------------------------------------------
@@ -492,11 +529,20 @@ async def write_phase(
     explicit override flag; until it lands, treat the gate as advisory.
     """
     phase_value = req.value
+    # ``actor`` is who *moved* the phase; ``owner`` is who holds the lease.  They
+    # are usually the same session, and were conflated while only the lease had a
+    # field — falling back keeps every existing caller behaving identically.
+    actor = req.actor or req.owner
 
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
         result = await asyncio.to_thread(
-            store.write_phase, phase_value, actor=req.owner, owner=req.owner
+            store.write_phase,
+            phase_value,
+            actor=actor,
+            owner=req.owner,
+            mode=req.mode,
+            free_since=req.free_since,
         )
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
@@ -521,7 +567,13 @@ async def write_phase(
     try:
         with store.transaction() as tx:
             # Write the phase — blob semantics, reusing this transaction.
-            result = tx.write_phase(phase_value, actor=req.owner, owner=req.owner)
+            result = tx.write_phase(
+                phase_value,
+                actor=actor,
+                owner=req.owner,
+                mode=req.mode,
+                free_since=req.free_since,
+            )
             # conflict.owner is None when no row exists yet — non-blocking
             if result.conflict is not None and result.conflict.owner is not None:
                 # lease_expires_at is also non-None when owner is non-None

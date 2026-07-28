@@ -26,9 +26,16 @@ _CSRF = {"X-AgentAlloy-CSRF": "1"}
 def _make_repo(tmp_path: Path, name: str, phase: str = "spec") -> Path:
     root = tmp_path / name
     (root / ".agentalloy").mkdir(parents=True)
-    (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\nschema_version: 1\n")
     (root / "pyproject.toml").write_text("")
+    _set_phase(root, phase)
     return root
+
+
+def _set_phase(root: Path, phase: str) -> None:
+    """Put *root* in *phase* — in the store, which is where the API reads it."""
+    from agentalloy.install.subcommands.phase import run_phase_set
+
+    run_phase_set(phase, root=root, force=True)
 
 
 def _write_spec_doc(root: Path) -> Path:
@@ -129,7 +136,7 @@ def test_approvals_stale_marker_reappears(client, tmp_path: Path, monkeypatch: p
     r = client.post("/api/repos/approve", json={"repo": str(repo), "phase": "spec"}, headers=_CSRF)
     assert r.status_code == 200
     # Back to spec (simulate rework), edit the artifact after the marker.
-    (repo / ".agentalloy" / "phase").write_text("phase: spec\nschema_version: 1\n")
+    _set_phase(repo, "spec")
     future = time.time() + 5
     import os
 

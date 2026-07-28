@@ -148,7 +148,9 @@ def test_install_in_lane_records_approval_and_advances(
     client, repo: Path, monkeypatch: pytest.MonkeyPatch
 ):
     _scaffold(client, repo)
-    (repo / ".agentalloy" / "phase").write_text("phase: add-skill\nschema_version: 1\n")
+    from agentalloy.install.subcommands.phase import run_phase_set
+
+    run_phase_set("add-skill", root=repo, force=True)
     monkeypatch.setattr(
         "agentalloy.install.subcommands.install_pack.install_local_pack",
         lambda pack_dir, **kw: {"action": "ingested", "skills_ingested": 1},

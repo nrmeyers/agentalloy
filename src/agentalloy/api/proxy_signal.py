@@ -594,7 +594,18 @@ async def evaluate_signal(
                     "path (see AGENTALLOY_PROJECTS_ROOT). Composition skipped for this repo.",
                     agentalloy_dir,
                 )
-        return SignalResult(should_compose=False)
+            return SignalResult(should_compose=False)
+
+        # Wired, but phase-less: `wire` writes no state at all (AC-9), so the
+        # entry phase is seeded lazily, here, on the first real request. Before
+        # this, a wired repo with no phase row was inert — every prompt fell
+        # through as a plain passthrough until someone ran `phase set` by hand.
+        # A read-only evaluation seeds nothing and just evaluates as intake.
+        phase = INTAKE_PHASE
+        if mutate:
+            _write_phase_atomic(cwd, phase)
+            phase_state = _phase_state(cwd)
+            transitioned_by = phase_state.transitioned_by if phase_state else None
 
     # 1b. Free-flow guard (single guard point). ``mode: free`` in the phase row
     # flips the whole request into compose-only handling: no orientation, no

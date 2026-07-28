@@ -1,12 +1,14 @@
-"""``phase`` subcommand — phase lock file management.
+"""``phase`` subcommand — the current SDD phase.
 
-Manage the `.agentalloy/phase` YAML file that tracks the current
-SDD phase for a project session.
+Phase lives in the ``sdd_state`` store, one row per repo; there is no
+``.agentalloy/phase`` file and no fallback to one.  Every verb here therefore
+needs a reachable store: in-process when the service runs this code itself,
+over HTTP otherwise (see :mod:`agentalloy.install.subcommands._state`).
 
 Commands:
-    agentalloy phase            — print current phase
-    agentalloy phase set <phase> — write/update the phase lock file
-    agentalloy phase clear      — remove the phase lock file
+    agentalloy phase             — print current phase
+    agentalloy phase set <phase> — advance (or move) the phase
+    agentalloy phase clear       — remove the phase row
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentalloy.api.state_client import StateClient, StateClientError
+from agentalloy.api.state_client import StateClientError
+from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
 
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
@@ -37,96 +40,38 @@ _APPROVAL_SINCE = {
 }
 
 
-def _phase_path(root: Path) -> Path:
-    return root / ".agentalloy" / "phase"
-
-
-def _read_phase(root: Path) -> dict[str, Any] | None:
-    """Read and parse the phase lock file. Returns None if not found."""
-    p = _phase_path(root)
-    if not p.exists():
-        return None
-    # Simple YAML parser — no pyyaml dependency needed for this flat format.
-    # Use partition on first colon only to handle values containing colons (e.g. ISO timestamps).
-    data: dict[str, Any] = {}
-    for line in p.read_text().splitlines():
-        if ":" not in line or line.strip().startswith("#"):
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        data[key] = value
-    return data if data else None
-
-
-def _write_phase(data: dict[str, Any], root: Path) -> None:
-    """Write the phase lock file, creating .agentalloy/ if needed."""
-    p = _phase_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    lines: list[str] = []
-    for key, value in data.items():
-        if isinstance(value, str) and "T" in value:
-            # ISO timestamp — quote it so YAML parsers read it as string
-            lines.append(f'{key}: "{value}"')
-        else:
-            lines.append(f"{key}: {value}")
-    p.write_text("\n".join(lines) + "\n")
-
-
 def _now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def run_phase_get(root: Path | None = None) -> dict[str, Any]:
-    """Get the current phase from the lock file.
+    """The current phase for *root*, read from the store.
 
-    Routes through the state service when it is running; falls back to
-    direct file reads when the service is down.
+    ``phase: None`` means the repo has no phase recorded — a legitimate state
+    for a freshly wired repo.  An unreachable store exits non-zero instead of
+    reporting that, so an outage cannot masquerade as a fresh repo.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-    data = _read_phase(root)
-    if data is None:
+    try:
+        state = phase_access(root).read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable — fail_on_state_error exits
+    if state is None:
         return {"phase": None, "message": "No active phase"}
     return {
-        "phase": data.get("phase"),
-        "started_at": data.get("started_at"),
-        "last_updated": data.get("last_updated"),
-        "workflow": data.get("workflow"),
+        "phase": state.phase,
+        "started_at": state.started_at,
+        "last_updated": state.last_updated,
+        "workflow": state.workflow,
     }
 
 
-def _gate_store(root: Path) -> Any:
-    """Store handle for out-of-process gate evaluation, or ``None`` if unavailable.
-
-    The CLI runs outside the service, so it has no in-process ``DuckDBStateStore``
-    handle — the service holds the writer lock. ``StateClient`` is duck-type
-    compatible with the only method the predicates call
-    (``list_contracts(phase=, slug=, status=)``), so it stands in as the store.
-
-    Without this, ``PredicateContext.store`` was ``None``, ``_query_store_contracts``
-    returned ``[]``, and the two contract predicates
-    (``build_contracts_cover_tasks``, ``build_contract_tag_focus``) evaluated
-    UNKNOWN and failed open — making the design→build coverage gate vacuous for
-    every CLI ``phase set``.
-
-    Returns ``None`` when the service is down, which restores the previous
-    fail-open behaviour: ``phase set`` must not gain a hard dependency on a
-    running service.
-
-    Known limitation: ``GET /contracts`` scopes to the *service's* repo, not to
-    ``root``. Gating a repo other than the one the service resolves is out of
-    scope here and needs its own contract.
-    """
-    client = StateClient()
-    try:
-        return client if client.is_running() else None
-    except Exception:
-        return None
-
-
-def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, list[str]]:
+def _forward_gate_blocks(
+    current: str, target: str, root: Path, store: Any
+) -> tuple[bool, list[str]]:
     """Whether a *forward* ``phase set`` should be refused, with advisories.
 
     A transition is "forward" only when ``target`` is the next phase in the
@@ -155,7 +100,7 @@ def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, l
     if not gate_spec:
         return False, []  # no packaged gate for this phase → nothing to enforce
 
-    ctx = PredicateContext(project_root=root, current_phase=current, store=_gate_store(root))
+    ctx = PredicateContext(project_root=root, current_phase=current, store=store)
     result, _ = evaluate_node(gate_spec, ctx, lm_client=None, qwen_calls=[0])
     if result != PredicateResult.NOT_MET:
         return False, []  # MET or UNKNOWN → allow
@@ -166,7 +111,9 @@ def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, l
     return True, decision.advisories
 
 
-def _approval_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, list[str]]:
+def _approval_gate_blocks(
+    current: str, target: str, root: Path, store: Any
+) -> tuple[bool, list[str]]:
     """Whether a forward ``phase set`` must be refused for lack of human approval.
 
     Approval is the human checkpoint that ``--force`` must NOT bypass (``--force``
@@ -198,7 +145,7 @@ def _approval_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, 
     since = _APPROVAL_SINCE.get(current, "")
     if since and not any(p.is_file() for p in root.glob(since)):
         return False, []  # nothing produced yet → completeness gate handles it
-    ctx = PredicateContext(project_root=root, current_phase=current, store=_gate_store(root))
+    ctx = PredicateContext(project_root=root, current_phase=current, store=store)
     result = eval_approval_recorded({"since": since}, ctx)
     if result != PredicateResult.NOT_MET:
         return False, []  # MET or UNKNOWN → allow
@@ -222,26 +169,14 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     recorded approval marker is refused with ``reason="approval"`` even under
     ``force``. Backward, bail, and reset transitions are never gated.
 
-    When the phase state service is running, the write is routed through the
-    service's HTTP API; otherwise the file-mirror path is used directly.
+    The write goes to the state store — in-process when this runs inside the
+    service, over HTTP otherwise.  There is no file-mirror path left: a store
+    that cannot be reached stops the command instead of writing somewhere the
+    service will never read.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-
-    # -- Service routing: try the HTTP client first, fall back to file mirror --
-    client = StateClient()
-    if client.is_running():
-        try:
-            return client.set_phase(phase, repo_root=str(root))
-        except StateClientError as exc:
-            # Service responded but errored — fall through to file mirror.
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-    # Service is down or the call failed — write directly to the file mirror.
 
     if phase not in VALID_PHASES:
         print(
@@ -250,13 +185,19 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
         )
         sys.exit(1)
 
-    existing = _read_phase(root)
-    current = existing.get("phase") if existing else None
+    access = phase_access(root)
+    try:
+        existing = access.read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    current = existing.phase if existing else None
+    gate_store = access.contracts_handle()
 
     # Human-approval gate runs unconditionally — --force waives only
     # artifact-completeness, never the human checkpoint.
     if current and current != phase:
-        appr_blocked, appr_adv = _approval_gate_blocks(current, phase, root)
+        appr_blocked, appr_adv = _approval_gate_blocks(current, phase, root, gate_store)
         if appr_blocked:
             return {
                 "phase": current,
@@ -267,7 +208,7 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
             }
 
     if not force and current and current != phase:
-        blocked, advisories = _forward_gate_blocks(current, phase, root)
+        blocked, advisories = _forward_gate_blocks(current, phase, root, gate_store)
         if blocked:
             return {
                 "phase": current,
@@ -276,38 +217,39 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
                 "advisories": advisories,
             }
 
-    now = _now_iso()
-
-    data: dict[str, Any] = {
-        "phase": phase,
-        "started_at": existing.get("started_at", now) if existing else now,
-        "last_updated": now,
-        "workflow": f"sdd-{phase}",
-    }
-    # Free-flow state (`agentalloy flow free`) rides the same file — a phase set
-    # must not silently drop the repo out of free-flow.
-    if existing:
-        for key in ("mode", "free_since"):
-            if key in existing:
-                data[key] = existing[key]
-
     # Record who caused a real transition, mirroring the proxy's
     # `skill_loader._write_phase_atomic` — lets a *different* session's next
     # turn recognize the phase changed out from under it (see
     # `proxy_signal._boundary_confirm_directives`'s "swept" case). An idempotent
-    # `phase set` to the same phase preserves the prior actor unchanged. No
-    # `CLAUDE_CODE_SESSION_ID` (a bare terminal invocation, not run from within a
-    # tracked session) records nothing — ambiguous, not attributable.
+    # `phase set` to the same phase preserves the prior actor unchanged (the
+    # store enforces that, not this call site). No `CLAUDE_CODE_SESSION_ID` (a
+    # bare terminal invocation, not run from within a tracked session) records
+    # nothing — ambiguous, not attributable.
     from agentalloy.signals.skill_loader import cli_session_key  # noqa: PLC0415
 
-    if current != phase:
-        actor = cli_session_key()
-        if actor:
-            data["transitioned_by"] = actor
-    elif existing and existing.get("transitioned_by"):
-        data["transitioned_by"] = existing["transitioned_by"]
+    try:
+        # `mode`/`free_since` are deliberately not passed: omitting them carries
+        # the stored pair forward, so a phase set never drops the repo out of
+        # free-flow. Only `agentalloy flow` sets them.
+        access.write(phase, actor=cli_session_key() or None)
+        state = access.read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
 
-    _write_phase(data, root)
+    data: dict[str, Any] = {
+        "phase": phase,
+        "started_at": state.started_at if state else _now_iso(),
+        "last_updated": state.last_updated if state else _now_iso(),
+        "workflow": f"sdd-{phase}",
+    }
+    if state and state.mode:
+        data["mode"] = state.mode
+    if state and state.free_since:
+        data["free_since"] = state.free_since
+    if state and state.transitioned_by:
+        data["transitioned_by"] = state.transitioned_by
+
     # On a real transition, SEED the work-item cursor to the new phase's first work-item
     # (filename order) so "which task is current" is reliably set — the single source of
     # truth both the proxy and the codify gate read. A phase with no contracts clears it.
@@ -336,15 +278,19 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
 
 
 def run_phase_clear(root: Path | None = None) -> dict[str, Any]:
-    """Remove the phase lock file."""
+    """Delete the phase row, leaving *root* genuinely phase-less."""
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-    p = _phase_path(root)
-    if p.exists():
-        p.unlink()
-        return {"message": "Phase cleared", "phase": None}
-    return {"message": "No phase to clear", "phase": None}
+    access = phase_access(root)
+    try:
+        existing = access.read()
+        access.clear()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    message = "Phase cleared" if existing else "No phase to clear"
+    return {"message": message, "phase": None}
 
 
 # ---------------------------------------------------------------------------
@@ -396,8 +342,7 @@ def _add_project_root_flag(p: argparse.ArgumentParser) -> None:
         "--project-root",
         default=None,
         help=(
-            "Repo directory to read/write the .agentalloy/phase file in. "
-            "Default: auto-detect from cwd (stops at $HOME)."
+            "Repo whose phase row to read/write. Default: auto-detect from cwd (stops at $HOME)."
         ),
     )
 
