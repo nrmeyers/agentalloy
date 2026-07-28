@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentalloy.api.state_client import StateClient, StateClientError
+from agentalloy.api.state_client import StateClientError
 
 _APPROVABLE = ("spec", "design", "sdd-fast", "add-skill")
 _EXIT_ARTIFACT_GLOB = {
@@ -68,14 +68,20 @@ def run_approve(
     "advanced": <run_phase_set result>}`` (which itself may carry ``blocked`` if a
     downstream artifact-completeness gate still isn't met).
 
-    When the phase state service is running, the approval is routed through
-    the service's HTTP API; otherwise the file-mirror path is used directly.
+    Runs entirely here rather than handing off to ``POST /state/approve``.  That
+    route only writes an ``approved`` row: it does not check the live phase, does
+    not write the marker the approval predicate actually reads, and does not
+    advance the phase.  Short-circuiting to it meant that with the service up,
+    ``agentalloy approve design`` reported success while approving nothing and
+    advancing nowhere.  The phase read and write below go through the store
+    either way, so there is no second source of truth left to route around.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
-    from agentalloy.install.subcommands.phase import (  # noqa: PLC0415
-        _read_phase,  # pyright: ignore[reportPrivateUsage]
-        run_phase_set,
+    from agentalloy.install.subcommands._state import (  # noqa: PLC0415
+        fail_on_state_error,
+        phase_access,
     )
+    from agentalloy.install.subcommands.phase import run_phase_set  # noqa: PLC0415
     from agentalloy.signals.gates import (  # noqa: PLC0415
         _PHASE_GRAPH,  # pyright: ignore[reportPrivateUsage]
     )
@@ -83,24 +89,12 @@ def run_approve(
 
     root = root or _repo_root()
 
-    # -- Service routing: try the HTTP client first, fall back to file mirror --
-    client = StateClient()
-    if client.is_running():
-        try:
-            result = client.approve(phase)
-            # Service handled it — return its result directly.
-            return result
-        except StateClientError as exc:
-            # Service responded but errored — fall through to file mirror.
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-    # Service is down or the call failed — write directly to the file mirror.
-
-    existing = _read_phase(root)
-    current = existing.get("phase") if existing else None
+    try:
+        existing = phase_access(root).read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    current = existing.phase if existing else None
     if current != phase:
         return {"ok": False, "error": f"current phase is '{current}', not '{phase}'"}
 

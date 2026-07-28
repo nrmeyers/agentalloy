@@ -3,9 +3,9 @@
 Covers:
 - Bug 1: _repo_root() treats $HOME as a boundary (never resolves the repo
   root to the home directory via a stray ~/package.json).
-- Bug 3: `wire` seeds the entry phase (create-only) and git-excludes
-  .agentalloy/; `status` classifies user-global files and reports per-repo
-  activation.
+- Bug 3: `wire` drops the repo README and git-excludes .agentalloy/ — and
+  writes no lifecycle state at all; `status` classifies user-global files and
+  reports per-repo activation.
 - Intake: the `intake` phase is accepted and selects the intake workflow skill.
 """
 
@@ -22,7 +22,7 @@ from agentalloy.install.subcommands.status import (
     _repo_phase,  # pyright: ignore[reportPrivateUsage]
 )
 from agentalloy.install.subcommands.wire import (
-    _seed_entry_phase,  # pyright: ignore[reportPrivateUsage]
+    _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -63,35 +63,58 @@ class TestRepoRootHomeBoundary:
         assert _repo_root() == work.resolve()
 
 
-class TestWireSeedsEntryPhase:
-    """Bug 3: wiring activates the repo by seeding the entry phase."""
+class TestWireSeedsRepoMetadata:
+    """Bug 3, as it stands now: wiring is a pure configuration step.
 
-    def test_seeds_intake_and_git_excludes(self, tmp_path: Path) -> None:
+    It used to seed the entry phase here, which made ``wire`` a writer of SDD
+    state and gave it a hard dependency on a running service.  The phase is
+    seeded lazily by the proxy on the repo's first request instead, so these
+    tests pin the inverse: metadata yes, lifecycle state no.
+    """
+
+    def test_writes_readme_and_git_excludes(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = _seed_entry_phase(tmp_path)
-        assert result == "intake"
-        phase_file = tmp_path / ".agentalloy" / "phase"
-        assert phase_file.exists()
-        assert "intake" in phase_file.read_text()
+        _seed_repo_metadata(tmp_path)
+        assert (tmp_path / ".agentalloy" / "README.md").is_file()
         exclude = tmp_path / ".git" / "info" / "exclude"
         assert exclude.exists()
         assert any(line.strip() == ".agentalloy/" for line in exclude.read_text().splitlines())
 
-    def test_create_only_does_not_clobber_existing_phase(self, tmp_path: Path) -> None:
-        run_phase_set("build", root=tmp_path)
-        assert _seed_entry_phase(tmp_path) is None
-        assert "build" in (tmp_path / ".agentalloy" / "phase").read_text()
+    def test_writes_no_phase(self, tmp_path: Path) -> None:
+        _seed_repo_metadata(tmp_path)
+        assert _repo_phase(str(tmp_path)) is None
+        assert not (tmp_path / ".agentalloy" / "phase").exists()
 
-    def test_no_git_repo_still_seeds_phase(self, tmp_path: Path) -> None:
-        assert _seed_entry_phase(tmp_path) == "intake"
-        assert (tmp_path / ".agentalloy" / "phase").exists()
+    def test_a_phaseless_repo_is_legitimate(self, tmp_path: Path) -> None:
+        """AC-9 — nothing downstream treats "wired, no phase yet" as broken.
+
+        Between `wire` and the repo's first proxy request there is a window in
+        which the repo is fully wired and has no phase at all.  That used to be
+        impossible, so the read paths were never asked to handle it; each one
+        must now answer "none" rather than raise.
+        """
+        from agentalloy.install.subcommands.phase import run_phase_get
+        from agentalloy.web.ops_api import _repo_info  # pyright: ignore[reportPrivateUsage]
+
+        _seed_repo_metadata(tmp_path)
+
+        assert run_phase_get(root=tmp_path)["phase"] is None
+        assert _repo_info(str(tmp_path), ["claude-code"]).phase is None
+
+    def test_does_not_disturb_an_existing_phase(self, tmp_path: Path) -> None:
+        run_phase_set("build", root=tmp_path)
+        _seed_repo_metadata(tmp_path)
+        assert _repo_phase(str(tmp_path)) == "build"
+
+    def test_no_git_repo_is_not_an_error(self, tmp_path: Path) -> None:
+        _seed_repo_metadata(tmp_path)
+        assert (tmp_path / ".agentalloy" / "README.md").is_file()
         assert not (tmp_path / ".git").exists()  # git-exclude was a no-op
 
     def test_git_exclude_is_idempotent(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        _seed_entry_phase(tmp_path)
-        (tmp_path / ".agentalloy" / "phase").unlink()  # allow a second seed
-        _seed_entry_phase(tmp_path)
+        _seed_repo_metadata(tmp_path)
+        _seed_repo_metadata(tmp_path)
         exclude_lines = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
         assert sum(1 for line in exclude_lines if line.strip() == ".agentalloy/") == 1
 

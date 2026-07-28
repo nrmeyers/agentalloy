@@ -14,7 +14,6 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,14 +28,19 @@ from agentalloy.install.output import add_json_flag, print_rich, write_result
 
 
 def _get_client() -> StateClient:
-    """Return a StateClient and verify the service is running."""
+    """A client for a verified-running service, or exit 1.
+
+    Contract writes have no in-process equivalent (the store exposes reads and
+    ``supersede``, not the create/patch pair these verbs need), so this stays a
+    service-only path.  What it shares with the phase surfaces is the *message*:
+    it used to print its own wording, naming an ``agentalloy start`` command
+    that does not exist.
+    """
+    from agentalloy.install.subcommands._state import SERVICE_DOWN_MESSAGE  # noqa: PLC0415
+
     client = StateClient()
     if not client.is_running():
-        print(
-            "Error: agentalloy service is not running. "
-            "Start the service or run `agentalloy start`.",
-            file=sys.stderr,
-        )
+        print(SERVICE_DOWN_MESSAGE, file=sys.stderr)
         sys.exit(1)
     return client
 
@@ -264,26 +268,21 @@ def _init(args: argparse.Namespace) -> int:
     client = _get_client()
     project_root = _repo_root()
 
-    # --phase defaults to the active phase
+    # --phase defaults to the active phase, read through the shared store seam
+    # (the service is already verified running by `_get_client` above).
     phase: str | None = args.phase
     if phase is None:
-        from agentalloy.api.state_client import StateClient
+        from agentalloy.install.subcommands._state import (  # noqa: PLC0415
+            fail_on_state_error,
+            phase_access,
+        )
 
-        sc = StateClient()
-        if sc.is_running():
-            phase_data = sc.get_state("phase")
-            if phase_data:
-                # Parse JSON response or raw string
-                if isinstance(phase_data, str):
-                    try:
-                        phase_data = json.loads(phase_data)
-                    except json.JSONDecodeError:
-                        phase_data = {"value": phase_data.strip()}
-                phase = (
-                    phase_data.get("value", phase_data.get("phase"))
-                    if isinstance(phase_data, dict)
-                    else phase_data
-                )
+        try:
+            state = phase_access(project_root).read()
+        except StateClientError as exc:
+            fail_on_state_error(exc)
+            raise  # unreachable
+        phase = state.phase if state else None
         if not phase:
             print(
                 "  [error] No --phase given and no active phase. Pass --phase explicitly.",

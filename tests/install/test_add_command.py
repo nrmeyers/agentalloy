@@ -94,7 +94,7 @@ class TestAddRun:
         )
         assert add._run(args) == 1
 
-    def test_add_default_lifecycle_full_seeds_phase(
+    def test_add_default_lifecycle_writes_config_only(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = tmp_path / "home"
@@ -114,16 +114,25 @@ class TestAddRun:
         )
         assert add._run(args) == 0
         assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: full\n"
-        assert (repo / ".agentalloy" / "phase").exists()
+        # `full` used to seed the entry phase here. Adopting a harness now
+        # writes configuration and nothing else — the proxy seeds the phase on
+        # the repo's first request, so this never needs a running service.
+        from agentalloy.install.subcommands.status import (
+            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+        )
 
-    def test_add_lifecycle_off_skips_phase_and_clears_stale(
+        assert _repo_phase(str(repo)) is None
+
+    def test_add_lifecycle_off_leaves_an_existing_phase_alone(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         home = tmp_path / "home"
         _global_hermes_config(home)
         repo = tmp_path / "repo"
         (repo / ".agentalloy").mkdir(parents=True)
-        (repo / ".agentalloy" / "phase").write_text("phase: build\n")
+        from agentalloy.install.subcommands.phase import run_phase_set
+
+        run_phase_set("build", root=repo, force=True)
         monkeypatch.setattr(Path, "home", lambda: home)
         monkeypatch.chdir(repo)
 
@@ -137,5 +146,12 @@ class TestAddRun:
         )
         assert add._run(args) == 0
         assert (repo / ".agentalloy" / "config").read_text() == "lifecycle_mode: off\n"
-        # off must not seed a phase, and a stale one is cleared.
-        assert not (repo / ".agentalloy" / "phase").exists()
+        # `off` used to clear the stale phase file. It no longer touches
+        # lifecycle state at all: the mode guard short-circuits before the phase
+        # is ever read, so a leftover row under `off` is inert, and clearing it
+        # would mean losing the repo's place if the user turns the mode back on.
+        from agentalloy.install.subcommands.status import (
+            _repo_phase,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        assert _repo_phase(str(repo)) == "build"

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
+from tests.support import seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -32,12 +33,7 @@ def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
 
 
 def _set_phase(tmp: Path, phase: str, *, transitioned_by: str | None = None) -> None:
-    d = tmp / ".agentalloy"
-    d.mkdir(exist_ok=True, parents=True)
-    lines = [f"phase: {phase}"]
-    if transitioned_by:
-        lines.append(f"transitioned_by: {transitioned_by}")
-    (d / "phase").write_text("\n".join(lines) + "\n")
+    seed_phase(tmp, phase, actor=transitioned_by)
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
@@ -102,9 +98,14 @@ async def test_swept_confirm_does_not_write_phase(tmp_path: Path):
     _set_phase(tmp_path, "design", transitioned_by="other-session")
     _seed_announced(tmp_path, "build", ["me"])
     await evaluate_signal(_req(), tmp_path, session_id="me")
-    content = (tmp_path / ".agentalloy" / "phase").read_text()
-    assert "phase: design" in content
-    assert "transitioned_by: other-session" in content
+    from agentalloy.signals.skill_loader import (
+        _phase_state,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    state = _phase_state(tmp_path)
+    assert state is not None
+    assert state.phase == "design"
+    assert state.transitioned_by == "other-session"
 
 
 async def test_toolless_header_request_does_not_fire(tmp_path: Path):

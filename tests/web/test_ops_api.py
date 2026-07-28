@@ -12,7 +12,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from agentalloy.api.state_router import get_state_store
+from agentalloy.api.state_router import (
+    _repo_key_for,
+    default_repo_root,
+    get_state_store,
+)
 from agentalloy.app import create_app
 from agentalloy.storage.state_store import open_state_store
 
@@ -22,9 +26,16 @@ _CSRF = {"X-AgentAlloy-CSRF": "1"}
 def _make_repo(tmp_path: Path, name: str, phase: str = "spec") -> Path:
     root = tmp_path / name
     (root / ".agentalloy").mkdir(parents=True)
-    (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\nschema_version: 1\n")
     (root / "pyproject.toml").write_text("")
+    _set_phase(root, phase)
     return root
+
+
+def _set_phase(root: Path, phase: str) -> None:
+    """Put *root* in *phase* — in the store, which is where the API reads it."""
+    from agentalloy.install.subcommands.phase import run_phase_set
+
+    run_phase_set(phase, root=root, force=True)
 
 
 def _write_spec_doc(root: Path) -> Path:
@@ -43,7 +54,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     app = create_app(use_default_lifespan=False)
     # Wire a state store so contract-counting routes work (store-backed, not filesystem).
     state_db = tmp_path / "state.duck"
-    store = open_state_store(state_db)
+    # Routes scope to the repo they resolve from the request; the fixture has
+    # to be opened under that same key or seeded rows are invisible to them.
+    store = open_state_store(state_db, repo=_repo_key_for(str(default_repo_root())))
     app.state.store = store
     app.dependency_overrides[get_state_store] = lambda: store
     with TestClient(app) as c:
@@ -123,7 +136,7 @@ def test_approvals_stale_marker_reappears(client, tmp_path: Path, monkeypatch: p
     r = client.post("/api/repos/approve", json={"repo": str(repo), "phase": "spec"}, headers=_CSRF)
     assert r.status_code == 200
     # Back to spec (simulate rework), edit the artifact after the marker.
-    (repo / ".agentalloy" / "phase").write_text("phase: spec\nschema_version: 1\n")
+    _set_phase(repo, "spec")
     future = time.time() + 5
     import os
 

@@ -20,19 +20,51 @@ takes over.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import duckdb
 
 logger = logging.getLogger(__name__)
+
+# The bucket every row landed in before task 11.  ``_repo()`` used to return
+# ``Path(db_path).stem`` and the service opens exactly one ``state.duck``, so
+# every repo on the machine shared the literal key ``"state"``.  Kept as the
+# unscoped default — deliberately *not* the filename, so a caller that forgets
+# to scope lands in a bucket named for what it is instead of one that merely
+# looks repo-shaped.  ``rekey_legacy_rows`` drains it.
+LEGACY_REPO_KEY = "state"
+
+
+class _TxnFlag:
+    """Connection-wide BEGIN/COMMIT state, shared across scoped views.
+
+    ``lock`` serialises transactions across threads. The service runs request
+    handlers in a threadpool over a single connection, so two threads could
+    otherwise both pass the ``active`` check and issue ``BEGIN`` on the same
+    connection — DuckDB then fails mid-statement with an opaque
+    ``IndexError``, and one of the two transitions is lost.
+
+    It is an ``RLock`` deliberately: a *same-thread* re-entrant call must still
+    hit the explicit "nested transaction" ``RuntimeError`` rather than
+    deadlocking on itself.
+    """
+
+    __slots__ = ("active", "lock")
+
+    def __init__(self) -> None:
+        self.active = False
+        self.lock = threading.RLock()
+
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -115,6 +147,52 @@ class StateWriteResult:
 
 
 @dataclass(frozen=True)
+class PhaseState:
+    """The ``phase`` row, decoded. The blob shape lives in this module alone.
+
+    ``workflow`` is *derived* (``sdd-<phase>``), never stored authoritatively —
+    see :meth:`DuckDBStateStore.write_phase`.
+    """
+
+    phase: str
+    mode: str | None = None
+    free_since: str | None = None
+    transitioned_by: str | None = None
+    started_at: str | None = None
+    last_updated: str | None = None
+    workflow: str = ""
+
+
+def _parse_flat_yaml(text: str) -> dict[str, str]:
+    """Parse the flat ``key: value`` phase file without pulling in a YAML dep.
+
+    The file was only ever written by ``_write_phase_atomic`` and the ``phase``
+    CLI, both of which emit one unnested ``key: value`` per line with optional
+    quoting on ISO timestamps. Splitting on the *first* colon matters: an
+    unquoted timestamp value contains colons of its own.
+
+    Unknown keys are kept — callers pick the fields they know and ignore the
+    rest, so a file written by a newer version does not fail to import.
+    """
+    data: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        key, _, value = stripped.partition(":")
+        data[key.strip()] = value.strip().strip('"').strip("'")
+    return data
+
+
+def _opt_str(value: Any) -> str | None:
+    """Coerce a blob field to ``str``, mapping empty/absent to ``None``."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+@dataclass(frozen=True)
 class LeaseResult:
     acquired: bool
     owner: str | None
@@ -131,6 +209,55 @@ class StateStoreError(Exception):
     """Base for state-store errors."""
 
 
+class _Result:
+    """Already-fetched rows, shaped like a DuckDB cursor.
+
+    A DuckDB connection holds *one* pending result.  Handing the live cursor
+    back to the caller means the rows are fetched after the lock is released,
+    so a second thread's ``execute`` can replace the result in between — which
+    surfaces as garbage rather than an error (``IndexError: tuple index out of
+    range``, or a JSON blob column read back as an ``int``).  Fetching eagerly
+    under the lock is what makes the shared connection safe.
+    """
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._rows[0] if self._rows else None
+
+
+class _LockedConn:
+    """Serialising façade over the raw DuckDB connection.
+
+    The service serves every repo from one handle, across a request threadpool.
+    Every statement therefore runs under the connection-wide lock, and results
+    are materialised before it is dropped.  The lock is the same ``RLock`` that
+    ``transaction()`` holds, so statements issued inside a transaction re-enter
+    it on the owning thread instead of deadlocking.
+    """
+
+    __slots__ = ("_conn", "_lock")
+
+    def __init__(self, conn: duckdb.DuckDBPyConnection, lock: threading.RLock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    def execute(self, sql: str, params: Any = None) -> _Result:
+        with self._lock:
+            cur = self._conn.execute(sql, params) if params is not None else self._conn.execute(sql)
+            try:
+                return _Result(cur.fetchall())
+            except Exception:
+                # DDL and most DML produce no result set.
+                return _Result([])
+
+
 class DuckDBStateStore:
     """Thin wrapper over a DuckDB connection to the SDD state store.
 
@@ -139,11 +266,29 @@ class DuckDBStateStore:
     manager to guarantee the handle is released.
     """
 
-    def __init__(self, db_path: str | Path, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        read_only: bool = False,
+        repo: str | None = None,
+    ) -> None:
         self._db_path = str(db_path)
         self._read_only = read_only
+        self._repo_key = repo or LEGACY_REPO_KEY
         self._conn: duckdb.DuckDBPyConnection | None = None
-        self._in_transaction: bool = False
+        # Built once at open() so scoped views share one façade object: views
+        # are shallow copies, and `view.conn is store.conn` is the check that
+        # proves they really are one handle rather than two.
+        self._locked: _LockedConn | None = None
+        # Shared across scoped views: two views over one connection must not
+        # both issue BEGIN.  A plain bool would be copied per view and the
+        # re-entrancy guard would stop guarding.
+        self._txn = _TxnFlag()
+        # Post-commit callback registry: kind -> list of callables.
+        # Fired after every write to the store (outside the lease).
+        # Harness-agnostic — knows only kinds and callables.
+        self._on_write_callbacks: dict[str, list[Callable[[str, Any, str], None]]] = {}
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -154,6 +299,7 @@ class DuckDBStateStore:
             self._conn = duckdb.connect(self._db_path, read_only=self._read_only)
         except duckdb.Error as exc:
             raise StateStoreError(str(exc)) from exc
+        self._locked = _LockedConn(self._conn, self._txn.lock)
         return self
 
     def close(self) -> None:
@@ -163,6 +309,7 @@ class DuckDBStateStore:
             except Exception:
                 logger.debug("failed to close DuckDB state connection", exc_info=True)
             self._conn = None
+            self._locked = None
 
     def __enter__(self) -> DuckDBStateStore:
         return self.open()
@@ -176,19 +323,20 @@ class DuckDBStateStore:
         self.close()
 
     @property
-    def conn(self) -> duckdb.DuckDBPyConnection:
-        if self._conn is None:
+    def conn(self) -> _LockedConn:
+        """The connection, wrapped so every statement is serialised.
+
+        Deliberately not the raw handle: callers reach for ``store.conn`` as if
+        it were private-to-them, and on the service it never is.
+        """
+        if self._locked is None:
             raise RuntimeError("StateStore is not open")
-        return self._conn
+        return self._locked
 
     # -- query workhorse -----------------------------------------------------
 
     def execute(self, sql: str, params: Any = None) -> list[tuple[Any, ...]]:
-        cur = self.conn.execute(sql, params) if params is not None else self.conn.execute(sql)
-        try:
-            return cur.fetchall()
-        except Exception:
-            return []
+        return self.conn.execute(sql, params).fetchall()
 
     def scalar(self, sql: str, params: Any = None) -> Any:
         rows = self.execute(sql, params)
@@ -199,11 +347,37 @@ class DuckDBStateStore:
     def iter_rows(self, sql: str, params: Any = None) -> Any:
         yield from self.execute(sql, params)
 
-    # -- repo slug (derived from db_path) ------------------------------------
+    # -- repo scoping --------------------------------------------------------
+
+    @property
+    def repo(self) -> str:
+        """The repo key every row read or written through this handle is under."""
+        return self._repo_key
+
+    def for_repo(self, repo: str) -> DuckDBStateStore:
+        """Return a view of this store scoped to ``repo``.
+
+        The service opens exactly one ``state.duck`` and serves every repo from
+        it, so the repo key cannot be a property of the handle's lifetime — it
+        has to be per-request.  A view shares the connection and the transaction
+        flag; only the key differs.  Views must not be closed: closing one would
+        close the connection out from under the store that produced it.
+        """
+        view = copy.copy(self)
+        view._repo_key = repo
+        return view
 
     def _repo(self) -> str:
-        """Return the repo slug for the current store."""
-        return Path(self._db_path).stem
+        """Return the repo key for the current handle."""
+        return self._repo_key
+
+    @property
+    def _in_transaction(self) -> bool:
+        return self._txn.active
+
+    @_in_transaction.setter
+    def _in_transaction(self, value: bool) -> None:
+        self._txn.active = value
 
     # -- schema --------------------------------------------------------------
 
@@ -294,6 +468,52 @@ class DuckDBStateStore:
             lease_expires_at=None,
             conflict=conflict,
         )
+
+    def clear(
+        self,
+        kind: str,
+        session_key: str | None = None,
+        *,
+        all_sessions: bool = False,
+    ) -> int:
+        """Delete state rows for ``kind``. Returns how many rows were removed.
+
+        The store equivalent of ``unlink()``ing a file-mirror kind: the reset
+        paths (``wire``, ``add``) and ``run_phase_clear`` need a way to make a
+        kind *absent*, not merely empty-valued — a row holding ``""`` still reads
+        as present to every consumer that checks for ``None``.
+
+        Scoping matches :meth:`read`/:meth:`write`: ``session_key=None`` targets
+        the repo-scoped row. ``all_sessions=True`` sweeps every session's row for
+        that kind, which is what a reset wants for session-scoped kinds
+        (``announced``, ``composed``, …) where no single key identifies "all of
+        them"; it is mutually exclusive with an explicit ``session_key``.
+
+        Deleting the row also **releases any lease** on it — ``acquire_lease``
+        requires an existing row, so a cleared kind cannot leave a session
+        holding a lease on something that no longer exists.
+
+        Clearing an absent kind returns ``0``; it is not an error, so reset paths
+        stay idempotent.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot clear in read-only mode")
+        if all_sessions and session_key is not None:
+            raise ValueError("clear(all_sessions=True) cannot take a session_key")
+
+        repo = self._repo()
+        if all_sessions:
+            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=?"
+            params: tuple[Any, ...] = (repo, kind)
+        else:
+            sql = "DELETE FROM sdd_state WHERE repo=? AND kind=? AND COALESCE(session_key, '')=?"
+            params = (repo, kind, session_key or "")
+
+        before = self.conn.execute(
+            sql.replace("DELETE FROM", "SELECT COUNT(*) FROM"), params
+        ).fetchone()
+        self.conn.execute(sql, params)
+        return int(before[0]) if before else 0
 
     # -- lease management ----------------------------------------------------
 
@@ -386,6 +606,45 @@ class DuckDBStateStore:
             (self._repo(), kind, session_key),
         )
 
+    # -- post-commit callbacks -----------------------------------------------
+
+    def on_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
+        """Register *fn* to be called after every write to *kind*, post-commit.
+
+        The callback receives ``(kind, value, repo)`` where *value* is the stored
+        string (JSON for the phase blob, raw text for other kinds) and *repo* is
+        the key of the handle that performed the write.  One store serves every
+        repo on the machine via :meth:`for_repo` views, so without *repo* a
+        callback cannot tell whose row changed — and a phase advance in one repo
+        would regenerate every other repo's rules file.  Callbacks
+        fire **outside** the lease — the write is already durable.  A callback
+        that raises does **not** roll back the write or kill the writer; errors
+        are logged and the next callback in the list still runs.
+
+        Harness-agnostic: the registry knows only kinds and callables.  It does
+        not reference Claude Code, Codex, or any single harness.  Per-harness
+        output from ``wire_harness`` is unchanged and stays.
+        """
+        self._on_write_callbacks.setdefault(kind, []).append(fn)
+
+    def off_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
+        """Unregister a previously registered callback."""
+        if kind in self._on_write_callbacks:
+            with suppress(ValueError):
+                self._on_write_callbacks[kind].remove(fn)
+
+    def _fire_callbacks(self, kind: str, value: str) -> None:
+        """Invoke all registered callbacks for *kind*, logging any errors.
+
+        ``self`` may be a :meth:`for_repo` view, so ``_repo()`` is the repo that
+        actually changed rather than the handle the callback was registered on.
+        """
+        for fn in list(self._on_write_callbacks.get(kind, [])):
+            try:
+                fn(kind, value, self._repo())
+            except Exception:
+                logger.exception("on_write callback for %r raised", kind)
+
     # -- transaction ---------------------------------------------------------
 
     @contextmanager
@@ -398,48 +657,216 @@ class DuckDBStateStore:
 
         Re-entrant calls raise :class:`RuntimeError` — silent nesting is
         explicitly rejected.
+
+        Concurrent callers on *other* threads block until the transaction ends:
+        one connection cannot carry two transactions, and the service serves
+        every repo from a single handle.
         """
         if self._in_transaction:
             raise RuntimeError("nested transaction() calls are not supported")
         if self._read_only:
             raise RuntimeError("cannot begin transaction in read-only mode")
 
-        self._in_transaction = True
-        self.conn.execute("BEGIN")
-        try:
-            yield self
-            self.conn.execute("COMMIT")
-        except BaseException:
-            self.conn.execute("ROLLBACK")
-            raise
-        finally:
-            self._in_transaction = False
+        with self._txn.lock:
+            # Re-check under the lock: another thread may have been mid-BEGIN
+            # when the fast-path check above ran.
+            if self._in_transaction:
+                raise RuntimeError("nested transaction() calls are not supported")
+            self._in_transaction = True
+            self.conn.execute("BEGIN")
+            try:
+                yield self
+                self.conn.execute("COMMIT")
+            except BaseException:
+                self.conn.execute("ROLLBACK")
+                raise
+            finally:
+                self._in_transaction = False
+
+    # -- phase blob ----------------------------------------------------------
+
+    def read_phase(self) -> PhaseState | None:
+        """Read the ``phase`` row as a typed value, or ``None`` when unset.
+
+        Tolerates a bare-string row (``"design"``) left by the pre-blob store or
+        by ``import_from_files``: it reads as a :class:`PhaseState` carrying just
+        the phase, with the derived ``workflow`` filled in. Nothing outside this
+        module parses the stored blob.
+        """
+        raw = self.read("phase")
+        if raw is None:
+            return None
+        data = self._from_json(raw)
+        if isinstance(data, str):
+            # Bare phase string (pre-blob row). Not an error — normalize it.
+            data = {"phase": data}
+        if not isinstance(data, dict) or not data.get("phase"):
+            return None
+        blob = cast("dict[str, Any]", data)
+        phase = str(blob["phase"])
+        return PhaseState(
+            phase=phase,
+            mode=_opt_str(blob.get("mode")),
+            free_since=_opt_str(blob.get("free_since")),
+            transitioned_by=_opt_str(blob.get("transitioned_by")),
+            started_at=_opt_str(blob.get("started_at")),
+            last_updated=_opt_str(blob.get("last_updated")),
+            workflow=f"sdd-{phase}",
+        )
+
+    def write_phase(
+        self,
+        phase: str,
+        *,
+        actor: str | None = None,
+        mode: str | None = None,
+        free_since: str | None = None,
+        owner: str | None = None,
+    ) -> StateWriteResult:
+        """Write the ``phase`` row as a blob, preserving what the caller didn't set.
+
+        Read-modify-write inside a transaction so a concurrent writer can never
+        observe a half-updated blob. This is the store-side replacement for
+        ``signals.skill_loader._write_phase_atomic``'s file semantics:
+
+        * ``mode`` / ``free_since`` are **carried forward** when not passed. An
+          auto-transition must never silently drop a repo out of (or into)
+          free-flow — only ``agentalloy flow free/resume`` sets them.
+        * ``transitioned_by`` is set to ``actor`` only on a *real* transition
+          (``prev != phase``). An idempotent same-phase write preserves the prior
+          actor, so a different session can still tell the phase moved and that
+          it wasn't the one that moved it.
+        * ``started_at`` is preserved across writes; only the first write sets it.
+        * ``workflow`` is **derived** here as ``sdd-<phase>`` and is never taken
+          from a caller — a caller cannot poison the row with a bogus workflow.
+
+        Passing ``mode=""`` (or ``free_since=""``) explicitly clears the field,
+        which is how ``flow resume`` drops free-flow; ``None`` means "leave it".
+
+        Callers already inside a :meth:`transaction` reuse it rather than
+        nesting (which is rejected outright).  ``POST /state/phase`` writes the
+        phase and a contract in one BEGIN/COMMIT, and it must get blob
+        semantics too — a phase advance that dropped free-flow mode purely
+        because a contract rode along would be a silent, phase-shaped bug.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+
+        outer: AbstractContextManager[object] = (
+            nullcontext() if self._in_transaction else self.transaction()
+        )
+        with outer:
+            prev = self.read_phase()
+            now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            resolved_mode = prev.mode if (mode is None and prev) else mode
+            resolved_since = prev.free_since if (free_since is None and prev) else free_since
+            is_transition = prev is None or prev.phase != phase
+            resolved_actor = actor if is_transition else prev.transitioned_by  # type: ignore[union-attr]
+
+            blob: dict[str, Any] = {
+                "phase": phase,
+                "mode": resolved_mode or None,
+                "free_since": resolved_since or None,
+                "transitioned_by": resolved_actor or None,
+                "started_at": (prev.started_at if prev and prev.started_at else now),
+                "last_updated": now,
+                "workflow": f"sdd-{phase}",
+            }
+            payload = json.dumps({k: v for k, v in blob.items() if v is not None})
+            result = self.write("phase", payload, owner=owner)
+            # Fire post-commit callbacks outside the lease so the write is
+            # already durable.  Callbacks that raise are logged but do not
+            # roll back or kill the writer.
+            self._fire_callbacks("phase", payload)
+            return result
 
     # -- file mirror ---------------------------------------------------------
 
     def import_from_files(self, agentalloy_dir: Path) -> dict[str, str]:
-        """Import state from file mirror.  Returns dict of kind -> value imported.
+        """One-shot migration of the file mirror into the store.
 
-        Idempotent: only imports kinds that have no row in the store yet.
-        Kept for one-shot migration of existing phase/cursor files.
+        Returns a dict of kind -> the value now in the store for kinds this call
+        imported. Idempotent: a kind that already has a row is skipped, and a
+        repo with no files at all is a no-op.
+
+        ``phase`` holds flat YAML across several lines — storing its raw text as
+        the value (what this method did until 2026-07-28) yields a row no reader
+        can parse. It is parsed into the blob shape via :meth:`write_phase`.
+
+        The rest of the mirror is *not* uniformly a bare token, so it cannot be
+        imported by reading text: ``approved`` is a directory of per-phase marker
+        files, and the session-scoped kinds hold TSV lines keyed by session id.
+        Session-scoped state is skipped outright — it is per-session ephemera
+        that regenerates on the next request, and a row imported without its
+        session key matches no reader. Repo-scoped kinds are imported only when
+        the path is a regular file; a directory-shaped kind is left for the
+        contract that gives it a store shape.
+
+        The phase file is deleted once its content has been *carried into* the
+        store. A repo that already has a store row is diverged: the store value
+        wins, but the file is left in place for task 08 to remove — until the
+        readers have moved, that file may be the only record of a phase set
+        while the service was down.
+
+        A phase file that cannot be parsed raises :class:`StateStoreError` and is
+        **not** deleted, so a bad file can be inspected rather than destroyed.
         """
         imported: dict[str, str] = {}
-        all_kinds = REPO_SCOPED_KINDS | SESSION_SCOPED_KINDS
 
-        for kind in all_kinds:
-            if self.read(kind) is not None:
-                continue  # already in store
-
+        for kind in sorted(REPO_SCOPED_KINDS):
             filepath = agentalloy_dir / kind
-            if not filepath.exists():
+            if kind == "phase":
+                value = self._import_phase_file(filepath)
+                if value:
+                    imported[kind] = value
                 continue
 
+            if self.read(kind) is not None:
+                continue  # already in store
+            if not filepath.is_file():
+                continue  # absent, or a directory-shaped kind
             value = filepath.read_text(encoding="utf-8").strip()
             if value:
                 self.write(kind, value)
                 imported[kind] = value
 
         return imported
+
+    def _import_phase_file(self, filepath: Path) -> str | None:
+        """Migrate ``.agentalloy/phase`` into the blob row, then remove the file.
+
+        Returns the phase imported, or ``None`` when there was nothing to import
+        (no file, or the store already holds a row and the file was merely
+        cleaned up).
+        """
+        if not filepath.exists():
+            return None
+
+        raw = filepath.read_text(encoding="utf-8")
+        data = _parse_flat_yaml(raw)
+        phase = _opt_str(data.get("phase"))
+        if phase is None:
+            raise StateStoreError(
+                f"{filepath} is not a readable phase file (no 'phase' key); "
+                "refusing to import or delete it"
+            )
+
+        if self.read("phase") is None:
+            self.write_phase(
+                phase,
+                actor=_opt_str(data.get("transitioned_by")),
+                mode=_opt_str(data.get("mode")),
+                free_since=_opt_str(data.get("free_since")),
+            )
+            filepath.unlink()
+            return phase
+
+        # Diverged: the store already has a phase and it wins. The file is
+        # *kept* rather than deleted for one reason — the readers have not moved
+        # yet (task 08), so this file may still be the only record of a phase
+        # set while the service was down. Deleting it is task 08's job.
+        return None
 
     # -- contract helpers ----------------------------------------------------
 
@@ -753,6 +1180,68 @@ class DuckDBStateStore:
 
         return sorted(state_repos | contract_repos)
 
+    def rekey_legacy_rows(self, repo: str) -> int:
+        """Move rows still under :data:`LEGACY_REPO_KEY` to ``repo``.
+
+        Before task 11 the repo column held ``"state"`` for every repo that ever
+        talked to the service, because the key was derived from the database
+        filename.  Those rows have exactly one plausible owner — the repo the
+        service was deployed against — so they are re-keyed to it wholesale.
+
+        Where the target key already has a row for the same ``(kind,
+        session_key)`` or ``contract_id``, the target wins and the legacy row is
+        dropped: a row written deliberately under the real key is the better
+        record than one from a bucket shared by every caller.
+
+        Idempotent — it runs on every service start.  Returns rows moved.
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+        if repo == LEGACY_REPO_KEY:
+            return 0
+
+        moved = 0
+        with self.transaction():
+            self.conn.execute(
+                """
+                DELETE FROM sdd_state AS legacy
+                 WHERE legacy.repo = ?
+                   AND EXISTS (
+                       SELECT 1 FROM sdd_state AS target
+                        WHERE target.repo = ?
+                          AND target.kind = legacy.kind
+                          AND target.session_key IS NOT DISTINCT FROM legacy.session_key
+                   )
+                """,
+                (LEGACY_REPO_KEY, repo),
+            )
+            self.conn.execute(
+                """
+                DELETE FROM sdd_contract AS legacy
+                 WHERE legacy.repo = ?
+                   AND EXISTS (
+                       SELECT 1 FROM sdd_contract AS target
+                        WHERE target.repo = ?
+                          AND target.contract_id = legacy.contract_id
+                   )
+                """,
+                (LEGACY_REPO_KEY, repo),
+            )
+            for table in ("sdd_state", "sdd_contract"):
+                rows = self.conn.execute(
+                    f"SELECT count(*) FROM {table} WHERE repo = ?",  # noqa: S608 — fixed literals
+                    (LEGACY_REPO_KEY,),
+                ).fetchall()
+                moved += rows[0][0] if rows else 0
+                self.conn.execute(
+                    f"UPDATE {table} SET repo = ? WHERE repo = ?",  # noqa: S608 — fixed literals
+                    (repo, LEGACY_REPO_KEY),
+                )
+
+        if moved:
+            logger.info("state store: re-keyed %d legacy row(s) to repo %r", moved, repo)
+        return moved
+
     def delete_repo_rows(self, repo: str) -> int:
         """Delete all rows for a repo from both sdd_state and sdd_contract.
 
@@ -778,9 +1267,53 @@ class DuckDBStateStore:
         return state_deleted + contract_deleted
 
 
-def open_state_store(db_path: str | Path, *, read_only: bool = False) -> DuckDBStateStore:
-    """Open (and, in writer mode, migrate) the state store at ``db_path``."""
-    store = DuckDBStateStore(db_path, read_only=read_only).open()
+def open_state_store(
+    db_path: str | Path,
+    *,
+    read_only: bool = False,
+    repo: str | None = None,
+) -> DuckDBStateStore:
+    """Open (and, in writer mode, migrate) the state store at ``db_path``.
+
+    ``repo`` is the default key for handles that are not re-scoped with
+    :meth:`DuckDBStateStore.for_repo`.  The service passes its own repo and then
+    scopes per request; single-repo callers can rely on the default.
+    """
+    store = DuckDBStateStore(db_path, read_only=read_only, repo=repo).open()
     if not read_only:
         store.migrate()
     return store
+
+
+# ---------------------------------------------------------------------------
+# Process-wide handle
+# ---------------------------------------------------------------------------
+#
+# DuckDB is single-writer: exactly one process may hold the state store open
+# for writing, and that process is the service.  In-process callers outside
+# the FastAPI request path — ``signals.skill_loader``, the watcher — cannot
+# take a ``Depends(get_state_store)`` and must not open a second handle, so
+# the service publishes the one it already owns here during its lifespan.
+#
+# Unbound is a *distinct* condition from "no phase recorded": a caller that
+# treats the two alike turns a store outage into a repo that looks like it
+# never had a phase.  ``process_store()`` returns ``None`` and every caller
+# has to say out loud what it does with that.
+
+_process_store: DuckDBStateStore | None = None
+
+
+def bind_process_store(store: DuckDBStateStore | None) -> None:
+    """Publish (or, with ``None``, retract) the process-wide store handle."""
+    global _process_store
+    _process_store = store
+
+
+def process_store() -> DuckDBStateStore | None:
+    """The store this process owns, or ``None`` when nothing has bound one.
+
+    ``None`` means *the store is out of reach from here* — a CLI process, a
+    test that did not bind one, or a service still in startup.  It never means
+    the store is empty.
+    """
+    return _process_store

@@ -141,6 +141,31 @@ def _pin_state_service_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _bound_state_store(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Give every test its own process-wide SDD state store.
+
+    Phase lives in the store, not in ``.agentalloy/phase``, and the in-process
+    readers (``signals.skill_loader``) reach it through the handle the service
+    publishes during its lifespan. Tests have no lifespan, so bind one here —
+    per test, on a fresh DuckDB file, so no test can observe another's phase.
+
+    Use :func:`seed_phase` to put a repo in a phase; a test that wants the
+    "store out of reach" branch unbinds it explicitly.
+    """
+    from agentalloy.storage.state_store import bind_process_store, open_state_store
+
+    db = tmp_path_factory.mktemp("state") / "state.duck"
+    store = open_state_store(db, repo="test")
+    bind_process_store(store)
+    try:
+        yield
+    finally:
+        bind_process_store(None)
+        with contextlib.suppress(Exception):
+            store.close()
+
+
+@pytest.fixture(autouse=True)
 def _pin_signal_intent_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the signals-layer intent backend to the deterministic cosine floor.
 

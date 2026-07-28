@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -52,6 +53,8 @@ from agentalloy.install.output import (
 from agentalloy.install.release_check import current_version as _current_version
 from agentalloy.install.release_check import fetch_latest_tag as _latest_release_tag
 from agentalloy.install.release_check import parse_semver as _parse_semver
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 STEP_NAME = "upgrade"
@@ -645,6 +648,7 @@ def _upgrade_native(
     actions.append("restarted service")
 
     _migrate_code_index_layout(actions, warnings, show_progress=show_progress)
+    _import_state_files(actions, warnings, show_progress=show_progress)
     return actions, warnings
 
 
@@ -674,6 +678,72 @@ def _migrate_code_index_layout(
         return
     if out:
         actions.append("migrated code index layout")
+
+
+def _repos_with_state_files() -> list[str]:
+    """Every repo root that may hold a file mirror, wiring records first.
+
+    Wiring is the registry because it is the near-complete record of which repos
+    exist.  It is not the *whole* record: a repo reached through the bare ``/v1``
+    surface resolves its state from the deployment directory rather than from a
+    wiring record, so ``AGENTALLOY_PROJECT_DIR`` (falling back to the cwd) is
+    appended.  Any other never-wired repo carries no harness config, so nothing
+    composes against its phase — it is skipped rather than searched for.
+    """
+    roots: list[str] = []
+    deployment = os.environ.get("AGENTALLOY_PROJECT_DIR") or str(Path.cwd())
+    try:
+        st = install_state.load_state()
+        entries = st.get("harness_files_written") or []
+        entries = entries if isinstance(entries, list) else []
+    except Exception:  # noqa: BLE001 — a bad state file must not fail an upgrade
+        entries = []
+    for entry in entries:  # pyright: ignore[reportUnknownVariableType]
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("repo_root") or "")  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        if root and root not in roots:
+            roots.append(root)
+    if deployment not in roots:
+        roots.append(deployment)
+    return roots
+
+
+def _import_state_files(actions: list[str], warnings: list[str], *, show_progress: bool) -> None:
+    """Carry every wired repo's ``.agentalloy`` file mirror into the state store.
+
+    Unconditional and un-prompted, on the same terms as the code-index layout
+    migration: taking the update *is* the consent, and it runs AFTER the service
+    is back up because the service holds the DuckDB write lock.
+
+    Never fails an upgrade. A repo whose file could not be imported keeps it —
+    the readers still consult the file mirror at this version, so a skipped
+    import is a retry, not a broken repo.
+    """
+    roots = _repos_with_state_files()
+    if not roots:
+        return
+
+    from agentalloy.api.state_client import StateClient, StateClientError
+
+    client = StateClient()
+    migrated = 0
+    with progress_activity("migrating phase state into the store", enabled=show_progress):
+        for root in roots:
+            if not (Path(root) / ".agentalloy").is_dir():
+                continue
+            try:
+                if client.import_files(root):
+                    migrated += 1
+            except StateClientError:
+                warnings.append(
+                    f"phase state migration skipped for {root} — the file still works; "
+                    "re-run `agentalloy upgrade` once the service is up"
+                )
+            except Exception:  # noqa: BLE001 — never fail an upgrade
+                logger.debug("state file import failed for %s", root, exc_info=True)
+    if migrated:
+        actions.append(f"migrated phase state into the store ({migrated} repos)")
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +857,7 @@ def _upgrade_container(
     # second class of install, and the CLI talks to the containerized service
     # over the same published port.
     _migrate_code_index_layout(actions, warnings, show_progress=False)
+    _import_state_files(actions, warnings, show_progress=False)
     return actions, warnings
 
 

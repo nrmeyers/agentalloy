@@ -24,6 +24,7 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _write_phase_atomic,
     cli_session_key,
 )
+from tests.support import seed_phase
 
 _KEY_A = "11111111-aaaa-4aaa-8aaa-111111111111"
 _KEY_B = "22222222-bbbb-4bbb-8bbb-222222222222"
@@ -31,7 +32,7 @@ _KEY_B = "22222222-bbbb-4bbb-8bbb-222222222222"
 
 def _seed(root: Path, phase: str, names: list[str]) -> None:
     (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
-    (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(root, phase)
     d = root / ".agentalloy" / "contracts" / "active" / phase
     d.mkdir(parents=True, exist_ok=True)
     for n in names:

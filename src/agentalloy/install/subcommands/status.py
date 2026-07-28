@@ -46,21 +46,21 @@ def _path_scope(path: str | None) -> str:
 
 
 def _repo_phase(repo_root: str) -> str | None:
-    """Return the activated phase for *repo_root*, or None if not activated.
+    """Return the recorded phase for *repo_root*, or None when it has none.
 
-    A repo composes only when it has an ``.agentalloy/phase`` file (the real
-    per-repo activation gate). This is what makes status self-diagnosing: a
-    wired-but-unphased repo is exactly the "wired but nothing happens" case.
+    Best-effort by design: ``status`` is a diagnostic that must render even when
+    the state service is down, so an unreachable store reads as ``None`` here
+    rather than exiting.  Every *acting* surface (``phase``/``flow``/``task``/
+    ``approve``) does the opposite and fails loud.  A phase-less repo is no
+    longer the "wired but nothing happens" case — the phase is seeded on the
+    repo's first proxy request.
     """
     try:
-        root = Path(repo_root)
-        if not (root / ".agentalloy" / "phase").exists():
-            return None
-        from agentalloy.install.subcommands.phase import run_phase_get  # noqa: PLC0415
+        from agentalloy.install.subcommands._state import phase_access  # noqa: PLC0415
 
-        phase = run_phase_get(root=root).get("phase")
-        return phase if phase and phase != "none" else None
-    except Exception:
+        state = phase_access(Path(repo_root), autostart=False).read()
+        return state.phase if state else None
+    except (Exception, SystemExit):
         return None
 
 

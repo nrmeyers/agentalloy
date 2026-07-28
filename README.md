@@ -156,13 +156,9 @@ Container inference is CPU-only on every host (GPU acceleration requires a nativ
 
 ## How it works: phases, contracts, signal layer
 
-Three small artifacts on disk drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
+Three small artifacts drive everything AgentAlloy does. None of them belong to your agent's prompt — they're state files that the signal layer reads.
 
-```
-.agentalloy/phase       →  phase: build
-```
-
-**The phase file.** A sticky, one-line YAML file under your project tracking the SDD lifecycle: `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
+**The phase store.** Phase lives in a per-repo DuckDB state store (not a disk file). Each phase tracks `intake → spec → design → build → qa → ship` — plus a **fast lane** (`sdd-fast`, a compressed spec-design-build for small tasks) and an **add-skill lane** (guided, human-approved custom-skill authoring). Each phase's workflow skill is injected as the persona until its declarative exit gates pass; `spec → design` and `design → build` additionally require an explicit `agentalloy approve <phase>` sign-off. The lifecycle is per-repo and opt-out (`agentalloy add <harness> --lifecycle-mode off`), and `agentalloy flow free` pauses all workflow steering — domain skills keep composing — until `flow resume`. Legacy repos can migrate their `.agentalloy/phase` file via `POST /import` on the service. Lanes, lifecycle modes, and the full gate inventory: [docs/operator.md](docs/operator.md#phases).
 
 **Task contracts.** A short markdown file (`.agentalloy/contracts/<phase>/<task>.md`) the agent writes once at task start, declaring `domain_tags`, scope, and success criteria in its frontmatter. From then on, **`domain_tags` is the BM25 input for retrieval** — surgical, intent-aware, and stable across the conversation. Schema and a full example: [docs/operator.md](docs/operator.md#contracts).
 
@@ -216,7 +212,7 @@ Four paths, depending on how your harness integrates with external tools.
 
 **Parallel sessions with git worktrees.** `agentalloy worktree <harness> <branch> -b` creates the worktree and wires it in one shot; each worktree's distinct path gets its own `/proj/<token>` — its own phase, its own upstream — while all worktrees share the one running service and corpus. One caveat: corpus mutations (`install-packs`, `reembed`) take the single-writer lock and affect every worktree, so stop the service before running them. Details: the `worktree` entry in [INSTALL.md](INSTALL.md).
 
-**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy add` writes a static rules file and `agentalloy watch start --harness <name>` (once per session) keeps it regenerated within ~1s of a phase or contract change. Capability matrix: [Harness support](#harness-support) below.
+**Sidecar harness.** Cursor, Windsurf, GitHub Copilot, and Antigravity CLI route through their own backends and can't be intercepted. For those, `agentalloy add` writes a static rules file and the running service's in-process store hook keeps it regenerated within ~1s of a phase change (no separate `watch` process needed). Capability matrix: [Harness support](#harness-support) below.
 
 ---
 
@@ -233,7 +229,7 @@ This is the key difference from `AGENTS.md` / `SKILL.md` approaches: the **insta
 Harnesses fall into two categories:
 
 - **Proxy-wired** (Claude Code, Aider, Cline, Codex, Continue.dev, OpenClaw, OpenCode, Hermes Agent, Copilot CLI, qwen-code — **all ten live-verified** by the harness e2e matrix, real binaries end to end) — full per-turn integration via the local proxy. The proxy intercepts LLM traffic, injects skill context, and evaluates gates automatically. Codex rides the native [OpenAI Responses passthrough](docs/responses-surface.md) (`/proj/<token>/v1/responses`).
-- **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by a file watcher. Reduced capability: no enforcement, advisory text only.
+- **Sidecar** (Cursor, Windsurf, Antigravity CLI) — static rules file kept current by the service's in-process store hook (fires post-commit on phase change). Reduced capability: no enforcement, advisory text only.
 - **Dual-carrier** (GitHub Copilot in VS Code, `github-copilot`) — BYOK "Custom Endpoint" proxy carrier (`chatLanguageModels.json`, agent-mode capable, pending manual verification) **plus** the instructions-file sidecar as ambient context and as the fallback when org policy disables BYOK.
 
 > Copilot has two entries: the standalone **Copilot CLI** (`copilot-cli`, npm `@github/copilot`) is proxy-wired via its BYOK env vars (`COPILOT_PROVIDER_*`), and the VS Code surface (`github-copilot`) is dual-carrier as above. In both BYOK modes, model traffic routes to your configured upstream key, not your Copilot subscription.

@@ -432,3 +432,122 @@ def decide_transition(
         qwen_calls=qwen_calls[0],
         advisories=advisories,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase gate verdict helper (slice 09: state-phase-gate)
+# ---------------------------------------------------------------------------
+
+# Approval-since paths keyed by the phase they're associated with.
+# These are globs for the phase's exit artifacts — the approval marker
+# (.agentalloy/approved/<phase>) must be newer than any matching file.
+_APPROVAL_SINCE: dict[str, str] = {
+    "spec": "docs/spec/*.md",
+    "design": "docs/design/**/*.md",
+    "sdd-fast": "docs/fast/*.md",
+    "add-skill": ".agentalloy/custom-skills/**/*.yaml",
+}
+
+
+def evaluate_phase_gate(
+    current_phase: str | None,
+    target_phase: str,
+    project_root: Path | None,
+    override: bool,
+    store: Any = None,
+) -> dict[str, Any] | None:
+    """Evaluate the exit gate for a phase transition.
+
+    Returns a verdict dict when the gate blocks, or ``None`` when the
+    transition is allowed.  The verdict carries ``result``, ``reason``,
+    and ``advisories`` (missing-artifact paths) so the CLI can render
+    operator-facing guidance without re-evaluating the gate.
+
+    Rules:
+    - Approval gate: forward transitions out of approval-gated phases
+      (spec/design/add-skill) require a recorded human approval marker
+      (unforgeable by --force).
+    - ``override=True`` skips the forward gate (artifact completeness)
+      but NOT the approval gate.
+    - If ``project_root`` is ``None`` (no repo context), the gate is
+      skipped and the write is allowed (fail open).
+    - If ``current_phase`` is ``None`` (fresh repo), the gate is skipped.
+    - If the phase hasn't changed (same-phase write), the gate is skipped.
+    - ``UNKNOWN`` fails open — an embed-server outage must not wedge
+      phase writes.
+    """
+    from agentalloy.signals.predicates import (  # noqa: PLC0415
+        PredicateContext,
+        PredicateResult,
+        approval_required,
+        eval_approval_recorded,
+    )
+
+    # Same-phase write — no gate needed
+    if current_phase is None or current_phase == target_phase:
+        return None
+
+    # Approval gate: forward transitions out of approval-gated phases
+    # require a recorded human approval marker. --force does NOT bypass
+    # this checkpoint.
+    if target_phase == _PHASE_GRAPH.get(current_phase) and approval_required(current_phase):
+        since = _APPROVAL_SINCE.get(current_phase, "")
+        if since and project_root:
+            # Exit artifact doesn't exist yet — skip approval gate,
+            # let the forward (completeness) gate handle it.
+            if not any(p.is_file() for p in project_root.glob(since)):
+                pass  # skip approval gate
+            else:
+                ctx = PredicateContext(
+                    project_root=project_root,
+                    current_phase=current_phase,
+                    store=store,
+                )
+                result = eval_approval_recorded({"since": since}, ctx)
+                if result == PredicateResult.NOT_MET:
+                    return {
+                        "result": "approval",
+                        "reason": "approval",
+                        "advisories": [
+                            f"'{current_phase}' requires human approval before advancing "
+                            f"to '{target_phase}'. Run `agentalloy approve {current_phase}` "
+                            f"once the user has approved."
+                        ],
+                    }
+
+    # Override flag: skip the forward (completeness) gate
+    if override:
+        return None
+
+    # Forward gate: evaluate the current phase's exit gates
+    # Only for forward transitions — backward/bail/non-linear are unguarded
+    from agentalloy.signals.skill_loader import (  # noqa: PLC0415
+        exit_gates_for_phase,
+    )
+
+    if target_phase != _PHASE_GRAPH.get(current_phase):
+        return None  # backward / bail / non-linear → unguarded
+
+    gate_spec = exit_gates_for_phase(current_phase)
+    if not gate_spec:
+        return None  # no packaged gate for this phase
+
+    ctx = PredicateContext(
+        project_root=project_root or Path.cwd(),
+        current_phase=current_phase or "",
+        store=store,
+    )
+    result, _ = evaluate_node(gate_spec, ctx, lm_client=None, qwen_calls=[0])
+
+    # Only NOT_MET blocks — UNKNOWN fails open (embed outage must not wedge).
+    if result != PredicateResult.NOT_MET:
+        return None  # MET or UNKNOWN — allow
+
+    # Use decide_transition for human-readable advisory text (near-miss paths,
+    # missing-artifact guidance). It re-evaluates deterministically (lm_client=None).
+    decision = decide_transition(current_phase, gate_spec, ctx, lm_client=None)
+    return {
+        "result": "not_met",
+        "reason": decision.advisories[0] if decision.advisories else "Exit gate not met",
+        "advisories": decision.advisories or [],
+    }

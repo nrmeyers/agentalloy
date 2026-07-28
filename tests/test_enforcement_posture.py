@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 
-from agentalloy.api import state_client as state_client_mod
 from agentalloy.install.subcommands import flow as flow_mod
 from agentalloy.install.subcommands import phase as phase_mod
 from agentalloy.install.subcommands import wire_harness
@@ -231,46 +230,50 @@ class TestTD9Banner:
 # ---------------------------------------------------------------------------
 
 
-class TestCLIForwardsRepoRoot:
-    @pytest.fixture
-    def captured(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-        seen: dict[str, Any] = {}
+class TestCLIPhaseWritesAreRepoScoped:
+    """Every CLI phase write must land on the *calling repo's* row.
 
-        def _set_phase(_self: Any, value: str, *, repo_root: str | None = None) -> dict[str, Any]:
-            seen["value"] = value
-            seen["repo_root"] = repo_root
-            return {"kind": "phase", "value": value}
+    This used to assert the shape of the HTTP body (``repo_root`` forwarded by
+    ``phase set``, deliberately withheld by ``flow``).  The withholding existed
+    only to protect a hack: ``flow`` encoded its mode into the phase *name*
+    (``"free-flow:design"``), and forwarding the repo would have handed that
+    bogus name to the posture rewriter, which fails it open and clears a locked
+    phase's deny rules.  Mode is a real field now, so there is no prefixed name
+    to hide and no reason for the two surfaces to disagree — both write the
+    calling repo, and the assertions are on the stored row rather than the wire.
+    """
 
-        monkeypatch.setattr(state_client_mod.StateClient, "is_running", lambda _self: True)
-        monkeypatch.setattr(state_client_mod.StateClient, "set_phase", _set_phase)
-        return seen
+    def _row(self, root: Path) -> Any:
+        from agentalloy.install.subcommands._state import phase_access
 
-    def test_phase_set_forwards_repo_root(self, captured: dict[str, Any], tmp_path: Path) -> None:
+        return phase_access(root).read()
+
+    def test_phase_set_writes_the_calling_repo(self, tmp_path: Path) -> None:
         phase_mod.run_phase_set("build", root=tmp_path)
-        assert captured["repo_root"] == str(tmp_path)
+        assert self._row(tmp_path).phase == "build"
 
-    @pytest.mark.parametrize("prefix", ["free-flow", "resume"])
-    def test_prefixed_phase_values_would_fail_open(self, prefix: str) -> None:
-        """Why flow must NOT forward repo_root.
-
-        The router writes ``req.value`` verbatim and hands the same string to the
-        posture rewriter. A prefixed value is not in ``DENIED_PHASES``, so it
-        fails open — forwarding ``repo_root`` from flow would CLEAR the deny
-        rules of a locked phase.
-        """
-        assert build_claude_code_permissions(f"{prefix}:design")["deny"] == []
-        assert build_claude_code_permissions("design")["deny"] != []
-
-    def test_flow_free_does_not_forward_repo_root(
-        self, captured: dict[str, Any], tmp_path: Path
-    ) -> None:
+    def test_flow_free_keeps_the_phase_name_unprefixed(self, tmp_path: Path) -> None:
+        phase_mod.run_phase_set("design", root=tmp_path)
         flow_mod.run_flow_free(root=tmp_path)
-        assert captured["value"].startswith("free-flow:")
-        assert captured["repo_root"] is None
+        row = self._row(tmp_path)
+        assert row.phase == "design"  # not "free-flow:design"
+        assert row.mode == "free"
+        assert row.free_since
 
-    def test_flow_resume_does_not_forward_repo_root(
-        self, captured: dict[str, Any], tmp_path: Path
-    ) -> None:
+    def test_flow_resume_restores_the_exact_phase(self, tmp_path: Path) -> None:
+        phase_mod.run_phase_set("design", root=tmp_path)
+        flow_mod.run_flow_free(root=tmp_path)
         flow_mod.run_flow_resume(root=tmp_path)
-        assert captured["value"].startswith("resume:")
-        assert captured["repo_root"] is None
+        row = self._row(tmp_path)
+        assert row.phase == "design"  # not "resume:design"
+        assert not row.mode
+
+    def test_a_prefixed_phase_would_still_fail_the_posture_open(self) -> None:
+        """The reason the prefixes had to go, kept as a regression tripwire.
+
+        A prefixed value is not in ``DENIED_PHASES``, so the posture rewriter
+        emits no deny rules for it.  Nothing writes such a value any more; this
+        asserts the hazard is real so it is not reintroduced.
+        """
+        assert build_claude_code_permissions("free-flow:design")["deny"] == []
+        assert build_claude_code_permissions("design")["deny"] != []

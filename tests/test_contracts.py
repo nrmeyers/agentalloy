@@ -13,6 +13,24 @@ import yaml
 # ---------------------------------------------------------------------------
 
 
+def _insert_contract(*, contract_id: str, phase: str, route: str | None) -> None:
+    """Seed an active contract row in the store the readers actually consult.
+
+    The autouse ``_bound_state_store`` fixture binds a fresh store per test, so
+    this is the same handle ``_intake_route_hint`` resolves through.
+    """
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "the autouse store fixture should have bound one"
+    store.execute(
+        "INSERT INTO sdd_contract "
+        "(repo, contract_id, slug, domain_tags, work_item, phase, route, status, updated_at) "
+        "VALUES (?, ?, 't', '[]', NULL, ?, ?, 'active', CURRENT_TIMESTAMP)",
+        [store._repo(), contract_id, phase, route],  # pyright: ignore[reportPrivateUsage]
+    )
+
+
 def _write_contract(
     path: Path,
     *,
@@ -317,6 +335,11 @@ class TestContractRoute:
 
 
 class TestIntakeRouteHint:
+    # Route reads come from the *bound process store*, not a repo-local file. The
+    # readers used to open ``<repo>/.agentalloy/state.db`` — a store nothing in
+    # ``src/`` ever wrote — so these tests passed only because they created that
+    # file themselves, while production always fell through to the default route.
+
     """_intake_route_hint is authoritative on the intake contract's ``route`` field:
     ``fast`` → sdd-fast lane, ``full`` → full lane (spec). When no intake contract is
     readable it falls back to the prior-authors-next cascade (contracts/active/sdd-fast/)."""
@@ -327,23 +350,7 @@ class TestIntakeRouteHint:
             phase="intake",
             extra_fields={"route": route},
         )
-        # Also write to the store at .agentalloy/state.db
-        from agentalloy.storage.state_store import DuckDBStateStore
-
-        db = tmp_path / ".agentalloy" / "state.db"
-        if not db.exists():
-            store = DuckDBStateStore(db)
-            store.open()
-            store.migrate()
-            store.close()
-        store = DuckDBStateStore(db)
-        store.open()
-        repo = store._repo()  # type: ignore[attr-defined]
-        store.execute(
-            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, route, status, updated_at)
-            VALUES ('{repo}', 'intake-t', 't', '[]', NULL, 'intake', '{route}', 'active', CURRENT_TIMESTAMP)"""
-        )
-        store.close()
+        _insert_contract(contract_id="intake-t", phase="intake", route=route)
 
     def test_fast_route_field_hints_sdd_fast(self, tmp_path: Path) -> None:
         """route: fast is honored from the field alone — no sdd-fast/ folder needed."""
@@ -383,24 +390,13 @@ class TestIntakeRouteHint:
         """Cascade fallback preserved: no intake contract + a sdd-fast/ work-item
         → fast lane."""
         from agentalloy.signals.skill_loader import _intake_route_hint
-        from agentalloy.storage.state_store import DuckDBStateStore
 
         _write_contract(
             tmp_path / ".agentalloy" / "contracts" / "active" / "sdd-fast" / "t.md",
             phase="sdd-fast",
             extra_fields={"route": "fast"},
         )
-        # Also write to the store so the fallback can find it
-        db = tmp_path / ".agentalloy" / "state.db"
-        store = DuckDBStateStore(db)
-        store.open()
-        store.migrate()
-        repo = store._repo()  # type: ignore[attr-defined]
-        store.execute(
-            f"""INSERT INTO sdd_contract (repo, contract_id, slug, domain_tags, work_item, phase, status, updated_at)
-            VALUES ('{repo}', 'sddfast-t', 't', '[]', NULL, 'sdd-fast', 'active', CURRENT_TIMESTAMP)"""
-        )
-        store.close()
+        _insert_contract(contract_id="sddfast-t", phase="sdd-fast", route=None)
         assert _intake_route_hint(tmp_path) == "sdd-fast"
 
     def test_malformed_intake_contract_falls_back(self, tmp_path: Path) -> None:

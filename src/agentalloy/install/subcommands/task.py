@@ -24,12 +24,45 @@ from pathlib import Path
 from typing import cast
 
 from agentalloy.api.state_client import StateClient, StateClientError
+from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
 from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage]
     _read_cursor,
-    _read_phase,
     _write_cursor_atomic,
     cli_session_key,
 )
+
+
+def _active_phase(root: Path) -> str | None:
+    """The repo's current phase, read from the store.
+
+    ``None`` means the repo genuinely has no phase.  An unreachable store exits
+    non-zero rather than returning ``None``: "no active phase" and "the service
+    is down" used to be the same answer here, so an outage silently reported
+    itself as a repo with no work to do.
+    """
+    try:
+        state = phase_access(root).read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    return state.phase if state else None
+
+
+def _store_cursor(cid: str, root: Path) -> None:
+    """Record the cursor — through the service when it is up, else the file.
+
+    The cursor is still file-backed (``.agentalloy/cursor``, plus the
+    session-scoped variants); only *phase* moved into the store.  This keeps the
+    existing either/or routing rather than dual-writing two sources of truth.
+    """
+    client = StateClient()
+    if client.is_running():
+        try:
+            client.set_cursor(cid)
+            return
+        except StateClientError as exc:
+            fail_on_state_error(exc)
+    _write_cursor_atomic(root, cid, cli_session_key())
 
 
 def _ordered_contracts(root: Path, phase: str) -> list[Path]:
@@ -56,58 +89,16 @@ def _cursor_id(phase: str, contract: Path) -> str:
 
 
 def run_task_next(root: Path) -> dict[str, object]:
-    """Advance the cursor to the next contract after the current one.
-
-    When the phase state service is running, the cursor update is routed
-    through the service's HTTP API; otherwise the file-mirror path is used.
-    """
-    client = StateClient()
-    if client.is_running():
-        try:
-            phase = _read_phase(root)
-            if phase is None:
-                return {"ok": False, "message": "No active phase."}
-            contracts = _ordered_contracts(root, phase)
-            if not contracts:
-                return {
-                    "ok": False,
-                    "message": f"No contracts under .agentalloy/contracts/{phase}/.",
-                }
-
-            session_key = cli_session_key()
-            names = [c.name for c in contracts]
-            cursor = _read_cursor(root, session_key)
-            current_name = cursor.rsplit("/", 1)[-1] if cursor else None
-            nxt = names.index(current_name) + 1 if current_name in names else 0
-
-            if nxt >= len(contracts):
-                return {
-                    "ok": True,
-                    "done": True,
-                    "message": f"All {len(contracts)} tasks composed.",
-                }
-
-            cid = _cursor_id(phase, contracts[nxt])
-            client.set_cursor(cid)
-            return {"ok": True, "cursor": cid, "index": nxt + 1, "total": len(contracts)}
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — write directly to the file mirror.
-    phase = _read_phase(root)
+    """Advance the cursor to the next contract after the current one."""
+    phase = _active_phase(root)
     if phase is None:
         return {"ok": False, "message": "No active phase."}
     contracts = _ordered_contracts(root, phase)
     if not contracts:
         return {"ok": False, "message": f"No contracts under .agentalloy/contracts/{phase}/."}
 
-    session_key = cli_session_key()
     names = [c.name for c in contracts]
-    cursor = _read_cursor(root, session_key)
+    cursor = _read_cursor(root, cli_session_key())
     current_name = cursor.rsplit("/", 1)[-1] if cursor else None
     # No/unknown cursor → start at the first task.
     nxt = names.index(current_name) + 1 if current_name in names else 0
@@ -116,48 +107,20 @@ def run_task_next(root: Path) -> dict[str, object]:
         return {"ok": True, "done": True, "message": f"All {len(contracts)} tasks composed."}
 
     cid = _cursor_id(phase, contracts[nxt])
-    _write_cursor_atomic(root, cid, session_key)
+    _store_cursor(cid, root)
     return {"ok": True, "cursor": cid, "index": nxt + 1, "total": len(contracts)}
 
 
 def run_task_start(slug: str, root: Path) -> dict[str, object]:
-    """Point the cursor at the contract whose filename stem (or name) matches *slug*.
-
-    When the phase state service is running, the cursor update is routed
-    through the service's HTTP API; otherwise the file-mirror path is used.
-    """
-    client = StateClient()
-    if client.is_running():
-        try:
-            phase = _read_phase(root)
-            if phase is None:
-                return {"ok": False, "message": "No active phase."}
-            contracts = _ordered_contracts(root, phase)
-            for c in contracts:
-                if slug in (c.stem, c.name):
-                    cid = _cursor_id(phase, c)
-                    client.set_cursor(cid)
-                    return {"ok": True, "cursor": cid}
-            return {
-                "ok": False,
-                "message": f"No contract matching '{slug}' under contracts/{phase}/.",
-            }
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — write directly to the file mirror.
-    phase = _read_phase(root)
+    """Point the cursor at the contract whose filename stem (or name) matches *slug*."""
+    phase = _active_phase(root)
     if phase is None:
         return {"ok": False, "message": "No active phase."}
     contracts = _ordered_contracts(root, phase)
     for c in contracts:
         if slug in (c.stem, c.name):
             cid = _cursor_id(phase, c)
-            _write_cursor_atomic(root, cid, cli_session_key())
+            _store_cursor(cid, root)
             return {"ok": True, "cursor": cid}
     return {"ok": False, "message": f"No contract matching '{slug}' under contracts/{phase}/."}
 
@@ -165,31 +128,28 @@ def run_task_start(slug: str, root: Path) -> dict[str, object]:
 def run_task_status(root: Path) -> dict[str, object]:
     """Report the current cursor and the ordered worklist for the active phase.
 
-    When the phase state service is running, the read is routed through
-    the service's HTTP API; otherwise the file-mirror path is used.
+    Always reports phase *and* worklist.  The service-up path used to return
+    ``{"ok": True, "cursor": ...}`` alone, so `task status` rendered an empty
+    worklist whenever the service happened to be running — the one case where
+    the command had the most to say.
     """
-    client = StateClient()
-    if client.is_running():
-        try:
-            raw = client.get_state("cursor")
-            if raw is not None:
-                return {"ok": True, "cursor": raw.strip()}
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror read.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — read directly from the file mirror.
-    phase = _read_phase(root)
+    phase = _active_phase(root)
     if phase is None:
         return {"ok": False, "message": "No active phase."}
+
+    cursor: str | None = None
+    client = StateClient()
+    if client.is_running():
+        raw = client.get_state("cursor")
+        cursor = raw.strip() if raw else None
+    if cursor is None:
+        cursor = _read_cursor(root, cli_session_key())
+
     contracts = _ordered_contracts(root, phase)
     return {
         "ok": True,
         "phase": phase,
-        "cursor": _read_cursor(root, cli_session_key()),
+        "cursor": cursor,
         "worklist": [_cursor_id(phase, c) for c in contracts],
     }
 

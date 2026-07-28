@@ -48,6 +48,13 @@ class TestFlowFree:
         assert read_flow_state(tmp_path)[0] == "free"
 
 
+def _row(root: Path):
+    """The stored phase record for *root* — the flow verbs' only persistence."""
+    from agentalloy.install.subcommands._state import phase_access
+
+    return phase_access(root).read()
+
+
 class TestFlowResume:
     def test_resume_restores_exact_phase(self, tmp_path: Path) -> None:
         run_phase_set("qa", root=tmp_path, force=True)
@@ -56,9 +63,10 @@ class TestFlowResume:
         assert result == {"phase": "qa", "mode": "workflow", "changed": True}
         assert _read_phase(tmp_path) == "qa"
         assert read_flow_state(tmp_path) == ("workflow", None)
-        # The free-flow fields are fully gone from the file.
-        raw = (tmp_path / ".agentalloy" / "phase").read_text()
-        assert "mode:" not in raw and "free_since:" not in raw
+        # Cleared, not merely falsy: the stored row carries no free-flow stamp.
+        row = _row(tmp_path)
+        assert row is not None
+        assert not row.free_since
 
     def test_resume_is_idempotent(self, tmp_path: Path) -> None:
         run_phase_set("build", root=tmp_path, force=True)
@@ -68,11 +76,17 @@ class TestFlowResume:
 
     def test_resume_preserves_other_phase_fields(self, tmp_path: Path) -> None:
         run_phase_set("spec", root=tmp_path, force=True)
-        before = (tmp_path / ".agentalloy" / "phase").read_text()
+        before = _row(tmp_path)
         run_flow_free(root=tmp_path)
         run_flow_resume(root=tmp_path)
-        after = (tmp_path / ".agentalloy" / "phase").read_text()
-        assert after == before  # started_at / last_updated / workflow survive
+        after = _row(tmp_path)
+        assert before is not None and after is not None
+        # A free/resume round trip touches mode and free_since and nothing else.
+        assert (after.phase, after.started_at, after.workflow) == (
+            before.phase,
+            before.started_at,
+            before.workflow,
+        )
 
 
 class TestFlowStatus:

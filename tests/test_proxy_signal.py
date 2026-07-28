@@ -23,6 +23,7 @@ from agentalloy.api import proxy_signal
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.prefilter import PreFilterMatch
+from tests.support import seed_phase
 
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
@@ -42,7 +43,7 @@ def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
 def _set_phase(tmp_path: Path, phase: str) -> None:
     phase_dir = tmp_path / ".agentalloy"
     phase_dir.mkdir(exist_ok=True)
-    (phase_dir / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(tmp_path, phase)
 
 
 # A stable session id used across a "session"'s turns. Orientation is now keyed
@@ -490,6 +491,22 @@ class TestProxyLifecycleMode:
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
         assert result.should_compose is False
 
+    def test_off_seeds_no_phase_in_a_fresh_repo(self, tmp_path: Path) -> None:
+        """An `off` repo with no phase stays phase-less — the guard runs first.
+
+        This is what lets `add --lifecycle-mode off` leave an existing phase row
+        alone instead of clearing it: in `off` the row is never read, so it is
+        inert rather than stale, and it is still there if the mode goes back on.
+        Reorder the guard below the lazy seed and `off` repos silently start
+        acquiring phases.
+        """
+        from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+        self._set_mode(tmp_path, "off")
+        result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path, mutate=True))
+        assert result.should_compose is False
+        assert _read_phase(tmp_path) is None
+
     def test_legacy_assist_defers_as_off(self, tmp_path: Path) -> None:
         # `assist` was removed with the hook transport; a repo still carrying it
         # reads as `off` and must defer (compose nothing).
@@ -541,16 +558,32 @@ class TestMissingProjectRootWarning:
         warns = [r for r in caplog.records if "not visible to the proxy" in r.getMessage()]
         assert len(warns) == 1
 
-    def test_present_agentalloy_dir_does_not_warn(
+    def test_present_agentalloy_dir_seeds_intake_instead_of_warning(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        # `.agentalloy/` exists but holds no phase file: the root IS visible, so
-        # this is a legitimate passthrough — no "not visible" warning.
+        # `.agentalloy/` exists but the repo has no phase row: the root IS
+        # visible, so this is a freshly wired repo, not an invisible one. Wiring
+        # deliberately seeds no state, so the entry phase is seeded here, on the
+        # first request — a wired repo that stayed inert until someone ran
+        # `phase set` by hand was the "wired but nothing happens" trap.
         (tmp_path / ".agentalloy").mkdir()
         with caplog.at_level(logging.WARNING, logger="agentalloy.api.proxy_signal"):
             result = asyncio.run(evaluate_signal(_req("hi"), tmp_path))
-        assert result.should_compose is False
+        assert result.should_compose is True
+        assert result.phase == "intake"
         assert not any("not visible to the proxy" in r.getMessage() for r in caplog.records)
+        # The seed lands in the store, not back in the file the migration
+        # removed — the one assertion that tells the two destinations apart.
+        assert not (tmp_path / ".agentalloy" / "phase").exists()
+
+    def test_phaseless_read_only_evaluation_seeds_nothing(self, tmp_path: Path) -> None:
+        """``mutate=False`` evaluates as intake without recording it."""
+        from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+        (tmp_path / ".agentalloy").mkdir()
+        result = asyncio.run(evaluate_signal(_req("hi"), tmp_path, mutate=False))
+        assert result.phase == "intake"
+        assert _read_phase(tmp_path) is None
 
 
 def _seed_contract(tmp_path: Path, phase: str, name: str) -> None:
@@ -888,7 +921,7 @@ class TestEvaluateSignalBanner:
     def test_lifecycle_off_leaves_banner_none(self, tmp_path: Path) -> None:
         d = tmp_path / ".agentalloy"
         d.mkdir()
-        (d / "phase").write_text("phase: spec\n")
+        seed_phase(tmp_path, "spec")
         (d / "config").write_text("lifecycle_mode: off\n")
         result = asyncio.run(evaluate_signal(_req("work"), tmp_path))
         assert result.should_compose is False

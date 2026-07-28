@@ -12,10 +12,10 @@ the service running (`curl -s localhost:47950/health`).
 
 1. Wire; confirm `.cursor/rules/agentalloy.mdc` (with `.cursor/` present; else
    a marker block in `.cursorrules`) exists and contains the current phase.
-   The watcher refreshes the same file.
-2. Open the repo in Cursor, start `agentalloy watch start --harness cursor`.
-3. Ask the agent "what phase is this project in per your rules?" — answer
-   should match `.agentalloy/phase`.
+   The in-process store hook refreshes the same file.
+2. Start the service (`agentalloy serve`) — the store hook auto-registers.
+3. Open the repo in Cursor, ask the agent "what phase is this project in per your rules?" — answer
+   should match the stored phase.
 4. `agentalloy phase set build` (or advance normally); within ~1s the rules
    file should regenerate — re-ask and confirm the agent sees the new phase.
 

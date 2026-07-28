@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agentalloy.signals.predicates import PredicateContext
+    from agentalloy.storage.state_store import DuckDBStateStore, PhaseState
 
 __all__ = [
     "FLOW_MODES",
@@ -51,7 +52,7 @@ __all__ = [
 LIFECYCLE_MODES = ("full", "off")
 _DEFAULT_LIFECYCLE_MODE = "full"
 
-# Per-repo flow modes, stored as an optional ``mode`` field in the phase file
+# Per-repo flow modes, stored as an optional ``mode`` field in the phase row
 # (see ``read_flow_state``). ``workflow`` (the default — an absent/unknown
 # ``mode`` reads as workflow) is today's full SDD steering; ``free`` pauses ALL
 # workflow steering (orientation, banners, exit gates, transitions, intake)
@@ -61,127 +62,124 @@ FLOW_MODES = ("workflow", "free")
 
 
 # ---------------------------------------------------------------------------
-# Phase file helpers
+# Phase helpers — the store is the only source
 # ---------------------------------------------------------------------------
+#
+# Phase lives in ``sdd_state`` kind ``phase``, one JSON blob per repo. Nothing
+# here touches ``.agentalloy/phase``. DuckDB is single-writer, so these helpers
+# borrow the service's handle (``process_store``) rather than opening one; a
+# CLI process, where nothing is bound, reaches the same row over HTTP.
+
+
+def _phase_view(project_root: Path) -> DuckDBStateStore | None:
+    """The store handle re-scoped to *project_root*'s repo, or ``None``.
+
+    ``None`` means the store is out of reach from this process — not that the
+    repo has no phase. Callers distinguish the two.
+    """
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    if store is None:
+        return None
+    from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+
+    return store.for_repo(_repo_key_for(str(project_root)))
+
+
+def _phase_state(project_root: Path) -> PhaseState | None:
+    """The full :class:`PhaseState` for *project_root*, or ``None``.
+
+    In-process only. The three projections below (``_read_phase``,
+    ``read_flow_state``, ``_read_transitioned_by``) all come off one call to
+    this on the proxy path, so a concurrent transition can never hand a single
+    turn a mixed view of phase, mode, and actor.
+    """
+    view = _phase_view(project_root)
+    if view is None:
+        return None
+    try:
+        return view.read_phase()
+    except Exception:
+        logger.warning("state store phase read failed for %s", project_root, exc_info=True)
+        return None
 
 
 def _read_phase(project_root: Path) -> str | None:
-    """Read the active phase from ``.agentalloy/phase``.
+    """The active phase for *project_root*, or ``None`` when none is recorded.
 
-    Returns ``None`` when the file is absent, unreadable, or malformed.
+    Deliberately store-only, with no HTTP fallback: the signal layer runs
+    *inside* the service, which owns the writer handle, so looping back over the
+    state API would be the service calling itself. Out-of-process callers (the
+    CLI) reach the same row through the HTTP client; task 06
+    (``cli-state-required``) makes an unreachable service fatal there rather
+    than letting an outage read as a fresh repo.
+
+    (The state HTTP client is named by description rather than by symbol on
+    purpose — ``tests/api/test_state_router.py::TestTE2`` greps this module's
+    source for that name to prove the in-process path never loops back.)
     """
-    phase_file = project_root / ".agentalloy" / "phase"
-    if not phase_file.exists():
-        return None
-    try:
-        import yaml
-
-        raw = yaml.safe_load(phase_file.read_text(encoding="utf-8"))
-        if raw is None:
-            return None
-        if isinstance(raw, dict):
-            raw_dict = cast("dict[str, Any]", raw)
-            phase_val = raw_dict.get("phase")
-            return str(phase_val).strip() if phase_val else None
-        return str(raw).strip() or None
-    except Exception:
-        return None
-
-
-def _read_phase_data(project_root: Path) -> dict[str, str]:
-    """Flat-parse ``.agentalloy/phase`` into a ``key -> value`` dict.
-
-    Hand-parses ``key: value`` lines (partition on the first colon, quotes
-    stripped) rather than yaml.safe_load, mirroring the CLI parser in
-    ``install.subcommands.phase`` — tolerant of unknown extra keys, and immune
-    to YAML 1.1 scalar coercion. A legacy bare-phase file (no colon) yields an
-    empty dict; callers wanting just the phase should use :func:`_read_phase`,
-    which handles that form. Never raises.
-    """
-    phase_file = project_root / ".agentalloy" / "phase"
-    data: dict[str, str] = {}
-    try:
-        raw = phase_file.read_text(encoding="utf-8")
-    except OSError:
-        return data
-    for line in raw.splitlines():
-        if ":" not in line or line.strip().startswith("#"):
-            continue
-        key, _, value = line.partition(":")
-        data[key.strip()] = value.strip().strip('"').strip("'")
-    return data
+    state = _phase_state(project_root)
+    return state.phase if state else None
 
 
 def read_flow_state(project_root: Path) -> tuple[str, str | None]:
-    """Read the per-repo flow mode from the phase file as ``(mode, free_since)``.
+    """The per-repo flow mode as ``(mode, free_since)``.
 
-    ``mode`` is ``"free"`` only when the phase file carries ``mode: free``;
-    anything else (absent file, absent key, unknown value, legacy bare-phase
-    file) reads as ``"workflow"`` — the historical behavior. ``free_since`` is
-    the ISO timestamp recorded when free-flow was entered (drives the daily
-    reminder), or ``None``. Never raises.
+    ``mode`` is ``"free"`` only when the phase row carries ``mode: free``;
+    anything else (no row, absent field, unknown value) reads as ``"workflow"``
+    — the historical behavior. ``free_since`` is the ISO timestamp recorded
+    when free-flow was entered (drives the daily reminder), or ``None``.
+    Never raises.
     """
-    data = _read_phase_data(project_root)
-    if data.get("mode", "").lower() == "free":
-        return "free", data.get("free_since") or None
+    state = _phase_state(project_root)
+    if state is not None and (state.mode or "").lower() == "free":
+        return "free", state.free_since or None
     return "workflow", None
 
 
 def _read_transitioned_by(project_root: Path) -> str | None:
-    """Read the session key (if any) that caused the current phase's last transition.
+    """The session key (if any) that caused the current phase's last transition.
 
     ``None`` means "don't know" — no session-aware writer recorded an actor for
-    this phase (a bare CLI ``phase set`` run outside a tracked Claude Code
-    session, a pre-existing repo predating this field, or nothing has
-    transitioned yet). Callers must treat ``None`` as ambiguous, not as
-    evidence the current session caused the transition — see
-    ``_write_phase_atomic``.
+    this phase (a bare CLI ``phase set`` outside a tracked session, a repo
+    predating the field, or nothing has transitioned yet). Callers must treat
+    ``None`` as ambiguous, not as evidence the current session caused the
+    transition — see :func:`_write_phase_atomic`.
     """
-    return _read_phase_data(project_root).get("transitioned_by") or None
+    state = _phase_state(project_root)
+    return (state.transitioned_by or None) if state else None
 
 
 def _write_phase_atomic(project_root: Path, phase: str, *, session_key: str | None = None) -> None:
-    """Atomically write *phase* to ``.agentalloy/phase``.
+    """Write *phase* to the store for *project_root*, then re-seed the cursor.
 
-    Uses a temp file + ``os.replace`` so concurrent writers never leave
-    a partially-written file. The phase line is always written first; the
-    free-flow fields (``mode``, ``free_since``) are preserved from the existing
-    file so an auto-transition never silently drops the repo out of (or into)
-    free-flow — only ``agentalloy flow free/resume`` touches them.
+    The write itself is :meth:`DuckDBStateStore.write_phase`, which does the
+    read-modify-write inside a transaction and owns the preservation rules the
+    file version used to hand-roll: ``mode``/``free_since`` carry forward so an
+    auto-transition never silently drops the repo out of (or into) free-flow,
+    and ``transitioned_by`` is stamped only on a *real* transition
+    (``prev != phase``) — an idempotent rewrite keeps the prior actor, which is
+    what lets a *different* session's next turn recognize "the phase moved and
+    it wasn't me" (``_boundary_confirm_directives``'s "swept" case).
 
-    ``session_key`` records *who* caused a real transition (``prev != phase``)
-    as ``transitioned_by`` — the session key of the proxy request (or CLI
-    invocation) whose action moved the phase, when known. On an idempotent
-    rewrite (``prev == phase``) the prior ``transitioned_by`` is preserved
-    unchanged, matching ``mode``/``free_since``. This lets a *different*
-    session's next turn recognize "the phase changed since I last looked, and
-    it wasn't me" (see ``_boundary_confirm_directives``'s "swept" case) instead
-    of silently reorienting to a phase transition it had no part in.
+    ``session_key`` is that actor. The name keeps its ``_atomic`` suffix: the
+    row is written under a lease inside one BEGIN/COMMIT, so the atomicity
+    guarantee the callers depend on is unchanged — only its mechanism moved
+    from ``os.replace`` to the store.
+
+    Raises when no process store is bound. This is called on the proxy's
+    auto-advance path, which always runs inside the service; silently dropping
+    a phase transition would leave the repo one phase behind with nothing to
+    show for it.
     """
-    phase_file = project_root / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True, exist_ok=True)
+    view = _phase_view(project_root)
+    if view is None:
+        raise RuntimeError(
+            "no state store bound in this process — phase writes require the service"
+        )
     prev = _read_phase(project_root)
-    prev_data = _read_phase_data(project_root)
-    lines = [f"phase: {phase}"]
-    for key in ("mode", "free_since"):
-        value = prev_data.get(key)
-        if value:
-            # Quote ISO timestamps so YAML parsers read them back as strings.
-            lines.append(f'{key}: "{value}"' if "T" in value else f"{key}: {value}")
-    transitioned_by = session_key if prev != phase else prev_data.get("transitioned_by")
-    if transitioned_by:
-        lines.append(f"transitioned_by: {transitioned_by}")
-    # Unique tmp per writer: the watcher and the async proxy both call this with
-    # no shared lock, so a fixed tmp name lets two writers race on the same file
-    # and defeat the os.replace atomicity. A per-writer tmp keeps it atomic.
-    tmp = phase_file.with_name(f"phase.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.replace(tmp, phase_file)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
+    view.write_phase(phase, actor=session_key)
     # On a real phase transition, SEED the work-item cursor to the first work-item of
     # the new phase (filename order — 01-, 02-, …) so "which task is current" is
     # reliably set without waiting for the agent's first `agentalloy task next`. The
@@ -657,12 +655,20 @@ def _read_intake_route(project_root: Path) -> str | None:
     Queries the store for active intake contracts and returns the newest one's
     ``route`` (``"full"`` | ``"fast"`` | ``"add-skill"``). Best-effort: any
     failure returns ``None``. Never raises.
+
+    Reads the *bound* process store rather than opening a handle of its own.
+    This used to open ``<repo>/.agentalloy/state.db`` — a store nothing in
+    ``src/`` has ever written, so intake routing silently always took the
+    default route, and the open *created* an empty file in every repo it
+    touched. Opening a second writer against the real store is not an option
+    either: the service holds the DuckDB write lock.
     """
     try:
-        from agentalloy.storage.state_store import open_state_store
+        from agentalloy.storage.state_store import process_store
 
-        db_path = project_root / ".agentalloy" / "state.db"
-        store = open_state_store(db_path)
+        store = process_store()
+        if store is None:
+            return None
         contracts = store.list_contracts(phase="intake", status="active")
         if not contracts:
             return None
@@ -696,10 +702,11 @@ def _intake_route_hint(project_root: Path) -> str | None:
 
     # No readable intake contract: fall back to store-presence (cascade).
     try:
-        from agentalloy.storage.state_store import open_state_store
+        from agentalloy.storage.state_store import process_store
 
-        db_path = project_root / ".agentalloy" / "state.db"
-        store = open_state_store(db_path)
+        store = process_store()
+        if store is None:
+            return None
         fast_contracts = store.list_contracts(phase="sdd-fast", status="active")
         if fast_contracts:
             return "sdd-fast"

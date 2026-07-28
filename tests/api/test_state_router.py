@@ -23,7 +23,9 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.state_client import StateClient, StateClientError
 from agentalloy.api.state_router import (
+    _repo_key_for,
     contract_router,
+    default_repo_root,
     get_state_store,
 )
 from agentalloy.api.state_router import (
@@ -40,7 +42,10 @@ from agentalloy.storage.state_store import DuckDBStateStore, open_state_store
 def state_store(tmp_path: Path) -> DuckDBStateStore:
     """A fresh, migrated StateStore at a tmp path."""
     db = tmp_path / "state.duck"
-    store = open_state_store(db)
+    # Seeded through the bare handle but read back through the routes, which
+    # scope to the repo they resolve from the request — so the fixture has to
+    # be opened under that same key or every seeded row is invisible.
+    store = open_state_store(db, repo=_repo_key_for(str(default_repo_root())))
     try:
         yield store
     finally:
@@ -310,8 +315,10 @@ class TestTA3:
         assert body["value"] == "build"
         assert body["contract_id"] == "ctr-ta3-1"
 
-        # Verify both rows exist in the store
-        assert state_store.read("phase") == "build"
+        # Verify both rows exist in the store.  ``read_phase`` decodes the blob;
+        # ``read`` would hand back the raw JSON row.
+        phase = state_store.read_phase()
+        assert phase is not None and phase.phase == "build"
         contract = state_store.get_contract("ctr-ta3-1")
         assert contract is not None
         assert contract["phase"] == "build"
@@ -328,7 +335,8 @@ class TestTA3:
         assert body["kind"] == "phase"
         assert body["value"] == "design"
         assert body["contract_id"] is None
-        assert state_store.read("phase") == "design"
+        phase = state_store.read_phase()
+        assert phase is not None and phase.phase == "design"
 
     def test_phase_advance_contract_optional_fields(
         self, full_client: TestClient, state_store: DuckDBStateStore

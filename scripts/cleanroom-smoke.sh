@@ -122,35 +122,40 @@ for pair in "CLAUDE.md:claude-code" "GEMINI.md:antigravity" ".cursorrules:cursor
   fi
 done
 
-echo "== per-repo lifecycle mode (off defers, no phase) =="
+# Phase seeding is no longer observable from this smoke.  `.agentalloy/phase` is
+# gone — the state store owns phase — and reading the store needs a running
+# service, which this clean-room deliberately does not have.  The seeding
+# behaviour both branches used to assert here is covered by unit tests
+# (`test_off_seeds_no_phase_in_a_fresh_repo` and the phase-access suite); what
+# remains below is the part the clean room can actually see: the files `wire`
+# writes.
+echo "== per-repo lifecycle mode (off defers) =="
 orepo="$WORK/lifecycle-off"
 mkdir -p "$orepo"
 git -C "$orepo" init -q
 omode="$(cd "$orepo" && agentalloy wire --harness claude-code --lifecycle-mode off --json 2>/dev/null \
         | python3 -c 'import sys,json; print(json.load(sys.stdin).get("lifecycle_mode",""))' 2>/dev/null)"
 if [ "$omode" = "off" ] \
-   && grep -q "lifecycle_mode: off" "$orepo/.agentalloy/config" 2>/dev/null \
-   && [ ! -e "$orepo/.agentalloy/phase" ]; then
-  echo "ok   [lifecycle off: config=off, phase not seeded]"
+   && grep -q "lifecycle_mode: off" "$orepo/.agentalloy/config" 2>/dev/null; then
+  echo "ok   [lifecycle off: config=off]"
 else
-  echo "FAIL [lifecycle off]: mode='$omode', config/phase state unexpected"
+  echo "FAIL [lifecycle off]: mode='$omode', config state unexpected"
   fail=1
 fi
 (cd "$orepo" && agentalloy unwire >/dev/null 2>&1) || true
 
-echo "== full mode: phase seeded + soft-precedence note + clean-room excludes =="
+echo "== full mode: soft-precedence note + clean-room excludes =="
 frepo="$WORK/lifecycle-full"
 mkdir -p "$frepo"
 git -C "$frepo" init -q
 : >"$frepo/CLAUDE.md"
 (cd "$frepo" && agentalloy wire --harness claude-code --lifecycle-mode full --clean-room >/dev/null 2>&1) || true
 if grep -q "lifecycle_mode: full" "$frepo/.agentalloy/config" 2>/dev/null \
-   && [ -e "$frepo/.agentalloy/phase" ] \
    && grep -q "BEGIN agentalloy install" "$frepo/.claude/CLAUDE.md" 2>/dev/null \
    && grep -q "claudeMdExcludes" "$frepo/.claude/settings.json" 2>/dev/null; then
-  echo "ok   [full: phase seeded, soft note + clean-room excludes written]"
+  echo "ok   [full: soft note + clean-room excludes written]"
 else
-  echo "FAIL [full]: missing phase / soft note / clean-room excludes"
+  echo "FAIL [full]: missing soft note / clean-room excludes"
   fail=1
 fi
 (cd "$frepo" && agentalloy unwire >/dev/null 2>&1) || true

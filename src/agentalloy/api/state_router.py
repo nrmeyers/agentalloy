@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,7 @@ from agentalloy.api.state_models import (
     ContractSupersedeRequest,
     PhaseAdvanceRequest,
     PhaseAdvanceResponse,
+    PhaseReadResponse,
     ResumeContractInfo,
     ResumeResponse,
     StateAllResponse,
@@ -41,7 +44,7 @@ from agentalloy.api.state_models import (
     StateWriteResponse,
 )
 from agentalloy.providers.base import end_session_instruction
-from agentalloy.storage.state_store import DuckDBStateStore
+from agentalloy.storage.state_store import DuckDBStateStore, StateStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,63 @@ def get_state_store() -> DuckDBStateStore:
     store (e.g. a bare router without a running app).
     """
     raise RuntimeError("get_state_store must be bound during app lifespan")
+
+
+_REPO_ROOT_QUERY = Query(
+    default=None,
+    description=(
+        "Absolute path to the repository root.  Determines which repo's state "
+        "the call reads or writes.  Omitted means the repo the service was "
+        "deployed against (AGENTALLOY_PROJECT_DIR, else the process cwd)."
+    ),
+)
+
+
+def default_repo_root() -> Path:
+    """The repo a request belongs to when it names none.
+
+    Mirrors :func:`agentalloy.api.proxy_context.resolve_working_dir` minus the
+    proxy-only sources, so both seams answer "which repo is this?" the same way.
+    """
+    env_dir = os.environ.get("AGENTALLOY_PROJECT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.cwd()
+
+
+def resolve_repo_root(repo_root: str | None = _REPO_ROOT_QUERY) -> Path:
+    """Resolve the repo root for this request."""
+    return Path(repo_root) if repo_root else default_repo_root()
+
+
+@lru_cache(maxsize=256)
+def _repo_key_for(root: str) -> str:
+    """Slug a repo root, memoised — ``repo_slug`` shells out to git.
+
+    Imported from ``code_index.slug`` deliberately: that module is the canonical
+    worktree-aware implementation and is pure stdlib, so importing it does not
+    drag in the ``[code-index]`` extra.
+    """
+    from agentalloy.code_index.slug import repo_slug
+
+    try:
+        return repo_slug(Path(root))
+    except Exception:
+        logger.debug("repo_slug failed for %s — falling back to basename", root, exc_info=True)
+        return Path(root).name
+
+
+def get_repo_store(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_state_store),
+) -> DuckDBStateStore:
+    """The lifespan store, scoped to the repo this request is about.
+
+    One service serves every repo from one ``state.duck``; without this scoping
+    they all share a single bucket and a phase set in one repo is read by the
+    next.  Repo-scoped stores isolate each repo's phase row behind a key namespace.
+    """
+    return store.for_repo(_repo_key_for(str(root)))
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +148,42 @@ def _write_result_to_response(
         owner=result.owner,
         lease_expires_at=result.lease_expires_at,
     )
+
+
+#: Gate predicates that name a file the phase owes.  Others (`approval_recorded`,
+#: `build_contracts_cover_tasks`) gate on state, not on a path, and have nothing
+#: to list here.
+_ARTIFACT_PREDICATES = ("artifact_exists", "artifact_contains")
+
+
+def _owed_artifacts(gates: dict[str, Any]) -> list[str]:
+    """The distinct artifact paths a phase's exit gates require.
+
+    Exit gates are a boolean tree: ``{"all_of": [{predicate: {...}}, ...]}``.
+    This walks it for the path-bearing predicates.  The previous version
+    iterated ``gates.items()`` expecting ``{gate_name: {"artifact": path}}`` —
+    a shape the corpus has never emitted — so ``owed_artifacts`` was silently
+    always empty, and the ``except`` around it meant nothing ever said so.
+    """
+    paths: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:  # pyright: ignore[reportUnknownVariableType]
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        for key, spec in node.items():  # pyright: ignore[reportUnknownVariableType]
+            if key in _ARTIFACT_PREDICATES and isinstance(spec, dict):
+                path = spec.get("path")  # pyright: ignore[reportUnknownMemberType]
+                if isinstance(path, str) and path not in paths:
+                    paths.append(path)
+            else:
+                walk(spec)
+
+    walk(gates)
+    return paths
 
 
 def _contract_row_to_response(row: dict[str, Any]) -> ContractResponse:
@@ -196,10 +292,21 @@ async def _trigger_compose_in_process(
     summary="Read all state kinds for the resolved repo",
 )
 async def read_all_state(
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateAllResponse:
+    """Every kind that has a value, with ``phase`` unwrapped to its bare name.
+
+    ``phase`` is stored as a blob; its raw row is JSON that no consumer of this
+    map is prepared to parse.  Unwrapping happens here so that nothing outside
+    the store ever handles the blob.
+    """
     state: dict[str, str] = {}
     for kind in sorted(ALL_KINDS):
+        if kind == "phase":
+            phase = await asyncio.to_thread(store.read_phase)
+            if phase is not None:
+                state["phase"] = phase.phase
+            continue
         value = await asyncio.to_thread(store.read, kind)
         if value is not None:
             state[kind] = value
@@ -217,7 +324,7 @@ async def read_all_state(
     summary="Assembled resume data for cold-session bootstrap",
 )
 async def read_resume(
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ResumeResponse:
     """Assemble phase, cursor'd work-item, owed artifacts, and governing decisions.
 
@@ -225,7 +332,8 @@ async def read_resume(
     fan-out of four separate calls.  The shape matches what the proxy's
     orientation block sends to the agent.
     """
-    phase = await asyncio.to_thread(store.read, "phase")
+    phase_state = await asyncio.to_thread(store.read_phase)
+    phase = phase_state.phase if phase_state is not None else None
     cursor_value = await asyncio.to_thread(store.read, "cursor")
 
     cursor_contract: ResumeContractInfo | None = None
@@ -254,23 +362,12 @@ async def read_resume(
                 )
 
     if phase:
-        # Get owed artifacts from exit gates for the current phase
         try:
             from agentalloy.signals.skill_loader import exit_gates_for_phase
 
-            gates = exit_gates_for_phase(phase) or {}
-            artifacts: list[str] = []
-            for _gate_name, gate_spec in gates.items():
-                if isinstance(gate_spec, dict):
-                    artifact = gate_spec.get("artifact") or gate_spec.get("artifact_contains")
-                    if isinstance(artifact, str):
-                        artifacts.append(artifact)
-                    elif isinstance(artifact, list):
-                        artifacts.extend(artifact)
-            if artifacts:
-                owed_artifacts = artifacts
+            owed_artifacts = _owed_artifacts(exit_gates_for_phase(phase) or {}) or None
         except Exception:
-            pass
+            logger.debug("exit gates unavailable for phase=%s", phase, exc_info=True)
 
     return ResumeResponse(
         phase=phase,
@@ -278,6 +375,70 @@ async def read_resume(
         owed_artifacts=owed_artifacts,
         governing_decisions=governing_decisions,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /state/phase — the bare phase name (before /{kind})
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/phase",
+    response_model=PhaseReadResponse,
+    summary="Read the current phase, decoded",
+)
+async def read_phase(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> PhaseReadResponse:
+    """Return the decoded phase row — never the stored blob verbatim.
+
+    Its own route rather than a branch inside ``/{kind}`` because the two
+    return genuinely different things: every other kind's stored value *is*
+    its value, while ``phase``'s row is JSON carrying mode, actor, and
+    timestamps alongside the name.  Serving it through the generic route
+    handed every caller a JSON envelope where it expected ``"build"``.
+
+    ``value`` stays the bare name so that older callers keep working; the
+    decoded fields ride alongside it because the CLI reads the whole row and,
+    without them, had no way to reach ``mode``/``free_since``/``transitioned_by``
+    except the file mirror this migration is removing.
+
+    Note the deliberate asymmetry with writes: ``POST /state/phase`` is gated
+    (task 09), this read is not.  Reading a phase cannot advance one.
+    """
+    phase = await asyncio.to_thread(store.read_phase)
+    if phase is None:
+        return PhaseReadResponse(kind="phase", value=None)
+    return PhaseReadResponse(
+        kind="phase",
+        value=phase.phase,
+        mode=phase.mode,
+        free_since=phase.free_since,
+        transitioned_by=phase.transitioned_by,
+        started_at=phase.started_at,
+        last_updated=phase.last_updated,
+        workflow=phase.workflow or None,
+    )
+
+
+@router.delete(
+    "/phase",
+    response_model=StateReadResponse,
+    summary="Clear the current phase",
+)
+async def clear_phase(
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> StateReadResponse:
+    """Delete the phase row, leaving the repo genuinely phase-less.
+
+    ``agentalloy phase clear`` used to ``unlink()`` the file; with the store as
+    the only source it needs a route, and it must *delete* rather than write an
+    empty value — a row holding ``""`` still reads as present to every consumer
+    that checks for ``None``.  Idempotent: clearing an absent phase is a
+    success, so reset paths stay re-runnable.
+    """
+    await asyncio.to_thread(store.clear, "phase")
+    return StateReadResponse(kind="phase", value=None)
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +456,21 @@ async def read_resume(
 )
 async def read_state(
     kind: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateReadResponse:
+    """Read one kind's stored value verbatim.
+
+    ``phase`` is excluded: its row is a blob, and this route's contract is
+    that ``value`` is the value.  FastAPI already routes ``/state/phase`` to
+    the specific handler above, so the guard only fires on a request that
+    reached here some other way — it exists so the exclusion is enforced by
+    the code rather than by route-declaration order.
+    """
+    if kind == "phase":  # pragma: no cover — unreachable while /phase is declared first
+        raise HTTPException(
+            status_code=404,
+            detail="read 'phase' via GET /state/phase; its stored row is a blob",
+        )
     if kind not in ALL_KINDS:
         raise HTTPException(
             status_code=404,
@@ -309,6 +483,23 @@ async def read_state(
 # ---------------------------------------------------------------------------
 # POST /state/phase — with optional contract (transactional)
 # ---------------------------------------------------------------------------
+
+
+def _evaluate_phase_gate(
+    store: DuckDBStateStore,
+    current_phase: str | None,
+    target_phase: str,
+    project_root: Path | None,
+    override: bool,
+) -> dict[str, Any] | None:
+    """Evaluate the exit gate for a phase transition.
+
+    Delegates to :func:`agentalloy.signals.gates.evaluate_phase_gate` so the
+    route and the CLI share a single evaluation point.
+    """
+    from agentalloy.signals.gates import evaluate_phase_gate as _eval  # noqa: PLC0415
+
+    return _eval(current_phase, target_phase, project_root, override, store)
 
 
 @router.post(
@@ -330,7 +521,7 @@ async def write_phase(
             "after a successful phase advance."
         ),
     ),
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> PhaseAdvanceResponse:
     """Advance the phase, optionally storing a contract in the same transaction.
 
@@ -341,12 +532,48 @@ async def write_phase(
     On success, compose is triggered in-process (the write *is* the trigger).
     When ``repo_root`` is provided the enforcement posture is rewritten for
     any wired Tier A harnesses (D1–D9).
+
+    **Exit gate:** this endpoint evaluates the exit gate for the transition.
+    The gate is evaluated *before* the write.  If it blocks, the verdict is
+    returned in ``gate_verdict`` and the write is skipped (the CLI renders
+    the blocking reason and missing-artifact paths).  Override bypasses the
+    gate except for always-approval phases.
+
+    Both paths go through ``store.write_phase`` rather than a raw
+    ``write("phase", ...)``: a raw write replaces the blob with a bare name and
+    so silently discards ``mode``, ``free_since``, ``started_at`` and
+    ``transitioned_by``.  ``read_phase`` tolerates that shape, which is exactly
+    why the loss was invisible.
     """
     phase_value = req.value
+    # ``actor`` is who *moved* the phase; ``owner`` is who holds the lease.  They
+    # are usually the same session, and were conflated while only the lease had a
+    # field — falling back keeps every existing caller behaving identically.
+    actor = req.actor or req.owner
+
+    # --- Exit gate evaluation (slice 09) ---
+    current_phase_row = store.read_phase()
+    current_phase = current_phase_row.phase if current_phase_row else None
+    project_root = Path(repo_root) if repo_root else None
+    verdict = _evaluate_phase_gate(store, current_phase, phase_value, project_root, req.override)
+    if verdict is not None:
+        # Gate blocks the transition — return verdict without writing.
+        return PhaseAdvanceResponse(
+            kind="phase",
+            value=phase_value,
+            gate_verdict=verdict,
+        )
 
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
-        result = await asyncio.to_thread(store.write, "phase", phase_value, owner=req.owner)
+        result = await asyncio.to_thread(
+            store.write_phase,
+            phase_value,
+            actor=actor,
+            owner=req.owner,
+            mode=req.mode,
+            free_since=req.free_since,
+        )
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
             raise HTTPException(
@@ -358,18 +585,26 @@ async def write_phase(
             await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
         return PhaseAdvanceResponse(
             kind=result.kind,
-            value=result.value,
+            # ``result.value`` is the stored blob; callers want the bare name.
+            value=phase_value,
             owner=result.owner,
             lease_expires_at=result.lease_expires_at,
             end_session_instruction=end_session_instruction(phase_value),
+            gate_verdict=None,
         )
 
     # Transactional path: phase + contract in one BEGIN/COMMIT
     contract_id: str | None = None
     try:
         with store.transaction() as tx:
-            # Write the phase
-            result = tx.write("phase", phase_value, owner=req.owner)
+            # Write the phase — blob semantics, reusing this transaction.
+            result = tx.write_phase(
+                phase_value,
+                actor=actor,
+                owner=req.owner,
+                mode=req.mode,
+                free_since=req.free_since,
+            )
             # conflict.owner is None when no row exists yet — non-blocking
             if result.conflict is not None and result.conflict.owner is not None:
                 # lease_expires_at is also non-None when owner is non-None
@@ -412,11 +647,12 @@ async def write_phase(
 
     return PhaseAdvanceResponse(
         kind=result.kind,
-        value=result.value,
+        value=phase_value,  # the bare name, not the stored blob
         owner=result.owner,
         lease_expires_at=result.lease_expires_at,
         contract_id=contract_id,
         end_session_instruction=end_session_instruction(phase_value),
+        gate_verdict=None,
     )
 
 
@@ -435,7 +671,7 @@ async def write_phase(
 )
 async def write_cursor(
     req: StateWriteRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
     result = await asyncio.to_thread(store.write, "cursor", req.value, owner=req.owner)
     http_status, response = _write_result_to_response(result)
@@ -462,7 +698,7 @@ async def write_cursor(
 )
 async def write_approve(
     req: StateWriteRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> StateWriteResponse | StateConflictInfo:
     result = await asyncio.to_thread(store.write, "approved", req.value, owner=req.owner)
     http_status, response = _write_result_to_response(result)
@@ -472,6 +708,38 @@ async def write_approve(
             detail=response.model_dump(mode="json"),  # type: ignore[union-attr]
         )
     return response  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# POST /state/import-files
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/import-files",
+    summary="One-shot migration of a repo's .agentalloy file mirror into the store",
+)
+async def import_files(
+    root: Path = Depends(resolve_repo_root),
+    store: DuckDBStateStore = Depends(get_repo_store),
+) -> dict[str, dict[str, str]]:
+    """Migrate legacy file-based state (``.agentalloy/phase``, etc.) into the store.
+
+    One-shot migration: carries the file mirror into DuckDB and deletes the
+    phase file once its content has been stored. Idempotent — a repo with no
+    file mirror, or one already migrated, returns an empty map. Deliberately
+    *not* subject to the phase-advance gate: this carries a phase that already
+    exists across a storage change, it does not advance one.
+
+    After migration the store is the sole source of truth. Sidecar harnesses
+    that still watch ``.agentalloy/phase`` will see the file deleted; they must
+    be re-wired to use the proxy or the in-process store hook.
+    """
+    try:
+        imported = await asyncio.to_thread(store.import_from_files, root / ".agentalloy")
+    except StateStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"imported": imported}
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +758,7 @@ async def write_approve(
 async def create_contract(
     req: ContractCreateRequest,
     request: Request,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     cid = await asyncio.to_thread(
         store.put_contract,
@@ -529,7 +797,7 @@ async def list_contracts(
     phase: str | None = Query(default=None, description="Filter by phase"),
     slug: str | None = Query(default=None, description="Filter by slug"),
     status: str | None = Query(default=None, description="Filter by status"),
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractListResponse:
     rows = await asyncio.to_thread(store.list_contracts, phase=phase, slug=slug, status=status)
     return ContractListResponse(contracts=[_contract_row_to_response(row) for row in rows])
@@ -550,7 +818,7 @@ async def list_contracts(
 )
 async def get_contract(
     contract_id: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     row = await asyncio.to_thread(store.get_contract, contract_id)
     if row is None:
@@ -574,7 +842,7 @@ async def get_contract(
 async def patch_contract(
     contract_id: str,
     req: ContractPatchRequest,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     updated = await asyncio.to_thread(
         store.update_contract,
@@ -608,7 +876,7 @@ async def patch_contract(
 )
 async def archive_contract(
     contract_id: str,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     archived = await asyncio.to_thread(store.archive_contract, contract_id)
     if not archived:
@@ -640,7 +908,7 @@ async def supersede_contract(
     contract_id: str,
     req: ContractSupersedeRequest,
     request: Request,
-    store: DuckDBStateStore = Depends(get_state_store),
+    store: DuckDBStateStore = Depends(get_repo_store),
 ) -> ContractResponse:
     new_id = await asyncio.to_thread(
         store.supersede_contract,

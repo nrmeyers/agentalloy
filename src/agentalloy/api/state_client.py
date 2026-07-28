@@ -15,7 +15,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 DEFAULT_PORT_FALLBACK = 47950
 
@@ -68,6 +69,7 @@ class StateClient:
     """
 
     base_url: str | None = None
+    repo_root: str | None = None
     _timeout: float = 5.0
 
     def __post_init__(self) -> None:
@@ -77,6 +79,8 @@ class StateClient:
                 "base_url",
                 os.environ.get("STATE_SERVICE_URL") or f"http://127.0.0.1:{_configured_port()}",
             )
+        if self.repo_root is None:
+            object.__setattr__(self, "repo_root", str(Path.cwd()))
 
     def is_running(self) -> bool:
         """Return True if the service responds to a health check."""
@@ -89,18 +93,37 @@ class StateClient:
 
     # -- write operations ------------------------------------------------
 
-    def set_phase(self, value: str, *, repo_root: str | None = None) -> dict[str, Any]:
+    def set_phase(
+        self,
+        value: str,
+        *,
+        repo_root: str | None = None,
+        actor: str | None = None,
+        mode: str | None = None,
+        free_since: str | None = None,
+    ) -> dict[str, Any]:
         """Set the current phase via the service.
 
         When *repo_root* is provided, it is forwarded as a query parameter
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
+
+        ``mode``/``free_since`` are the free-flow pair.  Omitting them carries
+        the stored values forward; passing ``""`` clears them, which is how
+        ``flow resume`` leaves free-flow.  They are real fields rather than
+        something smuggled inside *value*: ``flow free`` used to POST
+        ``"free-flow:<phase>"`` as the phase name, which wrote a phase nothing
+        recognises and had to skip the posture rewrite to avoid clearing the
+        deny rules.
         """
         body: dict[str, Any] = {"value": value}
-        path = "/state/phase"
-        if repo_root is not None:
-            path += f"?repo_root={urllib.parse.quote(repo_root)}"
-        return self._post(path, body)
+        if actor is not None:
+            body["actor"] = actor
+        if mode is not None:
+            body["mode"] = mode
+        if free_since is not None:
+            body["free_since"] = free_since
+        return self._post("/state/phase", body, repo_root=repo_root)
 
     def set_phase_with_contract(
         self, value: str, contract: dict[str, Any], *, repo_root: str | None = None
@@ -114,11 +137,19 @@ class StateClient:
         so the server can rewrite the enforcement posture for wired Tier A
         harnesses (D1–D9) as part of the phase advance.
         """
-        body: dict[str, Any] = {"value": value, "contract": contract}
-        path = "/state/phase"
-        if repo_root is not None:
-            path += f"?repo_root={urllib.parse.quote(repo_root)}"
-        return self._post(path, body)
+        return self._post(
+            "/state/phase", {"value": value, "contract": contract}, repo_root=repo_root
+        )
+
+    def import_files(self, repo_root: str | None = None) -> dict[str, str]:
+        """Migrate a repo's ``.agentalloy`` file mirror into the store.
+
+        Returns the kinds imported by this call — empty when the repo has no
+        file mirror left, which is the steady state after the first run.
+        """
+        resp = self._post("/state/import-files", {}, repo_root=repo_root)
+        imported = resp.get("imported") or {}
+        return imported if isinstance(imported, dict) else {}
 
     def approve(self, phase: str) -> dict[str, Any]:
         """Record an approval for the given phase."""
@@ -133,14 +164,68 @@ class StateClient:
     def get_state(self, kind: str) -> str | None:
         """Read a state kind (phase, cursor, approved) from the service.
 
-        Returns the raw string body on success, or ``None`` when the
-        service is down.
+        Returns the **value**, or ``None`` when the service is down or the kind
+        is unset.  It used to return the raw response body — that is, the whole
+        ``{"kind": ..., "value": ...}`` envelope as a string — so every caller
+        got JSON where it expected a bare token and rendered it verbatim.  A
+        body that is not that envelope is returned as-is rather than discarded,
+        so an older service still answers something usable.
         """
         try:
-            resp = urllib.request.urlopen(f"{self.base_url}/state/{kind}", timeout=self._timeout)
-            return resp.read().decode()
+            resp = urllib.request.urlopen(self._url(f"/state/{kind}"), timeout=self._timeout)
+            raw = resp.read().decode()
         except (urllib.error.URLError, OSError):
             return None
+        try:
+            body = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw
+        if isinstance(body, dict) and "value" in body:
+            value = body["value"]
+            return None if value is None else str(value)
+        return raw
+
+    def get_phase(self, *, repo_root: str | None = None) -> dict[str, Any] | None:
+        """Read the decoded phase row, or ``None`` when no phase is recorded.
+
+        Distinct from ``get_state("phase")``, which returns only the bare name:
+        the CLI renders ``mode``, ``free_since`` and the timestamps too, and
+        reaching them was the last thing keeping the file mirror alive.
+
+        Raises ``StateClientError`` when the service is unreachable.  A down
+        service must never read as "this repo has no phase" — that is exactly
+        how an outage used to look like a fresh repo and reset the workflow.
+        """
+        try:
+            resp = urllib.request.urlopen(
+                self._url("/state/phase", repo_root=repo_root), timeout=self._timeout
+            )
+            body = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
+        if not isinstance(body, dict) or body.get("value") is None:
+            return None
+        return cast("dict[str, Any]", body)
+
+    def clear_phase(self, *, repo_root: str | None = None) -> None:
+        """Delete the phase row.  Idempotent — clearing an absent phase is fine."""
+        req = urllib.request.Request(
+            self._url("/state/phase", repo_root=repo_root), method="DELETE"
+        )
+        try:
+            urllib.request.urlopen(req, timeout=self._timeout)
+        except urllib.error.HTTPError as exc:
+            raise StateClientError(
+                f"agentalloy service returned HTTP {exc.code}: {exc.reason}",
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise StateClientError(f"agentalloy service is not running ({exc})") from exc
 
     # -- contract operations ------------------------------------------------
 
@@ -152,7 +237,7 @@ class StateClient:
         """Read a contract by ID.  Returns None if not found."""
         try:
             resp = urllib.request.urlopen(
-                f"{self.base_url}/contracts/{contract_id}", timeout=self._timeout
+                self._url(f"/contracts/{contract_id}"), timeout=self._timeout
             )
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
@@ -181,8 +266,7 @@ class StateClient:
         if status is not None:
             params.append(("status", status))
 
-        qs = urllib.parse.urlencode(params) if params else ""
-        url = f"{self.base_url}/contracts?{qs}" if qs else f"{self.base_url}/contracts"
+        url = self._url("/contracts", params)
         try:
             resp = urllib.request.urlopen(url, timeout=self._timeout)
             data = json.loads(resp.read().decode())
@@ -193,7 +277,7 @@ class StateClient:
     def patch_contract(self, contract_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """In-place correction of a contract."""
         req = urllib.request.Request(
-            f"{self.base_url}/contracts/{contract_id}",
+            self._url(f"/contracts/{contract_id}"),
             data=json.dumps(updates).encode("utf-8"),
             method="PATCH",
         )
@@ -225,7 +309,7 @@ class StateClient:
         is unreachable.
         """
         try:
-            resp = urllib.request.urlopen(f"{self.base_url}/state/resume", timeout=self._timeout)
+            resp = urllib.request.urlopen(self._url("/state/resume"), timeout=self._timeout)
             return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
             raise StateClientError(
@@ -237,9 +321,35 @@ class StateClient:
 
     # -- internal helpers ------------------------------------------------
 
-    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _url(
+        self,
+        path: str,
+        params: list[tuple[str, str]] | None = None,
+        *,
+        repo_root: str | None = None,
+    ) -> str:
+        """Build a service URL carrying the repo this client speaks for.
+
+        ``repo_root`` rides on *every* call, not just the phase advance: the
+        service serves every repo from one store, so a call without it lands in
+        whichever repo the service happens to be deployed against.
+        """
+        query = list(params or [])
+        root = repo_root or self.repo_root
+        if root:
+            query.append(("repo_root", root))
+        qs = urllib.parse.urlencode(query)
+        return f"{self.base_url}{path}?{qs}" if qs else f"{self.base_url}{path}"
+
+    def _post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        repo_root: str | None = None,
+    ) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(f"{self.base_url}{path}", data=data, method="POST")
+        req = urllib.request.Request(self._url(path, repo_root=repo_root), data=data, method="POST")
         req.add_header("Content-Type", "application/json")
         try:
             resp = urllib.request.urlopen(req, timeout=self._timeout)
@@ -259,5 +369,5 @@ class StateClient:
 
     def _get(self, path: str) -> str:
         """Return the raw response body for a GET request."""
-        resp = urllib.request.urlopen(f"{self.base_url}{path}", timeout=self._timeout)
+        resp = urllib.request.urlopen(self._url(path), timeout=self._timeout)
         return resp.read().decode()

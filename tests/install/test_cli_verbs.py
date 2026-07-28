@@ -18,6 +18,15 @@ import pytest
 from agentalloy.install import state as install_state
 
 
+def _phase(root: Path) -> str | None:
+    """The repo's recorded phase, read where it now lives: the state store."""
+    from agentalloy.install.subcommands.status import (
+        _repo_phase,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    return _repo_phase(str(root))
+
+
 @pytest.fixture(autouse=True)
 def _fake_home_for_wiring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Some harness wiring (and --mcp-fallback) writes under Path.home() —
@@ -235,22 +244,24 @@ class TestWireLifecycleMode:
         rc = wire._run(self._wire(lifecycle_mode="off"))
         assert rc == 0
         assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
-        # off must NOT seed a phase — a seeded `intake` re-arms the front door.
-        assert not (repo_root / ".agentalloy" / "phase").exists()
+        # Neither mode seeds a phase any more; assert it via the store, since
+        # there is no file left to look for.
+        assert _phase(repo_root) is None
 
-    def test_detection_without_tty_defaults_to_full_and_seeds(
+    def test_detection_without_tty_defaults_to_full(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.install.subcommands import wire
 
         # Custom workflow present, but no flag and no TTY (pytest) -> back-compat:
-        # default `full`, phase seeded exactly as before this feature existed.
+        # default `full`. The mode is the whole outcome — `full` used to also
+        # seed the entry phase, which the proxy now does on first request.
         self._claude_repo_with_custom_workflow(repo_root)
         monkeypatch.chdir(repo_root)
         rc = wire._run(self._wire())
         assert rc == 0
         assert "lifecycle_mode: full" in (repo_root / ".agentalloy" / "config").read_text()
-        assert (repo_root / ".agentalloy" / "phase").exists()
+        assert _phase(repo_root) is None
 
     def test_tty_prompt_selects_mode(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -269,7 +280,7 @@ class TestWireLifecycleMode:
             rc = wire._run(self._wire())
         assert rc == 0
         assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
-        assert not (repo_root / ".agentalloy" / "phase").exists()
+        assert _phase(repo_root) is None
 
     def test_tty_prompt_default_is_full(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
@@ -289,25 +300,25 @@ class TestWireLifecycleMode:
             rc = wire._run(self._wire())
         assert rc == 0
         assert "lifecycle_mode: full" in (repo_root / ".agentalloy" / "config").read_text()
-        assert (repo_root / ".agentalloy" / "phase").exists()
+        assert _phase(repo_root) is None
 
-    def test_off_clears_stale_phase_file(
+    def test_off_leaves_an_existing_phase_alone(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from agentalloy.install.subcommands import wire
+        from agentalloy.install.subcommands.phase import run_phase_set
 
-        # A repo previously in `full` (phase=build) re-wired to off must not
-        # keep the stale phase — it would silently suppress compose while looking
-        # active. wire reconciles by clearing it.
+        # Re-wiring a `full` repo (phase=build) to `off` used to clear the phase
+        # so a stale value could not look active. Wiring writes no lifecycle
+        # state now, and the mode guard short-circuits before the phase is read,
+        # so the row is inert under `off` — and still there if the user goes back.
         self._claude_repo_with_custom_workflow(repo_root)
-        phase_file = repo_root / ".agentalloy" / "phase"
-        phase_file.parent.mkdir(parents=True)
-        phase_file.write_text("phase: build\n")
+        run_phase_set("build", root=repo_root, force=True)
         monkeypatch.chdir(repo_root)
         rc = wire._run(self._wire(lifecycle_mode="off"))
         assert rc == 0
         assert "lifecycle_mode: off" in (repo_root / ".agentalloy" / "config").read_text()
-        assert not phase_file.exists()
+        assert _phase(repo_root) == "build"
 
 
 class TestWireInstructionShaping:
@@ -536,34 +547,35 @@ class TestUnwire:
     def test_unwire_clears_repo_lifecycle_state(
         self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """wire seeds .agentalloy/phase + config; unwire removes phase but
-        preserves config (the wired-repo marker). Store rows are deleted via
-        the state store. Contracts are user work and are preserved."""
+        """unwire drops the repo's lifecycle state but keeps its config.
+
+        The config is the wired-repo marker and survives; the phase (a store
+        row, deleted via ``delete_repo_rows``) does not. Contracts are user work
+        and are preserved.
+        """
         from agentalloy.install.subcommands import unwire, wire
+        from agentalloy.install.subcommands.phase import run_phase_set
 
         (repo_root / "CLAUDE.md").write_text("# Project\n")  # auto-detect claude-code
         monkeypatch.chdir(repo_root)
         wire._run(argparse.Namespace(harness="claude-code", port=None, force=False))
-        phase = repo_root / ".agentalloy" / "phase"
         config = repo_root / ".agentalloy" / "config"
-        assert phase.exists() and config.exists(), "full wire seeds phase + config"
+        assert config.exists(), "full wire writes the config"
+        # Wiring seeds no phase, so give the repo one to have something to clear.
+        run_phase_set("build", root=repo_root, force=True)
         contract = repo_root / ".agentalloy" / "contracts" / "active" / "spec" / "keep.md"
         contract.parent.mkdir(parents=True)
         contract.write_text("# user's contract\n")
 
-        # Mock the store operations since we don't have a real DB in this test
+        # Stand in for the bound store: unwire prefers the process handle rather
+        # than opening a second writer against the DB the service holds.
         mock_store = MagicMock()
         mock_store.delete_repo_rows.return_value = 0
-        mock_settings = MagicMock()
-        mock_settings.duckdb_path = str(repo_root / "agentalloy.duck")
 
-        with (
-            patch("agentalloy.config.get_settings", return_value=mock_settings),
-            patch("agentalloy.storage.state_store.open_state_store", return_value=mock_store),
-        ):
+        with patch("agentalloy.storage.state_store.process_store", return_value=mock_store):
             rc = unwire._run(argparse.Namespace(force=False, json=True))
         assert rc == 0
-        assert not phase.exists(), "unwire must clear the stale phase"
+        mock_store.delete_repo_rows.assert_called_once()
         assert config.exists(), "unwire must preserve the wired-repo config"
         assert contract.exists(), "unwire must preserve user contracts"
 

@@ -102,17 +102,16 @@ Skill overrides resolve in three layers — project > profile > shipped default 
 
 Profile-layer overrides apply across every repo that resolves to the active profile. For the full override reference — what can/cannot be overridden and the complete `agentalloy customize` CLI — see [skill-authoring-and-overrides-spec.md § Override System](skill-authoring-and-overrides-spec.md#override-system).
 
-## Profiles and the sidecar watcher
+## Profiles and the sidecar store hook
 
-The sidecar watcher (used for harnesses that can't be proxy-wired) is profile-aware:
+The sidecar store hook (used for harnesses that can't be proxy-wired) is profile-aware:
 
-- **Config file:** `~/.agentalloy/watch/<profile_name>.yaml`
-- **PID file:** `~/.agentalloy/watch/<profile_name>.pid`
-- **Log file:** `~/.agentalloy/watch/<profile_name>.log`
+- **Profile name:** passed to `register_watcher()` during harness wiring; defaults to `"default"`
+- **Service logs:** check `agentalloy status` and service logs for regeneration messages
 
-The watcher uses `profile_name` from its config to load the correct workflow skill prose for phase transitions. The watcher config is auto-generated with `profile_name: "default"` by `agentalloy watch start`.
+The store hook loads workflow skill prose under the `default` profile. The service-side hook does not yet resolve a per-repo profile; that thread-through is outstanding.
 
-See `docs/sidecar-experience.md` for full watcher documentation.
+See `docs/sidecar-experience.md` for full sidecar documentation.
 
 ## Profiles and wiring
 

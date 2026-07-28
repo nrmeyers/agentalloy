@@ -136,7 +136,7 @@ def _run(args: argparse.Namespace) -> int:
         return 1
 
     port = add.resolve_port(args.port)
-    upstream, result, phase_seeded = add.adopt_and_wire(
+    upstream, result = add.adopt_and_wire(
         harness,
         target.resolve(),
         port=port,
@@ -146,7 +146,7 @@ def _run(args: argparse.Namespace) -> int:
         assume_index=True,
     )
 
-    _render(harness, args.branch, target, upstream, result, phase_seeded)
+    _render(harness, args.branch, target, upstream, result)
     return 0
 
 
@@ -156,7 +156,6 @@ def _render(
     target: Path,
     upstream: Upstream | None,
     result: dict[str, Any],
-    phase_seeded: str | None,
 ) -> None:
     """Human-readable summary of the worktree + wiring."""
     print(f"[AgentAlloy] worktree {harness}  branch={branch}")
@@ -169,6 +168,4 @@ def _render(
     touched = [*(result.get("files_written") or []), *(result.get("files_modified") or [])]
     for f in touched:
         print(f"  wired: {f.get('path')}")
-    if phase_seeded:
-        print(f"  phase: {phase_seeded} (worktree activated; isolated from the main checkout)")
     print(f"  next:  cd {target}")

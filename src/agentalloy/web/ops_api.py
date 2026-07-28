@@ -198,6 +198,7 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
         raise HTTPException(status_code=400, detail=f"repo is not a directory: {repo}")
 
     def _build() -> GateStatus:
+        from agentalloy.install.subcommands._state import phase_access
         from agentalloy.install.subcommands.phase import (
             _forward_gate_blocks,  # pyright: ignore[reportPrivateUsage]
         )
@@ -211,7 +212,10 @@ async def repo_gates(repo: str = Query(...)) -> GateStatus:
         nxt = _PHASE_GRAPH.get(phase) if phase else None
         blocked, advisories = (False, [])
         if phase and nxt and nxt != phase:
-            blocked, advisories = _forward_gate_blocks(phase, nxt, root)
+            # The gate's contract predicates query through this handle; in the
+            # service it is the bound store.
+            store = phase_access(root, autostart=False).contracts_handle()
+            blocked, advisories = _forward_gate_blocks(phase, nxt, root, store)
         required, pending = _approval_state(root, phase)
         approver = approved_at = None
         if phase and required and not pending:

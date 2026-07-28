@@ -30,7 +30,7 @@ def _qa_ready(root: Path) -> None:
 
 def test_tc1_gate_blocks_qa_to_ship_without_lesson(tmp_path: Path):
     _qa_ready(tmp_path)
-    blocked, advisories = _forward_gate_blocks("qa", "ship", tmp_path)
+    blocked, advisories = _forward_gate_blocks("qa", "ship", tmp_path, None)
     assert blocked is True
     # sanity: the qa doc leaves are satisfied, so it's the codify leaf blocking
     assert isinstance(advisories, list)
@@ -42,7 +42,7 @@ def test_tc1_gate_allows_once_lesson_recorded(tmp_path: Path):
     (tmp_path / "docs" / "solutions" / f"{SLUG}.md").write_text(
         "# lesson\n\nwhat worked\n", encoding="utf-8"
     )
-    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path)
+    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, None)
     assert blocked is False
 
 
@@ -50,7 +50,7 @@ def test_tc2_stale_lesson_for_other_task_still_blocks(tmp_path: Path):
     _qa_ready(tmp_path)
     (tmp_path / "docs" / "solutions").mkdir(parents=True, exist_ok=True)
     (tmp_path / "docs" / "solutions" / "some-old-task.md").write_text("# old", encoding="utf-8")
-    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path)
+    blocked, _ = _forward_gate_blocks("qa", "ship", tmp_path, None)
     assert blocked is True
 
 

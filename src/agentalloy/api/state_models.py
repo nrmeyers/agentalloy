@@ -9,7 +9,7 @@ validation and OpenAPI documentation.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -114,6 +114,30 @@ class StateAllResponse(BaseModel):
     state: dict[str, str]
 
 
+class PhaseReadResponse(StateReadResponse):
+    """Success response for GET /state/phase — the whole decoded phase row.
+
+    A superset of :class:`StateReadResponse`: ``value`` still carries the bare
+    phase name, so a caller that only wants "which phase" is unchanged.  The
+    remaining fields exist because ``phase`` is the one kind whose stored row is
+    a blob, and the CLI genuinely renders all of it — ``flow status`` needs
+    ``mode``/``free_since``, ``phase get`` prints the timestamps, and
+    ``phase set`` needs the prior ``transitioned_by`` to decide whether a write
+    is a real transition.  Serving only ``value`` forced every one of those back
+    onto the file mirror.
+
+    Every field but ``kind``/``value`` is ``None`` when no phase is recorded.
+    ``workflow`` is derived (``sdd-<phase>``), never caller-supplied.
+    """
+
+    mode: str | None = None
+    free_since: str | None = None
+    transitioned_by: str | None = None
+    started_at: str | None = None
+    last_updated: str | None = None
+    workflow: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Phase advance with optional contract
 # ---------------------------------------------------------------------------
@@ -139,6 +163,33 @@ class PhaseAdvanceRequest(BaseModel):
         description=(
             "Optional contract to store alongside the phase advance.  Both "
             "writes commit or roll back together."
+        ),
+    )
+    mode: str | None = Field(
+        default=None,
+        description=(
+            "Flow mode ('free' or empty to clear).  Omit to carry the stored "
+            "value forward — only `agentalloy flow free/resume` sets it."
+        ),
+    )
+    free_since: str | None = Field(
+        default=None,
+        description="ISO timestamp free-flow was entered; empty string clears it.",
+    )
+    actor: str | None = Field(
+        default=None,
+        description=(
+            "Session key credited with the transition.  Recorded only when the "
+            "phase actually changes, so a different session can tell the phase "
+            "moved and that it was not the one that moved it."
+        ),
+    )
+    override: bool = Field(
+        default=False,
+        description=(
+            "When True, bypass the phase exit gate.  Note: phases in "
+            "_ALWAYS_APPROVAL_PHASES (spec, design, add-skill) are always "
+            "refused — override has no effect on them."
         ),
     )
 
@@ -219,6 +270,11 @@ class PhaseAdvanceResponse(BaseModel):
     ``end_session_instruction`` is the deterministic end-of-phase directive
     surfaced identically by CLI, web, and proxy (D9).  Present on every
     successful phase advance.
+
+    ``gate_verdict`` is present when the route evaluated an exit gate.
+    It carries the result (``met``, ``not_met``, ``unknown``), the blocking
+    reason, and a list of missing-artifact paths so the CLI can render
+    operator-facing guidance without re-evaluating the gate itself.
     """
 
     success: Literal[True] = True
@@ -229,6 +285,7 @@ class PhaseAdvanceResponse(BaseModel):
     conflict: StateConflictInfo | None = None
     contract_id: str | None = None
     end_session_instruction: str | None = None
+    gate_verdict: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

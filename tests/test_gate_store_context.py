@@ -115,9 +115,8 @@ class TestForwardGateSeesContracts:
 
     def test_full_coverage_passes(self, design_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         store = _store_with(design_repo, n_build=3)
-        monkeypatch.setattr(phase_mod, "_gate_store", lambda _root: store)
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo
+            "design", "build", design_repo, store
         )
         assert blocked is False
 
@@ -130,9 +129,8 @@ class TestForwardGateSeesContracts:
         predicate returned UNKNOWN and the gate allowed the advance.
         """
         store = _store_with(design_repo, n_build=2)
-        monkeypatch.setattr(phase_mod, "_gate_store", lambda _root: store)
         blocked, advisories = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo
+            "design", "build", design_repo, store
         )
         assert blocked is True
         assert advisories
@@ -146,7 +144,6 @@ class TestForwardGateSeesContracts:
         only come from tag focus.
         """
         store = _store_with(design_repo, n_build=3, build_tags='["state","api","signals"]')
-        monkeypatch.setattr(phase_mod, "_gate_store", lambda _root: store)
         # Direct predicate assertion: the gate-level block alone can't distinguish
         # NOT_MET-from-tag-focus from NOT_MET-for-any-other-reason.
         ctx = PredicateContext(project_root=design_repo, current_phase="design", store=store)
@@ -155,19 +152,20 @@ class TestForwardGateSeesContracts:
             == PredicateResult.NOT_MET
         )
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo
+            "design", "build", design_repo, store
         )
         assert blocked is True
 
-    def test_service_down_still_fails_open(
-        self, design_repo: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """No service → no store → gate behaves exactly as it did before this task.
+    def test_no_store_handle_fails_open(self, design_repo: Path) -> None:
+        """A ``None`` handle still fails open at the predicate level.
 
-        `phase set` must not acquire a hard dependency on a running service.
+        This is now an internal invariant rather than a reachable state: the
+        caller (`run_phase_set`) obtains the handle from `phase_access`, which
+        has already exited non-zero if no store is reachable.  It is asserted
+        because the predicates -- not the gate -- own the fail-open rule, and a
+        future caller that legitimately has no handle must not start blocking.
         """
-        monkeypatch.setattr(phase_mod, "_gate_store", lambda _root: None)
         blocked, _ = phase_mod._forward_gate_blocks(  # noqa: SLF001
-            "design", "build", design_repo
+            "design", "build", design_repo, None
         )
         assert blocked is False

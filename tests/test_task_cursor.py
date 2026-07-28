@@ -18,6 +18,7 @@ from agentalloy.install.subcommands.task import (
     run_task_status,
 )
 from agentalloy.signals.skill_loader import _read_cursor  # type: ignore[reportPrivateUsage]
+from tests.support import seed_phase
 
 # NOTE: the shared-cursor path assumed here is kept hermetic by the autouse
 # `_no_ambient_session_id` fixture in tests/conftest.py (clears CLAUDE_CODE_SESSION_ID).
@@ -26,7 +27,7 @@ from agentalloy.signals.skill_loader import _read_cursor  # type: ignore[reportP
 
 def _seed(root: Path, phase: str, names: list[str]) -> None:
     (root / ".agentalloy").mkdir(parents=True, exist_ok=True)
-    (root / ".agentalloy" / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(root, phase)
     d = root / ".agentalloy" / "contracts" / "active" / phase
     d.mkdir(parents=True, exist_ok=True)
     for n in names:
@@ -147,7 +148,7 @@ def test_phase_transition_seeds_first_build_task(tmp_path: Path) -> None:
     )
 
     _seed(tmp_path, "build", ["02-api", "01-cache", "03-log"])
-    (tmp_path / ".agentalloy" / "phase").write_text("phase: design\n")  # enter build from elsewhere
+    seed_phase(tmp_path, "design")  # enter build from elsewhere
     _write_phase_atomic(tmp_path, "build")
     assert _read_cursor(tmp_path) == "active/build/01-cache.md"
 

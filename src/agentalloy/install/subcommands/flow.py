@@ -2,14 +2,14 @@
 
 Free-flow is a per-repo mode for sessions with no specific task in mind: it
 pauses ALL workflow steering (orientation, banners, exit gates, phase
-transitions, intake) while keeping domain-skill composition. State lives in
-the same per-repo ``.agentalloy/phase`` file the phase machine uses, as an
-optional ``mode: free`` + ``free_since: <iso>`` pair — entering free-flow never
-changes the ``phase`` value, so resume returns to exactly the prior phase.
+transitions, intake) while keeping domain-skill composition. It rides the same
+per-repo ``phase`` row the phase machine uses, as an optional ``mode: free`` +
+``free_since: <iso>`` pair — entering free-flow never changes the ``phase``
+value, so resume returns to exactly the prior phase.
 
-Like ``phase set``, these are deterministic per-repo file edits (no LM
-involvement) and the phase file is SHARED by every concurrent session in the
-repo: ``flow free`` / ``flow resume`` affect all of them, not just yours.
+Like ``phase set``, these are deterministic per-repo writes (no LM involvement)
+and the phase row is SHARED by every concurrent session in the repo:
+``flow free`` / ``flow resume`` affect all of them, not just yours.
 
 Commands:
     agentalloy flow free    — pause workflow steering (idempotent)
@@ -20,72 +20,51 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any
 
-from agentalloy.api.state_client import StateClient, StateClientError
-from agentalloy.install.subcommands.phase import (  # pyright: ignore[reportPrivateUsage]
-    _now_iso,
-    _read_phase,
-    _write_phase,
-)
+from agentalloy.api.state_client import StateClientError
+from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
+from agentalloy.install.subcommands.phase import _now_iso  # pyright: ignore[reportPrivateUsage]
 
-# A repo that was never wired has no phase file; free-flow still works there —
-# the file is created at the entry phase so resume lands where a fresh wire
+# A repo that was never wired has no phase row; free-flow still works there —
+# the row is created at the entry phase so resume lands where a fresh wire
 # would (intake runs on the first post-resume request).
 _DEFAULT_PHASE = "intake"
 
 
 def run_flow_free(root: Path | None = None) -> dict[str, Any]:
-    """Enter free-flow: set ``mode: free`` + ``free_since`` in the phase file.
+    """Enter free-flow: set ``mode: free`` + ``free_since`` on the phase row.
 
     Idempotent — already-free returns ``changed=False`` with the original
     ``free_since``. Never touches the ``phase`` value. Affects every session in
-    the repo (the phase file is per-repo shared state).
+    the repo (the phase row is per-repo shared state).
 
-    When the phase state service is running, the write is routed through the
-    service's HTTP API; otherwise the file-mirror path is used directly.
+    ``mode`` and ``free_since`` are written as their own fields.  They used to
+    be smuggled into the phase *name* (``"free-flow:design"``), which stored a
+    phase no consumer recognises and forced the call to skip the posture
+    rewrite so the bogus name would not clear the deny rules.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-
-    # -- Service routing: try the HTTP client first, fall back to file mirror --
-    client = StateClient()
-    if client.is_running():
-        try:
-            phase = _read_phase(root) or _DEFAULT_PHASE
-            # No repo_root: free-flow is a mode toggle, not a phase advance.
-            # The router writes req.value verbatim and passes it to the posture
-            # rewriter, and "free-flow:design" is not in DENIED_PHASES — it would
-            # fail open and CLEAR the design deny rules. Leave the posture alone.
-            return client.set_phase(f"free-flow:{phase}")
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — write directly to the file mirror.
-    data = _read_phase(root) or {}
-    phase = data.get("phase") or _DEFAULT_PHASE
-    if data.get("mode") == "free":
-        return {
-            "phase": phase,
-            "mode": "free",
-            "free_since": data.get("free_since"),
-            "changed": False,
-        }
-    # Keep the phase line first (old parsers read line-by-line), preserve every
-    # other existing key, then append the free-flow pair.
-    new: dict[str, Any] = {"phase": phase}
-    new.update({k: v for k, v in data.items() if k != "phase"})
-    new["mode"] = "free"
-    new["free_since"] = _now_iso()
-    _write_phase(new, root)
-    return {"phase": phase, "mode": "free", "free_since": new["free_since"], "changed": True}
+    access = phase_access(root)
+    try:
+        state = access.read()
+        phase = state.phase if state else _DEFAULT_PHASE
+        if state is not None and (state.mode or "").lower() == "free":
+            return {
+                "phase": phase,
+                "mode": "free",
+                "free_since": state.free_since,
+                "changed": False,
+            }
+        since = _now_iso()
+        access.write(phase, mode="free", free_since=since)
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    return {"phase": phase, "mode": "free", "free_since": since, "changed": True}
 
 
 def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
@@ -97,73 +76,41 @@ def run_flow_resume(root: Path | None = None) -> dict[str, Any]:
     free, it holds the free sentinel, which mismatches every real phase — so
     the next proxy request re-orients (intake included) as a first request.
     Affects every session in the repo.
-
-    When the phase state service is running, the write is routed through the
-    service's HTTP API; otherwise the file-mirror path is used directly.
     """
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
     from agentalloy.signals.skill_loader import _clear_state  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-
-    # -- Service routing: try the HTTP client first, fall back to file mirror --
-    client = StateClient()
-    if client.is_running():
-        try:
-            phase = _read_phase(root) or _DEFAULT_PHASE
-            # No repo_root — see run_flow_free. "resume:design" falls open in
-            # DENIED_PHASES and would clear the deny rules on resume.
-            return client.set_phase(f"resume:{phase}")
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror write.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — write directly to the file mirror.
-    data = _read_phase(root) or {}
-    phase = data.get("phase") or _DEFAULT_PHASE
-    if data.get("mode") != "free":
-        return {"phase": phase, "mode": "workflow", "changed": False}
-    new: dict[str, Any] = {"phase": phase}
-    new.update({k: v for k, v in data.items() if k not in ("phase", "mode", "free_since")})
-    _write_phase(new, root)
+    access = phase_access(root)
+    try:
+        state = access.read()
+        phase = state.phase if state else _DEFAULT_PHASE
+        if state is None or (state.mode or "").lower() != "free":
+            return {"phase": phase, "mode": "workflow", "changed": False}
+        # Empty strings *clear* the pair; None would carry it forward.
+        access.write(phase, mode="", free_since="")
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
     _clear_state(root, "free-reminded")
     return {"phase": phase, "mode": "workflow", "changed": True}
 
 
 def run_flow_status(root: Path | None = None) -> dict[str, Any]:
-    """Current flow mode, phase, and (when free) since-when.
-
-    When the phase state service is running, the read is routed through the
-    service's HTTP API; otherwise the file-mirror path is used directly.
-    """
+    """Current flow mode, phase, and (when free) since-when."""
     from agentalloy.install.state import _repo_root  # pyright: ignore[reportPrivateUsage]
 
     root = root or _repo_root()
-
-    # -- Service routing: try the HTTP client first, fall back to file mirror --
-    client = StateClient()
-    if client.is_running():
-        try:
-            raw = client.get_state("phase")
-            if raw is not None:
-                return {"phase": raw.strip(), "mode": "workflow"}
-        except StateClientError as exc:
-            print(
-                f"Warning: state service returned {exc.status}: {exc.message}; "
-                f"falling back to file-mirror read.",
-                file=sys.stderr,
-            )
-
-    # Service is down or the call failed — read directly from the file mirror.
-    data = _read_phase(root) or {}
-    mode = "free" if data.get("mode") == "free" else "workflow"
+    try:
+        state = phase_access(root).read()
+    except StateClientError as exc:
+        fail_on_state_error(exc)
+        raise  # unreachable
+    mode = "free" if state is not None and (state.mode or "").lower() == "free" else "workflow"
     return {
-        "phase": data.get("phase"),
+        "phase": state.phase if state else None,
         "mode": mode,
-        "free_since": data.get("free_since") if mode == "free" else None,
+        "free_since": (state.free_since if state else None) if mode == "free" else None,
     }
 
 
@@ -203,8 +150,7 @@ def _add_project_root_flag(p: argparse.ArgumentParser) -> None:
         "--project-root",
         default=None,
         help=(
-            "Repo directory to read/write the .agentalloy/phase file in. "
-            "Default: auto-detect from cwd (stops at $HOME)."
+            "Repo whose phase row to read/write. Default: auto-detect from cwd (stops at $HOME)."
         ),
     )
 

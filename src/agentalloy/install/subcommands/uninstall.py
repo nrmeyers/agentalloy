@@ -758,6 +758,22 @@ def _remove_uv_tool() -> dict[str, Any]:
     return _remove_uv_tool_internal()
 
 
+def _state_service_running() -> bool:
+    """True when something is listening on the state service.
+
+    Uninstall must not open a DuckDB writer behind a live service, and it must
+    not autostart one either — hence the direct client rather than
+    ``_state.require_service()``. Unreachable for any reason reads as *down*:
+    the caller's fallback is a direct open, which fails loudly on a real lock.
+    """
+    try:
+        from agentalloy.api.state_client import StateClient  # noqa: PLC0415
+
+        return StateClient().is_running()
+    except Exception:
+        return False
+
+
 def _unwire_repo_local(
     repo_root: Path,
     handled_paths: set[str],
@@ -837,22 +853,38 @@ def _unwire_repo_local(
         from agentalloy.config import get_settings  # noqa: PLC0415
         from agentalloy.storage.state_store import (
             open_state_store,  # noqa: PLC0415
+            process_store,  # noqa: PLC0415
         )
 
-        settings = get_settings()
-        store = open_state_store(settings.duckdb_path, read_only=False)
-        try:
-            deleted = store.delete_repo_rows(str(repo_root))
-            if deleted:
-                files_removed.append(
-                    {
-                        "repo": str(repo_root),
-                        "action": "dropped_store_rows",
-                        "deleted_rows": deleted,
-                    }
+        # Never open a second writer against the store the service holds — that
+        # is the DuckDB lock deadlock the repo-scoped migration exists to avoid.
+        # In-process (or service-hosted) the bound handle is the store; out of
+        # process the direct open is safe only while nothing is listening.
+        bound = process_store()
+        if bound is not None:
+            deleted = bound.delete_repo_rows(str(repo_root))
+        elif _state_service_running():
+            if warnings is not None:
+                warnings.append(
+                    f"Service is running — left store rows for {repo_root} in place. "
+                    "Stop the service and re-run to drop them."
                 )
-        finally:
-            store.close()
+            deleted = 0
+        else:
+            settings = get_settings()
+            store = open_state_store(settings.duckdb_path, read_only=False)
+            try:
+                deleted = store.delete_repo_rows(str(repo_root))
+            finally:
+                store.close()
+        if deleted:
+            files_removed.append(
+                {
+                    "repo": str(repo_root),
+                    "action": "dropped_store_rows",
+                    "deleted_rows": deleted,
+                }
+            )
     except Exception as exc:
         if warnings is not None:
             warnings.append(f"Failed to drop store rows for {repo_root}: {exc}")

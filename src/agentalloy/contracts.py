@@ -85,7 +85,7 @@ class ContractMalformed(ContractError):
 
 
 class ContractPhaseMismatch(ContractError):
-    """Contract's phase field doesn't match .agentalloy/phase."""
+    """Contract's phase field doesn't match the current store phase."""
 
 
 # ---------------------------------------------------------------------------

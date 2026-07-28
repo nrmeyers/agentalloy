@@ -56,11 +56,15 @@ def bare_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     root = tmp_path_factory.mktemp("bare-root")
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True)
+    # Wiring no longer seeds a phase (the proxy does, lazily), so an e2e repo
+    # that must start *at* intake sets it explicitly.
+    from agentalloy.install.subcommands.phase import run_phase_set
     from agentalloy.install.subcommands.wire import (
-        _seed_entry_phase,  # pyright: ignore[reportPrivateUsage]
+        _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
     )
 
-    _seed_entry_phase(root)
+    _seed_repo_metadata(root)
+    run_phase_set("intake", root=root, force=True)
     return root
 
 
@@ -180,9 +184,13 @@ def work_repo(tmp_path: Path) -> Path:
         check=True,
         capture_output=True,
     )
+    # Wiring no longer seeds a phase (the proxy does, lazily), so an e2e repo
+    # that must start *at* intake sets it explicitly.
+    from agentalloy.install.subcommands.phase import run_phase_set
     from agentalloy.install.subcommands.wire import (
-        _seed_entry_phase,  # pyright: ignore[reportPrivateUsage]
+        _seed_repo_metadata,  # pyright: ignore[reportPrivateUsage]
     )
 
-    _seed_entry_phase(tmp_path)
+    _seed_repo_metadata(tmp_path)
+    run_phase_set("intake", root=tmp_path, force=True)
     return tmp_path
