@@ -1,7 +1,17 @@
 # Domain Fragment Leak: Snowflake/Iceberg in Unrelated Build Injections
 
 **Date:** 2026-07-11  
-**Status:** Root cause identified, fixes proposed  
+**Status:** PARKED — historical analysis, not re-validated  
+
+> **Do not treat the numbers or the pipeline trace below as current.** This is a
+> snapshot of the retrieval pipeline as of 2026-07-11. Retrieval has changed
+> substantially since (E7v2 dense-prefix aboutness + BM25 anti-signal in 6.6.7,
+> the DEEPEN_BAND K-sweep in 6.6.8, and the Stage B posture flips), and the
+> corpus has been rebuilt more than once — fragment counts, percentages, and
+> ranking behaviour are all stale. Kept for the derivation and the method, not
+> the conclusions. Expect this to be re-investigated from scratch rather than
+> patched; when that happens, replace this file, don't amend it.
+
 **Related:** PLAN-OF-ATTACK.md §E (retrieval pipeline), §F (corpus hygiene), docs/followups.md (retrieval quality)
 
 ---
