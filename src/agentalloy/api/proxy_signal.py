@@ -36,21 +36,19 @@ from agentalloy.signals.skill_loader import (  # type: ignore[reportPrivateUsage
     _build_predicate_context,
     _intake_route_hint,
     _load_workflow_skill_for_phase,
+    _phase_state,
     _read_announced_state,
     _read_banner_turn,
     _read_composed,
     _read_cursor,
     _read_lifecycle_mode,
-    _read_phase,
     _read_state,
-    _read_transitioned_by,
     _write_announced_atomic,
     _write_banner_turn_atomic,
     _write_composed_atomic,
     _write_phase_atomic,
     _write_state_atomic,
     exit_gates_for_phase,
-    read_flow_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,7 +142,7 @@ class SignalResult:
     pending_announce: tuple[str, list[str]] | None = None
     pending_composed: str | None = None
 
-    # Free-flow mode (``mode: free`` in ``.agentalloy/phase``): ALL workflow
+    # Free-flow mode (``mode: free`` in the store's phase row): ALL workflow
     # steering is paused (orientation, banner, exit gates, transitions, intake)
     # but domain-skill composition keyed on the request's task text is kept.
     # When True the compose path takes the compose-only branch
@@ -573,8 +571,12 @@ async def evaluate_signal(
     # `_boundary_confirm_directives`'s "swept" case). Captured before this
     # turn's own potential transition further down, so it reflects "who set
     # the phase as of the start of this turn", never this turn's own write.
-    phase = _read_phase(cwd)
-    transitioned_by = _read_transitioned_by(cwd) if phase else None
+    # One store read, projected three ways (phase, actor, flow mode). These
+    # were three independent reads, so a transition landing mid-turn could
+    # hand this request a mixed view of the same row.
+    phase_state = _phase_state(cwd)
+    phase = phase_state.phase if phase_state else None
+    transitioned_by = phase_state.transitioned_by if phase_state else None
     if not phase:
         # A missing `.agentalloy/` here (lifecycle is active — we passed the
         # mode!="full" guard above) is the signature of a project root that
@@ -594,7 +596,7 @@ async def evaluate_signal(
                 )
         return SignalResult(should_compose=False)
 
-    # 1b. Free-flow guard (single guard point). ``mode: free`` in the phase file
+    # 1b. Free-flow guard (single guard point). ``mode: free`` in the phase row
     # flips the whole request into compose-only handling: no orientation, no
     # banner, no gate eval, no phase transition, no intake compose — but domain
     # skills for the task content still compose (via SignalResult.free_mode →
@@ -602,7 +604,9 @@ async def evaluate_signal(
     # returns to it exactly. Because this branch never commits the announce /
     # composed / banner markers under their workflow keys, resuming re-orients
     # (and re-runs intake) as if this were the first request.
-    flow_mode, free_since = read_flow_state(cwd)
+    free_mode = phase_state is not None and (phase_state.mode or "").lower() == "free"
+    flow_mode = "free" if free_mode else "workflow"
+    free_since = phase_state.free_since if (free_mode and phase_state) else None
     if flow_mode == "free":
         return _evaluate_free_flow(request, cwd, phase, free_since, session_id, mutate=mutate)
 

@@ -19,6 +19,7 @@ from agentalloy.signals.predicates import (
     eval_lessons_recorded,
     evaluate_predicate,
 )
+from tests.support import seed_phase
 
 MET = PredicateResult.MET
 NOT_MET = PredicateResult.NOT_MET
@@ -86,7 +87,7 @@ def test_phase_entry_seeds_gate_scope(tmp_path: Path):
 
     _qa_contract(tmp_path, "01-alpha")
     _qa_contract(tmp_path, "02-beta")
-    (tmp_path / ".agentalloy" / "phase").write_text("phase: build\n")  # enter qa from elsewhere
+    seed_phase(tmp_path, "build")  # enter qa from elsewhere
     _write_phase_atomic(tmp_path, "qa")
     # seeded to 01-alpha; its lesson is absent -> NOT_MET (blocks), not UNKNOWN
     assert eval_lessons_recorded({}, _ctx(tmp_path)) is NOT_MET

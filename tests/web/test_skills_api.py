@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.app import create_app
 from agentalloy.reads.models import ActiveSkill
+from tests.support import seed_phase
 
 _CSRF = {"X-AgentAlloy-CSRF": "1"}
 
@@ -131,7 +132,7 @@ def test_override_put_then_delete_roundtrip(client, tmp_path: Path):
 def test_signal_evaluate_read_only(client, tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".agentalloy").mkdir(parents=True)
-    (repo / ".agentalloy" / "phase").write_text("phase: build\nschema_version: 1\n")
+    seed_phase(repo, "build")
 
     r = client.post(
         "/api/signal/evaluate", json={"repo": str(repo), "prompt": "how do I write a test?"}
@@ -142,7 +143,9 @@ def test_signal_evaluate_read_only(client, tmp_path: Path):
     assert isinstance(body["should_compose"], bool)
     # Read-only: the simulator must not have advanced the phase or bumped
     # banner counters.
-    assert "build" in (repo / ".agentalloy" / "phase").read_text()
+    from agentalloy.signals.skill_loader import _read_phase  # pyright: ignore[reportPrivateUsage]
+
+    assert _read_phase(repo) == "build"
     assert not (repo / ".agentalloy" / "banner_turn").exists()
 
 

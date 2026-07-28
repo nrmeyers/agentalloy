@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from agentalloy.api.proxy_context import (
     decode_proj_token,
     encode_proj_token,
@@ -13,6 +15,7 @@ from agentalloy.api.proxy_context import (
     resolve_working_dir,
 )
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
+from tests.support import seed_phase
 
 _MSG = [ProxyMessage(role="user", content="hello")]
 
@@ -134,7 +137,6 @@ class TestProjToken:
         assert decode_proj_token(encode_proj_token(link)) == Path(os.path.realpath(real))
 
     def test_rejects_malformed_token(self) -> None:
-        import pytest
 
         for junk in ("not!base64!", "", "Zm9v"):  # last decodes to "foo" (relative → reject)
             with pytest.raises(ValueError):
@@ -142,48 +144,27 @@ class TestProjToken:
 
 
 class TestReadPhase:
-    """Test read_phase() file reading."""
+    """``read_phase`` reads the SDD state store, never a file."""
 
-    def test_existing_phase_file(self, tmp_path: Path) -> None:
-        """Returns stripped content of .agentalloy/phase."""
+    def test_existing_phase(self, tmp_path: Path) -> None:
+        seed_phase(tmp_path, "build")
+        assert read_phase(tmp_path) == "build"
+
+    def test_no_phase_recorded(self, tmp_path: Path) -> None:
+        assert read_phase(tmp_path) is None
+
+    def test_a_phase_file_is_not_a_source(self, tmp_path: Path) -> None:
+        """A leftover file from before the migration must not resurrect a phase."""
         phase_dir = tmp_path / ".agentalloy"
         phase_dir.mkdir()
-        (phase_dir / "phase").write_text("  build  \n")
-        result = read_phase(tmp_path)
-        assert result == "build"
+        (phase_dir / "phase").write_text("build\n")
+        assert read_phase(tmp_path) is None
 
-    def test_missing_phase_file(self, tmp_path: Path) -> None:
-        """Returns None when .agentalloy/phase does not exist."""
-        result = read_phase(tmp_path)
-        assert result is None
-
-    def test_missing_agentalloy_dir(self, tmp_path: Path) -> None:
-        """Returns None when .agentalloy directory does not exist."""
-        result = read_phase(tmp_path)
-        assert result is None
-
-    def test_empty_phase_file(self, tmp_path: Path) -> None:
-        """Returns None when phase file is empty."""
-        phase_dir = tmp_path / ".agentalloy"
-        phase_dir.mkdir()
-        (phase_dir / "phase").write_text("")
-        result = read_phase(tmp_path)
-        assert result is None
-
-    def test_whitespace_only_phase_file(self, tmp_path: Path) -> None:
-        """Returns None when phase file is only whitespace."""
-        phase_dir = tmp_path / ".agentalloy"
-        phase_dir.mkdir()
-        (phase_dir / "phase").write_text("   \n  \n  ")
-        result = read_phase(tmp_path)
-        assert result is None
-
-    def test_read_error_returns_none(self, tmp_path: Path) -> None:
-        """Returns None on OS-level read errors."""
-        phase_dir = tmp_path / ".agentalloy"
-        phase_dir.mkdir()
-        phase_file = phase_dir / "phase"
-        phase_file.write_text("build")
-        with mock.patch("pathlib.Path.read_text", side_effect=OSError("permission")):
-            result = read_phase(tmp_path)
-        assert result is None
+    def test_store_read_error_returns_none(self, tmp_path: Path) -> None:
+        """A failing store read is logged and answered None, not raised."""
+        seed_phase(tmp_path, "build")
+        with mock.patch(
+            "agentalloy.storage.state_store.DuckDBStateStore.read_phase",
+            side_effect=RuntimeError("db gone"),
+        ):
+            assert read_phase(tmp_path) is None

@@ -85,12 +85,11 @@ def resolve_working_dir(request: ProxyRequest, project_dir_override: Path | None
 
 
 def read_phase(cwd: Path) -> str | None:
-    """Read the current phase from *cwd*/.agentalloy/phase.
+    """Read the current phase for *cwd* from the SDD state store.
 
-    Handles both YAML format ("phase: build") and plain text ("build").
-
-    Returns the stripped phase string (e.g. "build") or ``None`` if the file
-    does not exist, is empty, or cannot be read.
+    Returns the phase string (e.g. "build"), or ``None`` when the repo has no
+    phase recorded or the store is out of reach — see
+    :func:`agentalloy.signals.skill_loader._read_phase`.
     """
     from agentalloy.signals.skill_loader import (
         _read_phase,  # pyright: ignore[reportPrivateUsage]

@@ -17,6 +17,8 @@ from agentalloy.api.proxy_apply import _compose_block
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import CONFIRM_LABEL, SignalResult, evaluate_signal
 from agentalloy.orchestration.compose import ComposeOrchestrator
+from agentalloy.signals.skill_loader import _read_phase  # pyright: ignore[reportPrivateUsage]
+from tests.support import seed_phase
 
 
 class _NullOrch(ComposeOrchestrator):
@@ -40,7 +42,7 @@ def _req(text: str = "continue") -> ProxyRequest:
 def _set_phase(tmp: Path, phase: str) -> None:
     d = tmp / ".agentalloy"
     d.mkdir(exist_ok=True, parents=True)
-    (d / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(tmp, phase)
 
 
 def _ship_record(tmp: Path, slug: str = "some-feature") -> None:
@@ -83,7 +85,7 @@ async def test_confirm_does_not_write_phase(tmp_path: Path):
     _set_phase(tmp_path, "ship")
     _ship_record(tmp_path)
     await evaluate_signal(_req(), tmp_path)
-    assert (tmp_path / ".agentalloy" / "phase").read_text() == "phase: ship\n", "no auto-reset"
+    assert _read_phase(tmp_path) == "ship", "no auto-reset"
 
 
 def test_confirm_label_is_distinct():

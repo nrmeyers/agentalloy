@@ -22,6 +22,7 @@ from agentalloy.signals import skill_loader as sl
 from tests.code_index.conftest import (
     fixture_repo,  # noqa: F401, F811 — re-exported for fixture parameter use
 )
+from tests.support import seed_phase
 
 # ---------------------------------------------------------------------------
 # AC-1: Differential test over signal-layer fixtures
@@ -29,34 +30,16 @@ from tests.code_index.conftest import (
 
 
 class TestReadParity:
-    """AC-1: The file-based readers and the store-backed readers agree."""
+    """AC-1: The signal-layer readers see the store row and nothing else."""
 
-    def test_store_and_file_produce_same_result(self, fixture_repo: Path) -> None:
-        """Phase read from file matches what the store would return.
+    def test_signal_reader_sees_the_store_row(self, fixture_repo: Path) -> None:
+        seed_phase(fixture_repo, "spec")
+        assert sl._read_phase(fixture_repo) == "spec"
 
-        We write a phase file, read it via the file-based path, then write the
-        same value into a DuckDBStateStore and verify parity.
-        """
-        from agentalloy.storage.state_store import DuckDBStateStore
-
-        # Seed the fixture repo with a phase file.
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\n", encoding="utf-8")
-
-        # File-based reader.
-        file_phase = sl._read_phase(fixture_repo)
-        assert file_phase == "spec"
-
-        # Store-backed read.
-        db = fixture_repo / "state.duck"
-        with DuckDBStateStore(db).open() as store:
-            store.migrate()
-            store.write("phase", "spec")
-            assert store.read("phase") == file_phase
-
-        # Clean up the duckdb file so tmp_path can remove the dir.
-        if db.exists():
-            db.unlink()
+    def test_a_phase_file_is_never_read(self, fixture_repo: Path) -> None:
+        """AC-1: no signal-layer path reads ``.agentalloy/phase``."""
+        (fixture_repo / ".agentalloy" / "phase").write_text("phase: spec\n", encoding="utf-8")
+        assert sl._read_phase(fixture_repo) is None
 
 
 # ---------------------------------------------------------------------------
@@ -67,33 +50,21 @@ class TestReadParity:
 class TestSingleOwnerWrites:
     """AC-2: CLI verbs succeed with service; code-level guards prevent bad writes."""
 
-    def test_cli_verbs_succeed_with_service(self) -> None:
-        """Phase write/write-read cycle works end-to-end (no service required).
-
-        This exercises the actual file-writing path that the CLI uses when the
-        service is down — the same code path the StateClient falls back to.
-        """
-
-        # Use a tmp_path fixture via the caller.
-        pass
-
-    def test_write_phase_atomic_creates_file(self, fixture_repo: Path) -> None:
-        """_write_phase_atomic creates the phase file with correct content."""
+    def test_write_phase_atomic_records_the_phase(self, fixture_repo: Path) -> None:
         sl._write_phase_atomic(fixture_repo, "design")
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        assert phase_file.exists()
-        content = phase_file.read_text()
-        assert "phase: design" in content
+        assert sl._read_phase(fixture_repo) == "design"
+
+    def test_write_phase_atomic_writes_no_file(self, fixture_repo: Path) -> None:
+        """AC-1: the write side leaves ``.agentalloy/phase`` non-existent."""
+        sl._write_phase_atomic(fixture_repo, "design")
+        assert not (fixture_repo / ".agentalloy" / "phase").exists()
 
     def test_write_phase_atomic_preserves_mode(self, fixture_repo: Path) -> None:
-        """Rewriting the same phase preserves mode and free_since fields."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\nmode: free\nfree_since: 2026-07-01\n", encoding="utf-8")
+        """AC-4: an idempotent rewrite must not drop the repo out of free-flow."""
+        seed_phase(fixture_repo, "spec", mode="free", free_since="2026-07-01")
 
         sl._write_phase_atomic(fixture_repo, "spec")  # idempotent rewrite
-        content = phase_file.read_text()
-        assert "mode:" in content
-        assert "free_since:" in content
+        assert sl.read_flow_state(fixture_repo) == ("free", "2026-07-01")
 
     def test_write_lifecycle_mode_guard(self) -> None:
         """_write_lifecycle_mode rejects invalid modes (code-level guard)."""
@@ -132,28 +103,24 @@ class TestSingleOwnerWrites:
 
 
 class TestServiceDown:
-    """AC-3: Phase set works when the service is down (file-mirror fallback)."""
+    """AC-3: with no store bound, a phase write fails loudly rather than silently."""
 
-    def test_phase_set_without_service(self, fixture_repo: Path) -> None:
-        """_write_phase_atomic works without any running service.
+    def test_phase_write_without_a_bound_store_raises(self, fixture_repo: Path) -> None:
+        """Store out of reach is not the same as "no phase" — a dropped
+        transition must never look like a successful one."""
+        from agentalloy.storage.state_store import bind_process_store, process_store
 
-        This is the file-mirror fallback path: the CLI writes directly to the
-        phase file when the state service is unreachable.
-        """
-        # Ensure no phase file exists.
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        if phase_file.exists():
-            phase_file.unlink()
-
-        # Write phase — no service needed.
-        sl._write_phase_atomic(fixture_repo, "spec")
-        assert phase_file.exists()
-        assert sl._read_phase(fixture_repo) == "spec"
+        store = process_store()
+        bind_process_store(None)
+        try:
+            with pytest.raises(RuntimeError, match="no state store bound"):
+                sl._write_phase_atomic(fixture_repo, "spec")
+        finally:
+            bind_process_store(store)
 
     def test_phase_set_clears_cursor_on_transition(self, fixture_repo: Path) -> None:
         """Transitioning to a new phase clears stale cursors."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: intake\n", encoding="utf-8")
+        seed_phase(fixture_repo, "intake")
 
         # Seed a cursor.
         cursor_file = fixture_repo / ".agentalloy" / "cursor"
@@ -227,11 +194,10 @@ class TestConcurrentTransition:
     def test_race_two_phase_transitions(self, fixture_repo: Path) -> None:
         """Two threads writing phase files concurrently — both succeed.
 
-        The file-based path uses temp-file + os.replace for atomicity, so
-        concurrent writes don't corrupt the file. The last writer wins.
+        The store path does its read-modify-write inside one BEGIN/COMMIT, so
+        concurrent writes can't interleave into a half-updated blob. The last
+        writer wins.
         """
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-
         errors: list[Exception] = []
 
         def write_phase(phase: str) -> None:
@@ -249,10 +215,7 @@ class TestConcurrentTransition:
         t2.join(timeout=10)
 
         assert not errors, f"Thread errors: {errors}"
-        # The file should be valid regardless of which write won.
-        content = phase_file.read_text()
-        assert "phase:" in content
-        # The final phase is one of the two written.
+        # The row is intact regardless of which write won.
         final_phase = sl._read_phase(fixture_repo)
         assert final_phase in ("design", "spec")
 
@@ -289,23 +252,21 @@ class TestFlowState:
     """read_flow_state behaviour."""
 
     def test_workflow_default(self, fixture_repo: Path) -> None:
-        """No phase file → workflow mode."""
+        """No phase row → workflow mode."""
         mode, free_since = sl.read_flow_state(fixture_repo)
         assert mode == "workflow"
         assert free_since is None
 
     def test_free_mode(self, fixture_repo: Path) -> None:
-        """phase file with mode: free → free mode."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\nmode: free\nfree_since: 2026-07-01\n", encoding="utf-8")
+        """phase row with mode: free → free mode."""
+        seed_phase(fixture_repo, "spec", mode="free", free_since="2026-07-01")
         mode, free_since = sl.read_flow_state(fixture_repo)
         assert mode == "free"
         assert free_since == "2026-07-01"
 
     def test_unknown_mode_defaults_workflow(self, fixture_repo: Path) -> None:
         """Unknown mode value falls back to workflow."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\nmode: unknown\n", encoding="utf-8")
+        seed_phase(fixture_repo, "spec", mode="unknown")
         mode, free_since = sl.read_flow_state(fixture_repo)
         assert mode == "workflow"
 
@@ -332,19 +293,16 @@ class TestTransitionedBy:
 
     def test_transitioned_by_recorded(self, fixture_repo: Path) -> None:
         """transitioned_by is recorded when present."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\ntransitioned_by: session-abc\n", encoding="utf-8")
+        seed_phase(fixture_repo, "spec", actor="session-abc")
         assert sl._read_transitioned_by(fixture_repo) == "session-abc"
 
     def test_transitioned_by_absent(self, fixture_repo: Path) -> None:
         """No transitioned_by → None."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\n", encoding="utf-8")
+        seed_phase(fixture_repo, "spec")
         assert sl._read_transitioned_by(fixture_repo) is None
 
     def test_transitioned_by_preserved_on_idempotent_write(self, fixture_repo: Path) -> None:
         """Rewriting the same phase preserves transitioned_by."""
-        phase_file = fixture_repo / ".agentalloy" / "phase"
-        phase_file.write_text("phase: spec\ntransitioned_by: session-xyz\n", encoding="utf-8")
+        seed_phase(fixture_repo, "spec", actor="session-xyz")
         sl._write_phase_atomic(fixture_repo, "spec")  # same phase
         assert sl._read_transitioned_by(fixture_repo) == "session-xyz"

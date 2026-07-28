@@ -21,6 +21,7 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from agentalloy.api.anthropic_passthrough import AnthropicPassthroughClient
@@ -36,6 +37,7 @@ from agentalloy.signals.skill_loader import (  # pyright: ignore[reportPrivateUs
     read_flow_state,
 )
 from agentalloy.storage.telemetry_store import open_telemetry_store
+from tests.support import seed_phase
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,13 +55,16 @@ def _write_phase_file(
     free: bool = False,
     free_since: str | None = None,
 ) -> None:
-    d = tmp_path / ".agentalloy"
-    d.mkdir(exist_ok=True)
-    lines = [f"phase: {phase}"]
+    """Seed the phase row, optionally in free-flow. (Named for the file it replaced.)"""
     if free:
-        lines.append("mode: free")
-        lines.append(f'free_since: "{free_since or _iso(datetime.now(UTC))}"')
-    (d / "phase").write_text("\n".join(lines) + "\n")
+        seed_phase(
+            tmp_path,
+            phase,
+            mode="free",
+            free_since=free_since or _iso(datetime.now(UTC)),
+        )
+    else:
+        seed_phase(tmp_path, phase)
 
 
 def _req(*user_texts: str, tools: bool = True) -> ProxyRequest:
@@ -109,55 +114,59 @@ def _orchestrator(output: str, captured_reqs: list[Any] | None = None) -> Compos
 
 
 # ---------------------------------------------------------------------------
-# Phase-file round-trip: mode / free_since / back-compat
+# Phase-row round-trip: mode / free_since / back-compat
 # ---------------------------------------------------------------------------
 
 
-class TestPhaseFileFlowState:
-    def test_old_file_without_mode_reads_workflow(self, tmp_path: Path) -> None:
+class TestPhaseRowFlowState:
+    def test_row_without_mode_reads_workflow(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         assert read_flow_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"
 
-    def test_absent_file_reads_workflow(self, tmp_path: Path) -> None:
+    def test_absent_row_reads_workflow(self, tmp_path: Path) -> None:
         assert read_flow_state(tmp_path) == ("workflow", None)
 
-    def test_legacy_bare_phase_file(self, tmp_path: Path) -> None:
-        d = tmp_path / ".agentalloy"
-        d.mkdir()
-        (d / "phase").write_text("build\n")
+    def test_bare_phase_row_reads_workflow(self, tmp_path: Path) -> None:
+        """A pre-blob row is a bare string; the store normalizes it."""
+        from agentalloy.api.state_router import _repo_key_for
+        from agentalloy.storage.state_store import process_store
+
+        store = process_store()
+        assert store is not None
+        store.for_repo(_repo_key_for(str(tmp_path))).write("phase", "build")
+
         assert read_flow_state(tmp_path) == ("workflow", None)
         assert _read_phase(tmp_path) == "build"
 
-    def test_free_file_round_trip(self, tmp_path: Path) -> None:
+    def test_free_row_round_trip(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "design", free=True, free_since="2026-07-01T00:00:00Z")
         assert read_flow_state(tmp_path) == ("free", "2026-07-01T00:00:00Z")
-        # An old agentalloy reading the new file must still see the phase (the
-        # tolerant YAML reader in skill_loader is the oldest parser in the tree).
         assert _read_phase(tmp_path) == "design"
 
     def test_write_phase_atomic_preserves_free_flow_fields(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build", free=True, free_since="2026-07-01T00:00:00Z")
         _write_phase_atomic(tmp_path, "qa")
-        raw = (tmp_path / ".agentalloy" / "phase").read_text()
-        assert raw.splitlines()[0] == "phase: qa"  # phase line stays first
+        assert _read_phase(tmp_path) == "qa"
         assert read_flow_state(tmp_path) == ("free", "2026-07-01T00:00:00Z")
 
     def test_write_phase_atomic_without_mode_stays_clean(self, tmp_path: Path) -> None:
         _write_phase_file(tmp_path, "build")
         _write_phase_atomic(tmp_path, "qa")
-        assert (tmp_path / ".agentalloy" / "phase").read_text() == "phase: qa\n"
+        assert _read_phase(tmp_path) == "qa"
+        assert read_flow_state(tmp_path) == ("workflow", None)
 
-    def test_phase_set_cli_preserves_free_flow_fields(self, tmp_path: Path) -> None:
-        from agentalloy.install.subcommands.flow import run_flow_free
-        from agentalloy.install.subcommands.phase import run_phase_set
+    def test_phase_writes_require_a_bound_store(self, tmp_path: Path) -> None:
+        """Store out of reach ≠ store empty — a dropped transition must be loud."""
+        from agentalloy.storage.state_store import bind_process_store, process_store
 
-        run_phase_set("build", root=tmp_path, force=True)
-        run_flow_free(root=tmp_path)
-        result = run_phase_set("qa", root=tmp_path, force=True)
-        assert result["phase"] == "qa"
-        mode, since = read_flow_state(tmp_path)
-        assert mode == "free" and since
+        store = process_store()
+        bind_process_store(None)
+        try:
+            with pytest.raises(RuntimeError, match="no state store bound"):
+                _write_phase_atomic(tmp_path, "qa")
+        finally:
+            bind_process_store(store)
 
 
 # ---------------------------------------------------------------------------

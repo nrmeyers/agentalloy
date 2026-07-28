@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+from pathlib import Path
 from typing import Any
 
 from agentalloy.lm_client import OpenAICompatClient
@@ -57,3 +58,19 @@ class StubLMClient(OpenAICompatClient):
 
     def close(self) -> None:
         pass
+
+
+def seed_phase(root: Path, phase: str, **fields: str | None) -> None:
+    """Put *root* in *phase* in the bound process store.
+
+    The test-side counterpart of ``_write_phase_atomic`` — ``mode``,
+    ``free_since`` and ``actor`` ride the same blob. Replaces the
+    ``.agentalloy/phase`` file writes the suite used before the store became
+    the only source.
+    """
+    from agentalloy.api.state_router import _repo_key_for  # pyright: ignore[reportPrivateUsage]
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None, "no state store bound — is _bound_state_store active?"
+    store.for_repo(_repo_key_for(str(root))).write_phase(phase, **fields)  # pyright: ignore[reportArgumentType]

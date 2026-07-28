@@ -14,6 +14,8 @@ from pathlib import Path
 
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
+from agentalloy.signals.skill_loader import _read_phase  # pyright: ignore[reportPrivateUsage]
+from tests.support import seed_phase
 
 
 def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
@@ -27,7 +29,7 @@ def _req(text: str = "continue", *, tools: bool = True) -> ProxyRequest:
 def _set_phase(tmp: Path, phase: str) -> None:
     d = tmp / ".agentalloy"
     d.mkdir(exist_ok=True, parents=True)
-    (d / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(tmp, phase)
 
 
 def _seed_announced(tmp: Path, phase: str, keys: list[str]) -> None:
@@ -102,4 +104,4 @@ async def test_new_session_confirm_does_not_write_phase(tmp_path: Path):
     _set_phase(tmp_path, "build")
     _seed_announced(tmp_path, "build", ["other"])
     await evaluate_signal(_req(), tmp_path, session_id="me")
-    assert (tmp_path / ".agentalloy" / "phase").read_text() == "phase: build\n"
+    assert _read_phase(tmp_path) == "build"

@@ -23,6 +23,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import threading
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
@@ -45,12 +46,24 @@ LEGACY_REPO_KEY = "state"
 
 
 class _TxnFlag:
-    """Connection-wide BEGIN/COMMIT re-entrancy flag, shared across scoped views."""
+    """Connection-wide BEGIN/COMMIT state, shared across scoped views.
 
-    __slots__ = ("active",)
+    ``lock`` serialises transactions across threads. The service runs request
+    handlers in a threadpool over a single connection, so two threads could
+    otherwise both pass the ``active`` check and issue ``BEGIN`` on the same
+    connection — DuckDB then fails mid-statement with an opaque
+    ``IndexError``, and one of the two transitions is lost.
+
+    It is an ``RLock`` deliberately: a *same-thread* re-entrant call must still
+    hit the explicit "nested transaction" ``RuntimeError`` rather than
+    deadlocking on itself.
+    """
+
+    __slots__ = ("active", "lock")
 
     def __init__(self) -> None:
         self.active = False
+        self.lock = threading.RLock()
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +209,55 @@ class StateStoreError(Exception):
     """Base for state-store errors."""
 
 
+class _Result:
+    """Already-fetched rows, shaped like a DuckDB cursor.
+
+    A DuckDB connection holds *one* pending result.  Handing the live cursor
+    back to the caller means the rows are fetched after the lock is released,
+    so a second thread's ``execute`` can replace the result in between — which
+    surfaces as garbage rather than an error (``IndexError: tuple index out of
+    range``, or a JSON blob column read back as an ``int``).  Fetching eagerly
+    under the lock is what makes the shared connection safe.
+    """
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._rows[0] if self._rows else None
+
+
+class _LockedConn:
+    """Serialising façade over the raw DuckDB connection.
+
+    The service serves every repo from one handle, across a request threadpool.
+    Every statement therefore runs under the connection-wide lock, and results
+    are materialised before it is dropped.  The lock is the same ``RLock`` that
+    ``transaction()`` holds, so statements issued inside a transaction re-enter
+    it on the owning thread instead of deadlocking.
+    """
+
+    __slots__ = ("_conn", "_lock")
+
+    def __init__(self, conn: duckdb.DuckDBPyConnection, lock: threading.RLock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    def execute(self, sql: str, params: Any = None) -> _Result:
+        with self._lock:
+            cur = self._conn.execute(sql, params) if params is not None else self._conn.execute(sql)
+            try:
+                return _Result(cur.fetchall())
+            except Exception:
+                # DDL and most DML produce no result set.
+                return _Result([])
+
+
 class DuckDBStateStore:
     """Thin wrapper over a DuckDB connection to the SDD state store.
 
@@ -215,6 +277,10 @@ class DuckDBStateStore:
         self._read_only = read_only
         self._repo_key = repo or LEGACY_REPO_KEY
         self._conn: duckdb.DuckDBPyConnection | None = None
+        # Built once at open() so scoped views share one façade object: views
+        # are shallow copies, and `view.conn is store.conn` is the check that
+        # proves they really are one handle rather than two.
+        self._locked: _LockedConn | None = None
         # Shared across scoped views: two views over one connection must not
         # both issue BEGIN.  A plain bool would be copied per view and the
         # re-entrancy guard would stop guarding.
@@ -229,6 +295,7 @@ class DuckDBStateStore:
             self._conn = duckdb.connect(self._db_path, read_only=self._read_only)
         except duckdb.Error as exc:
             raise StateStoreError(str(exc)) from exc
+        self._locked = _LockedConn(self._conn, self._txn.lock)
         return self
 
     def close(self) -> None:
@@ -238,6 +305,7 @@ class DuckDBStateStore:
             except Exception:
                 logger.debug("failed to close DuckDB state connection", exc_info=True)
             self._conn = None
+            self._locked = None
 
     def __enter__(self) -> DuckDBStateStore:
         return self.open()
@@ -251,19 +319,20 @@ class DuckDBStateStore:
         self.close()
 
     @property
-    def conn(self) -> duckdb.DuckDBPyConnection:
-        if self._conn is None:
+    def conn(self) -> _LockedConn:
+        """The connection, wrapped so every statement is serialised.
+
+        Deliberately not the raw handle: callers reach for ``store.conn`` as if
+        it were private-to-them, and on the service it never is.
+        """
+        if self._locked is None:
             raise RuntimeError("StateStore is not open")
-        return self._conn
+        return self._locked
 
     # -- query workhorse -----------------------------------------------------
 
     def execute(self, sql: str, params: Any = None) -> list[tuple[Any, ...]]:
-        cur = self.conn.execute(sql, params) if params is not None else self.conn.execute(sql)
-        try:
-            return cur.fetchall()
-        except Exception:
-            return []
+        return self.conn.execute(sql, params).fetchall()
 
     def scalar(self, sql: str, params: Any = None) -> Any:
         rows = self.execute(sql, params)
@@ -545,22 +614,31 @@ class DuckDBStateStore:
 
         Re-entrant calls raise :class:`RuntimeError` — silent nesting is
         explicitly rejected.
+
+        Concurrent callers on *other* threads block until the transaction ends:
+        one connection cannot carry two transactions, and the service serves
+        every repo from a single handle.
         """
         if self._in_transaction:
             raise RuntimeError("nested transaction() calls are not supported")
         if self._read_only:
             raise RuntimeError("cannot begin transaction in read-only mode")
 
-        self._in_transaction = True
-        self.conn.execute("BEGIN")
-        try:
-            yield self
-            self.conn.execute("COMMIT")
-        except BaseException:
-            self.conn.execute("ROLLBACK")
-            raise
-        finally:
-            self._in_transaction = False
+        with self._txn.lock:
+            # Re-check under the lock: another thread may have been mid-BEGIN
+            # when the fast-path check above ran.
+            if self._in_transaction:
+                raise RuntimeError("nested transaction() calls are not supported")
+            self._in_transaction = True
+            self.conn.execute("BEGIN")
+            try:
+                yield self
+                self.conn.execute("COMMIT")
+            except BaseException:
+                self.conn.execute("ROLLBACK")
+                raise
+            finally:
+                self._in_transaction = False
 
     # -- phase blob ----------------------------------------------------------
 
@@ -1160,3 +1238,37 @@ def open_state_store(
     if not read_only:
         store.migrate()
     return store
+
+
+# ---------------------------------------------------------------------------
+# Process-wide handle
+# ---------------------------------------------------------------------------
+#
+# DuckDB is single-writer: exactly one process may hold the state store open
+# for writing, and that process is the service.  In-process callers outside
+# the FastAPI request path — ``signals.skill_loader``, the watcher — cannot
+# take a ``Depends(get_state_store)`` and must not open a second handle, so
+# the service publishes the one it already owns here during its lifespan.
+#
+# Unbound is a *distinct* condition from "no phase recorded": a caller that
+# treats the two alike turns a store outage into a repo that looks like it
+# never had a phase.  ``process_store()`` returns ``None`` and every caller
+# has to say out loud what it does with that.
+
+_process_store: DuckDBStateStore | None = None
+
+
+def bind_process_store(store: DuckDBStateStore | None) -> None:
+    """Publish (or, with ``None``, retract) the process-wide store handle."""
+    global _process_store
+    _process_store = store
+
+
+def process_store() -> DuckDBStateStore | None:
+    """The store this process owns, or ``None`` when nothing has bound one.
+
+    ``None`` means *the store is out of reach from here* — a CLI process, a
+    test that did not bind one, or a service still in startup.  It never means
+    the store is empty.
+    """
+    return _process_store

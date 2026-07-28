@@ -26,6 +26,7 @@ from agentalloy.api.proxy_session import (
 from agentalloy.api.proxy_signal import commit_markers, evaluate_signal
 from agentalloy.storage.protocols import CompositionTrace, TelemetryStore
 from agentalloy.storage.telemetry_store import open_telemetry_store
+from tests.support import seed_phase
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,7 +54,7 @@ def _req(*user_texts: str, tools: bool = True) -> ProxyRequest:
 def _set_phase(tmp_path: Path, phase: str) -> None:
     d = tmp_path / ".agentalloy"
     d.mkdir(exist_ok=True)
-    (d / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(tmp_path, phase)
 
 
 def _skill() -> dict[str, object]:

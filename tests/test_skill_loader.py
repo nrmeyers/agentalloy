@@ -11,7 +11,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-import yaml
+
+from tests.support import seed_phase
 
 # ---------------------------------------------------------------------------
 # _read_phase
@@ -24,46 +25,34 @@ def test_read_phase_returns_none_when_missing(tmp_path: Path) -> None:
     assert _read_phase(tmp_path) is None
 
 
-def test_read_phase_reads_yaml_dict_format(tmp_path: Path) -> None:
+def test_read_phase_reads_the_store_row(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_phase
+
+    seed_phase(tmp_path, "build")
+    assert _read_phase(tmp_path) == "build"
+
+
+def test_read_phase_reads_a_bare_string_row(tmp_path: Path) -> None:
+    """Pre-blob rows hold a bare phase string; they must still read."""
+    from agentalloy.api.state_router import _repo_key_for
+    from agentalloy.signals.skill_loader import _read_phase
+    from agentalloy.storage.state_store import process_store
+
+    store = process_store()
+    assert store is not None
+    store.for_repo(_repo_key_for(str(tmp_path))).write("phase", "spec")
+    assert _read_phase(tmp_path) == "spec"
+
+
+def test_read_phase_ignores_a_leftover_phase_file(tmp_path: Path) -> None:
+    """A file left over from before the migration is not a source of truth."""
     from agentalloy.signals.skill_loader import _read_phase
 
     phase_file = tmp_path / ".agentalloy" / "phase"
     phase_file.parent.mkdir(parents=True)
     phase_file.write_text("phase: build\n")
 
-    assert _read_phase(tmp_path) == "build"
-
-
-def test_read_phase_reads_plain_string_format(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _read_phase
-
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True)
-    phase_file.write_text("spec\n")
-
-    assert _read_phase(tmp_path) == "spec"
-
-
-def test_read_phase_returns_none_on_malformed_file(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _read_phase
-
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True)
-    # Empty YAML dict value → no "phase" key
-    phase_file.write_text("{}  \n")
-
-    # {} is a dict with no "phase" key → None
     assert _read_phase(tmp_path) is None
-
-
-def test_read_phase_strips_whitespace(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _read_phase
-
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    phase_file.parent.mkdir(parents=True)
-    phase_file.write_text("phase:  qa  \n")
-
-    assert _read_phase(tmp_path) == "qa"
 
 
 # ---------------------------------------------------------------------------
@@ -141,40 +130,29 @@ def test_write_lifecycle_mode_rejects_invalid_mode(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_write_phase_atomic_creates_file(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _write_phase_atomic
+def test_write_phase_atomic_records_the_phase(tmp_path: Path) -> None:
+    from agentalloy.signals.skill_loader import _read_phase, _write_phase_atomic
 
     _write_phase_atomic(tmp_path, "design")
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    assert phase_file.exists()
-    content = yaml.safe_load(phase_file.read_text())
-    assert content["phase"] == "design"
+    assert _read_phase(tmp_path) == "design"
 
 
 def test_write_phase_atomic_overwrites_existing(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _write_phase_atomic
+    from agentalloy.signals.skill_loader import _read_phase, _write_phase_atomic
 
     _write_phase_atomic(tmp_path, "spec")
     _write_phase_atomic(tmp_path, "design")
-    phase_file = tmp_path / ".agentalloy" / "phase"
-    content = yaml.safe_load(phase_file.read_text())
-    assert content["phase"] == "design"
+    assert _read_phase(tmp_path) == "design"
 
 
-def test_write_phase_atomic_creates_parent_dirs(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _write_phase_atomic
+def test_write_phase_atomic_needs_no_repo_directory(tmp_path: Path) -> None:
+    """The row is keyed by repo identity; the repo need not exist on disk."""
+    from agentalloy.signals.skill_loader import _read_phase, _write_phase_atomic
 
     nested = tmp_path / "project"
     _write_phase_atomic(nested, "build")
-    assert (nested / ".agentalloy" / "phase").exists()
-
-
-def test_write_phase_atomic_no_tmp_file_left(tmp_path: Path) -> None:
-    from agentalloy.signals.skill_loader import _write_phase_atomic
-
-    _write_phase_atomic(tmp_path, "build")
-    tmp = tmp_path / ".agentalloy" / "phase.tmp"
-    assert not tmp.exists()
+    assert _read_phase(nested) == "build"
+    assert not (nested / ".agentalloy").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from agentalloy.api import proxy_signal
 from agentalloy.api.proxy_models import ProxyMessage, ProxyRequest
 from agentalloy.api.proxy_signal import evaluate_signal
 from agentalloy.signals.prefilter import PreFilterMatch
+from tests.support import seed_phase
 
 
 def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
@@ -42,7 +43,7 @@ def _req(prompt: str, *, tools: bool = True) -> ProxyRequest:
 def _set_phase(tmp_path: Path, phase: str) -> None:
     phase_dir = tmp_path / ".agentalloy"
     phase_dir.mkdir(exist_ok=True)
-    (phase_dir / "phase").write_text(f"phase: {phase}\n")
+    seed_phase(tmp_path, phase)
 
 
 # A stable session id used across a "session"'s turns. Orientation is now keyed
@@ -888,7 +889,7 @@ class TestEvaluateSignalBanner:
     def test_lifecycle_off_leaves_banner_none(self, tmp_path: Path) -> None:
         d = tmp_path / ".agentalloy"
         d.mkdir()
-        (d / "phase").write_text("phase: spec\n")
+        seed_phase(tmp_path, "spec")
         (d / "config").write_text("lifecycle_mode: off\n")
         result = asyncio.run(evaluate_signal(_req("work"), tmp_path))
         assert result.should_compose is False

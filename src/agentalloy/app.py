@@ -53,7 +53,7 @@ from agentalloy.orchestration.retrieve import RetrieveOrchestrator
 from agentalloy.reads import InconsistentActiveVersion
 from agentalloy.runtime_state import RuntimeCache, load_runtime_cache
 from agentalloy.storage.open import open_fragments, open_skills, open_telemetry
-from agentalloy.storage.state_store import open_state_store
+from agentalloy.storage.state_store import bind_process_store, open_state_store
 from agentalloy.telemetry import DuckDBTelemetryWriter
 from agentalloy.web.config_api import router as web_config_router
 from agentalloy.web.ops_api import router as web_ops_router
@@ -143,6 +143,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state_store.rekey_legacy_rows(state_store.repo)
     except Exception:
         logger.warning("state store legacy re-key failed — continuing", exc_info=True)
+    # Publish the handle to in-process callers that cannot take a `Depends`:
+    # `signals.skill_loader` (proxy phase reads/writes) and the watcher. DuckDB
+    # is single-writer, so they must share this one rather than open their own.
+    bind_process_store(state_store)
 
     # --- NXS-777: startup-time cache load ---
     runtime: RuntimeCache | None = None
@@ -331,6 +335,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.dependency_overrides.pop(get_retrieve_orchestrator, None)
         app.dependency_overrides.pop(get_skill_store, None)
         app.dependency_overrides.pop(get_state_store, None)
+        bind_process_store(None)
         # Guard each close independently: a failure in one (e.g. an in-flight
         # passthrough request at shutdown) must not skip the rest and leak the
         # DuckDB / Lance connections.

@@ -7,6 +7,7 @@ database in a temporary directory.
 
 from __future__ import annotations
 
+import threading
 from datetime import timedelta
 from pathlib import Path
 
@@ -175,6 +176,91 @@ class TestTransaction:
 # ---------------------------------------------------------------------------
 # Schema lifecycle
 # ---------------------------------------------------------------------------
+
+
+class TestConcurrentConnectionUse:
+    """One connection, many threads — the shape the service actually runs.
+
+    The service opens a single ``state.duck`` and serves every request from it
+    on a threadpool, so reads and writes genuinely overlap.  A DuckDB
+    connection carries one pending result, so handing a live cursor back to the
+    caller lets a second thread's statement replace the rows before the first
+    thread fetches them.  That does not raise where it happens — it surfaces
+    later as a phase row that reads back as garbage.
+    """
+
+    def test_reads_racing_writes_stay_coherent(self, tmp_path: Path) -> None:
+        store = DuckDBStateStore(tmp_path / "race.duck")
+        store.open()
+        store.migrate()
+        repo = store.for_repo("repo-a")
+        repo.write_phase("spec")
+
+        errors: list[BaseException] = []
+        seen: set[str] = set()
+        stop = threading.Event()
+
+        def reader() -> None:
+            try:
+                while not stop.is_set():
+                    state = repo.read_phase()
+                    if state is not None:
+                        seen.add(state.phase)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def writer() -> None:
+            try:
+                for i in range(200):
+                    repo.write_phase("build" if i % 2 else "spec")
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        readers = [threading.Thread(target=reader) for _ in range(4)]
+        writers = [threading.Thread(target=writer) for _ in range(3)]
+        for t in (*writers, *readers):
+            t.start()
+        for t in writers:
+            t.join()
+        stop.set()
+        for t in readers:
+            t.join()
+        store.close()
+
+        assert not errors, f"{len(errors)} errors, first: {errors[0]!r}"
+        # Never a phase nobody wrote: a torn read shows up as a bogus value,
+        # not only as an exception.
+        assert seen <= {"spec", "build"}
+
+    def test_a_transaction_excludes_other_threads(self, tmp_path: Path) -> None:
+        """A write from another thread lands after the transaction commits."""
+        store = DuckDBStateStore(tmp_path / "txn.duck")
+        store.open()
+        store.migrate()
+        repo = store.for_repo("repo-a")
+        repo.write_phase("spec")
+
+        inside = threading.Event()
+        released = threading.Event()
+
+        def other() -> None:
+            inside.wait(timeout=5)
+            repo.write_phase("qa")
+            released.set()
+
+        t = threading.Thread(target=other)
+        t.start()
+        with repo.transaction():
+            inside.set()
+            # The other thread is blocked on the connection lock, so it cannot
+            # have interleaved a write into the middle of this transaction.
+            assert not released.wait(timeout=0.3)
+            repo.write_phase("build")
+        t.join(timeout=5)
+
+        assert repo.read_phase() is not None
+        assert repo.read_phase().phase == "qa"  # pyright: ignore[reportOptionalMemberAccess]
+        store.close()
 
 
 class TestStoreSchema:
