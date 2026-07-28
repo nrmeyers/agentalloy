@@ -97,7 +97,7 @@ class TestTA6RetainsConfig:
         aa = repo / ".agentalloy"
         aa.mkdir()
         (aa / "config").write_text("harness: claude-code\n")
-        (aa / "phase").write_text("phase: build\n")
+        (aa / "phase").write_text("phase: build\n")  # phase is no longer cleaned up (store is source of truth)
         (aa / "upstream").write_text("origin/main\n")
         (aa / "README.md").write_text("test\n")
         (aa / "claude-code-env.sh").write_text("export FOO=bar\n")
@@ -107,8 +107,7 @@ class TestTA6RetainsConfig:
         # config and claude-code-env.sh should remain
         assert (aa / "config").exists(), "config should be preserved"
         assert (aa / "claude-code-env.sh").exists(), "claude-code-env.sh should be preserved"
-        # phase, upstream, README.md should be removed
-        assert not (aa / "phase").exists(), "phase should be removed"
+        # upstream and README.md are removed; phase is left behind (store is source of truth)
         assert not (aa / "upstream").exists(), "upstream should be removed"
         assert not (aa / "README.md").exists(), "README.md should be removed"
 

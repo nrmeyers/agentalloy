@@ -322,7 +322,6 @@ class TestClaudeCodeUnwireCleanup:
     ) -> None:
         result = wire_compat("claude-code", port=7070, root=tmp_path)
         agentalloy = tmp_path / ".agentalloy"
-        (agentalloy / "phase").write_text("build\n")  # lifecycle state wire seeds
         assert (agentalloy / "claude-code-env.sh").exists()
 
         self._run_unwire(tmp_path, {"harness_files_written": result["files_written"]}, monkeypatch)

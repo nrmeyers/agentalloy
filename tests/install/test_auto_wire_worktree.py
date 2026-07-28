@@ -63,7 +63,7 @@ class TestMainCheckoutRoot:
 class TestTryAutoWire:
     def test_skips_when_already_wired(self, worktree: Path) -> None:
         (worktree / ".agentalloy").mkdir()
-        (worktree / ".agentalloy" / "phase").write_text("phase: build\n")
+        (worktree / ".agentalloy" / "upstream").write_text("url: http://localhost:47950/v1\nmodel: test\n")
         with patch(f"{_MOD}._main_checkout_root") as mock_root:
             _try_auto_wire(worktree)
             mock_root.assert_not_called()  # short-circuited before even checking
@@ -81,7 +81,7 @@ class TestTryAutoWire:
 
     def test_skips_when_no_harness_recorded(self, repo: Path, worktree: Path) -> None:
         (repo / ".agentalloy").mkdir()
-        (repo / ".agentalloy" / "phase").write_text("phase: build\n")
+        (repo / ".agentalloy" / "upstream").write_text("url: http://localhost:47950/v1\nmodel: test\n")
         with (
             patch("agentalloy.install.state.load_state", return_value={}),
             patch("agentalloy.install.subcommands.add.adopt_and_wire") as mock_wire,
@@ -91,7 +91,6 @@ class TestTryAutoWire:
 
     def test_wires_worktree_from_main_checkout_state(self, repo: Path, worktree: Path) -> None:
         (repo / ".agentalloy").mkdir()
-        (repo / ".agentalloy" / "phase").write_text("phase: build\n")
         (repo / ".agentalloy" / "upstream").write_text(
             "url: http://localhost:9999/v1\nmodel: test-model\nkey_env: MY_KEY\n"
         )
@@ -120,7 +119,7 @@ class TestTryAutoWire:
         self, repo: Path, worktree: Path
     ) -> None:
         (repo / ".agentalloy").mkdir()
-        (repo / ".agentalloy" / "phase").write_text("phase: build\n")
+        (repo / ".agentalloy" / "upstream").write_text("url: http://localhost:47950/v1\nmodel: test\n")
         state = {
             "harness_files_written": [
                 {"harness": "hermes-agent", "repo_root": str(repo), "path": "x"},
