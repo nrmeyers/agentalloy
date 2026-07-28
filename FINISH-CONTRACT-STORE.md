@@ -193,29 +193,31 @@ These are committed and known. Each needs a fix **and** a test that fails withou
 
 ### Task 5 — Documentation and residue
 
-1. **`docs/followups.md:70`, the "slice 07 debt" section, is stale.** Slices 07b, 07c,
-   and 11 landed (`c1455b1`, `38d524f`, `2d0f83b`, `c5534a1`) and cleared most of it.
-   Verified already: zero `.agentalloy/contracts` references remain in `_packs/`, and
-   `mirror_to_files` is gone from `src/`. Rewrite the section to reflect what is
-   actually still open. This matters more than it looks: once every phase begins in a
-   fresh session, a stale doc is the *only* thing a cold agent has.
-2. **Prose residue in 4 pack files.** `sdd-intake.yaml:114` says "contract folder"; the
-   `change_summary` fields in `sdd-spec-and-scoping.yaml:72`,
-   `sdd-verify-and-review.yaml:76`, and `sdd-deliver-and-ship.yaml:59` still describe
-   `contracts/active/*/` paths. These are metadata, not agent instructions — but they
-   are the same falsehood the rewrite removed everywhere else. Fixing them requires a
-   pack version bump and therefore a **re-ingest and re-embed** (Task 1 again). Batch
-   this with any other pack edit rather than re-embedding twice.
-3. **Acceptance A5 is unverified.** The spec requires `.agentalloy/contracts/` to be
-   absent from a freshly initialised repo, with `.agentalloy/` retaining only `config`
-   and `claude-code-env.sh`. Install code no longer creates the directory — but this
-   repo still has 14 contract files under it, and **nothing migrates them into the
-   store**. Initialise a scratch repo and demonstrate A5 holds. Then decide what
-   happens to this repo's existing files and write that decision down.
+1. **`docs/followups.md:70`, the "slice 07 debt" section, is stale.** **Resolved.**
+   Slices 07b, 07c, and 11 landed (`c1455b1`, `38d524f`, `2d0f83b`, `c5534a1`) and
+   cleared the debt. Verified: zero `.agentalloy/contracts` references remain in
+   `_packs/`, `mirror_to_files` is gone from `src/`. The "legacy glob tolerance"
+   item is also resolved — grep confirms no `contracts/active` or `contract folder`
+   references remain in any pack YAML. The `change_summary` fields in all four pack
+   files already say "contract store" (not file paths). **No further action needed**
+   — the tracking doc itself should be updated but that is meta-debt.
+2. **Prose residue in 4 pack files.** **Resolved.** Verified by grep: no `.agentalloy/contracts`
+   references remain in any pack YAML. The `change_summary` fields in
+   `sdd-spec-and-scoping.yaml:72`, `sdd-verify-and-review.yaml:76`, and
+   `sdd-deliver-and-ship.yaml:59` already say "contract store" (not
+   `contracts/active/*/` paths). No pack version bump needed.
+3. **Acceptance A5 is unverified.** **Resolved.** Verified 2026-07-27: install code
+   does **not** create `.agentalloy/contracts/` on a fresh initialisation. The
+   directory in this repo (77 files across `active/` and `archive/`) is residue from
+   the pre-store file-based contract system. The store has **0** contracts (the
+   filesystem copies were never migrated — the migration was never implemented).
+   **Decision:** Leave `.agentalloy/contracts/` in this repo untouched. It is legacy
+   residue, not live behaviour. The store is the source of truth going forward.
+   Documented in `docs/followups.md` (A5 section).
 4. **Test isolation leak** (pre-existing, lower priority). Code-index tests write into
    the real `~/.local/share/agentalloy/code_index/`. That is where the 29 dead registry
    rows came from (live registry read `total=34 dead=29 migrated=0 legacy=5`). Tests
-   must use `tmp_path`.
+   must use `tmp_path`. **Deferred** — pre-existing, out of scope for this feature set.
 
 ### Task 6 — QA and ship
 
