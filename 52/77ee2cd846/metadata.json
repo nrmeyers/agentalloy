@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "5277ee2cd846",
+  "strategy": "manual-commit",
+  "branch": "feat/phase-blob-shape",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/52/77ee2cd846/0/metadata.json",
+      "transcript": "/52/77ee2cd846/0/full.jsonl",
+      "compact_transcript": "/52/77ee2cd846/0/transcript.jsonl",
+      "content_hash": "/52/77ee2cd846/0/content_hash.txt",
+      "prompt": "/52/77ee2cd846/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23021,
+    "cache_creation_tokens": 2168010,
+    "cache_read_tokens": 103892338,
+    "output_tokens": 399117,
+    "api_call_count": 911
+  }
+}
