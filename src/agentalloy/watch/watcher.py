@@ -221,3 +221,63 @@ def run_watcher(config: WatchConfig) -> None:
         if pid_file.exists():
             pid_file.unlink(missing_ok=True)
         _log.info("Watcher stopped")
+
+
+# ---------------------------------------------------------------------------
+# In-process store hook (slice 07: watch-store-hook)
+# ---------------------------------------------------------------------------
+
+
+def register_watcher(
+    store: Any,  # DuckDBStateStore
+    project_root: Path,
+    profile_name: str,
+    harness: str,
+) -> None:
+    """Register an in-process callback on the store so the watcher fires
+    post-commit when the phase row changes.
+
+    The callback loads the workflow skill prose for the new phase and
+    regenerates the harness's rules file through the appropriate
+    regenerator.  The store registry is harness-agnostic — it knows only
+    kinds and callables.  Per-harness output from ``wire_harness`` is
+    unchanged and stays.
+
+    This replaces the sidecar's file-based watch for harnesses that run
+    inside the service process (proxy-wired harnesses).  Sidecar harnesses
+    that run as a separate process keep their file-based watch.
+    """
+    from agentalloy.watch.regenerators import REGENERATORS  # noqa: PLC0415
+
+    regen = REGENERATORS.get(harness)
+    if regen is None:
+        _log.warning("No regenerator for harness '%s'; skipping store hook", harness)
+        return
+
+    def _on_phase_write(kind: str, value: str) -> None:  # noqa: ARG001
+        # value is the JSON blob; extract the phase string.
+        import json  # noqa: PLC0415
+
+        try:
+            data = json.loads(value)
+            new_phase = data.get("phase") if isinstance(data, dict) else str(data).strip() or None
+        except (json.JSONDecodeError, TypeError):
+            new_phase = None
+
+        if new_phase is None:
+            return
+
+        prose = _load_workflow_skill_prose(new_phase, profile_name)
+        if not prose:
+            return
+
+        content = f"# Active Phase: {new_phase}\n\n{prose}"
+        try:
+            regen(content, project_root)
+            _log.info("Regenerated %s rules file via store hook (phase=%s)", harness, new_phase)
+        except Exception:
+            _log.warning(
+                "Regeneration failed via store hook for harness '%s'", harness, exc_info=True
+            )
+
+    store.on_write("phase", _on_phase_write)

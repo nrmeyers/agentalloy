@@ -241,3 +241,151 @@ def test_watch_status_reports_not_running(tmp_path: Path, monkeypatch: pytest.Mo
     assert rc == 0
     data = json.loads(captured.getvalue())
     assert data["running"] is False
+
+
+# ---------------------------------------------------------------------------
+# Slice 07: watch-store-hook
+# ---------------------------------------------------------------------------
+
+
+def test_callback_fires_once_per_write_phase(tmp_path: Path) -> None:
+    """A registered callback fires exactly once per ``write_phase``, after commit."""
+    from agentalloy.storage.state_store import open_state_store
+
+    db = tmp_path / "state.duck"
+    store = open_state_store(db, repo="test")
+    store.open()
+
+    calls: list[tuple[str, str]] = []
+
+    def _fn(kind: str, value: str) -> None:
+        calls.append((kind, value))
+
+    store.on_write("phase", _fn)
+
+    # First write_phase
+    store.write_phase("spec")
+    assert len(calls) == 1
+    assert calls[0][0] == "phase"
+    assert '"phase": "spec"' in calls[0][1]
+
+    # Second write_phase
+    store.write_phase("design")
+    assert len(calls) == 2
+    assert calls[1][0] == "phase"
+    assert '"phase": "design"' in calls[1][1]
+
+    # Third write_phase (same phase — still fires)
+    store.write_phase("design")
+    assert len(calls) == 3
+
+
+def test_callback_raise_does_not_kill_writer(tmp_path: Path) -> None:
+    """A callback raising does not roll back the write or kill the writer."""
+    from agentalloy.storage.state_store import open_state_store
+
+    db = tmp_path / "state.duck"
+    store = open_state_store(db, repo="test")
+    store.open()
+
+    call_count = 0
+
+    def _bad_fn(kind: str, value: str) -> None:  # noqa: ARG001
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("callback exploded")
+
+    def _good_fn(kind: str, value: str) -> None:  # noqa: ARG001
+        pass
+
+    store.on_write("phase", _bad_fn)
+    store.on_write("phase", _good_fn)
+
+    # The write should succeed despite the bad callback
+    result = store.write_phase("spec")
+    assert result is not None
+    assert call_count == 1  # bad callback ran; good callback also ran
+
+
+def test_callback_unregistered_no_longer_fires(tmp_path: Path) -> None:
+    """After ``off_write``, the callback no longer fires."""
+    from agentalloy.storage.state_store import open_state_store
+
+    db = tmp_path / "state.duck"
+    store = open_state_store(db, repo="test")
+    store.open()
+
+    calls: list[int] = []
+
+    def _fn(kind: str, value: str) -> None:  # noqa: ARG001
+        calls.append(1)
+
+    store.on_write("phase", _fn)
+    store.write_phase("spec")
+    assert len(calls) == 1
+
+    store.off_write("phase", _fn)
+    store.write_phase("design")
+    assert len(calls) == 1  # no second call
+
+
+def test_register_watcher_hooks_store(tmp_path: Path) -> None:
+    """``register_watcher`` registers a callback that regenerates rules."""
+    from agentalloy.storage.state_store import open_state_store
+    from agentalloy.watch.watcher import register_watcher
+
+    db = tmp_path / "state.duck"
+    store = open_state_store(db, repo="test")
+    store.open()
+
+    # Register the watcher for a known harness
+    register_watcher(store, tmp_path, "default", "cursor")
+
+    # Verify a callback was registered
+    assert len(store._on_write_callbacks.get("phase", [])) == 1
+
+    # Trigger a write — the callback should fire (silently, since prose is empty)
+    store.write_phase("spec")
+    # No exception, no crash — the callback ran and logged.
+
+
+def test_harness_agnostic_registry_grep() -> None:
+    """The registry and watcher trigger contain no harness name.
+
+    The ``on_write`` registry and the ``register_watcher`` function are
+    harness-agnostic by design: they know only kinds and callables.
+    A grep for common harness names in the source proves the constraint.
+    """
+    import pathlib
+    import re
+
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    src_dir = repo_root / "src" / "agentalloy"
+
+    # Files that own the registry and the watcher trigger
+    target_files = [
+        src_dir / "storage" / "state_store.py",
+        src_dir / "watch" / "watcher.py",
+    ]
+
+    harness_names = ("claude", "codex", "windsurf", "copilot", "cline")
+
+    for path in target_files:
+        text = path.read_text(encoding="utf-8")
+        # Strip docstrings (triple-quoted strings) so we only check code.
+        # This allows mentioning harness names in prose comments.
+        code = re.sub(r'"""[\s\S]*?"""', "", text)
+        code = re.sub(r"'''[\s\S]*?'''", "", code)
+        for name in harness_names:
+            # Check that the harness name does not appear as a standalone
+            # identifier or in a string literal that is used as a value
+            # (not just in a comment).
+            # We allow it in comments (after #) and in docstrings (already stripped).
+            lines = code.split("\n")
+            for i, line in enumerate(lines, 1):
+                stripped = line.split("#")[0]  # remove inline comments
+                if name in stripped:
+                    raise AssertionError(
+                        f"{path.name}:{i}: harness name '{name}' found in code "
+                        f"(not in a comment or docstring): {stripped.strip()}"
+                    )

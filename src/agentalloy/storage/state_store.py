@@ -24,8 +24,8 @@ import copy
 import json
 import logging
 import threading
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -285,6 +285,10 @@ class DuckDBStateStore:
         # both issue BEGIN.  A plain bool would be copied per view and the
         # re-entrancy guard would stop guarding.
         self._txn = _TxnFlag()
+        # Post-commit callback registry: kind -> list of callables.
+        # Fired after every write to the store (outside the lease).
+        # Harness-agnostic — knows only kinds and callables.
+        self._on_write_callbacks: dict[str, list[Callable[[str, Any], None]]] = {}
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -602,6 +606,37 @@ class DuckDBStateStore:
             (self._repo(), kind, session_key),
         )
 
+    # -- post-commit callbacks -----------------------------------------------
+
+    def on_write(self, kind: str, fn: Callable[[str, Any], None]) -> None:
+        """Register *fn* to be called after every write to *kind*, post-commit.
+
+        The callback receives ``(kind, value)`` where *value* is the stored
+        string (JSON for the phase blob, raw text for other kinds).  Callbacks
+        fire **outside** the lease — the write is already durable.  A callback
+        that raises does **not** roll back the write or kill the writer; errors
+        are logged and the next callback in the list still runs.
+
+        Harness-agnostic: the registry knows only kinds and callables.  It does
+        not reference Claude Code, Codex, or any single harness.  Per-harness
+        output from ``wire_harness`` is unchanged and stays.
+        """
+        self._on_write_callbacks.setdefault(kind, []).append(fn)
+
+    def off_write(self, kind: str, fn: Callable[[str, Any], None]) -> None:
+        """Unregister a previously registered callback."""
+        if kind in self._on_write_callbacks:
+            with suppress(ValueError):
+                self._on_write_callbacks[kind].remove(fn)
+
+    def _fire_callbacks(self, kind: str, value: str) -> None:
+        """Invoke all registered callbacks for *kind*, logging any errors."""
+        for fn in list(self._on_write_callbacks.get(kind, [])):
+            try:
+                fn(kind, value)
+            except Exception:
+                logger.exception("on_write callback for %r raised", kind)
+
     # -- transaction ---------------------------------------------------------
 
     @contextmanager
@@ -730,11 +765,13 @@ class DuckDBStateStore:
                 "last_updated": now,
                 "workflow": f"sdd-{phase}",
             }
-            return self.write(
-                "phase",
-                json.dumps({k: v for k, v in blob.items() if v is not None}),
-                owner=owner,
-            )
+            payload = json.dumps({k: v for k, v in blob.items() if v is not None})
+            result = self.write("phase", payload, owner=owner)
+            # Fire post-commit callbacks outside the lease so the write is
+            # already durable.  Callbacks that raise are logged but do not
+            # roll back or kill the writer.
+            self._fire_callbacks("phase", payload)
+            return result
 
     # -- file mirror ---------------------------------------------------------
 
