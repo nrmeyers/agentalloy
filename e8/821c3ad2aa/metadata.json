@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "e8821c3ad2aa",
+  "strategy": "manual-commit",
+  "branch": "fix/design-gate-sees-contract-store",
+  "checkpoints_count": 7,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/e8/821c3ad2aa/0/metadata.json",
+      "transcript": "/e8/821c3ad2aa/0/full.jsonl",
+      "compact_transcript": "/e8/821c3ad2aa/0/transcript.jsonl",
+      "content_hash": "/e8/821c3ad2aa/0/content_hash.txt",
+      "prompt": "/e8/821c3ad2aa/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20527,
+    "cache_creation_tokens": 356761,
+    "cache_read_tokens": 19582845,
+    "output_tokens": 82364,
+    "api_call_count": 179
+  }
+}
