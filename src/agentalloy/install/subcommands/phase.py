@@ -97,6 +97,35 @@ def run_phase_get(root: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _gate_store(root: Path) -> Any:
+    """Store handle for out-of-process gate evaluation, or ``None`` if unavailable.
+
+    The CLI runs outside the service, so it has no in-process ``DuckDBStateStore``
+    handle — the service holds the writer lock. ``StateClient`` is duck-type
+    compatible with the only method the predicates call
+    (``list_contracts(phase=, slug=, status=)``), so it stands in as the store.
+
+    Without this, ``PredicateContext.store`` was ``None``, ``_query_store_contracts``
+    returned ``[]``, and the two contract predicates
+    (``build_contracts_cover_tasks``, ``build_contract_tag_focus``) evaluated
+    UNKNOWN and failed open — making the design→build coverage gate vacuous for
+    every CLI ``phase set``.
+
+    Returns ``None`` when the service is down, which restores the previous
+    fail-open behaviour: ``phase set`` must not gain a hard dependency on a
+    running service.
+
+    Known limitation: ``GET /contracts`` scopes to the *service's* repo, not to
+    ``root``. Gating a repo other than the one the service resolves is out of
+    scope here and needs its own contract.
+    """
+    client = StateClient()
+    try:
+        return client if client.is_running() else None
+    except Exception:
+        return None
+
+
 def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, list[str]]:
     """Whether a *forward* ``phase set`` should be refused, with advisories.
 
@@ -126,7 +155,7 @@ def _forward_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, l
     if not gate_spec:
         return False, []  # no packaged gate for this phase → nothing to enforce
 
-    ctx = PredicateContext(project_root=root, current_phase=current)
+    ctx = PredicateContext(project_root=root, current_phase=current, store=_gate_store(root))
     result, _ = evaluate_node(gate_spec, ctx, lm_client=None, qwen_calls=[0])
     if result != PredicateResult.NOT_MET:
         return False, []  # MET or UNKNOWN → allow
@@ -169,7 +198,7 @@ def _approval_gate_blocks(current: str, target: str, root: Path) -> tuple[bool, 
     since = _APPROVAL_SINCE.get(current, "")
     if since and not any(p.is_file() for p in root.glob(since)):
         return False, []  # nothing produced yet → completeness gate handles it
-    ctx = PredicateContext(project_root=root, current_phase=current)
+    ctx = PredicateContext(project_root=root, current_phase=current, store=_gate_store(root))
     result = eval_approval_recorded({"since": since}, ctx)
     if result != PredicateResult.NOT_MET:
         return False, []  # MET or UNKNOWN → allow
