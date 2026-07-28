@@ -111,6 +111,31 @@ class TestPhaseSet:
         assert not (repo_root / ".agentalloy").exists()
 
 
+class TestPhaseSetRendering:
+    """AC-11 — a successful `phase set` prints, rather than raising afterwards.
+
+    The renderer reads ``result['phase']``.  The migration moved the phase name
+    to ``value`` on the wire, and for a while the renderer was reading a key
+    ``run_phase_set`` did not return: the write landed, then the command died
+    with a ``KeyError``.  The phase had moved and the user saw a traceback.
+    """
+
+    def test_set_prints_the_new_phase(
+        self, repo_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        args = argparse.Namespace(phase="build", project_root=str(repo_root), force=False)
+        assert phase_mod._run_set(args) == 0  # pyright: ignore[reportPrivateUsage]
+        assert "Phase set to: build" in capsys.readouterr().out
+
+    def test_get_prints_the_current_phase(
+        self, repo_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run_phase_set("design", root=repo_root)
+        args = argparse.Namespace(project_root=str(repo_root))
+        assert phase_mod._run_get(args) == 0  # pyright: ignore[reportPrivateUsage]
+        assert "design" in capsys.readouterr().out
+
+
 class TestPhaseSetTransitionedBy:
     """Mirrors the proxy's `skill_loader._write_phase_atomic` attribution — lets
     a different session's next turn recognize the phase moved out from under it

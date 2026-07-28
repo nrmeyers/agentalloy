@@ -491,6 +491,22 @@ class TestProxyLifecycleMode:
             result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path))
         assert result.should_compose is False
 
+    def test_off_seeds_no_phase_in_a_fresh_repo(self, tmp_path: Path) -> None:
+        """An `off` repo with no phase stays phase-less — the guard runs first.
+
+        This is what lets `add --lifecycle-mode off` leave an existing phase row
+        alone instead of clearing it: in `off` the row is never read, so it is
+        inert rather than stale, and it is still there if the mode goes back on.
+        Reorder the guard below the lazy seed and `off` repos silently start
+        acquiring phases.
+        """
+        from agentalloy.signals.skill_loader import _read_phase  # noqa: PLC0415
+
+        self._set_mode(tmp_path, "off")
+        result = asyncio.run(evaluate_signal(_req("run the test suite"), tmp_path, mutate=True))
+        assert result.should_compose is False
+        assert _read_phase(tmp_path) is None
+
     def test_legacy_assist_defers_as_off(self, tmp_path: Path) -> None:
         # `assist` was removed with the hook transport; a repo still carrying it
         # reads as `off` and must defer (compose nothing).
@@ -556,6 +572,9 @@ class TestMissingProjectRootWarning:
         assert result.should_compose is True
         assert result.phase == "intake"
         assert not any("not visible to the proxy" in r.getMessage() for r in caplog.records)
+        # The seed lands in the store, not back in the file the migration
+        # removed — the one assertion that tells the two destinations apart.
+        assert not (tmp_path / ".agentalloy" / "phase").exists()
 
     def test_phaseless_read_only_evaluation_seeds_nothing(self, tmp_path: Path) -> None:
         """``mutate=False`` evaluates as intake without recording it."""

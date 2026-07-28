@@ -85,6 +85,22 @@ class TestWireSeedsRepoMetadata:
         assert _repo_phase(str(tmp_path)) is None
         assert not (tmp_path / ".agentalloy" / "phase").exists()
 
+    def test_a_phaseless_repo_is_legitimate(self, tmp_path: Path) -> None:
+        """AC-9 — nothing downstream treats "wired, no phase yet" as broken.
+
+        Between `wire` and the repo's first proxy request there is a window in
+        which the repo is fully wired and has no phase at all.  That used to be
+        impossible, so the read paths were never asked to handle it; each one
+        must now answer "none" rather than raise.
+        """
+        from agentalloy.install.subcommands.phase import run_phase_get
+        from agentalloy.web.ops_api import _repo_info  # pyright: ignore[reportPrivateUsage]
+
+        _seed_repo_metadata(tmp_path)
+
+        assert run_phase_get(root=tmp_path)["phase"] is None
+        assert _repo_info(str(tmp_path), ["claude-code"]).phase is None
+
     def test_does_not_disturb_an_existing_phase(self, tmp_path: Path) -> None:
         run_phase_set("build", root=tmp_path)
         _seed_repo_metadata(tmp_path)
