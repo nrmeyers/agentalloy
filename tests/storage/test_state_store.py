@@ -124,6 +124,8 @@ class TestTransaction:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            # Row must exist before leasing (lease claims ownership, does not create).
+            store.write("phase", "")
             with store.transaction() as tx:
                 result = tx.acquire_lease("phase", "s1")
                 assert result.acquired is True
@@ -136,6 +138,7 @@ class TestTransaction:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            store.write("phase", "")
             store.acquire_lease("phase", "s1")
             with store.transaction() as tx:
                 tx.release_lease("phase", "s1")
@@ -148,6 +151,7 @@ class TestTransaction:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            store.write("phase", "")
             with pytest.raises(ValueError):
                 with store.transaction() as tx:
                     tx.acquire_lease("phase", "s1")
@@ -155,6 +159,17 @@ class TestTransaction:
             # s1's lease should not exist; s2 can acquire freely.
             result = store.acquire_lease("phase", "s2")
             assert result.acquired is True
+
+    def test_acquire_lease_on_nonexistent_row_returns_conflict(self, tmp_path: Path) -> None:
+        """acquire_lease must not create rows — ghost rows violate lease semantics."""
+        db = tmp_path / "test.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+            # No write() — row does not exist.
+            result = store.acquire_lease("phase", "s1")
+            assert result.acquired is False
+            assert result.conflict is not None
+            assert "write it before leasing" in result.conflict.message
 
 
 # ---------------------------------------------------------------------------
@@ -303,11 +318,16 @@ class TestReadWrite:
 class TestLease:
     """Lease acquisition, conflict, and release."""
 
+    def _seed_phase(self, store: DuckDBStateStore) -> None:
+        """Write a phase row so acquire_lease has a row to claim."""
+        store.write("phase", "")
+
     def test_acquire_on_new_row(self, tmp_path: Path) -> None:
-        """Acquiring a lease on a non-existent row succeeds."""
+        """Acquiring a lease on an existing row claims ownership."""
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            self._seed_phase(store)
             result = store.acquire_lease("phase", "s1")
             assert result.acquired is True
             assert result.owner == "s1"
@@ -318,6 +338,7 @@ class TestLease:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            self._seed_phase(store)
             result = store.acquire_lease("phase", "s1")
             assert result.acquired is True
             store.release_lease("phase", "s1")
@@ -331,6 +352,7 @@ class TestLease:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            self._seed_phase(store)
             store.acquire_lease("phase", "s1")
             result = store.acquire_lease("phase", "s2")
             assert result.acquired is False
@@ -357,6 +379,7 @@ class TestLease:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            self._seed_phase(store)
             # Acquire with a very short duration.
             store.acquire_lease("phase", "s1", duration=timedelta(microseconds=1))
             # Wait for expiry.
@@ -373,6 +396,7 @@ class TestLease:
         db = tmp_path / "test.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
+            self._seed_phase(store)
             store.acquire_lease("phase", "s1")
             result = store.acquire_lease("phase", "s1")
             assert result.acquired is True
