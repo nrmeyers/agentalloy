@@ -179,8 +179,17 @@ These are committed and known. Each needs a fix **and** a test that fails withou
    verifies the phase is rolled back and no contract row is created. A3 is now
    verified at the endpoint level.
 5. **Slice 03's three-way `put_contract` / `update_contract` / `supersede_contract`
-   API.** Three entry points for one concept. Consolidate if you can do it without
-   breaking callers; if you cannot, document why the three-way split is correct.
+   API.** **Resolved: three-way split is correct.** Each method has distinct
+   semantics that cannot be merged without adding caller-facing complexity:
+   - ``put_contract`` — upsert (create or replace): full replacement. Used by
+     POST /contracts and the phase-advance transactional path.
+   - ``update_contract`` — partial in-place correction: only updates specific
+     fields (body, tags, scope), no revision fork. Used by PATCH /contracts/{id}.
+   - ``supersede_contract`` — revision fork: creates new row with new ID, flips
+     old to 'superseded', sets supersedes link. Used by POST /contracts/{id}/supersede.
+   The storage layer documents this explicitly (line 484-488). Three HTTP endpoints
+   map one-to-one to three distinct operations. Consolidating would require an enum
+   discriminator — more complexity, no benefit.
 
 ### Task 5 — Documentation and residue
 
