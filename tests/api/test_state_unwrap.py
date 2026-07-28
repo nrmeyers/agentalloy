@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from agentalloy.api.state_client import StateClient
 from agentalloy.api.state_router import (
+    _owed_artifacts,
     _repo_key_for,
     default_repo_root,
     get_state_store,
@@ -115,6 +116,102 @@ class TestResume:
         _store, client = wired
         body = client.get("/state/resume", params={"repo_root": str(tmp_path / "fresh")}).json()
         assert body["phase"] is None
+
+    def test_owed_artifacts_are_listed(self, wired, tmp_path: Path) -> None:
+        """The gates carry paths; resume must surface them, not swallow them.
+
+        This is the assertion whose absence let ``owed_artifacts`` be silently
+        ``None`` — the extractor read a gate shape the corpus never emits, and
+        the surrounding ``except`` hid it.
+        """
+        store, client = wired
+        repo = tmp_path / "repo"
+        _seed(store, repo)
+
+        owed = client.get("/state/resume", params={"repo_root": str(repo)}).json()["owed_artifacts"]
+
+        assert owed, "build has artifact gates; resume returned nothing"
+        assert all(isinstance(p, str) and "/" in p for p in owed)
+
+
+class TestOwedArtifactExtraction:
+    """``_owed_artifacts`` against the gate shape the corpus actually emits."""
+
+    def test_walks_the_all_of_tree(self) -> None:
+        gates = {
+            "all_of": [
+                {"artifact_exists": {"path": "docs/design/**/tasks.md"}},
+                {"artifact_contains": {"path": "docs/design/**/tasks.md", "sections": ["Tasks"]}},
+                {"approval_recorded": {"since": "docs/design/**"}},
+            ]
+        }
+        assert _owed_artifacts(gates) == ["docs/design/**/tasks.md"]
+
+    def test_state_only_predicates_contribute_nothing(self) -> None:
+        gates = {"all_of": [{"build_contracts_cover_tasks": {"phase": "design"}}]}
+        assert _owed_artifacts(gates) == []
+
+    def test_nested_branches_are_reached(self) -> None:
+        gates = {"any_of": [{"all_of": [{"artifact_exists": {"path": "docs/spec/x.md"}}]}]}
+        assert _owed_artifacts(gates) == ["docs/spec/x.md"]
+
+    def test_empty_gates_are_not_an_error(self) -> None:
+        assert _owed_artifacts({}) == []
+
+
+class TestPhaseWrite:
+    """``POST /state/phase`` must keep blob semantics and answer a bare name."""
+
+    def test_the_response_is_the_bare_name(self, wired, tmp_path: Path) -> None:
+        _store, client = wired
+        repo = tmp_path / "repo"
+
+        body = client.post(
+            "/state/phase", json={"value": "design"}, params={"repo_root": str(repo)}
+        )
+
+        assert body.status_code == 200
+        assert body.json()["value"] == "design"
+
+    def test_free_flow_mode_survives_an_advance(self, wired, tmp_path: Path) -> None:
+        """A raw ``write`` here replaced the blob with a bare name, dropping mode.
+
+        ``read_phase`` tolerates that shape, so nothing failed — the repo just
+        quietly left free-flow on its next phase advance.
+        """
+        store, client = wired
+        repo = tmp_path / "repo"
+        view = store.for_repo(_repo_key_for(str(repo)))
+        view.write_phase("design", actor="cli", mode="free", free_since="2026-07-28T00:00:00Z")
+
+        client.post("/state/phase", json={"value": "build"}, params={"repo_root": str(repo)})
+
+        after = view.read_phase()
+        assert after is not None
+        assert (after.phase, after.mode) == ("build", "free")
+        assert after.free_since == "2026-07-28T00:00:00Z"
+
+    def test_a_contract_advance_keeps_blob_semantics_too(self, wired, tmp_path: Path) -> None:
+        """The transactional path shares the caller's BEGIN rather than nesting."""
+        store, client = wired
+        repo = tmp_path / "repo"
+        view = store.for_repo(_repo_key_for(str(repo)))
+        view.write_phase("design", actor="cli", mode="free")
+
+        resp = client.post(
+            "/state/phase",
+            json={
+                "value": "build",
+                "contract": {"contract_id": "c-1", "phase": "build", "slug": "unwrap"},
+            },
+            params={"repo_root": str(repo)},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["value"] == "build"
+        after = view.read_phase()
+        assert after is not None
+        assert (after.phase, after.mode) == ("build", "free")
 
 
 class TestGenericKindRoute:

@@ -24,7 +24,7 @@ import copy
 import json
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -621,11 +621,20 @@ class DuckDBStateStore:
 
         Passing ``mode=""`` (or ``free_since=""``) explicitly clears the field,
         which is how ``flow resume`` drops free-flow; ``None`` means "leave it".
+
+        Callers already inside a :meth:`transaction` reuse it rather than
+        nesting (which is rejected outright).  ``POST /state/phase`` writes the
+        phase and a contract in one BEGIN/COMMIT, and it must get blob
+        semantics too — a phase advance that dropped free-flow mode purely
+        because a contract rode along would be a silent, phase-shaped bug.
         """
         if self._read_only:
             raise RuntimeError("cannot write in read-only mode")
 
-        with self.transaction():
+        outer: AbstractContextManager[object] = (
+            nullcontext() if self._in_transaction else self.transaction()
+        )
+        with outer:
             prev = self.read_phase()
             now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 

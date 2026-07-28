@@ -315,8 +315,10 @@ class TestTA3:
         assert body["value"] == "build"
         assert body["contract_id"] == "ctr-ta3-1"
 
-        # Verify both rows exist in the store
-        assert state_store.read("phase") == "build"
+        # Verify both rows exist in the store.  ``read_phase`` decodes the blob;
+        # ``read`` would hand back the raw JSON row.
+        phase = state_store.read_phase()
+        assert phase is not None and phase.phase == "build"
         contract = state_store.get_contract("ctr-ta3-1")
         assert contract is not None
         assert contract["phase"] == "build"
@@ -333,7 +335,8 @@ class TestTA3:
         assert body["kind"] == "phase"
         assert body["value"] == "design"
         assert body["contract_id"] is None
-        assert state_store.read("phase") == "design"
+        phase = state_store.read_phase()
+        assert phase is not None and phase.phase == "design"
 
     def test_phase_advance_contract_optional_fields(
         self, full_client: TestClient, state_store: DuckDBStateStore

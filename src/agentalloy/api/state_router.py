@@ -149,6 +149,42 @@ def _write_result_to_response(
     )
 
 
+#: Gate predicates that name a file the phase owes.  Others (`approval_recorded`,
+#: `build_contracts_cover_tasks`) gate on state, not on a path, and have nothing
+#: to list here.
+_ARTIFACT_PREDICATES = ("artifact_exists", "artifact_contains")
+
+
+def _owed_artifacts(gates: dict[str, Any]) -> list[str]:
+    """The distinct artifact paths a phase's exit gates require.
+
+    Exit gates are a boolean tree: ``{"all_of": [{predicate: {...}}, ...]}``.
+    This walks it for the path-bearing predicates.  The previous version
+    iterated ``gates.items()`` expecting ``{gate_name: {"artifact": path}}`` —
+    a shape the corpus has never emitted — so ``owed_artifacts`` was silently
+    always empty, and the ``except`` around it meant nothing ever said so.
+    """
+    paths: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:  # pyright: ignore[reportUnknownVariableType]
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        for key, spec in node.items():  # pyright: ignore[reportUnknownVariableType]
+            if key in _ARTIFACT_PREDICATES and isinstance(spec, dict):
+                path = spec.get("path")  # pyright: ignore[reportUnknownMemberType]
+                if isinstance(path, str) and path not in paths:
+                    paths.append(path)
+            else:
+                walk(spec)
+
+    walk(gates)
+    return paths
+
+
 def _contract_row_to_response(row: dict[str, Any]) -> ContractResponse:
     """Convert a store contract dict to a ContractResponse model."""
     return ContractResponse(
@@ -325,23 +361,12 @@ async def read_resume(
                 )
 
     if phase:
-        # Get owed artifacts from exit gates for the current phase
         try:
             from agentalloy.signals.skill_loader import exit_gates_for_phase
 
-            gates = exit_gates_for_phase(phase) or {}
-            artifacts: list[str] = []
-            for _gate_name, gate_spec in gates.items():
-                if isinstance(gate_spec, dict):
-                    artifact = gate_spec.get("artifact") or gate_spec.get("artifact_contains")
-                    if isinstance(artifact, str):
-                        artifacts.append(artifact)
-                    elif isinstance(artifact, list):
-                        artifacts.extend(artifact)
-            if artifacts:
-                owed_artifacts = artifacts
+            owed_artifacts = _owed_artifacts(exit_gates_for_phase(phase) or {}) or None
         except Exception:
-            pass
+            logger.debug("exit gates unavailable for phase=%s", phase, exc_info=True)
 
     return ResumeResponse(
         phase=phase,
@@ -453,12 +478,26 @@ async def write_phase(
     On success, compose is triggered in-process (the write *is* the trigger).
     When ``repo_root`` is provided the enforcement posture is rewritten for
     any wired Tier A harnesses (D1–D9).
+
+    Both paths go through ``store.write_phase`` rather than a raw
+    ``write("phase", ...)``: a raw write replaces the blob with a bare name and
+    so silently discards ``mode``, ``free_since``, ``started_at`` and
+    ``transitioned_by``.  ``read_phase`` tolerates that shape, which is exactly
+    why the loss was invisible.
+
+    **Gate hole (task 09):** this endpoint does not evaluate the phase exit
+    gate.  Anything that can reach the service can advance the phase without
+    owing an artifact — today only ``run_phase_set`` pre-evaluates, so a direct
+    POST walks straight through.  Task 09 moves the evaluation here and adds an
+    explicit override flag; until it lands, treat the gate as advisory.
     """
     phase_value = req.value
 
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
-        result = await asyncio.to_thread(store.write, "phase", phase_value, owner=req.owner)
+        result = await asyncio.to_thread(
+            store.write_phase, phase_value, actor=req.owner, owner=req.owner
+        )
         http_status, response = _write_result_to_response(result)
         if http_status != 200:
             raise HTTPException(
@@ -470,7 +509,8 @@ async def write_phase(
             await asyncio.to_thread(_rewrite_posture, Path(repo_root), phase_value)
         return PhaseAdvanceResponse(
             kind=result.kind,
-            value=result.value,
+            # ``result.value`` is the stored blob; callers want the bare name.
+            value=phase_value,
             owner=result.owner,
             lease_expires_at=result.lease_expires_at,
             end_session_instruction=end_session_instruction(phase_value),
@@ -480,8 +520,8 @@ async def write_phase(
     contract_id: str | None = None
     try:
         with store.transaction() as tx:
-            # Write the phase
-            result = tx.write("phase", phase_value, owner=req.owner)
+            # Write the phase — blob semantics, reusing this transaction.
+            result = tx.write_phase(phase_value, actor=req.owner, owner=req.owner)
             # conflict.owner is None when no row exists yet — non-blocking
             if result.conflict is not None and result.conflict.owner is not None:
                 # lease_expires_at is also non-None when owner is non-None
@@ -524,7 +564,7 @@ async def write_phase(
 
     return PhaseAdvanceResponse(
         kind=result.kind,
-        value=result.value,
+        value=phase_value,  # the bare name, not the stored blob
         owner=result.owner,
         lease_expires_at=result.lease_expires_at,
         contract_id=contract_id,
