@@ -8,6 +8,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import statistics
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -217,23 +218,28 @@ class TestLatencyBudget:
         assert elapsed_ms < 5.0, f"Store read took {elapsed_ms:.2f}ms (budget: 5ms)"
 
     def test_store_write_latency(self, tmp_path: Path) -> None:
-        """A single store write completes in < 16ms.
+        """A single store write completes in < 15ms.
 
-        The budget is 16 ms (not 15) because CI runners share CPU and can
-        occasionally push a single write over 15 ms even when the code is
-        performing normally.  The test still catches real regressions.
+        Measured as the MEDIAN of per-write samples, not the mean.  CI runners
+        share CPU and this suite runs under xdist, so one scheduler stall drags
+        a 100-write mean past any budget that still describes a typical write —
+        which is what the budget exists to protect.  The median ignores those
+        outliers; ratcheting the ceiling (15 -> 16 -> ...) only hides the signal.
         """
         db = tmp_path / "bench.duck"
         with DuckDBStateStore(db).open() as store:
             store.migrate()
 
-            iterations = 100
-            start = time.perf_counter()
-            for i in range(iterations):
+            samples_ms: list[float] = []
+            for i in range(100):
+                start = time.perf_counter()
                 store.write("phase", f"phase-{i}")
-            elapsed_ms = (time.perf_counter() - start) / iterations * 1000
+                samples_ms.append((time.perf_counter() - start) * 1000)
 
-        assert elapsed_ms < 16.0, f"Store write took {elapsed_ms:.2f}ms (budget: 16ms)"
+        median_ms = statistics.median(samples_ms)
+        assert median_ms < 15.0, (
+            f"Median store write took {median_ms:.2f}ms (budget: 15ms); max {max(samples_ms):.2f}ms"
+        )
 
     def test_store_lease_latency(self, tmp_path: Path) -> None:
         """A lease acquisition + release completes in < 25ms.
