@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "669fb5da0482",
+  "session_id": "0ed7b101-f7af-4a4e-8b28-c46e0374d839",
+  "strategy": "manual-commit",
+  "created_at": "2026-07-28T13:46:46.165758854Z",
+  "branch": "feat/phase-blob-shape",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-5",
+  "turn_id": "439c0acad6a9",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 22211,
+    "cache_creation_tokens": 1193956,
+    "cache_read_tokens": 53540072,
+    "output_tokens": 219604,
+    "api_call_count": 488
+  },
+  "session_metrics": {
+    "turn_count": 25
+  }
+}
