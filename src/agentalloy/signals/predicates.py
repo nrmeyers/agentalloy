@@ -127,20 +127,28 @@ def _emit_legacy_glob_trace(glob_pattern: str) -> None:
 
 def _query_store_contracts(
     ctx: PredicateContext, *, phase: str | None = None, slug: str | None = None
-) -> list[dict[str, Any]]:
-    """Query the store for contracts, falling back to filesystem if no store.
+) -> list[dict[str, Any]] | None:
+    """Query the store for contracts.
 
-    Returns a list of contract dicts from the store, or an empty list when the
-    store is unavailable. Each dict carries ``slug``, ``domain_tags``,
-    ``work_item``, ``phase``, etc. — the shape returned by
-    ``DuckDBStateStore.list_contracts``.
+    Each dict carries ``slug``, ``domain_tags``, ``work_item``, ``phase``, etc. —
+    the shape returned by ``DuckDBStateStore.list_contracts``.
+
+    Three outcomes, deliberately distinguishable — there is **no** filesystem
+    fallback (an earlier docstring claimed one):
+
+    * ``[]``      — no store configured, or the store genuinely holds no match.
+    * ``None``    — the store *errored*. Callers must fail open (UNKNOWN) rather
+      than read an infra failure as "no contracts": ``eval_contract_exists``
+      turns an empty result into NOT_MET, which would refuse a phase advance
+      because the service blipped.
+    * ``list``    — the matching rows.
     """
     if ctx.store is None:
         return []
     try:
         return ctx.store.list_contracts(phase=phase, slug=slug, status="active")
     except Exception:
-        return []
+        return None
 
 
 def eval_artifact_exists(args: dict[str, Any], ctx: PredicateContext) -> PredicateResult:
@@ -549,6 +557,8 @@ def eval_contract_exists(args: dict[str, Any], ctx: PredicateContext) -> Predica
 
     # Query store
     contracts = _query_store_contracts(ctx, phase=str(phase))
+    if contracts is None:
+        return PredicateResult.UNKNOWN  # store errored → fail open, not NOT_MET
     if not contracts and ctx.store is not None:
         # Store exists but returned nothing → no contracts for this phase
         return PredicateResult.NOT_MET
@@ -578,6 +588,8 @@ def eval_contract_has_tags(args: dict[str, Any], ctx: PredicateContext) -> Predi
 
     # Query store
     contracts = _query_store_contracts(ctx, phase=str(phase))
+    if contracts is None:
+        return PredicateResult.UNKNOWN  # store errored → fail open, not NOT_MET
     if not contracts and ctx.store is not None:
         return PredicateResult.NOT_MET
 
@@ -644,7 +656,7 @@ def _resolve_workitem_slug(ctx: PredicateContext, phase: str) -> str | None:
         raw = ""
 
     # Query store for contracts in this phase
-    in_phase = _query_store_contracts(ctx, phase=phase)
+    in_phase = _query_store_contracts(ctx, phase=phase) or []
 
     if raw:
         # Cursor points to a contract_id (e.g. "build/01-task.md" or just "01-task.md")
@@ -700,7 +712,7 @@ def _item_build_contracts(
         _emit_legacy_glob_trace(contracts_glob)
 
     # Query store for build contracts
-    build_contracts = _query_store_contracts(ctx, phase="build")
+    build_contracts = _query_store_contracts(ctx, phase="build") or []
 
     any_tagged = False
     mine: list[dict[str, Any]] = []
