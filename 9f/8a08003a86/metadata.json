@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "9f8a08003a86",
+  "strategy": "manual-commit",
+  "branch": "fix/contract-id-slash-routing",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tests/api/test_state.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9f/8a08003a86/0/metadata.json",
+      "transcript": "/9f/8a08003a86/0/full.jsonl",
+      "compact_transcript": "/9f/8a08003a86/0/transcript.jsonl",
+      "content_hash": "/9f/8a08003a86/0/content_hash.txt",
+      "prompt": "/9f/8a08003a86/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 101,
+    "cache_creation_tokens": 18287,
+    "cache_read_tokens": 1316255,
+    "output_tokens": 5503,
+    "api_call_count": 13
+  }
+}
