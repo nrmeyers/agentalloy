@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import duckdb
 
@@ -112,6 +112,31 @@ class StateWriteResult:
     owner: str | None
     lease_expires_at: datetime | None
     conflict: LeaseConflict | None
+
+
+@dataclass(frozen=True)
+class PhaseState:
+    """The ``phase`` row, decoded. The blob shape lives in this module alone.
+
+    ``workflow`` is *derived* (``sdd-<phase>``), never stored authoritatively —
+    see :meth:`DuckDBStateStore.write_phase`.
+    """
+
+    phase: str
+    mode: str | None = None
+    free_since: str | None = None
+    transitioned_by: str | None = None
+    started_at: str | None = None
+    last_updated: str | None = None
+    workflow: str = ""
+
+
+def _opt_str(value: Any) -> str | None:
+    """Coerce a blob field to ``str``, mapping empty/absent to ``None``."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 @dataclass(frozen=True)
@@ -414,6 +439,93 @@ class DuckDBStateStore:
             raise
         finally:
             self._in_transaction = False
+
+    # -- phase blob ----------------------------------------------------------
+
+    def read_phase(self) -> PhaseState | None:
+        """Read the ``phase`` row as a typed value, or ``None`` when unset.
+
+        Tolerates a bare-string row (``"design"``) left by the pre-blob store or
+        by ``import_from_files``: it reads as a :class:`PhaseState` carrying just
+        the phase, with the derived ``workflow`` filled in. Nothing outside this
+        module parses the stored blob.
+        """
+        raw = self.read("phase")
+        if raw is None:
+            return None
+        data = self._from_json(raw)
+        if isinstance(data, str):
+            # Bare phase string (pre-blob row). Not an error — normalize it.
+            data = {"phase": data}
+        if not isinstance(data, dict) or not data.get("phase"):
+            return None
+        blob = cast("dict[str, Any]", data)
+        phase = str(blob["phase"])
+        return PhaseState(
+            phase=phase,
+            mode=_opt_str(blob.get("mode")),
+            free_since=_opt_str(blob.get("free_since")),
+            transitioned_by=_opt_str(blob.get("transitioned_by")),
+            started_at=_opt_str(blob.get("started_at")),
+            last_updated=_opt_str(blob.get("last_updated")),
+            workflow=f"sdd-{phase}",
+        )
+
+    def write_phase(
+        self,
+        phase: str,
+        *,
+        actor: str | None = None,
+        mode: str | None = None,
+        free_since: str | None = None,
+        owner: str | None = None,
+    ) -> StateWriteResult:
+        """Write the ``phase`` row as a blob, preserving what the caller didn't set.
+
+        Read-modify-write inside a transaction so a concurrent writer can never
+        observe a half-updated blob. This is the store-side replacement for
+        ``signals.skill_loader._write_phase_atomic``'s file semantics:
+
+        * ``mode`` / ``free_since`` are **carried forward** when not passed. An
+          auto-transition must never silently drop a repo out of (or into)
+          free-flow — only ``agentalloy flow free/resume`` sets them.
+        * ``transitioned_by`` is set to ``actor`` only on a *real* transition
+          (``prev != phase``). An idempotent same-phase write preserves the prior
+          actor, so a different session can still tell the phase moved and that
+          it wasn't the one that moved it.
+        * ``started_at`` is preserved across writes; only the first write sets it.
+        * ``workflow`` is **derived** here as ``sdd-<phase>`` and is never taken
+          from a caller — a caller cannot poison the row with a bogus workflow.
+
+        Passing ``mode=""`` (or ``free_since=""``) explicitly clears the field,
+        which is how ``flow resume`` drops free-flow; ``None`` means "leave it".
+        """
+        if self._read_only:
+            raise RuntimeError("cannot write in read-only mode")
+
+        with self.transaction():
+            prev = self.read_phase()
+            now = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            resolved_mode = prev.mode if (mode is None and prev) else mode
+            resolved_since = prev.free_since if (free_since is None and prev) else free_since
+            is_transition = prev is None or prev.phase != phase
+            resolved_actor = actor if is_transition else prev.transitioned_by  # type: ignore[union-attr]
+
+            blob: dict[str, Any] = {
+                "phase": phase,
+                "mode": resolved_mode or None,
+                "free_since": resolved_since or None,
+                "transitioned_by": resolved_actor or None,
+                "started_at": (prev.started_at if prev and prev.started_at else now),
+                "last_updated": now,
+                "workflow": f"sdd-{phase}",
+            }
+            return self.write(
+                "phase",
+                json.dumps({k: v for k, v in blob.items() if v is not None}),
+                owner=owner,
+            )
 
     # -- file mirror ---------------------------------------------------------
 

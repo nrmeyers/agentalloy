@@ -284,6 +284,30 @@ class TestLatencyBudget:
             f"Median store write took {median_ms:.2f}ms (budget: 15ms); max {max(samples_ms):.2f}ms"
         )
 
+    def test_store_write_phase_latency(self, tmp_path: Path) -> None:
+        """``write_phase`` holds the same 15ms median budget as a raw write.
+
+        It is a read-modify-write inside a transaction, so it is strictly more
+        work than ``write``. Measured locally at ~12.6ms median against ~11.0ms
+        for the raw write — the blob semantics cost roughly 1.6ms. Same median
+        (not mean) discipline as ``test_store_write_latency``, and the same rule:
+        if this fails, re-measure. Do not ratchet the ceiling.
+        """
+        db = tmp_path / "bench_phase.duck"
+        with DuckDBStateStore(db).open() as store:
+            store.migrate()
+
+            samples_ms: list[float] = []
+            for i in range(100):
+                start = time.perf_counter()
+                store.write_phase("design" if i % 2 else "build", actor=f"sess-{i}")
+                samples_ms.append((time.perf_counter() - start) * 1000)
+
+        median_ms = statistics.median(samples_ms)
+        assert median_ms < 15.0, (
+            f"Median write_phase took {median_ms:.2f}ms (budget: 15ms); max {max(samples_ms):.2f}ms"
+        )
+
     def test_store_lease_latency(self, tmp_path: Path) -> None:
         """A lease acquisition + release completes in < 25ms.
 
