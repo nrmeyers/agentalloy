@@ -230,30 +230,80 @@ def register_watcher(
         _log.warning("No regenerator for harness '%s'; skipping store hook", harness)
         return
 
-    def _on_phase_write(kind: str, value: str) -> None:  # noqa: ARG001
-        # value is the JSON blob; extract the phase string.
-        import json  # noqa: PLC0415
+    def _on_phase_write(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+        new_phase = _phase_from_blob(value)
+        if new_phase is not None:
+            _regenerate(regen, harness, project_root, profile_name, new_phase)
 
-        try:
-            data = json.loads(value)
-            new_phase = data.get("phase") if isinstance(data, dict) else str(data).strip() or None
-        except (json.JSONDecodeError, TypeError):
-            new_phase = None
+    store.on_write("phase", _on_phase_write)
 
+
+def _phase_from_blob(value: str) -> str | None:
+    """Extract the phase name from a stored phase value, or ``None``."""
+    import json  # noqa: PLC0415
+
+    try:
+        data = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data.get("phase") if isinstance(data, dict) else str(data).strip() or None
+
+
+def _regenerate(
+    regen: Any,
+    harness: str,
+    project_root: Path,
+    profile_name: str,
+    new_phase: str,
+) -> None:
+    """Rewrite *harness*'s rules file in *project_root* for *new_phase*."""
+    prose = _load_workflow_skill_prose(new_phase, profile_name)
+    if not prose:
+        return
+    content = f"# Active Phase: {new_phase}\n\n{prose}"
+    try:
+        regen(content, project_root)
+        _log.info("Regenerated %s rules file via store hook (phase=%s)", harness, new_phase)
+    except Exception:
+        _log.warning("Regeneration failed via store hook for harness '%s'", harness, exc_info=True)
+
+
+def register_wired_repos_watcher(store: Any, *, profile_name: str = "default") -> None:
+    """Register one phase hook covering every wired repo, resolved at fire time.
+
+    Registering a per-repo callback at startup snapshots
+    ``harness_files_written``, and that snapshot goes stale the moment a repo or
+    harness is wired against a running service: the phase row still changes, the
+    rules file silently stops tracking it, and only a restart fixes it. Reading
+    the wiring records on each fire keeps late wiring covered.
+
+    Scoped by repo — only the repo whose row changed is regenerated. One store
+    serves every repo on the machine, so an unscoped hook would rewrite every
+    wired repo's rules file on any repo's phase advance.
+    """
+
+    def _on_phase_write(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
+        new_phase = _phase_from_blob(value)
         if new_phase is None:
             return
 
-        prose = _load_workflow_skill_prose(new_phase, profile_name)
-        if not prose:
-            return
+        from agentalloy.api.state_router import _repo_key_for  # noqa: PLC0415
+        from agentalloy.install import state as install_state  # noqa: PLC0415
+        from agentalloy.watch.regenerators import REGENERATORS  # noqa: PLC0415
 
-        content = f"# Active Phase: {new_phase}\n\n{prose}"
-        try:
-            regen(content, project_root)
-            _log.info("Regenerated %s rules file via store hook (phase=%s)", harness, new_phase)
-        except Exception:
-            _log.warning(
-                "Regeneration failed via store hook for harness '%s'", harness, exc_info=True
-            )
+        seen: set[tuple[str, str]] = set()
+        for entry in install_state.load_state().get("harness_files_written") or []:
+            harness = entry.get("harness")
+            root = entry.get("repo_root")
+            if not harness or not root or (harness, root) in seen:
+                continue
+            seen.add((harness, root))
+            if _repo_key_for(root) != repo:
+                continue
+            regen = REGENERATORS.get(harness)
+            if regen is None:
+                _log.warning("No regenerator for harness '%s'; skipping store hook", harness)
+                continue
+            _regenerate(regen, harness, Path(root), profile_name, new_phase)
 
     store.on_write("phase", _on_phase_write)

@@ -288,7 +288,7 @@ class DuckDBStateStore:
         # Post-commit callback registry: kind -> list of callables.
         # Fired after every write to the store (outside the lease).
         # Harness-agnostic — knows only kinds and callables.
-        self._on_write_callbacks: dict[str, list[Callable[[str, Any], None]]] = {}
+        self._on_write_callbacks: dict[str, list[Callable[[str, Any, str], None]]] = {}
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -608,11 +608,15 @@ class DuckDBStateStore:
 
     # -- post-commit callbacks -----------------------------------------------
 
-    def on_write(self, kind: str, fn: Callable[[str, Any], None]) -> None:
+    def on_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
         """Register *fn* to be called after every write to *kind*, post-commit.
 
-        The callback receives ``(kind, value)`` where *value* is the stored
-        string (JSON for the phase blob, raw text for other kinds).  Callbacks
+        The callback receives ``(kind, value, repo)`` where *value* is the stored
+        string (JSON for the phase blob, raw text for other kinds) and *repo* is
+        the key of the handle that performed the write.  One store serves every
+        repo on the machine via :meth:`for_repo` views, so without *repo* a
+        callback cannot tell whose row changed — and a phase advance in one repo
+        would regenerate every other repo's rules file.  Callbacks
         fire **outside** the lease — the write is already durable.  A callback
         that raises does **not** roll back the write or kill the writer; errors
         are logged and the next callback in the list still runs.
@@ -623,17 +627,21 @@ class DuckDBStateStore:
         """
         self._on_write_callbacks.setdefault(kind, []).append(fn)
 
-    def off_write(self, kind: str, fn: Callable[[str, Any], None]) -> None:
+    def off_write(self, kind: str, fn: Callable[[str, Any, str], None]) -> None:
         """Unregister a previously registered callback."""
         if kind in self._on_write_callbacks:
             with suppress(ValueError):
                 self._on_write_callbacks[kind].remove(fn)
 
     def _fire_callbacks(self, kind: str, value: str) -> None:
-        """Invoke all registered callbacks for *kind*, logging any errors."""
+        """Invoke all registered callbacks for *kind*, logging any errors.
+
+        ``self`` may be a :meth:`for_repo` view, so ``_repo()`` is the repo that
+        actually changed rather than the handle the callback was registered on.
+        """
         for fn in list(self._on_write_callbacks.get(kind, [])):
             try:
-                fn(kind, value)
+                fn(kind, value, self._repo())
             except Exception:
                 logger.exception("on_write callback for %r raised", kind)
 

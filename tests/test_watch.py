@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -190,10 +191,10 @@ def test_callback_fires_once_per_write_phase(tmp_path: Path) -> None:
     store = open_state_store(db, repo="test")
     store.open()
 
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    def _fn(kind: str, value: str) -> None:
-        calls.append((kind, value))
+    def _fn(kind: str, value: str, repo: str) -> None:
+        calls.append((kind, value, repo))
 
     store.on_write("phase", _fn)
 
@@ -202,6 +203,7 @@ def test_callback_fires_once_per_write_phase(tmp_path: Path) -> None:
     assert len(calls) == 1
     assert calls[0][0] == "phase"
     assert '"phase": "spec"' in calls[0][1]
+    assert calls[0][2] == "test", "the callback must learn whose row changed"
 
     # Second write_phase
     store.write_phase("design")
@@ -224,12 +226,12 @@ def test_callback_raise_does_not_kill_writer(tmp_path: Path) -> None:
 
     call_count = 0
 
-    def _bad_fn(kind: str, value: str) -> None:  # noqa: ARG001
+    def _bad_fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
         nonlocal call_count
         call_count += 1
         raise RuntimeError("callback exploded")
 
-    def _good_fn(kind: str, value: str) -> None:  # noqa: ARG001
+    def _good_fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
         pass
 
     store.on_write("phase", _bad_fn)
@@ -251,7 +253,7 @@ def test_callback_unregistered_no_longer_fires(tmp_path: Path) -> None:
 
     calls: list[int] = []
 
-    def _fn(kind: str, value: str) -> None:  # noqa: ARG001
+    def _fn(kind: str, value: str, repo: str) -> None:  # noqa: ARG001
         calls.append(1)
 
     store.on_write("phase", _fn)
@@ -281,6 +283,81 @@ def test_register_watcher_hooks_store(tmp_path: Path) -> None:
     # Trigger a write — the callback should fire (silently, since prose is empty)
     store.write_phase("spec")
     # No exception, no crash — the callback ran and logged.
+
+
+class TestWiredReposWatcher:
+    """The service-side hook: one callback, wiring records read at fire time."""
+
+    @staticmethod
+    def _arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_key: str) -> Any:
+        from agentalloy.storage.state_store import open_state_store
+        from agentalloy.watch import watcher as watcher_mod
+        from agentalloy.watch.watcher import register_wired_repos_watcher
+
+        monkeypatch.setattr(
+            watcher_mod, "_load_workflow_skill_prose", lambda phase, profile: f"prose for {phase}"
+        )
+        store = open_state_store(tmp_path / "state.duck", repo=repo_key)
+        store.open()
+        register_wired_repos_watcher(store)
+        return store
+
+    def test_a_repo_wired_after_startup_is_still_covered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The defect a boot-time snapshot leaves behind.
+
+        Registering per recorded repo at startup means a repo wired against an
+        already-running service never regenerates until a restart. The hook
+        reads the wiring records on each fire, so wiring order stops mattering.
+        """
+        late = tmp_path / "late"
+        (late / ".cursor").mkdir(parents=True)
+
+        store = self._arm(tmp_path, monkeypatch, "late-repo")
+
+        # Armed with no wiring records at all — the repo is wired only now.
+        monkeypatch.setattr(
+            "agentalloy.install.state.load_state",
+            lambda: {"harness_files_written": [{"harness": "cursor", "repo_root": str(late)}]},
+        )
+        monkeypatch.setattr("agentalloy.api.state_router._repo_key_for", lambda root: "late-repo")
+
+        store.write_phase("design")
+
+        mdc = late / ".cursor" / "rules" / "agentalloy.mdc"
+        assert mdc.exists(), "a repo wired after startup was not regenerated"
+        assert "prose for design" in mdc.read_text()
+
+    def test_only_the_repo_that_changed_is_regenerated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One store serves every repo, so the hook must scope by repo key."""
+        mine, theirs = tmp_path / "mine", tmp_path / "theirs"
+        (mine / ".cursor").mkdir(parents=True)
+        (theirs / ".cursor").mkdir(parents=True)
+
+        store = self._arm(tmp_path, monkeypatch, "mine")
+
+        monkeypatch.setattr(
+            "agentalloy.install.state.load_state",
+            lambda: {
+                "harness_files_written": [
+                    {"harness": "cursor", "repo_root": str(mine)},
+                    {"harness": "cursor", "repo_root": str(theirs)},
+                ]
+            },
+        )
+        monkeypatch.setattr(
+            "agentalloy.api.state_router._repo_key_for", lambda root: Path(root).name
+        )
+
+        store.write_phase("design")
+
+        assert (mine / ".cursor" / "rules" / "agentalloy.mdc").exists()
+        assert not (theirs / ".cursor" / "rules" / "agentalloy.mdc").exists(), (
+            "another repo's phase advance rewrote this repo's rules file"
+        )
 
 
 def test_phase_write_regenerates_the_harness_file(

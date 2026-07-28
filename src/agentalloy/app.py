@@ -149,20 +149,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     bind_process_store(state_store)
 
     # AC-6: register the in-process store hook so the watcher fires post-commit
-    # when the phase row changes.  Discovers every harness wired into every
-    # recorded repo so new harnesses added at runtime are covered.  Harness-agnostic:
-    # the callback knows only kinds and callables; per-harness output from
+    # when the phase row changes.  One hook, not one per recorded repo: the
+    # wiring records are read on each fire, so a repo wired against an already
+    # running service is covered without a restart.  Harness-agnostic — the
+    # registry knows only kinds and callables; per-harness output from
     # ``wire_harness`` is unchanged and stays.
     try:
-        from agentalloy.install import state as install_state  # noqa: PLC0415
-        from agentalloy.watch.watcher import register_watcher  # noqa: PLC0415
+        from agentalloy.watch.watcher import register_wired_repos_watcher  # noqa: PLC0415
 
-        _st = install_state.load_state()
-        for _entry in _st.get("harness_files_written") or []:
-            _harness = _entry.get("harness")
-            _repo = _entry.get("repo_root")
-            if _harness and _repo:
-                register_watcher(state_store, Path(_repo), "default", _harness)
+        register_wired_repos_watcher(state_store)
     except Exception:
         logger.warning("watcher hook registration failed — continuing", exc_info=True)
 
