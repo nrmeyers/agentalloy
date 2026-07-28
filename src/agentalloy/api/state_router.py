@@ -485,6 +485,23 @@ async def read_state(
 # ---------------------------------------------------------------------------
 
 
+def _evaluate_phase_gate(
+    store: DuckDBStateStore,
+    current_phase: str | None,
+    target_phase: str,
+    project_root: Path | None,
+    override: bool,
+) -> dict[str, Any] | None:
+    """Evaluate the exit gate for a phase transition.
+
+    Delegates to :func:`agentalloy.signals.gates.evaluate_phase_gate` so the
+    route and the CLI share a single evaluation point.
+    """
+    from agentalloy.signals.gates import evaluate_phase_gate as _eval  # noqa: PLC0415
+
+    return _eval(current_phase, target_phase, project_root, override, store)
+
+
 @router.post(
     "/phase",
     response_model=PhaseAdvanceResponse,
@@ -516,23 +533,36 @@ async def write_phase(
     When ``repo_root`` is provided the enforcement posture is rewritten for
     any wired Tier A harnesses (D1–D9).
 
+    **Exit gate:** this endpoint evaluates the exit gate for the transition.
+    The gate is evaluated *before* the write.  If it blocks, the verdict is
+    returned in ``gate_verdict`` and the write is skipped (the CLI renders
+    the blocking reason and missing-artifact paths).  Override bypasses the
+    gate except for always-approval phases.
+
     Both paths go through ``store.write_phase`` rather than a raw
     ``write("phase", ...)``: a raw write replaces the blob with a bare name and
     so silently discards ``mode``, ``free_since``, ``started_at`` and
     ``transitioned_by``.  ``read_phase`` tolerates that shape, which is exactly
     why the loss was invisible.
-
-    **Gate hole (task 09):** this endpoint does not evaluate the phase exit
-    gate.  Anything that can reach the service can advance the phase without
-    owing an artifact — today only ``run_phase_set`` pre-evaluates, so a direct
-    POST walks straight through.  Task 09 moves the evaluation here and adds an
-    explicit override flag; until it lands, treat the gate as advisory.
     """
     phase_value = req.value
     # ``actor`` is who *moved* the phase; ``owner`` is who holds the lease.  They
     # are usually the same session, and were conflated while only the lease had a
     # field — falling back keeps every existing caller behaving identically.
     actor = req.actor or req.owner
+
+    # --- Exit gate evaluation (slice 09) ---
+    current_phase_row = store.read_phase()
+    current_phase = current_phase_row.phase if current_phase_row else None
+    project_root = Path(repo_root) if repo_root else None
+    verdict = _evaluate_phase_gate(store, current_phase, phase_value, project_root, req.override)
+    if verdict is not None:
+        # Gate blocks the transition — return verdict without writing.
+        return PhaseAdvanceResponse(
+            kind="phase",
+            value=phase_value,
+            gate_verdict=verdict,
+        )
 
     # Fast path: no contract — use the existing non-transactional path
     if req.contract is None:
@@ -560,6 +590,7 @@ async def write_phase(
             owner=result.owner,
             lease_expires_at=result.lease_expires_at,
             end_session_instruction=end_session_instruction(phase_value),
+            gate_verdict=None,
         )
 
     # Transactional path: phase + contract in one BEGIN/COMMIT
@@ -621,6 +652,7 @@ async def write_phase(
         lease_expires_at=result.lease_expires_at,
         contract_id=contract_id,
         end_session_instruction=end_session_instruction(phase_value),
+        gate_verdict=None,
     )
 
 

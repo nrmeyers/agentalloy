@@ -21,6 +21,7 @@ from typing import Any
 
 from agentalloy.api.state_client import StateClientError
 from agentalloy.install.subcommands._state import fail_on_state_error, phase_access
+from agentalloy.signals.gates import evaluate_phase_gate as _evaluate_phase_gate
 
 # "intake" is the entry phase: a freshly-wired repo starts here so the intake
 # workflow (intent interview) composes on the first prompt, then hands off to
@@ -194,28 +195,19 @@ def run_phase_set(phase: str, root: Path | None = None, force: bool = False) -> 
     current = existing.phase if existing else None
     gate_store = access.contracts_handle()
 
-    # Human-approval gate runs unconditionally — --force waives only
-    # artifact-completeness, never the human checkpoint.
-    if current and current != phase:
-        appr_blocked, appr_adv = _approval_gate_blocks(current, phase, root, gate_store)
-        if appr_blocked:
-            return {
-                "phase": current,
-                "blocked": True,
-                "target": phase,
-                "advisories": appr_adv,
-                "reason": "approval",
-            }
-
-    if not force and current and current != phase:
-        blocked, advisories = _forward_gate_blocks(current, phase, root, gate_store)
-        if blocked:
-            return {
-                "phase": current,
-                "blocked": True,
-                "target": phase,
-                "advisories": advisories,
-            }
+    # Unified gate evaluation (slice 09: route evaluates, CLI delegates).
+    # evaluate_phase_gate checks: always-approval phases, approval gate,
+    # forward gate (artifact completeness).  --force maps to override=True
+    # which bypasses the forward gate but NOT the approval gate.
+    verdict = _evaluate_phase_gate(current, phase, root, force, gate_store)
+    if verdict is not None:
+        return {
+            "phase": current or phase,
+            "blocked": True,
+            "target": phase,
+            "advisories": verdict.get("advisories", []),
+            "reason": verdict.get("result", "not_met"),
+        }
 
     # Record who caused a real transition, mirroring the proxy's
     # `skill_loader._write_phase_atomic` — lets a *different* session's next

@@ -9,7 +9,7 @@ validation and OpenAPI documentation.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -184,6 +184,14 @@ class PhaseAdvanceRequest(BaseModel):
             "moved and that it was not the one that moved it."
         ),
     )
+    override: bool = Field(
+        default=False,
+        description=(
+            "When True, bypass the phase exit gate.  Note: phases in "
+            "_ALWAYS_APPROVAL_PHASES (spec, design, add-skill) are always "
+            "refused — override has no effect on them."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +270,11 @@ class PhaseAdvanceResponse(BaseModel):
     ``end_session_instruction`` is the deterministic end-of-phase directive
     surfaced identically by CLI, web, and proxy (D9).  Present on every
     successful phase advance.
+
+    ``gate_verdict`` is present when the route evaluated an exit gate.
+    It carries the result (``met``, ``not_met``, ``unknown``), the blocking
+    reason, and a list of missing-artifact paths so the CLI can render
+    operator-facing guidance without re-evaluating the gate itself.
     """
 
     success: Literal[True] = True
@@ -272,6 +285,7 @@ class PhaseAdvanceResponse(BaseModel):
     conflict: StateConflictInfo | None = None
     contract_id: str | None = None
     end_session_instruction: str | None = None
+    gate_verdict: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------

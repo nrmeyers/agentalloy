@@ -191,7 +191,11 @@ class TestPhaseWrite:
         view = store.for_repo(_repo_key_for(str(repo)))
         view.write_phase("design", actor="cli", mode="free", free_since="2026-07-28T00:00:00Z")
 
-        client.post("/state/phase", json={"value": "build"}, params={"repo_root": str(repo)})
+        client.post(
+            "/state/phase",
+            json={"value": "build", "override": True},
+            params={"repo_root": str(repo)},
+        )
 
         after = view.read_phase()
         assert after is not None
@@ -209,6 +213,7 @@ class TestPhaseWrite:
             "/state/phase",
             json={
                 "value": "build",
+                "override": True,
                 "contract": {"contract_id": "c-1", "phase": "build", "slug": "unwrap"},
             },
             params={"repo_root": str(repo)},
